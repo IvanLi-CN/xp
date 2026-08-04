@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-06-14
+- Last: 2026-08-04
 
 ## 背景 / 问题陈述
 
@@ -25,6 +25,9 @@
 - provider 主配置中的地区组、`💎 高质量`、`🚀 节点选择` 与 `🤯 All` 改为基于节点主动探测得到的订阅地区自动生成，并固定暴露 `Japan/HongKong/Taiwan/Korea/Singapore/US/Other`。
 - 管理端只展示 provider-only 状态；用户详情页复制/预览 canonical Mihomo URL。
 - 冻结部署无关的 relay 健康检查合同：只要节点以“托管默认 VLESS endpoint”身份存在，host-managed 与 container-managed 都必须用同一合同决定 `reality.dest` 改写与 Mihomo relay `url-test` URL 选择。
+- 冻结托管默认 endpoint 的所有权边界：`XP_DEFAULT_VLESS_PORT` /
+  `XP_DEFAULT_SS_PORT` 只提供首次 bootstrap 输入；endpoint 一旦存在，其端口由集群状态与
+  Admin UI/API 持有。
 
 ### Non-goals
 
@@ -92,6 +95,21 @@
 - provider 主配置里的 hidden per-base relay 组必须统一移动到系统托管组尾部，不能插在 `💎 高质量` 与地区组之间。
 - provider 主配置里的系统 owner-facing 地区组 `🔒 {Region}` 与 hidden source 组 `🌟 {Region}` 必须以节点主动探测归类为主；但对尚未产生首次成功探测结果的历史节点，渲染阶段会先沿用 legacy slug fallback（仅覆盖 JP/HK/TW/KR）以避免升级瞬间清空原有地区组。首次成功探测落盘后，仅在 probe 未 stale 时继续把 `subscription_region` 视为权威；probe stale 后渲染回退到 legacy slug fallback / `Other`。
 - `GET /api/health` 与 `GET /api/admin/config` 必须增量暴露 `vless_https_canary` 运行态，包括 enabled/bind、证书到期时间与最近一次续期错误；管理面视图保持只读，不提供手工修改接入面 probe URL 的入口。
+- `XP_DEFAULT_VLESS_PORT` 与 `XP_DEFAULT_SS_PORT` 只能在当前节点尚无对应
+  managed-default endpoint 时用于首次创建；普通 `xp` 启动、
+  `xp-ops xp sync-node-meta` 与 `xp-ops container run` 不得用 env 值覆盖已存在 endpoint
+  的集群端口，也不得因 env 被移除而删除已存在 endpoint。
+- `XP_DEFAULT_VLESS_PORT` 是 VLESS bootstrap 的唯一激活输入；该端口不存在时，遗留的
+  `XP_DEFAULT_VLESS_SERVER_NAMES` / `XP_DEFAULT_VLESS_FINGERPRINT` 不得阻断启动或激活
+  endpoint 管理。端口存在时，辅助输入按既有 bootstrap 校验规则处理。
+- 单条 legacy endpoint 被自动接管为 managed-default 时必须保留它原有的集群端口；env
+  中的 bootstrap 端口不得在接管过程中静默移动现网入口。
+- 已存在 managed-default endpoint 的有意端口重配置必须通过 Admin UI/API 的 endpoint
+  port update 完成；有意删除必须通过 endpoint delete 完成。若删除后仍保留对应
+  bootstrap env，且没有可接管的同类 endpoint，下一次 reconcile 会按该 env 重新创建
+  endpoint。
+- 端口是 operator-owned 字段，但托管 VLESS 的 `reality.dest`、`server_names` 与 canary
+  就绪门禁仍由系统派生并受保护；端口所有权变化不得放宽这些限制。
 - 托管 VLESS HTTPS canary 的 ACME 证书只使用 Cloudflare DNS-01。
   TXT 传播预检必须同时通过 Cloudflare 与 Google 的 DNS-over-HTTPS 解析器，
   且不得要求节点直连权威 DNS 的 UDP/TCP 53 端口。单个 DoH upstream 的负缓存响应
@@ -186,6 +204,21 @@
 - Given 托管 VLESS endpoint 被创建或 reconcile，When 检查 Xray inbound Reality 配置，Then `dest` 必须等于 `XP_VLESS_CANARY_BIND`，`server_names` 必须等于 `[node.access_host]`，且 SNI 不包含端口。
 - Given Admin UI/API 新建托管 VLESS endpoint，When 请求只提供 `node_id`、`port` 与可选的 `canary_upstream` / `accepted_authorities`，Then 后端必须按节点 `access_host` 自动派生 `reality.dest=XP_VLESS_CANARY_BIND`、`server_names=[node.access_host]`、`managed_default=true`，且不能要求调用方自行提交托管 Reality 字段。
 - Given Admin UI/API 修改托管 VLESS endpoint，When payload 包含 `reality.dest`、`server_names` 或 `server_names_source`，Then 系统必须拒绝或忽略该修改，不能让隐藏 UI 字段绕过托管协议事实。
+- Given managed-default VLESS endpoint 的集群端口为 `30445` 且本地
+  `XP_DEFAULT_VLESS_PORT` 为另一端口，When `xp` 启动或 `xp-ops xp sync-node-meta`
+  执行，Then endpoint 必须继续监听 `30445`，而 env 只保留为未来缺失 endpoint 的
+  bootstrap 输入。
+- Given 管理员通过 Admin UI/API 修改 managed-default VLESS 或 SS2022 endpoint 端口，
+  When 节点随后重启、升级或执行 sync，Then 集群中的新端口必须保持不变。
+- Given 当前节点尚无对应 managed-default endpoint，When 设置 bootstrap port 并执行
+  reconcile，Then 系统按该端口创建 endpoint；若只存在一条可自动接管的 legacy
+  endpoint，则保留 legacy endpoint 自身端口。
+- Given 已存在 managed-default endpoint，When bootstrap port env 被修改或移除，Then
+  普通 reconcile 不修改也不删除该 endpoint；管理员必须通过 endpoint update/delete
+  显式表达重配置意图。
+- Given `XP_DEFAULT_VLESS_PORT` 为空但 deprecated server-names 或 fingerprint env 仍存在，
+  When host 或 container 启动，Then 辅助字段被视为未激活的 bootstrap 配置，启动继续且
+  已存在 endpoint 仍由集群状态维护。
 - Given 非 `/generate_204` 请求进入 canary，When `Host` / HTTP/2 `:authority` 归一化为 canonical `access_host[:endpoint_port]` 或 endpoint 配置的 `accepted_authorities` 别名之一，Then 必须匹配同 node 上唯一托管 VLESS endpoint；0 个匹配、多个匹配或匹配但未设置 `canary_upstream` 时，对外统一返回普通纯文本 `404 Not Found`，内部诊断通过日志与 Admin 面可见。
 - Given endpoint 设置了 origin-only `canary_upstream`，When canary 代理非探测请求，Then 请求 method/path/query/body、非 hop-by-hop header、响应 status/header/body 应尽量透明流式转发；发往 upstream 的 `Host` 按 `canary_upstream` origin 归一化；HTTP/1.1、HTTPS ALPN HTTP/2、显式 h2c、SSE、大上传/下载属于支持范围，WebSocket upgrade 使用 HTTP/1.1 upstream 连接，显式 h2c 仅用于非 upgrade HTTP 流量，`CONNECT` 不属于 v1 反代能力。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.

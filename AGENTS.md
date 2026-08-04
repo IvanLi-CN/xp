@@ -35,6 +35,12 @@
   image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.
+- Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
+  `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
+  `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.
+  Existing ports are intentionally changed or endpoints deleted through the Admin UI/API. Keeping
+  a bootstrap env value after an explicit deletion recreates the endpoint on the next reconcile
+  when no same-kind endpoint remains available for conservative adoption.
 - Web-triggered automatic upgrade is supported only for host-managed `systemd` / `OpenRC` nodes via
   the restricted `xp-ops _upgrade-runner` one-shot delegation installed by `xp-ops init`. systemd
   nodes must include the root-owned fixed `/usr/local/libexec/xp-upgrade-trigger` helper and narrow

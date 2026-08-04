@@ -69,7 +69,9 @@ Key facts:
 
 - Entry point is fixed to `xp-ops container run`
 - Runtime image bundles `xp`, `xp-ops`, real embedded `web/dist`, `xray`, `cloudflared`, and `tini`
-- The container entrypoint can realign persisted node metadata, prepare Cloudflare DDNS runtime state, and reconcile default SS/VLESS endpoints purely from environment variables
+- The container entrypoint can realign persisted node metadata, prepare Cloudflare DDNS runtime
+  state, and bootstrap missing default SS/VLESS endpoints from environment variables; existing
+  endpoint ports remain cluster-owned
 - Reference Compose examples:
   - `deploy/docker/compose.bootstrap.yml`
   - `deploy/docker/compose.join.yml`

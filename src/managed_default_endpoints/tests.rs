@@ -65,6 +65,20 @@ fn build_default_vless_endpoint_spec_rejects_zero_port() {
 }
 
 #[test]
+fn build_default_vless_endpoint_spec_ignores_auxiliary_fields_without_bootstrap_port() {
+    let spec = build_default_vless_endpoint_spec(
+        None,
+        "node.example.com",
+        Some("cdn-a.example.test"),
+        Some("chrome"),
+        "127.0.0.1:39043".parse().unwrap(),
+    )
+    .unwrap();
+
+    assert!(spec.is_none());
+}
+
+#[test]
 fn build_default_ss_endpoint_spec_rejects_zero_port() {
     let err = build_default_ss_endpoint_spec(Some(0)).unwrap_err();
     assert!(err.to_string().contains("invalid port: 0"));
@@ -73,11 +87,11 @@ fn build_default_ss_endpoint_spec_rejects_zero_port() {
 #[tokio::test]
 async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest() {
     let tempdir = tempfile::tempdir().unwrap();
-    let endpoint = endpoint_vless("e1", 53844, &["example.com"], None);
+    let endpoint = endpoint_vless("e1", 30445, &["example.com"], None);
     let mut writes = Vec::<DesiredStateCommand>::new();
     let spec = ManagedDefaultEndpointsSpec {
         vless: Some(DefaultVlessEndpointSpec {
-            port: 53844,
+            port: 30443,
             reality_dest: "127.0.0.1:39043".to_string(),
             server_names: vec!["example.com".to_string()],
             server_names_source: RealityServerNamesSource::Manual,
@@ -116,10 +130,139 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
             assert!(meta.managed_default);
             assert_eq!(meta.reality.dest, "127.0.0.1:39043");
             assert_eq!(meta.reality.server_names, vec!["example.com"]);
-            assert_eq!(endpoint.port, 53844);
+            assert_eq!(endpoint.port, 30445);
         }
         other => panic!("unexpected command: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn missing_managed_vless_bootstraps_at_explicit_port() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let spec = ManagedDefaultEndpointsSpec {
+        vless: Some(DefaultVlessEndpointSpec {
+            port: 30445,
+            reality_dest: "127.0.0.1:39043".to_string(),
+            server_names: vec!["node.example.com".to_string()],
+            server_names_source: RealityServerNamesSource::Manual,
+            fingerprint: "chrome".to_string(),
+        }),
+        ss: None,
+    };
+    let mut writes = Vec::<DesiredStateCommand>::new();
+
+    {
+        let mut writer = |cmd| {
+            writes.push(cmd);
+            std::future::ready(Ok(()))
+        };
+        reconcile_host_managed_default_endpoints(
+            tempdir.path(),
+            "n1",
+            &[],
+            HostManagedDefaultEndpointsOptions {
+                explicit: &spec,
+                access_host: "node.example.com",
+                vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
+            },
+            &mut writer,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(writes.len(), 1);
+    match &writes[0] {
+        DesiredStateCommand::UpsertEndpoint { endpoint } => {
+            let meta: VlessRealityVisionTcpEndpointMeta =
+                serde_json::from_value(endpoint.meta.clone()).unwrap();
+            assert_eq!(endpoint.port, 30445);
+            assert!(meta.managed_default);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn existing_managed_ss_preserves_cluster_port_when_bootstrap_port_is_stale() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint_ss("s1", 30446, Some(true));
+    let spec = ManagedDefaultEndpointsSpec {
+        vless: None,
+        ss: Some(DefaultSsEndpointSpec { port: 30444 }),
+    };
+    let mut writes = Vec::<DesiredStateCommand>::new();
+
+    {
+        let mut writer = |cmd| {
+            writes.push(cmd);
+            std::future::ready(Ok(()))
+        };
+        reconcile_host_managed_default_endpoints(
+            tempdir.path(),
+            "n1",
+            &[endpoint],
+            HostManagedDefaultEndpointsOptions {
+                explicit: &spec,
+                access_host: "node.example.com",
+                vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
+            },
+            &mut writer,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(writes.is_empty());
+}
+
+#[tokio::test]
+async fn existing_managed_vless_preserves_cluster_port_when_bootstrap_port_is_stale() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint_vless("e1", 30445, &["node.example.com"], Some(true));
+    let spec = ManagedDefaultEndpointsSpec {
+        vless: Some(DefaultVlessEndpointSpec {
+            port: 30443,
+            reality_dest: "127.0.0.1:39043".to_string(),
+            server_names: vec!["node.example.com".to_string()],
+            server_names_source: RealityServerNamesSource::Manual,
+            fingerprint: "chrome".to_string(),
+        }),
+        ss: None,
+    };
+    let mut writes = Vec::<DesiredStateCommand>::new();
+
+    {
+        let mut writer = |cmd| {
+            writes.push(cmd);
+            std::future::ready(Ok(()))
+        };
+        reconcile_host_managed_default_endpoints(
+            tempdir.path(),
+            "n1",
+            &[endpoint],
+            HostManagedDefaultEndpointsOptions {
+                explicit: &spec,
+                access_host: "node.example.com",
+                vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
+            },
+            &mut writer,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    let upserted = writes
+        .iter()
+        .find_map(|command| match command {
+            DesiredStateCommand::UpsertEndpoint { endpoint } => Some(endpoint),
+            _ => None,
+        })
+        .expect("managed VLESS reconcile should refresh derived fields");
+    assert_eq!(upserted.port, 30445);
 }
 
 #[test]
@@ -177,8 +320,8 @@ fn host_managed_multiple_legacy_vless_are_not_auto_adopted() {
 }
 
 #[test]
-fn host_managed_explicitly_cleared_vless_is_not_rederived_from_marked_endpoint() {
-    let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
+fn host_managed_existing_explicit_vless_survives_bootstrap_env_removal() {
+    let endpoint = endpoint_vless("e1", 30445, &["example.com"], Some(true));
     let state = ManagedDefaultEndpointsState {
         schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
         vless_endpoint_id: Some("e1".to_string()),
@@ -195,7 +338,87 @@ fn host_managed_explicitly_cleared_vless_is_not_rederived_from_marked_endpoint()
     )
     .unwrap();
 
-    assert!(matches!(intent.vless, ManagedDefaultEndpointIntent::Remove));
+    match intent.vless {
+        ManagedDefaultEndpointIntent::Preserve { spec, source } => {
+            assert_eq!(spec.port, 30445);
+            assert_eq!(source, ManagedDefaultEndpointSource::Explicit);
+        }
+        other => panic!("expected existing endpoint to remain managed, got {other:?}"),
+    }
+}
+
+#[test]
+fn host_managed_existing_explicit_ss_survives_bootstrap_env_removal() {
+    let endpoint = endpoint_ss("s1", 30446, Some(true));
+    let state = ManagedDefaultEndpointsState {
+        schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
+        vless_endpoint_id: None,
+        vless_source: None,
+        ss_endpoint_id: Some("s1".to_string()),
+        ss_source: Some(ManagedDefaultEndpointSource::Explicit),
+    };
+    let intent = resolve_host_managed_default_endpoints_intent(
+        &ManagedDefaultEndpointsSpec::default(),
+        &[endpoint],
+        "node.example.com",
+        "127.0.0.1:39043".parse().unwrap(),
+        &state,
+    )
+    .unwrap();
+
+    match intent.ss {
+        ManagedDefaultEndpointIntent::Preserve { spec, source } => {
+            assert_eq!(spec.port, 30446);
+            assert_eq!(source, ManagedDefaultEndpointSource::Explicit);
+        }
+        other => panic!("expected existing endpoint to remain managed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn stale_preserve_intent_does_not_recreate_deleted_vless() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint_vless("e1", 30445, &["example.com"], Some(true));
+    let state = ManagedDefaultEndpointsState {
+        schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
+        vless_endpoint_id: Some("e1".to_string()),
+        vless_source: Some(ManagedDefaultEndpointSource::Explicit),
+        ss_endpoint_id: None,
+        ss_source: None,
+    };
+    persist_managed_default_endpoints_state(tempdir.path(), &state).unwrap();
+    let intent = resolve_host_managed_default_endpoints_intent(
+        &ManagedDefaultEndpointsSpec::default(),
+        &[endpoint],
+        "node.example.com",
+        "127.0.0.1:39043".parse().unwrap(),
+        &state,
+    )
+    .unwrap();
+    let mut writes = Vec::<DesiredStateCommand>::new();
+
+    {
+        let mut writer = |cmd| {
+            writes.push(cmd);
+            std::future::ready(Ok(()))
+        };
+        reconcile_managed_default_endpoints(
+            tempdir.path(),
+            "n1",
+            &[],
+            &intent,
+            &mut writer,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(writes.is_empty());
+    assert_eq!(
+        load_managed_default_endpoints_state(tempdir.path()).unwrap(),
+        ManagedDefaultEndpointsState::default()
+    );
 }
 
 #[test]
@@ -219,7 +442,7 @@ fn host_managed_auto_adopted_vless_preserves_global_server_name_mode() {
 }
 
 #[test]
-fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config() {
+fn host_managed_auto_adopted_vless_keeps_preserve_intent_without_explicit_config() {
     let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
     let state = ManagedDefaultEndpointsState {
         schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
@@ -239,7 +462,7 @@ fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config()
 
     assert!(matches!(
         intent.vless,
-        ManagedDefaultEndpointIntent::Manage {
+        ManagedDefaultEndpointIntent::Preserve {
             source: ManagedDefaultEndpointSource::AutoAdopted,
             ..
         }

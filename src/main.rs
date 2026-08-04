@@ -424,6 +424,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let vless_https_canary_task = if matches!(
         managed_default_intent.vless,
         xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+            | xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Preserve { .. }
     ) {
         let canary_result = xp::vless_https_canary::spawn(
             config_arc.clone(),
@@ -438,6 +439,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             matches!(
                 managed_default_intent.vless,
                 xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+                    | xp::managed_default_endpoints::ManagedDefaultEndpointIntent::Preserve { .. }
             ),
             &canary_result,
         ) {

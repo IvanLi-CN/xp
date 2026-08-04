@@ -1,6 +1,5 @@
 use super::*;
 use crate::managed_default_endpoints::{
-    ManagedDefaultEndpointIntent, ManagedDefaultEndpointSource,
     build_managed_default_vless_endpoint, reconcile_managed_default_vless_endpoint,
 };
 use crate::protocol::VlessRealityVisionTcpEndpointMeta;
@@ -396,6 +395,18 @@ fn parses_default_endpoint_specs_from_env() {
 }
 
 #[test]
+fn auxiliary_vless_env_does_not_require_a_bootstrap_port() {
+    let env = env_map(&[
+        ("XP_DEFAULT_VLESS_SERVER_NAMES", "cdn-a.example.test"),
+        ("XP_DEFAULT_VLESS_FINGERPRINT", "chrome"),
+    ]);
+
+    let spec = ManagedDefaultEndpointsSpec::from_env_map(&env, "node-1-ep.example.com").unwrap();
+
+    assert!(spec.vless.is_none());
+}
+
+#[test]
 fn default_vless_canary_bind_must_be_socket_addr() {
     let env = env_map(&[
         ("XP_ACCESS_HOST", "node-1-ep.example.com"),
@@ -684,7 +695,7 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
         serde_json::from_value(endpoint.meta.clone()).unwrap();
     let new_meta: VlessRealityVisionTcpEndpointMeta =
         serde_json::from_value(updated.meta.clone()).unwrap();
-    assert_eq!(updated.port, 60000);
+    assert_eq!(updated.port, 53842);
     assert_eq!(new_meta.reality.dest, "127.0.0.1:49043");
     assert_eq!(
         new_meta.reality.server_names,
@@ -694,35 +705,6 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
     assert_eq!(new_meta.reality_keys, old_meta.reality_keys);
     assert_eq!(new_meta.short_ids, old_meta.short_ids);
     assert_eq!(new_meta.active_short_id, old_meta.active_short_id);
-}
-
-#[test]
-fn container_unset_defaults_map_to_remove_intent() {
-    let reconcile_intent = crate::managed_default_endpoints::ManagedDefaultEndpointsIntent {
-        vless: match None::<DefaultVlessEndpointSpec> {
-            Some(spec) => ManagedDefaultEndpointIntent::Manage {
-                spec,
-                source: ManagedDefaultEndpointSource::Explicit,
-            },
-            None => ManagedDefaultEndpointIntent::Remove,
-        },
-        ss: match None::<DefaultSsEndpointSpec> {
-            Some(spec) => ManagedDefaultEndpointIntent::Manage {
-                spec,
-                source: ManagedDefaultEndpointSource::Explicit,
-            },
-            None => ManagedDefaultEndpointIntent::Remove,
-        },
-    };
-
-    assert!(matches!(
-        reconcile_intent.vless,
-        ManagedDefaultEndpointIntent::Remove
-    ));
-    assert!(matches!(
-        reconcile_intent.ss,
-        ManagedDefaultEndpointIntent::Remove
-    ));
 }
 
 #[tokio::test]

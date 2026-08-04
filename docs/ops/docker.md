@@ -46,10 +46,10 @@ xp-ops container run
 | `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`           | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
 | `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                     | DNS-01 DoH visibility wait budget; defaults to `180` seconds                                                                            |
 | `XP_MESH_PROXY_URL`                            | optional                     | Optional proxy-first/direct layer for public fallback egress; Mesh itself uses managed VLESS/REALITY HTTPS fallback                     |
-| `XP_DEFAULT_VLESS_PORT`                        | optional                     | Enables the managed default VLESS endpoint; managed SNI is derived from `XP_ACCESS_HOST`                                                |
-| `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated compatibility input; values are validated when present but no longer choose managed VLESS SNI                                |
+| `XP_DEFAULT_VLESS_PORT`                        | optional                     | Bootstrap port used only when the managed default VLESS endpoint is missing; managed SNI is derived from `XP_ACCESS_HOST`               |
+| `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated bootstrap compatibility input; validated only when `XP_DEFAULT_VLESS_PORT` is set and never chooses managed VLESS SNI        |
 | `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
-| `XP_DEFAULT_SS_PORT`                           | optional                     | Enables managed default SS2022 endpoint                                                                                                 |
+| `XP_DEFAULT_SS_PORT`                           | optional                     | Bootstrap port used only when the managed default SS2022 endpoint is missing                                                            |
 | `CLOUDFLARE_API_TOKEN`                         | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                          |
 
 ### Derived values
@@ -93,19 +93,34 @@ The container entrypoint treats the mounted data volume as the source of truth f
   administrator hash before XP starts. It must use Argon2id `m=4096,t=3,p=1`; a first join
   always retains the hash returned by its leader.
 - On join nodes, the first runtime reconcile reuses the `leader_api_base_url` carried by `XP_JOIN_TOKEN`, so default endpoints and node-meta sync do not depend on the local follower learning leader routing first
-- Managed default endpoints are reconciled from env on every start:
-  - first start creates them if missing
-  - later env changes patch the existing managed endpoints in place
-  - removing the env stops managing that endpoint and deletes the managed one if it was previously created/adopted by the container entrypoint
+- Managed default endpoint bootstrap runs on every start:
+  - a missing endpoint is created from its bootstrap env when no same-kind endpoint can be adopted
+  - an existing or auto-adopted endpoint keeps the port stored in Raft, even if the env differs or
+    is absent
+  - changing or removing env does not patch or delete an existing endpoint
 
 The managed default endpoint contract is:
 
-- VLESS: set `XP_DEFAULT_VLESS_PORT`; managed SNI is derived from `XP_ACCESS_HOST`
-- SS2022: set `XP_DEFAULT_SS_PORT`
+- VLESS bootstrap: set `XP_DEFAULT_VLESS_PORT`; managed SNI is derived from `XP_ACCESS_HOST`
+- SS2022 bootstrap: set `XP_DEFAULT_SS_PORT`
+- Existing endpoint reconfiguration: use the Admin UI or
+  `PATCH /api/admin/endpoints/{endpoint_id}`; use the endpoint delete operation for intentional
+  removal
+- Intentional rebootstrap: change the bootstrap env, explicitly delete the endpoint through the
+  Admin UI/API, ensure no other same-kind endpoint can be adopted, then restart the container;
+  retaining the old env after deletion recreates the old port under the same precondition
 
-For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each managed VLESS endpoint may carry its own `canary_upstream` plus an `accepted_authorities` alias set; aliases use `host[:port]`, and omitting the port means HTTPS default `443`. `GET/HEAD /generate_204` is always answered by xp, and other requests route by canonical `Host`/`:authority` or one of the accepted aliases to the endpoint upstream. Public misses are exposed as plain text `404 Not Found`.
+For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port,
+and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`.
+`XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated bootstrap compatibility input: it
+is ignored when `XP_DEFAULT_VLESS_PORT` is absent and, when bootstrap is active, is validated but
+does not choose managed SNI. Each managed VLESS endpoint may carry its own `canary_upstream` plus an
+`accepted_authorities` alias set; aliases use `host[:port]`, and omitting the port means HTTPS
+default `443`. `GET/HEAD /generate_204` is always answered by xp, and other requests route by
+canonical `Host`/`:authority` or one of the accepted aliases to the endpoint upstream. Public
+misses are exposed as plain text `404 Not Found`.
 
-If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
+If the entrypoint needs to take over an existing endpoint and there is exactly one endpoint of that kind on the current node, it adopts that endpoint without changing its port instead of creating a duplicate. Multiple same-kind endpoints are treated as an operator error and must be cleaned up manually.
 
 For a multi-node internal-auth v2 cutover, use a maintenance window and replace every node from
 the same immutable image digest. The fixed entrypoint cannot receive a new `container run` flag,
@@ -260,6 +275,6 @@ Pre-releases publish:
 - Tunnel enabled but startup fails before join: confirm `CLOUDFLARE_API_TOKEN`, account id, hostname, and zone id
 - Container restarts with unexpected node identity: inspect logs for the automatic node-meta realignment and verify `XP_NODE_NAME`, `XP_ACCESS_HOST`, and `XP_API_BASE_URL`
 - DDNS is enabled but `XP_ACCESS_HOST` does not update: confirm `XP_CLOUDFLARE_DDNS_ENABLED=true`, `XP_CLOUDFLARE_DDNS_ZONE_ID`, and `CLOUDFLARE_API_TOKEN`
-- Managed VLESS HTTPS canary fails on `https://<access_host[:vless_port]>/generate_204`: confirm `GET /api/admin/config` shows a healthy `vless_https_canary_status`, the managed VLESS endpoint exists on that host, and `XP_DEFAULT_VLESS_PORT` matches the probed ingress port
+- Managed VLESS HTTPS canary fails on `https://<access_host[:vless_port]>/generate_204`: confirm `GET /api/admin/config` shows a healthy `vless_https_canary_status`, then read the managed endpoint's cluster-owned port from the Endpoints Admin UI/API and verify that it matches the provider mapping
 - Default endpoint reconcile fails: ensure only one VLESS / one SS2022 endpoint exists on the node before asking the container to adopt them
 - Healthcheck fails but container is up: inspect `docker logs` for `xray` or `xp` child-process exits

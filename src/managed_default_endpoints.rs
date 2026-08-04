@@ -58,7 +58,11 @@ pub struct ManagedDefaultEndpointSources {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagedDefaultEndpointIntent<T> {
     Skip,
-    Remove,
+    Forget,
+    Preserve {
+        spec: T,
+        source: ManagedDefaultEndpointSource,
+    },
     Manage {
         spec: T,
         source: ManagedDefaultEndpointSource,
@@ -134,9 +138,6 @@ pub fn build_default_vless_endpoint_spec(
     vless_canary_bind: SocketAddr,
 ) -> anyhow::Result<Option<DefaultVlessEndpointSpec>> {
     let Some(port) = port else {
-        if server_names_raw.is_some() || fingerprint.is_some() {
-            bail!("XP_DEFAULT_VLESS_PORT is required when managing the default VLESS endpoint");
-        }
         return Ok(None);
     };
     validate_port(port).map_err(|err| anyhow!("{err}"))?;
@@ -337,96 +338,89 @@ where
             .copied()
     });
 
-    match intent {
-        ManagedDefaultEndpointIntent::Skip => Ok((
-            managed_cursor.endpoint_id.map(ToString::to_string),
-            managed_cursor.source,
-        )),
-        ManagedDefaultEndpointIntent::Remove => {
-            if let Some(endpoint) =
-                managed_current.or_else(|| adopt_marked_endpoint(&managed_marked))
-            {
-                eprintln!(
-                    "{log_label}: deleting managed default {} endpoint {}",
-                    kind.label(),
-                    endpoint.endpoint_id
-                );
-                write_command(DesiredStateCommand::DeleteEndpoint {
-                    endpoint_id: endpoint.endpoint_id.clone(),
-                })
-                .await?;
-            }
-            Ok((None, None))
+    let (desired, source, bootstrap_if_missing) = match intent {
+        ManagedDefaultEndpointIntent::Skip => {
+            return Ok((
+                managed_cursor.endpoint_id.map(ToString::to_string),
+                managed_cursor.source,
+            ));
         }
-        ManagedDefaultEndpointIntent::Manage {
-            spec: desired,
-            source,
-        } => {
-            if let Some(endpoint) = managed_current {
-                let next = desired.reconcile_existing(endpoint)?;
-                if &next != endpoint {
-                    eprintln!(
-                        "{log_label}: updating managed default {} endpoint {}",
-                        kind.label(),
-                        endpoint.endpoint_id
-                    );
-                    write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
-                }
-                return Ok((Some(endpoint.endpoint_id.clone()), Some(*source)));
-            }
+        ManagedDefaultEndpointIntent::Forget => return Ok((None, None)),
+        ManagedDefaultEndpointIntent::Preserve { spec, source } => (spec, source, false),
+        ManagedDefaultEndpointIntent::Manage { spec, source } => (spec, source, true),
+    };
 
-            let adoption_candidate = adopt_marked_endpoint(&managed_marked)
-                .or_else(|| desired.adoption_candidate(&same_kind));
-
-            if let Some(endpoint) = adoption_candidate {
-                let next = desired.reconcile_existing(endpoint)?;
-                if &next != endpoint {
-                    eprintln!(
-                        "{log_label}: adopting and updating managed default {} endpoint {}",
-                        kind.label(),
-                        endpoint.endpoint_id
-                    );
-                    write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
-                } else {
-                    eprintln!(
-                        "{log_label}: adopting existing managed default {} endpoint {}",
-                        kind.label(),
-                        endpoint.endpoint_id
-                    );
-                }
-                return Ok((Some(endpoint.endpoint_id.clone()), Some(*source)));
-            }
-
-            if same_kind.is_empty() {
-                let endpoint = desired.create_new(node_id.to_string())?;
-                let endpoint_id = endpoint.endpoint_id.clone();
-                eprintln!(
-                    "{log_label}: creating managed default {} endpoint {}",
-                    kind.label(),
-                    endpoint_id
-                );
-                write_command(DesiredStateCommand::UpsertEndpoint { endpoint }).await?;
-                return Ok((Some(endpoint_id), Some(*source)));
-            }
-
-            Err(anyhow!(
-                "{log_label}: multiple {} endpoints already exist on this node and no managed default endpoint can be identified; configure only one default endpoint or clean them up manually",
-                kind.label()
-            ))
+    if let Some(endpoint) = managed_current {
+        let next = desired.reconcile_existing(endpoint)?;
+        if &next != endpoint {
+            eprintln!(
+                "{log_label}: updating managed default {} endpoint {}",
+                kind.label(),
+                endpoint.endpoint_id
+            );
+            write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
         }
+        return Ok((Some(endpoint.endpoint_id.clone()), Some(*source)));
     }
+
+    let adoption_candidate = (bootstrap_if_missing || managed_cursor.endpoint_id.is_none())
+        .then(|| {
+            adopt_marked_endpoint(&managed_marked)
+                .or_else(|| desired.adoption_candidate(&same_kind))
+        })
+        .flatten();
+
+    if let Some(endpoint) = adoption_candidate {
+        let next = desired.reconcile_existing(endpoint)?;
+        if &next != endpoint {
+            eprintln!(
+                "{log_label}: adopting and updating managed default {} endpoint {}",
+                kind.label(),
+                endpoint.endpoint_id
+            );
+            write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
+        } else {
+            eprintln!(
+                "{log_label}: adopting existing managed default {} endpoint {}",
+                kind.label(),
+                endpoint.endpoint_id
+            );
+        }
+        return Ok((Some(endpoint.endpoint_id.clone()), Some(*source)));
+    }
+
+    if !bootstrap_if_missing {
+        return Ok((None, None));
+    }
+
+    if same_kind.is_empty() {
+        let endpoint = desired.create_new(node_id.to_string())?;
+        let endpoint_id = endpoint.endpoint_id.clone();
+        eprintln!(
+            "{log_label}: creating managed default {} endpoint {}",
+            kind.label(),
+            endpoint_id
+        );
+        write_command(DesiredStateCommand::UpsertEndpoint { endpoint }).await?;
+        return Ok((Some(endpoint_id), Some(*source)));
+    }
+
+    Err(anyhow!(
+        "{log_label}: multiple {} endpoints already exist on this node and no managed default endpoint can be identified; configure only one default endpoint or clean them up manually",
+        kind.label()
+    ))
 }
 
 trait ManagedEndpointSpec {
     fn create_new(&self, node_id: String) -> anyhow::Result<Endpoint>;
     fn reconcile_existing(&self, endpoint: &Endpoint) -> anyhow::Result<Endpoint>;
-    fn desired_port(&self) -> u16;
+    fn bootstrap_port(&self) -> u16;
 
     fn adoption_candidate<'a>(&self, endpoints: &[&'a Endpoint]) -> Option<&'a Endpoint> {
         let same_port = endpoints
             .iter()
             .copied()
-            .filter(|endpoint| endpoint.port == self.desired_port())
+            .filter(|endpoint| endpoint.port == self.bootstrap_port())
             .collect::<Vec<_>>();
         match same_port.as_slice() {
             [endpoint] => Some(*endpoint),
@@ -476,13 +470,12 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
         meta.managed_default = true;
 
         let mut next = endpoint.clone();
-        next.port = self.port;
         next.meta =
             serde_json::to_value(meta).context("serialize managed default VLESS endpoint")?;
         Ok(next)
     }
 
-    fn desired_port(&self) -> u16 {
+    fn bootstrap_port(&self) -> u16 {
         self.port
     }
 }
@@ -529,12 +522,11 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
         meta.managed_default = true;
 
         let mut next = endpoint.clone();
-        next.port = self.port;
         next.meta = serde_json::to_value(meta).context("serialize managed default SS endpoint")?;
         Ok(next)
     }
 
-    fn desired_port(&self) -> u16 {
+    fn bootstrap_port(&self) -> u16 {
         self.port
     }
 }
@@ -596,12 +588,14 @@ impl ManagedDefaultEndpointsIntent {
     pub fn into_spec(self) -> ManagedDefaultEndpointsSpec {
         ManagedDefaultEndpointsSpec {
             vless: match self.vless {
-                ManagedDefaultEndpointIntent::Manage { spec, .. } => Some(spec),
-                ManagedDefaultEndpointIntent::Skip | ManagedDefaultEndpointIntent::Remove => None,
+                ManagedDefaultEndpointIntent::Preserve { spec, .. }
+                | ManagedDefaultEndpointIntent::Manage { spec, .. } => Some(spec),
+                ManagedDefaultEndpointIntent::Skip | ManagedDefaultEndpointIntent::Forget => None,
             },
             ss: match self.ss {
-                ManagedDefaultEndpointIntent::Manage { spec, .. } => Some(spec),
-                ManagedDefaultEndpointIntent::Skip | ManagedDefaultEndpointIntent::Remove => None,
+                ManagedDefaultEndpointIntent::Preserve { spec, .. }
+                | ManagedDefaultEndpointIntent::Manage { spec, .. } => Some(spec),
+                ManagedDefaultEndpointIntent::Skip | ManagedDefaultEndpointIntent::Forget => None,
             },
         }
     }
@@ -623,20 +617,15 @@ fn resolve_host_managed_vless_intent(
 
     match derive_host_managed_vless_spec(node_endpoints, access_host, vless_canary_bind)? {
         Some(spec) => {
-            let source = match state.vless_effective_source() {
-                Some(ManagedDefaultEndpointSource::Explicit) => {
-                    return Ok(ManagedDefaultEndpointIntent::Remove);
-                }
-                Some(ManagedDefaultEndpointSource::AutoAdopted) | None => {
-                    ManagedDefaultEndpointSource::AutoAdopted
-                }
-            };
-            Ok(ManagedDefaultEndpointIntent::Manage { spec, source })
+            let source = state
+                .vless_effective_source()
+                .unwrap_or(ManagedDefaultEndpointSource::AutoAdopted);
+            Ok(ManagedDefaultEndpointIntent::Preserve { spec, source })
         }
         None => Ok(match state.vless_effective_source() {
             Some(ManagedDefaultEndpointSource::Explicit)
             | Some(ManagedDefaultEndpointSource::AutoAdopted) => {
-                ManagedDefaultEndpointIntent::Remove
+                ManagedDefaultEndpointIntent::Forget
             }
             None => ManagedDefaultEndpointIntent::Skip,
         }),
@@ -657,20 +646,15 @@ fn resolve_host_managed_ss_intent(
 
     match derive_host_managed_ss_spec(node_endpoints)? {
         Some(spec) => {
-            let source = match state.ss_effective_source() {
-                Some(ManagedDefaultEndpointSource::Explicit) => {
-                    return Ok(ManagedDefaultEndpointIntent::Remove);
-                }
-                Some(ManagedDefaultEndpointSource::AutoAdopted) | None => {
-                    ManagedDefaultEndpointSource::AutoAdopted
-                }
-            };
-            Ok(ManagedDefaultEndpointIntent::Manage { spec, source })
+            let source = state
+                .ss_effective_source()
+                .unwrap_or(ManagedDefaultEndpointSource::AutoAdopted);
+            Ok(ManagedDefaultEndpointIntent::Preserve { spec, source })
         }
         None => Ok(match state.ss_effective_source() {
             Some(ManagedDefaultEndpointSource::Explicit)
             | Some(ManagedDefaultEndpointSource::AutoAdopted) => {
-                ManagedDefaultEndpointIntent::Remove
+                ManagedDefaultEndpointIntent::Forget
             }
             None => ManagedDefaultEndpointIntent::Skip,
         }),
