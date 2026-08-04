@@ -289,7 +289,7 @@ fn read_systemd_environment_files(
                 Ok(raw) => {
                     let mut assignments = String::new();
                     for line in raw.lines().map(str::trim) {
-                        if !line.is_empty() && !line.starts_with('#') {
+                        if !line.is_empty() && !line.starts_with('#') && !line.starts_with(';') {
                             assignments.push_str("Environment=");
                             assignments.push_str(line);
                             assignments.push('\n');
@@ -378,14 +378,15 @@ fn parse_systemd_environment_files(source: &str) -> Vec<String> {
 }
 
 fn expand_systemd_unit_specifiers(path: &str, unit_name: &str) -> String {
+    let name_without_suffix = unit_name.strip_suffix(".service").unwrap_or(unit_name);
     let prefix = unit_name
         .split_once('@')
         .map(|(prefix, _)| prefix)
-        .unwrap_or_else(|| unit_name.strip_suffix(".service").unwrap_or(unit_name));
+        .unwrap_or(name_without_suffix);
     let placeholder = "\u{0}";
     path.replace("%%", placeholder)
         .replace("%n", unit_name)
-        .replace("%N", unit_name)
+        .replace("%N", name_without_suffix)
         .replace("%p", prefix)
         .replace(placeholder, "%")
 }
