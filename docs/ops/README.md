@@ -604,7 +604,9 @@ higher-priority directories. If a lower-priority directory already owns the
 managed filename, XP leaves it active instead of masking it. `EnvironmentFile`
 paths are normalized without escaping the managed root. Legacy custom/provider OpenRC scripts have no
 durable ownership marker, so an existing `8MiB` value in those scripts is
-preserved and must be changed explicitly after operator review.
+preserved and must be changed explicitly after operator review. The exact
+known provider wrapper is migrated only when it is a regular file; symbolic
+links and other custom filesystem objects remain untouched.
 
 ## Upgrade and rollback strategy
 

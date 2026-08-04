@@ -923,3 +923,29 @@ fn low_memory_backfill_preserves_custom_provider_wrapper_script() {
 
     assert_eq!(fs::read_to_string(wrapper).unwrap(), custom);
 }
+
+#[test]
+fn low_memory_backfill_preserves_provider_wrapper_symlink() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.usr_local_libexec_dir()).unwrap();
+    let target = tmp.path().join("provider-cloudflared-tunnel");
+    let legacy = concat!(
+        "#!/bin/sh\n",
+        "exec /usr/local/bin/cloudflared tunnel --no-autoupdate run ",
+        "--token \"$(cat /etc/cloudflared/tunnel-token)\"\n",
+    );
+    fs::write(&target, legacy).unwrap();
+    let wrapper = paths.usr_local_libexec_dir().join("cloudflared-tunnel");
+    symlink(&target, &wrapper).unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    assert!(
+        fs::symlink_metadata(&wrapper)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read_to_string(target).unwrap(), legacy);
+}

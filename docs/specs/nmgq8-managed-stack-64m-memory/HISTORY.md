@@ -51,7 +51,8 @@
 
 - 2026-07-29: release builds use Thin LTO, one codegen unit, and stripped
   symbols to reduce XP's mapped code footprint; OpenRC backfill now supports
-  provider wrapper scripts without `command_user`.
+  provider wrapper scripts without `command_user`. Wrapper migration is
+  restricted to regular files so operator-owned symbolic links remain intact.
 
 - 2026-07-29: OpenRC memory backfill now preserves executable service-script
   permissions after atomic replacement.

@@ -72,7 +72,8 @@ local process appears healthy.
 - A provider wrapper can hide the actual cloudflared arguments from the OpenRC
   service. Migrate only the exact known legacy wrapper from inline `--token`
   and implicit transport to `--token-file` plus an environment-backed HTTP/2
-  default; preserve both `XP_CLOUDFLARED_PROTOCOL` overrides and all custom wrappers.
+  default. Only migrate a regular file; preserve symbolic links, other custom
+  filesystem objects, `XP_CLOUDFLARED_PROTOCOL` overrides, and all custom wrappers.
 
 When CPU is high, compare transport before tightening the heap. On SG, QUIC at
 `8MiB` used about `7.70%` CPU and `8.15` GC/s; HTTP/2 at the same limit used

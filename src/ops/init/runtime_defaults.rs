@@ -224,6 +224,13 @@ fn backfill_provider_cloudflared_wrapper(paths: &Paths) -> Result<(), ExitError>
     if !path.exists() {
         return Ok(());
     }
+    if !fs::symlink_metadata(&path)
+        .map_err(filesystem_error)?
+        .file_type()
+        .is_file()
+    {
+        return Ok(());
+    }
     let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
     if raw.trim_end() != LEGACY {
         return Ok(());
