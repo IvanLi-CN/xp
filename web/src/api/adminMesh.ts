@@ -16,6 +16,17 @@ export const MeshBreakerStateSchema = z.enum([
 	"half_open",
 	"disabled",
 ]);
+export const MeshPeerReasonSchema = z.enum([
+	"mesh_available",
+	"missing_endpoint",
+	"ambiguous_endpoint",
+	"invalid_access_host",
+	"no_sample",
+	"transport_timeout",
+	"transport_error",
+	"protocol_rejected",
+	"fallback_active",
+]);
 
 export const AdminMeshBucketSchema = z.object({
 	minute: z.string(),
@@ -34,6 +45,8 @@ export const AdminMeshPeerSchema = z.object({
 	node_name: z.string(),
 	api_base_url: z.string(),
 	mesh_url: z.string().nullable(),
+	mesh_capability: z.enum(["enabled", "disabled"]).optional(),
+	mesh_reason: MeshPeerReasonSchema.optional(),
 	current_path: MeshTelemetryPathSchema.nullable(),
 	quality: MeshQualitySchema,
 	stale: z.boolean(),

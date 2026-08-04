@@ -10,7 +10,7 @@ import {
 	runAdminMeshProbes,
 } from "@/api/adminMesh";
 import { fetchAdminNodesRuntime } from "@/api/adminNodeRuntime";
-import { Button } from "@/components/Button";
+import { Button, IconButton } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { MeshUptimeStrip } from "@/components/MeshUptimeStrip";
 import { PageHeader } from "@/components/PageHeader";
@@ -76,6 +76,27 @@ function routeLabel(peer: AdminMeshPeer) {
 	return peer.current_path === "mesh" ? "Reality Mesh" : "Public fallback";
 }
 
+const meshReasonLabel: Record<
+	NonNullable<AdminMeshPeer["mesh_reason"]>,
+	string
+> = {
+	mesh_available: "Mesh available",
+	missing_endpoint: "Mesh endpoint missing",
+	ambiguous_endpoint: "Multiple Mesh endpoints",
+	invalid_access_host: "Invalid access host",
+	no_sample: "Awaiting Mesh sample",
+	transport_timeout: "Mesh timed out",
+	transport_error: "Mesh transport error",
+	protocol_rejected: "Mesh protocol rejected",
+	fallback_active: "Using public fallback",
+};
+
+function reasonLabel(peer: AdminMeshPeer) {
+	return peer.mesh_reason
+		? meshReasonLabel[peer.mesh_reason]
+		: "Mesh reason unknown";
+}
+
 function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
 	const label =
 		state === "half_open"
@@ -122,6 +143,9 @@ function PeerRows({
 			</div>
 			<div className="min-w-28 text-sm">
 				<p>{routeLabel(peer)}</p>
+				<p className="mt-1 truncate text-xs text-muted-foreground">
+					{reasonLabel(peer)}
+				</p>
 				<p className="mt-1 text-xs text-muted-foreground">
 					{timestamp(peer.last_transition_at)}
 				</p>
@@ -159,29 +183,25 @@ function PeerRows({
 			<div className="hidden items-center gap-4 border-b border-border/70 py-3 md:flex">
 				{content}
 				<div className="flex shrink-0 items-center gap-1">
-					<Button
+					<IconButton
+						label={`Probe ${peer.node_name}`}
+						tooltip={`Probe ${peer.node_name}`}
 						variant="ghost"
-						size="sm"
-						className="size-8 px-0"
-						aria-label={`Probe ${peer.node_name}`}
-						title={`Probe ${peer.node_name}`}
 						onClick={onProbe}
 						disabled={probeDisabled || !onProbe}
 					>
 						<Icon name="tabler:activity" size={16} />
-					</Button>
-					<Button
+					</IconButton>
+					<IconButton
+						label={`Open ${peer.node_name} details`}
+						tooltip={`Open ${peer.node_name} details`}
 						asChild
 						variant="ghost"
-						size="sm"
-						className="size-8 px-0"
-						aria-label={`Open ${peer.node_name} details`}
-						title={`Open ${peer.node_name} details`}
 					>
 						<Link to="/nodes/$nodeId" params={{ nodeId: peer.node_id }}>
 							<Icon name="tabler:arrow-up-right" size={16} />
 						</Link>
-					</Button>
+					</IconButton>
 				</div>
 			</div>
 			<div className="space-y-3 border-b border-border/70 py-4 md:hidden">

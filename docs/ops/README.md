@@ -203,7 +203,22 @@ Operational audit:
 # 1. Verify loopback canary runtime state after restart
 ssh <alias> 'curl -fsS http://127.0.0.1:62416/api/health | jq .vless_https_canary'
 ssh <alias> 'curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status'
+```
 
+Mesh read-only diagnosis:
+
+- Query `GET /api/admin/mesh/status` on each member and record `mesh_capability`,
+  `mesh_reason`, breaker state, current path, and the latest sample timestamp.
+- For every directed peer edge, compare the endpoint inventory with the canary status and Xray
+  listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
+- `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration
+  capability failures. `transport_timeout`, `transport_error`, and `protocol_rejected` mean the
+  Mesh target exists but the directed transport or protocol failed. A public success with
+  `fallback_active` is end-to-end success, not Mesh availability.
+- This audit is read-only: do not edit endpoint metadata, restart Xray/XP, reset breakers, or
+  remove cluster members as part of diagnosis.
+
+```bash
 # 2. Verify loopback TLS canary locally on the node
 curl --resolve <access_host>:39043:127.0.0.1 https://<access_host>:39043/generate_204
 

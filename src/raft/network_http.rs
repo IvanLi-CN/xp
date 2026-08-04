@@ -290,6 +290,7 @@ async fn mesh_target_for_raft(
             node_id: target_node.name.clone(),
             node_name: target_node.name.clone(),
             mesh_base_url: None,
+            mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
             public_base_url: raft_base_url.to_string(),
         };
     };
