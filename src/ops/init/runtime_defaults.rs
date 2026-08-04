@@ -67,7 +67,9 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
         let mut updated = raw.clone();
         if path.file_name() == Some(OsStr::new("cloudflared")) {
-            if is_generated_legacy_openrc_cloudflared_script(&raw) {
+            if is_generated_legacy_openrc_cloudflared_script(&raw)
+                || is_generated_legacy_openrc_provider_script(&raw)
+            {
                 updated = updated.replacen(
                     "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"",
                     "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"",
@@ -184,6 +186,12 @@ fn is_generated_legacy_openrc_cloudflared_script(raw: &str) -> bool {
     );
     raw == format!("{PREFIX}{legacy_args}{SUFFIX}")
         || raw == format!("{PREFIX}{http2_args}{SUFFIX}")
+}
+
+fn is_generated_legacy_openrc_provider_script(raw: &str) -> bool {
+    raw.lines()
+        .any(|line| line.trim() == "command=/usr/local/libexec/cloudflared-tunnel")
+        && raw.contains("export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"")
 }
 
 fn backfill_provider_cloudflared_wrapper(paths: &Paths) -> Result<(), ExitError> {
