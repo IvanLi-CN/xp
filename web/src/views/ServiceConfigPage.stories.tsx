@@ -30,6 +30,12 @@ export const ProviderOnly: Story = {
 export const PrivateMirrorTargetsBlocked: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByRole("heading", { name: "Cluster settings" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Node settings" }),
+		).toBeInTheDocument();
 		const checkbox = await canvas.findByRole("checkbox", {
 			name: "Allow private Mihomo mirror targets",
 		});

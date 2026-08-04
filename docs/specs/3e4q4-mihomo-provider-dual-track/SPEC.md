@@ -40,6 +40,7 @@
 - 后端 provider-only Mihomo HTTP 路由与 provider payload 渲染。
 - provider 主配置渲染、provider payload 渲染、请求 origin 解析。
 - Web `Settings / Service config` provider-only 状态展示与 `User Details` canonical Mihomo URL。
+- Web `Settings / Service config` 必须将集群级策略与当前节点运行配置分成独立的 `Cluster settings` / `Node settings` 区域；Mihomo 私网目标策略只归属集群区域。
 - Storybook / 前后端回归 / 真实 Mihomo provider 装载验证。
 - 设计文档与契约文档同步。
 
@@ -188,6 +189,7 @@
 - Given endpoint 设置了 origin-only `canary_upstream`，When canary 代理非探测请求，Then 请求 method/path/query/body、非 hop-by-hop header、响应 status/header/body 应尽量透明流式转发；发往 upstream 的 `Host` 按 `canary_upstream` origin 归一化；HTTP/1.1、HTTPS ALPN HTTP/2、显式 h2c、SSE、大上传/下载属于支持范围，WebSocket upgrade 使用 HTTP/1.1 upstream 连接，显式 h2c 仅用于非 upgrade HTTP 流量，`CONNECT` 不属于 v1 反代能力。
 - Given deployment mode is host-managed or container-managed, When the node declares or auto-adopts a managed default VLESS endpoint, Then the same managed-default marker / reconcile contract determines both `reality.dest` rewriting and Mihomo relay URL selection; delivery semantics must not differ by deployment mode.
 - Given Web 管理端打开 `Settings / Service config`，Then 显示 Mihomo provider-only 状态，且 `User Details` 可复制/预览 canonical Mihomo URL。
+- Given Web 管理端打开 `Settings / Service config`，Then `Cluster settings` 与 `Node settings` 必须有独立标题和说明，集群策略不得与节点运行字段混排。
 - Given 真实 Mihomo 加载显式 provider URL，When 执行 `mihomo -t` 或运行时 delay 检查，Then provider 内链式节点可引用主配置中的 per-base relay 组 `🛣️ {relay-base}`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
@@ -242,7 +244,7 @@ PR: none
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=page
   - state: Pages/ServiceConfigPage/PrivateMirrorTargetsBlocked
-  - evidence_note: 集群级 Mihomo 外部资源镜像策略默认阻止私网目标；开启后显示警告并保留显式复选框状态。
+  - evidence_note: 页面将集群策略与节点运行配置分成独立区域；集群级 Mihomo 外部资源镜像策略开启后显示警告并保留显式复选框状态。
     ![Mihomo private mirror target policy](./assets/mihomo-private-target-policy.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAliasDefaultsTo443`

@@ -90,6 +90,12 @@ describe("ServiceConfigPage", () => {
 	it("updates the cluster private-target mirror policy", async () => {
 		const user = userEvent.setup();
 		renderPage();
+		expect(
+			await screen.findByRole("heading", { name: "Cluster settings" }),
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("heading", { name: "Node settings" }),
+		).toBeTruthy();
 
 		const checkbox = await screen.findByRole("checkbox", {
 			name: "Allow private Mihomo mirror targets",
