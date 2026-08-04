@@ -142,6 +142,20 @@ PR: include
 
 - Whitespace normalization: no meaningful surrounding whitespace was present.
 
+Latest capability/reason diagnostics and unified row actions:
+
+- Source: mock-only, login-free `/ui-demo/system-status`.
+- Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
+  `capture_scope=browser-viewport`, `requested_viewports=1280x900,393x852`,
+  `rendered_assets=1280x900,393x852`, `sensitive_exclusion=N/A`,
+  `submission_gate=approved`.
+- The desktop peer rows show equal `32x32` Probe and details controls; the mobile
+  capture keeps the existing text actions and shows short Mesh reasons.
+
+![Desktop system status diagnostics](./assets/system-status-desktop-new.png)
+
+![Mobile system status diagnostics](./assets/system-status-mobile-new.png)
+
 ## 参考
 
 - `docs/specs/nbs5f-xray-control-plane-relay/SPEC.md`

@@ -18,6 +18,33 @@ export interface ButtonProps extends Omit<UiButtonProps, "variant" | "size"> {
 	iconLeft?: ReactNode;
 }
 
+export type IconButtonProps = Omit<ButtonProps, "children" | "iconLeft"> & {
+	label: string;
+	tooltip?: string;
+	children: ReactNode;
+};
+
+/** A stable 32px action target for dense row-level controls. */
+export function IconButton({
+	label,
+	tooltip,
+	children,
+	className,
+	...props
+}: IconButtonProps) {
+	return (
+		<Button
+			{...props}
+			size="sm"
+			className={cn("size-8 min-h-8 min-w-8 shrink-0 p-0", className)}
+			aria-label={label}
+			title={tooltip ?? label}
+		>
+			{children}
+		</Button>
+	);
+}
+
 export function Button({
 	variant = "primary",
 	size,
