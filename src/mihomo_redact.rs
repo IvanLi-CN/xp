@@ -198,7 +198,7 @@ async fn build_http_client_for_url(
         .map_err(|e| RedactError::network(format!("network_error: build http client: {e}")))
 }
 
-fn is_public_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => is_public_ipv4(ip),
         IpAddr::V6(ip) => is_public_ipv6(ip),

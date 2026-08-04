@@ -1,8 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAdminConfig } from "../api/adminConfig";
+import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { ToastProvider } from "../components/Toast";
@@ -58,8 +59,12 @@ function setupMocks() {
 		quota_auto_unban: true,
 		ip_geo_enabled: false,
 		ip_geo_origin: "https://api.country.is",
+		mihomo_resource_allow_private_targets: false,
 		admin_token_present: true,
 		admin_token_masked: "********",
+	});
+	vi.mocked(putMihomoResourcePolicy).mockResolvedValue({
+		mihomo_resource_allow_private_targets: true,
 	});
 }
 
@@ -80,5 +85,18 @@ describe("ServiceConfigPage", () => {
 			await screen.findByText(/Mihomo uses provider-only delivery/),
 		).toBeTruthy();
 		expect(screen.queryByText("Mihomo delivery")).toBeNull();
+	});
+
+	it("updates the cluster private-target mirror policy", async () => {
+		const user = userEvent.setup();
+		renderPage();
+
+		const checkbox = await screen.findByRole("checkbox", {
+			name: "Allow private Mihomo mirror targets",
+		});
+		await user.click(checkbox);
+
+		expect(putMihomoResourcePolicy).toHaveBeenCalledWith("admintoken", true);
+		expect(await screen.findByText("Allowed")).toBeTruthy();
 	});
 });

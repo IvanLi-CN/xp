@@ -2876,6 +2876,7 @@ async fn admin_config_returns_safe_view_and_masks_token() {
     assert!(json.get("vless_https_canary_status").is_some());
     assert_eq!(json["quota_poll_interval_secs"], 10);
     assert_eq!(json["quota_auto_unban"], true);
+    assert_eq!(json["mihomo_resource_allow_private_targets"], false);
     assert!(json.get("mihomo_delivery_mode").is_none());
 
     assert_eq!(json["admin_token_present"], true);
@@ -2899,6 +2900,42 @@ async fn admin_config_patch_is_removed() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn admin_mihomo_resource_policy_is_cluster_scoped_and_persisted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let initial = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/mihomo/resource-policy"))
+        .await
+        .unwrap();
+    assert_eq!(initial.status(), StatusCode::OK);
+    assert_eq!(body_json(initial).await["allow_private_targets"], false);
+
+    let updated = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/mihomo/resource-policy",
+            json!({ "allow_private_targets": true }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(body_json(updated).await["allow_private_targets"], true);
+
+    let config = app
+        .oneshot(req_authed("GET", "/api/admin/config"))
+        .await
+        .unwrap();
+    assert_eq!(config.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(config).await["mihomo_resource_allow_private_targets"],
+        true
+    );
 }
 
 #[tokio::test]

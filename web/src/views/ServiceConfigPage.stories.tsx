@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, within } from "@storybook/test";
+import { expect, userEvent, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/ServiceConfigPage",
@@ -24,5 +24,17 @@ export const ProviderOnly: Story = {
 			await canvas.findByText(/Mihomo uses provider-only delivery/),
 		).toBeInTheDocument();
 		await expect(canvas.queryByText("Mihomo delivery")).not.toBeInTheDocument();
+	},
+};
+
+export const PrivateMirrorTargetsBlocked: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const checkbox = await canvas.findByRole("checkbox", {
+			name: "Allow private Mihomo mirror targets",
+		});
+		await expect(checkbox).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(checkbox);
+		await expect(await canvas.findByText("Allowed")).toBeInTheDocument();
 	},
 };

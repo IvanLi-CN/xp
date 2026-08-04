@@ -240,6 +240,10 @@ PR: none
   - state: `Pages/ServiceConfigPage/ProviderOnly`
   - evidence_note: 管理端 `Settings / Service config` 展示 Mihomo 已收敛为 provider-only，移除 legacy/default route 切换。
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
+- source_type=storybook_canvas · target_program=mock-only · capture_scope=page
+  - state: Pages/ServiceConfigPage/PrivateMirrorTargetsBlocked
+  - evidence_note: 集群级 Mihomo 外部资源镜像策略默认阻止私网目标；开启后显示警告并保留显式复选框状态。
+    ![Mihomo private mirror target policy](./assets/mihomo-private-target-policy.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAliasDefaultsTo443`
   - submission_gate: `approved`

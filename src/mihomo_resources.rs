@@ -3,6 +3,7 @@
 use std::{
     collections::BTreeMap,
     io,
+    net::SocketAddr,
     pin::Pin,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -16,7 +17,7 @@ use axum::{
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt as _, stream};
 use hmac::{Hmac, Mac};
-use reqwest::Url;
+use reqwest::{Client, Url};
 use sha2::Sha256;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
@@ -145,6 +146,7 @@ mod tests {
         let response = proxy_resource(
             Url::parse(&format!("{}/resource", server.uri())).unwrap(),
             "stream-test",
+            true,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -161,6 +163,7 @@ mod tests {
         let response = proxy_resource(
             Url::parse(&format!("{}/error", server.uri())).unwrap(),
             "error-test",
+            true,
         )
         .await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -193,6 +196,7 @@ mod tests {
         let response = proxy_resource(
             Url::parse(&format!("{}/redirect-0", server.uri())).unwrap(),
             "redirect-test",
+            true,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -205,9 +209,21 @@ mod tests {
         let response = proxy_resource(
             Url::parse(&format!("{}/redirect-6", server.uri())).unwrap(),
             "redirect-limit-test",
+            true,
         )
         .await;
         assert_eq!(response.status(), StatusCode::LOOP_DETECTED);
+    }
+
+    #[tokio::test]
+    async fn proxy_blocks_private_targets_when_policy_is_disabled() {
+        let response = proxy_resource(
+            Url::parse("http://127.0.0.1:9/internal").unwrap(),
+            "private-target-test",
+            false,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -273,7 +289,53 @@ fn build_resource_directory(
     resources
 }
 
-pub async fn proxy_resource(url: Url, resource_id_value: &str) -> Response {
+fn build_resource_client() -> Client {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .user_agent("xp-mihomo-resource/1")
+        .build()
+        .expect("build Mihomo resource client")
+}
+
+async fn build_public_resource_client(
+    url: &Url,
+    timeout: Duration,
+) -> Result<Client, (StatusCode, &'static str)> {
+    let host = url
+        .host_str()
+        .ok_or((StatusCode::BAD_GATEWAY, "upstream_unreachable"))?;
+    let port = url
+        .port_or_known_default()
+        .ok_or((StatusCode::BAD_GATEWAY, "upstream_unreachable"))?;
+    let lookup = tokio::time::timeout(timeout, tokio::net::lookup_host((host, port))).await;
+    let addrs: Vec<SocketAddr> = match lookup {
+        Ok(Ok(addrs)) => addrs.collect(),
+        Ok(Err(_)) => return Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
+        Err(_) => return Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")),
+    };
+    if addrs.is_empty()
+        || addrs
+            .iter()
+            .any(|address| !crate::mihomo_redact::is_public_ip(address.ip()))
+    {
+        return Err((StatusCode::FORBIDDEN, "private_target_blocked"));
+    }
+
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .user_agent("xp-mihomo-resource/1")
+        .resolve_to_addrs(host, &addrs)
+        .build()
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "upstream_unreachable"))
+}
+
+pub async fn proxy_resource(
+    url: Url,
+    resource_id_value: &str,
+    allow_private_targets: bool,
+) -> Response {
     let global = GLOBAL_LIMIT
         .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
         .clone();
@@ -302,18 +364,19 @@ pub async fn proxy_resource(url: Url, resource_id_value: &str) -> Response {
     let deadline = Instant::now() + RESOURCE_TIMEOUT;
     let mut current = url;
     let mut redirects = 0;
-    let client = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .user_agent("xp-mihomo-resource/1")
-            .build()
-            .expect("build Mihomo resource client")
-    });
-
     let response = loop {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
+        };
+        let client = if allow_private_targets {
+            CLIENT.get_or_init(build_resource_client).clone()
+        } else {
+            match build_public_resource_client(&current, remaining).await {
+                Ok(client) => client,
+                Err((status, code)) => {
+                    return error_response(status, code);
+                }
+            }
         };
         let request = client
             .get(current.clone())

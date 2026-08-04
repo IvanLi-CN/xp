@@ -128,7 +128,8 @@ Response:
 - `resource_id` 是使用现有集群持久化密钥对规范化原 URL 做 HMAC-SHA-256 后的十六进制值。
 - 目录只包含当前 Mihomo profile 仍引用的 GeoX、规则 provider、代理 provider URL，以及 XP 固定 GeoX 资产；不接受 `url` 查询参数或其它任意上游地址。
 - 资源内容不在 XP 缓存、不写磁盘、不聚合到内存；上游响应按块流式转发。XP 施加 256 MiB、90 秒总超时、全局 32 条和单资源 4 条并发限制。
-- 初始 URL 和每个重定向目标都必须是无 userinfo 的 HTTPS；重定向在服务端最多跟随 5 次，不增加主机/IP 访问限制，客户端永远看不到 `Location`。
+- 初始 URL 和每个重定向目标都必须是无 userinfo 的 HTTPS；重定向在服务端最多跟随 5 次，客户端永远看不到 `Location`。
+- 集群设置 `allow_private_targets=false`（默认）时，XP 会对初始 URL 和每个重定向目标做 DNS 解析并固定到解析结果，拒绝 loopback、私网、链路本地、保留和文档地址，返回 `403 private_target_blocked`。开启后保留原有的最终目标直连语义。
 
 Responses:
 
@@ -139,7 +140,28 @@ Responses:
 - `502`: DNS、连接、TLS 或重定向解析失败
 - `504`: 90 秒总超时
 - `508`: 第六次重定向
+- `403`: 集群策略拒绝私网、回环或链路本地目标
 - upstream `4xx/5xx`: 保留状态码，使用 XP 固定错误体且不透传上游响应体或 `Location`
+
+## GET `/api/admin/mihomo/resource-policy`
+
+- 需要管理员认证。
+- 返回当前集群级外部资源镜像策略：
+
+```json
+{"allow_private_targets": false}
+```
+
+## PUT `/api/admin/mihomo/resource-policy`
+
+- 需要管理员认证。
+- 请求体：
+
+```json
+{"allow_private_targets": true}
+```
+
+- 设置通过 Raft 持久化并立即作用于所有节点的公开镜像请求。
 
 ## GET `/api/sub/{subscription_token}/mihomo/provider/system`
 

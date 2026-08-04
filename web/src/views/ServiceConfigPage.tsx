@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { fetchAdminConfig } from "../api/adminConfig";
+import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
@@ -12,6 +12,7 @@ import { PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
+import { Checkbox } from "../components/ui/checkbox";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
 	formatSyncTimestamp,
@@ -113,6 +114,7 @@ export function ServiceConfigPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const toast = useToast();
 	const runtime = useAppRuntime();
+	const queryClient = useQueryClient();
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -128,6 +130,34 @@ export function ServiceConfigPage() {
 		queryKey: ["adminConfig", adminToken],
 		enabled: adminToken.length > 0,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
+	});
+
+	const privateTargetPolicyMutation = useMutation({
+		mutationFn: (allowPrivateTargets: boolean) =>
+			putMihomoResourcePolicy(adminToken, allowPrivateTargets),
+		onSuccess: (result) => {
+			queryClient.setQueryData(
+				["adminConfig", adminToken],
+				(previous: typeof configQuery.data) =>
+					previous
+						? {
+								...previous,
+								mihomo_resource_allow_private_targets:
+									result.mihomo_resource_allow_private_targets,
+							}
+						: previous,
+			);
+			toast.pushToast({
+				variant: "success",
+				message: "Mihomo mirror policy updated.",
+			});
+		},
+		onError: (error) => {
+			toast.pushToast({
+				variant: "error",
+				message: `Failed to update Mihomo mirror policy: ${formatErrorMessage(error)}`,
+			});
+		},
 	});
 
 	const headerActions = (
@@ -278,6 +308,57 @@ export function ServiceConfigPage() {
 									value={data.api_base_url}
 									copyText={data.api_base_url}
 								/>
+							</div>
+						</div>
+					</div>
+
+					<div className="xp-card lg:col-span-2">
+						<div className="xp-card-body space-y-4">
+							<div className="flex flex-wrap items-start justify-between gap-4">
+								<div className="max-w-2xl">
+									<h2 className="text-base font-semibold">
+										Mihomo external resource mirror
+									</h2>
+									<p className="text-sm text-muted-foreground">
+										Cluster-wide control for private, loopback, and link-local
+										upstream targets.
+									</p>
+								</div>
+								<label
+									className="flex items-center gap-3 text-sm font-medium"
+									htmlFor="mihomo-private-targets"
+								>
+									<Checkbox
+										id="mihomo-private-targets"
+										checked={data.mihomo_resource_allow_private_targets}
+										disabled={
+											runtime.isReadOnly ||
+											privateTargetPolicyMutation.isPending
+										}
+										aria-label="Allow private Mihomo mirror targets"
+										onCheckedChange={(checked) => {
+											if (checked !== "indeterminate") {
+												privateTargetPolicyMutation.mutate(checked);
+											}
+										}}
+									/>
+									<span>
+										{data.mihomo_resource_allow_private_targets
+											? "Allowed"
+											: "Blocked"}
+									</span>
+								</label>
+							</div>
+							<div
+								className={
+									data.mihomo_resource_allow_private_targets
+										? "rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground"
+										: "rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success-foreground"
+								}
+							>
+								{data.mihomo_resource_allow_private_targets
+									? "Enabled: a configured mirror URL may reach private network services. Only enable this for trusted profiles."
+									: "Protected: private network targets are rejected before XP connects to them."}
 							</div>
 						</div>
 					</div>

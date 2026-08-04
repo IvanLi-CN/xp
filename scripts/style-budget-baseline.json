@@ -60,7 +60,7 @@
     "max_line_length": 183
   },
   "docs/desgin/subscription.md": {
-    "long_line_count": 25,
+    "long_line_count": 26,
     "max_line_length": 292
   },
   "docs/desgin/workflows.md": {
@@ -72,7 +72,7 @@
     "max_line_length": 263
   },
   "docs/ops/README.md": {
-    "long_line_count": 119,
+    "long_line_count": 120,
     "max_line_length": 748
   },
   "docs/ops/cloudflare-tunnel.md": {
@@ -372,7 +372,7 @@
     "max_line_length": 162
   },
   "docs/specs/3e4q4-mihomo-provider-dual-track/contracts/http-apis.md": {
-    "long_line_count": 15,
+    "long_line_count": 16,
     "max_line_length": 364
   },
   "docs/specs/3hpk4-admin-delete-node/HISTORY.md": {
@@ -583,12 +583,12 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8332
+    "source_lines": 8383
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
     "max_line_length": 142,
-    "source_lines": 9839
+    "source_lines": 9876
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -725,7 +725,7 @@
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4411
+    "source_lines": 4431
   },
   "src/state/tests.rs": {
     "source_lines": 2296
@@ -776,7 +776,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2472
+    "source_lines": 2480
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -1070,6 +1070,10 @@
     "long_line_count": 8,
     "max_line_length": 198,
     "source_lines": 406
+  },
+  "web/src/views/ServiceConfigPage.tsx": {
+    "long_line_count": 3,
+    "max_line_length": 120
   },
   "web/src/views/QuotaPolicyPage.tsx": {
     "long_line_count": 10,

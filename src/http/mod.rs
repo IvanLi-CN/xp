@@ -707,8 +707,20 @@ struct AdminServiceConfigResponse {
     quota_auto_unban: bool,
     ip_geo_enabled: bool,
     ip_geo_origin: String,
+    mihomo_resource_allow_private_targets: bool,
     admin_token_present: bool,
     admin_token_masked: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutMihomoResourcePolicyRequest {
+    allow_private_targets: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminMihomoResourcePolicyResponse {
+    allow_private_targets: bool,
 }
 
 #[derive(Deserialize)]
@@ -1063,6 +1075,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/_internal/alerts", get(admin_internal_get_alerts))
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
+        .route(
+            "/mihomo/resource-policy",
+            get(admin_get_mihomo_resource_policy).put(admin_put_mihomo_resource_policy),
+        )
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/upgrade/status", get(admin_get_upgrade_status))
         .route("/upgrade/start", post(admin_start_upgrade))
@@ -4217,6 +4233,10 @@ async fn build_admin_service_config_response(
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
     let mesh_proxy = state.mesh_proxy_state.snapshot().await;
+    let mihomo_resource_allow_private_targets = {
+        let store = state.store.lock().await;
+        store.mihomo_resource_allow_private_targets()
+    };
     let vless_https_canary_status = crate::vless_https_canary::load_status(
         &state.config.data_dir,
         state.config.vless_canary_bind,
@@ -4239,6 +4259,7 @@ async fn build_admin_service_config_response(
         quota_auto_unban: state.config.quota_auto_unban,
         ip_geo_enabled: state.config.ip_geo_enabled,
         ip_geo_origin,
+        mihomo_resource_allow_private_targets,
         admin_token_present,
         admin_token_masked,
     })
@@ -4248,6 +4269,32 @@ async fn admin_get_config(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminServiceConfigResponse>, ApiError> {
     Ok(Json(build_admin_service_config_response(&state).await?))
+}
+
+async fn admin_get_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminMihomoResourcePolicyResponse>, ApiError> {
+    let store = state.store.lock().await;
+    Ok(Json(AdminMihomoResourcePolicyResponse {
+        allow_private_targets: store.mihomo_resource_allow_private_targets(),
+    }))
+}
+
+async fn admin_put_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    ApiJson(req): ApiJson<PutMihomoResourcePolicyRequest>,
+) -> Result<Json<AdminMihomoResourcePolicyResponse>, ApiError> {
+    raft_write(
+        &state,
+        DesiredStateCommand::SetMihomoResourceAllowPrivateTargets {
+            allow: req.allow_private_targets,
+        },
+    )
+    .await?;
+
+    Ok(Json(AdminMihomoResourcePolicyResponse {
+        allow_private_targets: req.allow_private_targets,
+    }))
 }
 
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
@@ -8321,7 +8368,11 @@ async fn get_mihomo_resource(
     let Some(url) = url else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
-    mihomo_resources::proxy_resource(url, &resource_id).await
+    let allow_private_targets = {
+        let store = state.store.lock().await;
+        store.mihomo_resource_allow_private_targets()
+    };
+    mihomo_resources::proxy_resource(url, &resource_id, allow_private_targets).await
 }
 
 #[cfg(test)]

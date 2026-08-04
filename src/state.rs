@@ -260,6 +260,8 @@ pub struct PersistedState {
     #[serde(skip)]
     pub mihomo_resource_revision: u64,
     #[serde(default)]
+    pub mihomo_resource_allow_private_targets: bool,
+    #[serde(default)]
     pub nodes: BTreeMap<String, Node>,
     #[serde(default)]
     pub endpoints: BTreeMap<String, Endpoint>,
@@ -307,6 +309,7 @@ impl PersistedState {
         Self {
             schema_version: SCHEMA_VERSION,
             mihomo_resource_revision: 0,
+            mihomo_resource_allow_private_targets: false,
             nodes: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
@@ -1861,6 +1864,9 @@ pub enum DesiredStateCommand {
     SetMihomoDeliveryMode {
         mode: MihomoDeliveryMode,
     },
+    SetMihomoResourceAllowPrivateTargets {
+        allow: bool,
+    },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
     },
@@ -1994,6 +2000,9 @@ enum DesiredStateCommandCompat {
     },
     SetMihomoDeliveryMode {
         mode: MihomoDeliveryMode,
+    },
+    SetMihomoResourceAllowPrivateTargets {
+        allow: bool,
     },
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
@@ -2135,6 +2144,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             }
             DesiredStateCommandCompat::SetMihomoDeliveryMode { mode } => {
                 Self::SetMihomoDeliveryMode { mode }
+            }
+            DesiredStateCommandCompat::SetMihomoResourceAllowPrivateTargets { allow } => {
+                Self::SetMihomoResourceAllowPrivateTargets { allow }
             }
             DesiredStateCommandCompat::SetGeoDbUpdateSettings { settings } => Self::CompatNoop {
                 note: format!(
@@ -2918,6 +2930,10 @@ impl DesiredStateCommand {
             }
             Self::SetMihomoDeliveryMode { mode } => {
                 state.mihomo_delivery_mode = *mode;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetMihomoResourceAllowPrivateTargets { allow } => {
+                state.mihomo_resource_allow_private_targets = *allow;
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::SetGeoDbUpdateSettings { .. } => Ok(DesiredStateApplyResult::Applied),
@@ -4223,6 +4239,10 @@ impl JsonSnapshotStore {
 
     pub fn mihomo_delivery_mode(&self) -> MihomoDeliveryMode {
         self.state.mihomo_delivery_mode
+    }
+
+    pub fn mihomo_resource_allow_private_targets(&self) -> bool {
+        self.state.mihomo_resource_allow_private_targets
     }
 
     pub fn get_user_by_subscription_token(&self, subscription_token: &str) -> Option<User> {
