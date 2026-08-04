@@ -103,7 +103,8 @@
   中的 bootstrap 端口不得在接管过程中静默移动现网入口。
 - 已存在 managed-default endpoint 的有意端口重配置必须通过 Admin UI/API 的 endpoint
   port update 完成；有意删除必须通过 endpoint delete 完成。若删除后仍保留对应
-  bootstrap env，下一次 reconcile 会按该 env 重新创建 endpoint。
+  bootstrap env，且没有可接管的同类 endpoint，下一次 reconcile 会按该 env 重新创建
+  endpoint。
 - 端口是 operator-owned 字段，但托管 VLESS 的 `reality.dest`、`server_names` 与 canary
   就绪门禁仍由系统派生并受保护；端口所有权变化不得放宽这些限制。
 - 托管 VLESS HTTPS canary 的 ACME 证书只使用 Cloudflare DNS-01。

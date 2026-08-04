@@ -147,8 +147,8 @@
 - Given 当前节点已有 managed-default endpoint，When env 中的 bootstrap port 被修改或
   移除后重启容器，Then endpoint 的集群端口与存在性保持不变。
 - Given 管理员通过 Admin UI/API 修改 endpoint 端口，When 容器随后重启，Then 修改后的
-  端口保持不变；若管理员删除 endpoint 且 bootstrap env 仍存在，后续启动会按 env
-  重新创建。
+  端口保持不变；若管理员删除 endpoint、bootstrap env 仍存在且没有可接管的同类
+  endpoint，后续启动会按 env 重新创建。
 - Given PR CI 运行，When Docker job 执行，Then 镜像 smoke build 通过且默认 entrypoint dry-run 合同通过。
 - Given release 工作流成功，When 版本被发布，Then GHCR 产出 amd64/arm64 镜像与约定 tag。
 - Given 操作者只参考 README 与 ops 文档，When 按 Compose 示例部署 bootstrap / join 节点，Then 能明确知道所需 env、secret、volume 与 Cloudflare 前提。

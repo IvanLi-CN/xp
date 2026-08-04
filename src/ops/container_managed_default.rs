@@ -64,6 +64,7 @@ pub(super) async fn reconcile(
     if matches!(
         reconcile_intent.vless,
         crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+            | crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Preserve { .. }
     ) && !canary_ready
     {
         reconcile_intent.vless =

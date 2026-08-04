@@ -480,6 +480,7 @@ pub(crate) async fn sync_node_meta_runtime(
     if matches!(
         reconcile_intent.vless,
         crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Manage { .. }
+            | crate::managed_default_endpoints::ManagedDefaultEndpointIntent::Preserve { .. }
     ) && !canary_ready
     {
         eprintln!(

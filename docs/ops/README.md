@@ -182,11 +182,13 @@ Host-managed upgrade note:
 - If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
 - Change an existing managed-default port through the Endpoints Admin UI or
   `PATCH /api/admin/endpoints/{endpoint_id}`. Delete it through the corresponding endpoint delete
-  operation. If the bootstrap env remains set after deletion, the next startup/sync recreates the
-  missing endpoint from that value.
+  operation. If the bootstrap env remains set after deletion and no same-kind endpoint remains
+  available for conservative adoption, the next startup/sync recreates the missing endpoint from
+  that value.
 - To intentionally rebootstrap at a different port, first change the bootstrap env, explicitly
-  delete the endpoint through the Admin UI/API, then restart or run
-  `xp-ops xp sync-node-meta`; ordinary env edits alone never reconfigure an existing endpoint.
+  delete the endpoint through the Admin UI/API, ensure no other same-kind endpoint can be adopted,
+  then restart or run `xp-ops xp sync-node-meta`; ordinary env edits alone never reconfigure an
+  existing endpoint.
 
 Deployment note:
 
@@ -769,8 +771,9 @@ Ideal post-release path:
    - `curl -Ik https://<access_host[:vless_port]>/generate_204` succeeds from outside the node path you actually use
    - Mihomo provider render uses `https://<access_host[:managed_vless_port]>/generate_204`
 5. To change a managed-default port or remove an endpoint, use the Admin UI/API. Editing or removing
-   bootstrap env alone has no effect on an existing endpoint; retaining the env after an API
-   deletion recreates the missing endpoint on next reconcile.
+   bootstrap env alone has no effect on an existing endpoint. Retaining the env after an API
+   deletion recreates the missing endpoint on next reconcile when no same-kind endpoint remains
+   available for conservative adoption.
 
 ## Disaster recovery: quorum lost (single-node leader recovery)
 

@@ -94,7 +94,7 @@ The container entrypoint treats the mounted data volume as the source of truth f
   always retains the hash returned by its leader.
 - On join nodes, the first runtime reconcile reuses the `leader_api_base_url` carried by `XP_JOIN_TOKEN`, so default endpoints and node-meta sync do not depend on the local follower learning leader routing first
 - Managed default endpoint bootstrap runs on every start:
-  - a missing endpoint is created from its bootstrap env
+  - a missing endpoint is created from its bootstrap env when no same-kind endpoint can be adopted
   - an existing or auto-adopted endpoint keeps the port stored in Raft, even if the env differs or
     is absent
   - changing or removing env does not patch or delete an existing endpoint
@@ -107,8 +107,8 @@ The managed default endpoint contract is:
   `PATCH /api/admin/endpoints/{endpoint_id}`; use the endpoint delete operation for intentional
   removal
 - Intentional rebootstrap: change the bootstrap env, explicitly delete the endpoint through the
-  Admin UI/API, then restart the container; retaining the old env after deletion recreates the old
-  port
+  Admin UI/API, ensure no other same-kind endpoint can be adopted, then restart the container;
+  retaining the old env after deletion recreates the old port under the same precondition
 
 For managed VLESS REALITY endpoints, `server_names` is fixed to `[XP_ACCESS_HOST]` without a port and `reality.dest` is automatically set to `XP_VLESS_CANARY_BIND`. `XP_DEFAULT_VLESS_SERVER_NAMES` is accepted only as a deprecated compatibility input and does not choose managed SNI. Each managed VLESS endpoint may carry its own `canary_upstream` plus an `accepted_authorities` alias set; aliases use `host[:port]`, and omitting the port means HTTPS default `443`. `GET/HEAD /generate_204` is always answered by xp, and other requests route by canonical `Host`/`:authority` or one of the accepted aliases to the endpoint upstream. Public misses are exposed as plain text `404 Not Found`.
 

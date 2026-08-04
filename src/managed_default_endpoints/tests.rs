@@ -325,7 +325,7 @@ fn host_managed_existing_explicit_vless_survives_bootstrap_env_removal() {
     .unwrap();
 
     match intent.vless {
-        ManagedDefaultEndpointIntent::Manage { spec, source } => {
+        ManagedDefaultEndpointIntent::Preserve { spec, source } => {
             assert_eq!(spec.port, 30445);
             assert_eq!(source, ManagedDefaultEndpointSource::Explicit);
         }
@@ -353,12 +353,58 @@ fn host_managed_existing_explicit_ss_survives_bootstrap_env_removal() {
     .unwrap();
 
     match intent.ss {
-        ManagedDefaultEndpointIntent::Manage { spec, source } => {
+        ManagedDefaultEndpointIntent::Preserve { spec, source } => {
             assert_eq!(spec.port, 30446);
             assert_eq!(source, ManagedDefaultEndpointSource::Explicit);
         }
         other => panic!("expected existing endpoint to remain managed, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn stale_preserve_intent_does_not_recreate_deleted_vless() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint_vless("e1", 30445, &["example.com"], Some(true));
+    let state = ManagedDefaultEndpointsState {
+        schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
+        vless_endpoint_id: Some("e1".to_string()),
+        vless_source: Some(ManagedDefaultEndpointSource::Explicit),
+        ss_endpoint_id: None,
+        ss_source: None,
+    };
+    persist_managed_default_endpoints_state(tempdir.path(), &state).unwrap();
+    let intent = resolve_host_managed_default_endpoints_intent(
+        &ManagedDefaultEndpointsSpec::default(),
+        &[endpoint],
+        "node.example.com",
+        "127.0.0.1:39043".parse().unwrap(),
+        &state,
+    )
+    .unwrap();
+    let mut writes = Vec::<DesiredStateCommand>::new();
+
+    {
+        let mut writer = |cmd| {
+            writes.push(cmd);
+            std::future::ready(Ok(()))
+        };
+        reconcile_managed_default_endpoints(
+            tempdir.path(),
+            "n1",
+            &[],
+            &intent,
+            &mut writer,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(writes.is_empty());
+    assert_eq!(
+        load_managed_default_endpoints_state(tempdir.path()).unwrap(),
+        ManagedDefaultEndpointsState::default()
+    );
 }
 
 #[test]
@@ -382,7 +428,7 @@ fn host_managed_auto_adopted_vless_preserves_global_server_name_mode() {
 }
 
 #[test]
-fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config() {
+fn host_managed_auto_adopted_vless_keeps_preserve_intent_without_explicit_config() {
     let endpoint = endpoint_vless("e1", 53844, &["example.com"], Some(true));
     let state = ManagedDefaultEndpointsState {
         schema_version: MANAGED_DEFAULT_ENDPOINTS_SCHEMA_VERSION,
@@ -402,7 +448,7 @@ fn host_managed_auto_adopted_vless_keeps_manage_intent_without_explicit_config()
 
     assert!(matches!(
         intent.vless,
-        ManagedDefaultEndpointIntent::Manage {
+        ManagedDefaultEndpointIntent::Preserve {
             source: ManagedDefaultEndpointSource::AutoAdopted,
             ..
         }

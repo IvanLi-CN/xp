@@ -221,11 +221,11 @@ endpoint：
 
 容器入口在每次启动时都会检查缺失的托管 endpoint：
 
-- **第一次启动**：如果当前节点没有对应 endpoint，就自动创建
+- **第一次启动**：如果当前节点没有对应或可接管的同类 endpoint，就自动创建
 - **已有 endpoint**：保留 Raft / 管理 UI/API 中的端口，环境变量不同或缺失都不会覆盖或
   删除
 - **有意修改或删除**：在 Endpoints 管理 UI/API 中更新端口或删除 endpoint；若删除后仍
-  保留 bootstrap env，下次启动会重新创建
+  保留 bootstrap env，且没有可接管的同类 endpoint，下次启动会重新创建
 
 如果当前节点上某种类型只有**一条**现有 endpoint，容器入口会直接 adopt 这条 endpoint，而不是重复创建。
 
@@ -431,7 +431,8 @@ Endpoints 管理 UI/API 中显式修改。
 有意重配时按目标选择操作：只修改未来 bootstrap 端口就更新 env；修改现有 endpoint
 端口就通过 Admin UI 或 `PATCH /api/admin/endpoints/{endpoint_id}`；若要用新的 bootstrap
 值重建 endpoint，先更新 env，再通过 Admin UI/API 显式删除 endpoint，随后重启容器。
-删除 endpoint 但保留旧 bootstrap env 会按旧值重建。
+重建前还需确保没有可接管的同类 endpoint；删除 endpoint 但保留旧 bootstrap env 会在
+该前提下按旧值重建。
 
 ## 你不需要做的事情
 

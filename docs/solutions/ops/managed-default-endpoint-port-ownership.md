@@ -33,13 +33,15 @@ cluster-managed. That created two writable authorities for one port: local env a
 
 Use `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only when the corresponding managed endpoint
 is missing. Once an endpoint exists or a single legacy endpoint is auto-adopted, preserve its Raft
-port while reconciling only system-derived metadata. A changed or absent bootstrap env does not
-update or delete the endpoint.
+port while reconciling system-derived metadata. A changed or absent bootstrap port env does not
+update that port or delete the endpoint; other managed metadata still follows its existing
+reconcile contract.
 
 Use the Admin UI/API endpoint update and delete operations for intentional reconfiguration. If an
-endpoint is explicitly deleted while its bootstrap env remains, the next reconcile creates the
-missing endpoint from that bootstrap value. To intentionally rebootstrap on a different port,
-change the env first, explicitly delete the endpoint, then restart or run node metadata sync.
+endpoint is explicitly deleted while its bootstrap env remains and no same-kind endpoint can be
+adopted, the next reconcile creates the missing endpoint from that bootstrap value. To
+intentionally rebootstrap on a different port, change the env first, explicitly delete the
+endpoint, ensure no same-kind adoption candidate remains, then restart or run node metadata sync.
 
 ## Guardrails
 
@@ -55,7 +57,7 @@ change the env first, explicitly delete the endpoint, then restart or run node m
 
 - `src/managed_default_endpoints.rs`
 - `src/ops/container_managed_default.rs`
-- `src/http/tests.rs`
+- `src/http/tests/managed_vless_create.rs`
 - `docs/specs/3e4q4-mihomo-provider-dual-track/SPEC.md`
 - `docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md`
 - `docs/ops/README.md`
