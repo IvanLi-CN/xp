@@ -471,8 +471,8 @@ fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {
 }
 
 fn update_systemd_environment_files(source: &str, environment_files: &mut Vec<String>) {
-    for value in source
-        .lines()
+    for value in systemd_logical_lines(source)
+        .iter()
         .filter_map(|line| line.trim_start().strip_prefix("EnvironmentFile="))
     {
         let words = parse_systemd_words(value);
@@ -482,6 +482,28 @@ fn update_systemd_environment_files(source: &str, environment_files: &mut Vec<St
             environment_files.extend(words);
         }
     }
+}
+
+fn systemd_logical_lines(source: &str) -> Vec<String> {
+    let mut logical_lines = Vec::new();
+    let mut current = String::new();
+    for line in source.lines() {
+        let continued = line.ends_with('\\');
+        let fragment = line.strip_suffix('\\').unwrap_or(line);
+        if !current.is_empty() {
+            current.push(' ');
+            current.push_str(fragment.trim_start());
+        } else {
+            current.push_str(fragment);
+        }
+        if !continued {
+            logical_lines.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        logical_lines.push(current);
+    }
+    logical_lines
 }
 
 fn expand_systemd_unit_specifiers(path: &str, unit_name: &str) -> Option<String> {
