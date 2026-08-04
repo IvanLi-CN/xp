@@ -624,7 +624,7 @@ fn low_memory_backfill_supports_provider_wrapper_script() {
     );
     assert_eq!(
         fs::metadata(wrapper).unwrap().permissions().mode() & 0o777,
-        0o700
+        0o755
     );
     assert_eq!(
         fs::metadata(service).unwrap().permissions().mode() & 0o777,

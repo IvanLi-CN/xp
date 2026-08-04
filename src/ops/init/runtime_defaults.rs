@@ -208,7 +208,7 @@ fn backfill_provider_cloudflared_wrapper(paths: &Paths) -> Result<(), ExitError>
         return Ok(());
     }
     write_string_if_changed(&path, MANAGED)
-        .and_then(|_| chmod(&path, 0o700))
+        .and_then(|_| chmod(&path, 0o755))
         .map_err(filesystem_error)
 }
 
