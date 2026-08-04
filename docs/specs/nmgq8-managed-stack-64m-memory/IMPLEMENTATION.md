@@ -23,6 +23,10 @@
 - Joined Docker/Compose administrator-token reconciliation from an explicitly
   configured low-memory PHC before the XP child starts.
 - Xray low-buffer static policy and upgrade backfill.
+- Runtime-default backfill recognizes systemd drop-ins and EnvironmentFile
+  overrides, including explicit variable/all-environment resets and readable
+  non-regular inputs; only complete XP-generated legacy service templates are
+  eligible for the `8MiB` to `12MiB` migration.
 - Upgrade activation reloads systemd units and restarts both Xray and
   cloudflared before reporting success.
 - Host-managed upgrades replace `xp` and managed runtime assets before the optional
