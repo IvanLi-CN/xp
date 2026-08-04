@@ -232,8 +232,6 @@
 
 ## Visual Evidence
 
-PR: none
-
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Components/SubscriptionResourceMirrorToggle/Checked`
   - evidence_note: Mihomo 订阅的临时镜像选项在 checked 状态下显示明确的 XP mirror 选择，不改变 Raw/Clash 控件可见性。
@@ -244,7 +242,9 @@ PR: none
     ![Service config provider-only Mihomo delivery](./assets/service-config-provider-only.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=page
   - state: Pages/ServiceConfigPage/PrivateMirrorTargetsBlocked
+  - submission_gate: approved
   - evidence_note: 页面将集群策略与节点运行配置分成独立区域；集群级 Mihomo 外部资源镜像策略开启后显示警告并保留显式复选框状态，半透明语义告警背景使用统一的前景色令牌，确保深色主题下文本可读。
+    PR: include
     ![Mihomo private mirror target policy](./assets/mihomo-private-target-policy.png)
 - source_type=storybook_canvas · target_program=mock-only · capture_scope=element
   - state: `Pages/EndpointDetailsPage/ManagedDefaultAliasDefaultsTo443`
