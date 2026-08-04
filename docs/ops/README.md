@@ -600,7 +600,9 @@ Managed cloudflared also defaults to `GOMEMLIMIT=12MiB`, `GOGC=50`, and
 in complete managed templates are upgraded to `12MiB`; explicit operator
 overrides remain unchanged. Upgrade inspection includes systemd drop-ins under
 `/usr/lib`, `/usr/local/lib`, `/run`, and `/etc`, including same-name masking by
-higher-priority directories. Legacy custom/provider OpenRC scripts have no
+higher-priority directories. If a lower-priority directory already owns the
+managed filename, XP leaves it active instead of masking it. `EnvironmentFile`
+paths are normalized without escaping the managed root. Legacy custom/provider OpenRC scripts have no
 durable ownership marker, so an existing `8MiB` value in those scripts is
 preserved and must be changed explicitly after operator review.
 

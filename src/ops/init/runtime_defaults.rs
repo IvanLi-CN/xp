@@ -37,6 +37,11 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let dir = systemd.join(format!("{service}.service.d"));
         ensure_dir(&dir).map_err(filesystem_error)?;
         let managed = dir.join("20-xp-memory.conf");
+        if !managed.exists()
+            && lower_priority_systemd_drop_in_exists(paths, service, "20-xp-memory.conf")
+        {
+            continue;
+        }
         if managed.exists() {
             let raw = fs::read_to_string(&managed).map_err(filesystem_error)?;
             if !is_generated_systemd_drop_in(service, &raw) {
@@ -117,6 +122,21 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
     }
     backfill_provider_cloudflared_wrapper(paths)?;
     Ok(())
+}
+
+fn lower_priority_systemd_drop_in_exists(paths: &Paths, service: &str, name: &str) -> bool {
+    [
+        "/usr/lib/systemd/system",
+        "/usr/local/lib/systemd/system",
+        "/run/systemd/system",
+    ]
+    .iter()
+    .map(|base| {
+        paths
+            .map_abs(Path::new(base))
+            .join(format!("{service}.service.d/{name}"))
+    })
+    .any(|path| path.exists())
 }
 
 fn is_generated_legacy_systemd_cloudflared_unit(raw: &str) -> bool {
@@ -370,18 +390,14 @@ fn read_systemd_environment_files(
         let environment_file =
             expand_systemd_unit_specifiers(environment_file.trim_start_matches('-'), unit_name);
         let Some(environment_file) = environment_file else {
-            environment_sources.push(
-                concat!(
-                    "Environment=GOMEMLIMIT=operator-controlled\n",
-                    "Environment=GOGC=operator-controlled\n",
-                    "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=operator-controlled\n",
-                    "Environment=XP_CLOUDFLARED_PROTOCOL=operator-controlled\n",
-                )
-                .to_string(),
-            );
+            environment_sources.push(operator_controlled_systemd_environment());
             continue;
         };
-        let mapped = paths.map_abs(Path::new(&environment_file));
+        let Some(normalized) = normalize_absolute_systemd_path(&environment_file) else {
+            environment_sources.push(operator_controlled_systemd_environment());
+            continue;
+        };
+        let mapped = paths.map_abs(&normalized);
         let matches = expand_systemd_environment_file_pattern(&mapped)?;
         if matches.is_empty() && !optional {
             return Err(filesystem_error(std::io::Error::new(
@@ -408,6 +424,36 @@ fn read_systemd_environment_files(
         }
     }
     Ok(environment_sources)
+}
+
+fn normalize_absolute_systemd_path(path: &str) -> Option<PathBuf> {
+    let mut normalized = PathBuf::from("/");
+    let mut saw_root = false;
+    for component in Path::new(path).components() {
+        match component {
+            Component::RootDir => saw_root = true,
+            Component::Normal(value) => normalized.push(value),
+            Component::ParentDir => {
+                if normalized == Path::new("/") {
+                    return None;
+                }
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            Component::Prefix(_) => return None,
+        }
+    }
+    saw_root.then_some(normalized)
+}
+
+fn operator_controlled_systemd_environment() -> String {
+    concat!(
+        "Environment=GOMEMLIMIT=operator-controlled\n",
+        "Environment=GOGC=operator-controlled\n",
+        "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=operator-controlled\n",
+        "Environment=XP_CLOUDFLARED_PROTOCOL=operator-controlled\n",
+    )
+    .to_string()
 }
 
 fn should_backfill_systemd_value(

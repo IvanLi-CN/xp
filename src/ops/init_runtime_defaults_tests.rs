@@ -122,6 +122,29 @@ fn low_memory_backfill_applies_systemd_drop_in_directory_masking() {
 }
 
 #[test]
+fn low_memory_backfill_does_not_mask_lower_priority_managed_name() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(systemd.join("xray.service"), "[Service]\n").unwrap();
+    let vendor_drop_in = paths
+        .map_abs(std::path::Path::new("/usr/lib/systemd/system"))
+        .join("xray.service.d/20-xp-memory.conf");
+    fs::create_dir_all(vendor_drop_in.parent().unwrap()).unwrap();
+    fs::write(&vendor_drop_in, "[Service]\nEnvironment=GOMEMLIMIT=24MiB\n").unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    assert!(!systemd.join("xray.service.d/20-xp-memory.conf").exists());
+    assert!(
+        fs::read_to_string(vendor_drop_in)
+            .unwrap()
+            .contains("GOMEMLIMIT=24MiB")
+    );
+}
+
+#[test]
 fn low_memory_backfill_preserves_legacy_value_in_operator_drop_in() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
@@ -509,6 +532,32 @@ fn low_memory_backfill_reads_base_unit_environment_file_with_specifiers() {
             .join("20-xp-memory.conf"),
     )
     .unwrap();
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
+}
+
+#[test]
+fn low_memory_backfill_normalizes_environment_file_parent_components() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        concat!(
+            "[Service]\n",
+            "Environment=GOMEMLIMIT=8MiB\n",
+            "EnvironmentFile=/etc/cloudflared/../xp/runtime.env\n",
+        ),
+    )
+    .unwrap();
+    let environment_file = paths.map_abs(std::path::Path::new("/etc/xp/runtime.env"));
+    fs::create_dir_all(environment_file.parent().unwrap()).unwrap();
+    fs::write(environment_file, "GOMEMLIMIT=24MiB\n").unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
     assert!(!managed.contains("Environment=GOMEMLIMIT="));
 }
 

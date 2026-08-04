@@ -2,7 +2,8 @@
 
 - 2026-08-04: runtime-default backfill now inspects the complete systemd
   drop-in hierarchy and honors same-name masking before deciding whether an
-  operator override permits migration.
+  operator override permits migration. Managed-name collisions remain active,
+  and parent components in `EnvironmentFile` paths are normalized safely.
 
 - 2026-08-04: SG production A/B testing traced elevated cloudflared CPU to
   QUIC rather than the Go heap limit. HTTP/2 reduced CPU from about `7.70%` to
