@@ -29,6 +29,10 @@ struct AdminMeshPeerStatus {
     node_name: String,
     api_base_url: String,
     mesh_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_capability: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_reason: Option<crate::mesh_telemetry::MeshPeerReason>,
     current_path: Option<TelemetryPath>,
     quality: MeshQuality,
     stale: bool,
@@ -211,10 +215,22 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .into_iter()
         .filter(|node| node.node_id != state.cluster.node_id)
         .map(|node| {
-            let mesh_url =
-                crate::control_plane_mesh::peer_target_from_node(&node, &endpoints).mesh_base_url;
+            let target = crate::control_plane_mesh::peer_target_from_node(&node, &endpoints);
+            let mesh_url = target.mesh_base_url.clone();
             let mesh_enabled = mesh_url.is_some();
             let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
+            let mesh_reason = if mesh_enabled {
+                Some(
+                    peer.and_then(|peer| peer.last_mesh_reason)
+                        .filter(|_| {
+                            peer.and_then(|peer| peer.last_mesh_target.as_deref())
+                                == target.mesh_base_url.as_deref()
+                        })
+                        .unwrap_or(crate::mesh_telemetry::MeshPeerReason::NoSample),
+                )
+            } else {
+                Some(target.mesh_reason)
+            };
             let (
                 availability_1h,
                 availability_24h,
@@ -236,6 +252,10 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 node_name: node.node_name,
                 api_base_url: node.api_base_url,
                 mesh_url,
+                mesh_capability: Some(
+                    if mesh_enabled { "enabled" } else { "disabled" }.to_string(),
+                ),
+                mesh_reason,
                 current_path: peer.and_then(|peer| peer.last_path),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: is_mesh_peer_stale(peer, now),

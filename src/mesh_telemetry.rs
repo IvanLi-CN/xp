@@ -40,6 +40,20 @@ pub enum BreakerState {
     Disabled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshPeerReason {
+    MeshAvailable,
+    MissingEndpoint,
+    AmbiguousEndpoint,
+    InvalidAccessHost,
+    NoSample,
+    TransportTimeout,
+    TransportError,
+    ProtocolRejected,
+    FallbackActive,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshTelemetryEvent {
     pub at: String,
@@ -79,9 +93,13 @@ pub struct MeshPeerTelemetry {
     #[serde(default)]
     pub last_sample_at: Option<String>,
     #[serde(default)]
+    pub last_mesh_target: Option<String>,
+    #[serde(default)]
     pub last_transition_at: Option<String>,
     #[serde(default)]
     pub breaker: Option<BreakerState>,
+    #[serde(default)]
+    pub last_mesh_reason: Option<MeshPeerReason>,
     #[serde(default)]
     pub buckets: VecDeque<MeshTelemetryBucket>,
 }
@@ -261,6 +279,31 @@ impl MeshTelemetryHandle {
             persist(&self.path, &state)?;
         }
         Ok(())
+    }
+
+    pub async fn set_mesh_reason(
+        &self,
+        peer_id: impl Into<String>,
+        mesh_target: Option<&str>,
+        reason: MeshPeerReason,
+    ) -> anyhow::Result<()> {
+        let peer_id = peer_id.into();
+        let mut state = self.state.lock().await;
+        let peer = state
+            .peers
+            .entry(peer_id.clone())
+            .or_insert_with(|| MeshPeerTelemetry {
+                peer_id,
+                ..MeshPeerTelemetry::default()
+            });
+        let mesh_target = mesh_target.map(str::to_string);
+        if peer.last_mesh_reason == Some(reason) && peer.last_mesh_target == mesh_target {
+            return Ok(());
+        }
+        peer.last_mesh_reason = Some(reason);
+        peer.last_mesh_target = mesh_target;
+        state.revision += 1;
+        persist(&self.path, &state)
     }
 
     /// Records a final request failure after an earlier transport sample. This keeps path-attempt
@@ -527,6 +570,38 @@ mod tests {
         assert_eq!(snapshot.peers.len(), 1);
         assert_eq!(snapshot.peers[0].buckets[0].mesh_success, 1);
         assert_eq!(snapshot.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn persists_mesh_reason_and_reads_legacy_peer_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mesh/telemetry.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+                "schema_version": 1,
+                "revision": 0,
+                "peers": {"peer-a": {"peer_id": "peer-a", "buckets": []}},
+                "events": []
+            }"#,
+        )
+        .unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        assert_eq!(telemetry.snapshot().await.peers[0].last_mesh_reason, None);
+        telemetry
+            .set_mesh_reason(
+                "peer-a",
+                Some("https://peer-a.example.test:443"),
+                MeshPeerReason::TransportTimeout,
+            )
+            .await
+            .unwrap();
+        let restored = MeshTelemetryHandle::load(temp.path()).unwrap();
+        assert_eq!(
+            restored.snapshot().await.peers[0].last_mesh_reason,
+            Some(MeshPeerReason::TransportTimeout)
+        );
     }
 
     #[tokio::test]

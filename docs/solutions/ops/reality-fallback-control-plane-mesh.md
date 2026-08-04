@@ -27,6 +27,12 @@ outcome question.
   fallback.
 - A relay timeout is just as ambiguous as a Mesh timeout. Retry it on a direct public path only
   when the operation is read-only, Raft-idempotent, or protected by the durable request ledger.
+- Persist the latest per-peer diagnostic reason independently of the active path. Static target
+  reasons are `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host`; runtime reasons
+  are `no_sample`, `transport_timeout`, `transport_error`, `protocol_rejected`, and
+  `fallback_active`. A successful signed Mesh acknowledgement records `mesh_available`.
+- The status API treats `mesh_capability` and `mesh_reason` as additive fields. Older snapshots may
+  omit them; clients display `unknown` rather than rejecting the snapshot.
 
 ## Operational Consequences
 
@@ -54,3 +60,7 @@ outcome question.
 - Test Mesh-only, public-only and dual-path faults separately. The first should
   show fallback; the second should surface a Mesh success with standby failure;
   the third should mark the peer unavailable.
+- For a read-only cluster audit, collect the managed endpoint count, validated access host, canary
+  readiness, Xray listener, DNS/port reachability, and signed `health-v2` acknowledgement for every
+  directed edge. Do not change configuration, restart services, reset breakers, or infer Mesh
+  capability from a public fallback success alone.

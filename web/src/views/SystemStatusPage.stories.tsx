@@ -25,6 +25,7 @@ export const Healthy: Story = {
 			{ component: "ddns", status: "up" },
 		],
 		onProbeAll: fn(),
+		onProbePeer: fn(),
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
@@ -39,6 +40,32 @@ export const Healthy: Story = {
 		await expect(
 			await canvas.findByRole("heading", { name: "Peer transport" }),
 		).toBeInTheDocument();
+		const probe = await canvas.findByRole("button", {
+			name: `Probe ${demoMeshStatus.peers[0].node_name}`,
+		});
+		const details = await canvas.findByRole("link", {
+			name: `Open ${demoMeshStatus.peers[0].node_name} details`,
+		});
+		await expect(probe).toHaveClass("size-8", "min-h-8", "min-w-8", "p-0");
+		await expect(details).toHaveClass("size-8", "min-h-8", "min-w-8", "p-0");
+		await expect(probe).toHaveAttribute(
+			"title",
+			`Probe ${demoMeshStatus.peers[0].node_name}`,
+		);
+		await expect(details).toHaveAttribute(
+			"title",
+			`Open ${demoMeshStatus.peers[0].node_name} details`,
+		);
+		await expect(
+			(await canvas.findAllByText("Mesh available")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("Using public fallback")).length,
+		).toBeGreaterThan(0);
+		await userEvent.click(probe);
+		await expect(args.onProbePeer).toHaveBeenCalledWith(
+			demoMeshStatus.peers[0].node_id,
+		);
 		await userEvent.click(probeAllButton);
 		await expect(args.onProbeAll).toHaveBeenCalledOnce();
 	},

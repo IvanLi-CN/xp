@@ -43,8 +43,11 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         unique.mesh_base_url.as_deref(),
         Some("https://peer-a.example.test:443")
     );
+    assert_eq!(unique.mesh_reason, MeshPeerReason::MeshAvailable);
     assert_eq!(unique.public_base_url, node.api_base_url);
-    assert!(peer_target_from_node(&node, &[]).mesh_base_url.is_none());
+    let missing = peer_target_from_node(&node, &[]);
+    assert!(missing.mesh_base_url.is_none());
+    assert_eq!(missing.mesh_reason, MeshPeerReason::MissingEndpoint);
     let missing_access_host = Node {
         access_host: String::new(),
         ..node.clone()
@@ -54,6 +57,11 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
             .mesh_base_url
             .is_none()
     );
+    assert_eq!(
+        peer_target_from_node(&missing_access_host, &[managed_vless_endpoint("one", 443)])
+            .mesh_reason,
+        MeshPeerReason::InvalidAccessHost
+    );
     let invalid_access_host = Node {
         access_host: "https://peer-a.example.test:443/mesh".to_string(),
         ..node.clone()
@@ -62,6 +70,11 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         peer_target_from_node(&invalid_access_host, &[managed_vless_endpoint("one", 443)],)
             .mesh_base_url
             .is_none()
+    );
+    assert_eq!(
+        peer_target_from_node(&invalid_access_host, &[managed_vless_endpoint("one", 443)])
+            .mesh_reason,
+        MeshPeerReason::InvalidAccessHost
     );
     let absolute_fqdn = Node {
         access_host: "peer-a.example.test.".to_string(),
@@ -81,4 +94,5 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         ],
     );
     assert!(ambiguous.mesh_base_url.is_none());
+    assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }

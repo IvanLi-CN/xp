@@ -12,7 +12,9 @@ use crate::{
     domain::{Endpoint, Node},
     internal_auth::{self, InternalRoute, RequestContext},
     managed_default_endpoints::managed_default_vless_endpoint,
-    mesh_telemetry::{BreakerState, MeshTelemetryHandle, MeshTelemetrySample, TelemetryPath},
+    mesh_telemetry::{
+        BreakerState, MeshPeerReason, MeshTelemetryHandle, MeshTelemetrySample, TelemetryPath,
+    },
     protocol::validate_reality_server_name,
 };
 
@@ -118,6 +120,7 @@ pub struct MeshPeerTarget {
     pub node_id: String,
     pub node_name: String,
     pub mesh_base_url: Option<String>,
+    pub mesh_reason: MeshPeerReason,
     pub public_base_url: String,
 }
 pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTarget {
@@ -127,16 +130,21 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         .filter(|endpoint| endpoint.node_id == node.node_id)
         .filter(|endpoint| managed_default_vless_endpoint(endpoint).is_some())
         .collect::<Vec<_>>();
-    let mesh_base_url = match managed.as_slice() {
-        [endpoint] if validate_reality_server_name(access_host).is_ok() => {
-            Some(format!("https://{access_host}:{}", endpoint.port))
+    let mesh_reason = match managed.as_slice() {
+        [] => MeshPeerReason::MissingEndpoint,
+        [_] if validate_reality_server_name(access_host).is_err() => {
+            MeshPeerReason::InvalidAccessHost
         }
-        _ => None,
+        [_] => MeshPeerReason::MeshAvailable,
+        _ => MeshPeerReason::AmbiguousEndpoint,
     };
+    let mesh_base_url = matches!(mesh_reason, MeshPeerReason::MeshAvailable)
+        .then(|| format!("https://{access_host}:{}", managed[0].port));
     MeshPeerTarget {
         node_id: node.node_id.clone(),
         node_name: node.node_name.clone(),
         mesh_base_url,
+        mesh_reason,
         public_base_url: node.api_base_url.clone(),
     }
 }
@@ -505,14 +513,22 @@ impl MeshAwareHttpClient {
                     ));
                 }
                 Ok(Err(error)) => {
-                    self.record_mesh_transport_failure(peer, error.to_string())
-                        .await;
+                    self.record_mesh_transport_failure(
+                        peer,
+                        MeshPeerReason::TransportError,
+                        error.to_string(),
+                    )
+                    .await;
                     fallback = true;
                     mesh_outcome_ambiguous = true;
                 }
                 Err(_) => {
-                    self.record_mesh_transport_failure(peer, "Mesh request timed out".to_string())
-                        .await;
+                    self.record_mesh_transport_failure(
+                        peer,
+                        MeshPeerReason::TransportTimeout,
+                        "Mesh request timed out".to_string(),
+                    )
+                    .await;
                     fallback = true;
                     mesh_outcome_ambiguous = true;
                 }
@@ -564,6 +580,10 @@ impl MeshAwareHttpClient {
             request.updates_active_path,
         )
         .await;
+        if fallback && peer.mesh_base_url.is_some() {
+            self.record_mesh_reason(peer, MeshPeerReason::FallbackActive)
+                .await;
+        }
         Ok(response)
     }
 
@@ -724,7 +744,12 @@ impl MeshAwareHttpClient {
         }
     }
 
-    async fn record_mesh_transport_failure(&self, peer: &MeshPeerTarget, reason: String) {
+    async fn record_mesh_transport_failure(
+        &self,
+        peer: &MeshPeerTarget,
+        mesh_reason: MeshPeerReason,
+        reason: String,
+    ) {
         let state = self.circuits.record_retryable_failure(&peer.node_id).await;
         self.record_sample(
             peer,
@@ -735,6 +760,7 @@ impl MeshAwareHttpClient {
             false,
         )
         .await;
+        self.record_mesh_reason(peer, mesh_reason).await;
         if let Some(telemetry) = &self.telemetry {
             let message = if state == BreakerState::Open {
                 format!("Mesh breaker opened after retryable transport failure: {reason}")
@@ -761,6 +787,16 @@ impl MeshAwareHttpClient {
             false,
         )
         .await;
+        self.record_mesh_reason(peer, MeshPeerReason::ProtocolRejected)
+            .await;
+    }
+
+    async fn record_mesh_reason(&self, peer: &MeshPeerTarget, reason: MeshPeerReason) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_mesh_reason(&peer.node_id, peer.mesh_base_url.as_deref(), reason)
+                .await;
+        }
     }
 
     async fn record_sample(
@@ -786,6 +822,10 @@ impl MeshAwareHttpClient {
                         updates_active_path,
                     },
                 )
+                .await;
+        }
+        if success && path == TelemetryPath::Mesh {
+            self.record_mesh_reason(peer, MeshPeerReason::MeshAvailable)
                 .await;
         }
     }
@@ -895,106 +935,4 @@ mod peer_target_tests;
 #[cfg(test)]
 mod relay_state_tests;
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn mesh_proxy_status_strings_are_stable() {
-        assert_eq!(MeshProxyStatus::Disabled.as_str(), "disabled");
-        assert_eq!(MeshProxyStatus::Ready.as_str(), "ready");
-        assert_eq!(MeshProxyStatus::Fallback.as_str(), "fallback");
-        assert_eq!(MeshProxyStatus::Degraded.as_str(), "degraded");
-    }
-    #[test]
-    fn invalid_proxy_url_is_rejected() {
-        let err = apply_optional_proxy(reqwest::Client::builder(), Some("not a url")).unwrap_err();
-        assert!(err.to_string().contains("invalid proxy url"));
-    }
-    #[test]
-    fn mesh_budget_reserves_the_public_remainder() {
-        assert_eq!(
-            mesh_attempt_budget(Duration::from_millis(100)),
-            Duration::from_millis(500)
-        );
-        assert_eq!(
-            mesh_attempt_budget(Duration::from_secs(6)),
-            Duration::from_secs(2)
-        );
-        assert_eq!(
-            mesh_attempt_budget(Duration::from_secs(30)),
-            Duration::from_secs(5)
-        );
-    }
-    #[tokio::test]
-    async fn peer_breaker_opens_after_three_transport_failures() {
-        let breakers = PeerCircuitBreakers::default();
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::Attempt
-        );
-        assert_eq!(
-            breakers.record_retryable_failure("peer-a").await,
-            BreakerState::Closed
-        );
-        assert_eq!(
-            breakers.record_retryable_failure("peer-a").await,
-            BreakerState::Closed
-        );
-        assert_eq!(
-            breakers.record_retryable_failure("peer-a").await,
-            BreakerState::Open
-        );
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::SkipOpen
-        );
-        assert_eq!(
-            breakers.record_success("peer-a").await,
-            BreakerState::Closed
-        );
-    }
-    #[tokio::test]
-    async fn half_open_allows_exactly_one_mesh_probe() {
-        let breakers = PeerCircuitBreakers::default();
-        breakers.peers.lock().await.insert(
-            "peer-a".to_string(),
-            PeerCircuit {
-                failures: MESH_FAILURES_BEFORE_OPEN,
-                open_count: 1,
-                retry_at: Some(Instant::now() - Duration::from_secs(1)),
-                half_open_in_flight: false,
-            },
-        );
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::Probe
-        );
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::SkipOpen
-        );
-        assert_eq!(
-            breakers.record_success("peer-a").await,
-            BreakerState::Closed
-        );
-    }
-    #[tokio::test]
-    async fn protocol_failure_releases_the_half_open_probe_slot() {
-        let breakers = PeerCircuitBreakers::default();
-        breakers.peers.lock().await.insert(
-            "peer-a".to_string(),
-            PeerCircuit {
-                retry_at: Some(Instant::now() - Duration::from_secs(1)),
-                ..PeerCircuit::default()
-            },
-        );
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::Probe
-        );
-        breakers.release_half_open_probe("peer-a").await;
-        assert_eq!(
-            breakers.before_attempt("peer-a", true).await,
-            MeshAttemptDecision::Probe
-        );
-    }
-}
+mod tests;
