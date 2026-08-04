@@ -583,7 +583,7 @@ mod tests {
         assert!(
             fs::read_to_string(&cloudflared_openrc)
                 .unwrap()
-                .contains("GOMEMLIMIT:-12MiB")
+                .contains("GOMEMLIMIT:-8MiB")
         );
         assert!(
             fs::read_to_string(&cloudflared_wrapper)
