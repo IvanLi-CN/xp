@@ -87,7 +87,7 @@ If you want Mihomo relay `url-test` to probe the actual managed VLESS ingress in
 Contract:
 
 - `xp` terminates TLS for `GET/HEAD /generate_204` on the loopback canary and returns `204`.
-- xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, and set `server_names` to `[XP_ACCESS_HOST]` without a port. `XP_DEFAULT_VLESS_SERVER_NAMES` is deprecated compatibility input; when present it is validated, but it does not choose managed VLESS SNI.
+- xp-managed/default VLESS/REALITY endpoints set `reality.dest` to that loopback canary, and set `server_names` to `[XP_ACCESS_HOST]` without a port. `XP_DEFAULT_VLESS_SERVER_NAMES` is deprecated compatibility input; it is validated only when `XP_DEFAULT_VLESS_PORT` activates bootstrap, and it does not choose managed VLESS SNI.
 - The canary routes non-probe HTTPS traffic by HTTP authority, not by TLS SNI. `Host` / HTTP/2 `:authority` always accepts the canonical `XP_ACCESS_HOST[:endpoint_port]`; `:443` may be omitted. Managed VLESS endpoints may also carry an extra `accepted_authorities` set of normalized `host[:port]` aliases; omitting the port means HTTPS default `443`. Exactly one managed VLESS endpoint on the node must match the canonical authority or one of those aliases.
 - Each managed VLESS endpoint may store its own `canary_upstream` origin URL and `accepted_authorities` alias set. `accepted_authorities` only affects ordinary HTTPS Host matching; it does not change REALITY `server_names`, `reality.dest`, or the canonical `/generate_204` probe URL. When `canary_upstream` is unset, non-probe requests now return a plain text `404 Not Found`. When set, xp forwards method, path, query, non-hop-by-hop headers, status, response headers, and streaming bodies to that endpoint upstream. The outbound `Host` is normalized to the `canary_upstream` origin so localhost and name-based upstream services work predictably. Upstream mode is `auto`, `http1`, or explicit `h2c`; `auto` supports HTTP/1.1 and HTTPS ALPN HTTP/2.
 - Admin UI 的默认 `New endpoint` VLESS 创建路径已收敛到同一托管合同：页面只提交 `port` 与可选 `canary_upstream` / `accepted_authorities`，服务端按节点 `access_host` 自动派生 `reality.dest=XP_VLESS_CANARY_BIND`、`server_names=[node.access_host]` 并写入 `managed_default=true`。legacy 非托管 VLESS 创建仅保留给显式 API 客户端兼容，不再是 UI 主路径。
@@ -176,8 +176,8 @@ Host-managed upgrade note:
 
 - If no managed-default VLESS endpoint exists, `/etc/xp/xp.env` `XP_DEFAULT_VLESS_PORT` supplies its
   bootstrap port. Once an endpoint exists, its Raft value is authoritative and a stale or changed
-  env value does not move it. `XP_DEFAULT_VLESS_SERVER_NAMES` is ignored for SNI selection after
-  validation.
+  env value does not move it. `XP_DEFAULT_VLESS_SERVER_NAMES` is ignored when the bootstrap port is
+  absent; when bootstrap is active, it is validated but does not select SNI.
 - If a historical host-managed node has no `XP_DEFAULT_VLESS_*` yet, but the node currently has exactly one legacy VLESS endpoint whose metadata still predates the `managed_default` flag, the new binary auto-adopts that endpoint on startup and rewrites `reality.dest` to the loopback canary only after the canary is healthy; when canary preparation is blocked, startup/sync leave the existing endpoint untouched and surface the error via `vless_https_canary_status`.
 - If the node has multiple VLESS endpoints and none are already marked as managed-default, the runtime refuses to guess. In that case the operator must first decide which endpoint should be the managed default before expecting Mihomo relay probing to target that ingress.
 - Change an existing managed-default port through the Endpoints Admin UI or

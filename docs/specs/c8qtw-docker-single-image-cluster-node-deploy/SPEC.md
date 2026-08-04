@@ -146,6 +146,8 @@
   `XP_DEFAULT_SS_PORT`，When 容器启动，Then 按 env 端口创建对应 endpoint。
 - Given 当前节点已有 managed-default endpoint，When env 中的 bootstrap port 被修改或
   移除后重启容器，Then endpoint 的集群端口与存在性保持不变。
+- Given VLESS bootstrap port 为空但辅助 server-names 或 fingerprint env 仍存在，When
+  容器启动，Then 不创建 VLESS endpoint、不因辅助字段报错，并继续保留集群已有状态。
 - Given 管理员通过 Admin UI/API 修改 endpoint 端口，When 容器随后重启，Then 修改后的
   端口保持不变；若管理员删除 endpoint、bootstrap env 仍存在且没有可接管的同类
   endpoint，后续启动会按 env 重新创建。
