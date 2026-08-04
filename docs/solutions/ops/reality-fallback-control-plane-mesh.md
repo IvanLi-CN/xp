@@ -64,3 +64,8 @@ outcome question.
   readiness, Xray listener, DNS/port reachability, and signed `health-v2` acknowledgement for every
   directed edge. Do not change configuration, restart services, reset breakers, or infer Mesh
   capability from a public fallback success alone.
+- Exercise the reserved Canary route over both HTTP/1.1 and negotiated HTTP/2. HTTP/2 servers may
+  retain scheme and authority in the incoming URI; never append that complete URI to a loopback
+  origin. Rebuild the upstream URL from the fixed loopback origin plus the original path/query, and
+  assert that percent encoding and query ordering remain unchanged because internal-auth v2 signs
+  those bytes.

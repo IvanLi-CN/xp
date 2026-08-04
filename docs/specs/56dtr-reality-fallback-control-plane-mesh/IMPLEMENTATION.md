@@ -22,13 +22,19 @@
   behavior, while mobile text actions remain available.
 - systemd、OpenRC、container cutover guard、可取消的 pre-consumption marker 与 operator documentation。
 - Storybook state gallery、mock-only `ui_demo`、desktop/mobile visual evidence。
+- Canary Mesh forwarding rebuilds the fixed XP loopback URL from the authenticated request's raw
+  path and query. This keeps HTTP/2 absolute-form URIs from being appended as a second origin and
+  preserves the URI bytes covered by internal-auth v2.
 
 ## Validation Notes
 
 - Unit, integration, Web checks, Impeccable detection, Storybook interaction, and local visual
   validation run on this topic branch.
 - Read-only directed-edge checks found no signed `health-v2` acknowledgement from the current
-  Reality endpoints; public fallback observations are kept separate from Mesh active success.
+  Reality endpoints before the HTTP/2 loopback forwarding fix; public fallback observations are
+  kept separate from Mesh active success.
+- A real TLS regression sends the same signed `health-v2` request over HTTP/1.1 and HTTP/2,
+  verifies the loopback path/query and validates the returned acknowledgement.
 - Shared testbox fetched the real Xray suite but GHCR image resolution ended with EOF.
 - The failed testbox run removed its isolated remote directory and Docker resources.
 
