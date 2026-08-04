@@ -48,7 +48,7 @@ pub(super) async fn proxy_mesh_request(
     if !sender_is_member {
         return Err(not_found_response());
     }
-    let url = build_upstream_url(&auth.loopback_base_url, &parts.uri).map_err(|err| {
+    let url = build_mesh_loopback_url(&auth.loopback_base_url, &parts.uri).map_err(|err| {
         tracing::warn!(
             error = %err,
             method = %parts.method,
@@ -77,6 +77,23 @@ pub(super) async fn proxy_mesh_request(
         bad_gateway_response()
     })?;
     Ok(mesh_upstream_response_to_axum(response))
+}
+
+pub(super) fn build_mesh_loopback_url(base: &str, incoming: &Uri) -> anyhow::Result<reqwest::Url> {
+    let raw_path_and_query = incoming
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or_else(|| incoming.path());
+    let url = build_upstream_url(base, incoming)?;
+    let forwarded_path_and_query = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_string(),
+    };
+    anyhow::ensure!(
+        forwarded_path_and_query == raw_path_and_query,
+        "authenticated Mesh URI cannot be forwarded without normalization"
+    );
+    Ok(url)
 }
 
 pub(super) fn permitted_mesh_ingress(

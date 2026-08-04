@@ -24,7 +24,8 @@
 - Storybook state gallery、mock-only `ui_demo`、desktop/mobile visual evidence。
 - Canary Mesh forwarding rebuilds the fixed XP loopback URL from the authenticated request's raw
   path and query. This keeps HTTP/2 absolute-form URIs from being appended as a second origin and
-  preserves the URI bytes covered by internal-auth v2.
+  preserves the URI bytes covered by internal-auth v2; requests that the URL client would normalize
+  are rejected before loopback forwarding.
 
 ## Validation Notes
 

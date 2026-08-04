@@ -68,4 +68,5 @@ outcome question.
   retain scheme and authority in the incoming URI; never append that complete URI to a loopback
   origin. Rebuild the upstream URL from the fixed loopback origin plus the original path/query, and
   assert that percent encoding and query ordering remain unchanged because internal-auth v2 signs
-  those bytes.
+  those bytes. If the HTTP client would normalize those bytes, reject the request instead of
+  forwarding a URI that no longer matches the authenticated canonical value.

@@ -192,6 +192,18 @@ fn build_upstream_url_ignores_http2_absolute_uri_origin() {
 }
 
 #[test]
+fn mesh_loopback_url_rejects_authenticated_uri_normalization() {
+    for incoming in [
+        "/api/admin/_internal/mesh/../health",
+        "/api/admin/_internal/mesh/%2e%2e/health",
+        "/api/admin/_internal/mesh\\health",
+    ] {
+        let incoming: Uri = incoming.parse().unwrap();
+        assert!(mesh::build_mesh_loopback_url("http://127.0.0.1:8080", &incoming).is_err());
+    }
+}
+
+#[test]
 fn response_header_filter_preserves_websocket_handshake_headers_only_for_upgrade() {
     assert!(!response_header_allowed("connection", false));
     assert!(!response_header_allowed("upgrade", false));
