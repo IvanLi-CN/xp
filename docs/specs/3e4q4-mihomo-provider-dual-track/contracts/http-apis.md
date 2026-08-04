@@ -70,6 +70,7 @@ Notes:
 
 - canonical Mihomo URL。
 - 当用户未配置 Mihomo profile 时，仍回退到 clash 输出。
+- 请求 `external_resources=mirror` 但用户未配置 Mihomo profile 时返回 `422 invalid_request`，避免镜像选择静默失效。
 - 当用户已配置 Mihomo profile 时，返回 provider 主配置。
 - `PUT /api/admin/users/{user_id}/subscription-mihomo-profile` 会先对最终 provider 主配置 + `/mihomo/provider/system` payload 做联合预渲染校验；任何未定义的 `proxies`、`use`、`dialer-proxy` 或 `rules` 引用都会返回 `400 invalid_request`。
 - `external_resources=mirror` 是临时输出选项。仅在 Mihomo 格式有效；省略时保持原始 URL。
@@ -92,6 +93,7 @@ Response:
 
 - 始终返回 provider 方案的 Mihomo 主配置。
 - 当用户未配置 Mihomo profile 时，回退到 clash 输出。
+- 请求 `external_resources=mirror` 但用户未配置 Mihomo profile 时返回 `422 invalid_request`，避免镜像选择静默失效。
 - 顶层 `proxy-providers` 必含系统 provider `xp-system-generated` 与用户 `extra_proxy_providers_yaml`。
 - 顶层 `proxies` 仅保留 `extra_proxies_yaml`；系统动态节点不写入主配置顶层。
 - 系统 provider 的 `url` 必须指向当前请求对外 origin 下的 `/api/sub/{token}/mihomo/provider/system`。

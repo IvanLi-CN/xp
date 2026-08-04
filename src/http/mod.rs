@@ -8181,6 +8181,11 @@ fn render_mihomo_subscription(
                 .map(text_yaml_utf8)
                 .map_err(map_subscription_render_error)
             } else {
+                if external_resource_mode == subscription::MihomoExternalResourceMode::Mirror {
+                    return Err(ApiError::unprocessable_entity(
+                        "external resource mirror requires a Mihomo profile",
+                    ));
+                }
                 subscription::build_clash_yaml(
                     ca_key_pem,
                     &ctx.user,

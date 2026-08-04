@@ -116,6 +116,7 @@
 ### Edge cases / errors
 
 - 用户未配置 Mihomo profile 时，canonical `?format=mihomo` 与显式 provider 路径回退 clash；`/mihomo/provider/system` 始终返回系统 provider payload，不依赖用户 mixin。
+- 用户未配置 Mihomo profile 时请求 `external_resources=mirror` 必须返回 `422 invalid_request`，不得静默忽略镜像选项。
 - 当 `extra_proxy_providers_yaml` 已包含 `xp-system-generated` 时，保存 profile 成功但渲染 provider 路径返回 `400 invalid_request`，提示保留名冲突。
 - 当请求头无法推导外部 origin 时，provider 主配置回退到 `Config.api_base_url` 的规范化 origin。
 

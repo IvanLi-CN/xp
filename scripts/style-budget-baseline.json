@@ -60,7 +60,7 @@
     "max_line_length": 183
   },
   "docs/desgin/subscription.md": {
-    "long_line_count": 26,
+    "long_line_count": 27,
     "max_line_length": 292
   },
   "docs/desgin/workflows.md": {
@@ -583,12 +583,12 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8383
+    "source_lines": 8388
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
     "max_line_length": 142,
-    "source_lines": 9876
+    "source_lines": 9902
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,

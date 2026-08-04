@@ -220,3 +220,4 @@ MVP 建议输出“可直接导入”的最小 YAML：
 ### 6.6 缺失混入配置回退
 
 - 若用户未配置 Mihomo profile，`format=mihomo` 回退到 `format=clash` 输出。
+- 若用户在未配置 Mihomo profile 时请求 `external_resources=mirror`，返回 `422 invalid_request`，避免镜像选项无效却继续输出原始 Clash 配置。

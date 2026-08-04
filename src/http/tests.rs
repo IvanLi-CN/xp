@@ -6093,6 +6093,32 @@ async fn mihomo_mirror_query_rewrites_urls_and_rejects_non_mihomo_formats() {
         Some("DIRECT")
     );
 
+    store
+        .lock()
+        .await
+        .state_mut()
+        .user_mihomo_profiles
+        .remove(&user_id);
+    let mirror_without_profile = app
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/api/sub/{token}?format=mihomo&external_resources=mirror"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        mirror_without_profile.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let error = body_json(mirror_without_profile).await;
+    assert_eq!(error["error"]["code"], "invalid_request");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("requires a Mihomo profile"))
+    );
+
     let arbitrary_res = app
         .clone()
         .oneshot(req(
