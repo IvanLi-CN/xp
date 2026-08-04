@@ -1,5 +1,9 @@
 # History
 
+- 2026-08-04: runtime-default backfill now inspects the complete systemd
+  drop-in hierarchy and honors same-name masking before deciding whether an
+  operator override permits migration.
+
 - 2026-08-04: SG production A/B testing traced elevated cloudflared CPU to
   QUIC rather than the Go heap limit. HTTP/2 reduced CPU from about `7.70%` to
   `0.90%`; `10MiB` did not improve CPU or GC over `8MiB`. Managed deployments

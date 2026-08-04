@@ -1,5 +1,6 @@
 use super::*;
 use regex::Regex;
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
@@ -42,7 +43,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
                 continue;
             }
         }
-        let sources = systemd_environment_sources(paths, &unit, &dir, &managed)?;
+        let sources = systemd_environment_sources(paths, &unit, &managed)?;
         let mut content = format!("[Service]\n{MANAGED_MARKER}\n");
         for (key, value, legacy_default) in defaults {
             if should_backfill_systemd_value(
@@ -314,7 +315,6 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
 fn systemd_environment_sources(
     paths: &Paths,
     unit: &Path,
-    drop_in_dir: &Path,
     managed: &Path,
 ) -> Result<Vec<String>, ExitError> {
     let unit_name = unit
@@ -325,15 +325,28 @@ fn systemd_environment_sources(
     let mut sources = vec![unit_source.clone()];
     let mut environment_files = Vec::new();
     update_systemd_environment_files(&unit_source, &mut environment_files);
-    let mut drop_ins = Vec::new();
-    for entry in fs::read_dir(drop_in_dir).map_err(filesystem_error)? {
-        let path = entry.map_err(filesystem_error)?.path();
-        if path.extension() == Some(OsStr::new("conf")) && path != managed {
-            drop_ins.push(path);
+    let drop_in_name = format!("{unit_name}.d");
+    let mut drop_ins = BTreeMap::new();
+    for base in [
+        "/usr/lib/systemd/system",
+        "/usr/local/lib/systemd/system",
+        "/run/systemd/system",
+        "/etc/systemd/system",
+    ] {
+        let dir = paths.map_abs(Path::new(base)).join(&drop_in_name);
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(filesystem_error(error)),
+        };
+        for entry in entries {
+            let path = entry.map_err(filesystem_error)?.path();
+            if path.extension() == Some(OsStr::new("conf")) {
+                drop_ins.insert(path.file_name().unwrap().to_owned(), path);
+            }
         }
     }
-    drop_ins.sort();
-    for path in drop_ins {
+    for path in drop_ins.into_values().filter(|path| path != managed) {
         let source = fs::read_to_string(path).map_err(filesystem_error)?;
         update_systemd_environment_files(&source, &mut environment_files);
         sources.push(source);

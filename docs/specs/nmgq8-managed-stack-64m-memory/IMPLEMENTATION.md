@@ -27,6 +27,8 @@
   overrides, including explicit variable/all-environment resets and readable
   non-regular inputs; only complete XP-generated legacy service templates are
   eligible for the `8MiB` to `12MiB` migration.
+- Systemd override discovery follows the `/usr/lib`, `/usr/local/lib`, `/run`,
+  and `/etc` drop-in hierarchy with higher-priority same-name masking.
 - Legacy custom/provider OpenRC scripts lack a durable ownership marker, so an
   ambiguous existing `8MiB` value is preserved for explicit operator review.
 - Upgrade activation reloads systemd units and restarts both Xray and

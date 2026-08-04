@@ -598,7 +598,9 @@ the local network has verified QUIC support:
 Managed cloudflared also defaults to `GOMEMLIMIT=12MiB`, `GOGC=50`, and
 `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`. Existing XP-generated `8MiB` defaults
 in complete managed templates are upgraded to `12MiB`; explicit operator
-overrides remain unchanged. Legacy custom/provider OpenRC scripts have no
+overrides remain unchanged. Upgrade inspection includes systemd drop-ins under
+`/usr/lib`, `/usr/local/lib`, `/run`, and `/etc`, including same-name masking by
+higher-priority directories. Legacy custom/provider OpenRC scripts have no
 durable ownership marker, so an existing `8MiB` value in those scripts is
 preserved and must be changed explicitly after operator review.
 

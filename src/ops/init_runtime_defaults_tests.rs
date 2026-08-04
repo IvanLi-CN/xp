@@ -69,6 +69,59 @@ fn low_memory_backfill_preserves_systemd_operator_overrides() {
 }
 
 #[test]
+fn low_memory_backfill_preserves_runtime_systemd_drop_in_override() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=8MiB\n",
+    )
+    .unwrap();
+    let runtime_drop_in = paths
+        .map_abs(std::path::Path::new("/run/systemd/system"))
+        .join("cloudflared.service.d/30-operator.conf");
+    fs::create_dir_all(runtime_drop_in.parent().unwrap()).unwrap();
+    fs::write(runtime_drop_in, "[Service]\nEnvironment=GOMEMLIMIT=24MiB\n").unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
+}
+
+#[test]
+fn low_memory_backfill_applies_systemd_drop_in_directory_masking() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(systemd.join("cloudflared.service.d")).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=8MiB\n",
+    )
+    .unwrap();
+    let vendor_drop_in = paths
+        .map_abs(std::path::Path::new("/usr/lib/systemd/system"))
+        .join("cloudflared.service.d/10-memory.conf");
+    fs::create_dir_all(vendor_drop_in.parent().unwrap()).unwrap();
+    fs::write(vendor_drop_in, "[Service]\nEnvironment=GOMEMLIMIT=24MiB\n").unwrap();
+    fs::write(
+        systemd.join("cloudflared.service.d/10-memory.conf"),
+        "[Service]\nEnvironment=GOMEMLIMIT=32MiB\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
+}
+
+#[test]
 fn low_memory_backfill_preserves_legacy_value_in_operator_drop_in() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
