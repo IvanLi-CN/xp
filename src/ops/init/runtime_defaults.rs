@@ -26,6 +26,10 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         if !unit.exists() {
             continue;
         }
+        let migrate_legacy_cloudflared_limit = service == "cloudflared"
+            && is_generated_legacy_systemd_cloudflared_unit(
+                &fs::read_to_string(&unit).map_err(filesystem_error)?,
+            );
         if service == "cloudflared" {
             backfill_systemd_cloudflared_protocol(&unit)?;
         }
@@ -41,7 +45,12 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let sources = systemd_environment_sources(paths, &unit, &dir, &managed)?;
         let mut content = format!("[Service]\n{MANAGED_MARKER}\n");
         for (key, value, legacy_default) in defaults {
-            if should_backfill_systemd_value(&sources, key, *legacy_default) {
+            if should_backfill_systemd_value(
+                &sources,
+                key,
+                *legacy_default,
+                migrate_legacy_cloudflared_limit,
+            ) {
                 content.push_str(&format!("Environment={key}={value}\n"));
             }
         }
@@ -58,11 +67,13 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
         let mut updated = raw.clone();
         if path.file_name() == Some(OsStr::new("cloudflared")) {
-            updated = updated.replacen(
-                "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"",
-                "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"",
-                1,
-            );
+            if is_generated_legacy_openrc_cloudflared_script(&raw) {
+                updated = updated.replacen(
+                    "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"",
+                    "export GOMEMLIMIT=\"${GOMEMLIMIT:-12MiB}\"",
+                    1,
+                );
+            }
             updated = backfill_openrc_cloudflared_protocol(&updated);
         }
         let mut value = String::new();
@@ -105,6 +116,74 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
     }
     backfill_provider_cloudflared_wrapper(paths)?;
     Ok(())
+}
+
+fn is_generated_legacy_systemd_cloudflared_unit(raw: &str) -> bool {
+    const PREFIX: &str = concat!(
+        "[Unit]\n",
+        "Description=cloudflared (Cloudflare Tunnel)\n",
+        "Wants=network-online.target\n",
+        "After=network-online.target\n\n",
+        "[Service]\n",
+        "Type=simple\n",
+        "User=cloudflared\n",
+        "Group=cloudflared\n",
+        "Environment=GOMEMLIMIT=8MiB\n",
+        "Environment=GOGC=50\n",
+        "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n",
+    );
+    const SUFFIX: &str = concat!(
+        "Restart=always\n",
+        "RestartSec=2s\n\n",
+        "[Install]\n",
+        "WantedBy=multi-user.target\n",
+    );
+    let legacy_exec = concat!(
+        "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+        "--config /etc/cloudflared/config.yml tunnel run\n",
+    );
+    let http2_exec = concat!(
+        "Environment=XP_CLOUDFLARED_PROTOCOL=http2\n",
+        "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+        "--protocol ${XP_CLOUDFLARED_PROTOCOL} ",
+        "--config /etc/cloudflared/config.yml tunnel run\n",
+    );
+    raw == format!("{PREFIX}{legacy_exec}{SUFFIX}")
+        || raw == format!("{PREFIX}{http2_exec}{SUFFIX}")
+}
+
+fn is_generated_legacy_openrc_cloudflared_script(raw: &str) -> bool {
+    const PREFIX: &str = concat!(
+        "#!/sbin/openrc-run\n\n",
+        "name=\"cloudflared\"\n",
+        "description=\"cloudflared (Cloudflare Tunnel)\"\n\n",
+        "command=\"/usr/local/bin/cloudflared\"\n",
+    );
+    const SUFFIX: &str = concat!(
+        "command_user=\"cloudflared:cloudflared\"\n",
+        "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"\n",
+        "export GOGC=\"${GOGC:-50}\"\n",
+        "export TUNNEL_MANAGEMENT_DIAGNOSTICS=\"",
+        "${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}\"\n\n",
+        "# Ensure automatic recovery on crashes without busy-looping.\n",
+        "supervisor=supervise-daemon\n",
+        "respawn_delay=2\n",
+        "respawn_max=0\n\n",
+        "depend() {\n",
+        "  need net\n",
+        "}\n",
+    );
+    let legacy_args = concat!(
+        "command_args=\"--no-autoupdate ",
+        "--config /etc/cloudflared/config.yml tunnel run\"\n",
+    );
+    let http2_args = concat!(
+        "command_args=\"--no-autoupdate ",
+        "--protocol ${XP_CLOUDFLARED_PROTOCOL:-http2} ",
+        "--config /etc/cloudflared/config.yml tunnel run\"\n",
+    );
+    raw == format!("{PREFIX}{legacy_args}{SUFFIX}")
+        || raw == format!("{PREFIX}{http2_args}{SUFFIX}")
 }
 
 fn backfill_provider_cloudflared_wrapper(paths: &Paths) -> Result<(), ExitError> {
@@ -322,6 +401,7 @@ fn should_backfill_systemd_value(
     sources: &[String],
     key: &str,
     legacy_default: Option<&str>,
+    migrate_legacy_default: bool,
 ) -> bool {
     let unit_assignments = sources
         .first()
@@ -341,7 +421,9 @@ fn should_backfill_systemd_value(
         return false;
     }
     unit_assignments.is_empty()
-        || legacy_default.is_some_and(|legacy| unit_assignments.iter().all(|value| value == legacy))
+        || (migrate_legacy_default
+            && legacy_default
+                .is_some_and(|legacy| unit_assignments.iter().all(|value| value == legacy)))
 }
 
 fn parse_systemd_environment_line(line: &str) -> Vec<(String, String)> {

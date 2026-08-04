@@ -95,7 +95,25 @@ fn low_memory_backfill_migrates_legacy_systemd_default() {
     fs::create_dir_all(&systemd).unwrap();
     fs::write(
         systemd.join("cloudflared.service"),
-        "[Service]\nEnvironment=\"GOMEMLIMIT=8MiB\" \"GOGC=50\"\n",
+        concat!(
+            "[Unit]\n",
+            "Description=cloudflared (Cloudflare Tunnel)\n",
+            "Wants=network-online.target\n",
+            "After=network-online.target\n\n",
+            "[Service]\n",
+            "Type=simple\n",
+            "User=cloudflared\n",
+            "Group=cloudflared\n",
+            "Environment=GOMEMLIMIT=8MiB\n",
+            "Environment=GOGC=50\n",
+            "Environment=TUNNEL_MANAGEMENT_DIAGNOSTICS=false\n",
+            "ExecStart=/usr/bin/cloudflared --no-autoupdate ",
+            "--config /etc/cloudflared/config.yml tunnel run\n",
+            "Restart=always\n",
+            "RestartSec=2s\n\n",
+            "[Install]\n",
+            "WantedBy=multi-user.target\n",
+        ),
     )
     .unwrap();
 
@@ -105,7 +123,47 @@ fn low_memory_backfill_migrates_legacy_systemd_default() {
         fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
     assert!(managed.contains("GOMEMLIMIT=12MiB"));
     assert!(!managed.contains("Environment=GOGC=50"));
-    assert!(managed.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
+    assert!(!managed.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
+}
+
+#[test]
+fn low_memory_backfill_preserves_operator_owned_systemd_legacy_value() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let systemd = paths.systemd_unit_dir();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(
+        systemd.join("cloudflared.service"),
+        "[Service]\nEnvironment=GOMEMLIMIT=8MiB\n",
+    )
+    .unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let managed =
+        fs::read_to_string(systemd.join("cloudflared.service.d/20-xp-memory.conf")).unwrap();
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
+}
+
+#[test]
+fn low_memory_backfill_preserves_operator_owned_openrc_legacy_value() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.openrc_initd_dir()).unwrap();
+    let service = paths.openrc_initd_dir().join("cloudflared");
+    let original = concat!(
+        "#!/sbin/openrc-run\n",
+        "command_user=\"cloudflared:cloudflared\"\n",
+        "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"\n",
+        "export GOGC=\"${GOGC:-50}\"\n",
+    );
+    fs::write(&service, original).unwrap();
+
+    backfill_low_memory_runtime_defaults(&paths).unwrap();
+
+    let updated = fs::read_to_string(service).unwrap();
+    assert!(updated.contains("GOMEMLIMIT:-8MiB"));
+    assert!(!updated.contains("GOMEMLIMIT:-12MiB"));
 }
 
 #[test]
@@ -174,7 +232,7 @@ fn low_memory_backfill_ignores_absent_optional_systemd_environment_file() {
             .join("20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(managed.contains("Environment=GOMEMLIMIT=12MiB"));
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
 }
 
 #[test]
@@ -312,7 +370,7 @@ fn low_memory_backfill_ignores_semicolon_comments_in_environment_files() {
             .join("20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(managed.contains("Environment=GOMEMLIMIT=12MiB"));
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
 }
 
 #[test]
@@ -350,7 +408,7 @@ fn low_memory_backfill_honors_environment_file_reset() {
             .join("20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(managed.contains("Environment=GOMEMLIMIT=12MiB"));
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
 }
 
 #[test]
@@ -416,7 +474,7 @@ fn low_memory_backfill_globs_do_not_match_hidden_environment_files() {
             .join("20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(managed.contains("Environment=GOMEMLIMIT=12MiB"));
+    assert!(!managed.contains("Environment=GOMEMLIMIT="));
 }
 
 #[test]
@@ -428,10 +486,23 @@ fn low_memory_backfill_migrates_legacy_openrc_default() {
     fs::write(
         &service,
         concat!(
-            "command_user=\"cloudflared:cloudflared\"\n",
+            "#!/sbin/openrc-run\n\n",
+            "name=\"cloudflared\"\n",
+            "description=\"cloudflared (Cloudflare Tunnel)\"\n\n",
+            "command=\"/usr/local/bin/cloudflared\"\n",
             "command_args=\"--no-autoupdate --config /etc/cloudflared/config.yml tunnel run\"\n",
+            "command_user=\"cloudflared:cloudflared\"\n",
             "export GOMEMLIMIT=\"${GOMEMLIMIT:-8MiB}\"\n",
             "export GOGC=\"${GOGC:-50}\"\n",
+            "export TUNNEL_MANAGEMENT_DIAGNOSTICS=\"",
+            "${TUNNEL_MANAGEMENT_DIAGNOSTICS:-false}\"\n\n",
+            "# Ensure automatic recovery on crashes without busy-looping.\n",
+            "supervisor=supervise-daemon\n",
+            "respawn_delay=2\n",
+            "respawn_max=0\n\n",
+            "depend() {\n",
+            "  need net\n",
+            "}\n",
         ),
     )
     .unwrap();
