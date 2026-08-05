@@ -34,6 +34,73 @@ function fixturePathMatches(template: string, actual: string): boolean {
 	);
 }
 
+type PinnedWebContract = {
+	module: string;
+	route: string;
+	parser: string | null;
+};
+
+function normalizedRoute(
+	method: string,
+	path: string,
+	routes: readonly string[],
+) {
+	const pathname = path
+		.replace(/\$\{(?:query|params[^}]*)\}$/, "")
+		.replaceAll(/\$\{[^}]+\}/g, "fixture")
+		.split("?", 1)[0];
+	return routes.find((route) => {
+		const separator = route.indexOf(" ");
+		return (
+			route.slice(0, separator) === method &&
+			fixturePathMatches(route.slice(separator + 1), pathname)
+		);
+	});
+}
+
+function extractPinnedWebContracts(
+	sourceCommit: string,
+	files: readonly string[],
+	routes: readonly string[],
+): PinnedWebContract[] {
+	return files.flatMap((file) => {
+		const repoPath = file.startsWith("web/") ? file : `web/${file}`;
+		const source = execFileSync(
+			"git",
+			["show", `${sourceCommit}:${repoPath}`],
+			{
+				encoding: "utf8",
+			},
+		);
+		const functions = source.split(/(?=export async function )/g).slice(1);
+		return functions.flatMap((block) => {
+			const path = /[`"](\/api[^`"]+)[`"]/.exec(block)?.[1];
+			if (!path) return [];
+			const method =
+				/method:\s*"(DELETE|GET|PATCH|POST|PUT)"/.exec(block)?.[1] ?? "GET";
+			const route = normalizedRoute(method, path, routes);
+			if (!route)
+				throw new Error(
+					`Uninventoried callsite in ${repoPath}: ${method} ${path}`,
+				);
+			const readsJson = /\.json\(\)/.test(block);
+			const namedParser = /([A-Za-z0-9]+Schema)\.parse\(/.exec(block)?.[1];
+			const parser =
+				namedParser ??
+				(/\.parse\(json\)|\.parse\([\s\S]*?\.json\(\)/.test(block)
+					? "inline-zod"
+					: null);
+			if (readsJson && !parser) {
+				throw new Error(`Unparsed JSON response in ${repoPath}: ${route}`);
+			}
+			if (namedParser && !source.includes(`const ${namedParser}`)) {
+				throw new Error(`Missing parser definition in ${repoPath}: ${parser}`);
+			}
+			return [{ module: repoPath, route, parser }];
+		});
+	});
+}
+
 function executeFixtureRequest(
 	fixture: (typeof RELEASE_API_FIXTURES)[number],
 	serverRoutes: readonly string[],
@@ -149,6 +216,51 @@ describe("immutable release inventories", () => {
 				);
 			}
 			expect(digest.digest("hex")).toBe(inventory.webApiContractSha256);
+		}
+	});
+
+	it("executes the full pinned Web callsite matrix in both directions", () => {
+		for (const fixture of RELEASE_API_FIXTURES) {
+			const consumer = RELEASE_INVENTORIES.find(
+				(inventory) => inventory.releaseTag === fixture.consumerReleaseTag,
+			);
+			const server = RELEASE_INVENTORIES.find(
+				(inventory) => inventory.releaseTag === fixture.serverReleaseTag,
+			);
+			expect(consumer).toBeDefined();
+			expect(server).toBeDefined();
+			if (!consumer || !server) continue;
+			const files = execFileSync(
+				"git",
+				[
+					"ls-tree",
+					"-r",
+					"--name-only",
+					consumer.sourceCommit,
+					":(top)web/src/api",
+				],
+				{ encoding: "utf8" },
+			)
+				.split("\n")
+				.filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"));
+			const contracts = extractPinnedWebContracts(
+				consumer.sourceCommit,
+				files,
+				consumer.apiRoutes,
+			);
+			expect(contracts.length).toBeGreaterThan(0);
+			for (const contract of contracts) {
+				const request = fixture.requests.find(
+					(candidate) => candidate.route === contract.route,
+				);
+				expect(request, `${contract.module}: ${contract.route}`).toBeDefined();
+				const expectedStatus = !server.apiRoutes.includes(contract.route)
+					? 404
+					: contract.route === "DELETE /api/admin/nodes/{node_id}"
+						? 204
+						: 200;
+				expect(request?.expectedStatus).toBe(expectedStatus);
+			}
 		}
 	});
 
