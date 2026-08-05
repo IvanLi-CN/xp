@@ -39,6 +39,11 @@ const storage = localforage.createInstance({
 	storeName: "react_query_cache",
 	description: "Persisted read-only cache for offline admin access.",
 });
+const offlineSnapshotStorage = localforage.createInstance({
+	name: "xp",
+	storeName: "offline_query_snapshots",
+	description: "Durable per-query snapshots for offline startup recovery.",
+});
 
 const basePersister = createAsyncStoragePersister({
 	storage,
@@ -46,11 +51,51 @@ const basePersister = createAsyncStoragePersister({
 	throttleTime: 1_000,
 });
 
+type PersistedQuery = {
+	queryHash?: string;
+	queryKey?: readonly unknown[];
+	state?: {
+		data?: unknown;
+		dataUpdatedAt?: number;
+	};
+};
+
+function queryIdentifier(query: PersistedQuery) {
+	return query.queryHash ?? JSON.stringify(query.queryKey);
+}
+
+function mergePersistedQueries(
+	current: PersistedQueryCache,
+	previous: PersistedQueryCache | undefined,
+): PersistedQueryCache {
+	if (!previous || previous.buster !== current.buster) return current;
+	const currentQueries = current.clientState?.queries ?? [];
+	const currentIds = new Set(currentQueries.map(queryIdentifier));
+	const preservedQueries = (previous.clientState?.queries ?? []).filter(
+		(query) => !currentIds.has(queryIdentifier(query)),
+	);
+	return {
+		...current,
+		clientState: {
+			...current.clientState,
+			queries: [...preservedQueries, ...currentQueries],
+		},
+	};
+}
+
 const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] =
 	{
 		persistClient: async (client) => {
 			try {
-				await basePersister.persistClient(client);
+				const previous = (await basePersister.restoreClient()) as
+					| PersistedQueryCache
+					| undefined;
+				await basePersister.persistClient(
+					mergePersistedQueries(
+						client as PersistedQueryCache,
+						previous,
+					) as Parameters<typeof basePersister.persistClient>[0],
+				);
 			} catch {
 				// Some test and private-browsing environments do not expose IndexedDB.
 				// Offline persistence should degrade silently instead of crashing the app.
@@ -81,7 +126,9 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 	return {
 		persister,
 		maxAge: DAY_MS,
-		buster: __XP_WEB_BUILD_ID__,
+		// API snapshots survive frontend asset changes; compatibility probing owns
+		// the server-version boundary instead of the PWA build cache.
+		buster: __XP_WEB_PACKAGE_VERSION__,
 		dehydrateOptions: {
 			shouldDehydrateMutation: () => false,
 			shouldDehydrateQuery: (query) =>
@@ -93,6 +140,21 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 export async function readPersistedQuerySnapshot<T>(
 	queryKey: readonly unknown[],
 ): Promise<{ data: T | undefined; dataUpdatedAt: number | null }> {
+	try {
+		const snapshot = await offlineSnapshotStorage.getItem<{
+			data?: T;
+			dataUpdatedAt?: number;
+		}>(JSON.stringify(queryKey));
+		if (snapshot) {
+			return {
+				data: snapshot.data,
+				dataUpdatedAt: snapshot.dataUpdatedAt ?? null,
+			};
+		}
+	} catch {
+		// Fall through to the shared persisted query cache.
+	}
+
 	let raw: string | PersistedQueryCache | null;
 	try {
 		raw = await storage.getItem<string | PersistedQueryCache | null>(
@@ -133,14 +195,26 @@ export async function readPersistedQuerySnapshot<T>(
 	};
 }
 
+export async function writePersistedQuerySnapshot<T>(
+	queryKey: readonly unknown[],
+	data: T,
+	dataUpdatedAt: number,
+): Promise<void> {
+	try {
+		await offlineSnapshotStorage.setItem(JSON.stringify(queryKey), {
+			data,
+			dataUpdatedAt,
+		});
+	} catch {
+		// Offline persistence is an enhancement, not a hard dependency.
+	}
+}
+
 type PersistedQueryCache = {
+	buster?: string;
+	timestamp?: number;
 	clientState?: {
-		queries?: Array<{
-			queryKey?: readonly unknown[];
-			state?: {
-				data?: unknown;
-				dataUpdatedAt?: number;
-			};
-		}>;
+		mutations?: unknown[];
+		queries?: PersistedQuery[];
 	};
 };

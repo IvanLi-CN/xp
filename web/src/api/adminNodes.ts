@@ -35,7 +35,7 @@ export const AdminNodeSchema = z
 		node_name: z.string(),
 		api_base_url: z.string(),
 		access_host: z.string(),
-		quota_limit_bytes: z.number().int().nonnegative().default(0),
+		quota_limit_bytes: z.number().int().nonnegative(),
 		quota_reset: NodeQuotaResetSchema,
 		egress_probe: AdminNodeEgressProbeSchema.optional(),
 	})

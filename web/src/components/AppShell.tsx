@@ -118,6 +118,12 @@ export function AppShell({
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
+	const alertsCapabilityAvailable =
+		apiCompatibility.data?.kind === "compatible" &&
+		apiCompatibility.data.isFeatureAvailable("admin.alerts");
+	const upgradeCapabilityAvailable =
+		apiCompatibility.data?.kind === "compatible" &&
+		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
@@ -152,13 +158,13 @@ export function AppShell({
 
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && alertsCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
 	const adminUpgradeStatus = useQuery({
 		queryKey: ["adminUpgradeStatus", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && upgradeCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminUpgradeStatus(adminToken, signal),
 		refetchInterval: (query) => {
 			const state = query.state.data?.status.state;
@@ -171,10 +177,14 @@ export function AppShell({
 	});
 
 	const adminUpgradeStart = useMutation({
-		mutationFn: (payload: { targetTag: string }) =>
-			startAdminUpgrade(adminToken, {
+		mutationFn: async (payload: { targetTag: string }) => {
+			if (!upgradeCapabilityAvailable) {
+				throw new Error("The admin upgrade capability is unavailable.");
+			}
+			return startAdminUpgrade(adminToken, {
 				target_tag: payload.targetTag,
-			}),
+			});
+		},
 		onSuccess: (data) => {
 			queryClient.setQueryData(["adminUpgradeStatus", adminToken], data);
 			void clusterInfo.refetch();
@@ -257,9 +267,9 @@ export function AppShell({
 
 		const compatibility = apiCompatibility.data;
 		const statusEventsAvailable =
-			compatibility?.kind !== "incompatible" &&
-			(compatibility?.kind !== "compatible" ||
-				compatibility.isFeatureAvailable("admin.status-events"));
+			runtime.isOnline &&
+			compatibility?.kind === "compatible" &&
+			compatibility.isFeatureAvailable("admin.status-events");
 		if (!statusEventsAvailable) {
 			setStatusStream({
 				connected: false,
@@ -330,7 +340,7 @@ export function AppShell({
 		});
 
 		return () => handle.close();
-	}, [adminToken, apiCompatibility.data, queryClient]);
+	}, [adminToken, apiCompatibility.data, queryClient, runtime.isOnline]);
 
 	useEffect(() => {
 		const onFocus = () => {
@@ -537,6 +547,7 @@ export function AppShell({
 					});
 				}}
 				onStartUpgrade={(targetTag) => {
+					if (!upgradeCapabilityAvailable) return;
 					upgradeObservation.begin(targetTag);
 					adminUpgradeStart.mutate({ targetTag });
 				}}
@@ -546,6 +557,7 @@ export function AppShell({
 		adminUpgradeStart,
 		adminUpgradeStatus,
 		clusterInfo,
+		upgradeCapabilityAvailable,
 		runVersionCheck,
 		upgradeObservation,
 		versionCheck,

@@ -7,9 +7,9 @@ export const ClusterInfoResponseSchema = z
 		cluster_id: z.string(),
 		node_id: z.string(),
 		role: z.string(),
-		leader_api_base_url: z.string().default(""),
-		term: z.number().int().nonnegative().default(0),
-		xp_version: z.string().default("unknown"),
+		leader_api_base_url: z.string(),
+		term: z.number().int().nonnegative(),
+		xp_version: z.string(),
 	})
 	.passthrough();
 

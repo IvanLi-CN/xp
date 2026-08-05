@@ -443,6 +443,7 @@ export function SystemStatusPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const meshCapability = useApiCapability("admin.mesh");
 	const nodesCapability = useApiCapability("admin.nodes");
+	const alertsCapability = useApiCapability("admin.alerts");
 	const meshQuery = useQuery({
 		queryKey: ["adminMeshStatus", adminToken],
 		enabled: adminToken.length > 0 && meshCapability.available,
@@ -460,21 +461,22 @@ export function SystemStatusPage() {
 	});
 	const alertsQuery = useQuery({
 		queryKey: ["adminAlerts", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && alertsCapability.available,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 	const probe = useMutation({
 		mutationFn: (nodeIds: string[]) => runAdminMeshProbes(adminToken, nodeIds),
 		onSuccess: () => meshQuery.refetch(),
 	});
+	const meshData = meshCapability.available ? meshState.data : undefined;
 	const latestAt = latestQueryDataUpdatedAt([
-		meshState,
+		meshCapability.available ? meshState : null,
 		runtimeQuery,
 		alertsQuery,
 	]);
 	const localComponents =
 		runtimeQuery.data?.items
-			.find((item) => item.node_id === meshState.data?.local.node_id)
+			.find((item) => item.node_id === meshData?.local.node_id)
 			?.components.map((item) => ({
 				component: item.component,
 				status: item.status,
@@ -488,14 +490,11 @@ export function SystemStatusPage() {
 				description="Set an admin token to inspect mesh status."
 			/>
 		);
-	if (meshCapability.unavailable)
-		return (
-			<CapabilityUnavailableState
-				title="Mesh status unavailable"
-				reason={meshCapability.reason}
-			/>
-		);
-	if (meshState.isLoading && !hasQueryData(meshState))
+	if (
+		meshCapability.available &&
+		meshState.isLoading &&
+		!hasQueryData(meshState)
+	)
 		return (
 			<PageState
 				variant="loading"
@@ -504,6 +503,7 @@ export function SystemStatusPage() {
 			/>
 		);
 	if (
+		meshCapability.available &&
 		!hasQueryData(meshState) &&
 		queryIsOfflineBlocked(meshState, runtime.isOnline)
 	)
@@ -514,7 +514,7 @@ export function SystemStatusPage() {
 				description="Open System status once while online to keep a local snapshot."
 			/>
 		);
-	if (meshState.isError && !hasQueryData(meshState))
+	if (meshCapability.available && meshState.isError && !hasQueryData(meshState))
 		return (
 			<PageState
 				variant="error"
@@ -528,7 +528,22 @@ export function SystemStatusPage() {
 				}
 			/>
 		);
-	if (!meshState.data) return null;
+	if (!meshData) {
+		return (
+			<div className="space-y-5">
+				<PageHeader
+					title="System status"
+					description="Control-plane reachability, transport quality, and node runtime health."
+				/>
+				<section className="border-t border-border/70 pt-5">
+					<CapabilityUnavailableState
+						title="Mesh status unavailable"
+						reason={meshCapability.reason}
+					/>
+				</section>
+			</div>
+		);
+	}
 
 	return (
 		<div className="space-y-5">
@@ -545,14 +560,20 @@ export function SystemStatusPage() {
 				/>
 			) : null}
 			<SystemStatusSurface
-				status={meshState.data}
+				status={meshData}
 				components={localComponents}
 				isRefreshing={meshState.isFetching}
 				isProbing={probe.isPending}
 				readOnly={runtime.isReadOnly}
 				onRefresh={() => meshState.refetch()}
-				onProbeAll={() => probe.mutate([])}
-				onProbePeer={(nodeId) => probe.mutate([nodeId])}
+				onProbeAll={
+					meshCapability.available ? () => probe.mutate([]) : undefined
+				}
+				onProbePeer={
+					meshCapability.available
+						? (nodeId) => probe.mutate([nodeId])
+						: undefined
+				}
 			/>
 		</div>
 	);

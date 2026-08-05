@@ -87,9 +87,9 @@ export const AdminNodeRuntimeListItemSchema = z.object({
 
 export const AdminNodesRuntimeResponseSchema = z
 	.object({
-		partial: z.boolean().default(false),
-		unreachable_nodes: z.array(z.string()).default([]),
-		items: z.array(AdminNodeRuntimeListItemSchema).default([]),
+		partial: z.boolean(),
+		unreachable_nodes: z.array(z.string()),
+		items: z.array(AdminNodeRuntimeListItemSchema),
 	})
 	.passthrough();
 

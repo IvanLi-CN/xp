@@ -56,7 +56,8 @@ export function NodesPage() {
 	);
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodesRuntime", adminToken],
-		enabled: adminToken.length > 0 && nodesCapability.available,
+		enabled:
+			adminToken.length > 0 && (nodesCapability.available || !runtime.isOnline),
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 	const nodesState = useQueryWithOfflineFallback(
@@ -110,6 +111,12 @@ export function NodesPage() {
 			setJoinTokenError("Admin token is missing.");
 			return;
 		}
+		if (!nodesCapability.available || !runtime.isOnline) {
+			setJoinTokenError(
+				nodesCapability.reason ?? "The nodes API is unavailable.",
+			);
+			return;
+		}
 
 		if (ttlSeconds <= 0 || Number.isNaN(ttlSeconds)) {
 			setJoinTokenError("TTL must be greater than zero.");
@@ -145,7 +152,7 @@ export function NodesPage() {
 			);
 		}
 
-		if (nodesCapability.unavailable) {
+		if (nodesCapability.unavailable && !hasQueryData(nodesState)) {
 			return (
 				<CapabilityUnavailableState
 					title="Nodes unavailable"
@@ -287,6 +294,8 @@ export function NodesPage() {
 								disabled={
 									ttlSeconds <= 0 ||
 									adminToken.length === 0 ||
+									!nodesCapability.available ||
+									!runtime.isOnline ||
 									runtime.isReadOnly
 								}
 								onClick={handleCreateJoinToken}

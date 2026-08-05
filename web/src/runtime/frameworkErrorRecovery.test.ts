@@ -3,9 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BackendApiError } from "../api/backendError";
 import {
 	classifyFrameworkError,
-	clearXpAppShellCaches,
 	createDiagnosticDetails,
-	isXpAppShellCacheName,
 	recoverXpAppShell,
 } from "./frameworkErrorRecovery";
 
@@ -86,95 +84,15 @@ describe("framework error recovery", () => {
 		).toContain("online: false");
 	});
 
-	it("matches only XP app-shell cache names", () => {
-		expect(
-			isXpAppShellCacheName(
-				"workbox-precache-v2-https://xp.example",
-				"https://xp.example",
-			),
-		).toBe(true);
-		expect(isXpAppShellCacheName("xp-app-shell-build-123")).toBe(true);
-		expect(
-			isXpAppShellCacheName(
-				"workbox-runtime-https://xp.example",
-				"https://xp.example",
-			),
-		).toBe(false);
-		expect(isXpAppShellCacheName("react_query_cache")).toBe(false);
-	});
-
-	it("deletes only app-shell caches after a replacement is ready", async () => {
-		const deleted: string[] = [];
-		const cacheStorage = {
-			keys: vi.fn(async () => [
-				"workbox-precache-v2-https://xp.example",
-				"xp-app-shell-build-123",
-				"workbox-runtime-https://xp.example",
-				"react_query_cache",
-			]),
-			delete: vi.fn(async (name: string) => {
-				deleted.push(name);
-				return true;
-			}),
-		};
-
-		await expect(
-			clearXpAppShellCaches({
-				cacheStorage,
-				origin: "https://xp.example",
-				isOnline: true,
-				replacementReady: async () => true,
-			}),
-		).resolves.toEqual({
-			status: "cleared",
-			deleted: [
-				"workbox-precache-v2-https://xp.example",
-				"xp-app-shell-build-123",
-			],
-		});
-		expect(deleted).toEqual([
-			"workbox-precache-v2-https://xp.example",
-			"xp-app-shell-build-123",
-		]);
-	});
-
-	it("does not touch caches when offline or when replacement is unavailable", async () => {
-		const cacheStorage = {
-			keys: vi.fn(async () => ["xp-app-shell-build-123"]),
-			delete: vi.fn(async () => true),
-		};
-
-		await expect(
-			clearXpAppShellCaches({
-				cacheStorage,
-				isOnline: false,
-				replacementReady: async () => true,
-			}),
-		).resolves.toEqual({
-			status: "skipped",
-			reason: "offline",
-			deleted: [],
-		});
-
-		await expect(
-			clearXpAppShellCaches({
-				cacheStorage,
-				isOnline: true,
-				replacementReady: async () => false,
-			}),
-		).resolves.toEqual({
-			status: "skipped",
-			reason: "replacement-unavailable",
-			deleted: [],
-		});
-		expect(cacheStorage.keys).not.toHaveBeenCalled();
-		expect(cacheStorage.delete).not.toHaveBeenCalled();
-	});
-
-	it("does not clear caches until a waiting worker proves a complete replacement", async () => {
+	it("recovers with the active worker and activates a waiting replacement", async () => {
 		const update = vi.fn(async () => undefined);
 		const listeners = new Set<(event: MessageEvent) => void>();
-		let waiting: object | null = null;
+		const controllerChangeListeners = new Set<() => void>();
+		let waiting: { postMessage: (message: unknown) => void } | null = null;
+		const waitingPostMessage = vi.fn(() => {
+			waiting = null;
+			for (const listener of controllerChangeListeners) listener();
+		});
 		const serviceWorkerContainer = {
 			getRegistration: vi.fn(async () => ({ update, waiting })),
 			controller: {
@@ -183,17 +101,21 @@ describe("framework error recovery", () => {
 						listener({
 							data: {
 								type: "XP_CACHE_RECOVERY_READY",
-								buildId: "development",
+								buildId: "active",
 								deleted: ["xp-app-shell-build-123"],
 							},
 						} as MessageEvent);
 					}
 				}),
 			},
-			addEventListener: vi.fn((_type, listener) => listeners.add(listener)),
-			removeEventListener: vi.fn((_type, listener) =>
-				listeners.delete(listener),
-			),
+			addEventListener: vi.fn((type, listener) => {
+				if (type === "message") listeners.add(listener);
+				else controllerChangeListeners.add(listener);
+			}),
+			removeEventListener: vi.fn((type, listener) => {
+				if (type === "message") listeners.delete(listener);
+				else controllerChangeListeners.delete(listener);
+			}),
 		};
 
 		await expect(
@@ -202,13 +124,12 @@ describe("framework error recovery", () => {
 				serviceWorkerContainer,
 			}),
 		).resolves.toEqual({
-			status: "skipped",
-			reason: "replacement-unavailable",
-			deleted: [],
+			status: "cleared",
+			deleted: ["xp-app-shell-build-123"],
 		});
 		expect(update).toHaveBeenCalledOnce();
 
-		waiting = {};
+		waiting = { postMessage: waitingPostMessage };
 		await expect(
 			recoverXpAppShell({
 				isOnline: true,
@@ -220,7 +141,8 @@ describe("framework error recovery", () => {
 		});
 		expect(serviceWorkerContainer.controller.postMessage).toHaveBeenCalledWith({
 			type: "XP_REQUEST_CACHE_RECOVERY",
-			buildId: "development",
+			buildId: "active",
 		});
+		expect(waitingPostMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
 	});
 });

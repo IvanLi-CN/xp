@@ -18,9 +18,9 @@ export type AlertItem = z.infer<typeof AlertItemSchema>;
 
 export const AlertsResponseSchema = z
 	.object({
-		partial: z.boolean().default(false),
-		unreachable_nodes: z.array(z.string()).default([]),
-		items: z.array(AlertItemSchema).default([]),
+		partial: z.boolean(),
+		unreachable_nodes: z.array(z.string()),
+		items: z.array(AlertItemSchema),
 	})
 	.passthrough();
 

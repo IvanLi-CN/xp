@@ -50,6 +50,20 @@ describe("api compatibility", () => {
 		);
 	});
 
+	it("uses valid capabilities before an invalid release tag", () => {
+		const result = resolveApiCompatibility({
+			releaseTag: "v0.2.0",
+			capabilities: [
+				"api.health",
+				"api.cluster-info",
+				"admin.nodes",
+				"admin.status-events",
+			],
+		});
+
+		expect(result.kind).toBe("compatible");
+	});
+
 	it("rejects incomplete fingerprints", () => {
 		expect(
 			resolveApiCompatibility({
@@ -106,6 +120,63 @@ describe("api compatibility", () => {
 
 		expect(result.kind).toBe("compatible");
 		if (result.kind === "compatible") expect(result.profile.minor).toBe("3.22");
+	});
+
+	it("rejects an incomplete current-only fingerprint", () => {
+		expect(
+			resolveApiCompatibility({
+				fingerprint: {
+					"/api/health": ["status"],
+					"/api/cluster/info": [
+						"cluster_id",
+						"node_id",
+						"role",
+						"leader_api_base_url",
+						"term",
+					],
+					"/api/admin/nodes": ["items"],
+					"/api/admin/mesh/status": ["revision"],
+				},
+			}).kind,
+		).toBe("incompatible");
+	});
+
+	it("builds fallback fingerprint probes from the release inventories", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("not found", { status: 404 }))
+			.mockResolvedValueOnce(new Response("not found", { status: 404 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						cluster_id: "fixture",
+						node_id: "fixture",
+						role: "leader",
+						leader_api_base_url: "",
+						term: 0,
+					}),
+					{ status: 200 },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ items: [] }), { status: 200 }),
+			)
+			.mockResolvedValueOnce(new Response("not found", { status: 404 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { fetchApiCompatibility } = await import("./apiCompatibility");
+		const result = await fetchApiCompatibility({ adminToken: "fixture-token" });
+
+		expect(result.kind).toBe("compatible");
+		expect(fetchMock.mock.calls.slice(2).map(([path]) => path)).toEqual([
+			"/api/health",
+			"/api/cluster/info",
+			"/api/admin/nodes",
+			"/api/admin/mesh/status",
+		]);
 	});
 
 	it("falls back from the additive probe to the strict release endpoint", async () => {

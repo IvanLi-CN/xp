@@ -34,6 +34,8 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.nodes",
             "admin.users",
             "admin.endpoints",
+            "admin.alerts",
+            "admin.config",
             "admin.quota-policy",
             "admin.status-events",
             "admin.upgrade",
@@ -42,6 +44,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.node-probes",
             "admin.traffic-usage",
             "admin.mihomo-tools",
+            "admin.mihomo-resource-policy",
         ],
         fingerprint,
     })

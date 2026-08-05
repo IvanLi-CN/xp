@@ -7,11 +7,12 @@ import {
 	redactAdminMihomo,
 } from "../api/adminTools";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { MihomoSplitEditor } from "../components/MihomoSplitEditor";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useUiPrefs } from "../components/UiPrefs";
 import { YamlCodeEditor } from "../components/YamlCodeEditor";
@@ -72,6 +73,7 @@ export function ToolsPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
+	const toolsCapability = useApiCapability("admin.mihomo-tools");
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
 	const [sourceKind, setSourceKind] =
@@ -90,6 +92,15 @@ export function ToolsPage() {
 		setRedactedText("");
 		setError(null);
 		setIsSubmitting(false);
+	}
+
+	if (toolsCapability.unavailable) {
+		return (
+			<CapabilityUnavailableState
+				title="Mihomo tools unavailable"
+				reason={toolsCapability.reason}
+			/>
+		);
 	}
 
 	if (adminToken.length === 0) {

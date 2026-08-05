@@ -1,12 +1,15 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-const { mockReadPersistedQuerySnapshot } = vi.hoisted(() => ({
-	mockReadPersistedQuerySnapshot: vi.fn(),
-}));
+const { mockReadPersistedQuerySnapshot, mockWritePersistedQuerySnapshot } =
+	vi.hoisted(() => ({
+		mockReadPersistedQuerySnapshot: vi.fn(),
+		mockWritePersistedQuerySnapshot: vi.fn(),
+	}));
 
 vi.mock("./queryPersistence", () => ({
 	readPersistedQuerySnapshot: mockReadPersistedQuerySnapshot,
+	writePersistedQuerySnapshot: mockWritePersistedQuerySnapshot,
 }));
 
 import { useQueryWithOfflineFallback } from "./useQueryWithOfflineFallback";

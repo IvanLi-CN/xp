@@ -6,6 +6,8 @@ export const apiCapabilitiesFixture = {
 		"admin.nodes",
 		"admin.users",
 		"admin.endpoints",
+		"admin.alerts",
+		"admin.config",
 		"admin.quota-policy",
 		"admin.status-events",
 		"admin.upgrade",
@@ -14,6 +16,7 @@ export const apiCapabilitiesFixture = {
 		"admin.node-probes",
 		"admin.traffic-usage",
 		"admin.mihomo-tools",
+		"admin.mihomo-resource-policy",
 	],
 	fingerprint: {
 		"/api/health": ["status"],

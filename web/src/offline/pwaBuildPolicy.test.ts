@@ -34,6 +34,16 @@ describe("pwa build policy", () => {
 		).toBeNull();
 	});
 
+	it("never selects a process-wide pending build for an undeclared asset", () => {
+		expect(
+			selectBuildForRequest({
+				requestMode: "asset",
+				activeBuildId: "2026.08.05-new",
+				clientBuildId: null,
+			}),
+		).toBeNull();
+	});
+
 	it("does not delete a build while a controlled client owns it", () => {
 		expect(
 			canDeleteBuildCache("2026.08.04-old", {

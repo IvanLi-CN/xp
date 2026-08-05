@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { isBackendApiError, throwIfNotOk } from "./backendError";
 import {
+	API_CAPABILITIES_PATH,
 	API_COMPATIBILITY_WINDOW,
 	type ApiCapability,
 	type ApiCompatibilityMinor,
@@ -51,6 +52,19 @@ function fingerprintMatches(
 	fingerprint: ApiFingerprint,
 	inventory: ReleaseInventory,
 ): boolean {
+	const knownFingerprintPaths = new Set(
+		RELEASE_INVENTORIES.flatMap((candidate) =>
+			Object.keys(candidate.fingerprint),
+		),
+	);
+	for (const path of Object.keys(fingerprint)) {
+		if (
+			knownFingerprintPaths.has(path) &&
+			inventory.fingerprint[path] === undefined
+		) {
+			return false;
+		}
+	}
 	return Object.entries(inventory.fingerprint).every(([path, fields]) => {
 		const observed = fingerprint[path];
 		return (
@@ -58,6 +72,22 @@ function fingerprintMatches(
 			fields.every((field) => observed.includes(field))
 		);
 	});
+}
+
+function fingerprintProbePaths() {
+	return [
+		...new Set(
+			RELEASE_INVENTORIES.flatMap((profile) =>
+				Object.keys(profile.fingerprint),
+			),
+		),
+	].map((path) => ({
+		path,
+		auth: path.startsWith("/api/admin/"),
+		optional: RELEASE_INVENTORIES.some(
+			(profile) => profile.fingerprint[path] === undefined,
+		),
+	}));
 }
 
 function commonProfile(
@@ -93,6 +123,22 @@ export function resolveApiCompatibility(input: {
 	fingerprint?: ApiFingerprint;
 }): ApiCompatibilityResult {
 	const advertised = new Set(input.capabilities ?? []);
+	if (advertised.size > 0) {
+		const candidates = RELEASE_INVENTORIES.filter((profile) =>
+			[...advertised].every((capability) =>
+				profile.capabilities.includes(capability as ApiCapability),
+			),
+		);
+		const smallestProfileSize = Math.min(
+			...candidates.map((candidate) => candidate.capabilities.length),
+		);
+		const leastSpecificCandidates = candidates.filter(
+			(candidate) => candidate.capabilities.length === smallestProfileSize,
+		);
+		const profile = commonProfile(leastSpecificCandidates);
+		if (profile) return compatibleResult(profile, advertised);
+	}
+
 	if (input.releaseTag !== undefined) {
 		const minor = resolveReleaseMinor(input.releaseTag);
 		if (!minor) {
@@ -116,27 +162,6 @@ export function resolveApiCompatibility(input: {
 		);
 	}
 
-	if (advertised.size > 0) {
-		const candidates = RELEASE_INVENTORIES.filter((profile) =>
-			[...advertised].every((capability) =>
-				profile.capabilities.includes(capability as ApiCapability),
-			),
-		);
-		const smallestProfileSize = Math.min(
-			...candidates.map((candidate) => candidate.capabilities.length),
-		);
-		const leastSpecificCandidates = candidates.filter(
-			(candidate) => candidate.capabilities.length === smallestProfileSize,
-		);
-		const profile =
-			leastSpecificCandidates[0] ?? commonProfile(leastSpecificCandidates);
-		if (profile) return compatibleResult(profile, advertised);
-		return {
-			kind: "incompatible",
-			reason: "Capabilities do not identify an equivalent release profile",
-		};
-	}
-
 	if (input.fingerprint) {
 		const candidates = RELEASE_INVENTORIES.filter((profile) =>
 			fingerprintMatches(input.fingerprint ?? {}, profile),
@@ -150,10 +175,7 @@ export function resolveApiCompatibility(input: {
 			(candidate) =>
 				Object.keys(candidate.fingerprint).length === mostSpecificSize,
 		);
-		const profile =
-			mostSpecificCandidates.length === 1
-				? mostSpecificCandidates[0]
-				: commonProfile(mostSpecificCandidates);
+		const profile = commonProfile(mostSpecificCandidates);
 		if (profile) return compatibleResult(profile, profile.capabilities);
 	}
 
@@ -167,7 +189,7 @@ async function fetchCapabilities(options: {
 	adminToken?: string;
 	signal?: AbortSignal;
 }) {
-	const res = await fetch("/api/capabilities", {
+	const res = await fetch(API_CAPABILITIES_PATH, {
 		method: "GET",
 		headers: {
 			Accept: "application/json",
@@ -185,14 +207,8 @@ async function fetchApiFingerprint(options: {
 	adminToken?: string;
 	signal?: AbortSignal;
 }): Promise<ApiFingerprint> {
-	const probes = [
-		{ path: "/api/health", auth: false, optional: false },
-		{ path: "/api/cluster/info", auth: false, optional: false },
-		{ path: "/api/admin/nodes", auth: true, optional: false },
-		{ path: "/api/admin/mesh/status", auth: true, optional: true },
-	] as const;
 	const fingerprint: ApiFingerprint = {};
-	for (const probe of probes) {
+	for (const probe of fingerprintProbePaths()) {
 		const res = await fetch(probe.path, {
 			method: "GET",
 			headers: {

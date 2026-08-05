@@ -23,6 +23,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { formatUtcOffsetMinutes } from "../utils/quotaPolicyView";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -31,14 +32,6 @@ function formatError(err: unknown): string {
 	}
 	if (err instanceof Error) return err.message;
 	return String(err);
-}
-
-function formatUtcOffset(minutes: number): string {
-	const sign = minutes >= 0 ? "+" : "-";
-	const abs = Math.abs(minutes);
-	const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-	const mm = String(abs % 60).padStart(2, "0");
-	return `UTC${sign}${hh}:${mm}`;
 }
 
 export function UsersPage() {
@@ -246,8 +239,8 @@ export function UsersPage() {
 									title="Quota reset policy (user default)"
 								>
 									{user.quota_reset.policy === "monthly"
-										? `Reset: monthly@${user.quota_reset.day_of_month} ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`
-										: `Reset: unlimited ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`}
+										? `Reset: monthly@${user.quota_reset.day_of_month} ${formatUtcOffsetMinutes(user.quota_reset.tz_offset_minutes)}`
+										: `Reset: unlimited ${formatUtcOffsetMinutes(user.quota_reset.tz_offset_minutes)}`}
 								</div>
 							</div>
 						</td>

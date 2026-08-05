@@ -23,26 +23,38 @@ type ServiceWorkerMessage =
 	| { type: "SKIP_WAITING" }
 	| { type: "XP_DECLARE_BUILD"; buildId: string }
 	| { type: "XP_RELEASE_BUILD" }
-	| { type: "XP_REQUEST_CACHE_RECOVERY"; buildId: string };
+	| { type: "XP_REQUEST_CACHE_RECOVERY"; buildId: string | "active" };
+
+type BuildMetadata = {
+	buildId: string;
+	urls: string[];
+};
 
 const BUILD_ID = __XP_WEB_BUILD_ID__;
 const CACHE_NAME = appShellCacheName(BUILD_ID);
+let shouldClaimClients = false;
 const METADATA_DB_NAME = "xp_sw_metadata";
 const METADATA_STORE_NAME = "client_build_owners";
+const RETIRED_BUILD_STORE_NAME = "retired_builds";
 const manifestEntries = self.__WB_MANIFEST;
 const manifestUrls = new Set(
 	manifestEntries.map(
 		(entry) => new URL(entry.url, self.registration.scope).href,
 	),
 );
+const BUILD_METADATA_URL = new URL(
+	"/__xp_build_metadata__",
+	self.registration.scope,
+).href;
 const pendingNavigationBuilds = new Map<string, string>();
-let pendingNavigationBuildId: string | null = null;
+let cacheMutation: Promise<unknown> = Promise.resolve();
 
 function isSameOriginStaticRequest(request: Request): boolean {
 	const url = new URL(request.url);
 	return (
 		request.method === "GET" &&
 		url.origin === self.location.origin &&
+		url.pathname !== "/sw.js" &&
 		!url.pathname.startsWith("/api/") &&
 		!url.pathname.startsWith("/events")
 	);
@@ -50,14 +62,55 @@ function isSameOriginStaticRequest(request: Request): boolean {
 
 function openMetadataDb(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
-		const request = indexedDB.open(METADATA_DB_NAME, 1);
+		const request = indexedDB.open(METADATA_DB_NAME, 2);
 		request.onupgradeneeded = () => {
-			request.result.createObjectStore(METADATA_STORE_NAME, {
-				keyPath: "clientId",
-			});
+			const db = request.result;
+			if (!db.objectStoreNames.contains(METADATA_STORE_NAME)) {
+				db.createObjectStore(METADATA_STORE_NAME, { keyPath: "clientId" });
+			}
+			if (!db.objectStoreNames.contains(RETIRED_BUILD_STORE_NAME)) {
+				db.createObjectStore(RETIRED_BUILD_STORE_NAME, { keyPath: "buildId" });
+			}
 		};
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);
+	});
+}
+
+async function readRetiredBuilds(): Promise<Set<string>> {
+	const db = await openMetadataDb();
+	return new Promise((resolve, reject) => {
+		const transaction = db.transaction(RETIRED_BUILD_STORE_NAME, "readonly");
+		const request = transaction.objectStore(RETIRED_BUILD_STORE_NAME).getAll();
+		request.onsuccess = () => {
+			resolve(
+				new Set(
+					(request.result as Array<{ buildId?: unknown }>)
+						.filter((record) => typeof record.buildId === "string")
+						.map((record) => record.buildId as string),
+				),
+			);
+		};
+		request.onerror = () => reject(request.error);
+		transaction.oncomplete = () => db.close();
+	});
+}
+
+async function setRetiredBuild(
+	buildId: string,
+	retired: boolean,
+): Promise<void> {
+	const db = await openMetadataDb();
+	return new Promise((resolve, reject) => {
+		const transaction = db.transaction(RETIRED_BUILD_STORE_NAME, "readwrite");
+		const store = transaction.objectStore(RETIRED_BUILD_STORE_NAME);
+		if (retired) store.put({ buildId, retiredAt: Date.now() });
+		else store.delete(buildId);
+		transaction.oncomplete = () => {
+			db.close();
+			resolve();
+		};
+		transaction.onerror = () => reject(transaction.error);
 	});
 }
 
@@ -109,8 +162,18 @@ async function deleteOwner(clientId: string): Promise<void> {
 	});
 }
 
+async function retireBuildIfUnowned(
+	buildId: string | undefined,
+	owners: Record<string, string>,
+): Promise<void> {
+	if (buildId && !Object.values(owners).includes(buildId)) {
+		await setRetiredBuild(buildId, true);
+	}
+}
+
 async function cleanupUnownedBuildCaches(
 	owners: Record<string, string>,
+	retiredBuilds: Set<string>,
 ): Promise<string[]> {
 	const cacheNames = await caches.keys();
 	const deleted: string[] = [];
@@ -124,11 +187,15 @@ async function cleanupUnownedBuildCaches(
 		if (
 			!buildId ||
 			buildId === BUILD_ID ||
+			!retiredBuilds.has(buildId) ||
 			!canDeleteBuildCache(buildId, owners)
 		) {
 			continue;
 		}
-		if (await caches.delete(cacheName)) deleted.push(cacheName);
+		if (await caches.delete(cacheName)) {
+			deleted.push(cacheName);
+			await setRetiredBuild(buildId, false);
+		}
 	}
 	return deleted;
 }
@@ -139,8 +206,10 @@ async function reconcileOwnership(): Promise<string[]> {
 		includeUncontrolled: true,
 	});
 	const owners = await readOwners();
+	const retiredBuilds = await readRetiredBuilds();
 	const liveClientIds = new Set(windows.map((client) => client.id));
 	let hasUndeclaredClient = false;
+	const releasedBuilds = new Set<string>();
 
 	for (const client of windows) {
 		if (owners[client.id]) continue;
@@ -155,16 +224,23 @@ async function reconcileOwnership(): Promise<string[]> {
 		Object.keys(owners)
 			.filter((clientId) => !liveClientIds.has(clientId))
 			.map(async (clientId) => {
+				releasedBuilds.add(owners[clientId]);
 				await deleteOwner(clientId);
 				delete owners[clientId];
 			}),
 	);
+	for (const buildId of releasedBuilds) {
+		if (!Object.values(owners).includes(buildId)) {
+			retiredBuilds.add(buildId);
+			await setRetiredBuild(buildId, true);
+		}
+	}
 	for (const clientId of pendingNavigationBuilds.keys()) {
 		if (!liveClientIds.has(clientId)) pendingNavigationBuilds.delete(clientId);
 	}
 
 	if (!hasUndeclaredClient) {
-		return cleanupUnownedBuildCaches(owners);
+		return cleanupUnownedBuildCaches(owners, retiredBuilds);
 	}
 	return [];
 }
@@ -187,40 +263,96 @@ async function copyCache(
 	}
 }
 
+async function readBuildManifest(
+	cacheName: string,
+	expectedBuildId: string,
+): Promise<Set<string> | null> {
+	if (!(await caches.has(cacheName))) return null;
+	const cache = await caches.open(cacheName);
+	const metadataResponse = await cache.match(BUILD_METADATA_URL);
+	if (!metadataResponse) return null;
+
+	let metadata: BuildMetadata;
+	try {
+		const candidate = (await metadataResponse.json()) as Partial<BuildMetadata>;
+		if (
+			typeof candidate.buildId !== "string" ||
+			!Array.isArray(candidate.urls) ||
+			candidate.urls.length === 0 ||
+			candidate.urls.some((url) => typeof url !== "string") ||
+			candidate.buildId !== expectedBuildId
+		) {
+			return null;
+		}
+		metadata = {
+			buildId: candidate.buildId,
+			urls: candidate.urls,
+		};
+	} catch {
+		return null;
+	}
+
+	const urls = new Set(metadata.urls);
+	for (const url of urls) {
+		if (!(await cache.match(url))) return null;
+	}
+	return urls;
+}
+
+async function cacheContainsManifest(cacheName: string): Promise<boolean> {
+	return (await readBuildManifest(cacheName, BUILD_ID)) !== null;
+}
+
+async function writeBuildMetadata(
+	cache: Cache,
+	buildId: string,
+): Promise<void> {
+	await cache.put(
+		BUILD_METADATA_URL,
+		new Response(JSON.stringify({ buildId, urls: [...manifestUrls] }), {
+			headers: { "Content-Type": "application/json" },
+		}),
+	);
+}
+
+function runCacheMutation<T>(operation: () => Promise<T>): Promise<T> {
+	const next = cacheMutation.then(operation, operation);
+	cacheMutation = next.then(
+		() => undefined,
+		() => undefined,
+	);
+	return next;
+}
+
 async function replaceCacheFromStaging(
 	sourceName: string,
 	targetName: string,
 ): Promise<boolean> {
-	const backupName = `${targetName}-backup-${Date.now()}`;
-	let backupReady = false;
-	try {
-		await copyCache(targetName, backupName);
-		backupReady = true;
-		await caches.delete(targetName);
-		await copyCache(sourceName, targetName);
-		await caches.delete(backupName);
-		return true;
-	} catch {
-		await caches.delete(targetName);
-		if (backupReady) {
-			try {
-				await copyCache(backupName, targetName);
-			} catch {
-				return false;
-			}
+	return runCacheMutation(async () => {
+		// Complete build caches are immutable. An incomplete target is never
+		// served and may be rebuilt after the staged replacement is ready.
+		if (await caches.has(targetName)) {
+			if (await cacheContainsManifest(targetName)) return true;
+			if (!(await caches.delete(targetName))) return false;
 		}
-		await caches.delete(backupName);
-		return false;
-	}
+
+		try {
+			await copyCache(sourceName, targetName);
+			if (!(await cacheContainsManifest(targetName))) {
+				throw new Error("precache target is incomplete");
+			}
+			return true;
+		} catch {
+			// No controlled client can own a build before its first complete
+			// install, so an unpublished partial target can be discarded safely.
+			await caches.delete(targetName);
+			return false;
+		}
+	});
 }
 
 async function completeBuildCache(): Promise<boolean> {
-	const target = await caches.open(CACHE_NAME);
-	const missing = [] as string[];
-	for (const url of manifestUrls) {
-		if (!(await target.match(url))) missing.push(url);
-	}
-	if (missing.length === 0) return true;
+	if (await cacheContainsManifest(CACHE_NAME)) return true;
 
 	const recoveryName = `${CACHE_NAME}-recovery-${Date.now()}`;
 	const recovery = await caches.open(recoveryName);
@@ -231,6 +363,7 @@ async function completeBuildCache(): Promise<boolean> {
 				throw new Error(`precache failed: ${url} (${response.status})`);
 			await recovery.put(url, response);
 		}
+		await writeBuildMetadata(recovery, BUILD_ID);
 		if (!(await replaceCacheFromStaging(recoveryName, CACHE_NAME)))
 			return false;
 		await caches.delete(recoveryName);
@@ -255,21 +388,13 @@ async function installBuild(): Promise<void> {
 			if (!(await staging.match(url)))
 				throw new Error(`precache verification failed: ${url}`);
 		}
-		await caches.delete(CACHE_NAME);
-		const cache = await caches.open(CACHE_NAME);
-		for (const url of manifestUrls) {
-			const response = await staging.match(url);
-			if (!response) throw new Error(`precache copy failed: ${url}`);
-			await cache.put(url, response);
-		}
-		for (const url of manifestUrls) {
-			if (!(await cache.match(url)))
-				throw new Error(`precache verification failed: ${url}`);
+		await writeBuildMetadata(staging, BUILD_ID);
+		if (!(await replaceCacheFromStaging(stagingName, CACHE_NAME))) {
+			throw new Error("precache replacement failed");
 		}
 		await caches.delete(stagingName);
 	} catch (error) {
 		await caches.delete(stagingName);
-		await caches.delete(CACHE_NAME);
 		throw error;
 	}
 }
@@ -285,29 +410,35 @@ async function respondToClient(
 
 async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	const requestUrl = new URL(event.request.url);
+	const assetUrl = new URL(requestUrl.href);
+	assetUrl.search = "";
 	const requestKind = event.request.mode === "navigate" ? "navigate" : "asset";
-	if (requestKind === "navigate" && event.clientId) {
-		pendingNavigationBuilds.set(event.clientId, BUILD_ID);
-		pendingNavigationBuildId = BUILD_ID;
+	const requestClientId = event.clientId || event.resultingClientId || null;
+	if (requestKind === "navigate") {
+		if (event.clientId) pendingNavigationBuilds.set(event.clientId, BUILD_ID);
+		if (event.resultingClientId) {
+			pendingNavigationBuilds.set(event.resultingClientId, BUILD_ID);
+		}
 	}
-	if (requestKind === "asset" && !manifestUrls.has(requestUrl.href)) {
-		return new Response("Static asset is not part of the active precache.", {
-			status: 504,
-			headers: { "Content-Type": "text/plain" },
-		});
-	}
-
 	const owners = await readOwners();
-	const selectedClientBuild = event.clientId
-		? (pendingNavigationBuilds.get(event.clientId) ?? owners[event.clientId])
+	const hintedBuild = requestUrl.searchParams.get("xp-build");
+	const availableHintedBuild =
+		hintedBuild &&
+		(await readBuildManifest(appShellCacheName(hintedBuild), hintedBuild))
+			? hintedBuild
+			: null;
+	const selectedClientBuild = requestClientId
+		? (pendingNavigationBuilds.get(requestClientId) ?? owners[requestClientId])
 		: null;
 	const buildId = selectBuildForRequest({
 		requestMode: requestKind,
 		activeBuildId: BUILD_ID,
-		clientBuildId:
-			selectedClientBuild ??
-			(requestKind === "asset" ? pendingNavigationBuildId : null),
+		clientBuildId: selectedClientBuild ?? availableHintedBuild,
 	});
+	const responseUrl =
+		requestKind === "navigate"
+			? new URL("/index.html", self.registration.scope).href
+			: assetUrl.href;
 	if (!buildId) {
 		await respondToClient(event.clientId || null, {
 			type: "XP_REQUEST_BUILD_DECLARATION",
@@ -319,18 +450,40 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 			headers: { "Content-Type": "text/plain" },
 		});
 	}
+	const selectedManifest = await readBuildManifest(
+		appShellCacheName(buildId),
+		buildId,
+	);
+	if (!selectedManifest) {
+		await respondToClient(event.clientId || null, {
+			type: "XP_CACHE_MISS",
+			buildId,
+			url: responseUrl,
+		});
+		return new Response("The selected application build is incomplete.", {
+			status: 504,
+			headers: { "Content-Type": "text/plain" },
+		});
+	}
+	if (requestKind === "asset" && !selectedManifest.has(assetUrl.href)) {
+		await respondToClient(event.clientId || null, {
+			type: "XP_CACHE_MISS",
+			buildId,
+			url: assetUrl.href,
+		});
+		return new Response("Static asset is not part of the selected precache.", {
+			status: 504,
+			headers: { "Content-Type": "text/plain" },
+		});
+	}
 	const cache = await caches.open(appShellCacheName(buildId));
-	const cacheUrl =
-		requestKind === "navigate"
-			? new URL("/index.html", self.registration.scope).href
-			: requestUrl.href;
-	const response = await cache.match(cacheUrl, { ignoreSearch: true });
+	const response = await cache.match(responseUrl, { ignoreSearch: true });
 	if (response) return response;
 
 	await respondToClient(event.clientId || null, {
 		type: "XP_CACHE_MISS",
 		buildId,
-		url: requestUrl.pathname,
+		url: responseUrl,
 	});
 	return new Response("The selected application build is incomplete.", {
 		status: 504,
@@ -339,13 +492,23 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 }
 
 self.addEventListener("install", (event) => {
-	event.waitUntil(installBuild());
+	event.waitUntil(
+		(async () => {
+			const existingBuilds = await caches.keys();
+			shouldClaimClients = !existingBuilds.some(
+				(cacheName) =>
+					cacheName.startsWith(APP_SHELL_CACHE_PREFIX) &&
+					cacheName !== CACHE_NAME,
+			);
+			await installBuild();
+		})(),
+	);
 });
 
 self.addEventListener("activate", (event) => {
 	event.waitUntil(
 		(async () => {
-			await self.clients.claim();
+			if (shouldClaimClients) await self.clients.claim();
 			await reconcileOwnership();
 		})(),
 	);
@@ -367,35 +530,58 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 				return;
 			}
 			if (message?.type === "XP_DECLARE_BUILD" && clientId) {
-				if (!(await caches.has(appShellCacheName(message.buildId)))) {
+				const ownersBeforeDeclaration = await readOwners();
+				const cacheAvailable =
+					(await readBuildManifest(
+						appShellCacheName(message.buildId),
+						message.buildId,
+					)) !== null;
+				if (!cacheAvailable) {
 					await respondToClient(clientId, {
 						type: "XP_CACHE_MISS",
 						buildId: message.buildId,
 					});
 					return;
 				}
+				await setRetiredBuild(message.buildId, false);
 				await writeOwner(clientId, message.buildId);
+				const previousBuildId = ownersBeforeDeclaration[clientId];
+				const remainingOwners = Object.fromEntries(
+					Object.entries(ownersBeforeDeclaration).filter(
+						([ownerClientId]) => ownerClientId !== clientId,
+					),
+				);
+				await retireBuildIfUnowned(previousBuildId, remainingOwners);
 				pendingNavigationBuilds.delete(clientId);
-				pendingNavigationBuildId = null;
 				await reconcileOwnership();
 				return;
 			}
 			if (message?.type === "XP_RELEASE_BUILD" && clientId) {
+				const ownersBeforeRelease = await readOwners();
 				await deleteOwner(clientId);
+				const remainingOwners = Object.fromEntries(
+					Object.entries(ownersBeforeRelease).filter(
+						([ownerClientId]) => ownerClientId !== clientId,
+					),
+				);
+				await retireBuildIfUnowned(
+					ownersBeforeRelease[clientId],
+					remainingOwners,
+				);
 				pendingNavigationBuilds.delete(clientId);
-				pendingNavigationBuildId = null;
 				await reconcileOwnership();
 				return;
 			}
 			if (message?.type === "XP_REQUEST_CACHE_RECOVERY") {
 				const complete =
-					message.buildId === BUILD_ID && (await completeBuildCache());
+					(message.buildId === "active" || message.buildId === BUILD_ID) &&
+					(await completeBuildCache());
 				const deleted = complete ? await reconcileOwnership() : [];
 				await respondToClient(clientId, {
 					type: complete
 						? "XP_CACHE_RECOVERY_READY"
 						: "XP_CACHE_RECOVERY_UNAVAILABLE",
-					buildId: message.buildId,
+					buildId: BUILD_ID,
 					deleted,
 				});
 			}

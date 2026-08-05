@@ -11,10 +11,11 @@ import {
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
@@ -88,20 +89,23 @@ export function EndpointNewPage() {
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const configCapability = useApiCapability("admin.config");
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 	const adminConfigQuery = useQuery({
 		queryKey: ["adminConfig", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && configCapability.available,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
 	});
 	const form = useForm<EndpointFormInput, unknown, EndpointFormValues>({
@@ -192,6 +196,23 @@ export function EndpointNewPage() {
 			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
+
+	if (
+		endpointsCapability.unavailable ||
+		nodesCapability.unavailable ||
+		configCapability.unavailable
+	) {
+		return (
+			<CapabilityUnavailableState
+				title="Endpoint creation unavailable"
+				reason={
+					endpointsCapability.reason ??
+					nodesCapability.reason ??
+					configCapability.reason
+				}
+			/>
+		);
+	}
 
 	if (adminToken.length === 0) {
 		return (

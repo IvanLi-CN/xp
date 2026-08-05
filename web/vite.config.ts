@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -15,19 +15,32 @@ function resolveBuildId() {
 	const explicit = process.env.XP_WEB_BUILD_ID?.trim();
 	if (explicit) return explicit;
 
-	try {
-		const sha = execSync("git rev-parse --short HEAD", {
-			cwd: path.resolve(__dirname, ".."),
-			stdio: ["ignore", "pipe", "ignore"],
-		})
-			.toString()
-			.trim();
-		if (sha) return `${packageJson.version}-${sha}`;
-	} catch {
-		// ignore and fall back to package version
-	}
-
-	return packageJson.version;
+	const hash = createHash("sha256");
+	const ignoredDirectories = new Set([
+		"coverage",
+		"dist",
+		"node_modules",
+		"playwright-report",
+		"storybook-static",
+		"test-results",
+	]);
+	const visit = (directory: string) => {
+		for (const entry of fs
+			.readdirSync(directory, { withFileTypes: true })
+			.sort((left, right) => left.name.localeCompare(right.name))) {
+			if (ignoredDirectories.has(entry.name)) continue;
+			const filePath = path.join(directory, entry.name);
+			if (entry.isDirectory()) {
+				visit(filePath);
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			hash.update(path.relative(__dirname, filePath)).update("\0");
+			hash.update(fs.readFileSync(filePath));
+		}
+	};
+	visit(__dirname);
+	return `${packageJson.version}-${hash.digest("hex").slice(0, 12)}`;
 }
 
 function resolveSwUpdateIntervalMs() {
@@ -54,6 +67,50 @@ export default defineConfig(({ mode }) => {
 		plugins: [
 			react(),
 			tailwindcss(),
+			{
+				name: "xp-inline-build-declaration",
+				transformIndexHtml(html) {
+					const declaration = [
+						"<script>",
+						`window.__XP_WEB_BUILD_ID__=${JSON.stringify(buildId)};`,
+						"if (navigator.serviceWorker?.controller) {",
+						"navigator.serviceWorker.controller.postMessage({",
+						'type: "XP_DECLARE_BUILD",',
+						"buildId: window.__XP_WEB_BUILD_ID__",
+						"});",
+						"}",
+						"</script>",
+					].join("");
+					const entry = `?xp-build=${encodeURIComponent(buildId)}`;
+					return html
+						.replace(/(src="[^\"]+\.(?:js|tsx))"/, `$1${entry}"`)
+						.replace("</head>", `${declaration}</head>`);
+				},
+				configurePreviewServer(server) {
+					if (process.env.E2E_USE_PREVIEW !== "1") return;
+					server.middlewares.use((request, response, next) => {
+						if (!request.url?.startsWith("/sw.js?e2e-waiting=")) {
+							next();
+							return;
+						}
+						const serviceWorkerPath = path.resolve(__dirname, "dist/sw.js");
+						const waitingId = `e2e-waiting-${
+							new URL(request.url, "http://127.0.0.1").searchParams.get(
+								"e2e-waiting",
+							) ?? Date.now()
+						}`;
+						const source = fs.readFileSync(serviceWorkerPath, "utf8");
+						const body = `${source.replaceAll(
+							JSON.stringify(buildId),
+							JSON.stringify(waitingId),
+						)}\n/* e2e waiting revision */`;
+						response.statusCode = 200;
+						response.setHeader("Content-Type", "application/javascript");
+						response.setHeader("Cache-Control", "no-store");
+						response.end(body);
+					});
+				},
+			},
 			VitePWA({
 				registerType: "prompt",
 				injectRegister: false,

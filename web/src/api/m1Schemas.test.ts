@@ -53,18 +53,14 @@ describe("ClusterInfoResponseSchema", () => {
 		});
 	});
 
-	it("defaults fields omitted by an older compatible server", () => {
-		expect(
+	it("rejects missing fields declared by every pinned release", () => {
+		expect(() =>
 			ClusterInfoResponseSchema.parse({
 				cluster_id: "cluster",
 				node_id: "node",
 				role: "leader",
 			}),
-		).toMatchObject({
-			leader_api_base_url: "",
-			term: 0,
-			xp_version: "unknown",
-		});
+		).toThrow();
 	});
 });
 

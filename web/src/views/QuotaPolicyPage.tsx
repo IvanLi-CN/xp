@@ -571,6 +571,7 @@ export function QuotaPolicyPage() {
 		queryKey: ["adminQuotaPolicyNodeWeightRows", adminToken, selectedNodeId],
 		enabled:
 			adminToken.length > 0 &&
+			quotaCapability.available &&
 			selectedWeightTab !== "global" &&
 			Boolean(selectedNodeId),
 		queryFn: ({ signal }) =>
@@ -586,6 +587,7 @@ export function QuotaPolicyPage() {
 		queryKey: ["adminQuotaPolicyNodePolicy", adminToken, selectedNodeId],
 		enabled:
 			adminToken.length > 0 &&
+			quotaCapability.available &&
 			selectedWeightTab !== "global" &&
 			Boolean(selectedNodeId),
 		queryFn: ({ signal }) =>
