@@ -11,7 +11,11 @@ import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuo
 import type { AdminUser } from "../../src/api/adminUsers";
 import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
 import type { HealthResponse } from "../../src/api/health";
-import type { ApiCapability } from "../../src/api/releaseInventories";
+import {
+	API_CAPABILITIES,
+	type ApiCapability,
+	CURRENT_API_FINGERPRINT,
+} from "../../src/api/releaseInventories";
 import type { VersionCheckResponse } from "../../src/api/versionCheck";
 import type {
 	MockEndpointSeed,
@@ -54,31 +58,11 @@ export type MockStateSeed = {
 
 export const DEFAULT_API_CAPABILITIES = {
 	release_tag: "v3.22.5",
-	capabilities: [
-		"api.health",
-		"api.cluster-info",
-		"admin.nodes",
-		"admin.users",
-		"admin.endpoints",
-		"admin.quota-policy",
-		"admin.status-events",
-		"admin.upgrade",
-		"admin.mesh",
-		"admin.reality-domains",
-		"admin.node-probes",
-		"admin.traffic-usage",
-		"admin.mihomo-tools",
-	] satisfies ApiCapability[],
-	fingerprint: {
-		"/api/health": ["status"],
-		"/api/cluster/info": [
-			"cluster_id",
-			"node_id",
-			"role",
-			"leader_api_base_url",
-			"term",
-		],
-		"/api/admin/nodes": ["items"],
-		"/api/admin/status/events": ["hello", "snapshot"],
-	},
+	capabilities: [...API_CAPABILITIES] satisfies ApiCapability[],
+	fingerprint: Object.fromEntries(
+		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [
+			path,
+			[...fields],
+		]),
+	),
 };

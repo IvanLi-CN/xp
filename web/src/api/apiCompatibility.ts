@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { throwIfNotOk } from "./backendError";
+import { isBackendApiError, throwIfNotOk } from "./backendError";
 import {
-	API_CAPABILITIES,
 	API_COMPATIBILITY_WINDOW,
 	type ApiCapability,
 	type ApiCompatibilityMinor,
@@ -65,14 +64,10 @@ function commonProfile(
 	candidates: ReleaseInventory[],
 ): ReleaseInventory | null {
 	if (candidates.length === 0) return null;
-	const first = candidates[0];
-	if (!first) return null;
-	const signature = first.capabilities.join("\u0000");
-	return candidates.every(
-		(candidate) => candidate.capabilities.join("\u0000") === signature,
-	)
-		? first
-		: null;
+	const signatures = new Set(
+		candidates.map((candidate) => candidate.capabilities.join("\u0000")),
+	);
+	return signatures.size === 1 ? (candidates[0] ?? null) : null;
 }
 
 function compatibleResult(
@@ -134,9 +129,7 @@ export function resolveApiCompatibility(input: {
 			(candidate) => candidate.capabilities.length === smallestProfileSize,
 		);
 		const profile =
-			leastSpecificCandidates.length === 1
-				? leastSpecificCandidates[0]
-				: commonProfile(leastSpecificCandidates);
+			leastSpecificCandidates[0] ?? commonProfile(leastSpecificCandidates);
 		if (profile) return compatibleResult(profile, advertised);
 		return {
 			kind: "incompatible",
@@ -148,8 +141,19 @@ export function resolveApiCompatibility(input: {
 		const candidates = RELEASE_INVENTORIES.filter((profile) =>
 			fingerprintMatches(input.fingerprint ?? {}, profile),
 		);
+		const mostSpecificSize = Math.max(
+			...candidates.map(
+				(candidate) => Object.keys(candidate.fingerprint).length,
+			),
+		);
+		const mostSpecificCandidates = candidates.filter(
+			(candidate) =>
+				Object.keys(candidate.fingerprint).length === mostSpecificSize,
+		);
 		const profile =
-			candidates.length === 1 ? candidates[0] : commonProfile(candidates);
+			mostSpecificCandidates.length === 1
+				? mostSpecificCandidates[0]
+				: commonProfile(mostSpecificCandidates);
 		if (profile) return compatibleResult(profile, profile.capabilities);
 	}
 
@@ -182,9 +186,10 @@ async function fetchApiFingerprint(options: {
 	signal?: AbortSignal;
 }): Promise<ApiFingerprint> {
 	const probes = [
-		{ path: "/api/health", auth: false },
-		{ path: "/api/cluster/info", auth: false },
-		{ path: "/api/admin/nodes", auth: true },
+		{ path: "/api/health", auth: false, optional: false },
+		{ path: "/api/cluster/info", auth: false, optional: false },
+		{ path: "/api/admin/nodes", auth: true, optional: false },
+		{ path: "/api/admin/mesh/status", auth: true, optional: true },
 	] as const;
 	const fingerprint: ApiFingerprint = {};
 	for (const probe of probes) {
@@ -198,6 +203,7 @@ async function fetchApiFingerprint(options: {
 			},
 			signal: options.signal,
 		});
+		if (res.status === 404 && probe.optional) continue;
 		await throwIfNotOk(res);
 		const payload = (await res.json()) as unknown;
 		if (
@@ -226,7 +232,14 @@ export async function fetchApiCompatibility(options?: {
 			capabilities: capabilities.capabilities,
 			fingerprint: capabilities.fingerprint,
 		});
-	} catch {
+	} catch (error) {
+		if (!isBackendApiError(error) || error.status !== 404) {
+			return {
+				kind: "incompatible",
+				reason:
+					"The capabilities endpoint returned an invalid or failed response",
+			};
+		}
 		try {
 			const version = await fetchVersionCheck({ signal: options?.signal });
 			return resolveApiCompatibility({
@@ -245,13 +258,4 @@ export async function fetchApiCompatibility(options?: {
 			}
 		}
 	}
-}
-
-export function capabilityFromRoute(route: string): ApiCapability | null {
-	if (route === "GET /api/admin/status/events") return "admin.status-events";
-	if (route === "GET /api/health") return "api.health";
-	if (route === "GET /api/cluster/info") return "api.cluster-info";
-	return (
-		API_CAPABILITIES.find((capability) => route.includes(capability)) ?? null
-	);
 }

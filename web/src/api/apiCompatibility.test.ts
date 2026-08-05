@@ -50,7 +50,7 @@ describe("api compatibility", () => {
 		);
 	});
 
-	it("rejects invalid and ambiguous fingerprints", () => {
+	it("rejects incomplete fingerprints", () => {
 		expect(
 			resolveApiCompatibility({
 				fingerprint: {
@@ -59,6 +59,53 @@ describe("api compatibility", () => {
 				},
 			}).kind,
 		).toBe("incompatible");
+	});
+
+	it("resolves equivalent legacy fingerprints without guessing a mixed build", () => {
+		const result = resolveApiCompatibility({
+			fingerprint: {
+				"/api/health": ["status"],
+				"/api/cluster/info": [
+					"cluster_id",
+					"node_id",
+					"role",
+					"leader_api_base_url",
+					"term",
+				],
+				"/api/admin/nodes": ["items"],
+			},
+		});
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind === "compatible") {
+			expect(["3.21", "3.20"]).toContain(result.profile.minor);
+		}
+	});
+
+	it("selects the newest fingerprint profile when its mesh contract is present", () => {
+		const result = resolveApiCompatibility({
+			fingerprint: {
+				"/api/health": ["status"],
+				"/api/cluster/info": [
+					"cluster_id",
+					"node_id",
+					"role",
+					"leader_api_base_url",
+					"term",
+				],
+				"/api/admin/nodes": ["items"],
+				"/api/admin/mesh/status": [
+					"generated_at",
+					"revision",
+					"local",
+					"peers",
+					"events",
+				],
+			},
+		});
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind === "compatible") expect(result.profile.minor).toBe("3.22");
 	});
 
 	it("falls back from the additive probe to the strict release endpoint", async () => {
@@ -95,5 +142,23 @@ describe("api compatibility", () => {
 			"/api/version/check",
 			expect.objectContaining({ method: "GET" }),
 		);
+	});
+
+	it("does not downgrade a malformed capabilities response", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ capabilities: 3 }), { status: 200 }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { fetchApiCompatibility } = await import("./apiCompatibility");
+		const result = await fetchApiCompatibility();
+
+		expect(result).toEqual({
+			kind: "incompatible",
+			reason: expect.stringContaining("invalid or failed"),
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

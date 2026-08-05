@@ -172,22 +172,34 @@ describe("framework error recovery", () => {
 	});
 
 	it("does not clear caches until a waiting worker proves a complete replacement", async () => {
-		const cacheStorage = {
-			keys: vi.fn(async () => ["xp-app-shell-build-123"]),
-			delete: vi.fn(async () => true),
-		};
 		const update = vi.fn(async () => undefined);
+		const listeners = new Set<(event: MessageEvent) => void>();
+		let waiting: object | null = null;
+		const serviceWorkerContainer = {
+			getRegistration: vi.fn(async () => ({ update, waiting })),
+			controller: {
+				postMessage: vi.fn(() => {
+					for (const listener of listeners) {
+						listener({
+							data: {
+								type: "XP_CACHE_RECOVERY_READY",
+								buildId: "development",
+								deleted: ["xp-app-shell-build-123"],
+							},
+						} as MessageEvent);
+					}
+				}),
+			},
+			addEventListener: vi.fn((_type, listener) => listeners.add(listener)),
+			removeEventListener: vi.fn((_type, listener) =>
+				listeners.delete(listener),
+			),
+		};
 
 		await expect(
 			recoverXpAppShell({
-				cacheStorage,
 				isOnline: true,
-				serviceWorkerContainer: {
-					getRegistration: vi.fn(async () => ({
-						update,
-						waiting: null,
-					})),
-				},
+				serviceWorkerContainer,
 			}),
 		).resolves.toEqual({
 			status: "skipped",
@@ -195,22 +207,20 @@ describe("framework error recovery", () => {
 			deleted: [],
 		});
 		expect(update).toHaveBeenCalledOnce();
-		expect(cacheStorage.keys).not.toHaveBeenCalled();
 
+		waiting = {};
 		await expect(
 			recoverXpAppShell({
-				cacheStorage,
 				isOnline: true,
-				serviceWorkerContainer: {
-					getRegistration: vi.fn(async () => ({
-						update,
-						waiting: {},
-					})),
-				},
+				serviceWorkerContainer,
 			}),
 		).resolves.toEqual({
 			status: "cleared",
 			deleted: ["xp-app-shell-build-123"],
+		});
+		expect(serviceWorkerContainer.controller.postMessage).toHaveBeenCalledWith({
+			type: "XP_REQUEST_CACHE_RECOVERY",
+			buildId: "development",
 		});
 	});
 });

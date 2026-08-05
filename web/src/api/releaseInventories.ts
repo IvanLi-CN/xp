@@ -31,7 +31,17 @@ export type ReleaseInventory = {
 	fingerprint: Readonly<Record<string, readonly string[]>>;
 };
 
-const API_ROUTES = [
+export type ReleaseCompatibilityContract = {
+	direction: "new-web-to-legacy-api" | "legacy-web-to-new-api";
+	consumerReleaseTag: string;
+	serverReleaseTag: string;
+	serverMinor: ApiCompatibilityMinor;
+	apiRoutes: readonly string[];
+	webCallsites: readonly string[];
+	responseSchemas: Readonly<Record<string, readonly string[]>>;
+};
+
+const API_ROUTES_322 = [
 	"GET /api/health",
 	"GET /api/cluster/info",
 	"GET /api/capabilities",
@@ -107,7 +117,14 @@ const API_ROUTES = [
 	"GET /events",
 ] as const;
 
-const WEB_CALLSITES = [
+const API_ROUTES_320_321 = API_ROUTES_322.filter(
+	(route) =>
+		route !== "GET /api/capabilities" &&
+		route !== "GET /api/admin/mesh/status" &&
+		route !== "POST /api/admin/mesh/probes",
+);
+
+const WEB_CALLSITES_322 = [
 	"adminAlerts",
 	"adminAuth",
 	"adminConfig",
@@ -141,7 +158,11 @@ const WEB_CALLSITES = [
 	"versionCheck",
 ] as const;
 
-const RESPONSE_SCHEMAS = {
+const WEB_CALLSITES_320_321 = WEB_CALLSITES_322.filter(
+	(callsite) => callsite !== "adminMesh",
+);
+
+const RESPONSE_SCHEMAS_320 = {
 	"GET /api/health": ["status"],
 	"GET /api/cluster/info": [
 		"cluster_id",
@@ -151,14 +172,46 @@ const RESPONSE_SCHEMAS = {
 		"term",
 		"xp_version",
 	],
-	"GET /api/capabilities": ["release_tag", "capabilities", "fingerprint"],
 	"GET /api/admin/nodes": ["items"],
 	"GET /api/admin/nodes/runtime": ["partial", "unreachable_nodes", "items"],
 	"GET /api/admin/status/events": ["hello", "snapshot"],
 	"GET /api/version/check": ["current", "latest", "has_update", "checked_at"],
 } as const;
 
-const FINGERPRINT = {
+const RESPONSE_SCHEMAS_321 = {
+	...RESPONSE_SCHEMAS_320,
+	"GET /api/admin/config": [
+		"bind",
+		"xray_api_addr",
+		"data_dir",
+		"node_name",
+		"access_host",
+		"api_base_url",
+		"vless_https_canary_bind",
+		"quota_poll_interval_secs",
+		"quota_auto_unban",
+		"ip_geo_enabled",
+		"ip_geo_origin",
+		"admin_token_present",
+		"admin_token_masked",
+	],
+	"GET /api/sub/{subscription_token}": ["text/plain"],
+} as const;
+
+const RESPONSE_SCHEMAS_322 = {
+	...RESPONSE_SCHEMAS_321,
+	"GET /api/admin/status/events": ["hello", "snapshot", "mesh_revision"],
+	"GET /api/admin/mesh/status": [
+		"generated_at",
+		"revision",
+		"local",
+		"peers",
+		"events",
+	],
+	"GET /api/capabilities": ["release_tag", "capabilities", "fingerprint"],
+} as const;
+
+const FINGERPRINT_320_321 = {
 	"/api/health": ["status"],
 	"/api/cluster/info": [
 		"cluster_id",
@@ -168,6 +221,30 @@ const FINGERPRINT = {
 		"term",
 	],
 	"/api/admin/nodes": ["items"],
+} as const;
+
+const FINGERPRINT_322 = {
+	...FINGERPRINT_320_321,
+	"/api/admin/mesh/status": [
+		"generated_at",
+		"revision",
+		"local",
+		"peers",
+		"events",
+	],
+} as const;
+
+export const CURRENT_API_FINGERPRINT = {
+	"/api/health": ["status"],
+	"/api/cluster/info": [
+		"cluster_id",
+		"node_id",
+		"role",
+		"leader_api_base_url",
+		"term",
+	],
+	"/api/admin/nodes": ["items"],
+	"/api/admin/status/events": ["hello", "snapshot"],
 } as const;
 
 const COMMON_CAPABILITIES = [
@@ -188,35 +265,57 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		minor: "3.22",
 		releaseTag: "v3.22.5",
 		sourceCommit: "d7e1e652fbd5fa07442bd960894764a5b81ef3bc",
-		apiRoutes: API_ROUTES,
-		webCallsites: WEB_CALLSITES,
-		responseSchemas: RESPONSE_SCHEMAS,
+		apiRoutes: API_ROUTES_322,
+		webCallsites: WEB_CALLSITES_322,
+		responseSchemas: RESPONSE_SCHEMAS_322,
 		capabilities: [
 			...COMMON_CAPABILITIES,
 			"admin.mesh",
 			"admin.reality-domains",
 			"admin.node-probes",
 		],
-		fingerprint: FINGERPRINT,
+		fingerprint: FINGERPRINT_322,
 	},
 	{
 		minor: "3.21",
 		releaseTag: "v3.21.11",
 		sourceCommit: "8cf9564f366cb260b35106396840cbe3ed903c75",
-		apiRoutes: API_ROUTES,
-		webCallsites: WEB_CALLSITES,
-		responseSchemas: RESPONSE_SCHEMAS,
+		apiRoutes: API_ROUTES_320_321,
+		webCallsites: WEB_CALLSITES_320_321,
+		responseSchemas: RESPONSE_SCHEMAS_321,
 		capabilities: COMMON_CAPABILITIES,
-		fingerprint: FINGERPRINT,
+		fingerprint: FINGERPRINT_320_321,
 	},
 	{
 		minor: "3.20",
 		releaseTag: "v3.20.3",
 		sourceCommit: "aee855e41f63af0c99f296259b038cda73e24ae9",
-		apiRoutes: API_ROUTES,
-		webCallsites: WEB_CALLSITES,
-		responseSchemas: RESPONSE_SCHEMAS,
+		apiRoutes: API_ROUTES_320_321,
+		webCallsites: WEB_CALLSITES_320_321,
+		responseSchemas: RESPONSE_SCHEMAS_320,
 		capabilities: COMMON_CAPABILITIES,
-		fingerprint: FINGERPRINT,
+		fingerprint: FINGERPRINT_320_321,
 	},
 ] as const;
+
+export const RELEASE_COMPATIBILITY_CONTRACTS: readonly ReleaseCompatibilityContract[] =
+	RELEASE_INVENTORIES.flatMap((inventory) => [
+		{
+			direction: "new-web-to-legacy-api" as const,
+			consumerReleaseTag: "current",
+			serverReleaseTag: inventory.releaseTag,
+			serverMinor: inventory.minor,
+			apiRoutes: inventory.apiRoutes,
+			webCallsites: inventory.webCallsites,
+			responseSchemas: inventory.responseSchemas,
+		},
+		{
+			direction: "legacy-web-to-new-api" as const,
+			consumerReleaseTag: inventory.releaseTag,
+			serverReleaseTag: "v3.22.5",
+			serverMinor: "3.22" as const,
+			apiRoutes: inventory.apiRoutes,
+			webCallsites: inventory.webCallsites,
+			responseSchemas: inventory.responseSchemas,
+		},
+	]);

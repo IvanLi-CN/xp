@@ -108,25 +108,25 @@ async function deleteOwner(clientId: string): Promise<void> {
 
 async function cleanupUnownedBuildCaches(
 	owners: Record<string, string>,
-): Promise<void> {
+): Promise<string[]> {
 	const cacheNames = await caches.keys();
-	await Promise.all(
-		cacheNames.map(async (cacheName) => {
-			if (!cacheName.startsWith(APP_SHELL_CACHE_PREFIX)) return;
-			const buildId = buildIdFromCacheName(cacheName);
-			if (
-				!buildId ||
-				buildId === BUILD_ID ||
-				!canDeleteBuildCache(buildId, owners)
-			) {
-				return;
-			}
-			await caches.delete(cacheName);
-		}),
-	);
+	const deleted: string[] = [];
+	for (const cacheName of cacheNames) {
+		if (!cacheName.startsWith(APP_SHELL_CACHE_PREFIX)) continue;
+		const buildId = buildIdFromCacheName(cacheName);
+		if (
+			!buildId ||
+			buildId === BUILD_ID ||
+			!canDeleteBuildCache(buildId, owners)
+		) {
+			continue;
+		}
+		if (await caches.delete(cacheName)) deleted.push(cacheName);
+	}
+	return deleted;
 }
 
-async function reconcileOwnership(): Promise<void> {
+async function reconcileOwnership(): Promise<string[]> {
 	const windows = await self.clients.matchAll({
 		type: "window",
 		includeUncontrolled: true,
@@ -147,12 +147,16 @@ async function reconcileOwnership(): Promise<void> {
 	await Promise.all(
 		Object.keys(owners)
 			.filter((clientId) => !liveClientIds.has(clientId))
-			.map((clientId) => deleteOwner(clientId)),
+			.map(async (clientId) => {
+				await deleteOwner(clientId);
+				delete owners[clientId];
+			}),
 	);
 
 	if (!hasUndeclaredClient) {
-		await cleanupUnownedBuildCaches(owners);
+		return cleanupUnownedBuildCaches(owners);
 	}
+	return [];
 }
 
 async function completeBuildCache(): Promise<boolean> {
@@ -166,14 +170,12 @@ async function completeBuildCache(): Promise<boolean> {
 	const recoveryName = `${CACHE_NAME}-recovery-${Date.now()}`;
 	const recovery = await caches.open(recoveryName);
 	try {
-		await Promise.all(
-			[...manifestUrls].map(async (url) => {
-				const response = await fetch(new Request(url, { cache: "reload" }));
-				if (!response.ok)
-					throw new Error(`precache failed: ${url} (${response.status})`);
-				await recovery.put(url, response);
-			}),
-		);
+		for (const url of manifestUrls) {
+			const response = await fetch(new Request(url, { cache: "reload" }));
+			if (!response.ok)
+				throw new Error(`precache failed: ${url} (${response.status})`);
+			await recovery.put(url, response);
+		}
 		for (const url of manifestUrls) {
 			const response = await recovery.match(url);
 			if (!response) throw new Error(`precache verification failed: ${url}`);
@@ -188,21 +190,33 @@ async function completeBuildCache(): Promise<boolean> {
 }
 
 async function installBuild(): Promise<void> {
-	const cache = await caches.open(CACHE_NAME);
+	const stagingName = `${CACHE_NAME}-install-${Date.now()}`;
+	const staging = await caches.open(stagingName);
 	try {
-		await Promise.all(
-			[...manifestUrls].map(async (url) => {
-				const response = await fetch(new Request(url, { cache: "reload" }));
-				if (!response.ok)
-					throw new Error(`precache failed: ${url} (${response.status})`);
-				await cache.put(url, response);
-			}),
-		);
+		for (const url of manifestUrls) {
+			const response = await fetch(new Request(url, { cache: "reload" }));
+			if (!response.ok)
+				throw new Error(`precache failed: ${url} (${response.status})`);
+			await staging.put(url, response);
+		}
+		for (const url of manifestUrls) {
+			if (!(await staging.match(url)))
+				throw new Error(`precache verification failed: ${url}`);
+		}
+		await caches.delete(CACHE_NAME);
+		const cache = await caches.open(CACHE_NAME);
+		for (const url of manifestUrls) {
+			const response = await staging.match(url);
+			if (!response) throw new Error(`precache copy failed: ${url}`);
+			await cache.put(url, response);
+		}
 		for (const url of manifestUrls) {
 			if (!(await cache.match(url)))
 				throw new Error(`precache verification failed: ${url}`);
 		}
+		await caches.delete(stagingName);
 	} catch (error) {
+		await caches.delete(stagingName);
 		await caches.delete(CACHE_NAME);
 		throw error;
 	}
@@ -300,11 +314,13 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 			if (message?.type === "XP_REQUEST_CACHE_RECOVERY") {
 				const complete =
 					message.buildId === BUILD_ID && (await completeBuildCache());
+				const deleted = complete ? await reconcileOwnership() : [];
 				await respondToClient(clientId, {
 					type: complete
 						? "XP_CACHE_RECOVERY_READY"
 						: "XP_CACHE_RECOVERY_UNAVAILABLE",
 					buildId: message.buildId,
+					deleted,
 				});
 			}
 		})(),

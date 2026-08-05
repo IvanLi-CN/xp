@@ -136,7 +136,7 @@ export function FrameworkErrorRecovery({
 	isOnline,
 	repeatFailure = false,
 	onReload = defaultReload,
-	onClearCachedApp = () => recoverXpAppShell({ isOnline }),
+	onClearCachedApp = () => recoverXpAppShell({ buildId, isOnline }),
 }: FrameworkErrorRecoveryProps) {
 	const category = categoryProp ?? classifyFrameworkError(error, { isOnline });
 	const copy = CATEGORY_COPY[category];

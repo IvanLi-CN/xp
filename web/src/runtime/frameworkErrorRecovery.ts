@@ -43,8 +43,18 @@ type ServiceWorkerRegistrationLike = {
 };
 
 type SafeCacheRecoveryOptions = CacheRecoveryOptions & {
+	buildId?: string;
 	serviceWorkerContainer?: {
 		getRegistration: () => Promise<ServiceWorkerRegistrationLike | undefined>;
+		controller?: { postMessage: (message: unknown) => void } | null;
+		addEventListener?: (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
+		removeEventListener?: (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
 	};
 	replacementProbe?: (
 		registration: ServiceWorkerRegistrationLike,
@@ -303,9 +313,78 @@ export async function recoverXpAppShell(
 		const replacementReady = await (
 			options.replacementProbe ?? defaultReplacementProbe
 		)(registration);
-		return clearXpAppShellCaches({
-			...options,
-			replacementReady: async () => replacementReady,
+		if (!replacementReady) {
+			return {
+				status: "skipped",
+				reason: "replacement-unavailable",
+				deleted: [],
+			};
+		}
+
+		const controller = serviceWorkerContainer.controller;
+		const addEventListener = serviceWorkerContainer.addEventListener as (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
+		const removeEventListener = serviceWorkerContainer.removeEventListener as (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
+		if (!controller || !addEventListener || !removeEventListener) {
+			return {
+				status: "skipped",
+				reason: "service-worker-unavailable",
+				deleted: [],
+			};
+		}
+
+		return await new Promise<CacheRecoveryResult>((resolve) => {
+			const buildId = options.buildId ?? "development";
+			const onMessage = (event: MessageEvent) => {
+				const data = event.data as
+					| {
+							type?: string;
+							buildId?: string;
+							deleted?: unknown;
+					  }
+					| undefined;
+				if (
+					data?.buildId !== buildId ||
+					(data.type !== "XP_CACHE_RECOVERY_READY" &&
+						data.type !== "XP_CACHE_RECOVERY_UNAVAILABLE")
+				) {
+					return;
+				}
+				clearTimeout(timeoutId);
+				removeEventListener("message", onMessage);
+				const deleted = Array.isArray(data.deleted)
+					? data.deleted.filter(
+							(value): value is string => typeof value === "string",
+						)
+					: [];
+				resolve(
+					data.type === "XP_CACHE_RECOVERY_READY"
+						? { status: "cleared", deleted }
+						: {
+								status: "skipped",
+								reason: "replacement-unavailable",
+								deleted: [],
+							},
+				);
+			};
+			const timeoutId = setTimeout(() => {
+				removeEventListener("message", onMessage);
+				resolve({
+					status: "skipped",
+					reason: "replacement-unavailable",
+					deleted: [],
+				});
+			}, 10_000);
+			addEventListener("message", onMessage);
+			controller.postMessage({
+				type: "XP_REQUEST_CACHE_RECOVERY",
+				buildId,
+			});
 		});
 	} catch {
 		return {
