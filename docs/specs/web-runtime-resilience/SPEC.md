@@ -93,7 +93,7 @@
   因而窗口为 `3.22`、`3.21`、`3.20`。
 - 后端 API 在兼容窗口内保持旧 Web 已使用字段与语义；新增字段默认 additive。
 - Web schema 对兼容窗口内缺失的可选字段提供明确默认值，未知新增字段保持可忽略。
-- 构建测试必须分别从 `N` 的 `v3.22.4`，以及 `N-1`、`N-2` 各 minor 最新正式 release tag
+- 构建测试必须分别从 `N` 的 `v3.22.5`，以及 `N-1`、`N-2` 各 minor 最新正式 release tag
   提取不可变的 Web `/api`、`/events` callsites、请求/响应 schema 与后端路由 inventory；
   双向 fixture 与版本化旧客户端合同必须覆盖三份 inventory 的并集，禁止以当前源码或抽样页面替代。
 - 每个受控页面必须向 Service Worker 声明自己的 Web build ID；Service Worker 维护
