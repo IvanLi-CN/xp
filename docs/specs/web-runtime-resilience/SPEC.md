@@ -182,11 +182,12 @@ PR: none
 ## 实现前置条件（Definition of Ready / Preconditions）
 
 - [x] 主人已批准 Initiative 范围、双 Ticket 边界、API 兼容窗口与最终 owner approval gate。
-- [ ] 前置 PR 合入后，两个 Ticket 必须在 canonical GitHub tracker 创建并回填 Issue URL；
-      Ticket 创建前不得派发实现任务。
+- [x] 两个 Ticket 已在 canonical GitHub tracker 创建：
+      [#226 framework error recovery](https://github.com/IvanLi-CN/xp/issues/226) 与
+      [#227 atomic PWA updates and API compatibility](https://github.com/IvanLi-CN/xp/issues/227)。
 - [x] PWA 缓存生命周期与 API 兼容合同保持独立，不以 build ID 或缓存键耦合。
 - [x] UI 交付需先补 Storybook 状态，再由稳定 `ui_demo` 提供视觉证据。
-- [ ] 两个 Ticket URL 回填后，dispatch readiness 才成立；产品与架构决策本身已冻结。
+- [x] 两个 Ticket URL 已回填，dispatch readiness 成立；产品与架构决策已冻结。
 
 ## 实现里程碑（Milestones）
 
