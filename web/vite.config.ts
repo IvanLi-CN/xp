@@ -57,6 +57,9 @@ export default defineConfig(({ mode }) => {
 			VitePWA({
 				registerType: "prompt",
 				injectRegister: false,
+				strategies: "injectManifest",
+				srcDir: "src",
+				filename: "sw.ts",
 				includeAssets: [
 					"favicon.ico",
 					"favicon-16x16.png",
@@ -85,12 +88,9 @@ export default defineConfig(({ mode }) => {
 						},
 					],
 				},
-				workbox: {
+				injectManifest: {
 					globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webmanifest}"],
 					maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-					navigateFallback: "/index.html",
-					navigateFallbackDenylist: [/^\/api\//, /^\/events(?:\/|$)/],
-					cleanupOutdatedCaches: true,
 					sourcemap: true,
 				},
 			}),

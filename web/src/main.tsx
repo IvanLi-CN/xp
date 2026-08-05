@@ -13,6 +13,7 @@ import { UiPrefsProvider } from "./components/UiPrefs";
 import { AppRuntimeProvider } from "./offline/appRuntime";
 import { installOfflineApiWriteGuard } from "./offline/installOfflineApiWriteGuard";
 import { createPersistOptions } from "./offline/queryPersistence";
+import { declareServiceWorkerBuild } from "./offline/serviceWorkerBuild";
 import { createQueryClient } from "./queryClient";
 import { createAppRouter } from "./router";
 import { renderDocumentFallback } from "./runtime/documentFallback";
@@ -25,6 +26,7 @@ function bootstrap() {
 
 	installDocumentFallbackHandlers(rootElement);
 	installOfflineApiWriteGuard();
+	declareServiceWorkerBuild();
 
 	const queryClient = createQueryClient();
 	const router = createAppRouter();

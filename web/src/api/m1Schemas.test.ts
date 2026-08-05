@@ -52,6 +52,20 @@ describe("ClusterInfoResponseSchema", () => {
 			xp_version: "0.0.0",
 		});
 	});
+
+	it("defaults fields omitted by an older compatible server", () => {
+		expect(
+			ClusterInfoResponseSchema.parse({
+				cluster_id: "cluster",
+				node_id: "node",
+				role: "leader",
+			}),
+		).toMatchObject({
+			leader_api_base_url: "",
+			term: 0,
+			xp_version: "unknown",
+		});
+	});
 });
 
 describe("AdminNodesResponseSchema", () => {

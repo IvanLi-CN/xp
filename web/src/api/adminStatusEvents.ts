@@ -12,15 +12,17 @@ const AdminStatusEventsHelloSchema = z.object({
 	connected_at: z.string(),
 });
 
-const AdminStatusEventsSnapshotSchema = z.object({
-	emitted_at: z.string(),
-	health: HealthResponseSchema,
-	cluster_info: ClusterInfoResponseSchema,
-	nodes_runtime: AdminNodesRuntimeResponseSchema,
-	alerts: AlertsResponseSchema,
-	upgrade: AdminUpgradeStatusResponseSchema,
-	mesh_revision: z.number(),
-});
+const AdminStatusEventsSnapshotSchema = z
+	.object({
+		emitted_at: z.string(),
+		health: HealthResponseSchema,
+		cluster_info: ClusterInfoResponseSchema,
+		nodes_runtime: AdminNodesRuntimeResponseSchema,
+		alerts: AlertsResponseSchema,
+		upgrade: AdminUpgradeStatusResponseSchema,
+		mesh_revision: z.number().default(0),
+	})
+	.passthrough();
 
 const AdminStatusEventsErrorSchema = z.object({
 	message: z.string(),

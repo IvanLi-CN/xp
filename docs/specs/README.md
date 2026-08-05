@@ -109,6 +109,6 @@
 - `Lifecycle`: `draft|active|superseded|retired`
 - `Implementation`: 自由文本的 current truth，例如 `未开始`、`部分完成`、`已完成`
 
-| Topic          | Lifecycle | Implementation | Spec                             | Successor |
-| -------------- | --------- | -------------- | -------------------------------- | --------- |
-| Web 运行时韧性 | active    | 未开始         | `web-runtime-resilience/SPEC.md` | -         |
+| Topic         | Lifecycle | Implementation  | Spec                             | Successor  |
+| ------------- | --------- | --------------- | -------------------------------- | ---------- |
+| Web运行时韧性 | active    | 部分完成（1/2） | `web-runtime-resilience/SPEC.md` | #227 child |

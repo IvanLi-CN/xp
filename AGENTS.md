@@ -65,6 +65,15 @@
   terminal status, a structured rejection, or timeout. During that observation, duplicate Upgrade
   remains disabled even if the popover is manually closed; timeout stays locked until a manual
   status query proves an active job (new window) or idle/terminal state (unlock).
+- The Web PWA must keep each build's complete static app shell in a build-versioned precache. New
+  workers wait for explicit user confirmation; `xp_sw_metadata` owns cross-tab
+  `clientId -> buildId` records. Old app-shell caches remain until reconciliation proves that no
+  controlled client uses them.
+  Navigation and static subresources must never be assembled from mixed builds.
+- Web/API compatibility is independent of PWA build IDs. The supported window is the immutable
+  3.22/3.21/3.20 release inventory; Web probes additive capabilities first, then a strict stable
+  release tag and local endpoint fingerprints. Missing profile capabilities degrade only their
+  feature, while declared capability 404/schema failures remain regressions.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.

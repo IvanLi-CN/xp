@@ -67,7 +67,63 @@ test("warm-loads cached nodes page offline after first successful visit", async 
 	});
 
 	await page.reload();
-	await page.waitForTimeout(1000);
+	await page.waitForFunction(async () => {
+		if (
+			!("serviceWorker" in navigator) ||
+			!navigator.serviceWorker.controller
+		) {
+			return false;
+		}
+		const registration = await navigator.serviceWorker.ready;
+		if (!registration.active?.scriptURL.endsWith("/sw.js")) return false;
+		const appShellCache = (await caches.keys()).find((name) =>
+			name.startsWith("xp-app-shell-"),
+		);
+		if (!appShellCache) return false;
+		const cache = await caches.open(appShellCache);
+		const cachedUrls = new Set(
+			(await cache.keys()).map((request) => request.url),
+		);
+		if (
+			!["/index.html", "/site.webmanifest"].every((path) =>
+				cachedUrls.has(new URL(path, location.origin).href),
+			)
+		) {
+			return false;
+		}
+		if (
+			![...cachedUrls].some((url) =>
+				/\.(?:js|css)$/.test(new URL(url).pathname),
+			)
+		) {
+			return false;
+		}
+		const db = await new Promise<IDBDatabase | null>((resolve, reject) => {
+			const request = indexedDB.open("xp_sw_metadata");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		if (!db?.objectStoreNames.contains("client_build_owners")) {
+			db?.close();
+			return false;
+		}
+		const owners = await new Promise<unknown[]>((resolve, reject) => {
+			const request = db
+				.transaction("client_build_owners", "readonly")
+				.objectStore("client_build_owners")
+				.getAll();
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		db.close();
+		return owners.some(
+			(owner) =>
+				typeof owner === "object" &&
+				owner !== null &&
+				"clientId" in owner &&
+				"buildId" in owner,
+		);
+	});
 
 	await page.unroute("**/api/**");
 	await context.setOffline(true);

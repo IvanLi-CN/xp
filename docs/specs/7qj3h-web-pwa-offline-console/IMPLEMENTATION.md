@@ -14,6 +14,12 @@
   frontend bundle availability; it does not reuse the backend
   `VersionIndicator` upgrade job wording. The prompt now actively polls the
   registered Service Worker for updates while the app is open.
+- The runtime-resilience follow-up uses `injectManifest` with
+  `web/src/sw.ts`. Each build is precached under an independent cache name;
+  incomplete installs are discarded before activation, the worker remains
+  waiting for confirmation, and `xp_sw_metadata` records the build owned by
+  each controlled client. Navigation always uses the active build while
+  static subresources stay on the declaring client's complete build.
 
 ## Offline read-only console
 
@@ -80,3 +86,7 @@
   plus component stories for `PageState`, `AuthRecoveryAction`,
   `ReadStateBanner`, and the PWA update prompt card. The unauthorized
   `PageState` story also verifies its login redirect link.
+- `AppShell/ApiCompatibilityDegraded` covers feature-local status-stream
+  degradation. The API compatibility consumer uses immutable 3.22/3.21/3.20
+  release inventories, an additive capabilities probe, strict version fallback,
+  and local fingerprint fallback without sharing state with PWA build IDs.

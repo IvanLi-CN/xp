@@ -16,11 +16,13 @@ export const AlertItemSchema = z.object({
 
 export type AlertItem = z.infer<typeof AlertItemSchema>;
 
-export const AlertsResponseSchema = z.object({
-	partial: z.boolean(),
-	unreachable_nodes: z.array(z.string()),
-	items: z.array(AlertItemSchema),
-});
+export const AlertsResponseSchema = z
+	.object({
+		partial: z.boolean().default(false),
+		unreachable_nodes: z.array(z.string()).default([]),
+		items: z.array(AlertItemSchema).default([]),
+	})
+	.passthrough();
 
 export type AlertsResponse = z.infer<typeof AlertsResponseSchema>;
 

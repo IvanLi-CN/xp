@@ -108,9 +108,11 @@ use crate::{
     xray_supervisor::XrayHealthHandle,
 };
 
+mod capabilities;
 mod version_check;
 mod web_assets;
 
+use capabilities::api_capabilities;
 use version_check::{VersionCheckCache, api_version_check};
 
 #[derive(Clone)]
@@ -1293,6 +1295,7 @@ pub fn build_router_with_mesh_telemetry(
     let api = Router::new()
         .route("/health", get(health))
         .route("/cluster/info", get(cluster_info))
+        .route("/capabilities", get(api_capabilities))
         .route("/version/check", get(api_version_check))
         .route("/cluster/join", post(cluster_join))
         .route(

@@ -51,6 +51,7 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { useApiCompatibility } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
@@ -113,6 +114,7 @@ export function AppShell({
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
+	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
@@ -250,6 +252,23 @@ export function AppShell({
 			return;
 		}
 
+		const compatibility = apiCompatibility.data;
+		const statusEventsAvailable =
+			compatibility?.kind !== "incompatible" &&
+			(compatibility?.kind !== "compatible" ||
+				compatibility.isFeatureAvailable("admin.status-events"));
+		if (!statusEventsAvailable) {
+			setStatusStream({
+				connected: false,
+				lastEventAtMs: null,
+				error:
+					compatibility?.kind === "compatible"
+						? compatibility.degradationFor("admin.status-events")
+						: (compatibility?.reason ?? "API compatibility is unavailable"),
+			});
+			return;
+		}
+
 		const handle = startAdminStatusEvents({
 			adminToken,
 			onOpen: () => {
@@ -308,7 +327,7 @@ export function AppShell({
 		});
 
 		return () => handle.close();
-	}, [adminToken, queryClient]);
+	}, [adminToken, apiCompatibility.data, queryClient]);
 
 	useEffect(() => {
 		const onFocus = () => {
@@ -366,6 +385,10 @@ export function AppShell({
 
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
+		const compatibilityUnavailable =
+			apiCompatibility.data?.kind === "incompatible" ||
+			(apiCompatibility.data?.kind === "compatible" &&
+				!apiCompatibility.data.isFeatureAvailable("admin.status-events"));
 		const healthOk = health.isSuccess && health.data?.status === "ok";
 		items.push(
 			<Badge
@@ -454,9 +477,11 @@ export function AppShell({
 				<span>
 					{!runtime.isOnline
 						? "offline"
-						: statusStream.connected
-							? "live"
-							: "reconnecting"}
+						: compatibilityUnavailable
+							? "unavailable"
+							: statusStream.connected
+								? "live"
+								: "reconnecting"}
 				</span>
 			</Badge>,
 		);
@@ -469,6 +494,7 @@ export function AppShell({
 		clusterInfo.isSuccess,
 		health.data,
 		health.isSuccess,
+		apiCompatibility.data,
 		runtime.isOnline,
 		statusStream.connected,
 	]);
