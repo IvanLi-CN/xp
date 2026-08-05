@@ -4,34 +4,54 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./styles.css";
+import {
+	DocumentFallbackBoundary,
+	FrameworkErrorBoundary,
+	installDocumentFallbackHandlers,
+} from "./components/FrameworkErrorBoundary";
 import { UiPrefsProvider } from "./components/UiPrefs";
 import { AppRuntimeProvider } from "./offline/appRuntime";
 import { installOfflineApiWriteGuard } from "./offline/installOfflineApiWriteGuard";
 import { createPersistOptions } from "./offline/queryPersistence";
 import { createQueryClient } from "./queryClient";
 import { createAppRouter } from "./router";
+import { renderDocumentFallback } from "./runtime/documentFallback";
 
-const queryClient = createQueryClient();
-const router = createAppRouter();
+function bootstrap() {
+	const rootElement = document.getElementById("root");
+	if (!rootElement) {
+		throw new Error("Root element not found");
+	}
 
-installOfflineApiWriteGuard();
+	installDocumentFallbackHandlers(rootElement);
+	installOfflineApiWriteGuard();
 
-const rootElement = document.getElementById("root");
-if (!rootElement) {
-	throw new Error("Root element not found");
+	const queryClient = createQueryClient();
+	const router = createAppRouter();
+	const reactRoot = ReactDOM.createRoot(rootElement);
+
+	reactRoot.render(
+		<React.StrictMode>
+			<DocumentFallbackBoundary>
+				<FrameworkErrorBoundary>
+					<PersistQueryClientProvider
+						client={queryClient}
+						persistOptions={createPersistOptions()}
+					>
+						<UiPrefsProvider>
+							<AppRuntimeProvider>
+								<RouterProvider router={router} />
+							</AppRuntimeProvider>
+						</UiPrefsProvider>
+					</PersistQueryClientProvider>
+				</FrameworkErrorBoundary>
+			</DocumentFallbackBoundary>
+		</React.StrictMode>,
+	);
 }
 
-ReactDOM.createRoot(rootElement).render(
-	<React.StrictMode>
-		<PersistQueryClientProvider
-			client={queryClient}
-			persistOptions={createPersistOptions()}
-		>
-			<UiPrefsProvider>
-				<AppRuntimeProvider>
-					<RouterProvider router={router} />
-				</AppRuntimeProvider>
-			</UiPrefsProvider>
-		</PersistQueryClientProvider>
-	</React.StrictMode>,
-);
+try {
+	bootstrap();
+} catch (error) {
+	renderDocumentFallback(error);
+}

@@ -169,7 +169,9 @@
 
 ## Visual Evidence
 
-PR: none
+- Source: stable mock-only `ui_demo` route `/ui-demo/framework-recovery`.
+- Coverage: desktop and mobile viewports, including first-failure and repeated-failure states.
+- PR: none; no screenshot assets are committed or referenced.
 
 ## 文档更新（Docs to Update）
 
