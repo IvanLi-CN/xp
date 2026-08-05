@@ -94,8 +94,10 @@
 - 后端 API 在兼容窗口内保持旧 Web 已使用字段与语义；新增字段默认 additive。
 - Web schema 对兼容窗口内缺失的可选字段提供明确默认值，未知新增字段保持可忽略。
 - 构建测试必须分别从 `N` 的 `v3.22.5`，以及 `N-1`、`N-2` 各 minor 最新正式 release tag
-  提取不可变的 Web `/api`、`/events` callsites、请求/响应 schema 与后端路由 inventory；
-  双向 fixture 与版本化旧客户端合同必须覆盖三份 inventory 的并集，禁止以当前源码或抽样页面替代。
+  提取不可变的 Web `/api`、`/events` callsites、parser identity、完整 API source digest 与后端路由
+  inventory；双向合同必须覆盖三份 inventory 的 method、path、status 与 capability 并集，禁止以
+  当前源码或抽样页面替代。真实 wire-body fixture 与宽容 schema 解析覆盖关键页面，包括 nodes、
+  config、status events、version check 与新增/缺失字段场景；不以合成空 body 冒充未建模响应合同。
 - 每个受控页面必须向 Service Worker 声明自己的 Web build ID；Service Worker 维护
   `clientId -> build ID` ownership，并将该客户端的静态请求路由到对应保留 precache。
   ownership 写入独立的 `xp_sw_metadata` 持久存储，不得复用或清除 `react_query_cache`。
@@ -128,8 +130,9 @@
   仍服务旧构建标签页的完整缓存继续保留，最后一个旧客户端离开后才可清理。
 - Given 旧标签页尚未加载某个 lazy chunk，When 新版本在另一标签页激活，Then 旧标签页仍从自己的完整
   precache 加载该 chunk，不会回退到新构建资产。
-- Given N、N-1 或 N-2 服务端 fixture，When 全量 Web API 合同 inventory 执行，Then
-  支持的功能正常工作，缺失能力仅在对应 consumer 局部降级。
+- Given N、N-1 或 N-2 服务端合同，When 全量 Web API callsite inventory 与关键页面 wire-body
+  fixtures 执行，Then method/path/status/capability 全量匹配，关键页面支持的功能正常工作，缺失能力
+  仅在对应 consumer 局部降级。
 - Given N-1 或 N-2 Web 的版本化请求/响应合同，When 合同针对当前后端执行，Then 既有 endpoint、请求格式、
   状态码和响应语义继续满足旧客户端预期。
 - Given React bootstrap 或错误界面自身抛错，When document 级兜底接管，Then 页面仍提供最小错误说明与重新加载操作。
@@ -146,8 +149,9 @@
 ### Testing
 
 - Unit tests: 错误分类、诊断脱敏、缓存选择、schema 默认值与能力降级。
-- Integration tests: embedded assets、Service Worker cache headers、当前 Web 对 N/N-1/N-2 fixtures，
-  以及 N-1/N-2 Web 版本化请求合同对当前后端。
+- Integration tests: embedded assets、Service Worker cache headers、当前 Web 对 N/N-1/N-2
+  method/path/status/capability inventory 与关键页面 wire-body fixtures，以及 N-1/N-2 Web
+  版本化请求合同对当前后端。
 - E2E tests: 离线 warm-load、waiting update、失败安装、旧标签页 lazy chunk、用户触发切换，
   以及 React bootstrap/fallback 二次失败。
 

@@ -13,6 +13,8 @@
 - 2026-08-05: API 兼容窗口固定为 3.22/3.21/3.20；能力、正式 release tag 和本地 fingerprint
   依次探测，release inventory 记录不可变 source commit、路由、调用点和响应字段合同。
 - 2026-08-05: API 支持窗口固定为当前及前两个 minor，并覆盖双向兼容。
+- 2026-08-05: 完整 API inventory 固定为 pinned source digest 与 callsite method/path/status/capability
+  并集；真实 wire-body schema fixtures 聚焦关键页面，禁止用合成空 body 制造全量覆盖假象。
 
 ## Key Reasons / Replacements
 

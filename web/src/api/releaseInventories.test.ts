@@ -72,7 +72,7 @@ function extractPinnedWebContracts(
 				encoding: "utf8",
 			},
 		);
-		const functions = source.split(/(?=export async function )/g).slice(1);
+		const functions = source.split(/(?=export (?:async )?function )/g).slice(1);
 		return functions.flatMap((block) => {
 			const path = /[`"](\/api[^`"]+)[`"]/.exec(block)?.[1];
 			if (!path) return [];
@@ -249,6 +249,12 @@ describe("immutable release inventories", () => {
 				consumer.apiRoutes,
 			);
 			expect(contracts.length).toBeGreaterThan(0);
+			expect(contracts.map((contract) => contract.route)).toContain(
+				"GET /api/admin/status/events",
+			);
+			expect(contracts.map((contract) => contract.route)).toContain(
+				"GET /api/admin/nodes/{node_id}/runtime/events",
+			);
 			for (const contract of contracts) {
 				const request = fixture.requests.find(
 					(candidate) => candidate.route === contract.route,
