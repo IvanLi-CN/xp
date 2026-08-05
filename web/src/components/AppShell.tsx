@@ -51,6 +51,10 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import {
+	ApiCompatibilityProvider,
+	useApiCompatibility,
+} from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
@@ -113,6 +117,13 @@ export function AppShell({
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
+	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
+	const alertsCapabilityAvailable =
+		apiCompatibility.data?.kind === "compatible" &&
+		apiCompatibility.data.isFeatureAvailable("admin.alerts");
+	const upgradeCapabilityAvailable =
+		apiCompatibility.data?.kind === "compatible" &&
+		apiCompatibility.data.isFeatureAvailable("admin.upgrade");
 	const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 	const [versionCheck, dispatchVersionCheck] = useReducer(
@@ -147,13 +158,13 @@ export function AppShell({
 
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && alertsCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
 	const adminUpgradeStatus = useQuery({
 		queryKey: ["adminUpgradeStatus", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && upgradeCapabilityAvailable,
 		queryFn: ({ signal }) => fetchAdminUpgradeStatus(adminToken, signal),
 		refetchInterval: (query) => {
 			const state = query.state.data?.status.state;
@@ -166,10 +177,14 @@ export function AppShell({
 	});
 
 	const adminUpgradeStart = useMutation({
-		mutationFn: (payload: { targetTag: string }) =>
-			startAdminUpgrade(adminToken, {
+		mutationFn: async (payload: { targetTag: string }) => {
+			if (!upgradeCapabilityAvailable) {
+				throw new Error("The admin upgrade capability is unavailable.");
+			}
+			return startAdminUpgrade(adminToken, {
 				target_tag: payload.targetTag,
-			}),
+			});
+		},
 		onSuccess: (data) => {
 			queryClient.setQueryData(["adminUpgradeStatus", adminToken], data);
 			void clusterInfo.refetch();
@@ -250,6 +265,23 @@ export function AppShell({
 			return;
 		}
 
+		const compatibility = apiCompatibility.data;
+		const statusEventsAvailable =
+			runtime.isOnline &&
+			compatibility?.kind === "compatible" &&
+			compatibility.isFeatureAvailable("admin.status-events");
+		if (!statusEventsAvailable) {
+			setStatusStream({
+				connected: false,
+				lastEventAtMs: null,
+				error:
+					compatibility?.kind === "compatible"
+						? compatibility.degradationFor("admin.status-events")
+						: (compatibility?.reason ?? "API compatibility is unavailable"),
+			});
+			return;
+		}
+
 		const handle = startAdminStatusEvents({
 			adminToken,
 			onOpen: () => {
@@ -308,7 +340,7 @@ export function AppShell({
 		});
 
 		return () => handle.close();
-	}, [adminToken, queryClient]);
+	}, [adminToken, apiCompatibility.data, queryClient, runtime.isOnline]);
 
 	useEffect(() => {
 		const onFocus = () => {
@@ -366,6 +398,10 @@ export function AppShell({
 
 	const statusBadges = useMemo(() => {
 		const items: ReactNode[] = [];
+		const compatibilityUnavailable =
+			apiCompatibility.data?.kind === "incompatible" ||
+			(apiCompatibility.data?.kind === "compatible" &&
+				!apiCompatibility.data.isFeatureAvailable("admin.status-events"));
 		const healthOk = health.isSuccess && health.data?.status === "ok";
 		items.push(
 			<Badge
@@ -454,9 +490,11 @@ export function AppShell({
 				<span>
 					{!runtime.isOnline
 						? "offline"
-						: statusStream.connected
-							? "live"
-							: "reconnecting"}
+						: compatibilityUnavailable
+							? "unavailable"
+							: statusStream.connected
+								? "live"
+								: "reconnecting"}
 				</span>
 			</Badge>,
 		);
@@ -469,6 +507,7 @@ export function AppShell({
 		clusterInfo.isSuccess,
 		health.data,
 		health.isSuccess,
+		apiCompatibility.data,
 		runtime.isOnline,
 		statusStream.connected,
 	]);
@@ -508,6 +547,7 @@ export function AppShell({
 					});
 				}}
 				onStartUpgrade={(targetTag) => {
+					if (!upgradeCapabilityAvailable) return;
 					upgradeObservation.begin(targetTag);
 					adminUpgradeStart.mutate({ targetTag });
 				}}
@@ -517,6 +557,7 @@ export function AppShell({
 		adminUpgradeStart,
 		adminUpgradeStatus,
 		clusterInfo,
+		upgradeCapabilityAvailable,
 		runVersionCheck,
 		upgradeObservation,
 		versionCheck,
@@ -740,7 +781,9 @@ export function AppShell({
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
-							{children ?? <Outlet />}
+							<ApiCompatibilityProvider value={apiCompatibility.data ?? null}>
+								{children ?? <Outlet />}
+							</ApiCompatibilityProvider>
 						</main>
 					</div>
 				</div>

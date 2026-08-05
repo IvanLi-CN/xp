@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, within } from "@storybook/test";
+import { expect, userEvent, within } from "@storybook/test";
 
 import { AppShell } from "./AppShell";
 
@@ -41,5 +41,27 @@ export const OfflineTopbarIndicator: Story = {
 		await expect(
 			await canvas.findByText(/offline cached/i),
 		).toBeInTheDocument();
+	},
+};
+
+export const ApiCompatibilityDegraded: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				capabilities: {
+					release_tag: "v3.22.5",
+					capabilities: ["api.health", "api.cluster-info", "admin.nodes"],
+					fingerprint: {},
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Open status" }));
+		const page = within(canvasElement.ownerDocument.body);
+		await expect(
+			await page.findByTitle("Realtime status stream"),
+		).toHaveTextContent("unavailable");
 	},
 };

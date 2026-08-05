@@ -85,11 +85,13 @@ export const AdminNodeRuntimeListItemSchema = z.object({
 	recent_slots: z.array(NodeRuntimeHistorySlotSchema),
 });
 
-export const AdminNodesRuntimeResponseSchema = z.object({
-	partial: z.boolean(),
-	unreachable_nodes: z.array(z.string()),
-	items: z.array(AdminNodeRuntimeListItemSchema),
-});
+export const AdminNodesRuntimeResponseSchema = z
+	.object({
+		partial: z.boolean(),
+		unreachable_nodes: z.array(z.string()),
+		items: z.array(AdminNodeRuntimeListItemSchema),
+	})
+	.passthrough();
 
 export type AdminNodeRuntimeListItem = z.infer<
 	typeof AdminNodeRuntimeListItemSchema

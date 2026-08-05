@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 import yaml from "js-yaml";
 
 import { handleAdminConfigAndEndpointRoutes } from "./adminEndpointRouteMocks";
+import { apiCapabilitiesFixture } from "./apiCapabilities";
 
 const { load } = yaml;
 
@@ -474,16 +475,16 @@ export async function setupApiMocks(
 		const url = new URL(request.url());
 		const path = url.pathname;
 		const method = request.method();
-		if (!path.startsWith("/api/")) {
-			void route.continue();
-			return;
-		}
-
+		if (!path.startsWith("/api/")) return route.continue();
 		if (path === "/api/health" && method === "GET") {
 			jsonResponse(route, { status: state.healthStatus });
 			return;
 		}
 
+		if (path === "/api/capabilities" && method === "GET") {
+			jsonResponse(route, apiCapabilitiesFixture);
+			return;
+		}
 		if (path === "/api/cluster/info" && method === "GET") {
 			jsonResponse(route, state.clusterInfo);
 			return;

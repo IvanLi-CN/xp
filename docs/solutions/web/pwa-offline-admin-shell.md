@@ -56,6 +56,17 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
 - Serve `/sw.js` with stronger no-store semantics than ordinary HTML routes,
   including CDN-facing cache-bypass headers, so an edge cache cannot pin an old
   Service Worker for hours after a release.
+- Give every frontend build its own complete app-shell cache. Keep the new
+  worker waiting until the operator confirms the update, persist
+  `clientId -> buildId` ownership in `xp_sw_metadata`, and delete an old cache
+  only after all owners have disappeared. Navigation can use the active build,
+  but a controlled page's JS/CSS/font/icon requests must stay on its declared
+  build; a cache miss is a recovery signal, never permission to mix builds.
+- Keep API compatibility independent from PWA cache identity. The Web client
+  checks additive capability IDs first, then a strict stable release tag, then
+  a local fingerprint against immutable 3.22/3.21/3.20 inventories. A missing
+  declared capability disables only its feature; a 404 or schema failure for a
+  declared capability remains a regression signal.
 - Classify an initial `401` separately from offline and permission failures:
   offer a re-login link that preserves the current relative location, retain
   the existing token until login verifies a replacement, and do not offer that

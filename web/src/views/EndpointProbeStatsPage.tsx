@@ -9,13 +9,14 @@ import { fetchAdminEndpoint } from "../api/adminEndpoints";
 import type { EndpointProbeStatus } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import {
 	NodeNameLink,
 	compareNodeIdsByDisplayName,
 } from "../components/NodeNameLink";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
 import { badgeClass } from "../components/ui-helpers";
@@ -65,23 +66,26 @@ export function EndpointProbeStatsPage() {
 		from: "/app/endpoints/$endpointId/probe",
 	});
 	const adminToken = readAdminToken();
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const probesCapability = useApiCapability("admin.node-probes");
 
 	const endpointQuery = useQuery({
 		queryKey: ["adminEndpoint", adminToken, endpointId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoint(adminToken, endpointId, signal),
 	});
 
 	const historyQuery = useQuery({
 		queryKey: ["adminEndpointProbeHistory", adminToken, endpointId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && probesCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminEndpointProbeHistory(adminToken, endpointId, 24, signal),
 	});
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
@@ -134,6 +138,23 @@ export function EndpointProbeStatsPage() {
 				: [],
 		[selected, nodeNamesById],
 	);
+
+	if (
+		endpointsCapability.unavailable ||
+		nodesCapability.unavailable ||
+		probesCapability.unavailable
+	) {
+		return (
+			<CapabilityUnavailableState
+				title="Probe statistics unavailable"
+				reason={
+					probesCapability.reason ??
+					endpointsCapability.reason ??
+					nodesCapability.reason
+				}
+			/>
+		);
+	}
 
 	if (adminToken.length === 0) {
 		return (

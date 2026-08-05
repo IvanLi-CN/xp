@@ -2,9 +2,11 @@
 
 ARG XRAY_DOCKER_TAG=25.12.8
 ARG BUN_VERSION=1.3.5
-ARG XP_BUILD_VERSION=dev
+ARG XP_BUILD_VERSION=
 
 FROM oven/bun:${BUN_VERSION} AS web-builder
+ARG XP_BUILD_VERSION
+ENV XP_WEB_BUILD_ID=${XP_BUILD_VERSION}
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile

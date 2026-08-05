@@ -7,9 +7,10 @@ import { z } from "zod";
 import { createAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 import {
@@ -69,6 +70,7 @@ export function UserNewPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
 	const { pushToast } = useToast();
+	const usersCapability = useApiCapability("admin.users");
 	const [serverError, setServerError] = useState<string | null>(null);
 	const form = useForm<CreateUserFormInput, unknown, CreateUserValues>({
 		resolver: zodResolver(createUserSchema),
@@ -83,6 +85,14 @@ export function UserNewPage() {
 	const isSubmitting = form.formState.isSubmitting;
 
 	const content = useMemo(() => {
+		if (usersCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="User creation unavailable"
+					reason={usersCapability.reason}
+				/>
+			);
+		}
 		if (adminToken.length === 0) {
 			return (
 				<PageState
@@ -271,6 +281,7 @@ export function UserNewPage() {
 		pushToast,
 		resetPolicy,
 		serverError,
+		usersCapability,
 	]);
 
 	return (

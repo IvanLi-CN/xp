@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
+import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 import { buildDenseUserIpUsageStories } from "../storybook/ipUsageStoryData";
 
@@ -36,6 +37,25 @@ const nodes: AdminNode[] = [
 	},
 ];
 
+const endpoints: AdminEndpoint[] = [
+	{
+		endpoint_id: "endpoint-1",
+		node_id: TOKYO_NODE_ID,
+		tag: "edge-tokyo",
+		kind: "vless_reality_vision_tcp",
+		port: 443,
+		meta: {},
+	},
+	{
+		endpoint_id: "endpoint-2",
+		node_id: OSAKA_NODE_ID,
+		tag: "shadow-osaka",
+		kind: "ss2022_2022_blake3_aes_128_gcm",
+		port: 8443,
+		meta: {},
+	},
+];
+
 const userUsageReports = buildDenseUserIpUsageStories(
 	{
 		user_id: USER_ID_1,
@@ -53,6 +73,7 @@ const meta = {
 		},
 		mockApi: {
 			data: {
+				endpoints,
 				nodes,
 				userAccessByUserId: {
 					[USER_ID_1]: [
@@ -168,7 +189,7 @@ export const AccessTab: Story = {
 			await canvas.findByRole("button", { name: "Access" }),
 		);
 		await expect(
-			await canvas.findByText("Selected endpoints: 2"),
+			await canvas.findByText("Selected endpoints: 2", {}, { timeout: 5_000 }),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(

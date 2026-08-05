@@ -7,10 +7,11 @@ import { runAdminEndpointProbeRun } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { EndpointsTable } from "../components/EndpointsTable";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
@@ -34,18 +35,21 @@ function formatErrorMessage(error: unknown): string {
 export function EndpointsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const probesCapability = useApiCapability("admin.node-probes");
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
@@ -82,7 +86,7 @@ export function EndpointsPage() {
 				<Button
 					variant="secondary"
 					loading={probeRunMutation.isPending}
-					disabled={runtime.isReadOnly}
+					disabled={runtime.isReadOnly || !probesCapability.available}
 					onClick={() => probeRunMutation.mutate()}
 				>
 					Test all now
@@ -111,6 +115,23 @@ export function EndpointsPage() {
 					variant="empty"
 					title="Admin token required"
 					description="Set an admin token to load endpoints."
+				/>
+			);
+		}
+
+		if (endpointsCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="Endpoints unavailable"
+					reason={endpointsCapability.reason}
+				/>
+			);
+		}
+		if (nodesCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="Endpoint node data unavailable"
+					reason={nodesCapability.reason}
 				/>
 			);
 		}

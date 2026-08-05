@@ -50,6 +50,12 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminJoinTokens");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/clusterInfo");
+vi.mock("../offline/useQueryWithOfflineFallback", () => ({
+	useQueryWithOfflineFallback: (
+		_queryKey: readonly unknown[],
+		query: unknown,
+	) => query,
+}));
 vi.mock("../components/Icon", () => ({
 	Icon: ({ ariaLabel }: { ariaLabel?: string }) => (
 		<span aria-hidden={ariaLabel ? undefined : "true"} aria-label={ariaLabel} />

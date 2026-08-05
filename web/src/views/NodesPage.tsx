@@ -5,11 +5,12 @@ import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -24,6 +25,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
+import { highlightShell } from "../utils/highlightShell";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -33,41 +35,10 @@ function formatErrorMessage(error: unknown): string {
 	return String(error);
 }
 
-function highlightShell(text: string) {
-	const regex =
-		/(\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|'[^']*'|"[^"]*"|https?:\/\/[^\s"']+|--[a-z0-9-]+)/g;
-	const parts = text.split(regex);
-	let offset = 0;
-
-	return parts.map((part) => {
-		if (part.length === 0) return null;
-		const key = `o${offset}`;
-		offset += part.length;
-
-		let className: string | null = null;
-		if (part.startsWith("http://") || part.startsWith("https://")) {
-			className = "text-info";
-		} else if (part.startsWith("--")) {
-			className = "text-warning";
-		} else if (part.startsWith("$")) {
-			className = "text-accent-foreground";
-		} else if (part.startsWith("'") || part.startsWith('"')) {
-			className = "text-success";
-		}
-
-		return className ? (
-			<span key={key} className={className}>
-				{part}
-			</span>
-		) : (
-			<span key={key}>{part}</span>
-		);
-	});
-}
-
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const runtime = useAppRuntime();
+	const nodesCapability = useApiCapability("admin.nodes");
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
 	const [ttlSeconds, setTtlSeconds] = useState(3600);
@@ -85,7 +56,8 @@ export function NodesPage() {
 	);
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodesRuntime", adminToken],
-		enabled: adminToken.length > 0,
+		enabled:
+			adminToken.length > 0 && (nodesCapability.available || !runtime.isOnline),
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 	const nodesState = useQueryWithOfflineFallback(
@@ -139,6 +111,13 @@ export function NodesPage() {
 			setJoinTokenError("Admin token is missing.");
 			return;
 		}
+		if (!nodesCapability.available || !runtime.isOnline) {
+			setJoinTokenError(
+				nodesCapability.reason ?? "The nodes API is unavailable.",
+			);
+			return;
+		}
+
 		if (ttlSeconds <= 0 || Number.isNaN(ttlSeconds)) {
 			setJoinTokenError("TTL must be greater than zero.");
 			return;
@@ -169,6 +148,15 @@ export function NodesPage() {
 					variant="empty"
 					title="Admin token required"
 					description="Please provide an admin token to load nodes."
+				/>
+			);
+		}
+
+		if (nodesCapability.unavailable && !hasQueryData(nodesState)) {
+			return (
+				<CapabilityUnavailableState
+					title="Nodes unavailable"
+					reason={nodesCapability.reason}
 				/>
 			);
 		}
@@ -306,6 +294,8 @@ export function NodesPage() {
 								disabled={
 									ttlSeconds <= 0 ||
 									adminToken.length === 0 ||
+									!nodesCapability.available ||
+									!runtime.isOnline ||
 									runtime.isReadOnly
 								}
 								onClick={handleCreateJoinToken}

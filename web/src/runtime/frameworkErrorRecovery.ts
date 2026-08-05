@@ -16,8 +16,6 @@ type ClassifyOptions = {
 	isOnline?: boolean;
 };
 
-type CacheStorageLike = Pick<CacheStorage, "keys" | "delete">;
-
 export type CacheRecoveryResult =
 	| { status: "cleared"; deleted: string[] }
 	| {
@@ -25,27 +23,35 @@ export type CacheRecoveryResult =
 			reason:
 				| "offline"
 				| "replacement-unavailable"
-				| "service-worker-unavailable"
-				| "cache-unavailable";
+				| "service-worker-unavailable";
 			deleted: string[];
 	  };
 
 type CacheRecoveryOptions = {
-	cacheStorage?: CacheStorageLike;
-	origin?: string;
 	isOnline?: boolean;
-	replacementReady?: () => Promise<boolean>;
 };
 
 type ServiceWorkerRegistrationLike = {
 	update: () => Promise<unknown>;
-	waiting: unknown | null;
+	waiting: { postMessage: (message: unknown) => void } | null;
+};
+
+type ServiceWorkerContainerLike = {
+	getRegistration: () => Promise<ServiceWorkerRegistrationLike | undefined>;
+	controller?: { postMessage: (message: unknown) => void } | null;
+	addEventListener?: {
+		(type: "message", listener: (event: MessageEvent) => void): void;
+		(type: "controllerchange", listener: () => void): void;
+	};
+	removeEventListener?: {
+		(type: "message", listener: (event: MessageEvent) => void): void;
+		(type: "controllerchange", listener: () => void): void;
+	};
 };
 
 type SafeCacheRecoveryOptions = CacheRecoveryOptions & {
-	serviceWorkerContainer?: {
-		getRegistration: () => Promise<ServiceWorkerRegistrationLike | undefined>;
-	};
+	buildId?: string;
+	serviceWorkerContainer?: ServiceWorkerContainerLike;
 	replacementProbe?: (
 		registration: ServiceWorkerRegistrationLike,
 	) => Promise<boolean>;
@@ -206,65 +212,44 @@ export function createDiagnosticDetails(input: DiagnosticInput): string {
 	].join("\n");
 }
 
-function currentOrigin(): string {
-	return typeof location === "undefined" ? "" : location.origin;
-}
-
-export function isXpAppShellCacheName(
-	cacheName: string,
-	origin = currentOrigin(),
-): boolean {
-	const normalizedOrigin = origin.replace(/\/$/, "");
-	return (
-		cacheName.startsWith("xp-app-shell-") ||
-		cacheName === `workbox-precache-v2-${normalizedOrigin}` ||
-		cacheName.startsWith(`workbox-precache-v2-${normalizedOrigin}-`)
-	);
-}
-
-function getCacheStorage(): CacheStorageLike | undefined {
-	return typeof caches === "undefined" ? undefined : caches;
-}
-
-export async function clearXpAppShellCaches(
-	options: CacheRecoveryOptions = {},
-): Promise<CacheRecoveryResult> {
-	if (options.isOnline === false) {
-		return { status: "skipped", reason: "offline", deleted: [] };
-	}
-
-	if (options.replacementReady && !(await options.replacementReady())) {
-		return {
-			status: "skipped",
-			reason: "replacement-unavailable",
-			deleted: [],
-		};
-	}
-
-	const cacheStorage = options.cacheStorage ?? getCacheStorage();
-	if (!cacheStorage) {
-		return { status: "skipped", reason: "cache-unavailable", deleted: [] };
-	}
-
-	try {
-		const appShellCaches = (await cacheStorage.keys()).filter((cacheName) =>
-			isXpAppShellCacheName(cacheName, options.origin),
-		);
-		const deleted: string[] = [];
-		for (const cacheName of appShellCaches) {
-			if (await cacheStorage.delete(cacheName)) deleted.push(cacheName);
-		}
-		return { status: "cleared", deleted };
-	} catch {
-		return { status: "skipped", reason: "cache-unavailable", deleted: [] };
-	}
-}
-
 async function defaultReplacementProbe(
 	registration: ServiceWorkerRegistrationLike,
 ): Promise<boolean> {
 	// Workbox reaches waiting only after the complete precache install succeeds.
 	return registration.waiting !== null;
+}
+
+async function activateWaitingWorker(
+	registration: ServiceWorkerRegistrationLike,
+	serviceWorkerContainer: ServiceWorkerContainerLike,
+): Promise<boolean> {
+	const waiting = registration.waiting;
+	const addEventListener = serviceWorkerContainer.addEventListener;
+	const removeEventListener = serviceWorkerContainer.removeEventListener;
+	if (!waiting || !addEventListener || !removeEventListener) return false;
+
+	return await new Promise<boolean>((resolve) => {
+		let settled = false;
+		const onControllerChange = () => finish(true);
+		const timeoutId = setTimeout(() => finish(false), 10_000);
+		const pollId = setInterval(() => {
+			if (registration.waiting === null) finish(true);
+		}, 50);
+		const finish = (activated: boolean) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutId);
+			clearInterval(pollId);
+			removeEventListener("controllerchange", onControllerChange);
+			resolve(activated);
+		};
+		addEventListener("controllerchange", onControllerChange);
+		try {
+			waiting.postMessage({ type: "SKIP_WAITING" });
+		} catch {
+			finish(false);
+		}
+	});
 }
 
 export async function recoverXpAppShell(
@@ -303,9 +288,92 @@ export async function recoverXpAppShell(
 		const replacementReady = await (
 			options.replacementProbe ?? defaultReplacementProbe
 		)(registration);
-		return clearXpAppShellCaches({
-			...options,
-			replacementReady: async () => replacementReady,
+		// A waiting worker proves that a replacement is ready. Without one, the
+		// active worker can still rebuild its own incomplete cache safely.
+		if (!replacementReady && registration.waiting !== null) {
+			return {
+				status: "skipped",
+				reason: "replacement-unavailable",
+				deleted: [],
+			};
+		}
+		if (
+			registration.waiting &&
+			!(await activateWaitingWorker(registration, serviceWorkerContainer))
+		) {
+			return {
+				status: "skipped",
+				reason: "replacement-unavailable",
+				deleted: [],
+			};
+		}
+
+		const controller = serviceWorkerContainer.controller;
+		const addEventListener = serviceWorkerContainer.addEventListener as (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
+		const removeEventListener = serviceWorkerContainer.removeEventListener as (
+			type: "message",
+			listener: (event: MessageEvent) => void,
+		) => void;
+		if (!controller || !addEventListener || !removeEventListener) {
+			return {
+				status: "skipped",
+				reason: "service-worker-unavailable",
+				deleted: [],
+			};
+		}
+
+		return await new Promise<CacheRecoveryResult>((resolve) => {
+			const buildId = options.buildId ?? "development";
+			const onMessage = (event: MessageEvent) => {
+				const data = event.data as
+					| {
+							type?: string;
+							buildId?: string;
+							deleted?: unknown;
+					  }
+					| undefined;
+				if (
+					(data?.buildId !== buildId && data?.buildId !== "active") ||
+					(data.type !== "XP_CACHE_RECOVERY_READY" &&
+						data.type !== "XP_CACHE_RECOVERY_UNAVAILABLE")
+				) {
+					return;
+				}
+				clearTimeout(timeoutId);
+				removeEventListener("message", onMessage);
+				const deleted = Array.isArray(data.deleted)
+					? data.deleted.filter(
+							(value): value is string => typeof value === "string",
+						)
+					: [];
+				resolve(
+					data.type === "XP_CACHE_RECOVERY_READY"
+						? { status: "cleared", deleted }
+						: {
+								status: "skipped",
+								reason: "replacement-unavailable",
+								deleted: [],
+							},
+				);
+			};
+			const timeoutId = setTimeout(() => {
+				removeEventListener("message", onMessage);
+				resolve({
+					status: "skipped",
+					reason: "replacement-unavailable",
+					deleted: [],
+				});
+			}, 10_000);
+			addEventListener("message", onMessage);
+			controller.postMessage({
+				type: "XP_REQUEST_CACHE_RECOVERY",
+				// The active worker owns its own build identity. This also remains
+				// correct when a waiting replacement was activated above.
+				buildId: "active",
+			});
 		});
 	} catch {
 		return {

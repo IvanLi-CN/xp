@@ -15,11 +15,12 @@ import {
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TagInput } from "../components/TagInput";
 import { useToast } from "../components/Toast";
@@ -85,19 +86,22 @@ export function EndpointDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const probesCapability = useApiCapability("admin.node-probes");
 
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
 
 	const endpointQuery = useQuery({
 		queryKey: ["adminEndpoint", adminToken, endpointId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoint(adminToken, endpointId, signal),
 	});
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
@@ -306,6 +310,15 @@ export function EndpointDetailsPage() {
 			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
+
+	if (endpointsCapability.unavailable || nodesCapability.unavailable) {
+		return (
+			<CapabilityUnavailableState
+				title="Endpoint details unavailable"
+				reason={endpointsCapability.reason ?? nodesCapability.reason}
+			/>
+		);
+	}
 
 	if (adminToken.length === 0) {
 		return (
@@ -775,7 +788,7 @@ export function EndpointDetailsPage() {
 								<Button
 									variant="secondary"
 									loading={probeRunMutation.isPending}
-									disabled={runtime.isReadOnly}
+									disabled={runtime.isReadOnly || probesCapability.unavailable}
 									onClick={() => probeRunMutation.mutate()}
 								>
 									Test now
@@ -866,7 +879,9 @@ export function EndpointDetailsPage() {
 									<Button
 										variant="secondary"
 										loading={canaryProbeMutation.isPending}
-										disabled={runtime.isReadOnly}
+										disabled={
+											runtime.isReadOnly || probesCapability.unavailable
+										}
 										onClick={() => canaryProbeMutation.mutate()}
 									>
 										Test canary

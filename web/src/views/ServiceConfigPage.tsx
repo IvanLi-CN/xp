@@ -5,10 +5,11 @@ import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
@@ -115,6 +116,10 @@ export function ServiceConfigPage() {
 	const toast = useToast();
 	const runtime = useAppRuntime();
 	const queryClient = useQueryClient();
+	const configCapability = useApiCapability("admin.config");
+	const privateTargetPolicyCapability = useApiCapability(
+		"admin.mihomo-resource-policy",
+	);
 
 	const health = useQuery({
 		queryKey: ["health"],
@@ -128,7 +133,7 @@ export function ServiceConfigPage() {
 
 	const configQuery = useQuery({
 		queryKey: ["adminConfig", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && configCapability.available,
 		queryFn: ({ signal }) => fetchAdminConfig(adminToken, signal),
 	});
 
@@ -183,7 +188,11 @@ export function ServiceConfigPage() {
 				variant="primary"
 				size="sm"
 				loading={configQuery.isFetching}
-				disabled={adminToken.length === 0 || runtime.isReadOnly}
+				disabled={
+					adminToken.length === 0 ||
+					configCapability.unavailable ||
+					runtime.isReadOnly
+				}
 				onClick={() => configQuery.refetch()}
 			>
 				Refresh
@@ -192,6 +201,14 @@ export function ServiceConfigPage() {
 	);
 
 	const content = (() => {
+		if (configCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="Service configuration unavailable"
+					reason={configCapability.reason}
+				/>
+			);
+		}
 		if (adminToken.length === 0) {
 			return (
 				<PageState
@@ -296,57 +313,60 @@ export function ServiceConfigPage() {
 						</p>
 					</div>
 					<div className="grid gap-4 lg:grid-cols-2">
-						<div className="xp-card lg:col-span-2">
-							<div className="xp-card-body space-y-4">
-								<div className="flex flex-wrap items-start justify-between gap-4">
-									<div className="max-w-2xl">
-										<h3 className="text-base font-semibold">
-											Mihomo external resource mirror
-										</h3>
-										<p className="text-sm text-muted-foreground">
-											Cluster-wide control for private, loopback, and link-local
-											upstream targets.
-										</p>
-									</div>
-									<label
-										className="flex items-center gap-3 text-sm font-medium"
-										htmlFor="mihomo-private-targets"
-									>
-										<Checkbox
-											id="mihomo-private-targets"
-											checked={data.mihomo_resource_allow_private_targets}
-											disabled={
-												runtime.isReadOnly ||
-												privateTargetPolicyMutation.isPending
-											}
-											aria-label="Allow private Mihomo mirror targets"
-											onCheckedChange={(checked) => {
-												if (checked !== "indeterminate") {
-													privateTargetPolicyMutation.mutate(checked);
+						{privateTargetPolicyCapability.available &&
+						data.mihomo_resource_allow_private_targets !== undefined ? (
+							<div className="xp-card lg:col-span-2">
+								<div className="xp-card-body space-y-4">
+									<div className="flex flex-wrap items-start justify-between gap-4">
+										<div className="max-w-2xl">
+											<h3 className="text-base font-semibold">
+												Mihomo external resource mirror
+											</h3>
+											<p className="text-sm text-muted-foreground">
+												Cluster-wide control for private, loopback, and
+												link-local upstream targets.
+											</p>
+										</div>
+										<label
+											className="flex items-center gap-3 text-sm font-medium"
+											htmlFor="mihomo-private-targets"
+										>
+											<Checkbox
+												id="mihomo-private-targets"
+												checked={data.mihomo_resource_allow_private_targets}
+												disabled={
+													runtime.isReadOnly ||
+													privateTargetPolicyMutation.isPending
 												}
-											}}
-										/>
-										<span>
-											{data.mihomo_resource_allow_private_targets
-												? "Allowed"
-												: "Blocked"}
-										</span>
-									</label>
-								</div>
-								<div
-									className={
-										data.mihomo_resource_allow_private_targets
-											? "xp-alert xp-alert-warning px-4 py-3"
-											: "xp-alert xp-alert-success px-4 py-3"
-									}
-								>
-									{data.mihomo_resource_allow_private_targets
-										? "Enabled: a configured mirror URL may reach private network services. " +
-											"Only enable this for trusted profiles."
-										: "Protected: private network targets are rejected before XP connects to them."}
+												aria-label="Allow private Mihomo mirror targets"
+												onCheckedChange={(checked) => {
+													if (checked !== "indeterminate") {
+														privateTargetPolicyMutation.mutate(checked);
+													}
+												}}
+											/>
+											<span>
+												{data.mihomo_resource_allow_private_targets
+													? "Allowed"
+													: "Blocked"}
+											</span>
+										</label>
+									</div>
+									<div
+										className={
+											data.mihomo_resource_allow_private_targets
+												? "xp-alert xp-alert-warning px-4 py-3"
+												: "xp-alert xp-alert-success px-4 py-3"
+										}
+									>
+										{data.mihomo_resource_allow_private_targets
+											? "Enabled: a configured mirror URL may reach private network services. " +
+												"Only enable this for trusted profiles."
+											: "Protected: private network targets are rejected before XP connects to them."}
+									</div>
 								</div>
 							</div>
-						</div>
+						) : null}
 					</div>
 				</section>
 

@@ -14,6 +14,11 @@ type PageStateProps = {
 	action?: ReactNode;
 };
 
+type CapabilityUnavailableStateProps = {
+	title: string;
+	reason?: string | null;
+};
+
 const variantTone: Record<PageStateVariant, string> = {
 	loading: "text-info",
 	empty: "text-foreground",
@@ -51,5 +56,20 @@ export function PageState({
 				</div>
 			</CardContent>
 		</Card>
+	);
+}
+
+export function CapabilityUnavailableState({
+	title,
+	reason,
+}: CapabilityUnavailableStateProps) {
+	return (
+		<PageState
+			variant="error"
+			title={title}
+			description={
+				reason ?? "This feature is unavailable for the connected API."
+			}
+		/>
 	);
 }

@@ -14,7 +14,7 @@ export const AdminConfigResponseSchema = z.object({
 	quota_auto_unban: z.boolean(),
 	ip_geo_enabled: z.boolean(),
 	ip_geo_origin: z.string(),
-	mihomo_resource_allow_private_targets: z.boolean(),
+	mihomo_resource_allow_private_targets: z.boolean().optional(),
 	admin_token_present: z.boolean(),
 	admin_token_masked: z.string(),
 });

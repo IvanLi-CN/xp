@@ -52,6 +52,16 @@ describe("ClusterInfoResponseSchema", () => {
 			xp_version: "0.0.0",
 		});
 	});
+
+	it("rejects missing fields declared by every pinned release", () => {
+		expect(() =>
+			ClusterInfoResponseSchema.parse({
+				cluster_id: "cluster",
+				node_id: "node",
+				role: "leader",
+			}),
+		).toThrow();
+	});
 });
 
 describe("AdminNodesResponseSchema", () => {
