@@ -20,8 +20,9 @@ export const Default: Story = {};
 export const WithPreview: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const originalEditor = canvasElement.querySelector<HTMLElement>(
-			".cm-merge-a .cm-content[contenteditable='true']",
+		const textboxes = await canvas.findAllByRole("textbox");
+		const originalEditor = textboxes.find(
+			(element) => element.getAttribute("contenteditable") === "true",
 		);
 
 		if (!originalEditor) {

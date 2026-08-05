@@ -69,7 +69,8 @@ export default defineConfig(({ mode }) => {
 			tailwindcss(),
 			{
 				name: "xp-inline-build-declaration",
-				transformIndexHtml(html) {
+				transformIndexHtml(html, context) {
+					if (context.path.endsWith("/iframe.html")) return html;
 					const declaration = [
 						"<script>",
 						`window.__XP_WEB_BUILD_ID__=${JSON.stringify(buildId)};`,

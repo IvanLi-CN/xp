@@ -538,8 +538,8 @@ export function UserDetailsPage() {
 
 	useEffect(() => {
 		if (!userId || accessInitForUserId === userId) return;
-		if (endpointsQuery.isLoading || accessQuery.isLoading) return;
 		if (endpointsQuery.isError || accessQuery.isError) return;
+		if (!endpointsQuery.data || !accessQuery.data) return;
 
 		const next: Record<string, string[]> = {};
 		for (const item of access) {
@@ -559,10 +559,10 @@ export function UserDetailsPage() {
 		accessInitForUserId,
 		endpointById,
 		endpointsQuery.isError,
-		endpointsQuery.isLoading,
+		endpointsQuery.data,
 		access,
 		accessQuery.isError,
-		accessQuery.isLoading,
+		accessQuery.data,
 		userId,
 	]);
 
