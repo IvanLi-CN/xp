@@ -33,4 +33,17 @@ describe("inline bootstrap fallback", () => {
 			(window as Window & { __inlineLoaded?: boolean }).__inlineLoaded,
 		).toBe(true);
 	});
+
+	it("does not replace a React app after startup", () => {
+		document.body.innerHTML =
+			'<div id="root" data-xp-react-ready="true">ready</div>';
+		new Function(inlineBootstrapFallback("fixture-build"))();
+		const script = document.createElement("script");
+		document.head.append(script);
+
+		script.dispatchEvent(new Event("error"));
+
+		expect(document.getElementById("root")).toHaveTextContent("ready");
+		expect(document.querySelector("[data-xp-document-fallback]")).toBeNull();
+	});
 });

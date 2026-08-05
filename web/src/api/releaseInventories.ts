@@ -1,8 +1,8 @@
+import { WEB_API_CONTRACT_SHA256 } from "./releaseInventoryDigests";
 import {
 	type ReleaseFixtureResponse,
 	statusEventFixture,
 } from "./releaseInventoryFixtures";
-import { completeSchemas } from "./releaseInventorySchemas";
 
 export const API_COMPATIBILITY_WINDOW = ["3.22", "3.21", "3.20"] as const;
 export type ApiCompatibilityMinor = (typeof API_COMPATIBILITY_WINDOW)[number];
@@ -31,6 +31,7 @@ export type ReleaseInventory = {
 	minor: ApiCompatibilityMinor;
 	releaseTag: `v${string}`;
 	sourceCommit: string;
+	webApiContractSha256: string;
 	capabilityProbePath?: string;
 	apiRoutes: readonly string[];
 	webCallsites: readonly string[];
@@ -285,7 +286,6 @@ const API_ROUTES_320 = [
 	"GET /api/sub/{subscription_token}",
 ] as const;
 type ResponseSchemaMap = Readonly<Record<string, readonly string[]>>;
-
 const WEB_CALLSITES_322 = [
 	"adminAlerts",
 	"adminAuth",
@@ -563,9 +563,9 @@ const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"POST /api/admin/mesh/probes": ["node_ids"],
 };
 
-const RES_320 = completeSchemas(API_ROUTES_320, RESPONSE_FIELDS_320);
-const RES_321 = completeSchemas(API_ROUTES_321, RESPONSE_FIELDS_321);
-const RES_322 = completeSchemas(API_ROUTES_322, RESPONSE_FIELDS_322);
+const RESPONSE_SCHEMAS_320: ResponseSchemaMap = RESPONSE_FIELDS_320;
+const RESPONSE_SCHEMAS_321: ResponseSchemaMap = RESPONSE_FIELDS_321;
+const RESPONSE_SCHEMAS_322: ResponseSchemaMap = RESPONSE_FIELDS_322;
 
 const FINGERPRINT_320_321 = {
 	"/api/health": ["status"],
@@ -633,11 +633,12 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		minor: "3.22",
 		releaseTag: "v3.22.5",
 		sourceCommit: "d7e1e652fbd5fa07442bd960894764a5b81ef3bc",
+		webApiContractSha256: WEB_API_CONTRACT_SHA256["3.22"],
 		capabilityProbePath: API_CAPABILITIES_PATH,
 		apiRoutes: API_ROUTES_322,
 		webCallsites: WEB_CALLSITES_322,
 		requestSchemas: REQUEST_SCHEMAS_322,
-		responseSchemas: RES_322,
+		responseSchemas: RESPONSE_SCHEMAS_322,
 		capabilities: [
 			...COMMON_CAPABILITIES,
 			"admin.mesh",
@@ -649,10 +650,11 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		minor: "3.21",
 		releaseTag: "v3.21.11",
 		sourceCommit: "8cf9564f366cb260b35106396840cbe3ed903c75",
+		webApiContractSha256: WEB_API_CONTRACT_SHA256["3.21"],
 		apiRoutes: API_ROUTES_321,
 		webCallsites: WEB_CALLSITES_321,
 		requestSchemas: REQUEST_SCHEMAS_321,
-		responseSchemas: RES_321,
+		responseSchemas: RESPONSE_SCHEMAS_321,
 		capabilities: COMMON_CAPABILITIES,
 		fingerprint: FINGERPRINT_320_321,
 	},
@@ -660,10 +662,11 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		minor: "3.20",
 		releaseTag: "v3.20.3",
 		sourceCommit: "aee855e41f63af0c99f296259b038cda73e24ae9",
+		webApiContractSha256: WEB_API_CONTRACT_SHA256["3.20"],
 		apiRoutes: API_ROUTES_320,
 		webCallsites: WEB_CALLSITES_320,
 		requestSchemas: REQUEST_SCHEMAS_320,
-		responseSchemas: RES_320,
+		responseSchemas: RESPONSE_SCHEMAS_320,
 		capabilities: COMMON_CAPABILITIES,
 		fingerprint: FINGERPRINT_320_321,
 	},
@@ -950,6 +953,11 @@ function fixtureResponses(
 	return Object.entries(consumer.responseSchemas).flatMap(([route, fields]) => {
 		if (!server.apiRoutes.includes(route)) return [];
 		const response = serverResponses[route];
+		if (!response) {
+			throw new Error(
+				`Missing immutable response fixture for ${server.releaseTag} ${route}`,
+			);
+		}
 		const serverFields = server.responseSchemas[route];
 		if (!serverFields) {
 			throw new Error(
@@ -961,10 +969,7 @@ function fixtureResponses(
 				route,
 				fields: serverFields,
 				missingFields: fields.filter((field) => !serverFields.includes(field)),
-				...(response ?? {
-					contentType: "application/json" as const,
-					body: {},
-				}),
+				...response,
 			},
 		];
 	});

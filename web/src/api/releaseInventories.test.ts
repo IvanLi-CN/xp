@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -109,7 +110,7 @@ describe("immutable release inventories", () => {
 		}
 	});
 
-	it("covers every pinned Web API module and every inventoried response", () => {
+	it("pins the complete source contract for every Web API module", () => {
 		const helperModules = new Set([
 			"backendError",
 			"m1Schemas",
@@ -129,16 +130,25 @@ describe("immutable release inventories", () => {
 				],
 				{ encoding: "utf8" },
 			);
-			const modules = files
+			const contractFiles = files
 				.split("\n")
-				.filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+				.filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"));
+			const modules = contractFiles
 				.map((file) => file.slice(file.lastIndexOf("/") + 1, -3))
 				.filter((module) => !helperModules.has(module))
 				.sort();
 			expect([...inventory.webCallsites].sort()).toEqual(modules);
-			expect(Object.keys(inventory.responseSchemas).sort()).toEqual(
-				[...inventory.apiRoutes].sort(),
-			);
+			const digest = createHash("sha256");
+			for (const file of contractFiles.sort()) {
+				const repoPath = file.startsWith("web/") ? file : `web/${file}`;
+				digest.update(
+					execFileSync("git", [
+						"show",
+						`${inventory.sourceCommit}:${repoPath}`,
+					]),
+				);
+			}
+			expect(digest.digest("hex")).toBe(inventory.webApiContractSha256);
 		}
 	});
 

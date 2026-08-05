@@ -47,6 +47,7 @@ export function inlineBootstrapFallback(buildId: string): string {
 	const render = [
 		"if(shown)return;",
 		'const root=document.getElementById("root")||document.body;',
+		'if(root?.dataset.xpReactReady==="true")return;',
 		"if(!root){",
 		'window.addEventListener("DOMContentLoaded",render,{once:true});',
 		"return}",
