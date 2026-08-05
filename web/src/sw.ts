@@ -27,7 +27,7 @@ type ServiceWorkerMessage =
 
 type BuildMetadata = {
 	buildId: string;
-	urls: string[];
+	entries: Array<{ url: string; revision: string | null }>;
 };
 
 const BUILD_ID = __XP_WEB_BUILD_ID__;
@@ -37,10 +37,12 @@ const METADATA_DB_NAME = "xp_sw_metadata";
 const METADATA_STORE_NAME = "client_build_owners";
 const RETIRED_BUILD_STORE_NAME = "retired_builds";
 const manifestEntries = self.__WB_MANIFEST;
+const normalizedManifestEntries = manifestEntries.map((entry) => ({
+	url: new URL(entry.url, self.registration.scope).href,
+	revision: entry.revision ?? null,
+}));
 const manifestUrls = new Set(
-	manifestEntries.map(
-		(entry) => new URL(entry.url, self.registration.scope).href,
-	),
+	normalizedManifestEntries.map((entry) => entry.url),
 );
 const BUILD_METADATA_URL = new URL(
 	"/__xp_build_metadata__",
@@ -277,22 +279,33 @@ async function readBuildManifest(
 		const candidate = (await metadataResponse.json()) as Partial<BuildMetadata>;
 		if (
 			typeof candidate.buildId !== "string" ||
-			!Array.isArray(candidate.urls) ||
-			candidate.urls.length === 0 ||
-			candidate.urls.some((url) => typeof url !== "string") ||
+			!Array.isArray(candidate.entries) ||
+			candidate.entries.length === 0 ||
+			candidate.entries.some(
+				(entry) =>
+					typeof entry?.url !== "string" ||
+					(entry.revision !== null && typeof entry.revision !== "string"),
+			) ||
 			candidate.buildId !== expectedBuildId
 		) {
 			return null;
 		}
 		metadata = {
 			buildId: candidate.buildId,
-			urls: candidate.urls,
+			entries: candidate.entries,
 		};
 	} catch {
 		return null;
 	}
 
-	const urls = new Set(metadata.urls);
+	if (
+		expectedBuildId === BUILD_ID &&
+		JSON.stringify(metadata.entries) !==
+			JSON.stringify(normalizedManifestEntries)
+	) {
+		return null;
+	}
+	const urls = new Set(metadata.entries.map((entry) => entry.url));
 	for (const url of urls) {
 		if (!(await cache.match(url))) return null;
 	}
@@ -309,10 +322,35 @@ async function writeBuildMetadata(
 ): Promise<void> {
 	await cache.put(
 		BUILD_METADATA_URL,
-		new Response(JSON.stringify({ buildId, urls: [...manifestUrls] }), {
-			headers: { "Content-Type": "application/json" },
-		}),
+		new Response(
+			JSON.stringify({ buildId, entries: normalizedManifestEntries }),
+			{
+				headers: { "Content-Type": "application/json" },
+			},
+		),
 	);
+}
+
+async function fetchManifestEntry(entry: {
+	url: string;
+	revision: string | null;
+}): Promise<Response> {
+	const requestUrl = new URL(entry.url);
+	if (entry.revision)
+		requestUrl.searchParams.set("__WB_REVISION__", entry.revision);
+	const response = await fetch(new Request(requestUrl, { cache: "reload" }));
+	if (!response.ok)
+		throw new Error(`precache failed: ${entry.url} (${response.status})`);
+	const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+	const expectsHtml = new URL(entry.url).pathname.endsWith(".html");
+	if (
+		expectsHtml
+			? !contentType.includes("text/html")
+			: contentType.includes("text/html")
+	) {
+		throw new Error(`precache content type mismatch: ${entry.url}`);
+	}
+	return response;
 }
 
 function runCacheMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -357,11 +395,8 @@ async function completeBuildCache(): Promise<boolean> {
 	const recoveryName = `${CACHE_NAME}-recovery-${Date.now()}`;
 	const recovery = await caches.open(recoveryName);
 	try {
-		for (const url of manifestUrls) {
-			const response = await fetch(new Request(url, { cache: "reload" }));
-			if (!response.ok)
-				throw new Error(`precache failed: ${url} (${response.status})`);
-			await recovery.put(url, response);
+		for (const entry of normalizedManifestEntries) {
+			await recovery.put(entry.url, await fetchManifestEntry(entry));
 		}
 		await writeBuildMetadata(recovery, BUILD_ID);
 		if (!(await replaceCacheFromStaging(recoveryName, CACHE_NAME)))
@@ -378,11 +413,8 @@ async function installBuild(): Promise<void> {
 	const stagingName = `${CACHE_NAME}-install-${Date.now()}`;
 	const staging = await caches.open(stagingName);
 	try {
-		for (const url of manifestUrls) {
-			const response = await fetch(new Request(url, { cache: "reload" }));
-			if (!response.ok)
-				throw new Error(`precache failed: ${url} (${response.status})`);
-			await staging.put(url, response);
+		for (const entry of normalizedManifestEntries) {
+			await staging.put(entry.url, await fetchManifestEntry(entry));
 		}
 		for (const url of manifestUrls) {
 			if (!(await staging.match(url)))

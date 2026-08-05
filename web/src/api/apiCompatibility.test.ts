@@ -50,6 +50,18 @@ describe("api compatibility", () => {
 		);
 	});
 
+	it("rejects an explicitly empty capability advertisement", () => {
+		expect(
+			resolveApiCompatibility({
+				releaseTag: "v3.22.5",
+				capabilities: [],
+			}),
+		).toEqual({
+			kind: "incompatible",
+			reason: expect.stringContaining("empty API capability"),
+		});
+	});
+
 	it("uses valid capabilities before an invalid release tag", () => {
 		const result = resolveApiCompatibility({
 			releaseTag: "v0.2.0",

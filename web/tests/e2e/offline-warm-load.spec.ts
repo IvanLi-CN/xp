@@ -7,6 +7,20 @@ test.skip(
 	"offline warm-load requires a preview build with service worker support",
 );
 
+test("renders the static fallback when the entry module cannot load", async ({
+	page,
+}) => {
+	await page.route(/\/assets\/index-[^/]+\.js/, (route) => route.abort());
+	await page.goto("/");
+
+	await expect(
+		page.getByRole("heading", { name: "xp could not start" }),
+	).toBeVisible();
+	await expect(page.getByRole("button", { name: "Reload app" })).toBeVisible();
+	await page.getByText("Technical details").click();
+	await expect(page.getByText("entry resource failed to load")).toBeVisible();
+});
+
 test("warm-loads cached nodes page offline after first successful visit", async ({
 	context,
 	page,

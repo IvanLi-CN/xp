@@ -7,6 +7,8 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+import { inlineBootstrapFallback } from "./src/runtime/inlineBootstrapFallback";
+
 const packageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, "./package.json"), "utf8"),
 ) as { version: string };
@@ -73,6 +75,7 @@ export default defineConfig(({ mode }) => {
 					if (context.path.endsWith("/iframe.html")) return html;
 					const declaration = [
 						"<script>",
+						inlineBootstrapFallback(buildId),
 						`window.__XP_WEB_BUILD_ID__=${JSON.stringify(buildId)};`,
 						"if (navigator.serviceWorker?.controller) {",
 						"navigator.serviceWorker.controller.postMessage({",
@@ -85,7 +88,7 @@ export default defineConfig(({ mode }) => {
 					const entry = `?xp-build=${encodeURIComponent(buildId)}`;
 					return html
 						.replace(/(src="[^\"]+\.(?:js|tsx))"/, `$1${entry}"`)
-						.replace("</head>", `${declaration}</head>`);
+						.replace("<head>", `<head>${declaration}`);
 				},
 				configurePreviewServer(server) {
 					if (process.env.E2E_USE_PREVIEW !== "1") return;

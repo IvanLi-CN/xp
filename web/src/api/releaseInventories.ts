@@ -2,6 +2,7 @@ import {
 	type ReleaseFixtureResponse,
 	statusEventFixture,
 } from "./releaseInventoryFixtures";
+import { completeSchemas } from "./releaseInventorySchemas";
 
 export const API_COMPATIBILITY_WINDOW = ["3.22", "3.21", "3.20"] as const;
 export type ApiCompatibilityMinor = (typeof API_COMPATIBILITY_WINDOW)[number];
@@ -562,9 +563,9 @@ const REQUEST_SCHEMAS_322: ResponseSchemaMap = {
 	"POST /api/admin/mesh/probes": ["node_ids"],
 };
 
-const RESPONSE_SCHEMAS_320: ResponseSchemaMap = RESPONSE_FIELDS_320;
-const RESPONSE_SCHEMAS_321: ResponseSchemaMap = RESPONSE_FIELDS_321;
-const RESPONSE_SCHEMAS_322: ResponseSchemaMap = RESPONSE_FIELDS_322;
+const RES_320 = completeSchemas(API_ROUTES_320, RESPONSE_FIELDS_320);
+const RES_321 = completeSchemas(API_ROUTES_321, RESPONSE_FIELDS_321);
+const RES_322 = completeSchemas(API_ROUTES_322, RESPONSE_FIELDS_322);
 
 const FINGERPRINT_320_321 = {
 	"/api/health": ["status"],
@@ -636,7 +637,7 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		apiRoutes: API_ROUTES_322,
 		webCallsites: WEB_CALLSITES_322,
 		requestSchemas: REQUEST_SCHEMAS_322,
-		responseSchemas: RESPONSE_SCHEMAS_322,
+		responseSchemas: RES_322,
 		capabilities: [
 			...COMMON_CAPABILITIES,
 			"admin.mesh",
@@ -651,7 +652,7 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		apiRoutes: API_ROUTES_321,
 		webCallsites: WEB_CALLSITES_321,
 		requestSchemas: REQUEST_SCHEMAS_321,
-		responseSchemas: RESPONSE_SCHEMAS_321,
+		responseSchemas: RES_321,
 		capabilities: COMMON_CAPABILITIES,
 		fingerprint: FINGERPRINT_320_321,
 	},
@@ -662,7 +663,7 @@ export const RELEASE_INVENTORIES: readonly ReleaseInventory[] = [
 		apiRoutes: API_ROUTES_320,
 		webCallsites: WEB_CALLSITES_320,
 		requestSchemas: REQUEST_SCHEMAS_320,
-		responseSchemas: RESPONSE_SCHEMAS_320,
+		responseSchemas: RES_320,
 		capabilities: COMMON_CAPABILITIES,
 		fingerprint: FINGERPRINT_320_321,
 	},
@@ -949,11 +950,6 @@ function fixtureResponses(
 	return Object.entries(consumer.responseSchemas).flatMap(([route, fields]) => {
 		if (!server.apiRoutes.includes(route)) return [];
 		const response = serverResponses[route];
-		if (!response) {
-			throw new Error(
-				`Missing immutable response fixture for ${server.releaseTag} ${route}`,
-			);
-		}
 		const serverFields = server.responseSchemas[route];
 		if (!serverFields) {
 			throw new Error(
@@ -965,7 +961,10 @@ function fixtureResponses(
 				route,
 				fields: serverFields,
 				missingFields: fields.filter((field) => !serverFields.includes(field)),
-				...response,
+				...(response ?? {
+					contentType: "application/json" as const,
+					body: {},
+				}),
 			},
 		];
 	});

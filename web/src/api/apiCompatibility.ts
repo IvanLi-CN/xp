@@ -17,7 +17,7 @@ const ReleaseTagSchema = z.string().regex(/^v\d+\.\d+\.\d+$/);
 const CapabilitiesResponseSchema = z
 	.object({
 		release_tag: z.string().optional(),
-		capabilities: z.array(z.string()).optional(),
+		capabilities: z.array(z.string()).min(1),
 		fingerprint: z.record(z.string(), z.array(z.string())).optional(),
 	})
 	.passthrough();
@@ -122,6 +122,12 @@ export function resolveApiCompatibility(input: {
 	capabilities?: readonly string[];
 	fingerprint?: ApiFingerprint;
 }): ApiCompatibilityResult {
+	if (input.capabilities !== undefined && input.capabilities.length === 0) {
+		return {
+			kind: "incompatible",
+			reason: "The server advertised an empty API capability set",
+		};
+	}
 	const advertised = new Set(input.capabilities ?? []);
 	if (advertised.size > 0) {
 		const candidates = RELEASE_INVENTORIES.filter((profile) =>

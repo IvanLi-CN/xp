@@ -109,6 +109,39 @@ describe("immutable release inventories", () => {
 		}
 	});
 
+	it("covers every pinned Web API module and every inventoried response", () => {
+		const helperModules = new Set([
+			"backendError",
+			"m1Schemas",
+			"mihomoProfileMock",
+			"quotaReset",
+			"releaseInventories",
+		]);
+		for (const inventory of RELEASE_INVENTORIES) {
+			const files = execFileSync(
+				"git",
+				[
+					"ls-tree",
+					"-r",
+					"--name-only",
+					inventory.sourceCommit,
+					":(top)web/src/api",
+				],
+				{ encoding: "utf8" },
+			);
+			const modules = files
+				.split("\n")
+				.filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+				.map((file) => file.slice(file.lastIndexOf("/") + 1, -3))
+				.filter((module) => !helperModules.has(module))
+				.sort();
+			expect([...inventory.webCallsites].sort()).toEqual(modules);
+			expect(Object.keys(inventory.responseSchemas).sort()).toEqual(
+				[...inventory.apiRoutes].sort(),
+			);
+		}
+	});
+
 	it("contains immutable per-minor routes and tolerant response contracts", () => {
 		for (const inventory of RELEASE_INVENTORIES) {
 			expect(inventory.webCallsites).toContain("adminStatusEvents");

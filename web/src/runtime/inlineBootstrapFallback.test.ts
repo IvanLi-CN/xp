@@ -1,0 +1,36 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { inlineBootstrapFallback } from "./inlineBootstrapFallback";
+
+describe("inline bootstrap fallback", () => {
+	it("renders before the entry module is available", () => {
+		document.body.innerHTML = '<div id="root"></div>';
+		const reload = vi.fn();
+		vi.stubGlobal("location", { reload });
+		new Function(inlineBootstrapFallback("fixture-build"))();
+
+		const script = document.createElement("script");
+		document.head.append(script);
+		script.dispatchEvent(new Event("error"));
+
+		expect(
+			document.querySelector("[data-xp-document-fallback]"),
+		).not.toBeNull();
+		expect(document.body.textContent).toContain("fixture-build");
+		(
+			document.querySelector("[data-action=reload]") as HTMLButtonElement
+		).click();
+		expect(reload).toHaveBeenCalledOnce();
+	});
+
+	it("can be concatenated with the build declaration", () => {
+		expect(() => {
+			new Function(
+				`${inlineBootstrapFallback("fixture-build")}window.__inlineLoaded=true;`,
+			)();
+		}).not.toThrow();
+		expect(
+			(window as Window & { __inlineLoaded?: boolean }).__inlineLoaded,
+		).toBe(true);
+	});
+});
