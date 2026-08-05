@@ -7,24 +7,27 @@
 
 ## 快速新增一个规格
 
-1. 生成一个新的规格 `ID`（推荐 5 个字符的 nanoId 风格，降低并行建规格时的冲突概率）。
-2. 新建目录：`docs/specs/<id>-<title>/`（`<title>` 用简短 slug，建议 kebab-case）。
-3. 在该目录下创建 `SPEC.md`（模板见下方“SPEC.md 写法（简要）”）。
-4. 在下方 Index 表新增一行，并把 `Status` 设为 `待设计` 或 `待实现`（取决于是否已冻结验收标准），并填入 `Last`（通常为当天）。
+1. 选择稳定、无编号的 topic slug。
+2. 新建目录 `docs/specs/<topic>/`，并创建 `SPEC.md`、`IMPLEMENTATION.md` 与 `HISTORY.md`。
+3. 在下方 Slug-only topics 表新增一行；生命周期与实现状态分别记录。
 
 ## 目录与命名规则
 
-- 每个规格一个目录：`docs/specs/<id>-<title>/`
+- 新规格目录使用 `docs/specs/<topic>/`；topic 为稳定的 kebab-case slug，不分配 ID。
+- 现有 `docs/specs/<id>-<title>/` 属于只读兼容命名，可继续维护但不用于新规格。
+
+### Legacy ID-based naming（仅兼容现有规格）
+
 - `<id>`：推荐 5 个字符的 nanoId 风格，一经分配不要变更。
   - 推荐字符集（小写 + 避免易混淆字符）：`23456789abcdefghjkmnpqrstuvwxyz`
   - 正则：`[23456789abcdefghjkmnpqrstuvwxyz]{5}`
   - 兼容：若仓库历史已使用四位数字 `0001`-`9999`，允许继续共存。
-- `<title>`：短标题 slug（建议 kebab-case，避免空格与特殊字符）；目录名尽量稳定。
-- 人类可读标题写在 Index 的 `Title` 列；标题变更优先改 `Title`，不强制改目录名。
+- `<title>`：历史目录中的短标题 slug；目录名尽量稳定。
+- 历史人类可读标题写在 Legacy ID-based Index 的 `Title` 列。
 
-## 状态（Status）说明
+## Legacy Index 状态说明
 
-仅允许使用以下状态值：
+以下状态值仅适用于历史 ID-based Index。新 topic 使用 Slug-only topics 的 `Lifecycle` 与 `Implementation` 两列，不与本字段混用。
 
 - `待设计`：范围/约束/验收标准尚未冻结，仍在补齐信息与决策。
 - `待实现`：规格已冻结，可开工；实现与测试验证应以该规格为准。
@@ -60,7 +63,7 @@
 - 风险与开放问题（需要决策的点）
 - 假设（需主人确认）
 
-## Index（固定表格）
+## Legacy ID-based Index（兼容表格）
 
 |    ID | Title                                      | Status             | Spec                                                    | Last       | Notes                                                                                                                                                                                                                                                                                                                                             |
 | ----: | ------------------------------------------ | ------------------ | ------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,3 +103,12 @@
 | nmgq8 | 完整托管栈 64 MiB 内存预算                 | 待实现             | `nmgq8-managed-stack-64m-memory/SPEC.md`                | 2026-07-29 | fast-track；xp+xray+cloudflared+canary PSS 硬门禁与低内存管理员鉴权                                                                                                                                                                                                                                                                               |
 | r26nc | 节点与用户 Traffic 统计                    | 已完成             | `r26nc-node-user-traffic-analytics/SPEC.md`             | 2026-07-28 | 49h five-minute + 90d UTC daily rollups；Node/User Traffic tabs；partial-aware comparison charts                                                                                                                                                                                                                                                  |
 | 56dtr | Reality Mesh                               | active             | `56dtr-reality-fallback-control-plane-mesh/SPEC.md`     | 2026-08-03 |                                                                                                                                                                                                                                                                                                                                                   |
+
+## Slug-only topics（新规格 canonical catalog）
+
+- `Lifecycle`: `draft|active|superseded|retired`
+- `Implementation`: 自由文本的 current truth，例如 `未开始`、`部分完成`、`已完成`
+
+| Topic          | Lifecycle | Implementation | Spec                             | Successor |
+| -------------- | --------- | -------------- | -------------------------------- | --------- |
+| Web 运行时韧性 | active    | 未开始         | `web-runtime-resilience/SPEC.md` | -         |
