@@ -4,7 +4,7 @@
 
 ## Current Status
 
-- Implementation: 未开始
+- Implementation: #226 framework error recovery 已实现，待集成分支验证
 - Lifecycle: active
 - Catalog note: Initiative `web-runtime-resilience`
 
@@ -14,13 +14,13 @@
 
 ## Remaining Gaps
 
-- 框架级错误恢复界面尚未实现。
 - PWA 原子更新与完整性测试尚未实现。
 - N/N-1/N-2 API 兼容 fixtures 与局部降级尚未实现。
 
 ## Related Changes
 
-- None
+- #226 child PR: framework error classification, recovery UI, guarded static-cache action,
+  redacted diagnostics, document fallback, Storybook coverage, and mock-only `ui_demo` evidence.
 
 ## References
 

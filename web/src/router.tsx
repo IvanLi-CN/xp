@@ -9,6 +9,7 @@ import {
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGate } from "./components/AuthGate";
+import { FrameworkErrorRecovery } from "./components/FrameworkErrorRecovery";
 import { PwaStatusPrompt } from "./components/PwaStatusPrompt";
 import { ToastProvider } from "./components/Toast";
 import { hasAdminToken } from "./components/auth";
@@ -99,6 +100,10 @@ const UiDemoSystemStatusPage = lazyRouteComponent(
 	() => import("./demo/DemoSystemStatusPage"),
 	"UiDemoSystemStatusPage",
 );
+const UiDemoFrameworkRecoveryPage = lazyRouteComponent(
+	() => import("./demo/DemoFrameworkRecoveryPage"),
+	"DemoFrameworkRecoveryPage",
+);
 const DemoUserDetailsPage = lazyRouteComponent(
 	() => import("./demo/DemoUsersPage"),
 	"DemoUserDetailsPage",
@@ -126,6 +131,12 @@ const uiDemoSystemStatusRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/ui-demo/system-status",
 	component: UiDemoSystemStatusPage,
+});
+
+const uiDemoFrameworkRecoveryRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/ui-demo/framework-recovery",
+	component: UiDemoFrameworkRecoveryPage,
 });
 
 const appRoute = createRoute({
@@ -399,13 +410,19 @@ const demoAppRouteTree = demoAppRoute.addChildren([
 const routeTree = rootRoute.addChildren([
 	loginRoute,
 	uiDemoSystemStatusRoute,
+	uiDemoFrameworkRecoveryRoute,
 	appRouteTree,
 	demoLoginRouteTree,
 	demoAppRouteTree,
 ]);
 
 export function createAppRouter() {
-	const router = createRouter({ routeTree });
+	const router = createRouter({
+		routeTree,
+		defaultErrorComponent: ({ error }) => (
+			<FrameworkErrorRecovery error={error} />
+		),
+	});
 
 	return router;
 }
