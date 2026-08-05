@@ -51,7 +51,10 @@ import {
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
-import { useApiCompatibility } from "../api/useApiCompatibility";
+import {
+	ApiCompatibilityProvider,
+	useApiCompatibility,
+} from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
@@ -766,7 +769,9 @@ export function AppShell({
 					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
 						<aside className="hidden lg:block">{navContent}</aside>
 						<main className="xp-panel p-[var(--xp-page-padding)]">
-							{children ?? <Outlet />}
+							<ApiCompatibilityProvider value={apiCompatibility.data ?? null}>
+								{children ?? <Outlet />}
+							</ApiCompatibilityProvider>
 						</main>
 					</div>
 				</div>

@@ -10,9 +10,9 @@ export function selectBuildForRequest(args: {
 	requestMode: PwaRequestKind;
 	activeBuildId: string;
 	clientBuildId?: string | null;
-}): string {
+}): string | null {
 	if (args.requestMode === "navigate") return args.activeBuildId;
-	return args.clientBuildId || args.activeBuildId;
+	return args.clientBuildId ?? null;
 }
 
 export function canDeleteBuildCache(
@@ -21,6 +21,14 @@ export function canDeleteBuildCache(
 ): boolean {
 	return Object.values(owners).every(
 		(ownerBuildId) => ownerBuildId !== buildId,
+	);
+}
+
+export function isTransientBuildCacheName(cacheName: string): boolean {
+	return (
+		cacheName.includes("-install-") ||
+		cacheName.includes("-recovery-") ||
+		cacheName.includes("-backup-")
 	);
 }
 

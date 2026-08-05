@@ -29,10 +29,11 @@ import {
 import { putAdminUserNodeWeight } from "../api/adminUserNodeWeights";
 import { fetchAdminUsers, patchAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
@@ -59,6 +60,10 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import {
+	formatNodeQuotaResetBrief,
+	ratioStatusTone,
+} from "../utils/quotaPolicyView";
+import {
 	RATIO_BASIS_POINTS,
 	basisPointsToWeights,
 	formatPercentFromBasisPoints,
@@ -74,27 +79,6 @@ function formatError(err: unknown): string {
 	}
 	if (err instanceof Error) return err.message;
 	return String(err);
-}
-function formatUtcOffsetMinutes(minutes: number): string {
-	const sign = minutes >= 0 ? "+" : "-";
-	const abs = Math.abs(minutes);
-	const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-	const mm = String(abs % 60).padStart(2, "0");
-	return `UTC${sign}${hh}:${mm}`;
-}
-function formatNodeQuotaResetBrief(q: {
-	policy: "monthly" | "unlimited";
-	day_of_month?: number;
-	tz_offset_minutes?: number | null;
-}): string {
-	const tz =
-		q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
-			? "(local)"
-			: formatUtcOffsetMinutes(q.tz_offset_minutes);
-	if (q.policy === "monthly") {
-		return `monthly@${q.day_of_month ?? 1} ${tz}`;
-	}
-	return `unlimited ${tz}`;
 }
 type RatioDraftRow = {
 	userId: string;
@@ -164,14 +148,6 @@ type TablePercentInlineEditorProps = {
 const rangeInputClass =
 	"h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary disabled:cursor-not-allowed disabled:opacity-50";
 const surfaceClass = "xp-card";
-
-function ratioStatusTone(
-	totalBasisPoints: number,
-): "success" | "warning" | "error" {
-	if (totalBasisPoints === RATIO_BASIS_POINTS) return "success";
-	if (totalBasisPoints < RATIO_BASIS_POINTS) return "warning";
-	return "error";
-}
 
 function scopeTabClass(selected: boolean): string {
 	return cn(
@@ -498,6 +474,9 @@ export function QuotaPolicyPage() {
 	const runtime = useAppRuntime();
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
+	const quotaCapability = useApiCapability("admin.quota-policy");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const usersCapability = useApiCapability("admin.users");
 
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [selectedWeightTab, setSelectedWeightTab] = useState<string>("global");
@@ -540,19 +519,19 @@ export function QuotaPolicyPage() {
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
 	const usersQuery = useQuery({
 		queryKey: ["adminUsers", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && usersCapability.available,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 
 	const globalWeightRowsQuery = useQuery({
 		queryKey: ["adminQuotaPolicyGlobalWeightRows", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && quotaCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminQuotaPolicyGlobalWeightRows(adminToken, signal),
 		refetchOnWindowFocus: false,
@@ -1232,6 +1211,23 @@ export function QuotaPolicyPage() {
 						<Link to="/login">Go to login</Link>
 					</Button>
 				}
+			/>
+		);
+	}
+	if (
+		quotaCapability.unavailable ||
+		nodesCapability.unavailable ||
+		usersCapability.unavailable
+	) {
+		const unavailableCapability = quotaCapability.unavailable
+			? quotaCapability
+			: nodesCapability.unavailable
+				? nodesCapability
+				: usersCapability;
+		return (
+			<CapabilityUnavailableState
+				title="Quota policy unavailable"
+				reason={unavailableCapability.reason}
 			/>
 		);
 	}

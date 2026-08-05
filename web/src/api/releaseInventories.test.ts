@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { AdminNodesRuntimeResponseSchema } from "./adminNodeRuntime";
+import { AdminNodesResponseSchema } from "./adminNodes";
+import { ClusterInfoResponseSchema } from "./clusterInfo";
+import { HealthResponseSchema } from "./health";
 import {
 	API_COMPATIBILITY_WINDOW,
+	RELEASE_API_FIXTURES,
 	RELEASE_COMPATIBILITY_CONTRACTS,
 	RELEASE_INVENTORIES,
 } from "./releaseInventories";
+import { VersionCheckResponseSchema } from "./versionCheck";
 
 describe("immutable release inventories", () => {
 	it("pins the latest stable tag and source commit for every compatibility minor", () => {
@@ -45,6 +51,57 @@ describe("immutable release inventories", () => {
 
 	it("executes both compatibility directions for every pinned inventory", () => {
 		expect(RELEASE_COMPATIBILITY_CONTRACTS).toHaveLength(6);
+		for (const fixture of RELEASE_API_FIXTURES) {
+			const inventory = RELEASE_INVENTORIES.find(
+				(candidate) => candidate.releaseTag === fixture.releaseTag,
+			);
+			expect(inventory).toBeDefined();
+			if (!inventory) continue;
+
+			const requestRoutes = fixture.requests.map(
+				(request) => `${request.method} ${request.path}`,
+			);
+			expect(new Set(requestRoutes)).toEqual(new Set(inventory.apiRoutes));
+			for (const request of fixture.requests) {
+				expect(request.expectedStatus).toBe(200);
+			}
+
+			for (const response of fixture.responses) {
+				const fields = inventory.responseSchemas[response.route];
+				expect(fields).toBeDefined();
+				if (!fields) continue;
+				if (response.contentType === "text/plain") {
+					expect(fields).toContain("text/plain");
+					continue;
+				}
+
+				if (response.route === "GET /api/health") {
+					HealthResponseSchema.parse(response.body);
+				} else if (response.route === "GET /api/cluster/info") {
+					ClusterInfoResponseSchema.parse(response.body);
+				} else if (response.route === "GET /api/admin/nodes") {
+					AdminNodesResponseSchema.parse(response.body);
+				} else if (response.route === "GET /api/admin/nodes/runtime") {
+					AdminNodesRuntimeResponseSchema.parse(response.body);
+				} else if (response.route === "GET /api/version/check") {
+					VersionCheckResponseSchema.parse(response.body);
+				}
+
+				const body = response.body as Record<string, unknown>;
+				for (const field of fields) {
+					if (response.route === "GET /api/admin/status/events") {
+						const eventPath =
+							field === "hello" || field === "snapshot"
+								? field
+								: `snapshot.${field}`;
+						expect(body).toHaveProperty(eventPath);
+					} else {
+						expect(body).toHaveProperty(field);
+					}
+				}
+			}
+		}
+
 		for (const inventory of RELEASE_INVENTORIES) {
 			const newWebContract = RELEASE_COMPATIBILITY_CONTRACTS.find(
 				(contract) =>
@@ -60,6 +117,12 @@ describe("immutable release inventories", () => {
 			expect(legacyWebContract?.apiRoutes).toEqual(inventory.apiRoutes);
 			expect(newWebContract?.webCallsites).toEqual(inventory.webCallsites);
 			expect(legacyWebContract?.webCallsites).toEqual(inventory.webCallsites);
+			expect(newWebContract?.responseSchemas).toEqual(
+				inventory.responseSchemas,
+			);
+			expect(legacyWebContract?.responseSchemas).toEqual(
+				inventory.responseSchemas,
+			);
 		}
 	});
 });

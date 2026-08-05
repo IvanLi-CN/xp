@@ -41,6 +41,21 @@ export type ReleaseCompatibilityContract = {
 	responseSchemas: Readonly<Record<string, readonly string[]>>;
 };
 
+export type ReleaseApiFixture = {
+	releaseTag: string;
+	sourceCommit: string;
+	requests: readonly {
+		method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+		path: string;
+		expectedStatus: 200;
+	}[];
+	responses: readonly {
+		route: string;
+		contentType: "application/json" | "text/plain";
+		body: unknown;
+	}[];
+};
+
 const API_ROUTES_322 = [
 	"GET /api/health",
 	"GET /api/cluster/info",
@@ -319,3 +334,156 @@ export const RELEASE_COMPATIBILITY_CONTRACTS: readonly ReleaseCompatibilityContr
 			responseSchemas: inventory.responseSchemas,
 		},
 	]);
+
+const FIXTURE_NODE = {
+	node_id: "01fixture000000000000000000",
+	node_name: "fixture-node",
+	api_base_url: "https://fixture.example/api",
+	access_host: "fixture.example",
+	quota_limit_bytes: 0,
+	quota_reset: { policy: "unlimited", tz_offset_minutes: 0 },
+} as const;
+
+const FIXTURE_RESPONSES = {
+	"GET /api/health": {
+		contentType: "application/json" as const,
+		body: { status: "ok", extra_field_added_by_server: true },
+	},
+	"GET /api/cluster/info": {
+		contentType: "application/json" as const,
+		body: {
+			cluster_id: "fixture-cluster",
+			node_id: FIXTURE_NODE.node_id,
+			role: "leader",
+			leader_api_base_url: "https://fixture.example",
+			term: 7,
+			xp_version: "3.22.5",
+			extra_field_added_by_server: true,
+		},
+	},
+	"GET /api/admin/nodes": {
+		contentType: "application/json" as const,
+		body: { items: [FIXTURE_NODE], extra_field_added_by_server: true },
+	},
+	"GET /api/admin/nodes/runtime": {
+		contentType: "application/json" as const,
+		body: { partial: false, unreachable_nodes: [], items: [] },
+	},
+	"GET /api/admin/status/events": {
+		contentType: "application/json" as const,
+		body: {
+			hello: {
+				node_id: FIXTURE_NODE.node_id,
+				connected_at: "2026-08-05T00:00:00Z",
+			},
+			snapshot: {
+				emitted_at: "2026-08-05T00:00:00Z",
+				health: { status: "ok" },
+				cluster_info: {
+					cluster_id: "fixture-cluster",
+					node_id: FIXTURE_NODE.node_id,
+					role: "leader",
+					leader_api_base_url: "https://fixture.example",
+					term: 7,
+					xp_version: "3.22.5",
+				},
+				nodes_runtime: { partial: false, unreachable_nodes: [], items: [] },
+				alerts: { partial: false, unreachable_nodes: [], items: [] },
+				upgrade: {
+					support: { supported: false },
+					status: { state: "idle", updated_at: "2026-08-05T00:00:00Z" },
+				},
+				mesh_revision: 11,
+			},
+		},
+	},
+	"GET /api/version/check": {
+		contentType: "application/json" as const,
+		body: {
+			current: { package: "xp", release_tag: "v3.22.5" },
+			latest: { release_tag: "v3.22.5", published_at: "2026-08-05T00:00:00Z" },
+			has_update: false,
+			checked_at: "2026-08-05T00:00:00Z",
+			compare_reason: "fixture",
+			source: {
+				kind: "github",
+				repo: "IvanLi-CN/xp",
+				api_base: "https://api.github.com",
+				channel: "stable",
+			},
+		},
+	},
+	"GET /api/admin/config": {
+		contentType: "application/json" as const,
+		body: {
+			bind: "127.0.0.1:62416",
+			xray_api_addr: "127.0.0.1:10085",
+			data_dir: "/var/lib/xp",
+			node_name: "fixture-node",
+			access_host: "fixture.example",
+			api_base_url: "https://fixture.example",
+			vless_https_canary_bind: "127.0.0.1:18080",
+			quota_poll_interval_secs: 60,
+			quota_auto_unban: false,
+			ip_geo_enabled: false,
+			ip_geo_origin: "",
+			admin_token_present: true,
+			admin_token_masked: "****",
+		},
+	},
+	"GET /api/admin/mesh/status": {
+		contentType: "application/json" as const,
+		body: {
+			generated_at: "2026-08-05T00:00:00Z",
+			revision: 11,
+			local: {},
+			peers: [],
+			events: [],
+		},
+	},
+	"GET /api/capabilities": {
+		contentType: "application/json" as const,
+		body: {
+			release_tag: "v3.22.5",
+			capabilities: ["api.health", "admin.nodes"],
+			fingerprint: { "/api/health": ["status"] },
+		},
+	},
+	"GET /api/sub/{subscription_token}": {
+		contentType: "text/plain" as const,
+		body: "proxy-provider-fixture",
+	},
+} as const;
+
+function fixtureRequests(
+	inventory: ReleaseInventory,
+): ReleaseApiFixture["requests"] {
+	return inventory.apiRoutes.map((route) => {
+		const separator = route.indexOf(" ");
+		return {
+			method: route.slice(
+				0,
+				separator,
+			) as ReleaseApiFixture["requests"][number]["method"],
+			path: route.slice(separator + 1),
+			expectedStatus: 200,
+		};
+	});
+}
+
+function fixtureResponses(
+	inventory: ReleaseInventory,
+): ReleaseApiFixture["responses"] {
+	return Object.entries(inventory.responseSchemas).flatMap(([route]) => {
+		const response = FIXTURE_RESPONSES[route as keyof typeof FIXTURE_RESPONSES];
+		return response ? [{ route, ...response }] : [];
+	});
+}
+
+export const RELEASE_API_FIXTURES: readonly ReleaseApiFixture[] =
+	RELEASE_INVENTORIES.map((inventory) => ({
+		releaseTag: inventory.releaseTag,
+		sourceCommit: inventory.sourceCommit,
+		requests: fixtureRequests(inventory),
+		responses: fixtureResponses(inventory),
+	}));

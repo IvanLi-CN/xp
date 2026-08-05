@@ -5,6 +5,7 @@ import {
 	appShellCacheName,
 	buildIdFromCacheName,
 	canDeleteBuildCache,
+	isTransientBuildCacheName,
 	selectBuildForRequest,
 } from "./offline/pwaBuildPolicy";
 
@@ -34,6 +35,8 @@ const manifestUrls = new Set(
 		(entry) => new URL(entry.url, self.registration.scope).href,
 	),
 );
+const pendingNavigationBuilds = new Map<string, string>();
+let pendingNavigationBuildId: string | null = null;
 
 function isSameOriginStaticRequest(request: Request): boolean {
 	const url = new URL(request.url);
@@ -112,7 +115,11 @@ async function cleanupUnownedBuildCaches(
 	const cacheNames = await caches.keys();
 	const deleted: string[] = [];
 	for (const cacheName of cacheNames) {
-		if (!cacheName.startsWith(APP_SHELL_CACHE_PREFIX)) continue;
+		if (
+			!cacheName.startsWith(APP_SHELL_CACHE_PREFIX) ||
+			isTransientBuildCacheName(cacheName)
+		)
+			continue;
 		const buildId = buildIdFromCacheName(cacheName);
 		if (
 			!buildId ||
@@ -152,11 +159,59 @@ async function reconcileOwnership(): Promise<string[]> {
 				delete owners[clientId];
 			}),
 	);
+	for (const clientId of pendingNavigationBuilds.keys()) {
+		if (!liveClientIds.has(clientId)) pendingNavigationBuilds.delete(clientId);
+	}
 
 	if (!hasUndeclaredClient) {
 		return cleanupUnownedBuildCaches(owners);
 	}
 	return [];
+}
+
+async function copyCache(
+	sourceName: string,
+	targetName: string,
+): Promise<void> {
+	const source = await caches.open(sourceName);
+	const target = await caches.open(targetName);
+	for (const request of await source.keys()) {
+		const response = await source.match(request);
+		if (!response)
+			throw new Error(`cache source entry disappeared: ${request.url}`);
+		await target.put(request, response);
+	}
+	for (const request of await source.keys()) {
+		if (!(await target.match(request)))
+			throw new Error(`cache target entry missing: ${request.url}`);
+	}
+}
+
+async function replaceCacheFromStaging(
+	sourceName: string,
+	targetName: string,
+): Promise<boolean> {
+	const backupName = `${targetName}-backup-${Date.now()}`;
+	let backupReady = false;
+	try {
+		await copyCache(targetName, backupName);
+		backupReady = true;
+		await caches.delete(targetName);
+		await copyCache(sourceName, targetName);
+		await caches.delete(backupName);
+		return true;
+	} catch {
+		await caches.delete(targetName);
+		if (backupReady) {
+			try {
+				await copyCache(backupName, targetName);
+			} catch {
+				return false;
+			}
+		}
+		await caches.delete(backupName);
+		return false;
+	}
 }
 
 async function completeBuildCache(): Promise<boolean> {
@@ -176,11 +231,8 @@ async function completeBuildCache(): Promise<boolean> {
 				throw new Error(`precache failed: ${url} (${response.status})`);
 			await recovery.put(url, response);
 		}
-		for (const url of manifestUrls) {
-			const response = await recovery.match(url);
-			if (!response) throw new Error(`precache verification failed: ${url}`);
-			await target.put(url, response);
-		}
+		if (!(await replaceCacheFromStaging(recoveryName, CACHE_NAME)))
+			return false;
 		await caches.delete(recoveryName);
 		return true;
 	} catch {
@@ -234,6 +286,10 @@ async function respondToClient(
 async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	const requestUrl = new URL(event.request.url);
 	const requestKind = event.request.mode === "navigate" ? "navigate" : "asset";
+	if (requestKind === "navigate" && event.clientId) {
+		pendingNavigationBuilds.set(event.clientId, BUILD_ID);
+		pendingNavigationBuildId = BUILD_ID;
+	}
 	if (requestKind === "asset" && !manifestUrls.has(requestUrl.href)) {
 		return new Response("Static asset is not part of the active precache.", {
 			status: 504,
@@ -242,11 +298,27 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	}
 
 	const owners = await readOwners();
+	const selectedClientBuild = event.clientId
+		? (pendingNavigationBuilds.get(event.clientId) ?? owners[event.clientId])
+		: null;
 	const buildId = selectBuildForRequest({
 		requestMode: requestKind,
 		activeBuildId: BUILD_ID,
-		clientBuildId: event.clientId ? owners[event.clientId] : null,
+		clientBuildId:
+			selectedClientBuild ??
+			(requestKind === "asset" ? pendingNavigationBuildId : null),
 	});
+	if (!buildId) {
+		await respondToClient(event.clientId || null, {
+			type: "XP_REQUEST_BUILD_DECLARATION",
+			buildId: BUILD_ID,
+			url: requestUrl.pathname,
+		});
+		return new Response("The application build has not been declared yet.", {
+			status: 504,
+			headers: { "Content-Type": "text/plain" },
+		});
+	}
 	const cache = await caches.open(appShellCacheName(buildId));
 	const cacheUrl =
 		requestKind === "navigate"
@@ -303,11 +375,15 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 					return;
 				}
 				await writeOwner(clientId, message.buildId);
+				pendingNavigationBuilds.delete(clientId);
+				pendingNavigationBuildId = null;
 				await reconcileOwnership();
 				return;
 			}
 			if (message?.type === "XP_RELEASE_BUILD" && clientId) {
 				await deleteOwner(clientId);
+				pendingNavigationBuilds.delete(clientId);
+				pendingNavigationBuildId = null;
 				await reconcileOwnership();
 				return;
 			}

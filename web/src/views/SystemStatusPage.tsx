@@ -14,7 +14,7 @@ import { Button, IconButton } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { MeshUptimeStrip } from "@/components/MeshUptimeStrip";
 import { PageHeader } from "@/components/PageHeader";
-import { PageState } from "@/components/PageState";
+import { CapabilityUnavailableState, PageState } from "@/components/PageState";
 import { ReadStateBanner } from "@/components/ReadStateBanner";
 import { readAdminToken } from "@/components/auth";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ import {
 	queryIsOfflineBlocked,
 } from "@/offline/queryReadState";
 import { useQueryWithOfflineFallback } from "@/offline/useQueryWithOfflineFallback";
+import { useApiCapability } from "../api/useApiCompatibility";
 
 export type SystemStatusSurfaceProps = {
 	status: AdminMeshStatus;
@@ -440,9 +441,11 @@ function StatusFact({
 export function SystemStatusPage() {
 	const runtime = useAppRuntime();
 	const [adminToken] = useState(() => readAdminToken());
+	const meshCapability = useApiCapability("admin.mesh");
+	const nodesCapability = useApiCapability("admin.nodes");
 	const meshQuery = useQuery({
 		queryKey: ["adminMeshStatus", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && meshCapability.available,
 		queryFn: ({ signal }) => fetchAdminMeshStatus(adminToken, signal),
 		refetchInterval: 30_000,
 	});
@@ -452,7 +455,7 @@ export function SystemStatusPage() {
 	);
 	const runtimeQuery = useQuery({
 		queryKey: ["adminNodesRuntime", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 	const alertsQuery = useQuery({
@@ -483,6 +486,13 @@ export function SystemStatusPage() {
 				variant="empty"
 				title="Admin token required"
 				description="Set an admin token to inspect mesh status."
+			/>
+		);
+	if (meshCapability.unavailable)
+		return (
+			<CapabilityUnavailableState
+				title="Mesh status unavailable"
+				reason={meshCapability.reason}
 			/>
 		);
 	if (meshState.isLoading && !hasQueryData(meshState))
