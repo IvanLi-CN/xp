@@ -177,8 +177,7 @@
 - Capture scope: complete browser viewport; no post-capture crop.
 - Coverage: desktop first failure, guarded recovery result with expanded diagnostics, and mobile
   repeated failure.
-- Evidence baseline: `630b5b6fc8b838ff157a0191b6a3dff06ce825b0` plus the pending local UI evidence
-  changes shown here.
+- Evidence binding SHA: `41194b7`.
 - PR: none
 
 Desktop (`1440x900` CSS viewport), first resource-load failure:
