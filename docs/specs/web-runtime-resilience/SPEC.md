@@ -195,7 +195,7 @@
 - Coverage: desktop first failure, guarded recovery result with expanded diagnostics, and mobile
   repeated failure.
 - Evidence binding SHA: `41194b7`.
-- PR: none
+  PR: none
 
 Desktop (`1440x900` CSS viewport), first resource-load failure:
 
