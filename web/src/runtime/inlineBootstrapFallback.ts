@@ -58,7 +58,7 @@ export function inlineBootstrapFallback(buildId: string): string {
 	].join("");
 	const errorHandler = [
 		"const target=event.target;",
-		"if(target instanceof HTMLScriptElement",
+		"if(event.error||event.message||target===window||target instanceof HTMLScriptElement",
 		'||(target instanceof HTMLLinkElement&&target.rel==="stylesheet"))render()',
 	].join("");
 	return [

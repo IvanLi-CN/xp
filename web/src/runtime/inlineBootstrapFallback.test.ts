@@ -23,6 +23,22 @@ describe("inline bootstrap fallback", () => {
 		expect(reload).toHaveBeenCalledOnce();
 	});
 
+	it("renders when entry module evaluation fails after download", () => {
+		document.body.innerHTML = '<div id="root"></div>';
+		new Function(inlineBootstrapFallback("fixture-build"))();
+
+		window.dispatchEvent(
+			new ErrorEvent("error", {
+				error: new Error("module evaluation failed"),
+				message: "module evaluation failed",
+			}),
+		);
+
+		expect(
+			document.querySelector("[data-xp-document-fallback]"),
+		).not.toBeNull();
+	});
+
 	it("can be concatenated with the build declaration", () => {
 		expect(() => {
 			new Function(
