@@ -49,6 +49,9 @@
 - 每次 Web 构建的入口 HTML、JS chunks、CSS、字体、图标和 manifest 必须属于同一 precache 版本。
 - 新 Service Worker 必须在完整安装后进入 waiting；incumbent 仍控制客户端时仅在用户确认后请求激活。
   零受控客户端时允许浏览器按原生生命周期自动激活，下一次访问直接使用完整新构建。
+  唯一例外是 legacy Workbox 迁移：当同 scope 的精确 `workbox-precache-v2-<scope>` 仍存在，
+  存活客户端在最多 1 秒声明探测后均无有效 XP build ownership，完整新 Worker 可记录迁移状态并
+  `skipWaiting()`；该例外不得 `clients.claim()`、自动刷新或接管已打开页面。
   当前可用缓存不得因失败安装而被清理，仍有旧构建客户端时不得提前删除其完整 precache。
 - Web 必须兼容当前及前两个 minor 服务端版本，覆盖新 Web 连接旧后端与旧 Web 连接新后端。
 - 缺失 API 或字段必须在相关功能局部降级，不得阻断整个 App。
@@ -72,6 +75,10 @@
   `clients.matchAll()` 消失；此后才原子替换不再被其他客户端持有的 XP app-shell cache。
   无新版 worker 且无法完整重建当前 build 时不得删除可用缓存，只提供普通 reload 与稍后重试。
 - 新构建由 Service Worker 后台完整获取；正常状态展示可关闭的更新提示，用户确认后切换。
+- legacy Workbox 控制的已打开页面不能响应 XP ownership 声明时，完整新 Worker 后台激活但保持
+  该页面的旧 controller；用户手动刷新或新开页面后才加载当前完整 build。迁移状态仅记录精确 legacy
+  cache 和迁移开始时已存在的无 owner XP app-shell；所有存活页面声明有效 XP build 后才回收这些记录的
+  cache，不得清除 token、UI 偏好、`react_query_cache` 或其他站点缓存。
 - API consumer 以宽容 schema 和能力存在性决定功能可用性；旧服务端缺失的新功能显示局部升级说明。
 
 ### Edge cases / errors
@@ -81,6 +88,8 @@
 - 新 Service Worker 安装失败或网络中断时，当前激活版本及其缓存继续工作。
 - 多标签页可以暂时运行不同完整构建，但单个标签页不得混用不同构建的静态资源；
   旧版本 precache 必须保留到对应受控客户端全部离开，再由后续激活或启动清理。
+- legacy migration 不是常规 update 的替代路径：只要任一存活客户端已有有效 XP ownership，新 Worker
+  必须继续 waiting，直到用户明确确认更新。
 - 超出兼容窗口或缺少关键页面合同的服务端返回明确的局部不兼容状态。
 - cache recovery 若发现目标 build 仍被其他客户端持有，必须保留该 precache；
   请求页面仍可更新并导航到 active build，界面说明旧缓存将在最后一个 owner 离开后清理。
@@ -101,6 +110,8 @@
 - 每个受控页面必须向 Service Worker 声明自己的 Web build ID；Service Worker 维护
   `clientId -> build ID` ownership，并将该客户端的静态请求路由到对应保留 precache。
   ownership 写入独立的 `xp_sw_metadata` 持久存储，不得复用或清除 `react_query_cache`。
+  该数据库还保存 legacy Workbox migration state；它只允许记录当前 registration scope 的精确 legacy
+  precache 名称和迁移开始时的无 owner XP app-shell 名称。
   新 worker 激活或 controller change 后必须用 `clients.matchAll()` 与页面消息重新核对持久记录；
   reconciliation 完成前禁止清理任何旧 build cache，已消失 client 的记录才可回收。
   已存在客户端按 ownership 取完整旧构建；新的或重新加载的导航始终取完整 active build 的
@@ -126,6 +137,12 @@
 - Given 另一标签页仍持有请求清理的 build，When 当前标签页执行 cache recovery，Then
   旧 precache 保留供该 owner 使用，当前标签页切到 active build，其他站点数据不变。
 - Given 新构建下载中断，When 页面重新访问，Then 当前完整旧构建仍能启动。
+- Given legacy Workbox Worker 控制旧页面、完整 XP Worker 已 waiting 且存在无 owner 的中间 XP app-shell，When
+  后续完整 XP Worker 在最多 1 秒声明探测后仍找不到有效 XP owner，Then 它后台激活但不发生
+  `controllerchange`、`clients.claim()` 或自动刷新；旧页面手动刷新或新开页面后获得单一当前 build。
+- Given legacy migration 仍有旧页面未迁移，When ownership reconciliation 运行，Then legacy Workbox shell 和
+  迁移记录的中间 app-shell 保留；When 最后一个页面声明有效 XP build，Then 仅这些迁移记录的 cache 被回收，
+  token、UI preferences 与 `react_query_cache` 保持不变。
 - Given 新构建完整进入 waiting，When 用户确认更新，Then 当前页面切换到单一新构建；
   仍服务旧构建标签页的完整缓存继续保留，最后一个旧客户端离开后才可清理。
 - Given 旧标签页尚未加载某个 lazy chunk，When 新版本在另一标签页激活，Then 旧标签页仍从自己的完整
@@ -152,8 +169,8 @@
 - Integration tests: embedded assets、Service Worker cache headers、当前 Web 对 N/N-1/N-2
   method/path/status/capability inventory 与关键页面 wire-body fixtures，以及 N-1/N-2 Web
   版本化请求合同对当前后端。
-- E2E tests: 离线 warm-load、waiting update、失败安装、旧标签页 lazy chunk、用户触发切换，
-  以及 React bootstrap/fallback 二次失败。
+- E2E tests: 离线 warm-load、waiting update、失败安装、legacy Workbox 无 owner migration、旧标签页 lazy
+  chunk、用户触发切换，以及 production AppShell / VersionIndicator 的 React #185 console gate。
 
 ### UI / Storybook
 
@@ -178,19 +195,19 @@
 - Coverage: desktop first failure, guarded recovery result with expanded diagnostics, and mobile
   repeated failure.
 - Evidence binding SHA: `41194b7`.
-- PR: none
+  PR: none
 
 Desktop (`1440x900` CSS viewport), first resource-load failure:
 
-![Framework recovery desktop state](assets/framework-recovery-desktop.png)
+![Framework recovery desktop state](./assets/framework-recovery-desktop.png)
 
 Desktop (`1440x900` CSS viewport), guarded cache result and expanded diagnostics:
 
-![Framework recovery guarded result and diagnostics](assets/framework-recovery-diagnostics.png)
+![Framework recovery guarded result and diagnostics](./assets/framework-recovery-diagnostics.png)
 
 Mobile (`393x852` CSS viewport), repeated failure state:
 
-![Framework recovery mobile repeated-failure state](assets/framework-recovery-mobile.png)
+![Framework recovery mobile repeated-failure state](./assets/framework-recovery-mobile.png)
 
 ## 文档更新（Docs to Update）
 

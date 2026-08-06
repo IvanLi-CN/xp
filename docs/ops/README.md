@@ -27,11 +27,20 @@ Current support boundaries that operators must know:
 
 ## Web PWA and API compatibility
 
-The embedded admin Web app is a build-versioned PWA. A release precaches the complete HTML, JavaScript,
-CSS, font, icon, and manifest app shell under a build-specific cache name. The new worker waits for the
-operator's confirmation before activation; an interrupted install leaves the active build usable. Do not
-manually delete `xp-app-shell-*` caches while an older tab may still be open. Cross-tab ownership is
-stored in `xp_sw_metadata`, separately from the React Query cache.
+The embedded admin Web app is a build-versioned PWA. A release precaches the complete HTML,
+JavaScript, CSS, font, icon, and manifest app shell under a build-specific cache name.
+The new worker waits for the operator's confirmation before activation. An interrupted install leaves
+the active build usable. Do not manually delete `xp-app-shell-*` caches while an older tab may still be
+open. Cross-tab ownership is stored in `xp_sw_metadata`, separately from the React Query cache.
+
+The only activation exception repairs an old Workbox controller that cannot render the XP update
+prompt. After a complete new app shell is verified, the Worker may wait up to one second for a
+declaration from live clients. It activates in the background only when the exact same-scope
+`workbox-precache-v2-<scope>` exists and no client has valid XP ownership.
+This migration never claims or refreshes an open page; the operator must refresh or reopen it.
+`xp_sw_metadata` records the precise legacy cache and pre-existing orphan XP app-shell names.
+Those caches are deleted only after every live client declares a valid XP build. Normal XP-to-XP
+updates still wait for the operator's confirmation.
 
 The Web client supports the current API minor and the two previous minors in the fixed `3.22`,
 `3.21`, and `3.20` window. It probes `GET /api/capabilities`, falls back to the strict current

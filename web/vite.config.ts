@@ -78,21 +78,99 @@ export default defineConfig(({ mode }) => {
 				configurePreviewServer(server) {
 					if (process.env.E2E_USE_PREVIEW !== "1") return;
 					server.middlewares.use((request, response, next) => {
-						if (!request.url?.startsWith("/sw.js?e2e-waiting=")) {
+						const requestUrl = request.url
+							? new URL(request.url, "http://127.0.0.1")
+							: null;
+						if (requestUrl?.pathname === "/__e2e_legacy_worker__.js") {
+							response.statusCode = 200;
+							response.setHeader("Content-Type", "application/javascript");
+							response.setHeader("Cache-Control", "no-store");
+							response.end(
+								[
+									"self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));",
+									"self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));",
+								].join("\n"),
+							);
+							return;
+						}
+						if (requestUrl?.pathname === "/__e2e_legacy_client__.html") {
+							response.statusCode = 200;
+							response.setHeader("Content-Type", "text/html");
+							response.setHeader("Cache-Control", "no-store");
+							response.end(
+								"<!doctype html><title>legacy xp client</title><main>legacy xp client</main>",
+							);
+							return;
+						}
+						const waitingToken = requestUrl?.searchParams.get("e2e-waiting");
+						const migrationToken = requestUrl?.searchParams.get(
+							"e2e-legacy-migration",
+						);
+						const predecessorToken = requestUrl?.searchParams.get(
+							"e2e-legacy-predecessor",
+						);
+						const failedMigrationToken = requestUrl?.searchParams.get(
+							"e2e-legacy-install-failure",
+						);
+						if (
+							requestUrl?.pathname !== "/sw.js" ||
+							(!waitingToken &&
+								!migrationToken &&
+								!predecessorToken &&
+								!failedMigrationToken)
+						) {
 							next();
 							return;
 						}
 						const serviceWorkerPath = path.resolve(__dirname, "dist/sw.js");
-						const waitingId = `e2e-waiting-${
-							new URL(request.url, "http://127.0.0.1").searchParams.get(
-								"e2e-waiting",
-							) ?? Date.now()
-						}`;
 						const source = fs.readFileSync(serviceWorkerPath, "utf8");
-						const body = `${source.replaceAll(
-							JSON.stringify(buildId),
-							JSON.stringify(waitingId),
-						)}\n/* e2e waiting revision */`;
+						const withBuildId = (replacementBuildId: string) =>
+							source.replaceAll(
+								JSON.stringify(buildId),
+								JSON.stringify(replacementBuildId),
+							);
+						const withoutMigrationActivation = () => {
+							const replacement = source.replace(
+								/if\([^)]*==="legacy_migration"\)\{/,
+								"if(false){",
+							);
+							if (replacement === source) {
+								throw new Error(
+									"E2E predecessor fixture could not disable legacy migration activation",
+								);
+							}
+							return replacement;
+						};
+						const legacyInstallFailureInterceptor = [
+							"const __xpE2eFetch = self.fetch.bind(self);",
+							"self.fetch = (input, init) => {",
+							"const url = input instanceof Request",
+							"? input.url",
+							": new URL(input, self.registration.scope).href;",
+							'if (new URL(url).pathname.endsWith("/site.webmanifest")) {',
+							'return Promise.reject(new Error("e2e legacy precache failure"));',
+							"}",
+							"return __xpE2eFetch(input, init);",
+							"};",
+						].join(" ");
+						const legacyInstallFailureSource = (workerToken: string) =>
+							[
+								legacyInstallFailureInterceptor,
+								source,
+								`/* e2e legacy failure ${workerToken} */`,
+							].join("\n");
+						const body = waitingToken
+							? `${withBuildId(`e2e-waiting-${waitingToken}`)}\n/* e2e waiting revision */`
+							: predecessorToken
+								? `${withoutMigrationActivation().replaceAll(
+										JSON.stringify(buildId),
+										JSON.stringify(
+											`e2e-legacy-predecessor-${predecessorToken}`,
+										),
+									)}\n/* e2e legacy predecessor ${predecessorToken} */`
+								: failedMigrationToken
+									? legacyInstallFailureSource(failedMigrationToken)
+									: `${source}\n/* e2e legacy migration ${migrationToken} */`;
 						response.statusCode = 200;
 						response.setHeader("Content-Type", "application/javascript");
 						response.setHeader("Cache-Control", "no-store");
