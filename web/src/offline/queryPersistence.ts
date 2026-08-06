@@ -152,6 +152,18 @@ export function isPersistedQuerySnapshotFresh(
 	);
 }
 
+export function isPersistedQueryCacheFresh(
+	cache: Pick<PersistedQueryCache, "buster" | "timestamp">,
+	buildId: string,
+	now = Date.now(),
+): boolean {
+	return (
+		cache.buster === buildId &&
+		typeof cache.timestamp === "number" &&
+		now - cache.timestamp <= DAY_MS
+	);
+}
+
 export async function readPersistedQuerySnapshot<T>(
 	queryKey: readonly unknown[],
 ): Promise<{ data: T | undefined; dataUpdatedAt: number | null }> {
@@ -198,6 +210,9 @@ export async function readPersistedQuerySnapshot<T>(
 		}
 	} else {
 		parsed = raw;
+	}
+	if (!parsed || !isPersistedQueryCacheFresh(parsed, __XP_WEB_BUILD_ID__)) {
+		return { data: undefined, dataUpdatedAt: null };
 	}
 
 	const target = JSON.stringify(queryKey);

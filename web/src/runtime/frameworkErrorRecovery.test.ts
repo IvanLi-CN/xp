@@ -101,7 +101,7 @@ describe("framework error recovery", () => {
 						listener({
 							data: {
 								type: "XP_CACHE_RECOVERY_READY",
-								buildId: "active",
+								buildId: "replacement-build-456",
 								deleted: ["xp-app-shell-build-123"],
 							},
 						} as MessageEvent);

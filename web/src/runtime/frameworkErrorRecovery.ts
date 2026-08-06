@@ -326,7 +326,6 @@ export async function recoverXpAppShell(
 		}
 
 		return await new Promise<CacheRecoveryResult>((resolve) => {
-			const buildId = options.buildId ?? "development";
 			const onMessage = (event: MessageEvent) => {
 				const data = event.data as
 					| {
@@ -336,7 +335,7 @@ export async function recoverXpAppShell(
 					  }
 					| undefined;
 				if (
-					(data?.buildId !== buildId && data?.buildId !== "active") ||
+					typeof data?.buildId !== "string" ||
 					(data.type !== "XP_CACHE_RECOVERY_READY" &&
 						data.type !== "XP_CACHE_RECOVERY_UNAVAILABLE")
 				) {
