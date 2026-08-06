@@ -7,7 +7,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-import { inlineBootstrapFallback } from "./src/runtime/inlineBootstrapFallback";
+import { transformIndexHtmlWithInlineBuildDeclaration } from "./src/runtime/inlineBuildDeclaration";
 
 const packageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, "./package.json"), "utf8"),
@@ -73,22 +73,7 @@ export default defineConfig(({ mode }) => {
 				name: "xp-inline-build-declaration",
 				transformIndexHtml(html, context) {
 					if (context.path.endsWith("/iframe.html")) return html;
-					const declaration = [
-						"<script>",
-						inlineBootstrapFallback(buildId),
-						`window.__XP_WEB_BUILD_ID__=${JSON.stringify(buildId)};`,
-						"if (navigator.serviceWorker?.controller) {",
-						"navigator.serviceWorker.controller.postMessage({",
-						'type: "XP_DECLARE_BUILD",',
-						"buildId: window.__XP_WEB_BUILD_ID__",
-						"});",
-						"}",
-						"</script>",
-					].join("");
-					const entry = `?xp-build=${encodeURIComponent(buildId)}`;
-					return html
-						.replace(/(src="[^\"]+\.(?:js|tsx))"/, `$1${entry}"`)
-						.replace("<head>", `<head>${declaration}`);
+					return transformIndexHtmlWithInlineBuildDeclaration(html, buildId);
 				},
 				configurePreviewServer(server) {
 					if (process.env.E2E_USE_PREVIEW !== "1") return;
