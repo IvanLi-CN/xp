@@ -74,8 +74,8 @@ export const CacheVersionMismatch: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.getByText("cache version mismatch"),
-		).toBeInTheDocument();
+			canvas.getByTestId("framework-error-category"),
+		).toHaveAttribute("data-error-category", "cache-mismatch");
 		await expectReloadAction(canvasElement);
 		await expect(
 			canvas.getByRole("button", { name: "Clear cached app and reload" }),
@@ -166,7 +166,7 @@ export const RepeatedFailure: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("repeat-failure")).toHaveTextContent(
-			"This failure has repeated in this tab",
+			"This happened again. Safe cache recovery is available.",
 		);
 		await expect(
 			canvas.getByRole("button", { name: "Clear cached app and reload" }),

@@ -27,19 +27,26 @@ type RecoveryState =
 	| { kind: "working" }
 	| { kind: "message"; message: string };
 
+/*
+ * THESIS: A recovery page is one calm decision, not an error dashboard.
+ * OWN-WORLD: Existing xp dark control surface, system type, cyan action, semantic state color.
+ * STORY: Name the interruption, explain the safe next step, then expose deeper recovery on demand.
+ * FIRST VIEWPORT: One narrow column; Reload dominates, cache recovery and diagnostics recede.
+ * FORM: Established-world local extension; seed key xp-framework-recovery-operate-v1.
+ * FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review,
+ * the verdict, and DESIGN.md.
+ */
+const DESIGN_CONTRACT = "xp-framework-recovery-operate-v1";
+
 const CATEGORY_COPY: Record<
 	FrameworkErrorCategory,
 	{
-		label: string;
-		icon: string;
 		title: string;
 		description: string;
 		guidance: string;
 	}
 > = {
 	"chunk-load": {
-		label: "resource load failure",
-		icon: "tabler:cloud-off",
 		title: "The page bundle could not be loaded",
 		description:
 			"A frontend asset is missing or belongs to a different web build.",
@@ -48,8 +55,6 @@ const CATEGORY_COPY: Record<
 			"after an online replacement is ready.",
 	},
 	"cache-mismatch": {
-		label: "cache version mismatch",
-		icon: "tabler:database-x",
 		title: "The cached app assets are out of sync",
 		description:
 			"The page found static files from different frontend builds and stopped before mixing them.",
@@ -58,8 +63,6 @@ const CATEGORY_COPY: Record<
 			"replacement build is reachable.",
 	},
 	offline: {
-		label: "offline",
-		icon: "tabler:wifi-off",
 		title: "You are offline",
 		description:
 			"The app cannot reach the resources needed to recover this page right now.",
@@ -68,8 +71,6 @@ const CATEGORY_COPY: Record<
 			"data are left untouched.",
 	},
 	"api-incompatibility": {
-		label: "API incompatibility",
-		icon: "tabler:plug-connected-x",
 		title: "The backend does not support this web app",
 		description:
 			"This web build needs an API capability that the connected server does not provide.",
@@ -78,8 +79,6 @@ const CATEGORY_COPY: Record<
 			"matches the server release window.",
 	},
 	"react-runtime": {
-		label: "React runtime failure",
-		icon: "tabler:brand-react",
 		title: "The app hit a runtime error",
 		description:
 			"The page stopped to avoid leaving the management console in a partial state.",
@@ -88,8 +87,6 @@ const CATEGORY_COPY: Record<
 			"query cache are not cleared.",
 	},
 	unknown: {
-		label: "unknown runtime failure",
-		icon: "tabler:alert-triangle",
 		title: "The app encountered an unexpected error",
 		description:
 			"xp could not safely continue this page, but the rest of your browser data is preserved.",
@@ -182,128 +179,116 @@ export function FrameworkErrorRecovery({
 
 	return (
 		<main
-			className="flex min-h-screen items-center justify-center bg-background px-4 py-8 sm:px-6"
+			className="flex min-h-dvh items-center bg-background px-5 py-6 sm:px-8 sm:py-10"
 			aria-labelledby="framework-error-title"
+			data-design-contract={DESIGN_CONTRACT}
 		>
-			<div className="w-full max-w-2xl">
-				<div className="mb-5 flex items-center gap-3 px-1">
-					<img src="/xp-mark.png" alt="xp" className="size-9 shrink-0" />
-					<div>
-						<p className="text-sm font-semibold text-foreground">xp</p>
-						<p className="text-xs text-muted-foreground">cluster manager</p>
+			<div className="mx-auto w-full max-w-lg">
+				<div className="mb-10 flex items-center gap-2.5 text-muted-foreground">
+					<img
+						src="/xp-mark.png"
+						alt=""
+						aria-hidden="true"
+						className="size-8 shrink-0"
+					/>
+					<div className="text-sm">
+						<span className="font-semibold text-foreground">xp</span>
+						<span className="mx-2 text-border">/</span>
+						<span>cluster manager</span>
 					</div>
 				</div>
 
-				<section className="xp-card overflow-hidden">
-					<div className="xp-card-body gap-6 p-6 sm:p-8">
-						<div className="flex items-start gap-4">
-							<div
-								className={[
-									"flex size-12 shrink-0 items-center justify-center",
-									"rounded-2xl bg-destructive/12 text-destructive",
-								].join(" ")}
-							>
-								<Icon name={copy.icon} size={25} ariaLabel="Error" />
-							</div>
-							<div className="min-w-0 space-y-2">
-								<p
-									className="text-xs font-semibold uppercase tracking-[0.16em] text-destructive"
-									data-testid="framework-error-category"
-								>
-									{copy.label}
-								</p>
-								<h1
-									id="framework-error-title"
-									className="text-2xl font-semibold leading-tight tracking-tight sm:text-3xl"
-								>
-									{copy.title}
-								</h1>
-								<p className="max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
-									{copy.description}
-								</p>
-							</div>
-						</div>
-
-						<div className="xp-panel-muted p-4">
-							<p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-								Recommended next step
-							</p>
-							<p className="mt-2 text-sm leading-6 text-foreground">
-								{copy.guidance}
-							</p>
-						</div>
-
-						{repeatFailure ? (
-							<output
-								className="xp-alert xp-alert-warning"
-								data-testid="repeat-failure"
-							>
-								<Icon
-									name="tabler:history"
-									size={18}
-									ariaLabel="Repeated failure"
-								/>
-								<p className="text-sm">
-									This failure has repeated in this tab. A guarded static cache
-									recovery is now available.
-								</p>
-							</output>
-						) : null}
-
-						<div className="xp-card-actions">
-							<Button
-								onClick={onReload}
-								iconLeft={<Icon name="tabler:refresh" size={17} />}
-							>
-								Reload app
-							</Button>
-							{showCacheRecovery ? (
-								<Button
-									variant="secondary"
-									onClick={() => void handleCacheRecovery()}
-									loading={recoveryState.kind === "working"}
-									iconLeft={<Icon name="tabler:database-cog" size={17} />}
-								>
-									Clear cached app and reload
-								</Button>
-							) : null}
-							<CopyButton
-								text={diagnostics}
-								label="Copy diagnostic details"
-								copiedLabel="Diagnostics copied"
-								ariaLabel="Copy diagnostic details"
-								variant="ghost"
-							/>
-						</div>
-
-						{recoveryState.kind === "message" ? (
-							<output className="text-sm text-muted-foreground">
-								{recoveryState.message}
-							</output>
-						) : null}
-
-						<details className="group border-t border-border/70 pt-4">
-							<summary
-								className={[
-									"cursor-pointer text-sm font-medium text-muted-foreground",
-									"outline-none transition-colors hover:text-foreground",
-									"focus-visible:text-foreground",
-								].join(" ")}
-							>
-								Technical details
-							</summary>
-							<pre
-								className={[
-									"mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words",
-									"rounded-xl bg-muted/60 p-3 font-mono text-xs leading-5",
-									"text-muted-foreground",
-								].join(" ")}
-								data-testid="framework-error-diagnostics"
-							>
-								{diagnostics}
-							</pre>
-						</details>
+				<section
+					data-testid="framework-error-category"
+					data-error-category={category}
+				>
+					<div className="space-y-3">
+						<h1
+							id="framework-error-title"
+							className="text-2xl font-semibold leading-tight sm:text-3xl"
+						>
+							{copy.title}
+						</h1>
+						<p className="text-sm leading-6 text-muted-foreground sm:text-base">
+							{copy.description}
+						</p>
+						<p className="text-sm leading-6 text-foreground">{copy.guidance}</p>
 					</div>
+
+					{repeatFailure ? (
+						<output
+							className="mt-5 flex items-start gap-2 text-sm text-warning"
+							data-testid="repeat-failure"
+						>
+							<Icon name="tabler:history" size={18} />
+							<p className="leading-5">
+								This happened again. Safe cache recovery is available.
+							</p>
+						</output>
+					) : null}
+
+					<div className="mt-7 flex flex-col items-start gap-3">
+						<Button
+							className="w-full justify-center sm:w-auto"
+							onClick={onReload}
+							iconLeft={<Icon name="tabler:refresh" size={17} />}
+						>
+							Reload app
+						</Button>
+						{showCacheRecovery ? (
+							<Button
+								variant="ghost"
+								className="h-auto min-h-11 px-0 py-1 text-muted-foreground shadow-none"
+								onClick={() => void handleCacheRecovery()}
+								loading={recoveryState.kind === "working"}
+								iconLeft={<Icon name="tabler:database-cog" size={17} />}
+							>
+								Clear cached app and reload
+							</Button>
+						) : null}
+					</div>
+
+					{recoveryState.kind === "message" ? (
+						<output className="mt-4 block text-sm leading-5 text-muted-foreground">
+							{recoveryState.message}
+						</output>
+					) : null}
+
+					<details className="group mt-7 border-t border-border/70 pt-4">
+						<summary
+							className={[
+								"flex min-h-11 cursor-pointer items-center rounded-sm text-sm",
+								"font-medium text-muted-foreground focus-visible:ring-2",
+								"outline-none transition-colors hover:text-foreground",
+								"focus-visible:text-foreground focus-visible:ring-ring/30",
+							].join(" ")}
+						>
+							<Icon
+								name="tabler:chevron-right"
+								size={16}
+								className="mr-1 transition-transform group-open:rotate-90"
+							/>
+							Technical details
+						</summary>
+						<pre
+							className={[
+								"mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words",
+								"rounded-xl bg-muted/60 p-3 font-mono text-xs leading-5",
+								"text-muted-foreground [color-scheme:light] dark:[color-scheme:dark]",
+							].join(" ")}
+							data-testid="framework-error-diagnostics"
+						>
+							{diagnostics}
+						</pre>
+						<CopyButton
+							className="mt-2 h-auto min-h-11 px-0 py-1 text-muted-foreground shadow-none"
+							text={diagnostics}
+							label="Copy diagnostic details"
+							copiedLabel="Diagnostics copied"
+							ariaLabel="Copy diagnostic details"
+							variant="ghost"
+						/>
+					</details>
 				</section>
 			</div>
 		</main>

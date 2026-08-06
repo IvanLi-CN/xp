@@ -42,8 +42,9 @@ describe("FrameworkErrorRecovery", () => {
 				name: "The cached app assets are out of sync",
 			}),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("framework-error-category")).toHaveTextContent(
-			"cache version mismatch",
+		expect(screen.getByTestId("framework-error-category")).toHaveAttribute(
+			"data-error-category",
+			"cache-mismatch",
 		);
 		expect(
 			screen.getByRole("button", { name: "Clear cached app and reload" }),
@@ -93,8 +94,9 @@ describe("FrameworkErrorRecovery", () => {
 		);
 
 		expect(screen.getByTestId("repeat-failure")).toHaveTextContent(
-			"This failure has repeated in this tab",
+			"This happened again. Safe cache recovery is available.",
 		);
+		fireEvent.click(screen.getByText("Technical details"));
 		fireEvent.click(
 			screen.getByRole("button", { name: "Copy diagnostic details" }),
 		);

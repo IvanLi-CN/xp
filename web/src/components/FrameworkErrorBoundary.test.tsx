@@ -37,8 +37,9 @@ describe("framework error boundaries", () => {
 		expect(
 			screen.getByRole("heading", { name: "The app hit a runtime error" }),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("framework-error-category")).toHaveTextContent(
-			"React runtime failure",
+		expect(screen.getByTestId("framework-error-category")).toHaveAttribute(
+			"data-error-category",
+			"react-runtime",
 		);
 	});
 

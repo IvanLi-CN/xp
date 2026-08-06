@@ -174,8 +174,24 @@
 ## Visual Evidence
 
 - Source: stable mock-only `ui_demo` route `/ui-demo/framework-recovery`.
-- Coverage: desktop and mobile viewports, including first-failure and repeated-failure states.
-- PR: none; no screenshot assets are committed or referenced.
+- Capture scope: complete browser viewport; no post-capture crop.
+- Coverage: desktop first failure, guarded recovery result with expanded diagnostics, and mobile
+  repeated failure.
+- Evidence baseline: `630b5b6fc8b838ff157a0191b6a3dff06ce825b0` plus the pending local UI evidence
+  changes shown here.
+- PR: none
+
+Desktop (`1440x900` CSS viewport), first resource-load failure:
+
+![Framework recovery desktop state](assets/framework-recovery-desktop.png)
+
+Desktop (`1440x900` CSS viewport), guarded cache result and expanded diagnostics:
+
+![Framework recovery guarded result and diagnostics](assets/framework-recovery-diagnostics.png)
+
+Mobile (`393x852` CSS viewport), repeated failure state:
+
+![Framework recovery mobile repeated-failure state](assets/framework-recovery-mobile.png)
 
 ## 文档更新（Docs to Update）
 
