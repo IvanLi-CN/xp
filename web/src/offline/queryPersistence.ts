@@ -126,9 +126,7 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 	return {
 		persister,
 		maxAge: DAY_MS,
-		// API snapshots survive frontend asset changes; compatibility probing owns
-		// the server-version boundary instead of the PWA build cache.
-		buster: __XP_WEB_PACKAGE_VERSION__,
+		buster: __XP_WEB_BUILD_ID__,
 		dehydrateOptions: {
 			shouldDehydrateMutation: () => false,
 			shouldDehydrateQuery: (query) =>
@@ -137,20 +135,44 @@ export function createPersistOptions(): PersistQueryClientProviderProps["persist
 	};
 }
 
+type PersistedQuerySnapshot = {
+	buildId?: string;
+	storedAt?: number;
+};
+
+export function isPersistedQuerySnapshotFresh(
+	snapshot: PersistedQuerySnapshot,
+	buildId: string,
+	now = Date.now(),
+): boolean {
+	return (
+		snapshot.buildId === buildId &&
+		typeof snapshot.storedAt === "number" &&
+		now - snapshot.storedAt <= DAY_MS
+	);
+}
+
 export async function readPersistedQuerySnapshot<T>(
 	queryKey: readonly unknown[],
 ): Promise<{ data: T | undefined; dataUpdatedAt: number | null }> {
 	try {
+		const snapshotKey = JSON.stringify(queryKey);
 		const snapshot = await offlineSnapshotStorage.getItem<{
 			data?: T;
 			dataUpdatedAt?: number;
-		}>(JSON.stringify(queryKey));
-		if (snapshot) {
+			buildId?: string;
+			storedAt?: number;
+		}>(snapshotKey);
+		if (
+			snapshot &&
+			isPersistedQuerySnapshotFresh(snapshot, __XP_WEB_BUILD_ID__)
+		) {
 			return {
 				data: snapshot.data,
 				dataUpdatedAt: snapshot.dataUpdatedAt ?? null,
 			};
 		}
+		if (snapshot) await offlineSnapshotStorage.removeItem(snapshotKey);
 	} catch {
 		// Fall through to the shared persisted query cache.
 	}
@@ -204,6 +226,8 @@ export async function writePersistedQuerySnapshot<T>(
 		await offlineSnapshotStorage.setItem(JSON.stringify(queryKey), {
 			data,
 			dataUpdatedAt,
+			buildId: __XP_WEB_BUILD_ID__,
+			storedAt: Date.now(),
 		});
 	} catch {
 		// Offline persistence is an enhancement, not a hard dependency.
