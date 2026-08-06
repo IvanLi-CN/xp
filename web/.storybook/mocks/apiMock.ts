@@ -40,7 +40,6 @@ import type {
 import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
-import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
@@ -49,10 +48,11 @@ import type {
 	AdminUserPatchRequest,
 	AdminUserTokenResponse,
 } from "../../src/api/adminUsers";
-import type { ClusterInfoResponse } from "../../src/api/clusterInfo";
-import type { HealthResponse } from "../../src/api/health";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
-import type { VersionCheckResponse } from "../../src/api/versionCheck";
+import {
+	DEFAULT_API_CAPABILITIES,
+	type MockStateSeed,
+} from "./apiMockContract";
 import {
 	buildEndpointCreateMeta,
 	deriveGlobalServerNames,
@@ -68,7 +68,7 @@ export type StorybookApiMockConfig = {
 	failVersionCheck?: boolean;
 };
 
-type MockEndpointSeed = AdminEndpoint & {
+export type MockEndpointSeed = AdminEndpoint & {
 	active_short_id?: string;
 	short_ids?: string[];
 };
@@ -78,52 +78,27 @@ type MockEndpointRecord = AdminEndpoint & {
 	short_ids: string[];
 };
 
-type MockWindowedNodeIpUsage =
+export type MockWindowedNodeIpUsage =
 	| AdminNodeIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminNodeIpUsageResponse>>;
 
-type MockWindowedNodeTcpConnections =
+export type MockWindowedNodeTcpConnections =
 	| AdminNodeTcpConnectionsResponse
 	| Partial<
 			Record<AdminTcpConnectionUsageWindow, AdminNodeTcpConnectionsResponse>
 	  >;
 
-type MockWindowedUserIpUsage =
+export type MockWindowedUserIpUsage =
 	| AdminUserIpUsageResponse
 	| Partial<Record<AdminIpUsageWindow, AdminUserIpUsageResponse>>;
 
-type MockWindowedNodeTraffic =
+export type MockWindowedNodeTraffic =
 	| AdminNodeTrafficResponse
 	| Partial<Record<TrafficWindow, AdminNodeTrafficResponse>>;
 
-type MockWindowedUserTraffic =
+export type MockWindowedUserTraffic =
 	| AdminUserTrafficResponse
 	| Partial<Record<TrafficWindow, AdminUserTrafficResponse>>;
-
-type MockStateSeed = {
-	health: HealthResponse;
-	clusterInfo: ClusterInfoResponse;
-	versionCheck: VersionCheckResponse;
-	nodes: AdminNode[];
-	endpoints: MockEndpointSeed[];
-	realityDomains: AdminRealityDomain[];
-	users: AdminUser[];
-	userAccessByUserId: Record<string, AdminUserAccessItem[]>;
-	userAutoAssignEndpointKindsByUserId: Record<string, AdminEndpointKind[]>;
-	nodeQuotas: AdminUserNodeQuota[];
-	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
-	nodeTcpConnectionsByNodeId: Record<string, MockWindowedNodeTcpConnections>;
-	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
-	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
-	nodeTrafficByNodeId: Record<string, MockWindowedNodeTraffic>;
-	userTrafficByUserId: Record<string, MockWindowedUserTraffic>;
-	userNodeWeights: Record<string, AdminUserNodeWeightItem[]>;
-	userGlobalWeights: Record<string, number>;
-	nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy>;
-	quotaSummaries?: AdminUserQuotaSummariesResponse;
-	alerts: AlertsResponse;
-	subscriptions: Record<string, string>;
-};
 
 type MockState = Omit<MockStateSeed, "endpoints"> & {
 	endpoints: MockEndpointRecord[];
@@ -974,6 +949,7 @@ node-2`,
 				channel: "stable",
 			},
 		},
+		capabilities: DEFAULT_API_CAPABILITIES,
 		nodes,
 		endpoints,
 		realityDomains,
@@ -1003,6 +979,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		health: overrides?.health ?? base.health,
 		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
 		versionCheck: overrides?.versionCheck ?? base.versionCheck,
+		capabilities: overrides?.capabilities ?? base.capabilities,
 		nodes: overrides?.nodes ?? base.nodes,
 		endpoints: overrides?.endpoints ?? base.endpoints,
 		realityDomains: overrides?.realityDomains ?? base.realityDomains,
@@ -1245,6 +1222,10 @@ async function handleRequest(
 
 	if (path === "/api/cluster/info" && method === "GET") {
 		return jsonResponse(state.clusterInfo);
+	}
+
+	if (path === "/api/capabilities" && method === "GET") {
+		return jsonResponse(clone(state.capabilities));
 	}
 
 	if (path === "/api/version/check" && method === "GET") {

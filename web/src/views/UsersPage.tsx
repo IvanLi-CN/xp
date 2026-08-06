@@ -7,10 +7,11 @@ import { buttonVariants } from "@/components/ui/button";
 import { fetchAdminUserQuotaSummaries } from "../api/adminUserQuotaSummaries";
 import { fetchAdminUsers } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { readAdminToken } from "../components/auth";
@@ -22,6 +23,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { formatUtcOffsetMinutes } from "../utils/quotaPolicyView";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -32,31 +34,26 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
-function formatUtcOffset(minutes: number): string {
-	const sign = minutes >= 0 ? "+" : "-";
-	const abs = Math.abs(minutes);
-	const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-	const mm = String(abs % 60).padStart(2, "0");
-	return `UTC${sign}${hh}:${mm}`;
-}
-
 export function UsersPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
+	const usersCapability = useApiCapability("admin.users");
+	const quotaCapability = useApiCapability("admin.quota-policy");
 	const usersQuery = useQuery({
 		queryKey: ["adminUsers", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && usersCapability.available,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 	const quotaSummariesQuery = useQuery({
 		queryKey: ["adminUserQuotaSummaries", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && quotaCapability.available,
 		queryFn: ({ signal }) => fetchAdminUserQuotaSummaries(adminToken, signal),
 	});
 	const quotaSummaryByUserId = useMemo(() => {
 		const items = quotaSummariesQuery.data?.items ?? [];
 		return new Map(items.map((s) => [s.user_id, s]));
 	}, [quotaSummariesQuery.data]);
+	const quotaSummaryUnavailable = quotaCapability.unavailable;
 
 	const actions =
 		adminToken.length === 0 ? (
@@ -78,6 +75,15 @@ export function UsersPage() {
 					variant="empty"
 					title="Admin token required"
 					description="Set an admin token to load users."
+				/>
+			);
+		}
+
+		if (usersCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="Users unavailable"
+					reason={usersCapability.reason}
 				/>
 			);
 		}
@@ -160,11 +166,13 @@ export function UsersPage() {
 									.filter(Boolean)
 									.join(" ")}
 								title={
-									quotaSummariesQuery.isError
-										? `Failed to load quota summaries: ${formatError(quotaSummariesQuery.error)}`
-										: quotaSummariesQuery.data?.partial
-											? `Partial data (unreachable nodes): ${quotaSummariesQuery.data.unreachable_nodes.join(", ")}`
-											: "Used / limit (aggregated across nodes)"
+									quotaSummaryUnavailable
+										? "Quota usage is unavailable for this API release"
+										: quotaSummariesQuery.isError
+											? `Failed to load quota summaries: ${formatError(quotaSummariesQuery.error)}`
+											: quotaSummariesQuery.data?.partial
+												? `Partial data (unreachable nodes): ${quotaSummariesQuery.data.unreachable_nodes.join(", ")}`
+												: "Used / limit (aggregated across nodes)"
 								}
 							>
 								<span>Quota usage</span>
@@ -231,15 +239,17 @@ export function UsersPage() {
 									title="Quota reset policy (user default)"
 								>
 									{user.quota_reset.policy === "monthly"
-										? `Reset: monthly@${user.quota_reset.day_of_month} ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`
-										: `Reset: unlimited ${formatUtcOffset(user.quota_reset.tz_offset_minutes)}`}
+										? `Reset: monthly@${user.quota_reset.day_of_month} ${formatUtcOffsetMinutes(user.quota_reset.tz_offset_minutes)}`
+										: `Reset: unlimited ${formatUtcOffsetMinutes(user.quota_reset.tz_offset_minutes)}`}
 								</div>
 							</div>
 						</td>
 						<td className="align-top">
 							<div className="flex flex-col gap-1 min-w-0">
 								<div className="font-mono text-xs whitespace-nowrap">
-									{quotaSummariesQuery.isLoading ? (
+									{quotaSummaryUnavailable ? (
+										<span className="opacity-60">-</span>
+									) : quotaSummariesQuery.isLoading ? (
 										<span className="opacity-60">...</span>
 									) : quotaSummariesQuery.isError ? (
 										<span className="opacity-60">-</span>
@@ -267,7 +277,9 @@ export function UsersPage() {
 										})()
 									)}
 								</div>
-								{quotaSummariesQuery.isLoading || quotaSummariesQuery.isError
+								{quotaSummaryUnavailable ||
+								quotaSummariesQuery.isLoading ||
+								quotaSummariesQuery.isError
 									? null
 									: (() => {
 											const summary = quotaSummaryByUserId.get(user.user_id);

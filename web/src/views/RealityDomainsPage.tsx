@@ -17,12 +17,13 @@ import {
 	reorderAdminRealityDomains,
 } from "../api/adminRealityDomains";
 import { isBackendApiError } from "../api/backendError";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableCell } from "../components/DataTable";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import {
 	ResourceTable,
 	type ResourceTableHeader,
@@ -111,6 +112,8 @@ export function RealityDomainsPage() {
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
+	const domainsCapability = useApiCapability("admin.reality-domains");
+	const nodesCapability = useApiCapability("admin.nodes");
 	const createForm = useForm<CreateDomainsValues>({
 		resolver: zodResolver(createDomainsSchema),
 		defaultValues: {
@@ -120,13 +123,13 @@ export function RealityDomainsPage() {
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
 	const domainsQuery = useQuery({
 		queryKey: ["adminRealityDomains", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && domainsCapability.available,
 		queryFn: ({ signal }) => fetchAdminRealityDomains(adminToken, signal),
 	});
 
@@ -265,6 +268,15 @@ export function RealityDomainsPage() {
 			pushToast({ variant: "error", message: formatErrorMessage(error) });
 		},
 	});
+
+	if (domainsCapability.unavailable || nodesCapability.unavailable) {
+		return (
+			<CapabilityUnavailableState
+				title="Reality domains unavailable"
+				reason={domainsCapability.reason ?? nodesCapability.reason}
+			/>
+		);
+	}
 
 	if (adminToken.length === 0) {
 		return (

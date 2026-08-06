@@ -8,10 +8,12 @@ import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { AuthRecoveryAction } from "../components/AuthRecoveryAction";
 import { Button } from "../components/Button";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
+import { CapabilityUnavailableState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { ResourceTable } from "../components/ResourceTable";
 import { useUiPrefs } from "../components/UiPrefs";
@@ -64,6 +66,8 @@ function DashboardCard(props: {
 export function HomePage() {
 	const prefs = useUiPrefs();
 	const runtime = useAppRuntime();
+	const nodesCapability = useApiCapability("admin.nodes");
+	const alertsCapability = useApiCapability("admin.alerts");
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
 		readAdminToken(),
@@ -83,13 +87,13 @@ export function HomePage() {
 
 	const adminNodes = useQuery({
 		queryKey: ["adminNodesRuntime", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodesRuntime(adminToken, signal),
 	});
 
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && alertsCapability.available,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
@@ -218,7 +222,12 @@ export function HomePage() {
 						}}
 					/>
 				</div>
-				{adminToken.length === 0 ? (
+				{alertsCapability.unavailable ? (
+					<CapabilityUnavailableState
+						title="Alerts unavailable"
+						reason={alertsCapability.reason}
+					/>
+				) : adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token to query nodes.</p>
 				) : (
 					<p className="text-sm text-muted-foreground">
@@ -292,7 +301,7 @@ export function HomePage() {
 				actions={
 					<Button
 						variant="secondary"
-						disabled={adminToken.length === 0}
+						disabled={adminToken.length === 0 || alertsCapability.unavailable}
 						loading={adminAlerts.isFetching}
 						onClick={() => adminAlerts.refetch()}
 					>
@@ -300,7 +309,12 @@ export function HomePage() {
 					</Button>
 				}
 			>
-				{adminToken.length === 0 ? (
+				{alertsCapability.unavailable ? (
+					<CapabilityUnavailableState
+						title="Alerts unavailable"
+						reason={alertsCapability.reason}
+					/>
+				) : adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token.</p>
 				) : adminAlerts.isLoading && !hasQueryData(adminAlerts) ? (
 					<p>Loading...</p>
@@ -372,7 +386,12 @@ export function HomePage() {
 			</DashboardCard>
 
 			<DashboardCard title="Nodes">
-				{adminToken.length === 0 ? (
+				{nodesCapability.unavailable ? (
+					<CapabilityUnavailableState
+						title="Node inventory unavailable"
+						reason={nodesCapability.reason}
+					/>
+				) : adminToken.length === 0 ? (
 					<p className="text-warning">Please set admin token.</p>
 				) : adminNodes.isLoading && !hasQueryData(adminNodes) ? (
 					<p>Loading...</p>
@@ -386,6 +405,7 @@ export function HomePage() {
 							<AuthRecoveryAction error={adminNodes.error} />
 							<Button
 								variant="secondary"
+								disabled={nodesCapability.unavailable}
 								loading={adminNodes.isFetching}
 								onClick={() => adminNodes.refetch()}
 							>

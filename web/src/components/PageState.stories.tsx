@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 
 import { BackendApiError } from "../api/backendError";
 import { Button } from "./Button";
-import { PageState } from "./PageState";
+import { CapabilityUnavailableState, PageState } from "./PageState";
 
 const meta: Meta<typeof PageState> = {
 	title: "Components/PageState",
@@ -59,4 +59,13 @@ export const Offline: Story = {
 		title: "Offline cache unavailable",
 		description: "Reconnect to hydrate this page for offline use.",
 	},
+};
+
+export const CapabilityUnavailable: Story = {
+	render: () => (
+		<CapabilityUnavailableState
+			title="Mesh status unavailable"
+			reason="The connected API does not advertise admin.mesh."
+		/>
+	),
 };

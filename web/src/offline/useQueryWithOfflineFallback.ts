@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { readPersistedQuerySnapshot } from "./queryPersistence";
+import {
+	readPersistedQuerySnapshot,
+	writePersistedQuerySnapshot,
+} from "./queryPersistence";
 import { hasQueryData } from "./queryReadState";
 
 type QueryLike<T> = {
@@ -30,14 +33,25 @@ export function useQueryWithOfflineFallback<T, TQuery extends QueryLike<T>>(
 		[queryKeyHash],
 	);
 	const queryHasData = hasQueryData(query);
+	const shouldReadFallback =
+		!queryHasData && (query.isError || query.fetchStatus === "paused");
 
 	useEffect(() => {
 		if (queryHasData) {
+			void writePersistedQuerySnapshot(
+				persistedQueryKey,
+				query.data as T,
+				query.dataUpdatedAt,
+			);
 			setFallback((current) =>
 				current.data === undefined && current.dataUpdatedAt === null
 					? current
 					: { data: undefined, dataUpdatedAt: null },
 			);
+			return;
+		}
+		if (!shouldReadFallback) {
+			setFallback({ data: undefined, dataUpdatedAt: null });
 			return;
 		}
 
@@ -50,7 +64,13 @@ export function useQueryWithOfflineFallback<T, TQuery extends QueryLike<T>>(
 		return () => {
 			cancelled = true;
 		};
-	}, [persistedQueryKey, queryHasData]);
+	}, [
+		persistedQueryKey,
+		query.data,
+		query.dataUpdatedAt,
+		queryHasData,
+		shouldReadFallback,
+	]);
 
 	return {
 		...query,

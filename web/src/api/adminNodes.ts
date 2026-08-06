@@ -29,21 +29,25 @@ export const AdminNodeEgressProbeSchema = z.object({
 
 export type AdminNodeEgressProbe = z.infer<typeof AdminNodeEgressProbeSchema>;
 
-export const AdminNodeSchema = z.object({
-	node_id: z.string(),
-	node_name: z.string(),
-	api_base_url: z.string(),
-	access_host: z.string(),
-	quota_limit_bytes: z.number().int().nonnegative(),
-	quota_reset: NodeQuotaResetSchema,
-	egress_probe: AdminNodeEgressProbeSchema.optional(),
-});
+export const AdminNodeSchema = z
+	.object({
+		node_id: z.string(),
+		node_name: z.string(),
+		api_base_url: z.string(),
+		access_host: z.string(),
+		quota_limit_bytes: z.number().int().nonnegative(),
+		quota_reset: NodeQuotaResetSchema,
+		egress_probe: AdminNodeEgressProbeSchema.optional(),
+	})
+	.passthrough();
 
 export type AdminNode = z.infer<typeof AdminNodeSchema>;
 
-export const AdminNodesResponseSchema = z.object({
-	items: z.array(AdminNodeSchema),
-});
+export const AdminNodesResponseSchema = z
+	.object({
+		items: z.array(AdminNodeSchema),
+	})
+	.passthrough();
 
 export type AdminNodesResponse = z.infer<typeof AdminNodesResponseSchema>;
 

@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -6,6 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+import { transformIndexHtmlWithInlineBuildDeclaration } from "./src/runtime/inlineBuildDeclaration";
 
 const packageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, "./package.json"), "utf8"),
@@ -15,19 +17,32 @@ function resolveBuildId() {
 	const explicit = process.env.XP_WEB_BUILD_ID?.trim();
 	if (explicit) return explicit;
 
-	try {
-		const sha = execSync("git rev-parse --short HEAD", {
-			cwd: path.resolve(__dirname, ".."),
-			stdio: ["ignore", "pipe", "ignore"],
-		})
-			.toString()
-			.trim();
-		if (sha) return `${packageJson.version}-${sha}`;
-	} catch {
-		// ignore and fall back to package version
-	}
-
-	return packageJson.version;
+	const hash = createHash("sha256");
+	const ignoredDirectories = new Set([
+		"coverage",
+		"dist",
+		"node_modules",
+		"playwright-report",
+		"storybook-static",
+		"test-results",
+	]);
+	const visit = (directory: string) => {
+		for (const entry of fs
+			.readdirSync(directory, { withFileTypes: true })
+			.sort((left, right) => left.name.localeCompare(right.name))) {
+			if (ignoredDirectories.has(entry.name)) continue;
+			const filePath = path.join(directory, entry.name);
+			if (entry.isDirectory()) {
+				visit(filePath);
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			hash.update(path.relative(__dirname, filePath)).update("\0");
+			hash.update(fs.readFileSync(filePath));
+		}
+	};
+	visit(__dirname);
+	return `${packageJson.version}-${hash.digest("hex").slice(0, 12)}`;
 }
 
 function resolveSwUpdateIntervalMs() {
@@ -54,9 +69,43 @@ export default defineConfig(({ mode }) => {
 		plugins: [
 			react(),
 			tailwindcss(),
+			{
+				name: "xp-inline-build-declaration",
+				transformIndexHtml(html, context) {
+					if (context.path.endsWith("/iframe.html")) return html;
+					return transformIndexHtmlWithInlineBuildDeclaration(html, buildId);
+				},
+				configurePreviewServer(server) {
+					if (process.env.E2E_USE_PREVIEW !== "1") return;
+					server.middlewares.use((request, response, next) => {
+						if (!request.url?.startsWith("/sw.js?e2e-waiting=")) {
+							next();
+							return;
+						}
+						const serviceWorkerPath = path.resolve(__dirname, "dist/sw.js");
+						const waitingId = `e2e-waiting-${
+							new URL(request.url, "http://127.0.0.1").searchParams.get(
+								"e2e-waiting",
+							) ?? Date.now()
+						}`;
+						const source = fs.readFileSync(serviceWorkerPath, "utf8");
+						const body = `${source.replaceAll(
+							JSON.stringify(buildId),
+							JSON.stringify(waitingId),
+						)}\n/* e2e waiting revision */`;
+						response.statusCode = 200;
+						response.setHeader("Content-Type", "application/javascript");
+						response.setHeader("Cache-Control", "no-store");
+						response.end(body);
+					});
+				},
+			},
 			VitePWA({
 				registerType: "prompt",
 				injectRegister: false,
+				strategies: "injectManifest",
+				srcDir: "src",
+				filename: "sw.ts",
 				includeAssets: [
 					"favicon.ico",
 					"favicon-16x16.png",
@@ -85,12 +134,9 @@ export default defineConfig(({ mode }) => {
 						},
 					],
 				},
-				workbox: {
+				injectManifest: {
 					globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webmanifest}"],
 					maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-					navigateFallback: "/index.html",
-					navigateFallbackDenylist: [/^\/api\//, /^\/events(?:\/|$)/],
-					cleanupOutdatedCaches: true,
 					sourcemap: true,
 				},
 			}),

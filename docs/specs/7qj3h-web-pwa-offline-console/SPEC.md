@@ -8,7 +8,8 @@
 
 ## 背景 / 问题陈述
 
-- 现有 Web 只有 `site.webmanifest` 静态文件，`display` 仍为 `browser`，没有 Service Worker 注册，也没有前端静态资源更新提示。
+- Web 管理台现在交付可安装的 `site.webmanifest`、Service Worker 和独立的前端静态资源更新提示；
+  后续运行时韧性要求继续约束其缓存生命周期。
 - 管理台原本主要依赖在线 API 查询；浏览器刷新、慢网、临时断线和上游故障时，页面容易退化成空白加载或通用错误，而不是可读的运维视图。
 - 顶栏 `VersionIndicator` 只表达后端 `xp` 升级 job 状态，不表达 Web bundle 自身是否有新版本可刷新。
 
@@ -49,7 +50,8 @@
 
 ### MUST
 
-- Web 构建必须注册并交付 Service Worker，manifest 必须可安装（非 `display: browser`）。
+- Web 构建必须注册并交付 Service Worker，manifest 必须可安装（`display` 使用 `standalone`），
+  并交付构建版本化的完整 app-shell precache。
 - 首次成功加载后，重复访问在断网场景下必须能显示可交互 app shell 与最近缓存内容，而不是浏览器错误页。
 - React Query 持久化必须只覆盖允许的 major read queries，`maxAge` 为 `24h`，且缓存 `buster` 绑定当前前端构建版本。
 - 离线时 major read pages 必须明确标记缓存视图与最近同步时间；无缓存时返回专门的 offline empty state。
@@ -74,6 +76,13 @@
 ### PWA / 缓存层
 
 - Service Worker 只负责静态资源与导航回退，不缓存通用认证 API 响应。
+- 每次构建使用独立的 app-shell cache 名称和注入的 Web build ID；入口 HTML、JS、CSS、字体、图标和 manifest
+  必须在同一个 precache 中完整存在。安装下载或校验失败时删除未激活的目标 cache，保留当前 active build。
+- 新 worker 完整安装后保持 `waiting`，更新提示由 `PwaStatusPrompt` 呈现，只有用户确认后才发送
+  `SKIP_WAITING`。跨标签页的 `clientId -> buildId` ownership 写入独立的 `xp_sw_metadata` IndexedDB，旧
+  cache 只有在所有 owner 消失并完成 reconciliation 后才可清理。
+- 新导航从 active build 获取完整 `index.html`；受控页面的静态子资源按其声明的 build 路由，无法确定或缺失时
+  失败并请求 cache recovery，不从另一构建拼接资源。
 - 管理读模型通过 `PersistQueryClientProvider` + IndexedDB 持久化；只持久化 allowlist 中成功完成的 query。
 - 离线模式由运行时在线状态推导为只读模式，页面级状态从缓存是否存在、最近更新时间、网络是否在线共同计算。
 

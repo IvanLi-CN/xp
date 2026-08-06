@@ -6,6 +6,12 @@ import {
 } from "./adminNodeRuntime";
 
 describe("admin node runtime schemas", () => {
+	it("requires the server completeness fields", () => {
+		expect(() =>
+			AdminNodesRuntimeResponseSchema.parse({ items: [] }),
+		).toThrow();
+	});
+
 	it("accepts runtime list payload", () => {
 		const parsed = AdminNodesRuntimeResponseSchema.parse({
 			partial: false,

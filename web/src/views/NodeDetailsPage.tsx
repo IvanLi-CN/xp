@@ -38,12 +38,13 @@ import {
 import { fetchAdminNodeTraffic } from "../api/adminTraffic";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
@@ -484,24 +485,27 @@ export function NodeDetailsPage() {
 	const [adminToken] = useState(() => readAdminToken());
 	const appRuntime = useAppRuntime();
 	const prefs = useUiPrefs();
+	const nodesCapability = useApiCapability("admin.nodes");
+	const canReadRuntime =
+		adminToken.length > 0 && nodesCapability.available && appRuntime.isOnline;
 	const { pushToast } = useToast();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const nodeQuery = useQuery({
 		queryKey: ["adminNode", adminToken, nodeId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
 	});
 
 	const runtimeQuery = useQuery({
 		queryKey: ["adminNodeRuntime", adminToken, nodeId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminNodeRuntime(adminToken, nodeId, { eventsLimit: 200, signal }),
 	});
 	const historyQuery = useQuery({
 		queryKey: ["adminNodeHistory", adminToken, nodeId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
 
@@ -515,7 +519,10 @@ export function NodeDetailsPage() {
 		useState<AdminTcpConnectionUsageWindow>("24h");
 	const trafficQuery = useQuery({
 		queryKey: ["adminNodeTraffic", adminToken, nodeId, prefs.trafficWindow],
-		enabled: adminToken.length > 0 && activeTab === "traffic",
+		enabled:
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			activeTab === "traffic",
 		queryFn: ({ signal }) =>
 			fetchAdminNodeTraffic(adminToken, nodeId, prefs.trafficWindow, signal),
 		placeholderData: (previousData) =>
@@ -526,7 +533,10 @@ export function NodeDetailsPage() {
 	});
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
-		enabled: adminToken.length > 0 && activeTab === "ipUsage",
+		enabled:
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			activeTab === "ipUsage",
 		queryFn: ({ signal }) =>
 			fetchAdminNodeIpUsage(adminToken, nodeId, ipUsageWindow, signal),
 		placeholderData: (previousData) =>
@@ -539,7 +549,10 @@ export function NodeDetailsPage() {
 			nodeId,
 			tcpConnectionsWindow,
 		],
-		enabled: adminToken.length > 0 && activeTab === "tcpConnections",
+		enabled:
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			activeTab === "tcpConnections",
 		queryFn: ({ signal }) =>
 			fetchAdminNodeTcpConnections(
 				adminToken,
@@ -604,7 +617,7 @@ export function NodeDetailsPage() {
 	}, [runtimeQuery.data]);
 
 	useEffect(() => {
-		if (adminToken.length === 0) return;
+		if (!canReadRuntime) return;
 
 		let unmounted = false;
 		const stream = startNodeRuntimeEvents({
@@ -666,15 +679,15 @@ export function NodeDetailsPage() {
 			unmounted = true;
 			stream.close();
 		};
-	}, [adminToken, nodeId, runtimeQuery.refetch]);
+	}, [adminToken, canReadRuntime, nodeId, runtimeQuery.refetch]);
 
 	useEffect(() => {
-		if (adminToken.length === 0 || runtimeSseConnected) return;
+		if (!canReadRuntime || runtimeSseConnected) return;
 		const timer = window.setInterval(() => {
 			void runtimeQuery.refetch();
 		}, 10000);
 		return () => window.clearInterval(timer);
-	}, [adminToken, runtimeSseConnected, runtimeQuery.refetch]);
+	}, [canReadRuntime, runtimeSseConnected, runtimeQuery.refetch]);
 
 	const quotaValues = quotaForm.watch();
 
@@ -809,6 +822,14 @@ export function NodeDetailsPage() {
 	};
 
 	const content = (() => {
+		if (nodesCapability.unavailable) {
+			return (
+				<CapabilityUnavailableState
+					title="Node details unavailable"
+					reason={nodesCapability.reason}
+				/>
+			);
+		}
 		if (adminToken.length === 0) {
 			return (
 				<PageState

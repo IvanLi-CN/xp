@@ -2,7 +2,7 @@
 	"name": "xp",
 	"short_name": "xp",
 	"start_url": "/",
-	"display": "browser",
+	"display": "standalone",
 	"theme_color": "#00A9C7",
 	"background_color": "#ffffff",
 	"icons": [

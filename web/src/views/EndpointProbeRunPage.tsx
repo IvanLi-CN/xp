@@ -23,17 +23,19 @@ import {
 import { fetchAdminNodes } from "../api/adminNodes";
 import { isBackendApiError } from "../api/backendError";
 import { startSseStream } from "../api/sse";
+import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import {
 	NodeNameLink,
 	compareNodeIdsByDisplayName,
 } from "../components/NodeNameLink";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ResourceTable } from "../components/ResourceTable";
 import { useToast } from "../components/Toast";
 import { readAdminToken } from "../components/auth";
 import { badgeClass } from "../components/ui-helpers";
+import { useAppRuntime } from "../offline/appRuntime";
 import { computeEndpointProbeStatus } from "../utils/endpointProbeStatus";
 
 function formatErrorMessage(error: unknown): string {
@@ -153,6 +155,9 @@ export function EndpointProbeRunPage() {
 	const { runId } = useParams({ from: "/app/endpoints/probe/runs/$runId" });
 	const navigate = useNavigate();
 	const adminToken = readAdminToken();
+	const appRuntime = useAppRuntime();
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const probesCapability = useApiCapability("admin.node-probes");
 	const { pushToast } = useToast();
 
 	const [sseConnected, setSseConnected] = useState(false);
@@ -168,20 +173,20 @@ export function EndpointProbeRunPage() {
 
 	const statusQuery = useQuery({
 		queryKey: ["adminEndpointProbeRunStatus", adminToken, runId],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && probesCapability.available,
 		queryFn: ({ signal }) =>
 			fetchAdminEndpointProbeRunStatus(adminToken, runId, signal),
 	});
 
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: adminToken.length > 0 && probesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 
@@ -221,7 +226,12 @@ export function EndpointProbeRunPage() {
 		setLiveConfigHash(null);
 		setAutoRefreshedResults(false);
 
-		if (adminToken.length === 0) return;
+		if (
+			adminToken.length === 0 ||
+			!probesCapability.available ||
+			!appRuntime.isOnline
+		)
+			return;
 
 		const handle = startSseStream({
 			url: `/api/admin/endpoints/probe/runs/${encodeURIComponent(runId)}/events`,
@@ -342,7 +352,13 @@ export function EndpointProbeRunPage() {
 		});
 
 		return () => handle.close();
-	}, [adminToken, runId, pushToast]);
+	}, [
+		adminToken,
+		appRuntime.isOnline,
+		probesCapability.available,
+		pushToast,
+		runId,
+	]);
 
 	const nodesForUi = useMemo(() => {
 		const data = statusQuery.data;
@@ -388,6 +404,15 @@ export function EndpointProbeRunPage() {
 		statusQuery.refetch();
 		endpointsQuery.refetch();
 	}, [autoRefreshedResults, overallStatus, endpointsQuery, statusQuery]);
+
+	if (endpointsCapability.unavailable || probesCapability.unavailable) {
+		return (
+			<CapabilityUnavailableState
+				title="Probe run unavailable"
+				reason={probesCapability.reason ?? endpointsCapability.reason}
+			/>
+		);
+	}
 
 	if (adminToken.length === 0) {
 		return (

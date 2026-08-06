@@ -25,6 +25,21 @@ Current support boundaries that operators must know:
   removing those env values does not reconfigure or delete an existing endpoint.
 - When a deployment environment needs manual intervention, document the exact branch and operator steps instead of implying the generic path will work.
 
+## Web PWA and API compatibility
+
+The embedded admin Web app is a build-versioned PWA. A release precaches the complete HTML, JavaScript,
+CSS, font, icon, and manifest app shell under a build-specific cache name. The new worker waits for the
+operator's confirmation before activation; an interrupted install leaves the active build usable. Do not
+manually delete `xp-app-shell-*` caches while an older tab may still be open. Cross-tab ownership is
+stored in `xp_sw_metadata`, separately from the React Query cache.
+
+The Web client supports the current API minor and the two previous minors in the fixed `3.22`,
+`3.21`, and `3.20` window. It probes `GET /api/capabilities`, falls back to the strict current
+release tag from `GET /api/version/check`, and finally uses local endpoint fingerprints. A missing
+capability disables only the affected UI feature; an endpoint or schema failure for a declared capability
+is an API regression and must be investigated as such. PWA build IDs and API release profiles are
+independent and must not be manually aligned.
+
 ## Minimal runtime assumptions
 
 Host-managed mode assumptions:

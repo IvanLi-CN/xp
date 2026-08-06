@@ -36,6 +36,7 @@ import {
 	type SubscriptionFormat,
 	fetchSubscription,
 } from "../api/subscription";
+import { useApiCapability } from "../api/useApiCompatibility";
 import {
 	AccessMatrix,
 	type AccessMatrixCellState,
@@ -47,7 +48,7 @@ import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
-import { PageState } from "../components/PageState";
+import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
@@ -247,7 +248,13 @@ export function UserDetailsPage() {
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
-
+	const usersCapability = useApiCapability("admin.users");
+	const nodesCapability = useApiCapability("admin.nodes");
+	const endpointsCapability = useApiCapability("admin.endpoints");
+	const quotaCapability = useApiCapability("admin.quota-policy");
+	const trafficCapability = useApiCapability("admin.traffic-usage");
+	const enabledFor = (capability: { available: boolean }) =>
+		adminToken.length > 0 && capability.available;
 	const [tab, setTab] = useState<
 		"user" | "access" | "quotaStatus" | "traffic" | "usageDetails"
 	>("user");
@@ -303,60 +310,54 @@ export function UserDetailsPage() {
 	const [isDeleting, setIsDeleting] = useState(false);
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
-
 	const userQuery = useQuery({
 		queryKey: ["adminUser", adminToken, userId],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(usersCapability),
 		queryFn: ({ signal }) => fetchAdminUser(adminToken, userId, signal),
 	});
-
 	const mihomoProfileQuery = useQuery({
 		queryKey: ["adminUserMihomoProfile", adminToken, userId],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(usersCapability),
 		queryFn: ({ signal }) =>
 			fetchAdminUserMihomoProfile(adminToken, userId, signal),
 	});
-
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(nodesCapability),
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
-
 	const endpointsQuery = useQuery({
 		queryKey: ["adminEndpoints", adminToken],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(endpointsCapability),
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
-
 	const accessQuery = useQuery({
 		queryKey: ["adminUserAccess", adminToken, userId],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(usersCapability) && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminUserAccess(adminToken, userId, signal),
 	});
-
 	const nodeQuotasQuery = useQuery({
 		queryKey: ["adminUserNodeQuotas", adminToken, userId],
-		enabled: adminToken.length > 0,
+		enabled: enabledFor(quotaCapability),
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotas(adminToken, userId, signal),
 	});
 	const nodeQuotaStatusQuery = useQuery({
 		queryKey: ["adminUserNodeQuotaStatus", adminToken, userId],
 		enabled:
-			adminToken.length > 0 && (tab === "quotaStatus" || tab === "access"),
+			enabledFor(quotaCapability) &&
+			(tab === "quotaStatus" || tab === "access"),
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
 	const ipUsageQuery = useQuery({
 		queryKey: ["adminUserIpUsage", adminToken, userId, ipUsageWindow],
-		enabled: adminToken.length > 0 && tab === "usageDetails",
+		enabled: enabledFor(trafficCapability) && tab === "usageDetails",
 		queryFn: ({ signal }) =>
 			fetchAdminUserIpUsage(adminToken, userId, ipUsageWindow, signal),
 		placeholderData: (previousData) =>
 			previousData?.user.user_id === userId ? previousData : undefined,
 	});
-
 	const trafficQuery = useQuery({
 		queryKey: [
 			"adminUserTraffic",
@@ -365,7 +366,7 @@ export function UserDetailsPage() {
 			prefs.trafficWindow,
 			activeTrafficNodeId,
 		],
-		enabled: adminToken.length > 0 && tab === "traffic",
+		enabled: enabledFor(trafficCapability) && tab === "traffic",
 		queryFn: ({ signal }) =>
 			fetchAdminUserTraffic(
 				adminToken,
@@ -375,13 +376,11 @@ export function UserDetailsPage() {
 				signal,
 			),
 	});
-
 	useEffect(() => {
 		if (trafficQuery.data?.nodes) {
 			setTrafficNodeOptions(trafficQuery.data.nodes);
 		}
 	}, [trafficQuery.data?.nodes]);
-
 	const user = userQuery.data;
 	const availableTrafficNodes =
 		trafficQuery.data?.nodes ??
@@ -444,7 +443,6 @@ export function UserDetailsPage() {
 			null
 		);
 	}, [activeUsageNodeId, usageGroups]);
-
 	useEffect(() => {
 		if (usageGroups.length === 0) {
 			setActiveUsageNodeId(null);
@@ -540,8 +538,8 @@ export function UserDetailsPage() {
 
 	useEffect(() => {
 		if (!userId || accessInitForUserId === userId) return;
-		if (endpointsQuery.isLoading || accessQuery.isLoading) return;
 		if (endpointsQuery.isError || accessQuery.isError) return;
+		if (!endpointsQuery.data || !accessQuery.data) return;
 
 		const next: Record<string, string[]> = {};
 		for (const item of access) {
@@ -561,10 +559,10 @@ export function UserDetailsPage() {
 		accessInitForUserId,
 		endpointById,
 		endpointsQuery.isError,
-		endpointsQuery.isLoading,
+		endpointsQuery.data,
 		access,
 		accessQuery.isError,
-		accessQuery.isLoading,
+		accessQuery.data,
 		userId,
 	]);
 
@@ -988,9 +986,6 @@ export function UserDetailsPage() {
 		}
 	}
 
-	if (userQuery.isLoading && !hasQueryData(userQuery)) {
-		return <PageState variant="loading" title="Loading user" />;
-	}
 	if (adminToken.length === 0) {
 		return (
 			<PageState
@@ -999,6 +994,17 @@ export function UserDetailsPage() {
 				description="Set an admin token to manage user details."
 			/>
 		);
+	}
+	if (usersCapability.unavailable) {
+		return (
+			<CapabilityUnavailableState
+				title="User details unavailable"
+				reason={usersCapability.reason}
+			/>
+		);
+	}
+	if (userQuery.isLoading && !hasQueryData(userQuery)) {
+		return <PageState variant="loading" title="Loading user" />;
 	}
 	if (
 		!hasQueryData(userQuery) &&
@@ -1341,7 +1347,6 @@ export function UserDetailsPage() {
 							</div>
 						</div>
 					</section>
-
 					<div className="xp-card p-4 space-y-3">
 						<h3 className="font-semibold">Node quotas</h3>
 						<div className="rounded-xl border border-border/70 bg-muted/35 px-4 py-2 text-sm">
@@ -1393,7 +1398,6 @@ export function UserDetailsPage() {
 					</div>
 				</div>
 			) : null}
-
 			{tab === "access" ? (
 				<div className="space-y-4">
 					<div className="flex items-center justify-between">
@@ -1452,7 +1456,6 @@ export function UserDetailsPage() {
 							</Button>
 						</div>
 					) : null}
-
 					{!isAccessDataLoading && !accessDataError ? (
 						<AccessMatrix
 							nodes={(nodesQuery.data?.items ?? []).map((node) => ({
@@ -1494,7 +1497,6 @@ export function UserDetailsPage() {
 					) : null}
 				</div>
 			) : null}
-
 			{tab === "traffic" ? (
 				<div className="space-y-4">
 					{trafficQuery.isLoading && !trafficQuery.data ? (
@@ -1549,7 +1551,6 @@ export function UserDetailsPage() {
 					) : null}
 				</div>
 			) : null}
-
 			{tab === "usageDetails" ? (
 				<div className="space-y-4">
 					{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
@@ -1652,7 +1653,6 @@ export function UserDetailsPage() {
 					) : null}
 				</div>
 			) : null}
-
 			{tab === "quotaStatus" ? (
 				<div className="xp-card p-4 space-y-3">
 					{nodeQuotaStatusQuery.isLoading &&

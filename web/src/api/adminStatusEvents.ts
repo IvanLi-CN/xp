@@ -7,20 +7,22 @@ import { ClusterInfoResponseSchema } from "./clusterInfo";
 import { HealthResponseSchema } from "./health";
 import { type SseStreamHandle, startSseStream } from "./sse";
 
-const AdminStatusEventsHelloSchema = z.object({
+export const AdminStatusEventsHelloSchema = z.object({
 	node_id: z.string(),
 	connected_at: z.string(),
 });
 
-const AdminStatusEventsSnapshotSchema = z.object({
-	emitted_at: z.string(),
-	health: HealthResponseSchema,
-	cluster_info: ClusterInfoResponseSchema,
-	nodes_runtime: AdminNodesRuntimeResponseSchema,
-	alerts: AlertsResponseSchema,
-	upgrade: AdminUpgradeStatusResponseSchema,
-	mesh_revision: z.number(),
-});
+export const AdminStatusEventsSnapshotSchema = z
+	.object({
+		emitted_at: z.string(),
+		health: HealthResponseSchema,
+		cluster_info: ClusterInfoResponseSchema,
+		nodes_runtime: AdminNodesRuntimeResponseSchema,
+		alerts: AlertsResponseSchema,
+		upgrade: AdminUpgradeStatusResponseSchema,
+		mesh_revision: z.number().default(0),
+	})
+	.passthrough();
 
 const AdminStatusEventsErrorSchema = z.object({
 	message: z.string(),
