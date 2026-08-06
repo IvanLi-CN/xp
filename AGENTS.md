@@ -69,6 +69,11 @@
   workers wait for explicit user confirmation; `xp_sw_metadata` owns cross-tab
   `clientId -> buildId` records. Old app-shell caches remain until reconciliation proves that no
   controlled client uses them.
+  The only exception is a one-time Workbox legacy migration: after a complete precache, an exact
+  same-scope `workbox-precache-v2-<scope>` plus no valid XP owner after a bounded 1-second probe may
+  `skipWaiting()` in the background. It must not `clients.claim()` or refresh open pages.
+  It may only later remove recorded legacy and orphan XP app-shell caches after all live
+  clients declare valid ownership.
   Navigation and static subresources must never be assembled from mixed builds.
 - Web/API compatibility is independent of PWA build IDs. The supported window is the immutable
   3.22/3.21/3.20 release inventory; Web probes additive capabilities first, then a strict stable

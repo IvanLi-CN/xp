@@ -81,6 +81,10 @@
 - 新 worker 完整安装后保持 `waiting`，更新提示由 `PwaStatusPrompt` 呈现，只有用户确认后才发送
   `SKIP_WAITING`。跨标签页的 `clientId -> buildId` ownership 写入独立的 `xp_sw_metadata` IndexedDB，旧
   cache 只有在所有 owner 消失并完成 reconciliation 后才可清理。
+- Workbox legacy migration 是唯一后台激活例外：当精确的同 scope `workbox-precache-v2-<scope>` 存在，且
+  最多 1 秒的声明探测仍找不到任何有效 XP owner，完整新 Worker 记录 migration state 后可
+  `skipWaiting()`。它绝不 `clients.claim()` 或刷新旧页；旧页手动刷新或新开页面后才使用新 build。回收仅在
+  所有存活页面声明有效 XP build 后执行，且只删除记录中的 legacy precache 与迁移开始时的无 owner app-shell。
 - 新导航从 active build 获取完整 `index.html`；受控页面的静态子资源按其声明的 build 路由，无法确定或缺失时
   失败并请求 cache recovery，不从另一构建拼接资源。
 - 管理读模型通过 `PersistQueryClientProvider` + IndexedDB 持久化；只持久化 allowlist 中成功完成的 query。
@@ -105,6 +109,9 @@
 - Given 浏览器已成功加载过管理台一次，When 断网后再次访问，Then `app shell + 最近缓存内容` 在 warm-load 场景下可进入，而不是白屏或浏览器错误页。
 - Given 浏览器收到新前端 bundle，When Service Worker 完成更新，Then
   页面显示独立的“new web bundle ready”提示，而不是复用升级 job 文案。
+- Given legacy Workbox 仍控制一个旧页面且没有有效 XP ownership，When 完整新 Worker 安装，Then 它后台激活
+  但不接管或刷新该页面；When 用户手动刷新或新开页面，Then 页面加载单一当前 build，且 legacy cache 仅在
+  最后一个旧页面迁移后回收。
 - Given 设备断网但本地仍有 token 与缓存，When 访问 Dashboard / Nodes /
   Node details / Endpoints / Users / Quota policy / Service config / Tools，
   Then 页面进入离线只读态并显示 `last synced at`。

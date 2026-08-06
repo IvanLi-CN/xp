@@ -208,6 +208,27 @@ test("keeps the active precache when a replacement install is interrupted", asyn
 			urls: (await cache.keys()).map((request) => request.url),
 		};
 	});
+	await page.waitForFunction(async () => {
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open("xp_sw_metadata");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		if (!db.objectStoreNames.contains("client_build_owners")) {
+			db.close();
+			return false;
+		}
+		const owners = await new Promise<unknown[]>((resolve, reject) => {
+			const request = db
+				.transaction("client_build_owners", "readonly")
+				.objectStore("client_build_owners")
+				.getAll();
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		db.close();
+		return owners.length >= 2;
+	});
 	const owners = await page.evaluate(async () => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open("xp_sw_metadata");
@@ -414,4 +435,290 @@ test("holds a complete waiting worker until the user confirms activation", async
 		const registration = await navigator.serviceWorker.getRegistration();
 		return !registration?.waiting;
 	});
+});
+
+test("migrates a legacy client around a complete XP waiting worker", async ({
+	context,
+	page,
+}) => {
+	const token = `${Date.now()}`;
+	await page.goto("/__e2e_legacy_client__.html");
+	const legacyCacheName = await page.evaluate(
+		() => `workbox-precache-v2-${location.origin}/`,
+	);
+	await page.evaluate(async () => {
+		await navigator.serviceWorker.register("/__e2e_legacy_worker__.js", {
+			scope: "/",
+		});
+	});
+	await page.waitForFunction(() =>
+		navigator.serviceWorker.controller?.scriptURL.includes(
+			"/__e2e_legacy_worker__.js",
+		),
+	);
+	await page.evaluate(async (legacyCache) => {
+		await caches.open(legacyCache);
+		localStorage.setItem("xp_admin_token", "preserved-token");
+		localStorage.setItem("xp_ui_density", "compact");
+		await new Promise<void>((resolve, reject) => {
+			const request = indexedDB.open("xp", 1);
+			request.onupgradeneeded = () => {
+				if (!request.result.objectStoreNames.contains("react_query_cache"))
+					request.result.createObjectStore("react_query_cache");
+			};
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => {
+				const db = request.result;
+				const transaction = db.transaction("react_query_cache", "readwrite");
+				transaction
+					.objectStore("react_query_cache")
+					.put("preserved-query-cache", "legacy-sentinel");
+				transaction.onerror = () => reject(transaction.error);
+				transaction.oncomplete = () => {
+					db.close();
+					resolve();
+				};
+			};
+		});
+		let controllerChanges = 0;
+		navigator.serviceWorker.addEventListener("controllerchange", () => {
+			controllerChanges += 1;
+		});
+		Object.defineProperty(window, "__xp_e2e_controller_changes", {
+			get: () => controllerChanges,
+			configurable: true,
+		});
+	}, legacyCacheName);
+
+	const predecessorBuildId = `e2e-legacy-predecessor-${token}`;
+	await page.evaluate(async (workerToken) => {
+		await navigator.serviceWorker.register(
+			`/sw.js?e2e-legacy-predecessor=${workerToken}`,
+			{ scope: "/" },
+		);
+	}, token);
+	const predecessorReady = await page.evaluate(
+		async ({ workerToken, buildId }) => {
+			const deadline = Date.now() + 10_000;
+			while (Date.now() < deadline) {
+				const registration = await navigator.serviceWorker.getRegistration();
+				if (
+					registration &&
+					!registration.installing &&
+					registration.waiting?.scriptURL.includes(
+						`e2e-legacy-predecessor=${workerToken}`,
+					) &&
+					(await caches.has(`xp-app-shell-${buildId}`))
+				) {
+					return true;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+			return false;
+		},
+		{ workerToken: token, buildId: predecessorBuildId },
+	);
+	expect(predecessorReady).toBe(true);
+	const predecessorState = await page.evaluate(async (buildId) => {
+		const cache = await caches.open(`xp-app-shell-${buildId}`);
+		const metadataResponse = await cache.match(
+			new URL("/__xp_build_metadata__", location.origin).href,
+		);
+		const metadata = (await metadataResponse?.json()) as {
+			buildId?: string;
+			entries?: Array<{ url: string }>;
+		} | null;
+		const entries = metadata?.entries ?? [];
+		return {
+			metadataBuildId: metadata?.buildId ?? null,
+			entryCount: entries.length,
+			complete: await Promise.all(
+				entries.map((entry) => cache.match(entry.url)),
+			).then((responses) => responses.every(Boolean)),
+		};
+	}, predecessorBuildId);
+	expect(predecessorState.metadataBuildId).toBe(predecessorBuildId);
+	expect(predecessorState.entryCount).toBeGreaterThan(0);
+	expect(predecessorState.complete).toBe(true);
+
+	await page.evaluate(async (workerToken) => {
+		await navigator.serviceWorker.register(
+			`/sw.js?e2e-legacy-migration=${workerToken}`,
+			{ scope: "/" },
+		);
+	}, token);
+	await page.waitForFunction(
+		(workerToken) =>
+			navigator.serviceWorker
+				.getRegistration()
+				.then(
+					(registration) =>
+						registration?.active?.scriptURL.includes(
+							`e2e-legacy-migration=${workerToken}`,
+						) && !registration.waiting,
+				),
+		token,
+	);
+	const legacyTabState = await page.evaluate(
+		async ({ legacyCache, predecessorCache }) => ({
+			controller: navigator.serviceWorker.controller?.scriptURL ?? null,
+			controllerChanges: (
+				window as Window & { __xp_e2e_controller_changes?: number }
+			).__xp_e2e_controller_changes,
+			legacyCachePresent: await caches.has(legacyCache),
+			predecessorCachePresent: await caches.has(predecessorCache),
+		}),
+		{
+			legacyCache: legacyCacheName,
+			predecessorCache: `xp-app-shell-${predecessorBuildId}`,
+		},
+	);
+	expect(legacyTabState.controller).toContain("/__e2e_legacy_worker__.js");
+	expect(legacyTabState.controllerChanges).toBe(0);
+	expect(legacyTabState.legacyCachePresent).toBe(true);
+	expect(legacyTabState.predecessorCachePresent).toBe(true);
+
+	await page.close();
+	const migratedPage = await context.newPage();
+	await migratedPage.addInitScript(() => {
+		sessionStorage.setItem(
+			"xp.upgrade-observation",
+			JSON.stringify({
+				targetTag: "v3.23.0",
+				deadlineAtMs: Date.now() + 30_000,
+				startedAtMs: Date.now(),
+				phase: "observing",
+			}),
+		);
+	});
+	await setAdminToken(migratedPage, "preserved-token");
+	await setupApiMocks(migratedPage, { mockStatusEvents: false });
+	const runtimeErrors: string[] = [];
+	migratedPage.on("console", (message) => {
+		if (message.type() === "error") runtimeErrors.push(message.text());
+	});
+	migratedPage.on("pageerror", (error) => runtimeErrors.push(error.message));
+	await migratedPage.goto("/nodes");
+	await expect(
+		migratedPage.getByRole("heading", { name: "Nodes", exact: true }),
+	).toBeVisible();
+	await expect(
+		migratedPage.getByText(
+			"Waiting for the node to reconnect and report the upgrade status.",
+		),
+	).toBeVisible();
+	await migratedPage.waitForFunction(
+		async ({ legacyCache, predecessorCache, workerToken }) => {
+			const registration = await navigator.serviceWorker.getRegistration();
+			return (
+				registration?.active?.scriptURL.includes(
+					`e2e-legacy-migration=${workerToken}`,
+				) &&
+				!(await caches.has(legacyCache)) &&
+				!(await caches.has(predecessorCache))
+			);
+		},
+		{
+			legacyCache: legacyCacheName,
+			predecessorCache: `xp-app-shell-${predecessorBuildId}`,
+			workerToken: token,
+		},
+	);
+
+	const preservedState = await migratedPage.evaluate(async () => {
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open("xp");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		const queryCache = await new Promise<unknown>((resolve, reject) => {
+			const request = db
+				.transaction("react_query_cache", "readonly")
+				.objectStore("react_query_cache")
+				.get("legacy-sentinel");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		db.close();
+		return {
+			token: localStorage.getItem("xp_admin_token"),
+			density: localStorage.getItem("xp_ui_density"),
+			queryCache,
+		};
+	});
+	expect(preservedState).toEqual({
+		token: "preserved-token",
+		density: "compact",
+		queryCache: "preserved-query-cache",
+	});
+	expect(
+		runtimeErrors.some((message) =>
+			/Minified React error #185|Maximum update depth exceeded/i.test(message),
+		),
+	).toBe(false);
+});
+
+test("keeps the legacy worker and migration state unchanged when install fails", async ({
+	page,
+}) => {
+	const token = `${Date.now()}`;
+	await page.goto("/__e2e_legacy_client__.html");
+	const legacyCacheName = await page.evaluate(
+		() => `workbox-precache-v2-${location.origin}/`,
+	);
+	await page.evaluate(async (legacyCache) => {
+		await navigator.serviceWorker.register("/__e2e_legacy_worker__.js", {
+			scope: "/",
+		});
+		await caches.open(legacyCache);
+	}, legacyCacheName);
+	await page.waitForFunction(() =>
+		navigator.serviceWorker.controller?.scriptURL.includes(
+			"/__e2e_legacy_worker__.js",
+		),
+	);
+	await page.evaluate(async (workerToken) => {
+		try {
+			await navigator.serviceWorker.register(
+				`/sw.js?e2e-legacy-install-failure=${workerToken}`,
+				{ scope: "/" },
+			);
+		} catch {
+			// Browser registration may reject immediately or only after install.
+		}
+	}, token);
+	await page.waitForFunction(async (legacyCache) => {
+		const registration = await navigator.serviceWorker.getRegistration();
+		return (
+			registration?.active?.scriptURL.includes("/__e2e_legacy_worker__.js") &&
+			!registration.installing &&
+			!registration.waiting &&
+			(await caches.has(legacyCache))
+		);
+	}, legacyCacheName);
+	const migrationState = await page.evaluate(async () => {
+		const databases = await indexedDB.databases();
+		if (!databases.some((database) => database.name === "xp_sw_metadata"))
+			return null;
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open("xp_sw_metadata");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		if (!db.objectStoreNames.contains("migration_state")) {
+			db.close();
+			return null;
+		}
+		const state = await new Promise<unknown>((resolve, reject) => {
+			const request = db
+				.transaction("migration_state", "readonly")
+				.objectStore("migration_state")
+				.get("legacy-workbox");
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result ?? null);
+		});
+		db.close();
+		return state;
+	});
+	expect(migrationState).toBeNull();
 });

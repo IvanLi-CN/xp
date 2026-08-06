@@ -19,7 +19,7 @@ the UI can now be installed as a PWA and revisited in offline read-only mode fro
 - Quotas: cycle windows, bidirectional traffic, auto-ban, optional auto-unban (see `docs/desgin/quota.md` and `XP_QUOTA_*`)
 - Cluster consistency: 1–20 nodes Raft (OpenRaft); write requests are serialized by the leader
 - Embedded admin UI: served by `xp` (default: `http://127.0.0.1:62416/`)
-- Installable admin PWA: build-versioned atomic app-shell updates, offline read-only warm cache, and live status stream while open
+- Installable admin PWA: build-versioned atomic app-shell updates, safe legacy Worker migration without open-tab takeover, offline read-only warm cache, and live status stream while open
 - API compatibility: additive capability probing with immutable 3.22/3.21/3.20 release inventories and feature-local degradation
 - Ops tool: `xp-ops` (install/init services, unified `upgrade`, optional Cloudflare Tunnel, `container run`)
 - Official container image: `ghcr.io/ivanli-cn/xp` (single-image node runtime with optional Cloudflare Tunnel)

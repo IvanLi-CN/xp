@@ -4,7 +4,9 @@ import {
 	appShellCacheName,
 	canDeleteBuildCache,
 	isTransientBuildCacheName,
+	legacyWorkboxPrecacheCacheName,
 	selectBuildForRequest,
+	selectWorkerInstallMode,
 } from "./pwaBuildPolicy";
 
 describe("pwa build policy", () => {
@@ -68,5 +70,45 @@ describe("pwa build policy", () => {
 		expect(appShellCacheName("2026.08.05-new")).toBe(
 			"xp-app-shell-2026.08.05-new",
 		);
+	});
+
+	it("only bypasses waiting for an undeclared legacy Workbox client", () => {
+		const legacyCacheName = legacyWorkboxPrecacheCacheName(
+			"https://xp.example/",
+		);
+		expect(
+			selectWorkerInstallMode({
+				cacheNames: [
+					legacyCacheName,
+					appShellCacheName("intermediate-xp-build"),
+				],
+				currentCacheName: appShellCacheName("current-build"),
+				legacyCacheName,
+				liveClientCount: 1,
+				validXpOwnerCount: 0,
+			}),
+		).toBe("legacy_migration");
+
+		expect(
+			selectWorkerInstallMode({
+				cacheNames: [legacyCacheName, appShellCacheName("previous-xp-build")],
+				currentCacheName: appShellCacheName("current-build"),
+				legacyCacheName,
+				liveClientCount: 2,
+				validXpOwnerCount: 1,
+			}),
+		).toBe("normal_update");
+	});
+
+	it("keeps a regular XP-to-XP update waiting", () => {
+		expect(
+			selectWorkerInstallMode({
+				cacheNames: [appShellCacheName("previous-xp-build")],
+				currentCacheName: appShellCacheName("current-build"),
+				legacyCacheName: legacyWorkboxPrecacheCacheName("https://xp.example/"),
+				liveClientCount: 1,
+				validXpOwnerCount: 1,
+			}),
+		).toBe("normal_update");
 	});
 });

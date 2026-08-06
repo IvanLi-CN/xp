@@ -15,6 +15,12 @@
 - 2026-08-05: API 支持窗口固定为当前及前两个 minor，并覆盖双向兼容。
 - 2026-08-05: 完整 API inventory 固定为 pinned source digest 与 callsite method/path/status/capability
   并集；真实 wire-body schema fixtures 聚焦关键页面，禁止用合成空 body 制造全量覆盖假象。
+- 2026-08-06: 线上页面实证为 legacy Workbox controller、已完成的 XP waiting app-shell 与无 ownership
+  并存。该组合无法显示更新提示，形成 Worker 更新死锁。
+- 2026-08-06: 仅对精确 same-scope legacy Workbox cache 引入后台 `skipWaiting()` 迁移例外；它不
+  `clients.claim()`、不刷新旧页，并在所有存活页面声明有效 XP build 后仅回收 migration state 记录的 cache。
+- 2026-08-06: production preview 覆盖 AppShell、VersionIndicator 浮层及迁移后的当前 build，未复现
+  React #185；因此未进行猜测性的 Radix 或组件状态重写。
 
 ## Key Reasons / Replacements
 

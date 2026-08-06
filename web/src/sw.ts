@@ -6,7 +6,9 @@ import {
 	buildIdFromCacheName,
 	canDeleteBuildCache,
 	isTransientBuildCacheName,
+	legacyWorkboxPrecacheCacheName,
 	selectBuildForRequest,
+	selectWorkerInstallMode,
 } from "./offline/pwaBuildPolicy";
 
 declare const self: ServiceWorkerGlobalScope & {
@@ -17,6 +19,21 @@ type OwnerRecord = {
 	clientId: string;
 	buildId: string;
 	updatedAt: number;
+};
+
+type LegacyMigrationState = {
+	key: "legacy-workbox";
+	legacyCacheNames: string[];
+	orphanedAppShellCacheNames: string[];
+	startedAt: number;
+};
+
+type LiveClientOwnership = {
+	windows: readonly WindowClient[];
+	owners: Record<string, string>;
+	undeclaredClients: readonly WindowClient[];
+	validXpOwnerCount: number;
+	isComplete: boolean;
 };
 
 type ServiceWorkerMessage =
@@ -40,6 +57,10 @@ let shouldClaimClients = false;
 const METADATA_DB_NAME = "xp_sw_metadata";
 const METADATA_STORE_NAME = "client_build_owners";
 const RETIRED_BUILD_STORE_NAME = "retired_builds";
+const MIGRATION_STORE_NAME = "migration_state";
+const LEGACY_MIGRATION_KEY = "legacy-workbox";
+const OWNER_DECLARATION_PROBE_TIMEOUT_MS = 1_000;
+const OWNER_DECLARATION_PROBE_INTERVAL_MS = 50;
 const manifestEntries = self.__WB_MANIFEST;
 const normalizedManifestEntries = manifestEntries.map((entry) => ({
 	url: new URL(entry.url, self.registration.scope).href,
@@ -55,6 +76,8 @@ const BUILD_METADATA_URL = new URL(
 const pendingNavigationBuilds = new Map<string, string>();
 let cacheMutation: Promise<unknown> = Promise.resolve();
 
+type DeadlineResult<T> = { completed: true; value: T } | { completed: false };
+
 function isSameOriginStaticRequest(request: Request): boolean {
 	const url = new URL(request.url);
 	return (
@@ -68,7 +91,7 @@ function isSameOriginStaticRequest(request: Request): boolean {
 
 function openMetadataDb(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
-		const request = indexedDB.open(METADATA_DB_NAME, 2);
+		const request = indexedDB.open(METADATA_DB_NAME, 3);
 		request.onupgradeneeded = () => {
 			const db = request.result;
 			if (!db.objectStoreNames.contains(METADATA_STORE_NAME)) {
@@ -77,9 +100,106 @@ function openMetadataDb(): Promise<IDBDatabase> {
 			if (!db.objectStoreNames.contains(RETIRED_BUILD_STORE_NAME)) {
 				db.createObjectStore(RETIRED_BUILD_STORE_NAME, { keyPath: "buildId" });
 			}
+			if (!db.objectStoreNames.contains(MIGRATION_STORE_NAME)) {
+				db.createObjectStore(MIGRATION_STORE_NAME, { keyPath: "key" });
+			}
 		};
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);
+	});
+}
+
+function isLegacyMigrationOrphanCacheName(cacheName: string): boolean {
+	return (
+		cacheName.startsWith(APP_SHELL_CACHE_PREFIX) &&
+		cacheName !== CACHE_NAME &&
+		!isTransientBuildCacheName(cacheName) &&
+		buildIdFromCacheName(cacheName) !== null
+	);
+}
+
+function isValidLegacyMigration(
+	record: unknown,
+): record is LegacyMigrationState {
+	if (!record || typeof record !== "object") return false;
+	const candidate = record as Partial<LegacyMigrationState>;
+	const expectedLegacyCacheName = legacyWorkboxPrecacheCacheName(
+		self.registration.scope,
+	);
+	return (
+		candidate.key === LEGACY_MIGRATION_KEY &&
+		Array.isArray(candidate.legacyCacheNames) &&
+		candidate.legacyCacheNames.length === 1 &&
+		candidate.legacyCacheNames[0] === expectedLegacyCacheName &&
+		Array.isArray(candidate.orphanedAppShellCacheNames) &&
+		candidate.orphanedAppShellCacheNames.every(
+			(cacheName) =>
+				typeof cacheName === "string" &&
+				isLegacyMigrationOrphanCacheName(cacheName),
+		) &&
+		new Set(candidate.orphanedAppShellCacheNames).size ===
+			candidate.orphanedAppShellCacheNames.length &&
+		typeof candidate.startedAt === "number" &&
+		Number.isFinite(candidate.startedAt)
+	);
+}
+
+async function readLegacyMigration(): Promise<LegacyMigrationState | null> {
+	const db = await openMetadataDb();
+	const record = await new Promise<unknown>((resolve, reject) => {
+		const transaction = db.transaction(MIGRATION_STORE_NAME, "readonly");
+		const request = transaction
+			.objectStore(MIGRATION_STORE_NAME)
+			.get(LEGACY_MIGRATION_KEY);
+		let result: unknown;
+		request.onsuccess = () => {
+			result = request.result;
+		};
+		request.onerror = () => reject(request.error);
+		transaction.oncomplete = () => {
+			db.close();
+			resolve(result);
+		};
+	});
+	if (record === undefined) return null;
+	if (!isValidLegacyMigration(record)) {
+		await clearLegacyMigration();
+		return null;
+	}
+	return record;
+}
+
+async function writeLegacyMigration(
+	legacyCacheNames: readonly string[],
+	orphanedAppShellCacheNames: readonly string[],
+): Promise<void> {
+	const db = await openMetadataDb();
+	return new Promise((resolve, reject) => {
+		const transaction = db.transaction(MIGRATION_STORE_NAME, "readwrite");
+		transaction.objectStore(MIGRATION_STORE_NAME).put({
+			key: LEGACY_MIGRATION_KEY,
+			legacyCacheNames: [...legacyCacheNames],
+			orphanedAppShellCacheNames: [...orphanedAppShellCacheNames],
+			startedAt: Date.now(),
+		} satisfies LegacyMigrationState);
+		transaction.oncomplete = () => {
+			db.close();
+			resolve();
+		};
+		transaction.onerror = () => reject(transaction.error);
+	});
+}
+
+async function clearLegacyMigration(): Promise<void> {
+	const db = await openMetadataDb();
+	return new Promise((resolve, reject) => {
+		const transaction = db.transaction(MIGRATION_STORE_NAME, "readwrite");
+		transaction.objectStore(MIGRATION_STORE_NAME).delete(LEGACY_MIGRATION_KEY);
+		transaction.oncomplete = () => {
+			db.close();
+			resolve();
+		};
+		transaction.onerror = () => reject(transaction.error);
 	});
 }
 
@@ -206,25 +326,152 @@ async function cleanupUnownedBuildCaches(
 	return deleted;
 }
 
-async function reconcileOwnership(): Promise<string[]> {
-	const windows = await self.clients.matchAll({
-		type: "window",
-		includeUncontrolled: true,
-	});
-	const owners = await readOwners();
-	const retiredBuilds = await readRetiredBuilds();
-	const liveClientIds = new Set(windows.map((client) => client.id));
-	let hasUndeclaredClient = false;
-	const releasedBuilds = new Set<string>();
+async function cleanupLegacyMigrationCaches(
+	legacyMigration: LegacyMigrationState,
+	owners: Record<string, string>,
+): Promise<string[]> {
+	const deleted: string[] = [];
+	const cacheNames = await caches.keys();
+	for (const cacheName of legacyMigration.legacyCacheNames) {
+		if (
+			cacheName === legacyWorkboxPrecacheCacheName(self.registration.scope) &&
+			cacheNames.includes(cacheName) &&
+			(await caches.delete(cacheName))
+		) {
+			deleted.push(cacheName);
+		}
+	}
 
+	for (const cacheName of legacyMigration.orphanedAppShellCacheNames) {
+		if (
+			!isLegacyMigrationOrphanCacheName(cacheName) ||
+			!cacheNames.includes(cacheName)
+		)
+			continue;
+		const buildId = buildIdFromCacheName(cacheName);
+		if (!buildId || !canDeleteBuildCache(buildId, owners)) continue;
+		if (await caches.delete(cacheName)) deleted.push(cacheName);
+	}
+	await clearLegacyMigration();
+	return deleted;
+}
+
+async function resolveBeforeDeadline<T>(
+	operation: Promise<T>,
+	deadlineAtMs: number | undefined,
+): Promise<DeadlineResult<T>> {
+	if (deadlineAtMs === undefined) {
+		return { completed: true, value: await operation };
+	}
+	const remainingMs = deadlineAtMs - Date.now();
+	if (remainingMs <= 0) return { completed: false };
+	return Promise.race([
+		operation.then((value) => ({ completed: true, value }) as const),
+		delay(remainingMs).then(() => ({ completed: false }) as const),
+	]);
+}
+
+async function inspectLiveClientOwnership(
+	deadlineAtMs?: number,
+): Promise<LiveClientOwnership> {
+	const windowsResult = await resolveBeforeDeadline(
+		self.clients.matchAll({ type: "window", includeUncontrolled: true }),
+		deadlineAtMs,
+	);
+	if (!windowsResult.completed) {
+		return {
+			windows: [],
+			owners: {},
+			undeclaredClients: [],
+			validXpOwnerCount: 0,
+			isComplete: false,
+		};
+	}
+	const ownersResult = await resolveBeforeDeadline(readOwners(), deadlineAtMs);
+	if (!ownersResult.completed) {
+		return {
+			windows: windowsResult.value,
+			owners: {},
+			undeclaredClients: windowsResult.value,
+			validXpOwnerCount: 0,
+			isComplete: false,
+		};
+	}
+	const windows = windowsResult.value;
+	const owners = ownersResult.value;
+	const ownerAvailability = new Map<string, boolean>();
+	const undeclaredClients: WindowClient[] = [];
+	let isComplete = true;
 	for (const client of windows) {
-		if (owners[client.id]) continue;
-		hasUndeclaredClient = true;
+		const buildId = owners[client.id];
+		if (!buildId) {
+			undeclaredClients.push(client);
+			continue;
+		}
+		let cacheAvailable = ownerAvailability.get(buildId);
+		if (cacheAvailable === undefined) {
+			const manifestResult = await resolveBeforeDeadline(
+				readBuildManifest(appShellCacheName(buildId), buildId),
+				deadlineAtMs,
+			);
+			if (!manifestResult.completed) {
+				isComplete = false;
+				cacheAvailable = false;
+			} else {
+				cacheAvailable = manifestResult.value !== null;
+			}
+			ownerAvailability.set(buildId, cacheAvailable);
+		}
+		if (!cacheAvailable) undeclaredClients.push(client);
+	}
+	return {
+		windows,
+		owners,
+		undeclaredClients,
+		validXpOwnerCount: windows.length - undeclaredClients.length,
+		isComplete,
+	};
+}
+
+function requestOwnerDeclarations(clients: readonly WindowClient[]): void {
+	for (const client of clients) {
 		client.postMessage({
 			type: "XP_REQUEST_BUILD_DECLARATION",
 			buildId: BUILD_ID,
 		});
 	}
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function probeLiveClientOwnership(): Promise<LiveClientOwnership> {
+	const deadlineAtMs = Date.now() + OWNER_DECLARATION_PROBE_TIMEOUT_MS;
+	let ownership = await inspectLiveClientOwnership(deadlineAtMs);
+	if (!ownership.isComplete || ownership.undeclaredClients.length === 0)
+		return ownership;
+
+	requestOwnerDeclarations(ownership.undeclaredClients);
+	while (true) {
+		const remainingMs = deadlineAtMs - Date.now();
+		if (remainingMs <= 0) return ownership;
+		await delay(Math.min(OWNER_DECLARATION_PROBE_INTERVAL_MS, remainingMs));
+		if (Date.now() >= deadlineAtMs) return ownership;
+		ownership = await inspectLiveClientOwnership(deadlineAtMs);
+		if (!ownership.isComplete || ownership.undeclaredClients.length === 0)
+			return ownership;
+	}
+}
+
+async function reconcileOwnership(): Promise<string[]> {
+	const ownership = await inspectLiveClientOwnership();
+	const { windows, owners } = ownership;
+	const retiredBuilds = await readRetiredBuilds();
+	const liveClientIds = new Set(windows.map((client) => client.id));
+	const releasedBuilds = new Set<string>();
+
+	requestOwnerDeclarations(ownership.undeclaredClients);
 
 	await Promise.all(
 		Object.keys(owners)
@@ -245,10 +492,16 @@ async function reconcileOwnership(): Promise<string[]> {
 		if (!liveClientIds.has(clientId)) pendingNavigationBuilds.delete(clientId);
 	}
 
-	if (!hasUndeclaredClient) {
-		return cleanupUnownedBuildCaches(owners, retiredBuilds);
+	if (ownership.undeclaredClients.length > 0) return [];
+
+	const deleted = await cleanupUnownedBuildCaches(owners, retiredBuilds);
+	const legacyMigration = await readLegacyMigration();
+	if (legacyMigration) {
+		deleted.push(
+			...(await cleanupLegacyMigrationCaches(legacyMigration, owners)),
+		);
 	}
-	return [];
+	return deleted;
 }
 
 async function copyCache(
@@ -530,13 +783,35 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 self.addEventListener("install", (event) => {
 	event.waitUntil(
 		(async () => {
-			const existingBuilds = await caches.keys();
-			shouldClaimClients = !existingBuilds.some(
-				(cacheName) =>
-					cacheName.startsWith(APP_SHELL_CACHE_PREFIX) &&
-					cacheName !== CACHE_NAME,
-			);
+			const existingCacheNames = await caches.keys();
 			await installBuild();
+			const legacyCacheName = legacyWorkboxPrecacheCacheName(
+				self.registration.scope,
+			);
+			const hasLegacyPrecache = existingCacheNames.includes(legacyCacheName);
+			const ownership = hasLegacyPrecache
+				? await probeLiveClientOwnership()
+				: await inspectLiveClientOwnership();
+			const installMode = ownership.isComplete
+				? selectWorkerInstallMode({
+						cacheNames: existingCacheNames,
+						currentCacheName: CACHE_NAME,
+						legacyCacheName,
+						liveClientCount: ownership.windows.length,
+						validXpOwnerCount: ownership.validXpOwnerCount,
+					})
+				: "normal_update";
+			shouldClaimClients = installMode === "first_install";
+			if (installMode === "legacy_migration") {
+				const orphanedAppShellCacheNames = existingCacheNames.filter(
+					isLegacyMigrationOrphanCacheName,
+				);
+				await writeLegacyMigration(
+					[legacyCacheName],
+					orphanedAppShellCacheNames,
+				);
+				await self.skipWaiting();
+			}
 		})(),
 	);
 });

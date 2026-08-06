@@ -62,6 +62,12 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   only after all owners have disappeared. Navigation can use the active build,
   but a controlled page's JS/CSS/font/icon requests must stay on its declared
   build; a cache miss is a recovery signal, never permission to mix builds.
+- Treat a legacy Workbox controller as a one-time migration state, not as a normal update. After a
+  complete XP app shell is verified, probe undeclared live clients for at most one second. Only when
+  the exact same-scope `workbox-precache-v2-<scope>` exists and no client can declare a valid XP
+  build may the new Worker call `skipWaiting()`. It must not call `clients.claim()` or reload.
+  Persist the exact legacy cache and pre-existing orphan XP app-shell names in `xp_sw_metadata`.
+  Delete only those names after every live client has valid XP ownership.
 - Keep API compatibility independent from PWA cache identity. The Web client
   checks additive capability IDs first, then a strict stable release tag, then
   a local fingerprint against immutable 3.22/3.21/3.20 inventories. A missing
@@ -82,6 +88,8 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   pre-fix bundle cannot discover new Service Worker update behavior just because the backend was
   upgraded underneath it; reload once onto the fixed bundle first, then observe the next version
   change.
+- Never use the legacy migration exception for an XP-to-XP update. If any live client has a valid XP
+  owner record, preserve the ordinary waiting prompt and explicit user confirmation contract.
 - Check the public `sw.js` response headers from the deployed origin, not just the loopback admin
   port. A proxy or CDN that rewrites the Service Worker cache policy can silently break update
   prompts even when the source app returns `no-cache`.
