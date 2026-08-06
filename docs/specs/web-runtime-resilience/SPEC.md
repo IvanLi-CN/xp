@@ -199,15 +199,15 @@
 
 Desktop (`1440x900` CSS viewport), first resource-load failure:
 
-![Framework recovery desktop state](assets/framework-recovery-desktop.png)
+![Framework recovery desktop state](./assets/framework-recovery-desktop.png)
 
 Desktop (`1440x900` CSS viewport), guarded cache result and expanded diagnostics:
 
-![Framework recovery guarded result and diagnostics](assets/framework-recovery-diagnostics.png)
+![Framework recovery guarded result and diagnostics](./assets/framework-recovery-diagnostics.png)
 
 Mobile (`393x852` CSS viewport), repeated failure state:
 
-![Framework recovery mobile repeated-failure state](assets/framework-recovery-mobile.png)
+![Framework recovery mobile repeated-failure state](./assets/framework-recovery-mobile.png)
 
 ## 文档更新（Docs to Update）
 
