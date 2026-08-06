@@ -23,7 +23,11 @@ type ServiceWorkerMessage =
 	| { type: "SKIP_WAITING" }
 	| { type: "XP_DECLARE_BUILD"; buildId: string }
 	| { type: "XP_RELEASE_BUILD" }
-	| { type: "XP_REQUEST_CACHE_RECOVERY"; buildId: string | "active" };
+	| {
+			type: "XP_REQUEST_CACHE_RECOVERY";
+			buildId: string | "active";
+			requestId?: string;
+	  };
 
 type BuildMetadata = {
 	buildId: string;
@@ -614,6 +618,7 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 						? "XP_CACHE_RECOVERY_READY"
 						: "XP_CACHE_RECOVERY_UNAVAILABLE",
 					buildId: BUILD_ID,
+					requestId: message.requestId,
 					deleted,
 				});
 			}

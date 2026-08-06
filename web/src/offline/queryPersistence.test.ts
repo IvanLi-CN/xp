@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
 	isPersistedQueryCacheFresh,
 	isPersistedQuerySnapshotFresh,
+	mergePersistedQueries,
+	snapshotStoredAt,
 } from "./queryPersistence";
 
 describe("persisted query snapshot freshness", () => {
@@ -55,5 +57,34 @@ describe("persisted query snapshot freshness", () => {
 				1001 + 24 * 60 * 60 * 1000,
 			),
 		).toBe(false);
+	});
+
+	it("does not renew stale omitted queries during cache merges", () => {
+		const now = 1_000 + 24 * 60 * 60 * 1000;
+		const merged = mergePersistedQueries(
+			{
+				buster: "build-a",
+				timestamp: now,
+				clientState: { queries: [] },
+			},
+			{
+				buster: "build-a",
+				timestamp: 1_000,
+				clientState: {
+					queries: [
+						{
+							queryKey: ["adminNodes"],
+							state: { data: ["stale"], dataUpdatedAt: 1_000 },
+						},
+					],
+				},
+			},
+		);
+		expect(merged.clientState?.queries).toEqual([]);
+	});
+
+	it("keeps hydrated snapshots anchored to their data timestamp", () => {
+		expect(snapshotStoredAt(1_000, 9_000)).toBe(1_000);
+		expect(snapshotStoredAt(0, 9_000)).toBe(9_000);
 	});
 });

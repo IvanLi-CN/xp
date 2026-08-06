@@ -64,15 +64,19 @@ function queryIdentifier(query: PersistedQuery) {
 	return query.queryHash ?? JSON.stringify(query.queryKey);
 }
 
-function mergePersistedQueries(
+export function mergePersistedQueries(
 	current: PersistedQueryCache,
 	previous: PersistedQueryCache | undefined,
 ): PersistedQueryCache {
 	if (!previous || previous.buster !== current.buster) return current;
 	const currentQueries = current.clientState?.queries ?? [];
 	const currentIds = new Set(currentQueries.map(queryIdentifier));
+	const oldestAllowed = Date.now() - DAY_MS;
 	const preservedQueries = (previous.clientState?.queries ?? []).filter(
-		(query) => !currentIds.has(queryIdentifier(query)),
+		(query) =>
+			!currentIds.has(queryIdentifier(query)) &&
+			typeof query.state?.dataUpdatedAt === "number" &&
+			query.state.dataUpdatedAt >= oldestAllowed,
 	);
 	return {
 		...current,
@@ -150,6 +154,13 @@ export function isPersistedQuerySnapshotFresh(
 		typeof snapshot.storedAt === "number" &&
 		now - snapshot.storedAt <= DAY_MS
 	);
+}
+
+export function snapshotStoredAt(
+	dataUpdatedAt: number,
+	now = Date.now(),
+): number {
+	return dataUpdatedAt > 0 ? dataUpdatedAt : now;
 }
 
 export function isPersistedQueryCacheFresh(
@@ -242,7 +253,7 @@ export async function writePersistedQuerySnapshot<T>(
 			data,
 			dataUpdatedAt,
 			buildId: __XP_WEB_BUILD_ID__,
-			storedAt: Date.now(),
+			storedAt: snapshotStoredAt(dataUpdatedAt),
 		});
 	} catch {
 		// Offline persistence is an enhancement, not a hard dependency.

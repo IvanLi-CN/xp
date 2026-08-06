@@ -96,12 +96,14 @@ describe("framework error recovery", () => {
 		const serviceWorkerContainer = {
 			getRegistration: vi.fn(async () => ({ update, waiting })),
 			controller: {
-				postMessage: vi.fn(() => {
+				postMessage: vi.fn((message: unknown) => {
+					const requestId = (message as { requestId?: string }).requestId;
 					for (const listener of listeners) {
 						listener({
 							data: {
 								type: "XP_CACHE_RECOVERY_READY",
 								buildId: "replacement-build-456",
+								requestId,
 								deleted: ["xp-app-shell-build-123"],
 							},
 						} as MessageEvent);
@@ -139,10 +141,19 @@ describe("framework error recovery", () => {
 			status: "cleared",
 			deleted: ["xp-app-shell-build-123"],
 		});
-		expect(serviceWorkerContainer.controller.postMessage).toHaveBeenCalledWith({
-			type: "XP_REQUEST_CACHE_RECOVERY",
-			buildId: "active",
-		});
+		expect(serviceWorkerContainer.controller.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "XP_REQUEST_CACHE_RECOVERY",
+				buildId: "active",
+			}),
+		);
+		expect(
+			(
+				serviceWorkerContainer.controller.postMessage.mock.calls[0][0] as {
+					requestId?: string;
+				}
+			).requestId,
+		).toEqual(expect.any(String));
 		expect(waitingPostMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
 	});
 });

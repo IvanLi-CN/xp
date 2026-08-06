@@ -326,16 +326,19 @@ export async function recoverXpAppShell(
 		}
 
 		return await new Promise<CacheRecoveryResult>((resolve) => {
+			const requestId = `xp-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 			const onMessage = (event: MessageEvent) => {
 				const data = event.data as
 					| {
 							type?: string;
 							buildId?: string;
+							requestId?: string;
 							deleted?: unknown;
 					  }
 					| undefined;
 				if (
 					typeof data?.buildId !== "string" ||
+					data.requestId !== requestId ||
 					(data.type !== "XP_CACHE_RECOVERY_READY" &&
 						data.type !== "XP_CACHE_RECOVERY_UNAVAILABLE")
 				) {
@@ -372,6 +375,7 @@ export async function recoverXpAppShell(
 				// The active worker owns its own build identity. This also remains
 				// correct when a waiting replacement was activated above.
 				buildId: "active",
+				requestId,
 			});
 		});
 	} catch {
