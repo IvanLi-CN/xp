@@ -39,6 +39,23 @@ describe("inline bootstrap fallback", () => {
 		).not.toBeNull();
 	});
 
+	it("escapes untrusted build IDs in the static diagnostic", () => {
+		document.body.innerHTML = '<div id="root"></div>';
+		const maliciousBuildId = '</script><img src=x onerror="alert(1)">';
+		const fallback = inlineBootstrapFallback(maliciousBuildId);
+		new Function(fallback)();
+
+		const script = document.createElement("script");
+		document.head.append(script);
+		script.dispatchEvent(new Event("error"));
+
+		expect(fallback).not.toContain("</script><img");
+		expect(
+			document.querySelector("[data-xp-document-fallback] pre"),
+		).toHaveTextContent(maliciousBuildId);
+		expect(document.querySelector("img")).toBeNull();
+	});
+
 	it("can be concatenated with the build declaration", () => {
 		expect(() => {
 			new Function(

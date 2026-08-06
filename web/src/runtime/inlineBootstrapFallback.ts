@@ -1,4 +1,17 @@
+const HTML_ESCAPES: Record<string, string> = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+};
+
+function escapeHtml(value: string): string {
+	return value.replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
+}
+
 export function inlineBootstrapFallback(buildId: string): string {
+	const escapedBuildId = escapeHtml(buildId);
 	const shellStyle = [
 		"min-height:100vh",
 		"box-sizing:border-box",
@@ -41,7 +54,7 @@ export function inlineBootstrapFallback(buildId: string): string {
 		'<details style="margin-top:24px;color:#4b6871;font-size:13px">',
 		"<summary>Technical details</summary>",
 		'<pre style="white-space:pre-wrap;overflow-wrap:anywhere">',
-		`build: ${buildId}\\nerror: entry resource failed to load</pre>`,
+		`build: ${escapedBuildId}\\nerror: entry resource failed to load</pre>`,
 		"</details></article></main>",
 	].join("");
 	const render = [
