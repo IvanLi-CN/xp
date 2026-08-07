@@ -189,7 +189,7 @@
 - `cd web && bun run build-storybook`
 - `cd web && bun run test-storybook`
 - `cd web && bun run test:e2e:pwa`
-- `cd web && bun run test:e2e:upgrade-runtime`
+- `cd web && bun run test:e2e:upgrade-runtime`（production preview）
 
 ## Visual Evidence
 
