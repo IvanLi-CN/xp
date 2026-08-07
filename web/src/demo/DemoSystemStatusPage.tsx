@@ -1,5 +1,21 @@
 import type { AdminMeshStatus } from "@/api/adminMesh";
+import { Button } from "@/components/Button";
+import { Icon } from "@/components/Icon";
 import { SystemStatusSurface } from "@/views/SystemStatusPage";
+
+const demoNavigation = [
+	["Dashboard", "tabler:layout-dashboard"],
+	["System status", "tabler:activity-heartbeat"],
+	["Nodes", "tabler:server"],
+	["Endpoints", "tabler:plug"],
+	["Users", "tabler:users"],
+] as const;
+
+const demoSettingsNavigation = [
+	["Quota policy", "tabler:gauge"],
+	["Service config", "tabler:settings"],
+	["Tools", "tabler:tool"],
+] as const;
 
 function buckets(pattern: Array<"mesh" | "fallback" | "slow" | "down">) {
 	return pattern.map((item, index) => ({
@@ -163,10 +179,92 @@ export function DemoSystemStatusPage() {
 
 export function UiDemoSystemStatusPage() {
 	return (
-		<div className="min-h-screen bg-background p-4 md:p-5">
-			<main className="mx-auto max-w-7xl">
-				<DemoSystemStatusPage />
-			</main>
+		<div className="min-h-screen bg-background">
+			<div className="p-1.5 sm:p-4 md:p-5">
+				<div className="mx-auto flex max-w-7xl flex-col gap-2.5 sm:gap-4">
+					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
+						<div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+							<div className="flex min-w-0 items-center gap-2">
+								<img src="/xp-mark.png" alt="" className="size-6 shrink-0" />
+								<span className="text-lg font-semibold">xp</span>
+								<span className="hidden text-sm text-muted-foreground sm:inline">
+									cluster manager
+								</span>
+							</div>
+							<div className="hidden justify-center lg:flex">
+								<div
+									className={
+										"w-full max-w-md rounded-full border border-border bg-muted/40 px-4 " +
+										"py-2 font-mono text-sm text-muted-foreground"
+									}
+								>
+									Search / command palette
+								</div>
+							</div>
+							<div className="flex items-center gap-2">
+								<span
+									className={
+										"hidden rounded-full border border-border px-2 py-1 font-mono " +
+										"text-xs lg:inline"
+									}
+								>
+									xp 3.23.1
+								</span>
+								<Button variant="secondary" size="sm">
+									<Icon name="tabler:activity-heartbeat" size={15} />
+									<span className="hidden sm:inline">Status</span>
+								</Button>
+								<Button variant="secondary" size="sm">
+									<Icon name="tabler:settings" size={15} />
+									<span className="hidden sm:inline">Settings</span>
+								</Button>
+							</div>
+						</div>
+					</header>
+
+					<div className="grid grid-cols-1 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+						<aside className="xp-panel hidden p-4 lg:block">
+							<DemoNavigation title="Nav" items={demoNavigation} />
+							<DemoNavigation title="Settings" items={demoSettingsNavigation} />
+						</aside>
+						<main className="xp-panel min-w-0 p-[var(--xp-page-padding)]">
+							<DemoSystemStatusPage />
+						</main>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function DemoNavigation({
+	title,
+	items,
+}: {
+	title: string;
+	items: ReadonlyArray<readonly [string, string]>;
+}) {
+	return (
+		<div className="mb-6 space-y-2 last:mb-0">
+			<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+				{title}
+			</p>
+			<ul className="space-y-1.5">
+				{items.map(([label, icon]) => (
+					<li key={label}>
+						<div
+							className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-sm font-medium ${
+								label === "System status"
+									? "border-primary/25 bg-primary/10 text-foreground"
+									: "border-transparent text-muted-foreground"
+							}`}
+						>
+							<Icon name={icon} className="size-5 opacity-80" />
+							<span>{label}</span>
+						</div>
+					</li>
+				))}
+			</ul>
 		</div>
 	);
 }

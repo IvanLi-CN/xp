@@ -22,6 +22,12 @@
   behavior, while mobile text actions remain available.
 - systemd、OpenRC、container cutover guard、可取消的 pre-consumption marker 与 operator documentation。
 - Storybook state gallery、mock-only `ui_demo`、desktop/mobile visual evidence。
+- Peer transport uses a constrained desktop grid for its data and action columns, while narrower
+  viewports switch to full-width stacked rows. Storybook asserts the two desktop action targets are
+  `32x32` and remain inside the row boundary.
+- The System Status `ui_demo` reproduces the production App Shell, navigation rail, panel gap and
+  content width so visual evidence exercises the original overflow geometry instead of an isolated
+  surface.
 - Canary Mesh forwarding rebuilds the fixed XP loopback URL from the authenticated request's raw
   path and query. This keeps HTTP/2 absolute-form URIs from being appended as a second origin and
   preserves the URI bytes covered by internal-auth v2; requests that the URL client would normalize

@@ -56,6 +56,16 @@ export const Healthy: Story = {
 			"title",
 			`Open ${demoMeshStatus.peers[0].node_name} details`,
 		);
+		const probeRect = probe.getBoundingClientRect();
+		const detailsRect = details.getBoundingClientRect();
+		const peerRow = details.closest("[data-peer-row]");
+		await expect(peerRow).not.toBeNull();
+		const rowRect = peerRow?.getBoundingClientRect();
+		await expect(probeRect.width).toBe(32);
+		await expect(probeRect.height).toBe(32);
+		await expect(detailsRect.width).toBe(probeRect.width);
+		await expect(detailsRect.height).toBe(probeRect.height);
+		await expect(detailsRect.right).toBeLessThanOrEqual(rowRect?.right ?? 0);
 		await expect(
 			(await canvas.findAllByText("Mesh available")).length,
 		).toBeGreaterThan(0);
