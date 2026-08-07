@@ -182,6 +182,23 @@ Peer action containment at the production-width content column:
 
 ![Mobile peer actions at 393x852](./assets/system-status-layout-fixed-mobile-peer.png)
 
+Latest real AppShell route evidence:
+
+- Source: Playwright `/system-status` with the production `AppShell`, test token, and deterministic
+  mock API fixture; this is not the login-free `ui_demo` route.
+- Bound implementation commit: `b94c79f7`.
+- Capture metadata: `source_type=playwright_mock_api`, `target_program=local_xp_web_preview`,
+  `capture_scope=browser-viewport`, `requested_viewports=1605x806,393x852`,
+  `sensitive_exclusion=mock_data_only`, `submission_gate=approved`.
+- Desktop geometry asserts each peer row and details action remain inside the real `main.xp-panel`
+  content boundary. Mobile capture shows the stacked peer actions without horizontal overflow.
+
+PR: include
+![Real AppShell System Status desktop geometry](./assets/system-status-appshell-route-desktop.png)
+
+PR: include
+![Real AppShell System Status mobile peer actions](./assets/system-status-appshell-route-mobile.png)
+
 ## 参考
 
 - `docs/specs/nbs5f-xray-control-plane-relay/SPEC.md`

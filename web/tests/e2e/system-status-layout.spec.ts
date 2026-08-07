@@ -107,7 +107,7 @@ async function openSystemStatus(page: import("@playwright/test").Page) {
 
 test("keeps peer row actions inside the real AppShell content column", async ({
 	page,
-}, testInfo) => {
+}) => {
 	await page.setViewportSize({ width: 1605, height: 806 });
 	await page.emulateMedia({ colorScheme: "dark" });
 	await openSystemStatus(page);
@@ -150,14 +150,11 @@ test("keeps peer row actions inside the real AppShell content column", async ({
 			`${row.peer} details action exceeds the panel content`,
 		).toBeLessThanOrEqual(row.contentRight + 0.5);
 	}
-	await page.screenshot({
-		path: testInfo.outputPath("system-status-app-shell-desktop.png"),
-	});
 });
 
 test("keeps the stacked mobile peer actions free of horizontal overflow", async ({
 	page,
-}, testInfo) => {
+}) => {
 	await page.setViewportSize({ width: 393, height: 852 });
 	await openSystemStatus(page);
 
@@ -169,7 +166,4 @@ test("keeps the stacked mobile peer actions free of horizontal overflow", async 
 		scrollWidth: document.documentElement.scrollWidth,
 	}));
 	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
-	await page.screenshot({
-		path: testInfo.outputPath("system-status-app-shell-mobile.png"),
-	});
 });
