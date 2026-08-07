@@ -164,10 +164,10 @@ PR: include
 Peer action containment at the production-width content column:
 
 - Source: mock-only, login-free `/ui-demo/system-status`.
-- The demo reproduces the production App Shell: a 1280px outer shell, 272px
-  navigation rail, 24px gap and 984px content panel at the 1536px desktop
-  viewport. The resulting peer row is 934px wide, matching the constrained
-  panel geometry that exposed the overflow.
+- The demo is a presentation-only surface and does not prove production AppShell geometry.
+- Real route geometry is covered by `web/tests/e2e/system-status-layout.spec.ts`, which renders
+  `/system-status` with the authenticated AppShell and API fixture at `1605x806` CSS pixels and
+  asserts both the peer row and detail action remain inside `main.xp-panel` content bounds.
 - Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
   `capture_scope=browser-viewport`, `requested_viewports=1536x900,393x852`,
   `rendered_assets=1536x900,378x852`, `sensitive_exclusion=N/A`.
@@ -181,6 +181,26 @@ Peer action containment at the production-width content column:
 ![Mobile status summary at 393x852](./assets/system-status-layout-fixed-mobile.png)
 
 ![Mobile peer actions at 393x852](./assets/system-status-layout-fixed-mobile-peer.png)
+
+Latest real AppShell route evidence:
+
+- Source: Playwright `/system-status` with the production `AppShell`, test token, and deterministic
+  mock API fixture; this is not the login-free `ui_demo` route.
+- Bound implementation commit: `5ad40c4a`.
+- Capture metadata: `source_type=playwright_mock_api`, `target_program=local_xp_web_preview`,
+  `capture_scope=browser-viewport`, `requested_viewports=1605x806,393x852`,
+  `rendered_assets=1332x806,393x852`, `capture_transform=desktop_trim_whitespace_to_content_bounds`,
+  `sensitive_exclusion=mock_data_only`, `submission_gate=approved`.
+- The desktop PNG is a presentation crop of the 1605x806 browser capture; the geometry assertions
+  and acceptance measurements run against the uncropped browser viewport.
+- Desktop geometry asserts each peer row and details action remain inside the real `main.xp-panel`
+  content boundary. Mobile capture shows the stacked peer actions without horizontal overflow.
+
+PR: include
+![Real AppShell System Status desktop geometry](./assets/system-status-appshell-route-desktop.png)
+
+PR: include
+![Real AppShell System Status mobile peer actions](./assets/system-status-appshell-route-mobile.png)
 
 ## 参考
 

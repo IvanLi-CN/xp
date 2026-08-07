@@ -25,9 +25,9 @@
 - Peer transport uses a constrained desktop grid for its data and action columns, while narrower
   viewports switch to full-width stacked rows. Storybook asserts the two desktop action targets are
   `32x32` and remain inside the row boundary.
-- The System Status `ui_demo` reproduces the production App Shell, navigation rail, panel gap and
-  content width so visual evidence exercises the original overflow geometry instead of an isolated
-  surface.
+- The mock-only System Status `ui_demo` covers presentation states but does not establish shared
+  AppShell geometry. The real `/system-status` route has a Playwright content-boundary regression
+  check for peer-row actions at the production screenshot viewport.
 - Canary Mesh forwarding rebuilds the fixed XP loopback URL from the authenticated request's raw
   path and query. This keeps HTTP/2 absolute-form URIs from being appended as a second origin and
   preserves the URI bytes covered by internal-auth v2; requests that the URL client would normalize
