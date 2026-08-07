@@ -10,6 +10,8 @@
 - trusted TLS termination 且关闭 0-RTT 时，不为该威胁模型增加 nonce cache。
 - auth v1/v2 以维护窗口 hard cut，不支持持续 mixed-version 集群。
 - 状态页采用 all-peer table 和 uptime strip，不采用 topology graph。
+- Peer row actions belong to an explicit fixed-width grid column; when the data columns cannot fit,
+  the row switches to the stacked presentation instead of allowing controls to overflow the panel.
 - `XP_MESH_PROXY_URL` 保留为公网 egress compatibility，不定义 Mesh。
 - HTTP/2 ingress may expose an absolute-form URI. Canary forwarding must discard its origin and
   combine only the authenticated raw path/query with the fixed XP loopback origin; forcing

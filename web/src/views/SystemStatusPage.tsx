@@ -126,7 +126,7 @@ function PeerRows({
 }: { peer: AdminMeshPeer; onProbe?: () => void; probeDisabled?: boolean }) {
 	const content = (
 		<>
-			<div className="min-w-40">
+			<div className="min-w-0">
 				<div className="flex items-center gap-2">
 					<span className="truncate font-medium">{peer.node_name}</span>
 					<Badge variant={qualityVariant[peer.quality]} size="sm">
@@ -142,7 +142,7 @@ function PeerRows({
 					{peer.mesh_url ?? peer.api_base_url}
 				</p>
 			</div>
-			<div className="min-w-28 text-sm">
+			<div className="min-w-0 text-sm">
 				<p>{routeLabel(peer)}</p>
 				<p className="mt-1 truncate text-xs text-muted-foreground">
 					{reasonLabel(peer)}
@@ -151,7 +151,7 @@ function PeerRows({
 					{timestamp(peer.last_transition_at)}
 				</p>
 			</div>
-			<div className="min-w-64 flex-1">
+			<div className="min-w-0">
 				<MeshUptimeStrip
 					buckets={peer.buckets}
 					quality={peer.quality}
@@ -162,11 +162,11 @@ function PeerRows({
 					<span>Mesh {percent(peer.mesh_availability_24h)}</span>
 				</div>
 			</div>
-			<div className="min-w-24 text-sm">
+			<div className="min-w-0 text-sm">
 				<p>{percent(peer.availability_1h)}</p>
 				<p className="mt-1 text-xs text-muted-foreground">1h availability</p>
 			</div>
-			<div className="min-w-24 font-mono text-sm">
+			<div className="min-w-0 font-mono text-sm">
 				<p>
 					{peer.latency_p50_ms ?? "-"} / {peer.latency_p95_ms ?? "-"}
 				</p>
@@ -174,16 +174,24 @@ function PeerRows({
 					p50 / p95 ms
 				</p>
 			</div>
-			<div className="min-w-24">
+			<div className="min-w-0">
 				<BreakerBadge state={peer.breaker} />
 			</div>
 		</>
 	);
 	return (
 		<>
-			<div className="hidden items-center gap-4 border-b border-border/70 py-3 md:flex">
+			<div
+				data-peer-row={peer.node_id}
+				className="hidden items-center gap-3 border-b border-border/70 py-3 xl:grid"
+				style={{
+					gridTemplateColumns:
+						"minmax(9rem,1.35fr) minmax(7rem,.9fr) minmax(12rem,2fr) " +
+						"minmax(6rem,.65fr) minmax(6rem,.75fr) minmax(5.5rem,.6fr) 4.25rem",
+				}}
+			>
 				{content}
-				<div className="flex shrink-0 items-center gap-1">
+				<div className="flex w-[4.25rem] items-center justify-end gap-1">
 					<IconButton
 						label={`Probe ${peer.node_name}`}
 						tooltip={`Probe ${peer.node_name}`}
@@ -205,7 +213,7 @@ function PeerRows({
 					</IconButton>
 				</div>
 			</div>
-			<div className="space-y-3 border-b border-border/70 py-4 md:hidden">
+			<div className="space-y-3 border-b border-border/70 py-4 xl:hidden">
 				{content}
 				<div className="flex justify-end gap-2">
 					<Button

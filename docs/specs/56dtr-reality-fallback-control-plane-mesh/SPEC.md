@@ -161,6 +161,27 @@ PR: include
 PR: include
 ![Mobile system status diagnostics](./assets/system-status-mobile-new.png)
 
+Peer action containment at the production-width content column:
+
+- Source: mock-only, login-free `/ui-demo/system-status`.
+- The demo reproduces the production App Shell: a 1280px outer shell, 272px
+  navigation rail, 24px gap and 984px content panel at the 1536px desktop
+  viewport. The resulting peer row is 934px wide, matching the constrained
+  panel geometry that exposed the overflow.
+- Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
+  `capture_scope=browser-viewport`, `requested_viewports=1536x900,393x852`,
+  `rendered_assets=1536x900,378x852`, `sensitive_exclusion=N/A`.
+- Desktop peer rows use a constrained seven-column grid. Both action targets render at
+  `32x32`, and the details target's right edge is contained by the peer row's right edge.
+- Below the desktop table breakpoint, peers use full-width stacked rows and retain the
+  existing 44px-high text actions without horizontal overflow.
+
+![Contained desktop peer actions](./assets/system-status-layout-fixed-desktop.png)
+
+![Mobile status summary at 393x852](./assets/system-status-layout-fixed-mobile.png)
+
+![Mobile peer actions at 393x852](./assets/system-status-layout-fixed-mobile-peer.png)
+
 ## 参考
 
 - `docs/specs/nbs5f-xray-control-plane-relay/SPEC.md`
