@@ -17,7 +17,7 @@
 		"test-storybook": "test-storybook --url http://127.0.0.1:60081 --ci --browsers chromium --failOnConsole --testTimeout 60000 --maxWorkers=2",
 		"test:e2e": "playwright test",
 		"test:e2e:pwa": "E2E_USE_PREVIEW=1 playwright test tests/e2e/offline-warm-load.spec.ts",
-		"test:e2e:upgrade-runtime": "playwright test tests/e2e/upgrade-runtime.spec.ts",
+		"test:e2e:upgrade-runtime": "E2E_USE_PREVIEW=1 playwright test tests/e2e/upgrade-runtime.spec.ts",
 		"test:e2e:storybook": "playwright test -c playwright.storybook.config.ts"
 	},
 	"dependencies": {
