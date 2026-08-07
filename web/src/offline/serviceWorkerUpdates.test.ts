@@ -55,4 +55,16 @@ describe("serviceWorkerUpdates", () => {
 		expect(update).toHaveBeenCalledTimes(1);
 		stop();
 	});
+
+	it("keeps rejected best-effort checks from becoming unhandled rejections", async () => {
+		const update = vi.fn().mockRejectedValue(new Error("offline"));
+		const stop = startServiceWorkerUpdatePolling(
+			{ update } as Pick<ServiceWorkerRegistration, "update">,
+			0,
+		);
+
+		await vi.advanceTimersByTimeAsync(0);
+		expect(update).toHaveBeenCalledTimes(1);
+		stop();
+	});
 });
