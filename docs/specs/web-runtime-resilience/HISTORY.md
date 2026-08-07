@@ -21,6 +21,9 @@
   `clients.claim()`、不刷新旧页，并在所有存活页面声明有效 XP build 后仅回收 migration state 记录的 cache。
 - 2026-08-06: production preview 覆盖 AppShell、VersionIndicator 浮层及迁移后的当前 build，未复现
   React #185；因此未进行猜测性的 Radix 或组件状态重写。
+- 2026-08-07: 确认升级 start 响应直接进入终态时，AppShell 的状态同步 effect 调用 mutation `reset()` 会
+  通过 TanStack external store 触发自身重渲染，导致 React #185。同步路径改为只观察 durable upgrade status，
+  并以 `succeeded`、`failed`、`unsupported` 三个端到端场景防回归。
 
 ## Key Reasons / Replacements
 

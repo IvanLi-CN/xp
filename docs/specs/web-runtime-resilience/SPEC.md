@@ -130,6 +130,8 @@
 ## 验收标准（Acceptance Criteria）
 
 - Given chunk 加载失败、React #185 或未知运行时异常，When 根错误边界捕获异常，Then 显示分类后的项目错误界面和可执行恢复动作。
+- Given 用户确认 Web 升级且 start 响应立即为 `succeeded`、`failed` 或 `unsupported`，When AppShell
+  同步终态升级状态，Then 当前管理页保持可用，控制台不得出现 React #185 或最大更新深度错误。
 - Given 用户选择清理静态应用缓存且目标 build 无其他 owner，When 恢复完成，Then 对应 XP app-shell
   cache 在完整 replacement 就绪后被原子替换，登录和 IndexedDB 数据仍存在。
 - Given 无新版 worker 且网络无法完整重建当前 build，When 用户请求 cache recovery，Then
@@ -170,7 +172,7 @@
   method/path/status/capability inventory 与关键页面 wire-body fixtures，以及 N-1/N-2 Web
   版本化请求合同对当前后端。
 - E2E tests: 离线 warm-load、waiting update、失败安装、legacy Workbox 无 owner migration、旧标签页 lazy
-  chunk、用户触发切换，以及 production AppShell / VersionIndicator 的 React #185 console gate。
+  chunk、用户触发切换，以及 production AppShell / VersionIndicator 在直接终态升级响应下的 React #185 console gate。
 
 ### UI / Storybook
 
@@ -187,6 +189,7 @@
 - `cd web && bun run build-storybook`
 - `cd web && bun run test-storybook`
 - `cd web && bun run test:e2e:pwa`
+- `cd web && bun run test:e2e:upgrade-runtime`（production preview）
 
 ## Visual Evidence
 

@@ -198,23 +198,16 @@ export function AppShell({
 			void adminUpgradeStatus.refetch();
 		},
 	});
+	const upgradeStatusData = adminUpgradeStatus.data;
+	const dismissUpgradeResult = useCallback(() => {
+		adminUpgradeStart.reset();
+		upgradeObservation.clear();
+	}, [adminUpgradeStart.reset, upgradeObservation.clear]);
 
 	useEffect(() => {
-		if (!adminUpgradeStatus.data) return;
-		const state = adminUpgradeStatus.data.status.state;
-		if (
-			upgradeObservation.observation &&
-			(state === "succeeded" || state === "failed" || state === "unsupported")
-		) {
-			adminUpgradeStart.reset();
-		}
-		upgradeObservation.observeStatus(adminUpgradeStatus.data.status);
-	}, [
-		adminUpgradeStart,
-		adminUpgradeStatus.data,
-		upgradeObservation.observation,
-		upgradeObservation.observeStatus,
-	]);
+		if (!upgradeStatusData) return;
+		upgradeObservation.observeStatus(upgradeStatusData.status);
+	}, [upgradeObservation.observeStatus, upgradeStatusData]);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -535,7 +528,7 @@ export function AppShell({
 				upgradeStatusLoading={adminUpgradeStatus.isFetching}
 				upgradeStarting={adminUpgradeStart.isPending}
 				upgradeObservation={upgradeObservation.observation}
-				onDismissUpgradeResult={upgradeObservation.clear}
+				onDismissUpgradeResult={dismissUpgradeResult}
 				onRetryVersionCheck={() => {
 					void runVersionCheck({ force: true });
 				}}
@@ -557,6 +550,7 @@ export function AppShell({
 		adminUpgradeStart,
 		adminUpgradeStatus,
 		clusterInfo,
+		dismissUpgradeResult,
 		upgradeCapabilityAvailable,
 		runVersionCheck,
 		upgradeObservation,

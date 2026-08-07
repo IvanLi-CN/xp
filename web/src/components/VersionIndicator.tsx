@@ -152,7 +152,6 @@ export function VersionIndicator({
 				<div
 					onPointerEnter={handlePointerEnter}
 					onPointerLeave={handlePointerLeave}
-					onFocus={() => setOpen(true)}
 				>
 					<PopoverTrigger asChild>
 						<button
