@@ -199,6 +199,10 @@ export function AppShell({
 		},
 	});
 	const upgradeStatusData = adminUpgradeStatus.data;
+	const dismissUpgradeResult = useCallback(() => {
+		adminUpgradeStart.reset();
+		upgradeObservation.clear();
+	}, [adminUpgradeStart.reset, upgradeObservation.clear]);
 
 	useEffect(() => {
 		if (!upgradeStatusData) return;
@@ -524,7 +528,7 @@ export function AppShell({
 				upgradeStatusLoading={adminUpgradeStatus.isFetching}
 				upgradeStarting={adminUpgradeStart.isPending}
 				upgradeObservation={upgradeObservation.observation}
-				onDismissUpgradeResult={upgradeObservation.clear}
+				onDismissUpgradeResult={dismissUpgradeResult}
 				onRetryVersionCheck={() => {
 					void runVersionCheck({ force: true });
 				}}
@@ -546,6 +550,7 @@ export function AppShell({
 		adminUpgradeStart,
 		adminUpgradeStatus,
 		clusterInfo,
+		dismissUpgradeResult,
 		upgradeCapabilityAvailable,
 		runVersionCheck,
 		upgradeObservation,

@@ -138,4 +138,20 @@ describe("<VersionIndicator /> upgrade observation", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it("closes a terminal result with Escape", async () => {
+		render(<UpgradeHarness />);
+		fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Start upgrade" }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Record terminal" }));
+
+		await screen.findByText("Last upgrade completed to v3.21.10.");
+		fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(
+			screen.queryByText("Last upgrade completed to v3.21.10."),
+		).not.toBeInTheDocument();
+	});
 });

@@ -4,7 +4,10 @@ import { setAdminToken, setupApiMocks } from "./helpers";
 
 type UpgradeState = "idle" | "succeeded" | "failed" | "unsupported";
 
-function upgradeStatus(state: UpgradeState) {
+function upgradeStatus(
+	state: UpgradeState,
+	updatedAt = "2026-08-07T00:00:01Z",
+) {
 	return {
 		support: {
 			supported: true,
@@ -19,7 +22,7 @@ function upgradeStatus(state: UpgradeState) {
 			finished_at: state === "idle" ? null : "2026-08-07T00:00:01Z",
 			exit_code: state === "succeeded" ? 0 : state === "idle" ? null : 1,
 			message: null,
-			updated_at: "2026-08-07T00:00:01Z",
+			updated_at: updatedAt,
 		},
 	};
 }
@@ -86,7 +89,9 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 		await page.route("**/api/admin/upgrade/start", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
-				body: JSON.stringify(upgradeStatus(terminalState)),
+				body: JSON.stringify(
+					upgradeStatus(terminalState, new Date().toISOString()),
+				),
 			});
 		});
 		await page.route("**/api/admin/mesh/status", async (route) => {
@@ -114,6 +119,19 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 		await page.getByRole("button", { name: "Upgrade" }).click();
 		await page.getByRole("button", { name: "Start upgrade" }).click();
 
+		const terminalResult =
+			terminalState === "succeeded"
+				? "last succeeded"
+				: terminalState === "failed"
+					? "last failed"
+					: "ready";
+		await expect(page.getByText(terminalResult, { exact: true })).toBeVisible();
+		expect(
+			await page.evaluate(() => {
+				const value = window.sessionStorage.getItem("xp.upgrade-observation");
+				return value ? JSON.parse(value).phase : null;
+			}),
+		).toBe("terminal");
 		await expect(
 			page.getByRole("heading", { name: "System status", exact: true }),
 		).toBeVisible();
@@ -130,3 +148,78 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 		).toBe(false);
 	});
 }
+
+test("clears an ambiguous start error after status confirms success", async ({
+	page,
+}) => {
+	await setAdminToken(page);
+	await setupApiMocks(page, { mockStatusEvents: false });
+
+	let latestUpgradeStatus = upgradeStatus("idle");
+	await page.route("**/api/version/check", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				current: { package: "3.23.1", release_tag: "v3.23.1" },
+				latest: {
+					release_tag: "v3.23.2",
+					published_at: "2026-08-07T00:00:00Z",
+				},
+				has_update: true,
+				checked_at: "2026-08-07T00:00:00Z",
+				compare_reason: "update_available",
+				source: {
+					kind: "github_release",
+					repo: "IvanLi-CN/xp",
+					api_base: "https://api.github.com",
+					channel: "stable",
+				},
+			}),
+		});
+	});
+	await page.route("**/api/admin/upgrade/status", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(latestUpgradeStatus),
+		});
+	});
+	await page.route("**/api/admin/upgrade/start", async (route) => {
+		const succeeded = upgradeStatus("succeeded");
+		latestUpgradeStatus = {
+			...succeeded,
+			status: { ...succeeded.status, updated_at: new Date().toISOString() },
+		};
+		await route.fulfill({
+			status: 502,
+			contentType: "application/json",
+			body: JSON.stringify({ message: "restart boundary" }),
+		});
+	});
+	await page.route("**/api/admin/mesh/status", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(meshStatus),
+		});
+	});
+
+	await page.goto("/system-status");
+	await expect(
+		page.getByRole("heading", { name: "System status", exact: true }),
+	).toBeVisible();
+	await page
+		.getByRole("button", { name: "New version v3.23.2 is available." })
+		.click();
+	await page.getByRole("button", { name: "Upgrade" }).click();
+	await page.getByRole("button", { name: "Start upgrade" }).click();
+
+	await expect(page.getByText("last succeeded", { exact: true })).toBeVisible();
+	await page
+		.getByRole("heading", { name: "System status", exact: true })
+		.click();
+	await page
+		.getByRole("button", { name: "Last upgrade completed to v3.23.2." })
+		.click();
+	await expect(
+		page.getByText("502: request failed: 502", { exact: true }),
+	).toHaveCount(0);
+});

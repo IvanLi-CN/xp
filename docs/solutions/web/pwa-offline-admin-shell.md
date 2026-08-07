@@ -93,6 +93,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   `unsupported`. Assert that the original management route remains visible and that the console
   has no maximum-update-depth or React #185 error; do not treat an error boundary as a successful
   upgrade recovery path.
+- For an ambiguous upgrade-start error that later reconciles to a terminal status, clear the start
+  mutation only from the terminal-result dismissal event, including keyboard dismissal. This
+  removes stale error output after dismissal without writing back from the status synchronization
+  effect.
 - Validate the prompt on the next release after the fix lands. A page that is still running the
   pre-fix bundle cannot discover new Service Worker update behavior just because the backend was
   upgraded underneath it; reload once onto the fixed bundle first, then observe the next version

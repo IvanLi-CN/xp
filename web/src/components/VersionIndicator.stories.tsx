@@ -249,6 +249,38 @@ export const StatusTimedOut: Story = {
 	),
 };
 
+export const TerminalResult: Story = {
+	render: () => (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={{
+					...baseUpgradeStatus,
+					status: {
+						...baseUpgradeStatus.status,
+						state: "succeeded",
+						target_tag: "v0.2.0",
+						finished_at: "2026-07-04T00:00:45Z",
+						exit_code: 0,
+					},
+				}}
+				upgradeObservation={{
+					targetTag: "v0.2.0",
+					deadlineAtMs: 0,
+					phase: "terminal",
+				}}
+			/>
+		</Wrap>
+	),
+};
+
 export const ConfirmKeepsPopoverOpen: Story = {
 	render: () => <UpgradeObservationHarness />,
 	play: async () => {
