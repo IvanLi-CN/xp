@@ -16,11 +16,14 @@ export function startServiceWorkerUpdatePolling(
 	registration: Pick<ServiceWorkerRegistration, "update"> | null | undefined,
 	intervalMs: number,
 ) {
-	if (!registration || intervalMs <= 0) {
+	if (!registration) {
 		return () => {};
 	}
 
 	void requestServiceWorkerUpdateCheck(registration);
+	if (intervalMs <= 0) {
+		return () => {};
+	}
 
 	const intervalId = window.setInterval(() => {
 		void requestServiceWorkerUpdateCheck(registration);

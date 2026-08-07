@@ -189,7 +189,10 @@ Latest real AppShell route evidence:
 - Bound implementation commit: `5ad40c4a`.
 - Capture metadata: `source_type=playwright_mock_api`, `target_program=local_xp_web_preview`,
   `capture_scope=browser-viewport`, `requested_viewports=1605x806,393x852`,
+  `rendered_assets=1332x806,393x852`, `capture_transform=desktop_trim_whitespace_to_content_bounds`,
   `sensitive_exclusion=mock_data_only`, `submission_gate=approved`.
+- The desktop PNG is a presentation crop of the 1605x806 browser capture; the geometry assertions
+  and acceptance measurements run against the uncropped browser viewport.
 - Desktop geometry asserts each peer row and details action remain inside the real `main.xp-panel`
   content boundary. Mobile capture shows the stacked peer actions without horizontal overflow.
 

@@ -42,4 +42,17 @@ describe("serviceWorkerUpdates", () => {
 		await vi.advanceTimersByTimeAsync(60_000);
 		expect(update).toHaveBeenCalledTimes(2);
 	});
+
+	it("checks immediately when periodic polling is disabled", () => {
+		const update = vi.fn().mockResolvedValue(undefined);
+		const stop = startServiceWorkerUpdatePolling(
+			{ update } as Pick<ServiceWorkerRegistration, "update">,
+			0,
+		);
+
+		expect(update).toHaveBeenCalledTimes(1);
+		vi.advanceTimersByTime(60_000);
+		expect(update).toHaveBeenCalledTimes(1);
+		stop();
+	});
 });

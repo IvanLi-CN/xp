@@ -131,16 +131,25 @@ test("keeps peer row actions inside the real AppShell content column", async ({
 					'[aria-label^="Open "][aria-label$=" details"]',
 				);
 				if (!details) throw new Error("Peer details action was not rendered");
+				const rowRect = row.getBoundingClientRect();
+				const detailsRect = details.getBoundingClientRect();
 				return {
 					peer: row.dataset.peerRow,
 					contentRight,
-					rowRight: row.getBoundingClientRect().right,
-					detailsRight: details.getBoundingClientRect().right,
+					rowRight: rowRect.right,
+					detailsRight: detailsRect.right,
+					rowVisible: rowRect.width > 0 && rowRect.height > 0,
+					detailsVisible: detailsRect.width > 0 && detailsRect.height > 0,
 				};
 			},
 		);
 	});
 	for (const row of bounds) {
+		expect(row.rowVisible, `${row.peer} row must be visible`).toBe(true);
+		expect(
+			row.detailsVisible,
+			`${row.peer} details action must be visible`,
+		).toBe(true);
 		expect(
 			row.rowRight,
 			`${row.peer} row exceeds the panel content`,
