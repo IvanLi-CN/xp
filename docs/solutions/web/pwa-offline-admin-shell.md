@@ -54,6 +54,9 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   upgrade job leaves `running`/`restarting`, force a fresh cluster-info read and
   a Service Worker `registration.update()` so the UI can surface a frontend
   reload prompt without waiting for focus or a manual refresh.
+- On every successful Service Worker registration, request one update immediately before starting
+  periodic checks. This shortens the stale-client detection window without activating a waiting
+  worker or refreshing an operator's page.
 - Serve `/sw.js` with stronger no-store semantics than ordinary HTML routes,
   including CDN-facing cache-bypass headers, so an edge cache cannot pin an old
   Service Worker for hours after a release.
@@ -89,6 +92,8 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   persistence allowlist explicit and reviewable.
 - The PWA update prompt should stay separate from server upgrade state. Frontend bundle refresh and
   backend rollout are different operator actions.
+- An immediate update check is detection only. Keep the normal waiting state and explicit Reload
+  confirmation so a long-running admin action is never interrupted automatically.
 - Test confirmed server upgrades with an immediate terminal response for `succeeded`, `failed`, and
   `unsupported`. Assert that the original management route remains visible and that the console
   has no maximum-update-depth or React #185 error; do not treat an error boundary as a successful
@@ -120,6 +125,7 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
 - `web/vite.config.ts`
 - `web/src/offline/queryPersistence.ts`
 - `web/src/offline/installOfflineApiWriteGuard.ts`
+- `web/src/offline/serviceWorkerUpdates.ts`
 - `web/src/components/AppShell.tsx`
 - `web/tests/e2e/upgrade-runtime.spec.ts`
 - `src/http/mod.rs`

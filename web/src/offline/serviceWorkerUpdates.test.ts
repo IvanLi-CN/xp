@@ -26,18 +26,20 @@ describe("serviceWorkerUpdates", () => {
 		expect(update).toHaveBeenCalledTimes(1);
 	});
 
-	it("polls the registered service worker on the configured interval", async () => {
+	it("checks immediately and then polls the registered service worker", async () => {
 		const update = vi.fn().mockResolvedValue(undefined);
 		const stop = startServiceWorkerUpdatePolling(
 			{ update } as Pick<ServiceWorkerRegistration, "update">,
 			60_000,
 		);
 
-		await vi.advanceTimersByTimeAsync(60_000);
 		expect(update).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(update).toHaveBeenCalledTimes(2);
 
 		stop();
 		await vi.advanceTimersByTimeAsync(60_000);
-		expect(update).toHaveBeenCalledTimes(1);
+		expect(update).toHaveBeenCalledTimes(2);
 	});
 });

@@ -164,10 +164,10 @@ PR: include
 Peer action containment at the production-width content column:
 
 - Source: mock-only, login-free `/ui-demo/system-status`.
-- The demo reproduces the production App Shell: a 1280px outer shell, 272px
-  navigation rail, 24px gap and 984px content panel at the 1536px desktop
-  viewport. The resulting peer row is 934px wide, matching the constrained
-  panel geometry that exposed the overflow.
+- The demo is a presentation-only surface and does not prove production AppShell geometry.
+- Real route geometry is covered by `web/tests/e2e/system-status-layout.spec.ts`, which renders
+  `/system-status` with the authenticated AppShell and API fixture at `1605x806` CSS pixels and
+  asserts both the peer row and detail action remain inside `main.xp-panel` content bounds.
 - Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
   `capture_scope=browser-viewport`, `requested_viewports=1536x900,393x852`,
   `rendered_assets=1536x900,378x852`, `sensitive_exclusion=N/A`.

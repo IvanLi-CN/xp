@@ -22,6 +22,8 @@
   记录的 cache。AppShell 的升级状态同步不再重置关联 mutation；直接返回 `succeeded`、`failed` 或
   `unsupported` 的升级响应均由端到端回归覆盖，管理页保持可用且无 React #185。已确认终态仅在用户关闭
   结果（含键盘关闭）时清除 start mutation，避免已被状态轮询确认的 network/5xx 错误重新显示。
+- Service Worker 注册完成后先执行一次 `registration.update()`，再开始既有周期轮询；因此已运行旧
+  bundle 的标签无需等待首个轮询周期即可发现 waiting worker，但仍保留显式 Reload 确认。
 
 ## Remaining Gaps
 

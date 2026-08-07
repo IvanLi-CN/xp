@@ -53,6 +53,8 @@
   存活客户端在最多 1 秒声明探测后均无有效 XP build ownership，完整新 Worker 可记录迁移状态并
   `skipWaiting()`；该例外不得 `clients.claim()`、自动刷新或接管已打开页面。
   当前可用缓存不得因失败安装而被清理，仍有旧构建客户端时不得提前删除其完整 precache。
+- Web 注册 Service Worker 后必须立即请求一次更新检查，再开始周期检查；检查只能发现 waiting
+  worker，不得绕过用户确认而激活或刷新当前页面。
 - Web 必须兼容当前及前两个 minor 服务端版本，覆盖新 Web 连接旧后端与旧 Web 连接新后端。
 - 缺失 API 或字段必须在相关功能局部降级，不得阻断整个 App。
 
@@ -74,7 +76,8 @@
   再导航到 replacement build。旧页面及其 ownership 保留到导航提交、旧 client 从
   `clients.matchAll()` 消失；此后才原子替换不再被其他客户端持有的 XP app-shell cache。
   无新版 worker 且无法完整重建当前 build 时不得删除可用缓存，只提供普通 reload 与稍后重试。
-- 新构建由 Service Worker 后台完整获取；正常状态展示可关闭的更新提示，用户确认后切换。
+- Service Worker 注册完成后立即检查新构建，再按配置周期继续检查；正常状态展示可关闭的更新提示，
+  用户确认后才切换。
 - legacy Workbox 控制的已打开页面不能响应 XP ownership 声明时，完整新 Worker 后台激活但保持
   该页面的旧 controller；用户手动刷新或新开页面后才加载当前完整 build。迁移状态仅记录精确 legacy
   cache 和迁移开始时已存在的无 owner XP app-shell；所有存活页面声明有效 XP build 后才回收这些记录的
@@ -147,6 +150,8 @@
   token、UI preferences 与 `react_query_cache` 保持不变。
 - Given 新构建完整进入 waiting，When 用户确认更新，Then 当前页面切换到单一新构建；
   仍服务旧构建标签页的完整缓存继续保留，最后一个旧客户端离开后才可清理。
+- Given 旧 PWA 标签页在新 Web 发布后完成 Service Worker 注册，When 注册回调运行，Then 客户端立即
+  请求一次更新检查并可显示 waiting 更新提示；直到用户确认前，旧标签页不得自动激活或刷新。
 - Given 旧标签页尚未加载某个 lazy chunk，When 新版本在另一标签页激活，Then 旧标签页仍从自己的完整
   precache 加载该 chunk，不会回退到新构建资产。
 - Given N、N-1 或 N-2 服务端合同，When 全量 Web API callsite inventory 与关键页面 wire-body

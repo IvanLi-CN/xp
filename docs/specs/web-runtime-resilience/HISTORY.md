@@ -24,6 +24,8 @@
 - 2026-08-07: 确认升级 start 响应直接进入终态时，AppShell 的状态同步 effect 调用 mutation `reset()` 会
   通过 TanStack external store 触发自身重渲染，导致 React #185。同步路径改为只观察 durable upgrade status，
   并以 `succeeded`、`failed`、`unsupported` 三个端到端场景防回归。
+- Service Worker 注册后的首次更新检查不能等待周期计时器；立即检查缩短旧 bundle 发现 waiting worker
+  的窗口，同时维持用户确认激活的普通更新合同。
 
 ## Key Reasons / Replacements
 

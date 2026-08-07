@@ -20,6 +20,8 @@ export function startServiceWorkerUpdatePolling(
 		return () => {};
 	}
 
+	void requestServiceWorkerUpdateCheck(registration);
+
 	const intervalId = window.setInterval(() => {
 		void requestServiceWorkerUpdateCheck(registration);
 	}, intervalMs);

@@ -12,6 +12,8 @@
 - 状态页采用 all-peer table 和 uptime strip，不采用 topology graph。
 - Peer row actions belong to an explicit fixed-width grid column; when the data columns cannot fit,
   the row switches to the stacked presentation instead of allowing controls to overflow the panel.
+- Mock-only page demos establish presentation states but cannot establish shared AppShell geometry;
+  production-route layout regressions require a real-route geometry assertion.
 - `XP_MESH_PROXY_URL` 保留为公网 egress compatibility，不定义 Mesh。
 - HTTP/2 ingress may expose an absolute-form URI. Canary forwarding must discard its origin and
   combine only the authenticated raw path/query with the fixed XP loopback origin; forcing
