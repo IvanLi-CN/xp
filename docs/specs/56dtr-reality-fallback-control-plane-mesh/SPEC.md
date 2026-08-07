@@ -186,7 +186,7 @@ Latest real AppShell route evidence:
 
 - Source: Playwright `/system-status` with the production `AppShell`, test token, and deterministic
   mock API fixture; this is not the login-free `ui_demo` route.
-- Bound implementation commit: `b94c79f7`.
+- Bound implementation commit: `5ad40c4a`.
 - Capture metadata: `source_type=playwright_mock_api`, `target_program=local_xp_web_preview`,
   `capture_scope=browser-viewport`, `requested_viewports=1605x806,393x852`,
   `sensitive_exclusion=mock_data_only`, `submission_gate=approved`.
