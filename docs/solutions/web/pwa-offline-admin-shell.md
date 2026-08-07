@@ -11,6 +11,7 @@ tags:
 status: active
 related_specs:
   - docs/specs/7qj3h-web-pwa-offline-console/SPEC.md
+  - docs/specs/web-runtime-resilience/SPEC.md
 ---
 
 # Admin PWAs should separate shell caching from authenticated data caching
@@ -77,6 +78,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   offer a re-login link that preserves the current relative location, retain
   the existing token until login verifies a replacement, and do not offer that
   action for `403`.
+- Keep durable upgrade-status observation one-way. The effect that maps a status response into
+  UI observation must not call `useMutation().reset()`: TanStack Query publishes a new external
+  store result for each reset, so an effect that depends on the mutation result can recurse when a
+  successful, failed, or unsupported upgrade response arrives immediately.
 
 ## Guardrails / Reuse notes
 
@@ -84,6 +89,10 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   persistence allowlist explicit and reviewable.
 - The PWA update prompt should stay separate from server upgrade state. Frontend bundle refresh and
   backend rollout are different operator actions.
+- Test confirmed server upgrades with an immediate terminal response for `succeeded`, `failed`, and
+  `unsupported`. Assert that the original management route remains visible and that the console
+  has no maximum-update-depth or React #185 error; do not treat an error boundary as a successful
+  upgrade recovery path.
 - Validate the prompt on the next release after the fix lands. A page that is still running the
   pre-fix bundle cannot discover new Service Worker update behavior just because the backend was
   upgraded underneath it; reload once onto the fixed bundle first, then observe the next version
@@ -108,4 +117,5 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
 - `web/src/offline/queryPersistence.ts`
 - `web/src/offline/installOfflineApiWriteGuard.ts`
 - `web/src/components/AppShell.tsx`
+- `web/tests/e2e/upgrade-runtime.spec.ts`
 - `src/http/mod.rs`

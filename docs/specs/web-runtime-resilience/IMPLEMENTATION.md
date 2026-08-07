@@ -19,7 +19,8 @@
   compatibility。
 - 后续 legacy Workbox migration 修复把“旧 controller + orphan XP waiting cache + 无 ownership”纳入
   production preview 回归。完整 Worker 可后台激活，但不 claim 或刷新旧页；最终回收仅限 migration state
-  记录的 cache。当前 AppShell 与 VersionIndicator production preview 未复现 React #185。
+  记录的 cache。AppShell 的升级状态同步不再重置关联 mutation；直接返回 `succeeded`、`failed` 或
+  `unsupported` 的升级响应均由端到端回归覆盖，管理页保持可用且无 React #185。
 
 ## Remaining Gaps
 

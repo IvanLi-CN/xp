@@ -198,23 +198,12 @@ export function AppShell({
 			void adminUpgradeStatus.refetch();
 		},
 	});
+	const upgradeStatusData = adminUpgradeStatus.data;
 
 	useEffect(() => {
-		if (!adminUpgradeStatus.data) return;
-		const state = adminUpgradeStatus.data.status.state;
-		if (
-			upgradeObservation.observation &&
-			(state === "succeeded" || state === "failed" || state === "unsupported")
-		) {
-			adminUpgradeStart.reset();
-		}
-		upgradeObservation.observeStatus(adminUpgradeStatus.data.status);
-	}, [
-		adminUpgradeStart,
-		adminUpgradeStatus.data,
-		upgradeObservation.observation,
-		upgradeObservation.observeStatus,
-	]);
+		if (!upgradeStatusData) return;
+		upgradeObservation.observeStatus(upgradeStatusData.status);
+	}, [upgradeObservation.observeStatus, upgradeStatusData]);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
