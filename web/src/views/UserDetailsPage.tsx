@@ -1532,7 +1532,7 @@ export function UserDetailsPage() {
 										: []),
 								],
 							}}
-							window={prefs.trafficWindow}
+							window={trafficDisplay.displayWindow ?? prefs.trafficWindow}
 							onWindowChange={(next) => prefs.setTrafficWindow(next)}
 							isFetching={trafficQuery.isFetching}
 							isWindowPending={trafficDisplay.isWindowPending}
@@ -1627,7 +1627,7 @@ export function UserDetailsPage() {
 									<IpUsageView
 										title={`Usage details · ${activeUsageGroup.node.node_name}`}
 										description={`${activeUsageGroup.node.node_id} · ${activeUsageGroup.node.access_host || activeUsageGroup.node.api_base_url || "local node"}`}
-										window={ipUsageWindow}
+										window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
 										geoSource={activeUsageGroup.geo_source}
 										onWindowChange={setIpUsageWindow}
 										report={activeUsageGroup}

@@ -1559,7 +1559,7 @@ export function NodeDetailsPage() {
 							{trafficDisplay.data ? (
 								<TrafficView
 									report={trafficDisplay.data.traffic}
-									window={prefs.trafficWindow}
+									window={trafficDisplay.displayWindow ?? prefs.trafficWindow}
 									onWindowChange={(next) => prefs.setTrafficWindow(next)}
 									isFetching={trafficQuery.isFetching}
 									isWindowPending={trafficDisplay.isWindowPending}
@@ -1577,7 +1577,6 @@ export function NodeDetailsPage() {
 									description="Fetching minute-level inbound IP usage for this node."
 								/>
 							) : null}
-
 							{!ipUsageDisplay.data &&
 							queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
 								<PageState
@@ -1586,7 +1585,6 @@ export function NodeDetailsPage() {
 									description="Open this tab while online to keep the latest inbound IP report available offline."
 								/>
 							) : null}
-
 							{ipUsageQuery.isError &&
 							!ipUsageDisplay.data &&
 							!queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
@@ -1613,7 +1611,7 @@ export function NodeDetailsPage() {
 								<IpUsageView
 									title="IP usage"
 									description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
-									window={ipUsageWindow}
+									window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
 									geoSource={ipUsageDisplay.data.geo_source}
 									onWindowChange={setIpUsageWindow}
 									report={ipUsageDisplay.data}
@@ -1674,7 +1672,9 @@ export function NodeDetailsPage() {
 
 							{tcpConnectionsDisplay.data ? (
 								<TcpConnectionUsageView
-									window={tcpConnectionsWindow}
+									window={
+										tcpConnectionsDisplay.displayWindow ?? tcpConnectionsWindow
+									}
 									onWindowChange={setTcpConnectionsWindow}
 									report={tcpConnectionsDisplay.data}
 									isFetching={tcpConnectionsQuery.isFetching}

@@ -52,6 +52,7 @@ describe("useTimeWindowTransition", () => {
 			window: "7d",
 		});
 		expect(result.current.data).toBe("cached:24h");
+		expect(result.current.displayWindow).toBe("24h");
 		expect(result.current.isWindowPending).toBe(true);
 
 		act(() => vi.advanceTimersByTime(299));
