@@ -2491,6 +2491,7 @@ impl DesiredStateCommand {
 
                 let mut endpoint = endpoint.clone();
                 if endpoint.kind == EndpointKind::VlessRealityVisionTcp {
+                    let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
                     let mut meta: VlessRealityVisionTcpEndpointMeta =
                         serde_json::from_value(endpoint.meta.clone())?;
 
@@ -2577,6 +2578,13 @@ impl DesiredStateCommand {
                         .into());
                     }
                     endpoint.meta = serde_json::to_value(meta)?;
+                    if !had_mihomo_smux {
+                        endpoint
+                            .meta
+                            .as_object_mut()
+                            .expect("serialized VLESS metadata is an object")
+                            .remove("mihomo_smux");
+                    }
                 }
 
                 state

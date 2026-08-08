@@ -996,6 +996,29 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
 }
 
 #[test]
+fn upsert_vless_endpoint_preserves_missing_legacy_smux_field() {
+    let mut state = PersistedState::empty();
+    let mut endpoint = vless_endpoint("endpoint_legacy", "node_1");
+    endpoint
+        .meta
+        .as_object_mut()
+        .expect("vless metadata is an object")
+        .remove("mihomo_smux");
+
+    DesiredStateCommand::UpsertEndpoint { endpoint }
+        .apply(&mut state)
+        .unwrap();
+
+    assert!(
+        state
+            .endpoints
+            .get("endpoint_legacy")
+            .and_then(|saved| saved.meta.get("mihomo_smux"))
+            .is_none()
+    );
+}
+
+#[test]
 fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
     let mut state = PersistedState::empty();
 
