@@ -6,6 +6,8 @@ valid:
     let call = Call::AddInbound { tag: request.tag.clone() };
   - |
     let request = ReconcileRequest::RemoveInbound { tag: observed_tag.clone() };
+  - |
+    let request = RemoveInboundRequest { tag: observed_tag.clone() };
 invalid:
   - |
     let fixture = Config { node_id: "node-unapproved" };

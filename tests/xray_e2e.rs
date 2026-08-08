@@ -143,7 +143,7 @@ async fn wait_for_remove_user(client: &mut xray::XrayClient, tag: &str, email: &
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let req = AlterInboundRequest {
-            tag: xp_test_fixtures::slot_s462().to_owned(),
+            tag: tag.to_owned(),
             operation: Some(xp::xray::builder::build_remove_user_operation(email)),
         };
         match client.alter_inbound(req).await {
@@ -165,7 +165,7 @@ async fn wait_for_remove_inbound(client: &mut xray::XrayClient, tag: &str) {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let req = RemoveInboundRequest {
-            tag: xp_test_fixtures::slot_s462().to_owned(),
+            tag: tag.to_owned(),
         };
         match client.remove_inbound(req).await {
             Ok(_) => return,
@@ -612,6 +612,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         serde_json::from_slice(&bytes).unwrap()
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
 
     // Keep the distributable quota budget small to trigger a ban quickly, while respecting
     // the shared-quota buffer (>=256MiB).
@@ -744,7 +745,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
     let mut client = xray::connect(xray_api_addr).await.unwrap();
     let _ = client
         .remove_inbound(RemoveInboundRequest {
-            tag: xp_test_fixtures::slot_s487().to_owned(),
+            tag: endpoint_tag_ss,
         })
         .await;
 }

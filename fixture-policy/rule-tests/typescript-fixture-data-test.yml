@@ -6,6 +6,12 @@ valid:
     const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
   - |
     const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
+  - |
+    const next = ids.map((endpointId) => {
+      const endpoint = endpointById.get(endpointId);
+      if (!endpoint) throw new Error("missing endpoint");
+      return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
+    });
 invalid:
   - |
     const fixture = { host: "unapproved.fixture.test" };
