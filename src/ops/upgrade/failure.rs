@@ -4,8 +4,23 @@ use crate::ops::cli::ExitError;
 use crate::ops::runtime_activation::restart_xp_service;
 use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, ensure_upgrade_space_for};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Display;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const UNRESTORED_TRANSACTION_BACKUP_PREFIX: &str =
+    "rollback_failed: transaction_backup_unrestored:";
+
+pub(super) fn unrestored_transaction_backup_error(detail: impl Display) -> ExitError {
+    ExitError::new(
+        ROLLBACK_FAILURE_EXIT_CODE,
+        format!("{UNRESTORED_TRANSACTION_BACKUP_PREFIX} {detail}"),
+    )
+}
+
+fn preserves_unrestored_transaction_backup(error: &ExitError) -> bool {
+    error.message.contains(UNRESTORED_TRANSACTION_BACKUP_PREFIX)
+}
 
 pub(super) fn rollback_xp_ops_after_resumed_failure(
     dest: &Path,
@@ -15,25 +30,17 @@ pub(super) fn rollback_xp_ops_after_resumed_failure(
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if dest.exists() {
         fs::rename(dest, &failed).map_err(|error| {
-            ExitError::new(
-                8,
-                format!(
-                    "rollback_failed: stash upgraded xp-ops after resumed failure: {error}; \
-                     original error: {}",
-                    original_err.message
-                ),
-            )
+            unrestored_transaction_backup_error(format!(
+                "stash upgraded xp-ops after resumed failure: {error}; original error: {}",
+                original_err.message
+            ))
         })?;
     }
     fs::rename(backup, dest).map_err(|error| {
-        ExitError::new(
-            8,
-            format!(
-                "rollback_failed: restore xp-ops after resumed failure: {error}; \
-                 original error: {}",
-                original_err.message
-            ),
-        )
+        unrestored_transaction_backup_error(format!(
+            "restore xp-ops after resumed failure: {error}; original error: {}",
+            original_err.message
+        ))
     })?;
     let _ = fs::remove_file(&failed);
     Err(ExitError::new(
@@ -51,24 +58,17 @@ pub(super) fn rollback_xp_after_xray_failure(
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if dest.exists() {
         fs::rename(&dest, &failed).map_err(|error| {
-            ExitError::new(
-                8,
-                format!(
-                    "rollback_failed: stash upgraded xp after xray failure: {error}; \
-                     original error: {}",
-                    original_err.message
-                ),
-            )
+            unrestored_transaction_backup_error(format!(
+                "stash upgraded xp after xray failure: {error}; original error: {}",
+                original_err.message
+            ))
         })?;
     }
     fs::rename(backup, &dest).map_err(|error| {
-        ExitError::new(
-            8,
-            format!(
-                "rollback_failed: restore xp after xray failure: {error}; original error: {}",
-                original_err.message
-            ),
-        )
+        unrestored_transaction_backup_error(format!(
+            "restore xp after xray failure: {error}; original error: {}",
+            original_err.message
+        ))
     })?;
     let _ = fs::remove_file(&failed);
     if !restart_xp_service(paths) {
@@ -124,7 +124,7 @@ pub(super) fn cleanup_after_upgrade_failure(
     extra: &[&Path],
     error: ExitError,
 ) -> ExitError {
-    if error.code == ROLLBACK_FAILURE_EXIT_CODE {
+    if preserves_unrestored_transaction_backup(&error) {
         return error;
     }
     match cleanup_managed_artifacts_for(paths, extra) {
@@ -153,29 +153,22 @@ pub(super) fn restore_after_failed_install(
     let _ = fs::remove_file(staged);
     match fs::rename(backup, dest) {
         Ok(()) => ExitError::new(7, format!("{error_prefix}: {install_error}")),
-        Err(restore_error) => ExitError::new(
-            ROLLBACK_FAILURE_EXIT_CODE,
-            format!(
-                "rollback_failed: restore {binary} after install: {restore_error}; \
+        Err(restore_error) => unrestored_transaction_backup_error(format!(
+            "restore {binary} after install: {restore_error}; \
                  original install error: {install_error}"
-            ),
-        ),
+        )),
     }
 }
 
 pub(super) fn restore_after_failed_xp_ops_verification(dest: &Path, backup: &Path) -> ExitError {
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if let Err(error) = fs::rename(dest, &failed) {
-        return ExitError::new(
-            ROLLBACK_FAILURE_EXIT_CODE,
-            format!("rollback_failed: stash unverified xp-ops: {error}"),
-        );
+        return unrestored_transaction_backup_error(format!("stash unverified xp-ops: {error}"));
     }
     if let Err(error) = fs::rename(backup, dest) {
-        return ExitError::new(
-            ROLLBACK_FAILURE_EXIT_CODE,
-            format!("rollback_failed: restore xp-ops after verify failure: {error}"),
-        );
+        return unrestored_transaction_backup_error(format!(
+            "restore xp-ops after verify failure: {error}"
+        ));
     }
     let _ = fs::remove_file(&failed);
     ExitError::new(7, "install_failed: verify failed")
@@ -330,10 +323,19 @@ mod tests {
         let backup = bin_dir.join("xp.bak.transaction");
         fs::write(&backup, b"xp-old").unwrap();
 
+        let service_rollback_failed = cleanup_after_upgrade_failure(
+            &paths,
+            &[],
+            ExitError::new(ROLLBACK_FAILURE_EXIT_CODE, "rollback_failed: restart xp"),
+        );
+        assert_eq!(service_rollback_failed.code, ROLLBACK_FAILURE_EXIT_CODE);
+        assert!(!backup.exists());
+
+        fs::write(&backup, b"xp-old").unwrap();
         let rollback_failed = cleanup_after_upgrade_failure(
             &paths,
             &[],
-            ExitError::new(ROLLBACK_FAILURE_EXIT_CODE, "rollback_failed: restore xp"),
+            unrestored_transaction_backup_error("restore xp"),
         );
         assert_eq!(rollback_failed.code, ROLLBACK_FAILURE_EXIT_CODE);
         assert!(backup.exists());

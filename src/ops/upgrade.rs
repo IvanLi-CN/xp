@@ -21,7 +21,7 @@ use failure::{
     cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
     record_early_upgrade_failure, restore_after_failed_install,
     restore_after_failed_xp_ops_verification, rollback_xp_ops_after_resumed_failure,
-    write_upgrade_diagnostics,
+    unrestored_transaction_backup_error, write_upgrade_diagnostics,
 };
 use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
@@ -675,7 +675,9 @@ async fn upgrade_xp(
                 "service_error: restart failed; rolled back",
             ));
         }
-        return Err(ExitError::new(8, "rollback_failed"));
+        return Err(unrestored_transaction_backup_error(
+            "restore xp after restart failure",
+        ));
     }
 
     Ok(())

@@ -479,13 +479,17 @@ pub(super) fn rollback_runtime_binaries(backups: &[RuntimeBinaryBackup]) -> Resu
             let failed = installed
                 .dest
                 .with_extension(format!("failed.{}", now_unix_secs()));
-            fs::rename(&installed.dest, &failed).map_err(|e| {
-                ExitError::new(8, format!("rollback_failed: stash runtime binary: {e}"))
+            fs::rename(&installed.dest, &failed).map_err(|error| {
+                super::failure::unrestored_transaction_backup_error(format!(
+                    "stash runtime binary: {error}"
+                ))
             })?;
         }
         if let Some(backup) = installed.backup.as_ref() {
-            fs::rename(backup, &installed.dest).map_err(|e| {
-                ExitError::new(8, format!("rollback_failed: restore runtime binary: {e}"))
+            fs::rename(backup, &installed.dest).map_err(|error| {
+                super::failure::unrestored_transaction_backup_error(format!(
+                    "restore runtime binary: {error}"
+                ))
             })?;
         }
         let failed_prefix = installed
