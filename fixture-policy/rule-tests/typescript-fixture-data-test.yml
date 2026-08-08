@@ -7,6 +7,10 @@ valid:
   - |
     const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
   - |
+    const fixture = { started_at: fixtureCatalog.timestamp.baseline() };
+  - |
+    const fixture = { finished_at: null };
+  - |
     const next = ids.map((endpointId) => {
       const endpoint = endpointById.get(endpointId);
       if (!endpoint) throw new Error("missing endpoint");
@@ -57,6 +61,10 @@ invalid:
     const fixture = { token: process.env.TEST_TOKEN };
   - |
     const fixture = { updated_at: JSON.parse(raw) };
+  - |
+    const fixture = { emitted_at: new Date().toISOString() };
+  - |
+    const fixture = { total_bytes: 4096 };
   - |
     const fixture = { ip: await fetch("https://input.fixture.test") };
   - |

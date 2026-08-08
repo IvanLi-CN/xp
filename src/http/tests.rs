@@ -749,10 +749,10 @@ async fn record_inbound_ip_usage_samples(
         .unwrap();
 }
 
-fn add_cluster_node(store: &mut JsonSnapshotStore, _node_id: &str, node_name: &str) {
+fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: &str) {
     DesiredStateCommand::UpsertNode {
         node: Node {
-            node_id: xp_test_fixtures::slot_s457().to_owned(),
+            node_id: node_id.to_owned(),
             node_name: node_name.to_string(),
             access_host: xp_test_fixtures::slot_s566().to_owned(),
             api_base_url: xp_test_fixtures::slot_s567().to_owned(),
@@ -9072,8 +9072,16 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name(),
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name(),
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9088,7 +9096,10 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
             .endpoint_probe_participants_by_hour
             .insert(
                 hour.clone(),
-                std::collections::BTreeSet::from(["node_2".to_string(), "node_3".to_string()]),
+                std::collections::BTreeSet::from([
+                    xp_test_fixtures::secondary_node_id().to_owned(),
+                    xp_test_fixtures::tertiary_node_id().to_owned(),
+                ]),
             );
         let bucket = store
             .state_mut()
@@ -9099,11 +9110,11 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
             .entry(hour)
             .or_default();
         bucket.by_node.insert(
-            "node_2".to_string(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
             endpoint_probe_sample(true, false, Some(120)),
         );
         bucket.by_node.insert(
-            "node_3".to_string(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
             endpoint_probe_sample(true, false, Some(140)),
         );
         store.save().unwrap();
@@ -9136,8 +9147,16 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name(),
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name(),
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9152,7 +9171,10 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
             .endpoint_probe_participants_by_hour
             .insert(
                 hour.clone(),
-                std::collections::BTreeSet::from([local_node_id.clone(), "node_2".to_string()]),
+                std::collections::BTreeSet::from([
+                    local_node_id.clone(),
+                    xp_test_fixtures::secondary_node_id().to_owned(),
+                ]),
             );
         let bucket = store
             .state_mut()
@@ -9166,7 +9188,7 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
             .by_node
             .insert(local_node_id, endpoint_probe_sample(true, false, Some(111)));
         bucket.by_node.insert(
-            "node_2".to_string(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
             endpoint_probe_sample(false, false, None),
         );
         store.save().unwrap();
@@ -9199,8 +9221,16 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name(),
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name(),
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9238,7 +9268,7 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
             .or_default()
             .by_node
             .insert(
-                "node_2".to_string(),
+                xp_test_fixtures::secondary_node_id().to_owned(),
                 endpoint_probe_sample(true, false, Some(102)),
             );
         store.save().unwrap();

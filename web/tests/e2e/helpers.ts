@@ -903,7 +903,7 @@ export async function setupApiMocks(
 
 				const items = state.userNodeWeights[userId] ?? [];
 				const next: AdminUserNodeWeightItem = {
-					node_id: fixtureCatalog.slotString.s63(),
+					node_id: nodeId,
 					weight: rawWeight,
 				};
 				state.userNodeWeights[userId] = [

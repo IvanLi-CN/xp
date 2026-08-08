@@ -194,8 +194,8 @@ function setupMocks(args?: {
 			daily_traffic: [
 				{
 					date: "2026-03-08",
-					uplink_bytes: 1048576,
-					downlink_bytes: 2097152,
+					uplink_bytes: fixtureCatalog.slotNumber.n2(),
+					downlink_bytes: fixtureCatalog.slotNumber.n3(),
 					updated_at: fixtureCatalog.slotString.s48(),
 				},
 			],

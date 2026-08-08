@@ -292,8 +292,8 @@ const baseProbeRuns: DemoProbeRun[] = [
 		id: "probe-run-001",
 		endpointId: fixtureCatalog.identifier.endpointPrimary(),
 		status: "completed",
-		startedAt: "2026-04-29T09:41:42Z",
-		completedAt: "2026-04-29T09:42:00Z",
+		startedAt: fixtureCatalog.timestamp.baseline(),
+		completedAt: fixtureCatalog.timestamp.recent(),
 		samples: [
 			{
 				nodeId: fixtureCatalog.identifier.nodePrimary(),

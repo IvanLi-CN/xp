@@ -4,6 +4,8 @@ valid:
     { "hosts": { "primary": "node-a.fixture.test" } }
   - |
     { "metrics": { "latencyLow": 12 } }
+  - |
+    { "timestamps": { "date": "2024-01-01" } }
 invalid:
   - |
     { "hosts": { "unapproved": "node-z.fixture.test" } }

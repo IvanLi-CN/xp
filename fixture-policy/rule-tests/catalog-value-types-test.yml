@@ -3,6 +3,7 @@ valid:
   - '{ "metrics": { "latencyLow": 12 } }'
   - '{ "hosts": { "primary": "node-a.fixture.test" } }'
   - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
+  - '{ "timestamps": { "date": "2024-01-01" } }'
 invalid:
   - '{ "metrics": true }'
   - '{ "latencyLow": "12" }'

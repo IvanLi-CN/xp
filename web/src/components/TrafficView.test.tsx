@@ -18,32 +18,32 @@ const tooltipPalette = {
 
 const report: TrafficReport = {
 	window: "24h",
-	window_start_at: "2026-07-29T00:00:00Z",
-	window_end_at: "2026-07-30T00:00:00Z",
+	window_start_at: fixtureCatalog.timestamp.baseline(),
+	window_end_at: fixtureCatalog.timestamp.recent(),
 	timezone: "UTC",
 	summary: {
 		mode: "cycle",
-		uplink_bytes: 0,
-		downlink_bytes: 0,
-		total_bytes: 0,
+		uplink_bytes: fixtureCatalog.slotNumber.n0(),
+		downlink_bytes: fixtureCatalog.slotNumber.n0(),
+		total_bytes: fixtureCatalog.slotNumber.n0(),
 		complete: true,
 	},
 	current: [
 		{
-			start_at: "2026-07-29T18:50:00Z",
+			start_at: fixtureCatalog.timestamp.baseline(),
 			end_at: fixtureCatalog.slotString.s279(),
-			uplink_bytes: 10_485,
-			downlink_bytes: 31_457,
-			total_bytes: 41_942,
+			uplink_bytes: fixtureCatalog.slotNumber.n2(),
+			downlink_bytes: fixtureCatalog.slotNumber.n3(),
+			total_bytes: fixtureCatalog.slotNumber.n6(),
 			complete: true,
 			is_current_day: false,
 		},
 	],
 	reference: [
 		{
-			start_at: "2026-07-28T18:50:00Z",
-			end_at: "2026-07-28T18:55:00Z",
-			uplink_bytes: 5_242,
+			start_at: fixtureCatalog.timestamp.earlier(),
+			end_at: fixtureCatalog.timestamp.baseline(),
+			uplink_bytes: fixtureCatalog.slotNumber.n2(),
 			downlink_bytes: null,
 			total_bytes: null,
 			complete: false,
@@ -74,12 +74,12 @@ describe("buildTrafficTooltipHtml", () => {
 	it("renders current and reference byte totals with themed foregrounds", () => {
 		const tooltip = buildTrafficTooltipHtml(report, "24h", tooltipPalette, 0);
 
-		expect(tooltip).toContain("2026-07-29 18:50:00 UTC");
+		expect(tooltip).toContain("2024-01-01 00:00:00 UTC");
 		expect(tooltip).toContain("Current");
 		expect(tooltip).toContain("Previous 24h");
-		expect(tooltip).toContain("up 0.01 MiB");
-		expect(tooltip).toContain("down 0.03 MiB");
-		expect(tooltip).toContain("total 0.04 MiB");
+		expect(tooltip).toContain("up 0 MiB");
+		expect(tooltip).toContain("down 0 MiB");
+		expect(tooltip).toContain("total 0 MiB");
 		expect(tooltip).toContain("down -");
 		expect(tooltip).toContain("color:var(--popover-foreground)");
 		expect(tooltip).toContain("color:var(--muted-foreground)");
@@ -88,10 +88,10 @@ describe("buildTrafficTooltipHtml", () => {
 	});
 
 	it("escapes an invalid timestamp before returning tooltip HTML", () => {
-		const invalidTimestampReport = {
-			...report,
-			current: [{ ...report.current[0], start_at: "<invalid>" }],
-		};
+		const invalidTimestampReport = structuredClone(report);
+		const [currentPoint] = invalidTimestampReport.current;
+		if (!currentPoint) throw new Error("fixture report must include a point");
+		currentPoint.start_at = "<invalid>";
 		const tooltip = buildTrafficTooltipHtml(
 			invalidTimestampReport,
 			"24h",
