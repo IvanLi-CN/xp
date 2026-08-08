@@ -65,6 +65,8 @@ export const fixtureCatalog = {
 	},
 	authority: {
 		edgeExamplePort443: () => [...catalog.lists.primaryAuthorities],
+		existingAuthoritiesPort443: () =>
+			catalog.slots.stringLists[12].map((authority) => `${authority}:443`),
 		existingAndHost119Port53844: () => [
 			...catalog.slots.stringLists[12].map((authority) => `${authority}:443`),
 			`${catalog.slots.strings[119]}:53844`,

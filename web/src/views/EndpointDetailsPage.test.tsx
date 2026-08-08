@@ -208,9 +208,9 @@ describe("EndpointDetailsPage", () => {
 
 	it("does not render or submit SMux settings for VLESS endpoints", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "managed-vless",
+			endpoint_id: fixtureCatalog.slotString.s172(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s121(),
 			kind: "vless_reality_vision_tcp",
 			port: 53844,
 			meta: {},
@@ -265,8 +265,12 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
-				{ port: 53844 },
+				fixtureCatalog.slotString.s172(),
+				{
+					port: 53844,
+					accepted_authorities:
+						fixtureCatalog.authority.existingAuthoritiesPort443(),
+				},
 			);
 		});
 	});
