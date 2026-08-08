@@ -30,6 +30,7 @@ COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
 COPY proto ./proto
 COPY src ./src
 COPY tests ./tests
+COPY test-fixtures ./test-fixtures
 COPY --from=web-builder /app/web/dist ./web/dist
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
