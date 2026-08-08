@@ -461,8 +461,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         .await?;
         // A new process consumes the cutover marker at startup. Once the v2 epoch is durable,
         // restoring the backed-up v1 binary would violate the cluster protocol contract.
-        let rollback_xp_on_runtime_failure =
-            !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir).map_err(|error| {
+        let rollback_xp_on_runtime_failure = !args.allow_internal_auth_v2_cutover
+            || !crate::internal_auth_epoch::is_v2_epoch(&args.data_dir).map_err(|error| {
                 ExitError::new(
                     7,
                     format!(
