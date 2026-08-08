@@ -51,7 +51,7 @@ describe("AdminUpgradeStatusResponseSchema", () => {
 			},
 			status: {
 				state: "idle",
-				updated_at: "2026-07-04T00:00:00Z",
+				updated_at: fixtureCatalog.timestamp.baseline(),
 			},
 		});
 
