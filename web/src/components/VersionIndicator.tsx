@@ -261,7 +261,10 @@ export function VersionIndicator({
 									将自动清理历史升级文件后继续。
 								</p>
 							) : storageBlocked ? (
-								<p className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs">
+								<p
+									className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
+									role="alert"
+								>
 									{upgradeUnavailableReason}
 								</p>
 							) : null}

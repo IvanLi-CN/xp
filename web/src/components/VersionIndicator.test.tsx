@@ -177,7 +177,9 @@ describe("<VersionIndicator /> upgrade observation", () => {
 			/>,
 		);
 
-		expect(screen.getByText(/insufficient_upgrade_space/)).toBeInTheDocument();
+		expect(screen.getByRole("alert")).toHaveTextContent(
+			/insufficient_upgrade_space/,
+		);
 		expect(screen.getByRole("button", { name: "Unavailable" })).toBeDisabled();
 	});
 
