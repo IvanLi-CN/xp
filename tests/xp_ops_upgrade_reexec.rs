@@ -52,6 +52,7 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     command
         .env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999")
         .env("XP_OPS_UPGRADE_RESUME_REPO", "o/r")
+        .env("XP_OPS_GITHUB_REPO", "o/r")
         .env("XP_OPS_UPGRADE_RESUME_API_BASE", "http://127.0.0.1:1")
         .env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest)
         .env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup)
@@ -119,6 +120,7 @@ fn complete_phase_status_preflight_failure_restores_all_binaries() {
     command
         .env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999")
         .env("XP_OPS_UPGRADE_RESUME_REPO", "o/r")
+        .env("XP_OPS_GITHUB_REPO", "o/r")
         .env("XP_OPS_UPGRADE_RESUME_API_BASE", "http://127.0.0.1:1")
         .env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest)
         .env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup)

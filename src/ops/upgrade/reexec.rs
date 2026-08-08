@@ -183,10 +183,70 @@ fn transaction_backups(resume: &ResumeContext) -> Vec<&Path> {
 }
 
 fn remove_transaction_backups(resume: &ResumeContext) -> std::io::Result<()> {
-    for backup in transaction_backups(resume) {
-        std::fs::remove_file(backup)?;
+    remove_transaction_backup_paths(transaction_backups(resume), |path| {
+        std::fs::remove_file(path)
+    })
+}
+
+fn remove_transaction_backup_paths<F>(backups: Vec<&Path>, mut remove: F) -> std::io::Result<()>
+where
+    F: FnMut(&Path) -> std::io::Result<()>,
+{
+    let snapshots = backups
+        .into_iter()
+        .map(|path| {
+            let metadata = std::fs::symlink_metadata(path)?;
+            if !metadata.file_type().is_file() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "transaction backup is not a regular file: {}",
+                        path.display()
+                    ),
+                ));
+            }
+            Ok((path.to_path_buf(), std::fs::read(path)?))
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    for (index, (path, _)) in snapshots.iter().enumerate() {
+        if let Err(error) = remove(path) {
+            for (restore_path, contents) in snapshots.iter().take(index) {
+                if !restore_path.exists() {
+                    let _ = std::fs::write(restore_path, contents);
+                }
+            }
+            return Err(error);
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_transaction_backup_paths;
+
+    #[test]
+    fn restores_removed_backups_when_later_delete_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("xp-ops.bak.test");
+        let second = tmp.path().join("xp.bak.test");
+        std::fs::write(&first, b"xp-ops-old").unwrap();
+        std::fs::write(&second, b"xp-old").unwrap();
+        let mut calls = 0;
+
+        let error = remove_transaction_backup_paths(vec![&first, &second], |path| {
+            calls += 1;
+            if calls == 2 {
+                return Err(std::io::Error::other("injected deletion failure"));
+            }
+            std::fs::remove_file(path)
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(std::fs::read(&first).unwrap(), b"xp-ops-old");
+        assert_eq!(std::fs::read(&second).unwrap(), b"xp-old");
+    }
 }
 
 pub(super) fn mark_upgrade_runner_resume() {
