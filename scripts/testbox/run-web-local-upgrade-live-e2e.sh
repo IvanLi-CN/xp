@@ -541,6 +541,7 @@ run_rollback_case() {
     dump_case_debug rollback-startup
     return 1
   }
+  rm -f "$XP_DATA_DIR/mesh/internal-auth-v2.json"
   touch "$RESTART_FAIL_FILE"
 
   local start_body="$case_dir/start-upgrade.body"
