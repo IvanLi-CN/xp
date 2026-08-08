@@ -84,7 +84,7 @@ describe("<VersionIndicator /> upgrade observation", () => {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v3.21.10",
-					checked_at: "2026-08-03T00:00:00Z",
+					checked_at: fixtureCatalog.timestamp.baseline(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -118,7 +118,7 @@ describe("<VersionIndicator /> upgrade observation", () => {
 						finished_at: null,
 						exit_code: null,
 						message: null,
-						updated_at: "2026-08-03T00:00:00Z",
+						updated_at: fixtureCatalog.timestamp.baseline(),
 					},
 				}}
 			/>,
@@ -138,7 +138,7 @@ describe("<VersionIndicator /> upgrade observation", () => {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v3.21.10",
-					checked_at: "2026-08-03T00:00:00Z",
+					checked_at: fixtureCatalog.timestamp.baseline(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -172,7 +172,7 @@ describe("<VersionIndicator /> upgrade observation", () => {
 						finished_at: null,
 						exit_code: null,
 						message: null,
-						updated_at: "2026-08-03T00:00:00Z",
+						updated_at: fixtureCatalog.timestamp.baseline(),
 					},
 				}}
 			/>,
