@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
 import type { AdminNodeTcpConnectionsResponse } from "../api/adminTcpConnections";
 import type { AdminNodeTrafficResponse } from "../api/adminTraffic";
 import {
+	alignNodeIpUsageResponse,
 	alignNodeTcpConnectionsResponse,
 	alignNodeTrafficResponse,
 	emptyNodeTrafficResponse,
@@ -120,6 +122,58 @@ describe("time window report alignment", () => {
 		expect(aligned.window_end).toBe("2026-08-08T12:07:00.000Z");
 		expect(aligned.per_endpoint_series[0]?.series).toEqual([
 			{ minute: "2026-08-08T12:00:00Z", count: 3 },
+		]);
+	});
+
+	it("recomputes cached IP rows from the clipped occupancy timeline", () => {
+		const report: AdminNodeIpUsageResponse = {
+			node,
+			window: "24h",
+			geo_source: "country_is",
+			window_start: "2026-08-06T12:00:00Z",
+			window_end: "2026-08-07T12:00:00Z",
+			warnings: [],
+			unique_ip_series: [],
+			timeline: [
+				{
+					lane_key: "edge-a::203.0.113.1",
+					endpoint_id: "endpoint-a",
+					endpoint_tag: "edge-a",
+					ip: "203.0.113.1",
+					minutes: 1_440,
+					segments: [
+						{
+							start_minute: "2026-08-07T11:58:00Z",
+							end_minute: "2026-08-07T12:02:00Z",
+						},
+					],
+				},
+			],
+			ips: [
+				{
+					ip: "203.0.113.1",
+					minutes: 1_440,
+					endpoint_tags: ["edge-a", "aged-out"],
+					region: "Test",
+					operator: "Example",
+					last_seen_at: "2026-08-07T12:02:00Z",
+				},
+			],
+		};
+
+		const aligned = alignNodeIpUsageResponse(
+			report,
+			"24h",
+			Date.parse("2026-08-08T12:00:30Z"),
+		);
+
+		expect(aligned.ips).toEqual([
+			{
+				...report.ips[0],
+				minutes: 2,
+				endpoint_tags: ["edge-a"],
+				last_seen_at: "2026-08-07T12:02:00.000Z",
+			},
 		]);
 	});
 });

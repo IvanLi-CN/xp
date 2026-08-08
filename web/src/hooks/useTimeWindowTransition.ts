@@ -18,6 +18,7 @@ type UseTimeWindowTransitionOptions<T, W> = {
 	holdMs?: number;
 	identity: string;
 	isError: boolean;
+	isFetchedAfterMount: boolean;
 	isFetching: boolean;
 	now?: () => number;
 	window: W;
@@ -38,6 +39,7 @@ export function useTimeWindowTransition<T, W>({
 	holdMs = TIME_WINDOW_HOLD_MS,
 	identity,
 	isError,
+	isFetchedAfterMount,
 	isFetching,
 	now = Date.now,
 	window,
@@ -64,6 +66,7 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
+		isFetchedAfterMount,
 		isFetching,
 		now,
 	});
@@ -73,6 +76,7 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
+		isFetchedAfterMount,
 		isFetching,
 		now,
 	};
@@ -161,7 +165,7 @@ export function useTimeWindowTransition<T, W>({
 					dataUpdatedAt > displayRef.current.dataUpdatedAt)
 			) {
 				setDisplay({
-					data,
+					data: isFetchedAfterMount ? data : alignData(data, window, now()),
 					dataUpdatedAt,
 					window,
 				});
@@ -177,7 +181,7 @@ export function useTimeWindowTransition<T, W>({
 			clearTimer();
 			transitionRef.current = null;
 			setDisplay({
-				data,
+				data: isFetchedAfterMount ? data : alignData(data, window, now()),
 				dataUpdatedAt,
 				window,
 			});
@@ -189,7 +193,17 @@ export function useTimeWindowTransition<T, W>({
 			transitionRef.current = null;
 			setPhase("idle");
 		}
-	}, [clearTimer, data, dataUpdatedAt, isError, setDisplay, window]);
+	}, [
+		alignData,
+		clearTimer,
+		data,
+		dataUpdatedAt,
+		isError,
+		isFetchedAfterMount,
+		now,
+		setDisplay,
+		window,
+	]);
 
 	useLayoutEffect(() => clearTimer, [clearTimer]);
 

@@ -12,6 +12,7 @@ type HookProps = {
 	data: string | undefined;
 	dataUpdatedAt: number;
 	isError: boolean;
+	isFetchedAfterMount?: boolean;
 	isFetching: boolean;
 	window: Window;
 };
@@ -23,6 +24,7 @@ function useTransition(props: HookProps) {
 		createEmptyData,
 		holdMs: 300,
 		identity: "report",
+		isFetchedAfterMount: props.isFetchedAfterMount ?? true,
 		now: () => 1_000,
 	});
 }
@@ -91,6 +93,30 @@ describe("useTimeWindowTransition", () => {
 		expect(result.current.isWindowPending).toBe(false);
 		act(() => vi.advanceTimersByTime(300));
 		expect(result.current.data).toBe("fresh");
+	});
+
+	it("aligns persisted data restored asynchronously after mount", () => {
+		const { result, rerender } = renderHook(useTransition, {
+			initialProps: {
+				data: undefined,
+				dataUpdatedAt: 0,
+				isError: false,
+				isFetchedAfterMount: false,
+				isFetching: false,
+				window: "24h",
+			},
+		});
+
+		rerender({
+			data: "restored-cache",
+			dataUpdatedAt: 1,
+			isError: false,
+			isFetchedAfterMount: false,
+			isFetching: false,
+			window: "24h",
+		});
+
+		expect(result.current.data).toBe("restored-cache:24h");
 	});
 
 	it("shows the aligned target cache after the hold expires", () => {

@@ -1,4 +1,6 @@
 import type {
+	AdminIpUsageListEntry,
+	AdminIpUsageTimelineLane,
 	AdminIpUsageWindow,
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageNodeGroup,
@@ -65,6 +67,72 @@ function inRange(value: string, range: WindowRange): boolean {
 	);
 }
 
+function alignIpEntries(
+	entries: AdminIpUsageListEntry[],
+	timeline: AdminIpUsageTimelineLane[],
+): AdminIpUsageListEntry[] {
+	const byIp = new Map<
+		string,
+		{ endpointTags: Set<string>; segments: Array<[number, number]> }
+	>();
+	for (const lane of timeline) {
+		const aggregate = byIp.get(lane.ip) ?? {
+			endpointTags: new Set<string>(),
+			segments: [],
+		};
+		aggregate.endpointTags.add(lane.endpoint_tag);
+		for (const segment of lane.segments) {
+			aggregate.segments.push([
+				new Date(segment.start_minute).getTime(),
+				new Date(segment.end_minute).getTime(),
+			]);
+		}
+		byIp.set(lane.ip, aggregate);
+	}
+
+	return entries
+		.flatMap((entry) => {
+			const aggregate = byIp.get(entry.ip);
+			if (!aggregate) return [];
+			const segments = aggregate.segments.sort(
+				(left, right) => left[0] - right[0],
+			);
+			let minutes = 0;
+			let mergedStart = segments[0]?.[0];
+			let mergedEnd = segments[0]?.[1];
+			for (const [start, end] of segments.slice(1)) {
+				if (mergedStart === undefined || mergedEnd === undefined) break;
+				if (start <= mergedEnd + MINUTE_MS) {
+					mergedEnd = Math.max(mergedEnd, end);
+					continue;
+				}
+				minutes += Math.floor((mergedEnd - mergedStart) / MINUTE_MS) + 1;
+				mergedStart = start;
+				mergedEnd = end;
+			}
+			if (mergedStart === undefined || mergedEnd === undefined) return [];
+			minutes += Math.floor((mergedEnd - mergedStart) / MINUTE_MS) + 1;
+			return [
+				{
+					...entry,
+					minutes,
+					endpoint_tags: [...aggregate.endpointTags].sort(),
+					last_seen_at: iso(
+						segments.reduce(
+							(latest, segment) => Math.max(latest, segment[1]),
+							0,
+						),
+					),
+				},
+			];
+		})
+		.sort((left, right) =>
+			right.minutes !== left.minutes
+				? right.minutes - left.minutes
+				: left.ip.localeCompare(right.ip),
+		);
+}
+
 function alignIpGroup<
 	T extends AdminUserIpUsageNodeGroup | AdminNodeIpUsageResponse,
 >(report: T, window: AdminIpUsageWindow, now: number): T {
@@ -103,7 +171,7 @@ function alignIpGroup<
 			inRange(point.minute, range),
 		),
 		timeline,
-		ips: report.ips.filter((entry) => inRange(entry.last_seen_at, range)),
+		ips: alignIpEntries(report.ips, timeline),
 	};
 }
 
