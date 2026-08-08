@@ -348,7 +348,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     )?
     .with_mesh_observability(mesh_telemetry.clone());
     let mesh_client = raft_network.mesh_client();
-    let mesh_circuits = mesh_client.circuits();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),
@@ -503,7 +502,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         node_history.clone(),
         cluster_ca_key_pem_required.clone(),
         cluster_ca_pem.clone(),
-        mesh_client,
+        mesh_client.clone(),
     );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
@@ -545,7 +544,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         geo_db_update,
         mesh_proxy_state,
         mesh_telemetry,
-        mesh_circuits,
+        mesh_client,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

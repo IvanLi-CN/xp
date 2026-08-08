@@ -14,6 +14,14 @@ const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
 const MAX_BUCKETS: usize = 24 * 60;
 
+mod transport;
+use transport::MeshConnectionTrackers;
+pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
+pub use transport::{
+    MeshTransportHealth, MeshTransportProtocol, mesh_transport_counts_for,
+    mesh_transport_health_for,
+};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TelemetryPath {
@@ -63,44 +71,36 @@ pub struct MeshTelemetryEvent {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MeshTelemetryBucket {
     pub minute: String,
-    #[serde(default)]
     pub mesh_success: u32,
-    #[serde(default)]
     pub mesh_failure: u32,
-    #[serde(default)]
     pub public_success: u32,
-    #[serde(default)]
     pub public_failure: u32,
-    #[serde(default)]
     pub fallback_success: u32,
-    #[serde(default)]
     pub end_to_end_success: u32,
-    #[serde(default)]
     pub end_to_end_failure: u32,
-    #[serde(default)]
     pub latency_samples_ms: Vec<u32>,
+    pub mesh_h2_requests: u32,
+    pub mesh_connection_starts: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MeshPeerTelemetry {
     pub peer_id: String,
-    #[serde(default)]
     pub peer_name: String,
-    #[serde(default)]
     pub last_path: Option<TelemetryPath>,
-    #[serde(default)]
     pub last_sample_at: Option<String>,
-    #[serde(default)]
     pub last_mesh_target: Option<String>,
-    #[serde(default)]
     pub last_transition_at: Option<String>,
-    #[serde(default)]
     pub breaker: Option<BreakerState>,
-    #[serde(default)]
     pub last_mesh_reason: Option<MeshPeerReason>,
-    #[serde(default)]
+    pub last_mesh_protocol: Option<MeshTransportProtocol>,
+    pub connection_generation: u64,
+    pub current_connection_requests: u64,
+    pub last_connection_started_at: Option<String>,
     pub buckets: VecDeque<MeshTelemetryBucket>,
 }
 
@@ -141,12 +141,14 @@ pub struct MeshTelemetrySample {
     pub latency_ms: Option<u32>,
     pub fallback: bool,
     pub updates_active_path: bool,
+    pub(crate) transport: Option<MeshTransportObservation>,
 }
 
 #[derive(Clone)]
 pub struct MeshTelemetryHandle {
     path: Arc<PathBuf>,
     state: Arc<Mutex<PersistedTelemetry>>,
+    connections: MeshConnectionTrackers,
     probe_gate: Arc<Semaphore>,
 }
 
@@ -170,6 +172,7 @@ impl MeshTelemetryHandle {
         Ok(Self {
             path: Arc::new(path),
             state: Arc::new(Mutex::new(state)),
+            connections: MeshConnectionTrackers::default(),
             probe_gate: Arc::new(Semaphore::new(4)),
         })
     }
@@ -197,6 +200,7 @@ impl MeshTelemetryHandle {
     ) -> anyhow::Result<()> {
         let now = Utc::now();
         let peer_id = peer_id.into();
+        let observed_transport = self.connections.observe(&peer_id, sample.transport).await;
         let mut state = self.state.lock().await;
         let peer = state
             .peers
@@ -214,6 +218,16 @@ impl MeshTelemetryHandle {
         peer.last_sample_at = Some(timestamp(now));
         if updates_active_path && previous_path != Some(sample.path) {
             peer.last_transition_at = Some(timestamp(now));
+        }
+        if let Some(observed) = observed_transport {
+            peer.last_mesh_protocol = Some(observed.protocol);
+            if observed.connection_started {
+                peer.connection_generation = peer.connection_generation.saturating_add(1);
+                peer.last_connection_started_at = Some(timestamp(now));
+            }
+            if let Some(requests) = observed.current_connection_requests {
+                peer.current_connection_requests = requests;
+            }
         }
         let bucket = ensure_bucket(peer, now);
         match (sample.path, sample.success) {
@@ -233,6 +247,14 @@ impl MeshTelemetryHandle {
         }
         if sample.fallback && sample.success {
             bucket.fallback_success += 1;
+        }
+        if let Some(observed) = observed_transport {
+            if observed.protocol == MeshTransportProtocol::H2 {
+                bucket.mesh_h2_requests = bucket.mesh_h2_requests.saturating_add(1);
+            }
+            if observed.connection_started {
+                bucket.mesh_connection_starts = bucket.mesh_connection_starts.saturating_add(1);
+            }
         }
         if let Some(latency_ms) = sample.latency_ms {
             // Per-minute quantiles do not need unbounded precision. Keeping 64 values remains
@@ -538,6 +560,28 @@ fn persist(path: &Path, state: &PersistedTelemetry) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::SocketAddr;
+
+    fn h2_sample(fingerprint: MeshConnectionFingerprint) -> MeshTelemetrySample {
+        MeshTelemetrySample {
+            path: TelemetryPath::Mesh,
+            success: true,
+            latency_ms: Some(10),
+            fallback: false,
+            updates_active_path: true,
+            transport: Some(MeshTransportObservation {
+                protocol: MeshTransportProtocol::H2,
+                fingerprint: Some(fingerprint),
+            }),
+        }
+    }
+
+    fn fingerprint(local_port: u16, remote_port: u16) -> MeshConnectionFingerprint {
+        MeshConnectionFingerprint {
+            local_addr: SocketAddr::from(([127, 0, 0, 1], local_port)),
+            remote_addr: SocketAddr::from(([127, 0, 0, 2], remote_port)),
+        }
+    }
 
     #[tokio::test]
     async fn persists_bounded_buckets_and_events() {
@@ -553,6 +597,7 @@ mod tests {
                     latency_ms: Some(42),
                     fallback: false,
                     updates_active_path: true,
+                    transport: None,
                 },
             )
             .await
@@ -573,6 +618,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connection_fingerprints_count_reuse_without_persisting_socket_addresses() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        telemetry
+            .record_sample("peer-a", "alpha", h2_sample(fingerprint(41000, 443)))
+            .await
+            .unwrap();
+        telemetry
+            .record_sample("peer-a", "alpha", h2_sample(fingerprint(41000, 443)))
+            .await
+            .unwrap();
+        telemetry
+            .record_sample("peer-a", "alpha", h2_sample(fingerprint(41001, 443)))
+            .await
+            .unwrap();
+
+        let peer = telemetry.snapshot().await.peers.remove(0);
+        assert_eq!(peer.last_mesh_protocol, Some(MeshTransportProtocol::H2));
+        assert_eq!(peer.connection_generation, 2);
+        assert_eq!(peer.current_connection_requests, 1);
+        assert_eq!(peer.buckets[0].mesh_h2_requests, 3);
+        assert_eq!(peer.buckets[0].mesh_connection_starts, 2);
+
+        let persisted = fs::read_to_string(temp.path().join("mesh/telemetry.json")).unwrap();
+        assert!(!persisted.contains("127.0.0.1"));
+        assert!(!persisted.contains("41000"));
+        assert!(!persisted.contains("41001"));
+    }
+
+    #[tokio::test]
+    async fn first_connection_after_restart_advances_the_persisted_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+        telemetry
+            .record_sample("peer-a", "alpha", h2_sample(fingerprint(41000, 443)))
+            .await
+            .unwrap();
+        drop(telemetry);
+
+        let restored = MeshTelemetryHandle::load(temp.path()).unwrap();
+        restored
+            .record_sample("peer-a", "alpha", h2_sample(fingerprint(41000, 443)))
+            .await
+            .unwrap();
+        let peer = restored.snapshot().await.peers.remove(0);
+
+        assert_eq!(peer.connection_generation, 2);
+        assert_eq!(peer.current_connection_requests, 1);
+        assert_eq!(peer.buckets[0].mesh_connection_starts, 2);
+    }
+
+    #[tokio::test]
     async fn persists_mesh_reason_and_reads_legacy_peer_records() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("mesh/telemetry.json");
@@ -588,7 +685,11 @@ mod tests {
         )
         .unwrap();
         let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
-        assert_eq!(telemetry.snapshot().await.peers[0].last_mesh_reason, None);
+        let legacy_snapshot = telemetry.snapshot().await;
+        let legacy_peer = &legacy_snapshot.peers[0];
+        assert_eq!(legacy_peer.last_mesh_reason, None);
+        assert_eq!(legacy_peer.last_mesh_protocol, None);
+        assert_eq!(legacy_peer.connection_generation, 0);
         telemetry
             .set_mesh_reason(
                 "peer-a",
@@ -660,6 +761,79 @@ mod tests {
         assert_eq!(quality_for_peer(&peer, now), MeshQuality::Good);
     }
 
+    #[test]
+    fn mesh_transport_health_uses_the_five_minute_churn_threshold() {
+        let now = Utc::now();
+        assert_eq!(
+            mesh_transport_health_for(None, now),
+            MeshTransportHealth::Unknown
+        );
+        let mut peer = MeshPeerTelemetry {
+            last_mesh_protocol: Some(MeshTransportProtocol::H2),
+            connection_generation: 3,
+            buckets: VecDeque::from([
+                MeshTelemetryBucket {
+                    minute: timestamp(now - Duration::minutes(6)),
+                    mesh_h2_requests: 8,
+                    mesh_connection_starts: 8,
+                    ..MeshTelemetryBucket::default()
+                },
+                MeshTelemetryBucket {
+                    minute: timestamp(now - Duration::minutes(2)),
+                    mesh_h2_requests: 12,
+                    mesh_connection_starts: 2,
+                    ..MeshTelemetryBucket::default()
+                },
+            ]),
+            ..MeshPeerTelemetry::default()
+        };
+        assert_eq!(
+            mesh_transport_health_for(Some(&peer), now),
+            MeshTransportHealth::Healthy
+        );
+        peer.buckets.back_mut().unwrap().mesh_connection_starts = 3;
+        assert_eq!(
+            mesh_transport_health_for(Some(&peer), now),
+            MeshTransportHealth::Churning
+        );
+        peer.last_mesh_protocol = Some(MeshTransportProtocol::Other);
+        assert_eq!(
+            mesh_transport_health_for(Some(&peer), now),
+            MeshTransportHealth::Churning
+        );
+    }
+
+    #[test]
+    fn mesh_transport_counts_are_bounded_to_the_requested_window() {
+        let now = Utc::now();
+        let peer = MeshPeerTelemetry {
+            buckets: VecDeque::from([
+                MeshTelemetryBucket {
+                    minute: timestamp(now - Duration::minutes(61)),
+                    mesh_h2_requests: 100,
+                    mesh_connection_starts: 100,
+                    ..MeshTelemetryBucket::default()
+                },
+                MeshTelemetryBucket {
+                    minute: timestamp(now - Duration::minutes(30)),
+                    mesh_h2_requests: 20,
+                    mesh_connection_starts: 2,
+                    ..MeshTelemetryBucket::default()
+                },
+                MeshTelemetryBucket {
+                    minute: timestamp(now - Duration::minutes(2)),
+                    mesh_h2_requests: 5,
+                    mesh_connection_starts: 1,
+                    ..MeshTelemetryBucket::default()
+                },
+            ]),
+            ..MeshPeerTelemetry::default()
+        };
+
+        assert_eq!(mesh_transport_counts_for(&peer, 5, now), (5, 1));
+        assert_eq!(mesh_transport_counts_for(&peer, 60, now), (25, 3));
+    }
+
     #[tokio::test]
     async fn passive_public_sample_does_not_replace_active_mesh_path() {
         let temp = tempfile::tempdir().unwrap();
@@ -674,6 +848,7 @@ mod tests {
                     latency_ms: Some(42),
                     fallback: false,
                     updates_active_path: true,
+                    transport: None,
                 },
             )
             .await
@@ -690,6 +865,7 @@ mod tests {
                     latency_ms: Some(50),
                     fallback: false,
                     updates_active_path: false,
+                    transport: None,
                 },
             )
             .await
@@ -714,6 +890,7 @@ mod tests {
                     latency_ms: Some(50),
                     fallback: false,
                     updates_active_path: true,
+                    transport: None,
                 },
             )
             .await
@@ -734,6 +911,7 @@ mod tests {
                     latency_ms: None,
                     fallback: false,
                     updates_active_path: true,
+                    transport: None,
                 },
             )
             .await
@@ -748,6 +926,7 @@ mod tests {
                     latency_ms: Some(60),
                     fallback: true,
                     updates_active_path: true,
+                    transport: None,
                 },
             )
             .await
@@ -775,6 +954,7 @@ mod tests {
                     latency_ms: None,
                     fallback: false,
                     updates_active_path: false,
+                    transport: None,
                 },
             )
             .await

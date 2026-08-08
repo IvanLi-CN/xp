@@ -10,6 +10,9 @@ set -euo pipefail
 # - safe cleanup (only resources created by this run)
 
 TESTBOX="${TESTBOX:-codex-testbox}"
+RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
+ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
+MESH_RESOURCE_BASELINE_SHA="962751d70bfb3488eb78b84fd1e369c97c304f6f"
 
 # 1) Identify local repo root (fallback to current dir if not a git repo).
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -45,6 +48,7 @@ REMOTE_BASE="/srv/codex/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 REMOTE_SUBNET_CLAIMS="$REMOTE_BASE/.shared-testbox-subnet-claims"
+REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
 COMPOSE_PROJECT="$(python3 - "$COMPOSE_PROJECT_RAW" <<'PY'
@@ -57,6 +61,10 @@ PY
 REMOTE_RUN_B64="$(printf '%s' "$REMOTE_RUN" | base64 | tr -d '\n')"
 COMPOSE_PROJECT_B64="$(printf '%s' "$COMPOSE_PROJECT" | base64 | tr -d '\n')"
 SUBNET_CLAIM_ROOT_B64="$(printf '%s' "$REMOTE_SUBNET_CLAIMS" | base64 | tr -d '\n')"
+REMOTE_RESOURCE_BASELINE_B64="$(printf '%s' "$REMOTE_RESOURCE_BASELINE" | base64 | tr -d '\n')"
+RUN_MESH_RESOURCE_B64="$(printf '%s' "$RUN_MESH_RESOURCE" | base64 | tr -d '\n')"
+ONLY_MESH_RESOURCE_B64="$(printf '%s' "$ONLY_MESH_RESOURCE" | base64 | tr -d '\n')"
+MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900}" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -77,21 +85,37 @@ rsync -az --delete \
   --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
+  ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RESOURCE_BASELINE'"
+  git -C "$REPO_ROOT" archive "$MESH_RESOURCE_BASELINE_SHA" \
+    | ssh -o BatchMode=yes "$TESTBOX" "tar -x -C '$REMOTE_RESOURCE_BASELINE'"
+  rsync -az --delete "$REPO_ROOT/web/dist/" "$TESTBOX:$REMOTE_RESOURCE_BASELINE/web/dist/"
+fi
+
 # 5) Run on testbox.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' bash -s" <<'REMOTE'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' bash -s" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
 COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
 SUBNET_CLAIM_ROOT="$(printf '%s' "${SUBNET_CLAIM_ROOT_B64:?}" | base64 -d)"
+REMOTE_RESOURCE_BASELINE="$(printf '%s' "${REMOTE_RESOURCE_BASELINE_B64:?}" | base64 -d)"
+RUN_MESH_RESOURCE="$(printf '%s' "${RUN_MESH_RESOURCE_B64:?}" | base64 -d)"
+ONLY_MESH_RESOURCE="$(printf '%s' "${ONLY_MESH_RESOURCE_B64:?}" | base64 -d)"
+MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64 -d)"
 
 cleanup() {
   set +e
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     cd "$REMOTE_RUN/scripts/e2e" || exit 0
     if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
-      docker compose -p "$COMPOSE_PROJECT" -f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml" down -v --remove-orphans >/dev/null 2>&1 || true
+      cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
+      if [ -f ".codex.user-compat.yaml" ]; then
+        cleanup_files+=(-f ".codex.user-compat.yaml")
+      fi
+      docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     fi
   fi
   if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ -d "$SUBNET_CLAIM_DIR" ]; then
@@ -122,6 +146,11 @@ import socket
 s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()
 PY
 )"
+XP_E2E_VLESS_PORT="$(python3 - <<'PY'
+import socket
+s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()
+PY
+)"
 while [ "$XP_E2E_SS_PORT" = "$XP_E2E_XRAY_API_PORT" ]; do
   XP_E2E_SS_PORT="$(python3 - <<'PY'
 import socket
@@ -129,7 +158,14 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
 PY
   )"
 done
-export XP_E2E_XRAY_API_PORT XP_E2E_SS_PORT
+while [ "$XP_E2E_VLESS_PORT" = "$XP_E2E_XRAY_API_PORT" ] || [ "$XP_E2E_VLESS_PORT" = "$XP_E2E_SS_PORT" ]; do
+  XP_E2E_VLESS_PORT="$(python3 - <<'PY'
+import socket
+s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()
+PY
+  )"
+done
+export XP_E2E_XRAY_API_PORT XP_E2E_SS_PORT XP_E2E_VLESS_PORT
 
 COMPOSE_FILE="docker-compose.xray.yml"
 SUBNET_CLAIM_DIR=""
@@ -138,6 +174,7 @@ SUBNET_CLAIM_DIR=""
 # Workaround: drop ALL caps, then add back a known-good set (default minus SETFCAP).
 caps_override=".codex.caps-compat.yaml"
 net_override=".codex.net-compat.yaml"
+user_override=".codex.user-compat.yaml"
 services="$(docker compose -f "$COMPOSE_FILE" config --services)"
 {
   echo "services:"
@@ -297,8 +334,17 @@ networks:
 YAML
 
 echo "selected subnet: $TESTBOX_SUBNET"
-echo "starting xray: api_port=$XP_E2E_XRAY_API_PORT ss_port=$XP_E2E_SS_PORT"
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" -f "$caps_override" -f "$net_override" up -d
+echo "starting xray: api_port=$XP_E2E_XRAY_API_PORT ss_port=$XP_E2E_SS_PORT vless_port=$XP_E2E_VLESS_PORT"
+compose_files=(-f "$COMPOSE_FILE" -f "$caps_override" -f "$net_override")
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  cat > "$user_override" <<YAML
+services:
+  xray:
+    user: "$(id -u):$(id -g)"
+YAML
+  compose_files+=(-f "$user_override")
+fi
+docker compose -p "$COMPOSE_PROJECT" "${compose_files[@]}" up -d
 
 echo "waiting for xray gRPC on 127.0.0.1:$XP_E2E_XRAY_API_PORT..."
 python3 - <<'PY'
@@ -325,8 +371,43 @@ export RUST_TEST_THREADS=1
 export XP_E2E_XRAY_MODE=external
 export XP_E2E_XRAY_API_ADDR="127.0.0.1:$XP_E2E_XRAY_API_PORT"
 
-cargo test --test xray_e2e -- --ignored
-cargo test --test shared_quota_xray_e2e -- --ignored
+if [ "$ONLY_MESH_RESOURCE" != "1" ]; then
+  cargo test --test xray_e2e -- --ignored
+  cargo test --test xray_mesh_transport_e2e -- --ignored
+  cargo test --test shared_quota_xray_e2e -- --ignored
+fi
+
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  mkdir -p "$REMOTE_RESOURCE_BASELINE/web"
+  rm -rf "$REMOTE_RESOURCE_BASELINE/web/dist"
+  cp -a "$REMOTE_RUN/web/dist" "$REMOTE_RESOURCE_BASELINE/web/dist"
+  resource_target="$REMOTE_RUN/target-resource"
+  CARGO_TARGET_DIR="$resource_target" cargo build --release --bin xp
+  cp "$resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
+  CARGO_TARGET_DIR="$resource_target" \
+    cargo build --release --bin xp --manifest-path "$REMOTE_RESOURCE_BASELINE/Cargo.toml"
+  cp "$resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
+  xray_container="$(docker ps -q \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=xray")"
+  if [ -z "$xray_container" ]; then
+    echo "resource workload Xray container is unavailable" >&2
+    exit 1
+  fi
+  xray_pid="$(docker inspect -f '{{.State.Pid}}' "$xray_container")"
+  echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid)"
+  XP_MESH_RESOURCE_MODE=shared-testbox \
+    XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
+    XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+    XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
+    XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
+    CARGO_TARGET_DIR="$resource_target" \
+    cargo test --release --test mesh_transport_resource_e2e -- --ignored --nocapture
+fi
 REMOTE
 
-echo "OK: xray_e2e + shared_quota_xray_e2e on $TESTBOX"
+if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+  echo "OK: Mesh transport resource workload on $TESTBOX"
+else
+  echo "OK: xray_e2e + xray_mesh_transport_e2e + shared_quota_xray_e2e on $TESTBOX"
+fi

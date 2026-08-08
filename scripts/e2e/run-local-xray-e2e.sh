@@ -48,6 +48,31 @@ PY
 done
 export XP_E2E_SS_PORT
 
+if [ -z "${XP_E2E_VLESS_PORT:-}" ]; then
+  XP_E2E_VLESS_PORT="$(
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+  )"
+fi
+while [ "${XP_E2E_VLESS_PORT}" = "${XP_E2E_XRAY_API_PORT}" ] ||
+  [ "${XP_E2E_VLESS_PORT}" = "${XP_E2E_SS_PORT}" ]; do
+  XP_E2E_VLESS_PORT="$(
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+  )"
+done
+export XP_E2E_VLESS_PORT
+
 cleanup() {
   compose down
 }
@@ -93,6 +118,11 @@ export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
 cargo test --test xray_e2e -- --ignored
+
+XP_E2E_XRAY_MODE=external \
+XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+cargo test --test xray_mesh_transport_e2e -- --ignored
 
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \

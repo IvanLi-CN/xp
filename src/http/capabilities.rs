@@ -41,6 +41,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.status-events",
             "admin.upgrade",
             "admin.mesh",
+            "admin.mesh-transport-reuse",
             "admin.reality-domains",
             "admin.node-probes",
             "admin.traffic-usage",
@@ -69,6 +70,11 @@ mod tests {
                 .contains(&"admin.endpoint-mihomo-smux")
         );
         assert!(response.capabilities.contains(&"admin.status-events"));
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.mesh-transport-reuse")
+        );
         assert_eq!(response.fingerprint["/api/health"], vec!["status"]);
     }
 }

@@ -42,7 +42,8 @@ use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
     control_plane_mesh::{
-        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest, PeerCircuitBreakers,
+        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
+        build_mesh_http_client,
     },
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
@@ -66,8 +67,9 @@ use crate::{
         DEFAULT_VLESS_FINGERPRINT, DefaultVlessEndpointSpec, build_managed_default_vless_endpoint,
     },
     mesh_telemetry::{
-        BreakerState, MeshQuality, MeshTelemetryHandle, TelemetryPath, availability_for,
-        latency_percentiles_for, quality_for_peer,
+        BreakerState, MeshQuality, MeshTelemetryHandle, MeshTransportHealth, MeshTransportProtocol,
+        TelemetryPath, availability_for, latency_percentiles_for, mesh_transport_counts_for,
+        mesh_transport_health_for, quality_for_peer,
     },
     mihomo_redact, mihomo_resources,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
@@ -140,7 +142,7 @@ pub struct AppState {
     pub ops_github_api_base_url: Arc<String>,
     pub ops_github_client: reqwest::Client,
     pub mesh_proxy_state: MeshProxyStateHandle,
-    pub mesh_circuits: PeerCircuitBreakers,
+    pub mesh_client: MeshAwareHttpClient,
     pub mesh_telemetry: MeshTelemetryHandle,
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
@@ -869,6 +871,21 @@ pub fn build_router(
 ) -> Router {
     let mesh_telemetry =
         MeshTelemetryHandle::load(&config.data_dir).expect("load local mesh telemetry");
+    let node_cert_pem = cluster
+        .read_node_cert_pem(&config.data_dir)
+        .expect("read node certificate");
+    let node_key_pem = cluster
+        .read_node_key_pem(&config.data_dir)
+        .expect("read node private key");
+    let mesh_client = build_mesh_http_client(
+        &cluster_ca_pem,
+        &node_cert_pem,
+        &node_key_pem,
+        config.mesh_proxy_url.as_deref(),
+        mesh_proxy_state.clone(),
+    )
+    .expect("build Mesh transport clients")
+    .with_mesh_observability(mesh_telemetry.clone());
     build_router_with_mesh_telemetry(
         config,
         store,
@@ -887,7 +904,7 @@ pub fn build_router(
         geo_db_update,
         mesh_proxy_state,
         mesh_telemetry,
-        PeerCircuitBreakers::default(),
+        mesh_client,
     )
 }
 
@@ -910,7 +927,7 @@ pub fn build_router_with_mesh_telemetry(
     geo_db_update: GeoDbUpdateHandle,
     mesh_proxy_state: MeshProxyStateHandle,
     mesh_telemetry: MeshTelemetryHandle,
-    mesh_circuits: PeerCircuitBreakers,
+    mesh_client: MeshAwareHttpClient,
 ) -> Router {
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
@@ -958,7 +975,7 @@ pub fn build_router_with_mesh_telemetry(
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
         mesh_proxy_state,
-        mesh_circuits,
+        mesh_client,
         mesh_telemetry,
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
@@ -2407,7 +2424,7 @@ async fn admin_list_nodes_runtime_response(
     };
     let local_node_id = state.cluster.node_id.clone();
 
-    let client = build_cluster_http_client(state)?;
+    let client = state.mesh_client.clone();
     let mut items = Vec::new();
     let mut unreachable_nodes = Vec::new();
 
@@ -2503,7 +2520,7 @@ async fn admin_get_node_runtime(
         )));
     }
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
     let response = send_mesh_internal_read(
         &state,
         &client,
@@ -2644,7 +2661,7 @@ async fn admin_get_user_traffic(
         .collect::<BTreeMap<_, _>>();
 
     let local_node_id = state.cluster.node_id.clone();
-    let client = build_admin_http_client(&state)?;
+    let client = state.mesh_client.clone();
     let report_now = Utc::now();
     let history = state.node_history.clone();
     let state_for_fanout = state.clone();
@@ -3054,7 +3071,7 @@ async fn admin_get_node_tcp_connections(
         )));
     }
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
     let response = send_mesh_internal_read(
         &state,
         &client,
@@ -3169,7 +3186,7 @@ async fn admin_get_node_ip_usage(
         )));
     }
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
     let response = send_mesh_internal_read(
         &state,
         &client,
@@ -3305,7 +3322,7 @@ async fn admin_get_user_ip_usage(
     let mut groups = Vec::<AdminUserIpUsageNodeGroup>::new();
     let mut unreachable_nodes = Vec::<String>::new();
 
-    let client = build_admin_http_client(&state)?;
+    let client = state.mesh_client.clone();
     for node in relevant_nodes {
         if node.node_id == local_node_id {
             let geo_source = state.geo_db_update.ip_geo_source();
@@ -3601,7 +3618,7 @@ async fn admin_stream_node_runtime_events(
                 },
             ));
         } else {
-            let client = build_cluster_http_client(&state)?;
+            let client = state.mesh_client.clone();
             let state_for_remote = state.clone();
             tokio::spawn(async move {
                 forward_remote_node_runtime_events(state_for_remote, client, node, tx).await;
@@ -3791,7 +3808,7 @@ async fn admin_refresh_node_egress_probe(
         )));
     }
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
     let response = send_mesh_internal_request(
         &state,
         &client,
@@ -4954,58 +4971,6 @@ async fn admin_get_endpoint_probe_history(
     )))
 }
 
-fn build_cluster_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiError> {
-    let ca = reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    // Best effort: if the edge requires mTLS, attach node identity.
-    let cert = state
-        .cluster
-        .read_node_cert_pem(&state.config.data_dir)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let key = state
-        .cluster
-        .read_node_key_pem(&state.config.data_dir)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let identity_pem = format!("{cert}\n{key}");
-    let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let direct = reqwest::Client::builder()
-        .add_root_certificate(
-            reqwest::Certificate::from_pem(state.cluster_ca_pem.as_bytes())
-                .map_err(|e| ApiError::internal(e.to_string()))?,
-        )
-        .identity(
-            reqwest::Identity::from_pem(identity_pem.as_bytes())
-                .map_err(|e| ApiError::internal(e.to_string()))?,
-        )
-        .build()
-        .map_err(|e| ApiError::internal(format!("build cluster reqwest client: {e}")))?;
-
-    let relay = if let Some(mesh_proxy_url) = state.config.mesh_proxy_url.as_deref() {
-        let relay_builder = crate::control_plane_mesh::apply_optional_proxy(
-            reqwest::Client::builder()
-                .add_root_certificate(ca)
-                .identity(identity),
-            Some(mesh_proxy_url),
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-        Some(
-            relay_builder
-                .build()
-                .map_err(|e| ApiError::internal(format!("build relay reqwest client: {e}")))?,
-        )
-    } else {
-        None
-    };
-
-    Ok(
-        MeshAwareHttpClient::new(direct, relay, state.mesh_proxy_state.clone())
-            .with_mesh_observability(state.mesh_telemetry.clone())
-            .with_circuits(state.mesh_circuits.clone()),
-    )
-}
-
 async fn admin_run_endpoint_probe_run(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminEndpointProbeRunResponse>, ApiError> {
@@ -5021,7 +4986,7 @@ async fn admin_run_endpoint_probe_run(
 
     let local_node_id = state.cluster.node_id.clone();
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
 
     let mut tasks = Vec::new();
     for node in nodes {
@@ -5258,7 +5223,7 @@ async fn admin_get_endpoint_probe_run_status(
     };
     let local_node_id = state.cluster.node_id.clone();
 
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
 
     let mut tasks = Vec::new();
     for node in nodes {
@@ -5641,7 +5606,7 @@ async fn admin_stream_endpoint_probe_run_events(
     initial_events.push_back(sse_json_event("hello", &hello));
 
     let local_node_id = state.cluster.node_id.clone();
-    let client = build_cluster_http_client(&state)?;
+    let client = state.mesh_client.clone();
 
     let (tx, rx) = mpsc::channel::<Event>(512);
 
@@ -6264,7 +6229,7 @@ async fn admin_probe_endpoint_canary(
     let url = endpoint_canary_probe_url(&node, &endpoint)?;
 
     let local_node_id = state.cluster.node_id.clone();
-    let cluster_client = build_cluster_http_client(&state)?;
+    let cluster_client = state.mesh_client.clone();
 
     let mut tasks = Vec::new();
     for node in nodes {
@@ -7141,7 +7106,7 @@ async fn admin_list_user_quota_summaries(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(&state)?;
+    let client = state.mesh_client.clone();
 
     let mut unreachable_nodes = Vec::new();
 
@@ -7400,7 +7365,7 @@ async fn admin_get_user_node_quota_status(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(&state)?;
+    let client = state.mesh_client.clone();
 
     let mut items = local_items;
     let mut unreachable_nodes = Vec::new();
@@ -7802,38 +7767,6 @@ fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<Ale
     items
 }
 
-fn build_admin_http_client(state: &AppState) -> Result<MeshAwareHttpClient, ApiError> {
-    let cluster_ca_pem = state.cluster_ca_pem.as_str();
-    let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let direct = reqwest::Client::builder()
-        .add_root_certificate(ca)
-        .build()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let relay = if let Some(mesh_proxy_url) = state.config.mesh_proxy_url.as_deref() {
-        let relay_builder = crate::control_plane_mesh::apply_optional_proxy(
-            reqwest::Client::builder().add_root_certificate(
-                reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-                    .map_err(|e| ApiError::internal(e.to_string()))?,
-            ),
-            Some(mesh_proxy_url),
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-        Some(
-            relay_builder
-                .build()
-                .map_err(|e| ApiError::internal(e.to_string()))?,
-        )
-    } else {
-        None
-    };
-    Ok(
-        MeshAwareHttpClient::new(direct, relay, state.mesh_proxy_state.clone())
-            .with_mesh_observability(state.mesh_telemetry.clone())
-            .with_circuits(state.mesh_circuits.clone()),
-    )
-}
-
 async fn admin_get_alerts_response(
     state: &AppState,
     scope: Option<&str>,
@@ -7864,7 +7797,7 @@ async fn admin_get_alerts_response(
         let store = state.store.lock().await;
         store.list_nodes()
     };
-    let client = build_admin_http_client(state)?;
+    let client = state.mesh_client.clone();
 
     let mut items = local_items;
     let mut unreachable_nodes = Vec::new();

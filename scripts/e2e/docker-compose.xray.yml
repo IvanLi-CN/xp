@@ -7,6 +7,7 @@ services:
     ports:
       - "127.0.0.1:${XP_E2E_XRAY_API_PORT:-10085}:10085"
       - "127.0.0.1:${XP_E2E_SS_PORT:-31080}:${XP_E2E_SS_PORT:-31080}"
+      - "127.0.0.1:${XP_E2E_VLESS_PORT:-31081}:${XP_E2E_VLESS_PORT:-31081}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
