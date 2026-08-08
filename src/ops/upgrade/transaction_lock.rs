@@ -19,8 +19,7 @@ pub(super) fn begin(
     if !is_real_upgrade {
         return Ok(None);
     }
-    if is_resumed_upgrade {
-        verify_resume_owner(data_dir)?;
+    if is_resumed_upgrade && current_process_owns_lock(data_dir)? {
         return Ok(None);
     }
     UpgradeTransactionLock::acquire(data_dir).map(Some)
@@ -131,15 +130,12 @@ fn release_path(path: &Path) {
     }
 }
 
-pub(super) fn verify_resume_owner(data_dir: &Path) -> Result<(), ExitError> {
+fn current_process_owns_lock(data_dir: &Path) -> Result<bool, ExitError> {
     let path = crate::upgrade_job::upgrade_dir(data_dir).join(TRANSACTION_LOCK_FILE);
-    if lock_owner_pid(&path)? == Some(current_pid()) {
-        return Ok(());
+    if !path.exists() {
+        return Ok(false);
     }
-    Err(ExitError::new(
-        3,
-        "invalid_args: resumed upgrade lock is not owned by current process",
-    ))
+    Ok(lock_owner_pid(&path)? == Some(current_pid()))
 }
 
 fn lock_owner_is_running(path: &Path) -> Result<bool, ExitError> {
@@ -176,7 +172,7 @@ fn current_pid() -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{TRANSACTION_LOCK_FILE, UpgradeTransactionLock, release, verify_resume_owner};
+    use super::{TRANSACTION_LOCK_FILE, UpgradeTransactionLock, begin, release};
 
     #[test]
     fn rejects_a_second_live_upgrade_transaction() {
@@ -185,6 +181,13 @@ mod tests {
         let error = UpgradeTransactionLock::acquire(tmp.path()).unwrap_err();
         assert_eq!(error.code, 3);
         assert_eq!(error.message, "upgrade_in_progress");
+    }
+
+    #[test]
+    fn resumed_upgrade_without_a_lock_acquires_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = begin(tmp.path(), true, true).unwrap();
+        assert!(lock.is_some());
     }
 
     #[test]
@@ -206,9 +209,9 @@ mod tests {
         let upgrade_dir = tmp.path().join("upgrade");
         std::fs::create_dir_all(&upgrade_dir).unwrap();
         let path = upgrade_dir.join(TRANSACTION_LOCK_FILE);
-        std::fs::write(&path, format!("{}\n", std::process::id() + 1)).unwrap();
+        std::fs::write(&path, "1\n").unwrap();
 
-        assert!(verify_resume_owner(tmp.path()).is_err());
+        assert!(begin(tmp.path(), true, true).is_err());
         release(tmp.path());
         assert!(path.exists());
     }
