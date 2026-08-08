@@ -541,6 +541,8 @@ run_rollback_case() {
     dump_case_debug rollback-startup
     return 1
   }
+  # A durable v2 epoch rejects rollback to an unverified old binary. Exercise
+  # the transaction rollback contract on a legacy, pre-cutover fixture.
   rm -f "$XP_DATA_DIR/mesh/internal-auth-v2.json"
   touch "$RESTART_FAIL_FILE"
 
