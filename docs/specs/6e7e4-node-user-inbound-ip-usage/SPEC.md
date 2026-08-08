@@ -164,40 +164,75 @@
 - In-plan references: None.
 - PR visual evidence source: maintain `## Visual Evidence (PR)` in this spec when PR screenshots are needed.
 
-## Visual Evidence (PR)
+## Visual Evidence
 
-- source_type: `storybook_canvas`
-  target_program: `mock-only`
-  capture_scope: `element`
-  sensitive_exclusion: `N/A`
-  submission_gate: `approved-by-owner`
-  story_id_or_title: `Pages/NodeDetailsPage/IpUsageTab`
-  state: `default (24h)`
-  evidence_note: 验证节点详情 `IP usage` tab 的 unique-IP 面积图、占用泳道与 IP 列表在同一视图内完整出现。
-  image:
-  ![Node details IP usage tab](./assets/node-details-ip-usage-tab.png)
+Storybook覆盖=通过
 
-- source_type: `storybook_canvas`
-  target_program: `mock-only`
-  capture_scope: `element`
-  sensitive_exclusion: `N/A`
-  submission_gate: `approved-by-owner`
-  story_id_or_title: `Pages/UserDetailsPage/UsageDetailsTab`
-  state: `default (24h)`
-  evidence_note: 验证用户详情 `Usage details` tab 以节点切换 tabs 呈现，并展示对应节点的图表与 IP 列表。
-  image:
-  ![User details usage details tab](./assets/user-details-usage-details-tab.png)
+视觉证据目标源=storybook_canvas
 
-- source_type: `storybook_canvas`
-  target_program: `mock-only`
-  capture_scope: `browser-viewport`
-  sensitive_exclusion: `N/A`
-  submission_gate: `approved-by-owner`
-  story_id_or_title: `Components/IpUsageView/Default`
-  state: `pinned IP + time highlight (24h)`
-  evidence_note: 验证 IP usage 顶部摘要区的 pinned IP 与 Time badge 在深色主题下具备足够对比度，并与图表中的时间高亮保持联动。
-  image:
-  ![IP usage highlight summary badges](./assets/ip-usage-highlight-summary-time.png)
+视觉证据=存在
+
+空白裁剪=已裁剪
+
+聊天回图=已展示
+
+证据落盘=已落盘
+
+证据绑定sha=4ca4d4306db10fa44a936f8fa718c10e14796b4e
+
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1440x1000
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=trim_only
+  evidence_surface=page
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Pages/NodeDetailsPage/IpUsageTab7d
+  state=dark 7-day unique-IP step chart
+  evidence_note=验证 Node details 的 IP usage 7d 窗口使用当前平顶阶梯线，occupancy lanes 与 IP 列表保持完整。
+
+PR: include
+
+![Node IP usage 7-day step chart](./assets/node-ip-usage-7d-step.png)
+
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1440x1000
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=require_margin
+  evidence_surface=component
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Components/IpUsageView/LoadingLatest
+  state=dark loading latest data
+  evidence_note=验证弱阻断遮罩保留图表上下文，同时以高对比状态条提示加载中。
+
+PR: include
+
+![IP usage loading overlay dark](./assets/ip-usage-window-loading-dark.png)
+
+- source_type=storybook_canvas
+  target_program=mock-only
+  capture_scope=browser-viewport
+  requested_viewport=1440x1000
+  viewport_strategy=browser-resize-fallback
+  （仓库未启用 Storybook viewport addon）
+  margin_policy=require_margin
+  evidence_surface=component
+  sensitive_exclusion=N/A
+  submission_gate=approved
+  story_id_or_title=Components/IpUsageView/LoadingLatest
+  state=light loading latest data
+  evidence_note=验证亮色主题下遮罩、状态条、图标与文字具备清晰层级。
+
+PR: include
+
+![IP usage loading overlay light](./assets/ip-usage-window-loading-light.png)
 
 ## 资产晋升（Asset promotion）
 

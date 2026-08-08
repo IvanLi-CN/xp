@@ -56,6 +56,10 @@ export const Dense7d: Story = {
 	},
 };
 
+export const LoadingLatest: Story = {
+	args: { isWindowPending: true },
+};
+
 export const Empty: Story = {
 	args: {
 		emptyTitle: "No inbound IP activity",

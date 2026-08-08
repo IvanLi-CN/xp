@@ -5,10 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import {
-	type AdminIpUsageWindow,
-	fetchAdminNodeIpUsage,
-} from "../api/adminIpUsage";
+import type { AdminIpUsageWindow } from "../api/adminIpUsage";
 import {
 	type NodeHistorySnapshot,
 	fetchAdminNodeHistory,
@@ -31,11 +28,7 @@ import {
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
-import {
-	type AdminTcpConnectionUsageWindow,
-	fetchAdminNodeTcpConnections,
-} from "../api/adminTcpConnections";
-import { fetchAdminNodeTraffic } from "../api/adminTraffic";
+import type { AdminTcpConnectionUsageWindow } from "../api/adminTcpConnections";
 import { isBackendApiError } from "../api/backendError";
 import type { NodeQuotaReset } from "../api/quotaReset";
 import { useApiCapability } from "../api/useApiCompatibility";
@@ -46,6 +39,7 @@ import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
+import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
@@ -72,6 +66,7 @@ import {
 	SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { useNodeTimeWindowReports } from "../hooks/useNodeTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
 	formatSyncTimestamp,
@@ -508,7 +503,6 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
-
 	const [runtimeLive, setRuntimeLive] =
 		useState<AdminNodeRuntimeDetailResponse | null>(null);
 	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
@@ -517,53 +511,32 @@ export function NodeDetailsPage() {
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [tcpConnectionsWindow, setTcpConnectionsWindow] =
 		useState<AdminTcpConnectionUsageWindow>("24h");
-	const trafficQuery = useQuery({
-		queryKey: ["adminNodeTraffic", adminToken, nodeId, prefs.trafficWindow],
-		enabled:
-			adminToken.length > 0 &&
-			nodesCapability.available &&
-			activeTab === "traffic",
-		queryFn: ({ signal }) =>
-			fetchAdminNodeTraffic(adminToken, nodeId, prefs.trafficWindow, signal),
-		placeholderData: (previousData) =>
-			previousData?.node.node_id === nodeId &&
-			previousData.traffic.window === prefs.trafficWindow
-				? previousData
-				: undefined,
-	});
-	const ipUsageQuery = useQuery({
-		queryKey: ["adminNodeIpUsage", adminToken, nodeId, ipUsageWindow],
-		enabled:
+	const {
+		ipUsageDisplay,
+		ipUsageQuery,
+		tcpConnectionsDisplay,
+		tcpConnectionsQuery,
+		trafficDisplay,
+		trafficQuery,
+	} = useNodeTimeWindowReports({
+		adminToken,
+		ipUsageEnabled:
 			adminToken.length > 0 &&
 			nodesCapability.available &&
 			activeTab === "ipUsage",
-		queryFn: ({ signal }) =>
-			fetchAdminNodeIpUsage(adminToken, nodeId, ipUsageWindow, signal),
-		placeholderData: (previousData) =>
-			previousData?.node.node_id === nodeId ? previousData : undefined,
-	});
-	const tcpConnectionsQuery = useQuery({
-		queryKey: [
-			"adminNodeTcpConnections",
-			adminToken,
-			nodeId,
-			tcpConnectionsWindow,
-		],
-		enabled:
+		ipUsageWindow,
+		nodeId,
+		tcpConnectionsEnabled:
 			adminToken.length > 0 &&
 			nodesCapability.available &&
 			activeTab === "tcpConnections",
-		queryFn: ({ signal }) =>
-			fetchAdminNodeTcpConnections(
-				adminToken,
-				nodeId,
-				tcpConnectionsWindow,
-				signal,
-			),
-		placeholderData: (previousData) =>
-			previousData?.node.node_id === nodeId ? previousData : undefined,
+		tcpConnectionsWindow,
+		trafficEnabled:
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			activeTab === "traffic",
+		trafficWindow: prefs.trafficWindow,
 	});
-
 	useEffect(() => {
 		if (!nodeId) return;
 		setRuntimeLive(null);
@@ -573,7 +546,6 @@ export function NodeDetailsPage() {
 		setIpUsageWindow("24h");
 		setTcpConnectionsWindow("24h");
 	}, [nodeId]);
-
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
@@ -1549,14 +1521,14 @@ export function NodeDetailsPage() {
 
 					{activeTab === "traffic" ? (
 						<div className="space-y-4">
-							{trafficQuery.isLoading && !trafficQuery.data ? (
+							{trafficQuery.isLoading && !trafficDisplay.data ? (
 								<PageState
 									variant="loading"
 									title="Loading traffic"
 									description="Fetching five-minute node traffic rollups."
 								/>
 							) : null}
-							{!trafficQuery.data &&
+							{!trafficDisplay.data &&
 							queryIsOfflineBlocked(trafficQuery, appRuntime.isOnline) ? (
 								<PageState
 									variant="offline"
@@ -1565,7 +1537,7 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 							{trafficQuery.isError &&
-							!trafficQuery.data &&
+							!trafficDisplay.data &&
 							!queryIsOfflineBlocked(trafficQuery, appRuntime.isOnline) ? (
 								<QueryErrorState
 									title="Failed to load traffic"
@@ -1575,12 +1547,22 @@ export function NodeDetailsPage() {
 									onRetry={() => trafficQuery.refetch()}
 								/>
 							) : null}
-							{trafficQuery.data ? (
+							{trafficQuery.isError && trafficDisplay.data ? (
+								<QueryRefreshError
+									title="Traffic refresh failed"
+									description={formatErrorMessage(trafficQuery.error)}
+									error={trafficQuery.error}
+									loading={trafficQuery.isFetching}
+									onRetry={() => trafficQuery.refetch()}
+								/>
+							) : null}
+							{trafficDisplay.data ? (
 								<TrafficView
-									report={trafficQuery.data.traffic}
-									window={prefs.trafficWindow}
+									report={trafficDisplay.data.traffic}
+									window={trafficDisplay.displayWindow ?? prefs.trafficWindow}
 									onWindowChange={(next) => prefs.setTrafficWindow(next)}
 									isFetching={trafficQuery.isFetching}
+									isWindowPending={trafficDisplay.isWindowPending}
 								/>
 							) : null}
 						</div>
@@ -1588,15 +1570,14 @@ export function NodeDetailsPage() {
 
 					{activeTab === "ipUsage" ? (
 						<div className="space-y-4">
-							{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
+							{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
 								<PageState
 									variant="loading"
 									title="Loading IP usage"
 									description="Fetching minute-level inbound IP usage for this node."
 								/>
 							) : null}
-
-							{!ipUsageQuery.data &&
+							{!ipUsageDisplay.data &&
 							queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
 								<PageState
 									variant="offline"
@@ -1604,9 +1585,8 @@ export function NodeDetailsPage() {
 									description="Open this tab while online to keep the latest inbound IP report available offline."
 								/>
 							) : null}
-
 							{ipUsageQuery.isError &&
-							!ipUsageQuery.data &&
+							!ipUsageDisplay.data &&
 							!queryIsOfflineBlocked(ipUsageQuery, appRuntime.isOnline) ? (
 								<QueryErrorState
 									title="Failed to load IP usage"
@@ -1617,15 +1597,26 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{ipUsageQuery.data ? (
+							{ipUsageQuery.isError && ipUsageDisplay.data ? (
+								<QueryRefreshError
+									title="IP usage refresh failed"
+									description={formatErrorMessage(ipUsageQuery.error)}
+									error={ipUsageQuery.error}
+									loading={ipUsageQuery.isFetching}
+									onRetry={() => ipUsageQuery.refetch()}
+								/>
+							) : null}
+
+							{ipUsageDisplay.data ? (
 								<IpUsageView
 									title="IP usage"
 									description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
-									window={ipUsageWindow}
-									geoSource={ipUsageQuery.data.geo_source}
+									window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
+									geoSource={ipUsageDisplay.data.geo_source}
 									onWindowChange={setIpUsageWindow}
-									report={ipUsageQuery.data}
+									report={ipUsageDisplay.data}
 									isFetching={ipUsageQuery.isFetching}
+									isWindowPending={ipUsageDisplay.isWindowPending}
 									emptyTitle="No inbound IP activity"
 								/>
 							) : null}
@@ -1634,7 +1625,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "tcpConnections" ? (
 						<div className="space-y-4">
-							{tcpConnectionsQuery.isLoading && !tcpConnectionsQuery.data ? (
+							{tcpConnectionsQuery.isLoading && !tcpConnectionsDisplay.data ? (
 								<PageState
 									variant="loading"
 									title="Loading TCP connection count"
@@ -1642,7 +1633,7 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{!tcpConnectionsQuery.data &&
+							{!tcpConnectionsDisplay.data &&
 							queryIsOfflineBlocked(
 								tcpConnectionsQuery,
 								appRuntime.isOnline,
@@ -1655,7 +1646,7 @@ export function NodeDetailsPage() {
 							) : null}
 
 							{tcpConnectionsQuery.isError &&
-							!tcpConnectionsQuery.data &&
+							!tcpConnectionsDisplay.data &&
 							!queryIsOfflineBlocked(
 								tcpConnectionsQuery,
 								appRuntime.isOnline,
@@ -1669,12 +1660,25 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 
-							{tcpConnectionsQuery.data ? (
+							{tcpConnectionsQuery.isError && tcpConnectionsDisplay.data ? (
+								<QueryRefreshError
+									title="TCP connection refresh failed"
+									description={formatErrorMessage(tcpConnectionsQuery.error)}
+									error={tcpConnectionsQuery.error}
+									loading={tcpConnectionsQuery.isFetching}
+									onRetry={() => tcpConnectionsQuery.refetch()}
+								/>
+							) : null}
+
+							{tcpConnectionsDisplay.data ? (
 								<TcpConnectionUsageView
-									window={tcpConnectionsWindow}
+									window={
+										tcpConnectionsDisplay.displayWindow ?? tcpConnectionsWindow
+									}
 									onWindowChange={setTcpConnectionsWindow}
-									report={tcpConnectionsQuery.data}
+									report={tcpConnectionsDisplay.data}
 									isFetching={tcpConnectionsQuery.isFetching}
+									isWindowPending={tcpConnectionsDisplay.isWindowPending}
 								/>
 							) : null}
 						</div>

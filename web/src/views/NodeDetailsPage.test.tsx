@@ -326,11 +326,13 @@ function setupMocks(args?: {
 describe("<NodeDetailsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
 	});
 
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
 	});
 
 	it("loads IP usage on demand and switches windows", async () => {
