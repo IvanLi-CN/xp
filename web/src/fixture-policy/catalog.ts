@@ -3,15 +3,21 @@ import catalog from "../../../fixture-policy/catalog.json" with {
 };
 
 const slotString = Object.fromEntries(
-	catalog.slots.strings.map((value, index) => [`s${index}`, () => value]),
+	catalog.slots.strings.map((_, index) => [
+		`s${index}`,
+		() => catalog.slots.strings[index],
+	]),
 ) as Record<`s${number}`, () => string>;
 const slotNumber = Object.fromEntries(
-	catalog.slots.numbers.map((value, index) => [`n${index}`, () => value]),
+	catalog.slots.numbers.map((_, index) => [
+		`n${index}`,
+		() => catalog.slots.numbers[index],
+	]),
 ) as Record<`n${number}`, () => number>;
 const slotList = Object.fromEntries(
-	catalog.slots.stringLists.map((value, index) => [
+	catalog.slots.stringLists.map((_, index) => [
 		`l${index}`,
-		() => [...value],
+		() => [...catalog.slots.stringLists[index]],
 	]),
 ) as Record<`l${number}`, () => string[]>;
 
@@ -66,9 +72,13 @@ export const fixtureCatalog = {
 	authority: {
 		edgeExamplePort443: () => [...catalog.lists.primaryAuthorities],
 		existingAuthoritiesPort443: () =>
-			catalog.slots.stringLists[12].map((authority) => `${authority}:443`),
+			catalog.slots.stringLists[12].map(
+				(_, index) => `${catalog.slots.stringLists[12][index]}:443`,
+			),
 		existingAndHost119Port53844: () => [
-			...catalog.slots.stringLists[12].map((authority) => `${authority}:443`),
+			...catalog.slots.stringLists[12].map(
+				(_, index) => `${catalog.slots.stringLists[12][index]}:443`,
+			),
 			`${catalog.slots.strings[119]}:53844`,
 		],
 		host119Port53844: () => [`${catalog.slots.strings[119]}:53844`],

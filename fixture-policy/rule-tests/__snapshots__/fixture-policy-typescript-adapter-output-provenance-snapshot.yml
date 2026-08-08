@@ -1,0 +1,16 @@
+id: fixture-policy-typescript-adapter-output-provenance
+snapshots:
+  ? |
+    const primary = () => "live.example";
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 16
+      end: 36
+  ? |
+    const primary = () => `live.${suffix}`;
+  : labels:
+    - source: () => `live.${suffix}`
+      style: primary
+      start: 16
+      end: 38

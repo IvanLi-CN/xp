@@ -810,11 +810,17 @@ export async function setupApiMocks(
 				if (!desired.has(id)) deleted += 1;
 			}
 
-			const nextItems: AdminUserAccessItem[] = [...desired].sort().map(() => ({
-				user_id: userId,
-				endpoint_id: fixtureCatalog.slotString.s68(),
-				node_id: fixtureCatalog.string.none(),
-			}));
+			const nextItems: AdminUserAccessItem[] = [...desired]
+				.sort()
+				.map((endpointId) => {
+					const endpoint = endpointById.get(endpointId);
+					if (!endpoint) throw new Error(`missing endpoint: ${endpointId}`);
+					return {
+						user_id: userId,
+						endpoint_id: endpoint.endpoint_id,
+						node_id: endpoint.node_id,
+					};
+				});
 			state.userAccessByUserId[userId] = nextItems;
 
 			jsonResponse(route, { created, deleted, items: nextItems });

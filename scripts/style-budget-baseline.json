@@ -1092,7 +1092,7 @@
   "web/tests/e2e/helpers.ts": {
     "long_line_count": 0,
     "max_line_length": 84,
-    "source_lines": 1057
+    "source_lines": 1063
   },
   "fixture-policy/rules/catalog-keys.yml": {
     "long_line_count": 1,
