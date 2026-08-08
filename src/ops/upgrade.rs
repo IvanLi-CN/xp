@@ -17,6 +17,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 mod failure;
 mod managed_runtimes;
+mod reexec;
 use failure::{
     cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
     record_early_upgrade_failure, restore_after_failed_install,
@@ -24,6 +25,7 @@ use failure::{
     unrestored_transaction_backup_error, write_upgrade_diagnostics,
 };
 use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
+use reexec::{clear_upgrade_resume_env, finish_reexeced_upgrade, resume_with_upgraded_xp_ops};
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -32,6 +34,7 @@ const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
+const UPGRADE_RESUME_SERVICE_PHASE_COMPLETE: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_PHASE_COMPLETE";
 const ROLLBACK_FAILURE_EXIT_CODE: i32 = 8;
 #[derive(Debug, Clone, Copy)]
 enum Platform {
@@ -141,6 +144,7 @@ struct ResumeContext {
     release: LockedRelease,
     xp_ops_dest: PathBuf,
     xp_ops_backup: PathBuf,
+    service_phase_complete: bool,
 }
 
 async fn fetch_release(
@@ -323,6 +327,13 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let xp_ops_asset_name = platform.xp_ops_asset_name();
 
     if mode == Mode::Real
+        && let Some(resume) = resume.as_ref()
+        && resume.service_phase_complete
+    {
+        return finish_reexeced_upgrade(&paths, &args.data_dir, resume);
+    }
+
+    if mode == Mode::Real
         && resume.is_none()
         && let Err(error) = preflight_upgrade(&paths, &xp_dest, &xp_ops_dest)
     {
@@ -484,15 +495,28 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         if resume.is_some() {
             clear_upgrade_resume_env();
         } else {
-            let _ = upgrade_xp_ops(
+            install_xp_ops_binary(
                 &paths,
                 &release,
                 &checksums,
                 xp_ops_asset_name,
                 &xp_ops_dest,
                 &xp_ops_backup,
+                false,
             )
             .await?;
+            if let Err(error) = resume_with_upgraded_xp_ops(
+                &paths,
+                &args,
+                &release,
+                &format!("{owner}/{repo}"),
+                &api_base,
+                &xp_ops_dest,
+                &xp_ops_backup,
+            ) {
+                return rollback_xp_ops_after_resumed_failure(&xp_ops_dest, &xp_ops_backup, error);
+            }
+            unreachable!("xp-ops self-reexec must replace the current process");
         }
         Ok(())
     }
@@ -683,17 +707,6 @@ async fn upgrade_xp(
     Ok(())
 }
 
-async fn upgrade_xp_ops(
-    paths: &Paths,
-    release: &GitHubRelease,
-    checksums: &HashMap<String, [u8; 32]>,
-    asset_name: &str,
-    dest: &Path,
-    backup: &Path,
-) -> Result<bool, ExitError> {
-    install_xp_ops_binary(paths, release, checksums, asset_name, dest, backup, false).await
-}
-
 async fn install_xp_ops_binary(
     paths: &Paths,
     release: &GitHubRelease,
@@ -836,18 +849,11 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
         },
         xp_ops_dest,
         xp_ops_backup,
+        service_phase_complete: matches!(
+            std::env::var(UPGRADE_RESUME_SERVICE_PHASE_COMPLETE).as_deref(),
+            Ok("1")
+        ),
     }))
-}
-
-fn clear_upgrade_resume_env() {
-    // Safety: env vars are process-local and no other threads mutate them in `xp-ops`.
-    unsafe {
-        std::env::remove_var(UPGRADE_RESUME_TAG);
-        std::env::remove_var(UPGRADE_RESUME_REPO);
-        std::env::remove_var(UPGRADE_RESUME_API_BASE);
-        std::env::remove_var(UPGRADE_RESUME_XP_OPS_DEST);
-        std::env::remove_var(UPGRADE_RESUME_XP_OPS_BACKUP);
-    }
 }
 
 fn preserve_control_plane_listeners(
