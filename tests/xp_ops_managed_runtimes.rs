@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -28,18 +28,6 @@ fn write_executable(path: &Path, content: &str) {
     let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();
-}
-
-fn find_backup(dir: &Path, prefix: &str) -> Option<PathBuf> {
-    fs::read_dir(dir)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(prefix))
-        })
 }
 
 #[tokio::test]
@@ -164,13 +152,16 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
         fs::read(local_bin.join("cloudflared")).unwrap(),
         new_cloudflared
     );
-    assert_eq!(
-        fs::read(find_backup(&local_bin, "xray.bak.").unwrap()).unwrap(),
-        b"xray-old"
-    );
-    assert_eq!(
-        fs::read(find_backup(&local_bin, "cloudflared.bak.").unwrap()).unwrap(),
-        b"cloudflared-old"
+    assert!(
+        fs::read_dir(&local_bin)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_none_or(|name| !name.contains(".bak."))
+            })
     );
     let marker = fs::read_to_string(marker).unwrap();
     assert!(marker.contains("rc-service xray restart"));
