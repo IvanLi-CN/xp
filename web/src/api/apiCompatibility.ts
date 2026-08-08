@@ -130,19 +130,27 @@ export function resolveApiCompatibility(input: {
 	}
 	const advertised = new Set(input.capabilities ?? []);
 	if (advertised.size > 0) {
-		const candidates = RELEASE_INVENTORIES.filter((profile) =>
-			[...advertised].every((capability) =>
-				profile.capabilities.includes(capability as ApiCapability),
-			),
+		const inventoriedCapabilities = new Set(
+			RELEASE_INVENTORIES.flatMap((profile) => profile.capabilities),
 		);
-		const smallestProfileSize = Math.min(
-			...candidates.map((candidate) => candidate.capabilities.length),
+		const profileCapabilities = [...advertised].filter((capability) =>
+			inventoriedCapabilities.has(capability as ApiCapability),
 		);
-		const leastSpecificCandidates = candidates.filter(
-			(candidate) => candidate.capabilities.length === smallestProfileSize,
-		);
-		const profile = commonProfile(leastSpecificCandidates);
-		if (profile) return compatibleResult(profile, advertised);
+		if (profileCapabilities.length > 0) {
+			const candidates = RELEASE_INVENTORIES.filter((profile) =>
+				profileCapabilities.every((capability) =>
+					profile.capabilities.includes(capability as ApiCapability),
+				),
+			);
+			const smallestProfileSize = Math.min(
+				...candidates.map((candidate) => candidate.capabilities.length),
+			);
+			const leastSpecificCandidates = candidates.filter(
+				(candidate) => candidate.capabilities.length === smallestProfileSize,
+			);
+			const profile = commonProfile(leastSpecificCandidates);
+			if (profile) return compatibleResult(profile, advertised);
+		}
 	}
 
 	if (input.releaseTag !== undefined) {

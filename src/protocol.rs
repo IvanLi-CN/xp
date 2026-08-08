@@ -35,6 +35,42 @@ pub struct CanaryUpstreamConfig {
     pub mode: CanaryUpstreamMode,
 }
 
+pub const MIHOMO_SMUX_DEFAULT_MAX_CONNECTIONS: u16 = 4;
+pub const MIHOMO_SMUX_DEFAULT_MIN_STREAMS: u16 = 4;
+pub const MIHOMO_SMUX_MAX_CONNECTIONS_MAX: u16 = 16;
+pub const MIHOMO_SMUX_MIN_STREAMS_MAX: u16 = 64;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MihomoSmuxConfig {
+    pub enabled: bool,
+    pub max_connections: u16,
+    pub min_streams: u16,
+    pub only_tcp: bool,
+}
+
+impl Default for MihomoSmuxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_connections: MIHOMO_SMUX_DEFAULT_MAX_CONNECTIONS,
+            min_streams: MIHOMO_SMUX_DEFAULT_MIN_STREAMS,
+            only_tcp: true,
+        }
+    }
+}
+
+impl MihomoSmuxConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.max_connections == 0 || self.max_connections > MIHOMO_SMUX_MAX_CONNECTIONS_MAX {
+            return Err("max_connections must be between 1 and 16");
+        }
+        if self.min_streams == 0 || self.min_streams > MIHOMO_SMUX_MIN_STREAMS_MAX {
+            return Err("min_streams must be between 1 and 64");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealityServerNamesSource {
@@ -60,6 +96,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub accepted_authorities: Vec<String>,
     #[serde(default)]
+    pub mihomo_smux: MihomoSmuxConfig,
+    #[serde(default)]
     pub managed_default: bool,
 }
 
@@ -67,6 +105,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
 pub struct Ss2022EndpointMeta {
     pub method: String,
     pub server_psk_b64: String,
+    #[serde(default)]
+    pub mihomo_smux: MihomoSmuxConfig,
     #[serde(default)]
     pub managed_default: bool,
 }
@@ -540,6 +580,36 @@ mod tests {
         let server = "server";
         let user = "user";
         assert_eq!(ss2022_password(server, user), "server:user");
+    }
+
+    #[test]
+    fn mihomo_smux_defaults_and_bounds_are_stable() {
+        assert_eq!(
+            MihomoSmuxConfig::default(),
+            MihomoSmuxConfig {
+                enabled: true,
+                max_connections: 4,
+                min_streams: 4,
+                only_tcp: true,
+            }
+        );
+        assert!(MihomoSmuxConfig::default().validate().is_ok());
+        assert!(
+            MihomoSmuxConfig {
+                max_connections: 0,
+                ..MihomoSmuxConfig::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            MihomoSmuxConfig {
+                min_streams: 65,
+                ..MihomoSmuxConfig::default()
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]

@@ -347,7 +347,7 @@ fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
 }
 
 fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
-    let meta = match endpoint.kind {
+    let mut meta = match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
             serde_json::from_value::<VlessRealityVisionTcpEndpointMeta>(endpoint.meta.clone())
                 .ok()
@@ -361,14 +361,14 @@ fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
                 .unwrap_or_else(|| endpoint.meta.clone())
         }
     };
-
+    meta.as_object_mut()
+        .map(|object| object.remove("mihomo_smux"));
     let cfg = serde_json::json!({
         "kind": endpoint_kind_key(&endpoint.kind),
         "tag": endpoint.tag,
         "port": endpoint.port,
         "meta": meta,
     });
-
     let bytes = serde_json::to_vec(&cfg).ok()?;
     let mut hasher = Sha256::new();
     hasher.update(bytes);

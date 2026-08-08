@@ -446,6 +446,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             active_short_id: short_id,
             canary_upstream: None,
             accepted_authorities: Vec::new(),
+            mihomo_smux: Default::default(),
             managed_default: true,
         };
         Ok(Endpoint {
@@ -466,12 +467,19 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             serde_json::from_value(endpoint.meta.clone()).with_context(|| {
                 format!("parse VLESS endpoint {} metadata", endpoint.endpoint_id)
             })?;
+        let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
         meta.reality = self.reality_config();
         meta.managed_default = true;
 
         let mut next = endpoint.clone();
         next.meta =
             serde_json::to_value(meta).context("serialize managed default VLESS endpoint")?;
+        if !had_mihomo_smux {
+            next.meta
+                .as_object_mut()
+                .expect("serialized VLESS metadata is an object")
+                .remove("mihomo_smux");
+        }
         Ok(next)
     }
 
@@ -498,6 +506,7 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
         let meta = Ss2022EndpointMeta {
             method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
             server_psk_b64: generate_ss2022_psk_b64(&mut rng),
+            mihomo_smux: Default::default(),
             managed_default: true,
         };
         Ok(Endpoint {
@@ -519,10 +528,17 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
         }
         let mut meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone())
             .with_context(|| format!("parse SS2022 endpoint {} metadata", endpoint.endpoint_id))?;
+        let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
         meta.managed_default = true;
 
         let mut next = endpoint.clone();
         next.meta = serde_json::to_value(meta).context("serialize managed default SS endpoint")?;
+        if !had_mihomo_smux {
+            next.meta
+                .as_object_mut()
+                .expect("serialized SS2022 metadata is an object")
+                .remove("mihomo_smux");
+        }
         Ok(next)
     }
 

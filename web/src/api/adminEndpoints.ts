@@ -61,6 +61,27 @@ export type CanaryUpstreamConfig = z.infer<typeof CanaryUpstreamConfigSchema>;
 export const AcceptedAuthoritiesSchema = z.array(z.string());
 export type AcceptedAuthorities = z.infer<typeof AcceptedAuthoritiesSchema>;
 
+export const MihomoSmuxConfigSchema = z.object({
+	enabled: z.boolean(),
+	max_connections: z.number().int().min(1).max(16),
+	min_streams: z.number().int().min(1).max(64),
+	only_tcp: z.boolean(),
+});
+
+export type MihomoSmuxConfig = z.infer<typeof MihomoSmuxConfigSchema>;
+
+export const DEFAULT_MIHOMO_SMUX_CONFIG: MihomoSmuxConfig = {
+	enabled: true,
+	max_connections: 4,
+	min_streams: 4,
+	only_tcp: true,
+};
+
+export function parseMihomoSmuxConfig(value: unknown): MihomoSmuxConfig {
+	const parsed = MihomoSmuxConfigSchema.safeParse(value);
+	return parsed.success ? parsed.data : DEFAULT_MIHOMO_SMUX_CONFIG;
+}
+
 export const AdminEndpointSchema = z.object({
 	endpoint_id: z.string(),
 	node_id: z.string(),
@@ -99,6 +120,7 @@ export type AdminEndpointCreateRequest =
 			reality: RealityConfig;
 			canary_upstream?: never;
 			accepted_authorities?: never;
+			mihomo_smux?: MihomoSmuxConfig;
 	  }
 	| {
 			kind: "vless_reality_vision_tcp";
@@ -107,11 +129,13 @@ export type AdminEndpointCreateRequest =
 			reality?: never;
 			canary_upstream?: CanaryUpstreamConfig | null;
 			accepted_authorities?: string[] | null;
+			mihomo_smux?: MihomoSmuxConfig;
 	  }
 	| {
 			kind: "ss2022_2022_blake3_aes_128_gcm";
 			node_id: string;
 			port: number;
+			mihomo_smux?: MihomoSmuxConfig;
 	  };
 
 export type AdminEndpointPatchRequest = {
@@ -119,6 +143,7 @@ export type AdminEndpointPatchRequest = {
 	reality?: RealityConfig;
 	canary_upstream?: CanaryUpstreamConfig | null;
 	accepted_authorities?: string[] | null;
+	mihomo_smux?: MihomoSmuxConfig;
 };
 
 export async function fetchAdminEndpoints(

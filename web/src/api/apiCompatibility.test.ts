@@ -76,6 +76,22 @@ describe("api compatibility", () => {
 		expect(result.kind).toBe("compatible");
 	});
 
+	it("preserves additive capabilities while selecting a stable profile", () => {
+		const result = resolveApiCompatibility({
+			capabilities: [
+				"api.health",
+				"api.cluster-info",
+				"admin.nodes",
+				"admin.status-events",
+				"admin.endpoint-mihomo-smux",
+			],
+		});
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind !== "compatible") return;
+		expect(result.isFeatureAvailable("admin.endpoint-mihomo-smux")).toBe(true);
+	});
+
 	it("rejects incomplete fingerprints", () => {
 		expect(
 			resolveApiCompatibility({
@@ -225,6 +241,15 @@ describe("api compatibility", () => {
 			"/api/version/check",
 			expect.objectContaining({ method: "GET" }),
 		);
+	});
+
+	it("requires an inventoried capability to select an additive profile", () => {
+		expect(
+			resolveApiCompatibility({
+				releaseTag: "v3.23.0",
+				capabilities: ["admin.endpoint-mihomo-smux"],
+			}).kind,
+		).toBe("incompatible");
 	});
 
 	it("does not downgrade a malformed capabilities response", async () => {

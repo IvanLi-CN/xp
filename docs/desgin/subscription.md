@@ -130,6 +130,19 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - `proxies: [...]`
 - 可选：追加一个 `proxy-groups`（例如 `select`）与基础 `rules`（后续再定，避免替用户做过多假设）
 
+### 5.4 接入点 SMux 策略
+
+- 所有 XP 生成的 YAML proxy 条目均可带有接入点保存的 `smux` 配置；覆盖
+  `format=clash`、Mihomo provider 主配置所引用的 system payload，以及 VLESS/SS2022
+  的直连和链式条目。
+- 该配置的最低客户端版本是 `Mihomo >= v1.19.29`。旧客户端应升级，或由管理员在
+  接入点高级设置关闭策略。
+- 缺失 `meta.mihomo_smux` 的既有接入点默认启用：`protocol: smux`、
+  `max-connections: 4`、`min-streams: 4`、`only-tcp: true`、`padding: false`、
+  `statistic: false`。
+- Raw/Base64 的 VLESS 与 Shadowsocks URI 不携带 SMux。SMux 是 Mihomo 本地的 YAML
+  proxy 行为，不是 VLESS 或 Shadowsocks URI 的标准协商字段。
+
 ## 6. Mihomo 混入配置输出（`format=mihomo`）
 
 ### 6.1 混入配置来源

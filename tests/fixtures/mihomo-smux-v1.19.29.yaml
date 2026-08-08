@@ -1,0 +1,48 @@
+port: 0
+mode: rule
+proxies:
+  - name: xp-vless-smux
+    type: vless
+    server: vless.example.test
+    port: 443
+    uuid: 8a4f3617-6e5e-4a6f-8ba6-7cbbce1f79ed
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.example.test
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: 0123456789abcdef
+    smux:
+      enabled: true
+      protocol: smux
+      max-connections: 4
+      min-streams: 4
+      padding: false
+      statistic: false
+      only-tcp: true
+  - name: xp-ss2022-smux
+    type: ss
+    server: ss.example.test
+    port: 443
+    cipher: 2022-blake3-aes-128-gcm
+    password: AAAAAAAAAAAAAAAAAAAAAA==:BBBBBBBBBBBBBBBBBBBBBB==
+    udp: true
+    smux:
+      enabled: true
+      protocol: smux
+      max-connections: 4
+      min-streams: 4
+      padding: false
+      statistic: false
+      only-tcp: true
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - xp-vless-smux
+      - xp-ss2022-smux
+rules:
+  - MATCH,Proxy

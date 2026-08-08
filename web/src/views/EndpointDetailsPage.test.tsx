@@ -11,6 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAdminEndpoint, patchAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { resolveApiCompatibility } from "../api/apiCompatibility";
+import { API_CAPABILITIES } from "../api/releaseInventories";
+import { ApiCompatibilityProvider } from "../api/useApiCompatibility";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -43,7 +46,14 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 	};
 });
 
-vi.mock("../api/adminEndpoints");
+vi.mock("../api/adminEndpoints", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../api/adminEndpoints")>();
+	return {
+		...actual,
+		fetchAdminEndpoint: vi.fn(),
+		patchAdminEndpoint: vi.fn(),
+	};
+});
 vi.mock("../api/adminNodes");
 
 vi.mock("../components/auth", async (importOriginal) => {
@@ -54,15 +64,25 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
-function renderPage() {
+function renderPage({
+	smuxSupported = true,
+}: { smuxSupported?: boolean } = {}) {
 	const queryClient = createQueryClient();
+	const compatibility = resolveApiCompatibility({
+		capabilities: [
+			...API_CAPABILITIES,
+			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
+		],
+	});
 	return render(
 		<QueryClientProvider client={queryClient}>
-			<UiPrefsProvider>
-				<ToastProvider>
-					<EndpointDetailsPage />
-				</ToastProvider>
-			</UiPrefsProvider>
+			<ApiCompatibilityProvider value={compatibility}>
+				<UiPrefsProvider>
+					<ToastProvider>
+						<EndpointDetailsPage />
+					</ToastProvider>
+				</UiPrefsProvider>
+			</ApiCompatibilityProvider>
 		</QueryClientProvider>,
 	);
 }
@@ -200,6 +220,81 @@ describe("EndpointDetailsPage", () => {
 						"edge.example.test:53844",
 					],
 				},
+			);
+		});
+	});
+
+	it("defaults legacy endpoint SMux and persists an edited policy", async () => {
+		vi.mocked(patchAdminEndpoint).mockResolvedValue({
+			endpoint_id: "endpoint-managed-vless",
+			node_id: "node-1",
+			tag: "managed-vless",
+			kind: "vless_reality_vision_tcp",
+			port: 53844,
+			meta: {},
+		});
+
+		renderPage();
+		const enabled = await screen.findByLabelText("启用 SMux");
+		expect(enabled).toHaveAttribute("data-state", "checked");
+		fireEvent.change(await screen.findByLabelText("最大物理连接数"), {
+			target: { value: "8" },
+		});
+		fireEvent.change(await screen.findByLabelText("扩容前最小流数"), {
+			target: { value: "6" },
+		});
+		fireEvent.click(await screen.findByLabelText("仅复用 TCP"));
+		fireEvent.click(enabled);
+		expect(await screen.findByLabelText("最大物理连接数")).toBeDisabled();
+		expect(await screen.findByLabelText("仅复用 TCP")).toBeDisabled();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Save changes" }),
+		);
+
+		await waitFor(() => {
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				"endpoint-managed-vless",
+				{
+					port: 53844,
+					mihomo_smux: {
+						enabled: false,
+						max_connections: 8,
+						min_streams: 6,
+						only_tcp: false,
+					},
+				},
+			);
+		});
+	});
+
+	it("does not render or submit SMux settings to a legacy endpoint API", async () => {
+		vi.mocked(patchAdminEndpoint).mockResolvedValue({
+			endpoint_id: "endpoint-managed-vless",
+			node_id: "node-1",
+			tag: "managed-vless",
+			kind: "vless_reality_vision_tcp",
+			port: 53844,
+			meta: {},
+		});
+
+		renderPage({ smuxSupported: false });
+
+		expect(
+			await screen.findByText(
+				"This server does not support per-endpoint Mihomo SMux settings.",
+			),
+		).toBeInTheDocument();
+		expect(screen.queryByLabelText("启用 SMux")).toBeNull();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Save changes" }),
+		);
+
+		await waitFor(() => {
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				"endpoint-managed-vless",
+				{ port: 53844 },
 			);
 		});
 	});

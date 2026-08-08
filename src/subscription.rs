@@ -7,10 +7,18 @@ use crate::{
     credentials,
     domain::{Endpoint, EndpointKind, Node, User},
     managed_default_endpoints::managed_default_vless_endpoint,
-    protocol::{SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta, ss2022_password},
+    protocol::{
+        MihomoSmuxConfig, SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
+        ss2022_password,
+    },
     state::{
         NodeEgressProbeState, NodeSubscriptionRegion, NodeUserEndpointMembership, UserMihomoProfile,
     },
+};
+
+mod clash_proxy;
+use clash_proxy::{
+    ClashProxy, ClashRealityOpts, ClashSsProxy, ClashVlessProxy, mihomo_smux_config,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4986,6 +4994,7 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(proxy).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5027,6 +5036,7 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: Some(relay_group_name.clone()),
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(chain).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5057,6 +5067,7 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     udp: true,
                     dialer_proxy: None,
                     network: None,
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(direct).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5074,6 +5085,7 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                     udp: true,
                     dialer_proxy: Some(relay_group_name.clone()),
                     network: Some("tcp".to_string()),
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(chain).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5224,6 +5236,7 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
 
                 (uri, proxy)
@@ -5262,6 +5275,7 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                     udp: true,
                     dialer_proxy: None,
                     network: None,
+                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
 
                 (uri, proxy)
@@ -5330,58 +5344,6 @@ fn hex_upper_nibble(n: u8) -> char {
 #[derive(Debug, Clone, serde::Serialize)]
 struct ClashConfig {
     proxies: Vec<ClashProxy>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
-#[serde(untagged)]
-enum ClashProxy {
-    Vless(ClashVlessProxy),
-    Ss(ClashSsProxy),
-}
-
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
-struct ClashVlessProxy {
-    name: String,
-    #[serde(rename = "type")]
-    proxy_type: String,
-    server: String,
-    port: u16,
-    uuid: String,
-    network: String,
-    udp: bool,
-    tls: bool,
-    flow: String,
-    servername: String,
-    #[serde(rename = "client-fingerprint")]
-    client_fingerprint: String,
-    #[serde(rename = "reality-opts")]
-    reality_opts: ClashRealityOpts,
-    #[serde(rename = "dialer-proxy", skip_serializing_if = "Option::is_none")]
-    dialer_proxy: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
-struct ClashRealityOpts {
-    #[serde(rename = "public-key")]
-    public_key: String,
-    #[serde(rename = "short-id")]
-    short_id: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
-struct ClashSsProxy {
-    name: String,
-    #[serde(rename = "type")]
-    proxy_type: String,
-    server: String,
-    port: u16,
-    cipher: String,
-    password: String,
-    udp: bool,
-    #[serde(rename = "dialer-proxy", skip_serializing_if = "Option::is_none")]
-    dialer_proxy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    network: Option<String>,
 }
 
 mod node_selector;
