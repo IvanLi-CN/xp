@@ -9,8 +9,24 @@ rule:
     - kind: arrow_function
     - not:
         any:
-          - pattern: '() => null'
-          - pattern: '() => undefined'
           - has:
+              field: body
+              regex: '^null$'
+          - has:
+              field: body
+              regex: '^undefined$'
+          - has:
+              field: body
+              regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+$'
+          - has:
+              field: body
+              regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+          - has:
+              field: body
+              regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
+          - has:
+              field: body
+              regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
+          - inside:
               stopBy: end
-              pattern: catalog.$$$
+              pattern: Object.fromEntries($$$)

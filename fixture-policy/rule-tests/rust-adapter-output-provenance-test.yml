@@ -1,0 +1,19 @@
+id: fixture-policy-rust-adapter-output-provenance
+valid:
+  - |
+    pub fn primary() -> &'static str {
+        &catalog().hosts.primary
+    }
+  - |
+    pub fn none<T>() -> Option<T> {
+        None
+    }
+invalid:
+  - |
+    pub fn injected_host() -> &'static str {
+        "unapproved.fixture.test"
+    }
+  - |
+    pub fn injected_metric() -> u64 {
+        4096
+    }

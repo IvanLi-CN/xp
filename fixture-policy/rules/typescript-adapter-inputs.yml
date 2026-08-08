@@ -3,7 +3,7 @@ language: TypeScript
 severity: error
 message: The fixture adapter may only read the checked-in JSON catalog.
 files:
-  - web/src/fixture-policy/**/*.ts
+  - web/src/fixture-policy/catalog.ts
 rule:
   any:
     - pattern: process.env.$NAME

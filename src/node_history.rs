@@ -2263,11 +2263,11 @@ mod tests {
             timezone: "UTC".to_string(),
             summary: TrafficSummary {
                 mode: "rolling_30d".to_string(),
-                cycle_start_at: None,
-                cycle_end_at: None,
+                cycle_start_at: xp_test_fixtures::none(),
+                cycle_end_at: xp_test_fixtures::none(),
                 uplink_bytes: xp_test_fixtures::slot_n16(),
                 downlink_bytes: xp_test_fixtures::slot_n16(),
-                total_bytes: 0,
+                total_bytes: xp_test_fixtures::slot_n16(),
                 complete: true,
                 tracking_since: None,
             },
@@ -3432,19 +3432,19 @@ mod tests {
     fn merged_reports_do_not_sum_incompatible_quota_cycles() {
         let mut first = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         first.summary.mode = "cycle".to_string();
-        first.summary.cycle_start_at = Some("2026-05-01T00:00:00Z".to_string());
-        first.summary.cycle_end_at = Some("2026-06-01T00:00:00Z".to_string());
+        first.summary.cycle_start_at = Some(xp_test_fixtures::slot_s624().to_owned());
+        first.summary.cycle_end_at = Some(xp_test_fixtures::slot_s625().to_owned());
         first.summary.uplink_bytes = xp_test_fixtures::slot_n30();
         first.summary.downlink_bytes = xp_test_fixtures::slot_n31();
-        first.summary.total_bytes = 300;
+        first.summary.total_bytes = xp_test_fixtures::slot_n38();
 
         let mut second = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         second.summary.mode = "cycle".to_string();
-        second.summary.cycle_start_at = Some("2026-05-15T00:00:00Z".to_string());
-        second.summary.cycle_end_at = Some("2026-06-15T00:00:00Z".to_string());
+        second.summary.cycle_start_at = Some(xp_test_fixtures::slot_s626().to_owned());
+        second.summary.cycle_end_at = Some(xp_test_fixtures::slot_s627().to_owned());
         second.summary.uplink_bytes = xp_test_fixtures::slot_n26();
         second.summary.downlink_bytes = xp_test_fixtures::slot_n28();
-        second.summary.total_bytes = 900;
+        second.summary.total_bytes = xp_test_fixtures::slot_n39();
 
         let merged = merge_traffic_reports(
             &[first, second],

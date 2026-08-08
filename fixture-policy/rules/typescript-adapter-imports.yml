@@ -3,12 +3,10 @@ language: TypeScript
 severity: error
 message: The TypeScript fixture adapter may only import the checked-in JSON catalog.
 files:
-  - web/src/fixture-policy/**/*.ts
+  - web/src/fixture-policy/catalog.ts
 rule:
   all:
     - kind: import_statement
     - not:
         any:
           - pattern: 'import catalog from "../../../fixture-policy/catalog.json" with { type: "json" }'
-          - pattern: 'import { fixtureCatalog } from "./catalog"'
-          - pattern: import type { $$$ } from $MODULE

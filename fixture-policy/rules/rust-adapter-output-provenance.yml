@@ -1,0 +1,42 @@
+id: fixture-policy-rust-adapter-output-provenance
+language: Rust
+severity: error
+message: Rust fixture adapter accessors must derive values directly from the checked-in catalog.
+files:
+  - test-fixtures/src/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: function_item
+        - regex: '^pub fn '
+        - not:
+            any:
+              - pattern: |
+                  pub fn none<$TYPE>() -> Option<$TYPE> {
+                    None
+                  }
+              - has:
+                  stopBy: end
+                  pattern: catalog()
+    - all:
+        - kind: string_literal
+        - inside:
+            stopBy: end
+            all:
+              - kind: function_item
+              - regex: '^pub fn '
+        - not:
+            inside:
+              stopBy: end
+              pattern: serde_json::from_value($VALUE).expect($MESSAGE)
+    - all:
+        - kind: integer_literal
+        - inside:
+            stopBy: end
+            all:
+              - kind: function_item
+              - regex: '^pub fn '
+        - not:
+            inside:
+              stopBy: end
+              pattern: catalog().$GROUP.$FIELD[$INDEX]

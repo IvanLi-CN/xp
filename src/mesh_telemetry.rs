@@ -566,7 +566,7 @@ mod tests {
         MeshTelemetrySample {
             path: TelemetryPath::Mesh,
             success: true,
-            latency_ms: Some(10),
+            latency_ms: Some(xp_test_fixtures::slot_n24()),
             fallback: false,
             updates_active_path: true,
             transport: Some(MeshTransportObservation {

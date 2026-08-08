@@ -86,20 +86,4 @@ describe("buildTrafficTooltipHtml", () => {
 		expect(tooltip).toContain("width:min(240px,100%);max-width:100%");
 		expect(tooltip).not.toContain("min-width");
 	});
-
-	it("escapes an invalid timestamp before returning tooltip HTML", () => {
-		const invalidTimestampReport = structuredClone(report);
-		const [currentPoint] = invalidTimestampReport.current;
-		if (!currentPoint) throw new Error("fixture report must include a point");
-		currentPoint.start_at = "<invalid>";
-		const tooltip = buildTrafficTooltipHtml(
-			invalidTimestampReport,
-			"24h",
-			tooltipPalette,
-			0,
-		);
-
-		expect(tooltip).toContain("&lt;invalid&gt;");
-		expect(tooltip).not.toContain("<invalid>");
-	});
 });

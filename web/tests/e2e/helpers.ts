@@ -476,7 +476,6 @@ export async function setupApiMocks(
 			),
 	};
 	let userSeq = state.users.length + 1;
-	let tokenSeq = 1;
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
@@ -921,8 +920,7 @@ export async function setupApiMocks(
 					errorResponse(route, `User not found: ${userId}`, 404);
 					return;
 				}
-				const nextToken = `reset-${tokenSeq++}-${userId}`;
-				user.subscription_token = nextToken;
+				user.subscription_token = fixtureCatalog.slotString.s94();
 				jsonResponse(route, {
 					subscription_token: fixtureCatalog.slotString.s94(),
 				});

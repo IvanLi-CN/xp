@@ -316,8 +316,8 @@ fn load_or_init_persists_pruned_usage_memberships() {
         store.usage.memberships.insert(
             "stale_user::stale_endpoint".to_string(),
             MembershipUsage {
-                cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
-                cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                cycle_start_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                cycle_end_at: xp_test_fixtures::recent_timestamp().to_owned(),
                 used_bytes: 10,
                 last_uplink_total: 10,
                 last_downlink_total: 0,

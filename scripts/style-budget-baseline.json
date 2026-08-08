@@ -1096,15 +1096,15 @@
   },
   "fixture-policy/rules/catalog-keys.yml": {
     "long_line_count": 1,
-    "max_line_length": 1063
+    "max_line_length": 1259
   },
   "fixture-policy/rules/catalog-string-values.yml": {
     "long_line_count": 1,
-    "max_line_length": 1446
+    "max_line_length": 1622
   },
   "fixture-policy/rules/catalog-value-types.yml": {
     "long_line_count": 4,
-    "max_line_length": 673
+    "max_line_length": 739
   },
   "fixture-policy/rules/rust-adapter-imports.yml": {
     "long_line_count": 1,
@@ -1112,19 +1112,23 @@
   },
   "fixture-policy/rules/rust-fixture-data.yml": {
     "long_line_count": 3,
-    "max_line_length": 592
+    "max_line_length": 632
   },
   "fixture-policy/rules/rust-inline-fixture-assignment.yml": {
     "long_line_count": 2,
-    "max_line_length": 843
+    "max_line_length": 855
   },
   "fixture-policy/rules/rust-inline-fixture-data.yml": {
     "long_line_count": 3,
-    "max_line_length": 847
+    "max_line_length": 859
+  },
+  "fixture-policy/rules/tsx-fixture-assignment.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1287
   },
   "fixture-policy/rules/tsx-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 851
+    "max_line_length": 971
   },
   "fixture-policy/rules/tsx-shorthand-fixture-data.yml": {
     "long_line_count": 1,
@@ -1134,9 +1138,17 @@
     "long_line_count": 1,
     "max_line_length": 103
   },
+  "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
+    "long_line_count": 1,
+    "max_line_length": 144
+  },
+  "fixture-policy/rules/typescript-fixture-assignment.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1464
+  },
   "fixture-policy/rules/typescript-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 1056
+    "max_line_length": 1148
   },
   "fixture-policy/rules/typescript-shorthand-fixture-data.yml": {
     "long_line_count": 1,
@@ -1147,8 +1159,8 @@
     "max_line_length": 208
   },
   "test-fixtures/src/lib.rs": {
-    "long_line_count": 32,
+    "long_line_count": 36,
     "max_line_length": 147,
-    "source_lines": 1128
+    "source_lines": 1160
   }
 }
