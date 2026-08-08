@@ -307,7 +307,8 @@ fn available_bytes(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     let stats = unsafe { stats.assume_init() };
-    Ok((stats.f_bavail as u64).saturating_mul(stats.f_frsize))
+    let available_blocks: u64 = stats.f_bavail.into();
+    Ok(available_blocks.saturating_mul(stats.f_frsize))
 }
 
 #[cfg(test)]
