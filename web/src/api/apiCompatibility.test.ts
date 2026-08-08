@@ -76,6 +76,22 @@ describe("api compatibility", () => {
 		expect(result.kind).toBe("compatible");
 	});
 
+	it("preserves additive capabilities while selecting a stable profile", () => {
+		const result = resolveApiCompatibility({
+			capabilities: [
+				"api.health",
+				"api.cluster-info",
+				"admin.nodes",
+				"admin.status-events",
+				"admin.endpoint-mihomo-smux",
+			],
+		});
+
+		expect(result.kind).toBe("compatible");
+		if (result.kind !== "compatible") return;
+		expect(result.isFeatureAvailable("admin.endpoint-mihomo-smux")).toBe(true);
+	});
+
 	it("rejects incomplete fingerprints", () => {
 		expect(
 			resolveApiCompatibility({

@@ -40,6 +40,9 @@ Mihomo 的 SMux 是客户端本地复用策略，必须随 YAML 订阅下发。
   VLESS/SS2022 条目均遵守该策略。
 - 管理 API 创建未传该字段时保存默认策略。
   PATCH 只接受完整对象，拒绝 `null` 与越界值。
+- API 必须广告 `admin.endpoint-mihomo-smux` capability。管理 Web 在该 capability
+  缺失时不显示 SMux 控件，也不得在创建或更新请求中发送 `mihomo_smux`，以便与支持
+  窗口中的旧服务真实降级。
 - Web 管理界面必须告知 `Mihomo >= v1.19.29` 的客户端要求。
 
 ## 接口契约（Interfaces & Contracts）
@@ -48,6 +51,7 @@ Mihomo 的 SMux 是客户端本地复用策略，必须随 YAML 订阅下发。
 
 - `POST /api/admin/endpoints`: HTTP API, internal, Modify, Web admin。
 - `PATCH /api/admin/endpoints/{endpoint_id}`: HTTP API, internal, Modify, Web admin。
+- `admin.endpoint-mihomo-smux`: API capability, internal, Read, Web admin feature gate。
 - YAML subscription proxy: subscription contract, external, Modify,
   Mihomo >= v1.19.29。
 

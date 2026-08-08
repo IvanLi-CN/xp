@@ -130,8 +130,14 @@ export function resolveApiCompatibility(input: {
 	}
 	const advertised = new Set(input.capabilities ?? []);
 	if (advertised.size > 0) {
+		const inventoriedCapabilities = new Set(
+			RELEASE_INVENTORIES.flatMap((profile) => profile.capabilities),
+		);
+		const profileCapabilities = [...advertised].filter((capability) =>
+			inventoriedCapabilities.has(capability as ApiCapability),
+		);
 		const candidates = RELEASE_INVENTORIES.filter((profile) =>
-			[...advertised].every((capability) =>
+			profileCapabilities.every((capability) =>
 				profile.capabilities.includes(capability as ApiCapability),
 			),
 		);

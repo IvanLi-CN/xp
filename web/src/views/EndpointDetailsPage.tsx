@@ -67,10 +67,7 @@ import {
 	acceptedAuthoritySuggestionsFromAccessHost,
 	canaryUpstreamSuggestionsFromAuthorities,
 } from "../utils/managedVlessForm";
-import {
-	buildMihomoSmuxConfig,
-	mihomoSmuxConfigsEqual,
-} from "../utils/mihomoSmux";
+import { changedMihomoSmuxConfig } from "../utils/mihomoSmux";
 import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
@@ -97,6 +94,7 @@ export function EndpointDetailsPage() {
 	const endpointsCapability = useApiCapability("admin.endpoints");
 	const nodesCapability = useApiCapability("admin.nodes");
 	const probesCapability = useApiCapability("admin.node-probes");
+	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
 
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
@@ -166,12 +164,6 @@ export function EndpointDetailsPage() {
 			if (!Number.isFinite(portNumber) || portNumber <= 0) {
 				throw new Error("Please enter a valid port.");
 			}
-			const nextMihomoSmux = buildMihomoSmuxConfig(
-				mihomoSmux,
-				mihomoSmuxMaxConnections,
-				mihomoSmuxMinStreams,
-			);
-
 			const payload: {
 				port?: number;
 				reality?: {
@@ -184,12 +176,14 @@ export function EndpointDetailsPage() {
 				accepted_authorities?: string[] | null;
 				mihomo_smux?: MihomoSmuxConfig;
 			} = { port: portNumber };
-			const currentMihomoSmux = parseMihomoSmuxConfig(
+			const changedMihomoSmux = changedMihomoSmuxConfig(
+				mihomoSmuxCapability.available,
 				endpoint.meta.mihomo_smux,
+				mihomoSmux,
+				mihomoSmuxMaxConnections,
+				mihomoSmuxMinStreams,
 			);
-			if (!mihomoSmuxConfigsEqual(nextMihomoSmux, currentMihomoSmux)) {
-				payload.mihomo_smux = nextMihomoSmux;
-			}
+			if (changedMihomoSmux) payload.mihomo_smux = changedMihomoSmux;
 
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
@@ -786,6 +780,7 @@ export function EndpointDetailsPage() {
 
 								<EndpointMihomoSmuxSettings
 									config={mihomoSmux}
+									available={mihomoSmuxCapability.available}
 									disabled={patchMutation.isPending || runtime.isReadOnly}
 									inputClass={inputClass}
 									maxConnections={mihomoSmuxMaxConnections}

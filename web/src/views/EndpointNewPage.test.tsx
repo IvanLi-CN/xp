@@ -13,6 +13,9 @@ import { fetchAdminConfig } from "../api/adminConfig";
 import { createAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
+import { resolveApiCompatibility } from "../api/apiCompatibility";
+import { API_CAPABILITIES } from "../api/releaseInventories";
+import { ApiCompatibilityProvider } from "../api/useApiCompatibility";
 import { ToastProvider } from "../components/Toast";
 import { createQueryClient } from "../queryClient";
 import { EndpointNewPage } from "./EndpointNewPage";
@@ -55,13 +58,23 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
-function renderPage() {
+function renderPage({
+	smuxSupported = true,
+}: { smuxSupported?: boolean } = {}) {
 	const queryClient = createQueryClient();
+	const compatibility = resolveApiCompatibility({
+		capabilities: [
+			...API_CAPABILITIES,
+			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
+		],
+	});
 	return render(
 		<QueryClientProvider client={queryClient}>
-			<ToastProvider>
-				<EndpointNewPage />
-			</ToastProvider>
+			<ApiCompatibilityProvider value={compatibility}>
+				<ToastProvider>
+					<EndpointNewPage />
+				</ToastProvider>
+			</ApiCompatibilityProvider>
 		</QueryClientProvider>,
 	);
 }
@@ -191,6 +204,39 @@ describe("EndpointNewPage", () => {
 			expect(mockNavigate).toHaveBeenCalledWith({
 				to: "/endpoints/$endpointId",
 				params: { endpointId: "ep-managed" },
+			});
+		});
+	});
+
+	it("omits SMux controls and payload for a legacy endpoint API", async () => {
+		vi.mocked(createAdminEndpoint).mockResolvedValue({
+			endpoint_id: "ep-legacy",
+			node_id: "node-alpha",
+			tag: "ep-legacy",
+			kind: "vless_reality_vision_tcp",
+			port: 443,
+			meta: { managed_default: true },
+		});
+
+		renderPage({ smuxSupported: false });
+
+		expect(
+			await screen.findByText(
+				"This server does not support per-endpoint Mihomo SMux settings.",
+			),
+		).toBeInTheDocument();
+		expect(screen.queryByLabelText("启用 SMux")).toBeNull();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Create endpoint" }),
+		);
+
+		await waitFor(() => {
+			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
+				kind: "vless_reality_vision_tcp",
+				node_id: "node-alpha",
+				port: 443,
+				canary_upstream: undefined,
+				accepted_authorities: undefined,
 			});
 		});
 	});

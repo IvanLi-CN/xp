@@ -5,6 +5,7 @@ import { Input } from "./ui/input";
 
 type EndpointMihomoSmuxSettingsProps = {
 	config: MihomoSmuxConfig;
+	available: boolean;
 	disabled: boolean;
 	inputClass: string;
 	maxConnections: string;
@@ -16,6 +17,7 @@ type EndpointMihomoSmuxSettingsProps = {
 
 export function EndpointMihomoSmuxSettings({
 	config,
+	available,
 	disabled,
 	inputClass,
 	maxConnections,
@@ -24,6 +26,14 @@ export function EndpointMihomoSmuxSettings({
 	onMaxConnectionsChange,
 	onMinStreamsChange,
 }: EndpointMihomoSmuxSettingsProps) {
+	if (!available) {
+		return (
+			<p className="text-xs text-muted-foreground">
+				This server does not support per-endpoint Mihomo SMux settings.
+			</p>
+		);
+	}
+
 	const controlsDisabled = disabled || !config.enabled;
 
 	return (

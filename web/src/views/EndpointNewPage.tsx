@@ -106,6 +106,7 @@ export function EndpointNewPage() {
 	const endpointsCapability = useApiCapability("admin.endpoints");
 	const nodesCapability = useApiCapability("admin.nodes");
 	const configCapability = useApiCapability("admin.config");
+	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -168,12 +169,14 @@ export function EndpointNewPage() {
 			if (adminToken.length === 0) {
 				throw new Error("Missing admin token.");
 			}
-			const mihomoSmux = {
-				enabled: values.mihomoSmuxEnabled,
-				max_connections: values.mihomoSmuxMaxConnections,
-				min_streams: values.mihomoSmuxMinStreams,
-				only_tcp: values.mihomoSmuxOnlyTcp,
-			};
+			const mihomoSmux = mihomoSmuxCapability.available
+				? {
+						enabled: values.mihomoSmuxEnabled,
+						max_connections: values.mihomoSmuxMaxConnections,
+						min_streams: values.mihomoSmuxMinStreams,
+						only_tcp: values.mihomoSmuxOnlyTcp,
+					}
+				: undefined;
 
 			if (values.kind === "vless_reality_vision_tcp") {
 				const canaryUpstreamUrl = values.canaryUpstreamUrl.trim();
@@ -198,7 +201,7 @@ export function EndpointNewPage() {
 						: undefined,
 					accepted_authorities:
 						acceptedAuthorities.length > 0 ? acceptedAuthorities : undefined,
-					mihomo_smux: mihomoSmux,
+					...(mihomoSmux ? { mihomo_smux: mihomoSmux } : {}),
 				});
 			}
 
@@ -206,7 +209,7 @@ export function EndpointNewPage() {
 				kind: values.kind,
 				node_id: values.nodeId,
 				port: values.port,
-				mihomo_smux: mihomoSmux,
+				...(mihomoSmux ? { mihomo_smux: mihomoSmux } : {}),
 			});
 		},
 		onSuccess: (endpoint) => {
@@ -559,113 +562,132 @@ export function EndpointNewPage() {
 									</div>
 								) : null}
 
-								<details className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
-									<summary className="cursor-pointer text-sm font-medium">
-										高级设置：连接复用 (SMux)
-									</summary>
-									<div className="mt-4 space-y-4">
-										<p className="text-xs text-muted-foreground">
-											仅写入 YAML 订阅，要求 Mihomo &gt;= v1.19.29。VLESS/SS URI
-											不包含此设置。
-										</p>
-										<div className="flex items-center gap-2">
-											<Checkbox
-												id="mihomo-smux-enabled"
-												checked={mihomoSmuxEnabled}
-												disabled={createMutation.isPending}
-												onCheckedChange={(checked) =>
-													form.setValue("mihomoSmuxEnabled", checked === true, {
-														shouldDirty: true,
-													})
-												}
-											/>
-											<label
-												className="cursor-pointer text-sm font-medium"
-												htmlFor="mihomo-smux-enabled"
-											>
-												启用 SMux
-											</label>
-										</div>
-										<div className="grid gap-4 md:grid-cols-2">
-											<div className="space-y-2">
-												<label
-													className="text-sm font-medium"
-													htmlFor="mihomo-smux-max-connections"
-												>
-													最大物理连接数
-												</label>
-												<Input
-													id="mihomo-smux-max-connections"
-													type="number"
-													min={1}
-													max={16}
-													disabled={
-														createMutation.isPending || !mihomoSmuxEnabled
+								{mihomoSmuxCapability.available ? (
+									<details className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+										<summary className="cursor-pointer text-sm font-medium">
+											高级设置：连接复用 (SMux)
+										</summary>
+										<div className="mt-4 space-y-4">
+											<p className="text-xs text-muted-foreground">
+												仅写入 YAML 订阅，要求 Mihomo &gt;= v1.19.29。VLESS/SS
+												URI 不包含此设置。
+											</p>
+											<div className="flex items-center gap-2">
+												<Checkbox
+													id="mihomo-smux-enabled"
+													checked={mihomoSmuxEnabled}
+													disabled={createMutation.isPending}
+													onCheckedChange={(checked) =>
+														form.setValue(
+															"mihomoSmuxEnabled",
+															checked === true,
+															{
+																shouldDirty: true,
+															},
+														)
 													}
-													{...form.register("mihomoSmuxMaxConnections")}
 												/>
-												<p className="text-xs text-muted-foreground">
-													1-16 条连接。
-												</p>
-												{form.formState.errors.mihomoSmuxMaxConnections
-													?.message ? (
-													<p className="text-xs text-destructive">
-														{
-															form.formState.errors.mihomoSmuxMaxConnections
-																.message
+												<label
+													className="cursor-pointer text-sm font-medium"
+													htmlFor="mihomo-smux-enabled"
+												>
+													启用 SMux
+												</label>
+											</div>
+											<div className="grid gap-4 md:grid-cols-2">
+												<div className="space-y-2">
+													<label
+														className="text-sm font-medium"
+														htmlFor="mihomo-smux-max-connections"
+													>
+														最大物理连接数
+													</label>
+													<Input
+														id="mihomo-smux-max-connections"
+														type="number"
+														min={1}
+														max={16}
+														disabled={
+															createMutation.isPending || !mihomoSmuxEnabled
 														}
+														{...form.register("mihomoSmuxMaxConnections")}
+													/>
+													<p className="text-xs text-muted-foreground">
+														1-16 条连接。
 													</p>
-												) : null}
+													{form.formState.errors.mihomoSmuxMaxConnections
+														?.message ? (
+														<p className="text-xs text-destructive">
+															{
+																form.formState.errors.mihomoSmuxMaxConnections
+																	.message
+															}
+														</p>
+													) : null}
+												</div>
+												<div className="space-y-2">
+													<label
+														className="text-sm font-medium"
+														htmlFor="mihomo-smux-min-streams"
+													>
+														扩容前最小流数
+													</label>
+													<Input
+														id="mihomo-smux-min-streams"
+														type="number"
+														min={1}
+														max={64}
+														disabled={
+															createMutation.isPending || !mihomoSmuxEnabled
+														}
+														{...form.register("mihomoSmuxMinStreams")}
+													/>
+													<p className="text-xs text-muted-foreground">
+														1-64 个并发流。
+													</p>
+													{form.formState.errors.mihomoSmuxMinStreams
+														?.message ? (
+														<p className="text-xs text-destructive">
+															{
+																form.formState.errors.mihomoSmuxMinStreams
+																	.message
+															}
+														</p>
+													) : null}
+												</div>
 											</div>
-											<div className="space-y-2">
-												<label
-													className="text-sm font-medium"
-													htmlFor="mihomo-smux-min-streams"
-												>
-													扩容前最小流数
-												</label>
-												<Input
-													id="mihomo-smux-min-streams"
-													type="number"
-													min={1}
-													max={64}
+											<div className="flex items-center gap-2">
+												<Checkbox
+													id="mihomo-smux-only-tcp"
+													checked={form.watch("mihomoSmuxOnlyTcp")}
 													disabled={
 														createMutation.isPending || !mihomoSmuxEnabled
 													}
-													{...form.register("mihomoSmuxMinStreams")}
+													onCheckedChange={(checked) =>
+														form.setValue(
+															"mihomoSmuxOnlyTcp",
+															checked === true,
+															{
+																shouldDirty: true,
+															},
+														)
+													}
 												/>
-												<p className="text-xs text-muted-foreground">
-													1-64 个并发流。
-												</p>
-												{form.formState.errors.mihomoSmuxMinStreams?.message ? (
-													<p className="text-xs text-destructive">
-														{form.formState.errors.mihomoSmuxMinStreams.message}
-													</p>
-												) : null}
+												<label
+													className="cursor-pointer text-sm font-medium"
+													htmlFor="mihomo-smux-only-tcp"
+												>
+													仅复用 TCP
+												</label>
 											</div>
 										</div>
-										<div className="flex items-center gap-2">
-											<Checkbox
-												id="mihomo-smux-only-tcp"
-												checked={form.watch("mihomoSmuxOnlyTcp")}
-												disabled={
-													createMutation.isPending || !mihomoSmuxEnabled
-												}
-												onCheckedChange={(checked) =>
-													form.setValue("mihomoSmuxOnlyTcp", checked === true, {
-														shouldDirty: true,
-													})
-												}
-											/>
-											<label
-												className="cursor-pointer text-sm font-medium"
-												htmlFor="mihomo-smux-only-tcp"
-											>
-												仅复用 TCP
-											</label>
-										</div>
-									</div>
-								</details>
+									</details>
+								) : (
+									<p className="text-xs text-muted-foreground">
+										This server does not support per-endpoint Mihomo SMux
+										settings.
+									</p>
+								)}
 							</div>
 
 							{form.formState.errors.root?.message ? (

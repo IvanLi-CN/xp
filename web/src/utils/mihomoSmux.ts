@@ -1,4 +1,7 @@
-import type { MihomoSmuxConfig } from "../api/adminEndpoints";
+import {
+	type MihomoSmuxConfig,
+	parseMihomoSmuxConfig,
+} from "../api/adminEndpoints";
 
 export function buildMihomoSmuxConfig(
 	config: MihomoSmuxConfig,
@@ -34,4 +37,18 @@ export function mihomoSmuxConfigsEqual(
 		left.min_streams === right.min_streams &&
 		left.only_tcp === right.only_tcp
 	);
+}
+
+export function changedMihomoSmuxConfig(
+	available: boolean,
+	current: unknown,
+	config: MihomoSmuxConfig,
+	maxConnections: string,
+	minStreams: string,
+): MihomoSmuxConfig | undefined {
+	if (!available) return undefined;
+	const next = buildMihomoSmuxConfig(config, maxConnections, minStreams);
+	return mihomoSmuxConfigsEqual(next, parseMihomoSmuxConfig(current))
+		? undefined
+		: next;
 }

@@ -34,6 +34,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.nodes",
             "admin.users",
             "admin.endpoints",
+            "admin.endpoint-mihomo-smux",
             "admin.alerts",
             "admin.config",
             "admin.quota-policy",
@@ -62,6 +63,11 @@ mod tests {
             format!("v{}", crate::version::VERSION)
         );
         assert!(response.capabilities.contains(&"api.health"));
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.endpoint-mihomo-smux")
+        );
         assert!(response.capabilities.contains(&"admin.status-events"));
         assert_eq!(response.fingerprint["/api/health"], vec!["status"]);
     }

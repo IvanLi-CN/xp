@@ -12,7 +12,8 @@
 - VLESS Reality 与 SS2022 元数据均保存 `mihomo_smux`；旧元数据通过反序列化默认值获得同一策略。
 - 创建未提供策略时持久化默认值；PATCH 只替换完整策略，并拒绝 `null` 或越界数值。
 - Clash 与 Mihomo system provider YAML 的直连、链式 VLESS/SS2022 proxy 均按接入点策略输出 SMux；Raw/Base64 URI 不变。
-- 接入点新建和详情页均提供可编辑的高级设置，并在关闭后保留管理员已填数值。
+- 接入点新建和详情页均提供可编辑的高级设置，并在关闭后保留管理员已填数值；旧 API
+  未广告 `admin.endpoint-mihomo-smux` 时界面隐藏控件且不会发送该字段。
 - 脱敏 VLESS Reality 与 SS2022 fixture 已由官方 Mihomo `v1.19.29` 的 `-t` 配置检查解析通过。
 
 ## Validation Coverage
