@@ -1,6 +1,5 @@
 use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
 use crate::ops::paths::Paths;
-use crate::ops::platform::{CpuArch, detect_cpu_arch};
 use crate::ops::runtime_activation::restart_xp_service;
 use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, workspace_path};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 mod failure;
+mod inputs;
 mod managed_runtimes;
 mod reexec;
 use failure::{
@@ -24,8 +24,16 @@ use failure::{
     restore_after_failed_xp_ops_verification, rollback_xp_ops_after_resumed_failure,
     unrestored_transaction_backup_error, write_upgrade_diagnostics,
 };
-use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
-use reexec::{clear_upgrade_resume_env, finish_reexeced_upgrade, resume_with_upgraded_xp_ops};
+use inputs::{
+    detect_platform, github_api_base, parse_owner_repo, resolve_repo, validate_release_args,
+};
+use managed_runtimes::{
+    RuntimeBinaryBackup, rollback_complete_phase_binaries, upgrade_and_reconcile_managed_runtimes,
+};
+use reexec::{
+    ReexecTransaction, clear_upgrade_resume_env, finish_reexeced_upgrade,
+    resume_with_upgraded_xp_ops,
+};
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -34,9 +42,10 @@ const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
+const UPGRADE_RESUME_SERVICE_BACKUPS: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS";
 const UPGRADE_RESUME_SERVICE_PHASE_COMPLETE: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_PHASE_COMPLETE";
 #[derive(Debug, Clone, Copy)]
-enum Platform {
+pub(super) enum Platform {
     LinuxX86_64,
     LinuxAarch64,
 }
@@ -55,57 +64,6 @@ impl Platform {
         }
     }
 }
-fn detect_platform() -> Result<Platform, ExitError> {
-    if std::env::consts::OS != "linux" {
-        return Err(ExitError::new(2, "unsupported_platform"));
-    }
-    match detect_cpu_arch() {
-        CpuArch::X86_64 => Ok(Platform::LinuxX86_64),
-        CpuArch::Aarch64 => Ok(Platform::LinuxAarch64),
-        CpuArch::Other(_) => Err(ExitError::new(2, "unsupported_platform")),
-    }
-}
-
-fn github_api_base() -> String {
-    std::env::var("XP_OPS_GITHUB_API_BASE_URL").unwrap_or_else(|_| DEFAULT_GITHUB_API_BASE.into())
-}
-
-fn resolve_repo(args_repo: Option<&str>) -> Result<(String, String), ExitError> {
-    let repo = args_repo
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("XP_OPS_GITHUB_REPO").ok())
-        .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string());
-
-    let Some((owner, name)) = parse_owner_repo(repo.as_str()) else {
-        return Err(ExitError::new(
-            3,
-            format!("invalid_args: invalid --repo (expected owner/repo): {repo}"),
-        ));
-    };
-    Ok((owner, name))
-}
-
-fn parse_owner_repo(v: &str) -> Option<(String, String)> {
-    let (owner, repo) = v.split_once('/')?;
-    if owner.trim().is_empty() || repo.trim().is_empty() {
-        return None;
-    }
-    if repo.contains('/') {
-        return None;
-    }
-    Some((owner.trim().to_string(), repo.trim().to_string()))
-}
-
-fn validate_release_args(args: &UpgradeReleaseArgs) -> Result<(), ExitError> {
-    if args.prerelease && args.version != "latest" {
-        return Err(ExitError::new(
-            3,
-            "invalid_args: --prerelease only works with --version latest",
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Debug, serde::Deserialize)]
 struct GitHubAsset {
     name: String,
@@ -143,6 +101,7 @@ struct ResumeContext {
     release: LockedRelease,
     xp_ops_dest: PathBuf,
     xp_ops_backup: PathBuf,
+    service_backups: Vec<RuntimeBinaryBackup>,
     service_phase_complete: bool,
 }
 
@@ -300,11 +259,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let (owner, repo) = resume
         .as_ref()
         .map(|ctx| (ctx.release.owner.clone(), ctx.release.repo.clone()))
-        .unwrap_or(resolve_repo(release_args.repo.as_deref())?);
+        .unwrap_or(resolve_repo(
+            release_args.repo.as_deref(),
+            DEFAULT_GITHUB_REPO,
+        )?);
     let api_base = resume
         .as_ref()
         .map(|ctx| ctx.release.api_base.clone())
-        .unwrap_or_else(github_api_base);
+        .unwrap_or_else(|| github_api_base(DEFAULT_GITHUB_API_BASE));
     let xp_dest = paths.usr_local_bin_xp();
     let xp_backup = backup_path(&xp_dest);
     let xp_asset_name = platform.xp_asset_name();
@@ -482,7 +444,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     ),
                 )
             })?;
-        upgrade_and_reconcile_managed_runtimes(
+        let runtime_backups = upgrade_and_reconcile_managed_runtimes(
             &paths,
             &release,
             &checksums,
@@ -491,6 +453,11 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             rollback_xp_on_runtime_failure,
         )
         .await?;
+        let mut service_backups = vec![RuntimeBinaryBackup {
+            dest: xp_dest.clone(),
+            backup: Some(xp_backup.clone()),
+        }];
+        service_backups.extend(runtime_backups);
         if resume.is_some() {
             clear_upgrade_resume_env();
         } else {
@@ -510,9 +477,22 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                 &release,
                 &format!("{owner}/{repo}"),
                 &api_base,
-                &xp_ops_dest,
-                &xp_ops_backup,
+                ReexecTransaction {
+                    xp_ops_dest: &xp_ops_dest,
+                    xp_ops_backup: &xp_ops_backup,
+                    service_backups: &service_backups,
+                },
             ) {
+                let error = match rollback_complete_phase_binaries(&paths, &service_backups) {
+                    Ok(()) => error,
+                    Err(rollback) => ExitError::new(
+                        rollback.code,
+                        format!(
+                            "{}; service binary rollback failed: {}",
+                            error.message, rollback.message
+                        ),
+                    ),
+                };
                 return rollback_xp_ops_after_resumed_failure(&xp_ops_dest, &xp_ops_backup, error);
             }
             unreachable!("xp-ops self-reexec must replace the current process");
@@ -841,6 +821,19 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
                 "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP",
             )
         })?);
+    let service_backups =
+        serde_json::from_str(&std::env::var(UPGRADE_RESUME_SERVICE_BACKUPS).map_err(|_| {
+            ExitError::new(
+                3,
+                "invalid_args: missing XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS",
+            )
+        })?)
+        .map_err(|error| {
+            ExitError::new(
+                3,
+                format!("invalid_args: parse XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS: {error}"),
+            )
+        })?;
     Ok(Some(ResumeContext {
         release: LockedRelease {
             owner,
@@ -850,6 +843,7 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
         },
         xp_ops_dest,
         xp_ops_backup,
+        service_backups,
         service_phase_complete: matches!(
             std::env::var(UPGRADE_RESUME_SERVICE_PHASE_COMPLETE).as_deref(),
             Ok("1")

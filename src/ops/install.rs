@@ -203,7 +203,11 @@ async fn install_xray(
     .await;
     let cleanup = cleanup_workspace(&tmp_dir);
     match (result, cleanup) {
-        (Err(error), _) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(ExitError::new(
+            error.code,
+            format!("{}; cleanup workspace: {cleanup_error}", error.message),
+        )),
+        (Err(error), Ok(_)) => Err(error),
         (Ok(()), Ok(_)) => Ok(()),
         (Ok(()), Err(error)) => Err(ExitError::new(
             3,

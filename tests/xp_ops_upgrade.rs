@@ -785,6 +785,7 @@ mod linux {
         cmd.env("XP_OPS_UPGRADE_RESUME_API_BASE", server.uri());
         cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest);
         cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup);
+        cmd.env("XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS", "[]");
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
 
         cmd.assert()
