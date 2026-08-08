@@ -1603,7 +1603,7 @@ async function handleRequest(
 
 		const items = state.userNodeWeights[userId] ?? [];
 		const next: AdminUserNodeWeightItem = {
-			node_id: fixtureCatalog.slotString.s32(),
+			node_id: nodeId,
 			weight: payload.weight,
 		};
 		state.userNodeWeights[userId] = [

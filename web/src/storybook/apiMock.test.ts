@@ -499,7 +499,7 @@ describe("storybook api mock", () => {
 			items: Array<{ node_id: string }>;
 		};
 		const nodeId =
-			nodesData.items[0]?.node_id ?? fixtureCatalog.slotString.s32();
+			nodesData.items[1]?.node_id ?? fixtureCatalog.slotString.s36();
 
 		const listRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/node-weights`, { method: "GET" }),
