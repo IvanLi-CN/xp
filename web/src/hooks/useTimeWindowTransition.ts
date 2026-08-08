@@ -1,3 +1,4 @@
+import { useIsRestoring } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 export const TIME_WINDOW_HOLD_MS = 300;
@@ -18,7 +19,6 @@ type UseTimeWindowTransitionOptions<T, W> = {
 	holdMs?: number;
 	identity: string;
 	isError: boolean;
-	isFetchedAfterMount: boolean;
 	isFetching: boolean;
 	now?: () => number;
 	window: W;
@@ -39,11 +39,11 @@ export function useTimeWindowTransition<T, W>({
 	holdMs = TIME_WINDOW_HOLD_MS,
 	identity,
 	isError,
-	isFetchedAfterMount,
 	isFetching,
 	now = Date.now,
 	window,
 }: UseTimeWindowTransitionOptions<T, W>) {
+	const isRestoring = useIsRestoring();
 	const initialNow = now();
 	const [display, setDisplayState] = useState<DisplayState<T, W> | null>(() =>
 		data
@@ -66,7 +66,6 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
-		isFetchedAfterMount,
 		isFetching,
 		now,
 	});
@@ -76,7 +75,6 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
-		isFetchedAfterMount,
 		isFetching,
 		now,
 	};
@@ -165,7 +163,7 @@ export function useTimeWindowTransition<T, W>({
 					dataUpdatedAt > displayRef.current.dataUpdatedAt)
 			) {
 				setDisplay({
-					data: isFetchedAfterMount ? data : alignData(data, window, now()),
+					data: isRestoring ? alignData(data, window, now()) : data,
 					dataUpdatedAt,
 					window,
 				});
@@ -181,7 +179,7 @@ export function useTimeWindowTransition<T, W>({
 			clearTimer();
 			transitionRef.current = null;
 			setDisplay({
-				data: isFetchedAfterMount ? data : alignData(data, window, now()),
+				data: isRestoring ? alignData(data, window, now()) : data,
 				dataUpdatedAt,
 				window,
 			});
@@ -199,7 +197,7 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
-		isFetchedAfterMount,
+		isRestoring,
 		now,
 		setDisplay,
 		window,

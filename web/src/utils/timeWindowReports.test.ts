@@ -125,7 +125,7 @@ describe("time window report alignment", () => {
 		]);
 	});
 
-	it("recomputes cached IP rows from the clipped occupancy timeline", () => {
+	it("clears IP rows when timeline clipping makes exact aggregates impossible", () => {
 		const report: AdminNodeIpUsageResponse = {
 			node,
 			window: "24h",
@@ -167,13 +167,27 @@ describe("time window report alignment", () => {
 			Date.parse("2026-08-08T12:00:30Z"),
 		);
 
-		expect(aligned.ips).toEqual([
+		expect(aligned.ips).toEqual([]);
+
+		const completeIps = [
+			...report.ips,
 			{
 				...report.ips[0],
-				minutes: 2,
-				endpoint_tags: ["edge-a"],
-				last_seen_at: "2026-08-07T12:02:00.000Z",
+				ip: "203.0.113.2",
+				endpoint_tags: ["outside-top-20"],
 			},
-		]);
+		];
+		const unchanged = alignNodeIpUsageResponse(
+			{
+				...report,
+				window_start: "2026-08-07T12:01:00Z",
+				window_end: "2026-08-08T12:00:00Z",
+				ips: completeIps,
+			},
+			"24h",
+			Date.parse("2026-08-08T12:00:30Z"),
+		);
+
+		expect(unchanged.ips).toEqual(completeIps);
 	});
 });

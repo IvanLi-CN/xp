@@ -1,4 +1,6 @@
+import { IsRestoringProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimeWindowTransition } from "./useTimeWindowTransition";
@@ -12,7 +14,6 @@ type HookProps = {
 	data: string | undefined;
 	dataUpdatedAt: number;
 	isError: boolean;
-	isFetchedAfterMount?: boolean;
 	isFetching: boolean;
 	window: Window;
 };
@@ -24,7 +25,6 @@ function useTransition(props: HookProps) {
 		createEmptyData,
 		holdMs: 300,
 		identity: "report",
-		isFetchedAfterMount: props.isFetchedAfterMount ?? true,
 		now: () => 1_000,
 	});
 }
@@ -96,22 +96,24 @@ describe("useTimeWindowTransition", () => {
 	});
 
 	it("aligns persisted data restored asynchronously after mount", () => {
+		const wrapper = ({ children }: { children: ReactNode }) => (
+			<IsRestoringProvider value={true}>{children}</IsRestoringProvider>
+		);
 		const { result, rerender } = renderHook(useTransition, {
 			initialProps: {
 				data: undefined,
 				dataUpdatedAt: 0,
 				isError: false,
-				isFetchedAfterMount: false,
 				isFetching: false,
 				window: "24h",
 			},
+			wrapper,
 		});
 
 		rerender({
 			data: "restored-cache",
 			dataUpdatedAt: 1,
 			isError: false,
-			isFetchedAfterMount: false,
 			isFetching: false,
 			window: "24h",
 		});
