@@ -1,0 +1,14 @@
+id: fixture-policy-typescript-adapter-catalog-origin
+language: TypeScript
+severity: error
+message: The TypeScript fixture adapter must import the checked-in JSON catalog.
+files:
+  - web/src/fixture-policy/catalog.ts
+rule:
+  all:
+    - kind: program
+    - not:
+        has:
+          all:
+            - kind: import_statement
+            - regex: '^import\s+catalog\s+from\s+["''][^"'']*fixture-policy/catalog[.]json["'']'

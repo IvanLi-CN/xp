@@ -1,0 +1,9 @@
+id: fixture-policy-typescript-adapter-catalog-origin
+valid:
+  - |
+    import catalog from "../../../fixture-policy/catalog.json" with { type: "json" };
+    const primary = () => catalog.hosts.primary;
+invalid:
+  - |
+    const catalog = { hosts: { primary: "live.example" } };
+    const primary = () => catalog.hosts.primary;

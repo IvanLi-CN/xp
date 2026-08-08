@@ -7,3 +7,9 @@ invalid:
     const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
   - |
     import { fixtureCatalog } from "./fixture-input";
+  - |
+    import * as fixtureCatalog from "./fixture-input";
+  - |
+    import fixtureCatalog from "./fixture-input";
+  - |
+    import { value as fixtureCatalog } from "./fixture-input";
