@@ -16,6 +16,8 @@ use crate::{
     },
 };
 
+mod legacy_smux;
+
 #[derive(Debug, Default)]
 struct TestGeoLookup;
 
@@ -996,29 +998,6 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
 }
 
 #[test]
-fn upsert_vless_endpoint_preserves_missing_legacy_smux_field() {
-    let mut state = PersistedState::empty();
-    let mut endpoint = vless_endpoint("endpoint_legacy", "node_1");
-    endpoint
-        .meta
-        .as_object_mut()
-        .expect("vless metadata is an object")
-        .remove("mihomo_smux");
-
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
-
-    assert!(
-        state
-            .endpoints
-            .get("endpoint_legacy")
-            .and_then(|saved| saved.meta.get("mihomo_smux"))
-            .is_none()
-    );
-}
-
-#[test]
 fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
     let mut state = PersistedState::empty();
 
@@ -1220,6 +1199,8 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
         managed_default: false,
     };
 
+    let mut endpoint_meta = serde_json::to_value(meta).unwrap();
+    endpoint_meta.as_object_mut().unwrap().remove("mihomo_smux");
     store.state_mut().endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
@@ -1228,7 +1209,7 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
             tag: endpoint_tag(&kind, &endpoint_id),
             kind,
             port: 443,
-            meta: serde_json::to_value(meta).unwrap(),
+            meta: endpoint_meta,
         },
     );
     store.save().unwrap();
@@ -1243,10 +1224,12 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
 
     let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
     let endpoint = store.get_endpoint(&endpoint_id).unwrap();
-    let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(endpoint.meta).unwrap();
+    let meta: VlessRealityVisionTcpEndpointMeta =
+        serde_json::from_value(endpoint.meta.clone()).unwrap();
 
     assert_eq!(out.active_short_id, meta.active_short_id);
     assert_eq!(out.short_ids, meta.short_ids);
+    assert!(endpoint.meta.get("mihomo_smux").is_none());
 }
 
 #[test]

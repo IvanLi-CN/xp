@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     let tmp = tempfile::tempdir().unwrap();
-    let app = app(&tmp);
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let res = app
         .clone()
@@ -49,6 +49,19 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
             "only_tcp": true
         })
     );
+    {
+        let mut snapshot = store.lock().await;
+        snapshot
+            .state_mut()
+            .endpoints
+            .get_mut(&endpoint_id)
+            .unwrap()
+            .meta
+            .as_object_mut()
+            .unwrap()
+            .remove("mihomo_smux");
+        snapshot.save().unwrap();
+    }
 
     let res = app
         .clone()
@@ -66,6 +79,7 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
     assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
     assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
+    assert_eq!(updated["meta"].get("mihomo_smux"), None);
     assert_eq!(updated["meta"]["reality_keys"], reality_keys);
     assert_eq!(updated["meta"]["short_ids"], short_ids);
     assert_eq!(updated["meta"]["active_short_id"], active_short_id);

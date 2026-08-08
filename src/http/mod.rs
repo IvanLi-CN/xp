@@ -5826,6 +5826,8 @@ async fn admin_patch_endpoint(
 
     match endpoint.kind {
         EndpointKind::VlessRealityVisionTcp => {
+            let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
+            let mihomo_smux_was_omitted = req.mihomo_smux.is_none();
             let mut meta: VlessRealityVisionTcpEndpointMeta =
                 serde_json::from_value(endpoint.meta.clone())
                     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -5894,6 +5896,13 @@ async fn admin_patch_endpoint(
 
             endpoint.meta =
                 serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
+            if mihomo_smux_was_omitted && !had_mihomo_smux {
+                endpoint
+                    .meta
+                    .as_object_mut()
+                    .expect("serialized VLESS metadata is an object")
+                    .remove("mihomo_smux");
+            }
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
             if req.reality.is_some() {

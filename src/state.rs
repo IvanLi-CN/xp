@@ -2340,6 +2340,7 @@ fn build_global_vless_meta_updates(
         if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
             continue;
         }
+        let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
         let mut meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
         if meta.reality.server_names_source != RealityServerNamesSource::Global {
@@ -2359,9 +2360,26 @@ fn build_global_vless_meta_updates(
         if !meta.managed_default {
             meta.reality.dest = format!("{}:443", meta.reality.server_names[0].trim());
         }
-        out.insert(endpoint_id.clone(), serde_json::to_value(meta)?);
+        out.insert(
+            endpoint_id.clone(),
+            serialize_vless_meta_preserving_smux(meta, had_mihomo_smux)?,
+        );
     }
     Ok(out)
+}
+
+fn serialize_vless_meta_preserving_smux(
+    meta: VlessRealityVisionTcpEndpointMeta,
+    had_mihomo_smux: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(meta)?;
+    if !had_mihomo_smux {
+        value
+            .as_object_mut()
+            .expect("serialized VLESS metadata is an object")
+            .remove("mihomo_smux");
+    }
+    Ok(value)
 }
 
 fn apply_vless_meta_updates(
@@ -2577,14 +2595,7 @@ impl DesiredStateCommand {
                         }
                         .into());
                     }
-                    endpoint.meta = serde_json::to_value(meta)?;
-                    if !had_mihomo_smux {
-                        endpoint
-                            .meta
-                            .as_object_mut()
-                            .expect("serialized VLESS metadata is an object")
-                            .remove("mihomo_smux");
-                    }
+                    endpoint.meta = serialize_vless_meta_preserving_smux(meta, had_mihomo_smux)?;
                 }
 
                 state
@@ -4197,12 +4208,13 @@ impl JsonSnapshotStore {
 
         debug_assert_eq!(endpoint.kind, EndpointKind::VlessRealityVisionTcp);
 
+        let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
         let mut meta: VlessRealityVisionTcpEndpointMeta =
             serde_json::from_value(endpoint.meta.clone())?;
 
         let out = rotate_short_ids_in_place(&mut meta.short_ids, &mut meta.active_short_id, rng);
 
-        endpoint.meta = serde_json::to_value(meta)?;
+        endpoint.meta = serialize_vless_meta_preserving_smux(meta, had_mihomo_smux)?;
 
         Ok(Some((
             DesiredStateCommand::UpsertEndpoint { endpoint },
