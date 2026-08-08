@@ -18,6 +18,7 @@ mod failure;
 mod inputs;
 mod managed_runtimes;
 mod reexec;
+mod transaction_lock;
 use failure::{
     cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
     record_early_upgrade_failure, restore_after_failed_install,
@@ -34,6 +35,7 @@ use reexec::{
     ReexecTransaction, clear_upgrade_resume_env, finish_reexeced_upgrade,
     resume_with_upgraded_xp_ops,
 };
+use transaction_lock::UpgradeTransactionLock;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -252,6 +254,9 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let current_exe = std::env::current_exe()
         .map_err(|error| ExitError::new(7, format!("install_failed: current_exe: {error}")))?;
     let resume = load_resume_context(args.release.repo.as_deref())?;
+    let _transaction_lock = (mode == Mode::Real && resume.is_none())
+        .then(|| UpgradeTransactionLock::acquire(&args.data_dir))
+        .transpose()?;
     let release_args = resume
         .as_ref()
         .map(|ctx| ctx.release.release_args())
