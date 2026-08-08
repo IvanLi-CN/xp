@@ -456,7 +456,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             xp_asset_name,
             &xp_backup,
             &args.data_dir,
-            args.allow_internal_auth_v2_cutover,
         )
         .await?;
         // A new process consumes the cutover marker at startup. Once the v2 epoch is durable,
@@ -594,7 +593,6 @@ async fn upgrade_xp(
     asset_name: &str,
     backup: &Path,
     data_dir: &Path,
-    allow_internal_auth_v2_cutover: bool,
 ) -> Result<(), ExitError> {
     let Some(asset_url) = find_asset_url(release, asset_name) else {
         return Err(ExitError::new(
@@ -644,32 +642,30 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
-        if allow_internal_auth_v2_cutover {
-            match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
-                Ok(true) => {
-                    return Err(ExitError::new(
-                        7,
+        match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
+            Ok(true) => {
+                return Err(ExitError::new(
+                    7,
+                    concat!(
+                        "service_error: restart failed after internal-auth v2 epoch ",
+                        "was consumed; ",
+                        "v1 rollback is blocked"
+                    ),
+                ));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return Err(ExitError::new(
+                    7,
+                    format!(
                         concat!(
-                            "service_error: restart failed after internal-auth v2 epoch ",
-                            "was consumed; ",
-                            "v1 rollback is blocked"
+                            "service_error: restart failed and internal-auth epoch is ",
+                            "unreadable; ",
+                            "v1 rollback is blocked: {}"
                         ),
-                    ));
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    return Err(ExitError::new(
-                        7,
-                        format!(
-                            concat!(
-                                "service_error: restart failed and internal-auth epoch is ",
-                                "unreadable; ",
-                                "v1 rollback is blocked: {}"
-                            ),
-                            error
-                        ),
-                    ));
-                }
+                        error
+                    ),
+                ));
             }
         }
         let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));

@@ -541,6 +541,9 @@ run_rollback_case() {
     dump_case_debug rollback-startup
     return 1
   }
+  # A durable v2 epoch intentionally blocks rollback to a v1 binary. This fixture
+  # exercises the ordinary legacy rollback path required by the upgrade contract.
+  rm -f "$XP_DATA_DIR/mesh/internal-auth-v2.json"
   touch "$RESTART_FAIL_FILE"
 
   local start_body="$case_dir/start-upgrade.body"
