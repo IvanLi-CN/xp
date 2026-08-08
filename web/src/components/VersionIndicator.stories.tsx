@@ -190,7 +190,7 @@ export const UpdateAvailableCleansHistory: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.timestamp.baseline(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -230,7 +230,7 @@ export const UpdateAvailableInsufficientSpace: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.timestamp.baseline(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
