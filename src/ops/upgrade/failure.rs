@@ -1,4 +1,3 @@
-use super::ROLLBACK_FAILURE_EXIT_CODE;
 use crate::ops::Paths;
 use crate::ops::cli::ExitError;
 use crate::ops::runtime_activation::restart_xp_service;
@@ -10,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 const UNRESTORED_TRANSACTION_BACKUP_PREFIX: &str =
     "rollback_failed: transaction_backup_unrestored:";
+const ROLLBACK_FAILURE_EXIT_CODE: i32 = 8;
 
 pub(super) fn unrestored_transaction_backup_error(detail: impl Display) -> ExitError {
     ExitError::new(

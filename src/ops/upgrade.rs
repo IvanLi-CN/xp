@@ -35,7 +35,6 @@ const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
 const UPGRADE_RESUME_SERVICE_PHASE_COMPLETE: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_PHASE_COMPLETE";
-const ROLLBACK_FAILURE_EXIT_CODE: i32 = 8;
 #[derive(Debug, Clone, Copy)]
 enum Platform {
     LinuxX86_64,
@@ -577,6 +576,7 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     let starting = crate::upgrade_job::status_for_runner_start(&request);
     crate::upgrade_job::write_status(&args.data_dir, &starting)
         .map_err(|e| ExitError::new(7, format!("service_error: write upgrade status: {e}")))?;
+    reexec::mark_upgrade_runner_resume();
 
     let release_args = UpgradeReleaseArgs {
         version: request.target_tag.clone(),
@@ -591,6 +591,7 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     };
 
     let result = cmd_upgrade(paths, upgrade_args).await;
+    clear_upgrade_resume_env();
     let final_status =
         crate::upgrade_job::status_for_runner_finish(&request, result.as_ref().map(|_| ()));
     if let Err(err) = crate::upgrade_job::write_status(&args.data_dir, &final_status) {

@@ -11,6 +11,8 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
+const UPGRADE_RESUME_RUNNER: &str = "XP_OPS_UPGRADE_RESUME_RUNNER";
+
 pub(super) fn resume_with_upgraded_xp_ops(
     paths: &Paths,
     args: &UpgradeArgs,
@@ -52,28 +54,33 @@ pub(super) fn finish_reexeced_upgrade(
     data_dir: &Path,
     resume: &ResumeContext,
 ) -> Result<(), ExitError> {
-    let cleanup = cleanup_managed_artifacts_excluding(
-        paths,
-        &[&resume.xp_ops_dest],
-        &[&resume.xp_ops_backup],
-    )
-    .and_then(|_| std::fs::remove_file(&resume.xp_ops_backup));
-    match cleanup {
-        Ok(()) => {
-            clear_upgrade_resume_env();
-            super::failure::clear_upgrade_diagnostics(data_dir);
-            Ok(())
-        }
-        Err(cleanup_error) => recover_after_complete_phase_failure(
+    if let Err(error) =
+        cleanup_managed_artifacts_excluding(paths, &[&resume.xp_ops_dest], &[&resume.xp_ops_backup])
+    {
+        return recover_after_complete_phase_failure(
             paths,
             data_dir,
             resume,
             ExitError::new(
                 7,
-                format!("service_error: cleanup upgrade artifacts: {cleanup_error}"),
+                format!("service_error: cleanup upgrade artifacts: {error}"),
             ),
-        ),
+        );
     }
+    if let Err(error) = finish_upgrade_runner_status(data_dir) {
+        return recover_after_complete_phase_failure(paths, data_dir, resume, error);
+    }
+    if let Err(error) = std::fs::remove_file(&resume.xp_ops_backup) {
+        return recover_after_complete_phase_failure(
+            paths,
+            data_dir,
+            resume,
+            ExitError::new(7, format!("service_error: cleanup xp-ops backup: {error}")),
+        );
+    }
+    clear_upgrade_resume_env();
+    super::failure::clear_upgrade_diagnostics(data_dir);
+    Ok(())
 }
 
 fn recover_after_complete_phase_failure(
@@ -97,6 +104,7 @@ fn recover_after_complete_phase_failure(
         &HashMap::new(),
         &error,
     );
+    write_upgrade_runner_failure(data_dir, &error);
     Err(error)
 }
 
@@ -110,8 +118,36 @@ pub(super) fn clear_upgrade_resume_env() {
             UPGRADE_RESUME_XP_OPS_DEST,
             UPGRADE_RESUME_XP_OPS_BACKUP,
             UPGRADE_RESUME_SERVICE_PHASE_COMPLETE,
+            UPGRADE_RESUME_RUNNER,
         ] {
             std::env::remove_var(key);
         }
+    }
+}
+
+pub(super) fn mark_upgrade_runner_resume() {
+    // Safety: env vars are process-local and no other threads mutate them in `xp-ops`.
+    unsafe { std::env::set_var(UPGRADE_RESUME_RUNNER, "1") }
+}
+
+fn finish_upgrade_runner_status(data_dir: &Path) -> Result<(), ExitError> {
+    if !matches!(std::env::var(UPGRADE_RESUME_RUNNER).as_deref(), Ok("1")) {
+        return Ok(());
+    }
+    let request = crate::upgrade_job::prepare_runner_request(data_dir, super::DEFAULT_GITHUB_REPO)?;
+    let status = crate::upgrade_job::status_for_runner_finish(&request, Ok(()));
+    crate::upgrade_job::write_status(data_dir, &status)
+        .map_err(|error| ExitError::new(7, format!("service_error: write upgrade status: {error}")))
+}
+
+fn write_upgrade_runner_failure(data_dir: &Path, error: &ExitError) {
+    if !matches!(std::env::var(UPGRADE_RESUME_RUNNER).as_deref(), Ok("1")) {
+        return;
+    }
+    if let Ok(request) =
+        crate::upgrade_job::prepare_runner_request(data_dir, super::DEFAULT_GITHUB_REPO)
+    {
+        let status = crate::upgrade_job::status_for_runner_finish(&request, Err(error));
+        let _ = crate::upgrade_job::write_status(data_dir, &status);
     }
 }

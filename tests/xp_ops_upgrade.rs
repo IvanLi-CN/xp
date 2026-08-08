@@ -215,7 +215,7 @@ mod linux {
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
         let new_xp = b"xp-new-binary";
-        let new_xp_ops = b"xp-ops-new-binary".to_vec();
+        let new_xp_ops = current_xp_ops_bytes();
         let xp_checksum = sha256_hex(new_xp);
         let xp_ops_checksum = sha256_hex(&new_xp_ops);
         mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
