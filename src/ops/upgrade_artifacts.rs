@@ -47,7 +47,7 @@ fn assess_upgrade_storage_for(paths: &Paths, extra: &[&Path]) -> io::Result<Upgr
     let artifacts = managed_artifacts(paths, extra)?;
     let workspace = workspace_path(paths);
     let workspace_reclaimable = workspace_reclaimable(paths.root(), &workspace)?;
-    let install = managed_binaries(paths)
+    let install = managed_installation_binaries(paths)
         .into_iter()
         .chain(extra.iter().map(|path| path.to_path_buf()))
         .map(|path| volume_for(&path, &artifacts, &workspace, workspace_reclaimable))
@@ -130,7 +130,37 @@ fn cleanup_workspace_from(root: &Path, workspace: &Path) -> io::Result<u64> {
     Ok(reclaimed)
 }
 
-fn managed_binaries(paths: &Paths) -> [PathBuf; 5] {
+pub(crate) fn managed_cloudflared_dest(paths: &Paths) -> PathBuf {
+    if paths.openrc_initd_dir().join("cloudflared").exists() {
+        return paths.usr_local_bin_cloudflared();
+    }
+    let usr_bin = paths.usr_bin_cloudflared();
+    if paths
+        .systemd_unit_dir()
+        .join("cloudflared.service")
+        .exists()
+        && usr_bin.exists()
+    {
+        return usr_bin;
+    }
+    let usr_local = paths.usr_local_bin_cloudflared();
+    if usr_local.exists() {
+        usr_local
+    } else {
+        usr_bin
+    }
+}
+
+fn managed_installation_binaries(paths: &Paths) -> [PathBuf; 4] {
+    [
+        paths.usr_local_bin_xp(),
+        paths.usr_local_bin_xp_ops(),
+        paths.usr_local_bin_xray(),
+        managed_cloudflared_dest(paths),
+    ]
+}
+
+fn managed_artifact_binaries(paths: &Paths) -> [PathBuf; 5] {
     [
         paths.usr_local_bin_xp(),
         paths.usr_local_bin_xp_ops(),
@@ -141,7 +171,7 @@ fn managed_binaries(paths: &Paths) -> [PathBuf; 5] {
 }
 
 fn managed_artifacts(paths: &Paths, extra: &[&Path]) -> io::Result<Vec<PathBuf>> {
-    let managed = managed_binaries(paths)
+    let managed = managed_artifact_binaries(paths)
         .into_iter()
         .chain(extra.iter().map(|path| path.to_path_buf()));
     let mut artifacts = Vec::new();
@@ -374,6 +404,19 @@ mod tests {
         assert!(!is_managed_artifact_name("xp-backup", "xp"));
         assert!(!is_managed_artifact_name("xp.bak.", "xp"));
         assert!(!is_managed_artifact_name("not-xp.bak.1", "xp"));
+    }
+
+    #[test]
+    fn storage_uses_only_the_selected_cloudflared_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let local = paths.usr_local_bin_cloudflared();
+        fs::create_dir_all(local.parent().unwrap()).unwrap();
+        fs::write(&local, b"cloudflared").unwrap();
+
+        let installation = managed_installation_binaries(&paths);
+        assert!(installation.contains(&local));
+        assert!(!installation.contains(&paths.usr_bin_cloudflared()));
     }
 
     #[test]

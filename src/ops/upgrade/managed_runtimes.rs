@@ -4,6 +4,7 @@ use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_c
 use crate::ops::runtime_activation::{
     reload_systemd_units, restart_cloudflared_service, restart_xray_service,
 };
+use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct RuntimeBinaryBackup {
@@ -404,27 +405,6 @@ pub(super) async fn upgrade_managed_runtime_binaries(
         }
     }
     Ok(installed)
-}
-
-fn managed_cloudflared_dest(paths: &Paths) -> PathBuf {
-    if paths.openrc_initd_dir().join("cloudflared").exists() {
-        return paths.usr_local_bin_cloudflared();
-    }
-    let usr_bin = paths.usr_bin_cloudflared();
-    if paths
-        .systemd_unit_dir()
-        .join("cloudflared.service")
-        .exists()
-        && usr_bin.exists()
-    {
-        return usr_bin;
-    }
-    let usr_local = paths.usr_local_bin_cloudflared();
-    if usr_local.exists() {
-        usr_local
-    } else {
-        usr_bin
-    }
 }
 
 async fn install_release_binary(

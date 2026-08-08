@@ -105,10 +105,15 @@ pub(super) fn finish_reexeced_upgrade(
         );
     }
     if let Err(error) = finish_upgrade_runner_status(data_dir) {
-        tracing::warn!(
-            error = %error.message,
-            "upgrade committed but could not write runner success status"
+        super::failure::write_upgrade_diagnostics(
+            data_dir,
+            &resume.release.tag,
+            &HashMap::new(),
+            &error,
         );
+        super::transaction_lock::release(&paths.map_abs(data_dir));
+        clear_upgrade_resume_env();
+        return Err(error);
     }
     super::transaction_lock::release(&paths.map_abs(data_dir));
     clear_upgrade_resume_env();
@@ -251,7 +256,8 @@ fn restore_transaction_backup(snapshot: &TransactionBackupSnapshot) -> std::io::
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_runner_status_writable, remove_transaction_backup_paths, restore_transaction_backup,
+        ensure_runner_status_writable, finish_upgrade_runner_status_for_runner,
+        remove_transaction_backup_paths, restore_transaction_backup,
     };
     use std::os::unix::fs::PermissionsExt;
 
@@ -324,6 +330,28 @@ mod tests {
         let error = ensure_runner_status_writable(tmp.path()).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
+
+    #[test]
+    fn runner_status_completion_reports_write_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let upgrade_dir = tmp.path().join("upgrade");
+        std::fs::create_dir_all(&upgrade_dir).unwrap();
+        let request = crate::upgrade_job::UpgradeRequest {
+            target_tag: "v0.2.0".to_string(),
+            repo: None,
+            requested_at: "2026-08-08T00:00:00Z".to_string(),
+        };
+        std::fs::write(
+            crate::upgrade_job::request_path(tmp.path()),
+            serde_json::to_vec(&request).unwrap(),
+        )
+        .unwrap();
+        std::fs::create_dir(upgrade_dir.join("status.json.tmp")).unwrap();
+
+        let error = finish_upgrade_runner_status_for_runner(tmp.path(), true).unwrap_err();
+        assert_eq!(error.code, 7);
+        assert!(error.message.contains("write upgrade status"));
+    }
 }
 
 pub(super) fn mark_upgrade_runner_resume() {
@@ -332,7 +360,17 @@ pub(super) fn mark_upgrade_runner_resume() {
 }
 
 fn finish_upgrade_runner_status(data_dir: &Path) -> Result<(), ExitError> {
-    if !matches!(std::env::var(UPGRADE_RESUME_RUNNER).as_deref(), Ok("1")) {
+    finish_upgrade_runner_status_for_runner(
+        data_dir,
+        matches!(std::env::var(UPGRADE_RESUME_RUNNER).as_deref(), Ok("1")),
+    )
+}
+
+fn finish_upgrade_runner_status_for_runner(
+    data_dir: &Path,
+    is_runner: bool,
+) -> Result<(), ExitError> {
+    if !is_runner {
         return Ok(());
     }
     let request = crate::upgrade_job::prepare_runner_request(data_dir, super::DEFAULT_GITHUB_REPO)?;
