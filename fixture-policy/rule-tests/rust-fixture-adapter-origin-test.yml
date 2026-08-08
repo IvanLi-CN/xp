@@ -1,0 +1,13 @@
+id: fixture-policy-rust-adapter-origin
+valid:
+  - |
+    let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };
+invalid:
+  - |
+    mod xp_test_fixtures {
+      pub fn primary_node_id() -> &'static str { "live.example" }
+    }
+  - |
+    mod xp_test_fixtures;
+  - |
+    use external_fixture as xp_test_fixtures;
