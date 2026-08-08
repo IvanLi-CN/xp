@@ -110,7 +110,7 @@ pub(super) fn finish_reexeced_upgrade(
             "upgrade committed but could not write runner success status"
         );
     }
-    super::transaction_lock::release(data_dir);
+    super::transaction_lock::release(&paths.map_abs(data_dir));
     clear_upgrade_resume_env();
     super::failure::clear_upgrade_diagnostics(data_dir);
     Ok(())
@@ -151,7 +151,7 @@ fn recover_after_complete_phase_failure(
         &error,
     );
     write_upgrade_runner_failure(data_dir, &error);
-    super::transaction_lock::release(data_dir);
+    super::transaction_lock::release(&paths.map_abs(data_dir));
     Err(error)
 }
 

@@ -253,8 +253,9 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let current_exe = std::env::current_exe()
         .map_err(|error| ExitError::new(7, format!("install_failed: current_exe: {error}")))?;
     let resume = load_resume_context(args.release.repo.as_deref())?;
+    let lock_data_dir = paths.map_abs(&args.data_dir);
     let _transaction_lock =
-        transaction_lock::begin(&args.data_dir, mode == Mode::Real, resume.is_some())?;
+        transaction_lock::begin(&lock_data_dir, mode == Mode::Real, resume.is_some())?;
     let release_args = resume
         .as_ref()
         .map(|ctx| ctx.release.release_args())
