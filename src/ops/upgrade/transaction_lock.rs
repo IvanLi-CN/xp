@@ -66,13 +66,17 @@ impl UpgradeTransactionLock {
 
 impl Drop for UpgradeTransactionLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        release_path(&self.path);
     }
 }
 
 pub(super) fn release(data_dir: &Path) {
     let path = crate::upgrade_job::upgrade_dir(data_dir).join(TRANSACTION_LOCK_FILE);
-    match lock_owner_pid(&path) {
+    release_path(&path);
+}
+
+fn release_path(path: &Path) {
+    match lock_owner_pid(path) {
         Ok(Some(pid)) if pid == current_pid() => {
             if let Err(error) = fs::remove_file(path) {
                 tracing::warn!(error = %error, "could not release upgrade transaction lock");
@@ -145,13 +149,16 @@ mod tests {
     }
 
     #[test]
-    fn reclaims_a_zero_pid_lock() {
+    fn reclaims_invalid_pid_locks() {
         let tmp = tempfile::tempdir().unwrap();
         let upgrade_dir = tmp.path().join("upgrade");
         std::fs::create_dir_all(&upgrade_dir).unwrap();
-        std::fs::write(upgrade_dir.join(TRANSACTION_LOCK_FILE), "0\n").unwrap();
-        let lock = UpgradeTransactionLock::acquire(tmp.path()).unwrap();
-        drop(lock);
+        let path = upgrade_dir.join(TRANSACTION_LOCK_FILE);
+        for value in ["0", "-1", "not-a-pid"] {
+            std::fs::write(&path, format!("{value}\n")).unwrap();
+            let lock = UpgradeTransactionLock::acquire(tmp.path()).unwrap();
+            drop(lock);
+        }
     }
 
     #[test]
@@ -164,6 +171,18 @@ mod tests {
 
         assert!(verify_resume_owner(tmp.path()).is_err());
         release(tmp.path());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn dropping_a_replaced_lock_does_not_remove_the_foreign_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = UpgradeTransactionLock::acquire(tmp.path()).unwrap();
+        let path = tmp.path().join("upgrade").join(TRANSACTION_LOCK_FILE);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, format!("{}\n", std::process::id() + 1)).unwrap();
+
+        drop(lock);
         assert!(path.exists());
     }
 }
