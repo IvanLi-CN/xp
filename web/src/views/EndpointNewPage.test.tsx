@@ -205,9 +205,9 @@ describe("EndpointNewPage", () => {
 
 	it("omits SMux controls and payload for a legacy endpoint API", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-legacy",
-			node_id: "node-alpha",
-			tag: "ep-legacy",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: { managed_default: true },
@@ -228,10 +228,10 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "vless_reality_vision_tcp",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
-				canary_upstream: undefined,
-				accepted_authorities: undefined,
+				canary_upstream: fixtureCatalog.optional.undefined(),
+				accepted_authorities: fixtureCatalog.optional.undefined(),
 			});
 		});
 	});
@@ -542,9 +542,9 @@ describe("EndpointNewPage", () => {
 
 	it("submits the editable Mihomo SMux policy for SS2022", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-smux",
-			node_id: "node-alpha",
-			tag: "ep-smux",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "ss2022_2022_blake3_aes_128_gcm",
 			port: 443,
 			meta: {},
@@ -572,7 +572,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "ss2022_2022_blake3_aes_128_gcm",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				mihomo_smux: {
 					enabled: false,

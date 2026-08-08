@@ -650,9 +650,9 @@ async fn ensure_existing_inbound_treats_existing_tag_found_as_ok() {
 #[test]
 fn desired_inbound_hash_ignores_mihomo_smux_policy() {
     let mut endpoint = Endpoint {
-        endpoint_id: "endpoint-1".to_string(),
-        node_id: "node-1".to_string(),
-        tag: "ss2022-endpoint-1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 443,
         meta: serde_json::json!({

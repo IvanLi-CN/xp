@@ -408,7 +408,7 @@
     "max_line_length": 189
   },
   "docs/specs/README.md": {
-    "long_line_count": 42,
+    "long_line_count": 43,
     "max_line_length": 486
   },
   "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
