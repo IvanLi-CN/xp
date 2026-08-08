@@ -1,3 +1,4 @@
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 import type {
 	DemoActivity,
 	DemoEndpoint,
@@ -47,102 +48,108 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
 
 const baseNodes: DemoNode[] = [
 	{
-		id: "node-tokyo-1",
+		id: fixtureCatalog.identifier.nodePrimary(),
 		name: "tokyo-1",
 		region: "Tokyo",
-		accessHost: "tokyo-1.edge.example.net",
-		apiBaseUrl: "https://tokyo-1.edge.example.net",
+		accessHost: fixtureCatalog.host.primary(),
+		apiBaseUrl: fixtureCatalog.url.primaryApi(),
 		role: "leader",
 		term: 42,
 		status: "healthy",
-		latencyMs: 18,
+		latencyMs: fixtureCatalog.metric.latencyLow(),
 		quotaLimitGb: null,
 		quotaUsedGb: 184,
-		lastSeenAt: "2026-04-29T09:48:00Z",
+		lastSeenAt: fixtureCatalog.timestamp.recent(),
 	},
 	{
-		id: "node-osaka-1",
+		id: fixtureCatalog.identifier.nodeSecondary(),
 		name: "osaka-1",
 		region: "Osaka",
-		accessHost: "osaka-1.edge.example.net",
-		apiBaseUrl: "https://osaka-1.edge.example.net",
+		accessHost: fixtureCatalog.host.secondary(),
+		apiBaseUrl: fixtureCatalog.url.secondaryApi(),
 		role: "follower",
 		term: 42,
 		status: "healthy",
-		latencyMs: 24,
+		latencyMs: fixtureCatalog.metric.latencyLow(),
 		quotaLimitGb: 900,
 		quotaUsedGb: 611,
-		lastSeenAt: "2026-04-29T09:47:30Z",
+		lastSeenAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
-		id: "node-sgp-1",
+		id: fixtureCatalog.identifier.nodeTertiary(),
 		name: "singapore-1",
 		region: "Singapore",
-		accessHost: "sgp-1.edge.example.net",
-		apiBaseUrl: "https://sgp-1.edge.example.net",
+		accessHost: fixtureCatalog.host.tertiary(),
+		apiBaseUrl: fixtureCatalog.url.tertiaryApi(),
 		role: "follower",
 		term: 42,
 		status: "healthy",
-		latencyMs: 42,
+		latencyMs: fixtureCatalog.metric.latencyHigh(),
 		quotaLimitGb: 1200,
 		quotaUsedGb: 433,
-		lastSeenAt: "2026-04-29T09:46:54Z",
+		lastSeenAt: fixtureCatalog.timestamp.baseline(),
 	},
 ];
 
 const baseEndpoints: DemoEndpoint[] = [
 	{
-		id: "endpoint-tokyo-reality",
+		id: fixtureCatalog.identifier.endpointPrimary(),
 		name: "tokyo-reality-443",
-		nodeId: "node-tokyo-1",
+		nodeId: fixtureCatalog.identifier.nodePrimary(),
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		status: "serving",
-		serverNames: ["cdn-a.example.test", "origin.example.test"],
+		serverNames: fixtureCatalog.list.primaryServerNames(),
 		managedDefault: true,
-		canaryUpstreamUrl: "http://127.0.0.1:8080",
+		canaryUpstreamUrl: fixtureCatalog.url.loopback39043(),
 		canaryUpstreamMode: "auto",
-		acceptedAuthorities: ["tokyo-1.edge.example.net:443"],
-		assignedUserIds: ["user-lin", "user-ops"],
-		probeLatencyMs: 31,
-		lastProbeAt: "2026-04-29T09:42:00Z",
-		createdAt: "2026-03-19T11:24:00Z",
+		acceptedAuthorities: fixtureCatalog.list.primaryAuthorities(),
+		assignedUserIds: [
+			fixtureCatalog.identifier.userPrimary(),
+			fixtureCatalog.identifier.userQuinary(),
+		],
+		probeLatencyMs: fixtureCatalog.metric.latencyLow(),
+		lastProbeAt: fixtureCatalog.timestamp.recent(),
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
-		id: "endpoint-osaka-ss",
+		id: fixtureCatalog.identifier.endpointSecondary(),
 		name: "osaka-ss-8443",
-		nodeId: "node-osaka-1",
+		nodeId: fixtureCatalog.identifier.nodeSecondary(),
 		kind: "ss2022_2022_blake3_aes_128_gcm",
 		port: 8443,
 		status: "serving",
-		serverNames: [],
-		assignedUserIds: ["user-maria", "user-very-long"],
-		probeLatencyMs: 54,
-		lastProbeAt: "2026-04-29T09:37:00Z",
-		createdAt: "2026-02-02T02:10:00Z",
+		serverNames: fixtureCatalog.list.secondaryServerNames(),
+		assignedUserIds: [
+			fixtureCatalog.identifier.userSecondary(),
+			fixtureCatalog.identifier.userQuaternary(),
+		],
+		probeLatencyMs: fixtureCatalog.metric.latencyHigh(),
+		lastProbeAt: fixtureCatalog.timestamp.baseline(),
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
-		id: "endpoint-sgp-reality",
+		id: fixtureCatalog.identifier.endpointTertiary(),
 		name: "singapore-global-reality",
-		nodeId: "node-sgp-1",
+		nodeId: fixtureCatalog.identifier.nodeTertiary(),
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		status: "degraded",
-		serverNames: ["cdn-b.example.test"],
+		serverNames: fixtureCatalog.list.tertiaryServerNames(),
 		managedDefault: true,
-		canaryUpstreamUrl: "http://127.0.0.1:9090",
+		canaryUpstreamUrl: fixtureCatalog.url.loopback39043(),
 		canaryUpstreamMode: "auto",
-		acceptedAuthorities: ["sgp-1.edge.example.net:443"],
-		assignedUserIds: ["user-sato"],
-		probeLatencyMs: 118,
-		lastProbeAt: "2026-04-29T09:31:00Z",
-		createdAt: "2026-01-15T21:02:00Z",
+		acceptedAuthorities: fixtureCatalog.list.tertiaryAuthorities(),
+		assignedUserIds: [fixtureCatalog.identifier.userTertiary()],
+		probeLatencyMs: fixtureCatalog.metric.latencyHigh(),
+		lastProbeAt: fixtureCatalog.timestamp.baseline(),
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 ];
 
 const baseUsers: DemoUser[] = [
 	{
-		id: "user-lin",
+		id: fixtureCatalog.identifier.userPrimary(),
 		displayName: "Lin Chen",
 		email: "lin.chen@example.com",
 		locale: "zh-CN",
@@ -150,14 +157,14 @@ const baseUsers: DemoUser[] = [
 		status: "active",
 		quotaLimitGb: 200,
 		quotaUsedGb: 86,
-		endpointIds: ["endpoint-tokyo-reality"],
-		subscriptionToken: "sub_01HXPDEMO0LINCHEN8ZPMDV",
+		endpointIds: [fixtureCatalog.identifier.endpointPrimary()],
+		subscriptionToken: fixtureCatalog.identifier.tokenPrimary(),
 		mihomoMixinYaml:
 			"rules:\n  - DOMAIN-SUFFIX,example.net,DIRECT\n  - GEOIP,CN,DIRECT\n",
-		createdAt: "2026-02-08T08:00:00Z",
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
-		id: "user-maria",
+		id: fixtureCatalog.identifier.userSecondary(),
 		displayName: "Maria Alvarez",
 		email: "maria.alvarez@example.com",
 		locale: "es-MX",
@@ -165,13 +172,13 @@ const baseUsers: DemoUser[] = [
 		status: "active",
 		quotaLimitGb: 120,
 		quotaUsedGb: 64,
-		endpointIds: ["endpoint-osaka-ss"],
-		subscriptionToken: "sub_01HXPDEMO0MARIA84J5T9",
+		endpointIds: [fixtureCatalog.identifier.endpointSecondary()],
+		subscriptionToken: fixtureCatalog.identifier.tokenSecondary(),
 		mihomoMixinYaml: "proxy-groups:\n  - name: Auto\n    type: url-test\n",
-		createdAt: "2026-02-12T16:25:00Z",
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 	{
-		id: "user-sato",
+		id: fixtureCatalog.identifier.userTertiary(),
 		displayName: "佐藤 未来",
 		email: "sato.mirai@example.jp",
 		locale: "ja-JP",
@@ -179,13 +186,13 @@ const baseUsers: DemoUser[] = [
 		status: "quota_limited",
 		quotaLimitGb: 80,
 		quotaUsedGb: 81,
-		endpointIds: ["endpoint-sgp-reality"],
-		subscriptionToken: "sub_01HXPDEMO0SATO01EY84",
+		endpointIds: [fixtureCatalog.identifier.endpointTertiary()],
+		subscriptionToken: fixtureCatalog.identifier.tokenTertiary(),
 		mihomoMixinYaml: "rules:\n  - MATCH,Proxy\n",
-		createdAt: "2026-03-01T03:40:00Z",
+		createdAt: fixtureCatalog.timestamp.recent(),
 	},
 	{
-		id: "user-very-long",
+		id: fixtureCatalog.identifier.userQuaternary(),
 		displayName:
 			"Operations reviewer with a very long display name that should truncate",
 		email: "reviewer.long-name@example.co.uk",
@@ -194,13 +201,13 @@ const baseUsers: DemoUser[] = [
 		status: "active",
 		quotaLimitGb: null,
 		quotaUsedGb: 244,
-		endpointIds: ["endpoint-osaka-ss"],
-		subscriptionToken: "sub_01HXPDEMO_LONG_TOKEN_FOR_LAYOUT_REVIEW_9EY84",
+		endpointIds: [fixtureCatalog.identifier.endpointSecondary()],
+		subscriptionToken: fixtureCatalog.identifier.tokenQuaternary(),
 		mihomoMixinYaml: "dns:\n  enable: true\n  enhanced-mode: fake-ip\n",
-		createdAt: "2026-03-18T10:30:00Z",
+		createdAt: fixtureCatalog.timestamp.recent(),
 	},
 	{
-		id: "user-ops",
+		id: fixtureCatalog.identifier.userQuinary(),
 		displayName: "Ops break-glass account",
 		email: "ops-breakglass@example.net",
 		locale: "en-US",
@@ -208,39 +215,42 @@ const baseUsers: DemoUser[] = [
 		status: "disabled",
 		quotaLimitGb: 20,
 		quotaUsedGb: 0,
-		endpointIds: ["endpoint-tokyo-reality"],
-		subscriptionToken: "sub_01HXPDEMO_DISABLED_OPS",
+		endpointIds: [fixtureCatalog.identifier.endpointPrimary()],
+		subscriptionToken: fixtureCatalog.identifier.tokenQuinary(),
 		mihomoMixinYaml: "",
-		createdAt: "2026-01-04T00:00:00Z",
+		createdAt: fixtureCatalog.timestamp.baseline(),
 	},
 ];
 
 const baseRealityDomains: DemoRealityDomain[] = [
 	{
 		id: "domain-onedrive",
-		hostname: "cdn-a.example.test",
+		hostname: fixtureCatalog.host.serverPrimary(),
 		enabled: true,
-		nodeIds: ["node-tokyo-1", "node-osaka-1"],
+		nodeIds: [
+			fixtureCatalog.identifier.nodePrimary(),
+			fixtureCatalog.identifier.nodeSecondary(),
+		],
 		priority: 1,
-		lastValidatedAt: "2026-04-29T09:32:00Z",
+		lastValidatedAt: fixtureCatalog.timestamp.recent(),
 		notes: "Primary Reality camouflage domain for Japan nodes.",
 	},
 	{
 		id: "domain-office",
-		hostname: "origin.example.test",
+		hostname: fixtureCatalog.host.serverSecondary(),
 		enabled: true,
-		nodeIds: ["node-tokyo-1"],
+		nodeIds: [fixtureCatalog.identifier.nodePrimary()],
 		priority: 2,
-		lastValidatedAt: "2026-04-29T08:52:00Z",
+		lastValidatedAt: fixtureCatalog.timestamp.none(),
 		notes: "Secondary serverName for token rotation tests.",
 	},
 	{
 		id: "domain-archive",
-		hostname: "cdn-b.example.test",
+		hostname: fixtureCatalog.host.serverSecondary(),
 		enabled: false,
-		nodeIds: ["node-sgp-1"],
+		nodeIds: [fixtureCatalog.identifier.nodeTertiary()],
 		priority: 3,
-		lastValidatedAt: null,
+		lastValidatedAt: fixtureCatalog.timestamp.baseline(),
 		notes: "Disabled while Singapore probe is degraded.",
 	},
 ];
@@ -255,14 +265,14 @@ const baseQuotaPolicy: DemoQuotaPolicy = {
 		p3: 60,
 	},
 	nodeWeights: {
-		"node-tokyo-1": 120,
-		"node-osaka-1": 90,
-		"node-sgp-1": 70,
+		[fixtureCatalog.identifier.nodePrimary()]: 120,
+		[fixtureCatalog.identifier.nodeSecondary()]: 90,
+		[fixtureCatalog.identifier.nodeTertiary()]: 70,
 	},
 };
 
 const baseServiceConfig: DemoServiceConfig = {
-	publicOrigin: "https://tokio-xp.example.net",
+	publicOrigin: fixtureCatalog.url.publicOrigin(),
 	auditLogRetentionDays: 30,
 	xrayRestartStrategy: "rolling",
 };
@@ -280,27 +290,27 @@ const baseToolRuns: DemoToolRun[] = [
 const baseProbeRuns: DemoProbeRun[] = [
 	{
 		id: "probe-run-001",
-		endpointId: "endpoint-tokyo-reality",
+		endpointId: fixtureCatalog.identifier.endpointPrimary(),
 		status: "completed",
 		startedAt: "2026-04-29T09:41:42Z",
 		completedAt: "2026-04-29T09:42:00Z",
 		samples: [
 			{
-				nodeId: "node-tokyo-1",
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
 				status: "ok",
-				latencyMs: 31,
+				latencyMs: fixtureCatalog.metric.latencyLow(),
 				message: "Inbound accepted the probe.",
 			},
 			{
-				nodeId: "node-osaka-1",
+				nodeId: fixtureCatalog.identifier.nodeSecondary(),
 				status: "ok",
-				latencyMs: 44,
+				latencyMs: fixtureCatalog.metric.latencyHigh(),
 				message: "Cross-node probe succeeded.",
 			},
 			{
-				nodeId: "node-sgp-1",
+				nodeId: fixtureCatalog.identifier.nodeTertiary(),
 				status: "ok",
-				latencyMs: 71,
+				latencyMs: fixtureCatalog.metric.latencyHigh(),
 				message: "Cross-region path is slower but healthy.",
 			},
 		],
@@ -344,10 +354,13 @@ function largeUsers(): DemoUser[] {
 					: "active";
 		const endpointIds =
 			index % 4 === 0
-				? ["endpoint-tokyo-reality", "endpoint-osaka-ss"]
+				? [
+						fixtureCatalog.identifier.endpointPrimary(),
+						fixtureCatalog.identifier.endpointSecondary(),
+					]
 				: [
 						baseEndpoints[index % baseEndpoints.length]?.id ??
-							"endpoint-tokyo-reality",
+							fixtureCatalog.identifier.endpointPrimary(),
 					];
 		return {
 			id: `user-batch-${String(index + 1).padStart(2, "0")}`,
@@ -362,10 +375,10 @@ function largeUsers(): DemoUser[] {
 			quotaLimitGb: limit,
 			quotaUsedGb: used,
 			endpointIds,
-			subscriptionToken: `sub_01HXPDEMOLARGE${String(index + 1).padStart(2, "0")}`,
+			subscriptionToken: fixtureCatalog.identifier.tokenPrimary(),
 			mihomoMixinYaml:
 				index % 4 === 0 ? "rules:\n  - DOMAIN-SUFFIX,internal,DIRECT\n" : "",
-			createdAt: `2026-03-${String((index % 24) + 1).padStart(2, "0")}T08:30:00Z`,
+			createdAt: fixtureCatalog.timestamp.baseline(),
 		};
 	});
 }
@@ -410,26 +423,26 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 		nodes[1] = {
 			...nodes[1],
 			status: "degraded",
-			latencyMs: 386,
-			lastSeenAt: "2026-04-29T09:21:00Z",
+			latencyMs: fixtureCatalog.metric.latencyHigh(),
+			lastSeenAt: fixtureCatalog.timestamp.baseline(),
 		};
 		nodes[2] = {
 			...nodes[2],
 			status: "offline",
-			latencyMs: null,
-			lastSeenAt: "2026-04-29T08:57:00Z",
+			latencyMs: fixtureCatalog.metric.none(),
+			lastSeenAt: fixtureCatalog.timestamp.baseline(),
 		};
 		endpoints[1] = {
 			...endpoints[1],
 			status: "degraded",
-			probeLatencyMs: 640,
-			lastProbeAt: "2026-04-29T09:23:00Z",
+			probeLatencyMs: fixtureCatalog.metric.latencyHigh(),
+			lastProbeAt: fixtureCatalog.timestamp.baseline(),
 		};
 		endpoints[2] = {
 			...endpoints[2],
 			status: "disabled",
-			probeLatencyMs: null,
-			lastProbeAt: "2026-04-29T09:22:00Z",
+			probeLatencyMs: fixtureCatalog.metric.none(),
+			lastProbeAt: fixtureCatalog.timestamp.baseline(),
 		};
 		activity = [
 			{
@@ -458,7 +471,7 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 			realityDomains: cloneRealityDomains().slice(0, 1),
 			quotaPolicy: {
 				...cloneQuotaPolicy(),
-				nodeWeights: { "node-tokyo-1": 100 },
+				nodeWeights: { [fixtureCatalog.identifier.nodePrimary()]: 100 },
 			},
 			serviceConfig: cloneServiceConfig(),
 			toolRuns: [],

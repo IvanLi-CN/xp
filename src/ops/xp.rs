@@ -894,7 +894,7 @@ mod recover_single_node_tests {
                 1u64,
                 crate::raft::types::NodeMeta {
                     name: "node-1".to_string(),
-                    api_base_url: "https://xp1:6443".to_string(),
+                    api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
                     raft_endpoint: "https://xp1:6443".to_string(),
                 },
             ),
@@ -902,7 +902,7 @@ mod recover_single_node_tests {
                 2u64,
                 crate::raft::types::NodeMeta {
                     name: "node-2".to_string(),
-                    api_base_url: "https://xp2:6443".to_string(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
                     raft_endpoint: "https://xp2:6443".to_string(),
                 },
             ),
@@ -914,7 +914,7 @@ mod recover_single_node_tests {
 
         let desired = crate::raft::types::NodeMeta {
             name: "node-2-new".to_string(),
-            api_base_url: "https://xp2-alt:6443".to_string(),
+            api_base_url: xp_test_fixtures::tertiary_api_url().to_owned(),
             raft_endpoint: "https://xp2-alt:6443".to_string(),
         };
         let out = recover_single_node_membership(&stored, 2u64, desired.clone()).unwrap();

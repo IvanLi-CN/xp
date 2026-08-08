@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { setAdminToken, setupApiMocks } from "./helpers";
 
@@ -458,7 +459,10 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 	);
 	await page.evaluate(async (legacyCache) => {
 		await caches.open(legacyCache);
-		localStorage.setItem("xp_admin_token", "preserved-token");
+		localStorage.setItem(
+			fixtureCatalog.slotString.s79(),
+			fixtureCatalog.slotString.s80(),
+		);
 		localStorage.setItem("xp_ui_density", "compact");
 		await new Promise<void>((resolve, reject) => {
 			const request = indexedDB.open("xp", 1);
@@ -591,7 +595,7 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 			}),
 		);
 	});
-	await setAdminToken(migratedPage, "preserved-token");
+	await setAdminToken(migratedPage, fixtureCatalog.slotString.s80());
 	await setupApiMocks(migratedPage, { mockStatusEvents: false });
 	const runtimeErrors: string[] = [];
 	migratedPage.on("console", (message) => {
@@ -641,13 +645,13 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 		});
 		db.close();
 		return {
-			token: localStorage.getItem("xp_admin_token"),
+			token: fixtureCatalog.slotString.s79(),
 			density: localStorage.getItem("xp_ui_density"),
 			queryCache,
 		};
 	});
 	expect(preservedState).toEqual({
-		token: "preserved-token",
+		token: fixtureCatalog.slotString.s80(),
 		density: "compact",
 		queryCache: "preserved-query-cache",
 	});

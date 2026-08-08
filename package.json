@@ -2,13 +2,16 @@
   "name": "xp-hooks",
   "private": true,
   "version": "0.0.0",
-  "devDependencies": {
-    "@commitlint/cli": "^21.1.0",
+	"devDependencies": {
+		"@ast-grep/cli": "0.45.1",
+		"@commitlint/cli": "^21.1.0",
     "@commitlint/config-conventional": "^21.1.0",
     "commitlint-plugin-function-rules": "^5.0.1",
     "dprint": "^0.55.1"
   },
-  "scripts": {
-    "check:style-budget": "python3 scripts/check-style-budget.py"
-  }
+	"scripts": {
+		"check:fixture-policy": "ast-grep test && ast-grep scan --config sgconfig.yml --format github --report-style short --no-ignore hidden --no-ignore dot --no-ignore exclude --no-ignore global --no-ignore vcs",
+		"typecheck": "cd web && bun run typecheck",
+		"check:style-budget": "python3 scripts/check-style-budget.py"
+	}
 }

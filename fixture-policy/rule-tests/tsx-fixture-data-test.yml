@@ -1,0 +1,9 @@
+id: fixture-policy-tsx-data-source
+valid:
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+invalid:
+  - |
+    const fixture = { host: "unapproved.fixture.test" };
+  - |
+    const fixture = { node_name: "unapproved-node" };

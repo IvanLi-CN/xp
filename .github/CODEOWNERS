@@ -1,0 +1,12 @@
+/.github/CODEOWNERS @IvanLi-CN
+/fixture-policy/ @IvanLi-CN
+/sgconfig.yml @IvanLi-CN
+/test-fixtures/ @IvanLi-CN
+/web/src/fixture-policy/ @IvanLi-CN
+/package.json @IvanLi-CN
+/bun.lock @IvanLi-CN
+/Cargo.toml @IvanLi-CN
+/Cargo.lock @IvanLi-CN
+/.github/workflows/fixture-policy.yml @IvanLi-CN
+/docs/desgin/quality.md @IvanLi-CN
+/docs/specs/fixture-policy-gate/ @IvanLi-CN

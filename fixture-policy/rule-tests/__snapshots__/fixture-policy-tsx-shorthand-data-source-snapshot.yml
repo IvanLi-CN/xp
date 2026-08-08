@@ -1,0 +1,10 @@
+id: fixture-policy-tsx-shorthand-data-source
+snapshots:
+  ? |
+    const tag = "unapproved";
+    const fixture = { tag };
+  : labels:
+    - source: tag
+      style: primary
+      start: 44
+      end: 47

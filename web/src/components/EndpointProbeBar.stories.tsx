@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,9 +11,9 @@ function createSlots(
 	statuses: AdminEndpointProbeSlot["status"][],
 ): AdminEndpointProbeSlot[] {
 	return statuses.map((status, index) => ({
-		hour: `${String(index).padStart(2, "0")}:00`,
+		hour: `${String(index).padStart(2, fixtureCatalog.slotString.s268())}:00`,
 		status,
-		checked_at: `2026-03-09T${String(index).padStart(2, "0")}:00:00Z`,
+		checked_at: fixtureCatalog.slotString.s268(),
 		latency_ms_p50:
 			status === "missing" || status === "down" ? undefined : 40 + index * 3,
 	}));

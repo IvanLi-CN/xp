@@ -1,0 +1,23 @@
+id: fixture-policy-typescript-catalog-origin
+language: TypeScript
+severity: error
+message: fixtureCatalog must be imported from the approved fixture-policy adapter.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  any:
+    - pattern: const fixtureCatalog = $$$
+    - pattern: let fixtureCatalog = $$$
+    - pattern: var fixtureCatalog = $$$
+    - pattern: function fixtureCatalog($$$) { $$$ }
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog

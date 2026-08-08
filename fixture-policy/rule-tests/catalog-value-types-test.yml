@@ -1,0 +1,10 @@
+id: fixture-policy-catalog-value-types
+valid:
+  - '{ "metrics": { "latencyLow": 12 } }'
+  - '{ "hosts": { "primary": "node-a.fixture.test" } }'
+  - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
+invalid:
+  - '{ "metrics": true }'
+  - '{ "latencyLow": "12" }'
+  - '{ "primary": 12 }'
+  - '{ "primaryServerNames": "edge-a.fixture.test" }'

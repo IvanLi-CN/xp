@@ -105,7 +105,7 @@ fn test_admin_token_hash() -> String {
 
 fn test_config(data_dir: PathBuf) -> Config {
     Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::slot_s447().parse().unwrap(),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
         xray_health_interval_secs: 5,
         xray_health_fails_before_down: 4,
@@ -125,8 +125,8 @@ fn test_config(data_dir: PathBuf) -> Config {
         data_dir,
         admin_token_hash: test_admin_token_hash(),
         node_name: "node-1".to_string(),
-        access_host: String::new(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        access_host: xp_test_fixtures::slot_s492().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             crate::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -198,10 +198,10 @@ async fn app_with_recording_raft(
     ));
 
     let restored = Node {
-        node_id: crate::id::new_ulid_string(),
+        node_id: xp_test_fixtures::slot_s493().to_owned(),
         node_name: "hinet".to_string(),
-        access_host: "hinet-ep.707979.xyz".to_string(),
-        api_base_url: "https://hinet-xp.707979.xyz".to_string(),
+        access_host: xp_test_fixtures::slot_s494().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s495().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -221,7 +221,7 @@ async fn app_with_recording_raft(
                 raft_id,
                 RaftNodeMeta {
                     name: cluster.node_name.clone(),
-                    api_base_url: cluster.api_base_url.clone(),
+                    api_base_url: xp_test_fixtures::slot_s486().to_owned(),
                     raft_endpoint: cluster.api_base_url.clone(),
                 },
             )]),

@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpointProbeRunStatus } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -91,7 +92,7 @@ describe("<EndpointProbeRunPage />", () => {
 			config_hash: "cfg-hash",
 			nodes: [
 				{
-					node_id: "node-a",
+					node_id: fixtureCatalog.slotString.s106(),
 					status: "finished",
 					progress: {
 						run_id: "run-1",
@@ -101,12 +102,12 @@ describe("<EndpointProbeRunPage />", () => {
 						endpoints_total: 1,
 						endpoints_done: 1,
 						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:10Z",
-						finished_at: "2026-03-11T11:00:10Z",
+						updated_at: fixtureCatalog.slotString.s222(),
+						finished_at: fixtureCatalog.slotString.s222(),
 					},
 				},
 				{
-					node_id: "node-b",
+					node_id: fixtureCatalog.slotString.s110(),
 					status: "finished",
 					progress: {
 						run_id: "run-1",
@@ -116,12 +117,12 @@ describe("<EndpointProbeRunPage />", () => {
 						endpoints_total: 1,
 						endpoints_done: 1,
 						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:11Z",
-						finished_at: "2026-03-11T11:00:11Z",
+						updated_at: fixtureCatalog.slotString.s223(),
+						finished_at: fixtureCatalog.slotString.s223(),
 					},
 				},
 				{
-					node_id: "node-c",
+					node_id: fixtureCatalog.slotString.s224(),
 					status: "busy",
 					current: {
 						run_id: "run-elsewhere",
@@ -131,7 +132,7 @@ describe("<EndpointProbeRunPage />", () => {
 						endpoints_total: 1,
 						endpoints_done: 0,
 						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:05Z",
+						updated_at: fixtureCatalog.slotString.s225(),
 					},
 				},
 			],
@@ -139,20 +140,20 @@ describe("<EndpointProbeRunPage />", () => {
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 			items: [
 				{
-					endpoint_id: "endpoint-1",
-					node_id: "node-a",
-					tag: "endpoint-1",
+					endpoint_id: fixtureCatalog.slotString.s40(),
+					node_id: fixtureCatalog.slotString.s106(),
+					tag: fixtureCatalog.slotString.s40(),
 					kind: "ss2022_2022_blake3_aes_128_gcm",
 					port: 443,
 					meta: {},
 					probe: {
-						latest_checked_at: "2026-03-11T11:00:11Z",
+						latest_checked_at: fixtureCatalog.slotString.s223(),
 						latest_latency_ms_p50: 120,
 						slots: [
 							{
 								hour: "2026-03-11T11:00:00Z",
 								status: "missing",
-								checked_at: "2026-03-11T11:00:11Z",
+								checked_at: fixtureCatalog.slotString.s223(),
 								latency_ms_p50: 120,
 							},
 						],
@@ -163,26 +164,26 @@ describe("<EndpointProbeRunPage />", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-a",
-					node_name: "Tokyo edge",
-					api_base_url: "https://tokyo.example.invalid",
-					access_host: "tokyo.example.invalid",
+					node_id: fixtureCatalog.slotString.s106(),
+					node_name: fixtureCatalog.slotString.s210(),
+					api_base_url: fixtureCatalog.slotString.s211(),
+					access_host: fixtureCatalog.slotString.s212(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
 				{
-					node_id: "node-b",
-					node_name: "Amsterdam edge",
-					api_base_url: "https://amsterdam.example.invalid",
-					access_host: "amsterdam.example.invalid",
+					node_id: fixtureCatalog.slotString.s110(),
+					node_name: fixtureCatalog.slotString.s207(),
+					api_base_url: fixtureCatalog.slotString.s208(),
+					access_host: fixtureCatalog.slotString.s209(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
 				{
-					node_id: "node-c",
-					node_name: "Singapore edge",
-					api_base_url: "https://singapore.example.invalid",
-					access_host: "singapore.example.invalid",
+					node_id: fixtureCatalog.slotString.s224(),
+					node_name: fixtureCatalog.slotString.s226(),
+					api_base_url: fixtureCatalog.slotString.s227(),
+					access_host: fixtureCatalog.slotString.s228(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
@@ -193,14 +194,14 @@ describe("<EndpointProbeRunPage />", () => {
 			onMessage?.({
 				event: "sample",
 				data: JSON.stringify({
-					node_id: "node-a",
+					node_id: fixtureCatalog.slotString.s106(),
 					run_id: "run-1",
 					hour: "2026-03-11T11:00:00Z",
 					sample: {
-						endpoint_id: "endpoint-1",
+						endpoint_id: fixtureCatalog.slotString.s40(),
 						ok: true,
-						checked_at: "2026-03-11T11:00:10Z",
-						latency_ms: 110,
+						checked_at: fixtureCatalog.slotString.s222(),
+						latency_ms: fixtureCatalog.slotNumber.n12(),
 						config_hash: "cfg-hash",
 					},
 				}),
@@ -208,14 +209,14 @@ describe("<EndpointProbeRunPage />", () => {
 			onMessage?.({
 				event: "sample",
 				data: JSON.stringify({
-					node_id: "node-b",
+					node_id: fixtureCatalog.slotString.s110(),
 					run_id: "run-1",
 					hour: "2026-03-11T11:00:00Z",
 					sample: {
-						endpoint_id: "endpoint-1",
+						endpoint_id: fixtureCatalog.slotString.s40(),
 						ok: true,
-						checked_at: "2026-03-11T11:00:11Z",
-						latency_ms: 120,
+						checked_at: fixtureCatalog.slotString.s223(),
+						latency_ms: fixtureCatalog.slotNumber.n13(),
 						config_hash: "cfg-hash",
 					},
 				}),
@@ -235,9 +236,9 @@ describe("<EndpointProbeRunPage />", () => {
 			);
 		});
 
-		expect((await screen.findAllByText("endpoint-1")).length).toBeGreaterThan(
-			0,
-		);
+		expect(
+			(await screen.findAllByText(fixtureCatalog.slotString.s40())).length,
+		).toBeGreaterThan(0);
 		expect(await screen.findByText("Up")).toBeInTheDocument();
 		expect(screen.queryByText("Missing")).toBeNull();
 	});
@@ -249,14 +250,14 @@ describe("<EndpointProbeRunPage />", () => {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			"Amsterdam edge",
-			"Singapore edge",
-			"Tokyo edge",
+			fixtureCatalog.slotString.s207(),
+			fixtureCatalog.slotString.s210(),
+			fixtureCatalog.slotString.s226(),
 		]);
 		expect(links.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-b",
-			"/nodes/node-c",
-			"/nodes/node-a",
+			`/nodes/${fixtureCatalog.slotString.s110()}`,
+			`/nodes/${fixtureCatalog.slotString.s106()}`,
+			`/nodes/${fixtureCatalog.slotString.s224()}`,
 		]);
 	});
 
@@ -266,7 +267,9 @@ describe("<EndpointProbeRunPage />", () => {
 		);
 		renderPage();
 
-		expect(await screen.findByText("node-a")).toBeInTheDocument();
+		expect(
+			await screen.findByText(fixtureCatalog.slotString.s106()),
+		).toBeInTheDocument();
 		expect(screen.queryByText("Failed to load probe status")).toBeNull();
 	});
 });

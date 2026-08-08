@@ -8,6 +8,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpoint, patchAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -42,7 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => mockNavigate,
-		useParams: () => ({ endpointId: "endpoint-managed-vless" }),
+		useParams: () => ({ endpointId: fixtureCatalog.slotString.s172() }),
 	};
 });
 
@@ -91,10 +92,10 @@ function setupMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-1",
-				node_name: "tokyo-1",
-				access_host: "edge.example.test",
-				api_base_url: "https://tokyo-1.example.com",
+				node_id: fixtureCatalog.slotString.s32(),
+				node_name: fixtureCatalog.slotString.s33(),
+				access_host: fixtureCatalog.slotString.s119(),
+				api_base_url: fixtureCatalog.slotString.s34(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -105,27 +106,21 @@ function setupMocks() {
 		],
 	});
 	vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-		endpoint_id: "endpoint-managed-vless",
-		node_id: "node-1",
-		tag: "managed-vless",
+		endpoint_id: fixtureCatalog.slotString.s172(),
+		node_id: fixtureCatalog.slotString.s32(),
+		tag: fixtureCatalog.slotString.s121(),
 		kind: "vless_reality_vision_tcp",
 		port: 53844,
 		meta: {
 			reality: {
-				dest: "127.0.0.1:39043",
-				server_names: ["edge.example.test"],
+				dest: fixtureCatalog.address.loopback39043(),
+				server_names: fixtureCatalog.slotList.l5(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
 			managed_default: true,
-			canary_upstream: {
-				url: "http://127.0.0.1:8080",
-				mode: "auto",
-			},
-			accepted_authorities: [
-				"endpoint.example.test:53844",
-				"edge.example.com:53844",
-			],
+			canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+			accepted_authorities: fixtureCatalog.slotList.l12(),
 		},
 	});
 }
@@ -145,28 +140,21 @@ describe("EndpointDetailsPage", () => {
 
 	it("restores managed suggestions and keeps the managed patch payload stable", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "managed-vless",
+			endpoint_id: fixtureCatalog.slotString.s172(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s121(),
 			kind: "vless_reality_vision_tcp",
 			port: 53844,
 			meta: {
 				reality: {
-					dest: "127.0.0.1:39043",
-					server_names: ["edge.example.test"],
+					dest: fixtureCatalog.address.loopback39043(),
+					server_names: fixtureCatalog.slotList.l5(),
 					server_names_source: "manual",
 					fingerprint: "chrome",
 				},
 				managed_default: true,
-				canary_upstream: {
-					url: "https://tokyo-1.example.com",
-					mode: "auto",
-				},
-				accepted_authorities: [
-					"endpoint.example.test:53844",
-					"edge.example.com:53844",
-					"edge.example.test:53844",
-				],
+				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+				accepted_authorities: fixtureCatalog.slotList.l13(),
 			},
 		});
 
@@ -194,10 +182,10 @@ describe("EndpointDetailsPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("tag-input-suggestions"),
-			).findByText("edge.example.test:53844"),
+			).findByText(fixtureCatalog.authority.host119Port53844()[0]),
 		);
 		expect(
-			await screen.findByTitle("edge.example.test:53844"),
+			await screen.findByTitle(fixtureCatalog.authority.host119Port53844()[0]),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -207,18 +195,12 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
+				fixtureCatalog.slotString.s172(),
 				{
 					port: 53844,
-					canary_upstream: {
-						url: "https://127.0.0.1:39043",
-						mode: "auto",
-					},
-					accepted_authorities: [
-						"endpoint.example.test:53844",
-						"edge.example.com:53844",
-						"edge.example.test:53844",
-					],
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+					accepted_authorities:
+						fixtureCatalog.authority.existingAndHost119Port53844(),
 				},
 			);
 		});
@@ -309,10 +291,10 @@ describe("EndpointDetailsPage", () => {
 			vi.mocked(fetchAdminNodes).mockResolvedValue({
 				items: [
 					{
-						node_id: "node-hinet",
-						node_name: "hinet",
-						access_host: "hinet-ep.707979.xyz",
-						api_base_url: "https://hinet-xp.707979.xyz",
+						node_id: fixtureCatalog.slotString.s124(),
+						node_name: fixtureCatalog.slotString.s125(),
+						access_host: fixtureCatalog.slotString.s126(),
+						api_base_url: fixtureCatalog.slotString.s127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -323,15 +305,15 @@ describe("EndpointDetailsPage", () => {
 				],
 			});
 			vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-				endpoint_id: "endpoint-managed-vless",
-				node_id: "node-hinet",
-				tag: "managed-hinet",
+				endpoint_id: fixtureCatalog.slotString.s172(),
+				node_id: fixtureCatalog.slotString.s124(),
+				tag: fixtureCatalog.slotString.s129(),
 				kind: "vless_reality_vision_tcp",
 				port: 53844,
 				meta: {
 					reality: {
-						dest: "127.0.0.1:39043",
-						server_names: ["hinet-ep.707979.xyz"],
+						dest: fixtureCatalog.address.loopback39043(),
+						server_names: fixtureCatalog.slotList.l7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
@@ -339,24 +321,21 @@ describe("EndpointDetailsPage", () => {
 				},
 			});
 			vi.mocked(patchAdminEndpoint).mockResolvedValue({
-				endpoint_id: "endpoint-managed-vless",
-				node_id: "node-hinet",
-				tag: "managed-hinet",
+				endpoint_id: fixtureCatalog.slotString.s172(),
+				node_id: fixtureCatalog.slotString.s124(),
+				tag: fixtureCatalog.slotString.s129(),
 				kind: "vless_reality_vision_tcp",
 				port: 53844,
 				meta: {
 					reality: {
-						dest: "127.0.0.1:39043",
-						server_names: ["hinet-ep.707979.xyz"],
+						dest: fixtureCatalog.address.loopback39043(),
+						server_names: fixtureCatalog.slotList.l7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
 					managed_default: true,
-					canary_upstream: {
-						url: "https://127.0.0.1:39043",
-						mode: "auto",
-					},
-					accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+					accepted_authorities: fixtureCatalog.slotList.l15(),
 				},
 			});
 
@@ -384,10 +363,12 @@ describe("EndpointDetailsPage", () => {
 			fireEvent.click(
 				await within(
 					await screen.findByTestId("tag-input-suggestions"),
-				).findByText("hinet-ep.707979.xyz:53844"),
+				).findByText(fixtureCatalog.authority.host126Port53844()[0]),
 			);
 			expect(
-				await screen.findByTitle("hinet-ep.707979.xyz:53844"),
+				await screen.findByTitle(
+					fixtureCatalog.authority.host126Port53844()[0],
+				),
 			).toBeInTheDocument();
 
 			fireEvent.click(
@@ -397,14 +378,11 @@ describe("EndpointDetailsPage", () => {
 			await waitFor(() => {
 				expect(patchAdminEndpoint).toHaveBeenCalledWith(
 					"admintoken",
-					"endpoint-managed-vless",
+					fixtureCatalog.slotString.s172(),
 					{
 						port: 53844,
-						canary_upstream: {
-							url: "https://127.0.0.1:39043",
-							mode: "auto",
-						},
-						accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+						canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+						accepted_authorities: fixtureCatalog.authority.host126Port53844(),
 					},
 				);
 			});
@@ -418,10 +396,10 @@ describe("EndpointDetailsPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "tokyo-1",
-					access_host: "",
-					api_base_url: "not-a-url",
+					node_id: fixtureCatalog.slotString.s32(),
+					node_name: fixtureCatalog.slotString.s33(),
+					access_host: fixtureCatalog.string.none(),
+					api_base_url: fixtureCatalog.slotString.s123(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",

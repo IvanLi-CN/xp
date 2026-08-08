@@ -3,19 +3,21 @@ import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
-import { buildDenseUserIpUsageStories } from "../storybook/ipUsageStoryData";
+import { fixtureCatalog } from "../fixture-policy/catalog";
+import {
+	buildDenseUserIpUsageStories,
+	buildDuplicateNameUserIpUsageStories,
+} from "../storybook/ipUsageStoryData";
 
-const USER_ID_1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-const USER_ID_2 = "01HF7YAT01YVKWQ847J5T9EY84";
-const TOKYO_NODE_ID = "node-1";
-const OSAKA_NODE_ID = "node-2";
+const USER_ID_1 = fixtureCatalog.identifier.userPrimary();
+const USER_ID_2 = fixtureCatalog.identifier.userSecondary();
 
 const nodes: AdminNode[] = [
 	{
-		node_id: TOKYO_NODE_ID,
-		node_name: "tokyo-1",
-		access_host: "tokyo-1.example.com",
-		api_base_url: "https://tokyo-1.example.com",
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		access_host: fixtureCatalog.host.primary(),
+		api_base_url: fixtureCatalog.url.primaryApi(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -24,10 +26,10 @@ const nodes: AdminNode[] = [
 		},
 	},
 	{
-		node_id: OSAKA_NODE_ID,
-		node_name: "osaka-1",
-		access_host: "osaka-1.example.com",
-		api_base_url: "https://osaka-1.example.com",
+		node_id: fixtureCatalog.identifier.nodeSecondary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		access_host: fixtureCatalog.host.secondary(),
+		api_base_url: fixtureCatalog.url.secondaryApi(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -39,30 +41,24 @@ const nodes: AdminNode[] = [
 
 const endpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: "endpoint-1",
-		node_id: TOKYO_NODE_ID,
-		tag: "edge-tokyo",
+		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		tag: fixtureCatalog.identifier.endpointTagPrimary(),
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		meta: {},
 	},
 	{
-		endpoint_id: "endpoint-2",
-		node_id: OSAKA_NODE_ID,
-		tag: "shadow-osaka",
+		endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+		node_id: fixtureCatalog.identifier.nodeSecondary(),
+		tag: fixtureCatalog.identifier.endpointTagSecondary(),
 		kind: "ss2022_2022_blake3_aes_128_gcm",
 		port: 8443,
 		meta: {},
 	},
 ];
 
-const userUsageReports = buildDenseUserIpUsageStories(
-	{
-		user_id: USER_ID_1,
-		display_name: "Alice",
-	},
-	nodes,
-);
+const userUsageReports = buildDenseUserIpUsageStories();
 
 const meta = {
 	title: "Pages/UserDetailsPage",
@@ -78,27 +74,27 @@ const meta = {
 				userAccessByUserId: {
 					[USER_ID_1]: [
 						{
-							user_id: USER_ID_1,
-							endpoint_id: "endpoint-1",
-							node_id: TOKYO_NODE_ID,
+							user_id: fixtureCatalog.identifier.userPrimary(),
+							endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+							node_id: fixtureCatalog.identifier.nodePrimary(),
 						},
 						{
-							user_id: USER_ID_1,
-							endpoint_id: "endpoint-2",
-							node_id: OSAKA_NODE_ID,
+							user_id: fixtureCatalog.identifier.userPrimary(),
+							endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+							node_id: fixtureCatalog.identifier.nodeSecondary(),
 						},
 					],
 				},
 				nodeQuotas: [
 					{
-						user_id: USER_ID_1,
-						node_id: TOKYO_NODE_ID,
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						node_id: fixtureCatalog.identifier.nodePrimary(),
 						quota_limit_bytes: 10 * 2 ** 30,
 						quota_reset_source: "user",
 					},
 					{
-						user_id: USER_ID_1,
-						node_id: OSAKA_NODE_ID,
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						node_id: fixtureCatalog.identifier.nodeSecondary(),
 						quota_limit_bytes: 5 * 2 ** 30,
 						quota_reset_source: "node",
 					},
@@ -258,10 +254,10 @@ export const UsageDetailsDuplicateNames: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: "dup-node-a",
-						node_name: "tokyo",
-						access_host: "tokyo-a.example.com",
-						api_base_url: "https://tokyo-a.example.com",
+						node_id: fixtureCatalog.identifier.endpointPrimary(),
+						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+						access_host: fixtureCatalog.host.primary(),
+						api_base_url: fixtureCatalog.url.primaryApi(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -270,10 +266,10 @@ export const UsageDetailsDuplicateNames: Story = {
 						},
 					},
 					{
-						node_id: "dup-node-b",
-						node_name: "tokyo",
-						access_host: "tokyo-b.example.com",
-						api_base_url: "https://tokyo-b.example.com",
+						node_id: fixtureCatalog.identifier.endpointSecondary(),
+						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+						access_host: fixtureCatalog.host.secondary(),
+						api_base_url: fixtureCatalog.url.secondaryApi(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -284,38 +280,7 @@ export const UsageDetailsDuplicateNames: Story = {
 				],
 				userIpUsageByUserId: {
 					[USER_ID_1]: {
-						...buildDenseUserIpUsageStories(
-							{
-								user_id: USER_ID_1,
-								display_name: "Alice",
-							},
-							[
-								{
-									node_id: "dup-node-a",
-									node_name: "tokyo",
-									access_host: "tokyo-a.example.com",
-									api_base_url: "https://tokyo-a.example.com",
-									quota_limit_bytes: 0,
-									quota_reset: {
-										policy: "monthly",
-										day_of_month: 1,
-										tz_offset_minutes: null,
-									},
-								},
-								{
-									node_id: "dup-node-b",
-									node_name: "tokyo",
-									access_host: "tokyo-b.example.com",
-									api_base_url: "https://tokyo-b.example.com",
-									quota_limit_bytes: 0,
-									quota_reset: {
-										policy: "monthly",
-										day_of_month: 1,
-										tz_offset_minutes: null,
-									},
-								},
-							],
-						),
+						...buildDuplicateNameUserIpUsageStories(),
 					},
 				},
 			},
@@ -327,10 +292,14 @@ export const UsageDetailsDuplicateNames: Story = {
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo · tokyo-a.example.com" }),
+			await canvas.findByRole("tab", {
+				name: `${fixtureCatalog.identifier.nodeNamePrimary()} · ${fixtureCatalog.host.primary()}`,
+			}),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo · tokyo-b.example.com" }),
+			await canvas.findByRole("tab", {
+				name: `${fixtureCatalog.identifier.nodeNamePrimary()} · ${fixtureCatalog.host.secondary()}`,
+			}),
 		).toBeInTheDocument();
 	},
 };
