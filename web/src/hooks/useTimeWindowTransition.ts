@@ -1,4 +1,3 @@
-import { useIsRestoring } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 export const TIME_WINDOW_HOLD_MS = 300;
@@ -19,6 +18,7 @@ type UseTimeWindowTransitionOptions<T, W> = {
 	holdMs?: number;
 	identity: string;
 	isError: boolean;
+	isFetchedAfterMount: boolean;
 	isFetching: boolean;
 	now?: () => number;
 	window: W;
@@ -39,15 +39,12 @@ export function useTimeWindowTransition<T, W>({
 	holdMs = TIME_WINDOW_HOLD_MS,
 	identity,
 	isError,
+	isFetchedAfterMount,
 	isFetching,
 	now = Date.now,
 	window,
 }: UseTimeWindowTransitionOptions<T, W>) {
-	const isRestoring = useIsRestoring();
 	const initialNow = now();
-	const mountedAtRef = useRef(initialNow);
-	const restorationSeenRef = useRef(isRestoring);
-	if (isRestoring) restorationSeenRef.current = true;
 	const [display, setDisplayState] = useState<DisplayState<T, W> | null>(() =>
 		data
 			? {
@@ -69,6 +66,7 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
+		isFetchedAfterMount,
 		isFetching,
 		now,
 	});
@@ -78,6 +76,7 @@ export function useTimeWindowTransition<T, W>({
 		data,
 		dataUpdatedAt,
 		isError,
+		isFetchedAfterMount,
 		isFetching,
 		now,
 	};
@@ -92,22 +91,6 @@ export function useTimeWindowTransition<T, W>({
 		clearTimeout(timerRef.current);
 		timerRef.current = null;
 	}, []);
-
-	const normalizeIncomingData = useCallback(
-		(incoming: T, updatedAt: number, incomingWindow: W) => {
-			const wasRestored =
-				restorationSeenRef.current && updatedAt < mountedAtRef.current;
-			restorationSeenRef.current = false;
-			return wasRestored
-				? latestRef.current.alignData(
-						incoming,
-						incomingWindow,
-						latestRef.current.now(),
-					)
-				: incoming;
-		},
-		[],
-	);
 
 	useLayoutEffect(() => {
 		if (identityRef.current !== identity) {
@@ -182,7 +165,7 @@ export function useTimeWindowTransition<T, W>({
 					dataUpdatedAt > displayRef.current.dataUpdatedAt)
 			) {
 				setDisplay({
-					data: normalizeIncomingData(data, dataUpdatedAt, window),
+					data: isFetchedAfterMount ? data : alignData(data, window, now()),
 					dataUpdatedAt,
 					window,
 				});
@@ -198,7 +181,7 @@ export function useTimeWindowTransition<T, W>({
 			clearTimer();
 			transitionRef.current = null;
 			setDisplay({
-				data: normalizeIncomingData(data, dataUpdatedAt, window),
+				data: isFetchedAfterMount ? data : alignData(data, window, now()),
 				dataUpdatedAt,
 				window,
 			});
@@ -211,11 +194,13 @@ export function useTimeWindowTransition<T, W>({
 			setPhase("idle");
 		}
 	}, [
+		alignData,
 		clearTimer,
 		data,
 		dataUpdatedAt,
 		isError,
-		normalizeIncomingData,
+		isFetchedAfterMount,
+		now,
 		setDisplay,
 		window,
 	]);

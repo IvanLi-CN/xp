@@ -1,6 +1,4 @@
-import { IsRestoringProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
-import { type ReactNode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimeWindowTransition } from "./useTimeWindowTransition";
@@ -14,6 +12,7 @@ type HookProps = {
 	data: string | undefined;
 	dataUpdatedAt: number;
 	isError: boolean;
+	isFetchedAfterMount?: boolean;
 	isFetching: boolean;
 	window: Window;
 };
@@ -25,20 +24,9 @@ function useTransition(props: HookProps) {
 		createEmptyData,
 		holdMs: 300,
 		identity: "report",
+		isFetchedAfterMount: props.isFetchedAfterMount ?? true,
 		now: () => 1_000,
 	});
-}
-
-function restorationWrapper() {
-	let finishRestoring = () => {};
-	const Wrapper = ({ children }: { children: ReactNode }) => {
-		const [isRestoring, setIsRestoring] = useState(true);
-		finishRestoring = () => setIsRestoring(false);
-		return (
-			<IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>
-		);
-	};
-	return { finishRestoring: () => finishRestoring(), Wrapper };
 }
 
 describe("useTimeWindowTransition", () => {
@@ -107,8 +95,7 @@ describe("useTimeWindowTransition", () => {
 		expect(result.current.data).toBe("fresh");
 	});
 
-	it("aligns persisted data restored asynchronously after mount", () => {
-		const restoration = restorationWrapper();
+	it("aligns restored data even when its persisted timestamp is in the future", () => {
 		const { result, rerender } = renderHook(useTransition, {
 			initialProps: {
 				data: undefined,
@@ -117,14 +104,13 @@ describe("useTimeWindowTransition", () => {
 				isFetching: false,
 				window: "24h",
 			},
-			wrapper: restoration.Wrapper,
 		});
-		act(() => restoration.finishRestoring());
 
 		rerender({
 			data: "restored-cache",
-			dataUpdatedAt: 900,
+			dataUpdatedAt: 1_001,
 			isError: false,
+			isFetchedAfterMount: false,
 			isFetching: false,
 			window: "24h",
 		});
@@ -133,7 +119,6 @@ describe("useTimeWindowTransition", () => {
 	});
 
 	it("keeps the first network response raw after an empty restoration", () => {
-		const restoration = restorationWrapper();
 		const { result, rerender } = renderHook(useTransition, {
 			initialProps: {
 				data: undefined,
@@ -142,9 +127,7 @@ describe("useTimeWindowTransition", () => {
 				isFetching: false,
 				window: "24h",
 			},
-			wrapper: restoration.Wrapper,
 		});
-		act(() => restoration.finishRestoring());
 
 		rerender({
 			data: "fresh",
