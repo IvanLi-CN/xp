@@ -1,0 +1,11 @@
+id: fixture-policy-typescript-assignment-source
+valid:
+  - |
+    report.start_at = fixtureCatalog.timestamp.baseline();
+  - |
+    report.total_bytes = null;
+invalid:
+  - |
+    report.start_at = "unapproved-timestamp";
+  - |
+    report.total_bytes = Number.parseInt(raw, 10);

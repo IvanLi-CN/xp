@@ -1,0 +1,26 @@
+id: fixture-policy-rust-adapter-output-provenance
+snapshots:
+  ? |
+    pub fn injected_host() -> &'static str {
+        "unapproved.fixture.test"
+    }
+  : labels:
+    - source: |-
+        pub fn injected_host() -> &'static str {
+            "unapproved.fixture.test"
+        }
+      style: primary
+      start: 0
+      end: 72
+  ? |
+    pub fn injected_metric() -> u64 {
+        4096
+    }
+  : labels:
+    - source: |-
+        pub fn injected_metric() -> u64 {
+            4096
+        }
+      style: primary
+      start: 0
+      end: 44

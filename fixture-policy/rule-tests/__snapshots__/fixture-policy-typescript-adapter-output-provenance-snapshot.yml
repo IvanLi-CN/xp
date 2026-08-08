@@ -8,6 +8,13 @@ snapshots:
       start: 16
       end: 36
   ? |
+    const primary = () => (catalog.hosts.primary, "live.example");
+  : labels:
+    - source: () => (catalog.hosts.primary, "live.example")
+      style: primary
+      start: 16
+      end: 61
+  ? |
     const primary = () => `live.${suffix}`;
   : labels:
     - source: () => `live.${suffix}`

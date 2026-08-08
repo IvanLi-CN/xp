@@ -19,6 +19,9 @@
     "secondaryApi": "https://node-b.fixture.test",
     "tertiaryApi": "https://node-c.fixture.test",
     "loopback39043": "http://127.0.0.1:39043",
+    "canaryHttpsListener": "https://127.0.0.1:39043",
+    "canaryHttpsAlternate": "https://127.0.0.1:49043",
+    "canaryHttpLoopback": "http://127.0.0.1:8080",
     "publicOrigin": "https://public.fixture.test"
   },
   "identifiers": {
@@ -75,6 +78,36 @@
     ],
     "tertiaryAuthorities": [
       "node-c.fixture.test:443"
+    ],
+    "existingAuthoritiesPort443": [
+      "edge-12-0.fixture.test:443",
+      "edge-12-1.fixture.test:443"
+    ],
+    "existingAndHost119Port53844": [
+      "edge-12-0.fixture.test:443",
+      "edge-12-1.fixture.test:443",
+      "host-119.fixture.test:53844"
+    ],
+    "host119Port53844": [
+      "host-119.fixture.test:53844"
+    ],
+    "host126": [
+      "host-126.fixture.test"
+    ],
+    "host126Port443": [
+      "host-126.fixture.test:443"
+    ],
+    "host126Port53844": [
+      "host-126.fixture.test:53844"
+    ],
+    "host130": [
+      "host-130.fixture.test"
+    ],
+    "host130Port443": [
+      "host-130.fixture.test:443"
+    ],
+    "host130Port8443": [
+      "host-130.fixture.test:8443"
     ]
   },
   "subscription": {
@@ -744,7 +777,23 @@
       "endpoint_missing",
       "endpoint-tag-fixture-test",
       "sub_user_1",
-      "2023-12-30T23:00:00Z"
+      "2023-12-30T23:00:00Z",
+      "2026-05-01T00:00:00Z",
+      "2026-06-01T00:00:00Z",
+      "2026-05-15T00:00:00Z",
+      "2026-06-15T00:00:00Z",
+      "2026-08-07T12:00:00Z",
+      "2026-08-08T12:00:00Z",
+      "2026-08-08T11:55:00Z",
+      "2026-08-08T12:07:30Z",
+      "2026-08-08T12:05:00.000Z",
+      "2026-08-08T12:00:00.000Z",
+      "2026-08-08T12:08:00Z",
+      "2026-08-06T12:00:00Z",
+      "2026-08-07T11:58:00Z",
+      "2026-08-07T12:02:00Z",
+      "2026-08-08T12:00:30Z",
+      "2026-08-07T12:01:00Z"
     ],
     "numbers": [
       1,
@@ -784,7 +833,11 @@
       2016,
       93,
       124,
-      217
+      217,
+      300,
+      900,
+      65,
+      724
     ],
     "stringLists": [
       [],

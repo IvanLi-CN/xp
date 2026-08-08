@@ -1,0 +1,17 @@
+id: fixture-policy-tsx-assignment-source
+snapshots:
+  ? |
+    report.start_at = "unapproved-timestamp";
+  : labels:
+    - source: report.start_at = "unapproved-timestamp"
+      style: primary
+      start: 0
+      end: 40
+    - source: report.start_at
+      style: secondary
+      start: 0
+      end: 15
+    - source: '"unapproved-timestamp"'
+      style: secondary
+      start: 18
+      end: 40

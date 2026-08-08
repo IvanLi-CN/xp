@@ -19,7 +19,7 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"earlier"|"baseline"|"recent"|"later")$'
+            regex: '^("primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"canaryHttpsListener"|"canaryHttpsAlternate"|"canaryHttpLoopback"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"earlier"|"baseline"|"recent"|"later")$'
         - has:
             field: value
             not:
@@ -37,7 +37,7 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"primaryAuthorities"|"tertiaryAuthorities")$'
+            regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"primaryAuthorities"|"tertiaryAuthorities"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443")$'
         - has:
             field: value
             not:

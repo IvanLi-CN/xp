@@ -9,3 +9,5 @@ invalid:
     const primary = () => "live.example";
   - |
     const primary = () => `live.${suffix}`;
+  - |
+    const primary = () => (catalog.hosts.primary, "live.example");

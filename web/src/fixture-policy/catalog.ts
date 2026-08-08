@@ -57,37 +57,33 @@ export const fixtureCatalog = {
 	},
 	canaryUpstream: {
 		httpsListener: () => ({
-			url: `https://${catalog.addresses.loopback39043}`,
+			url: catalog.urls.canaryHttpsListener,
 			mode: "auto" as const,
 		}),
 		httpsAlternate: () => ({
-			url: `https://${catalog.addresses.loopback49043}`,
+			url: catalog.urls.canaryHttpsAlternate,
 			mode: "auto" as const,
 		}),
 		httpLoopback: () => ({
-			url: `http://${catalog.addresses.loopback}:8080`,
+			url: catalog.urls.canaryHttpLoopback,
 			mode: "auto" as const,
 		}),
 	},
 	authority: {
 		edgeExamplePort443: () => [...catalog.lists.primaryAuthorities],
-		existingAuthoritiesPort443: () =>
-			catalog.slots.stringLists[12].map(
-				(_, index) => `${catalog.slots.stringLists[12][index]}:443`,
-			),
-		existingAndHost119Port53844: () => [
-			...catalog.slots.stringLists[12].map(
-				(_, index) => `${catalog.slots.stringLists[12][index]}:443`,
-			),
-			`${catalog.slots.strings[119]}:53844`,
+		existingAuthoritiesPort443: () => [
+			...catalog.lists.existingAuthoritiesPort443,
 		],
-		host119Port53844: () => [`${catalog.slots.strings[119]}:53844`],
-		host126: () => [catalog.slots.strings[126]],
-		host126Port443: () => [`${catalog.slots.strings[126]}:443`],
-		host126Port53844: () => [`${catalog.slots.strings[126]}:53844`],
-		host130: () => [catalog.slots.strings[130]],
-		host130Port443: () => [`${catalog.slots.strings[130]}:443`],
-		host130Port8443: () => [`${catalog.slots.strings[130]}:8443`],
+		existingAndHost119Port53844: () => [
+			...catalog.lists.existingAndHost119Port53844,
+		],
+		host119Port53844: () => [...catalog.lists.host119Port53844],
+		host126: () => [...catalog.lists.host126],
+		host126Port443: () => [...catalog.lists.host126Port443],
+		host126Port53844: () => [...catalog.lists.host126Port53844],
+		host130: () => [...catalog.lists.host130],
+		host130Port443: () => [...catalog.lists.host130Port443],
+		host130Port8443: () => [...catalog.lists.host130Port8443],
 	},
 	identifier: {
 		nodePrimary: () => catalog.identifiers.nodePrimary,

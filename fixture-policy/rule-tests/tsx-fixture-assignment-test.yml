@@ -1,0 +1,7 @@
+id: fixture-policy-tsx-assignment-source
+valid:
+  - |
+    report.start_at = fixtureCatalog.timestamp.baseline();
+invalid:
+  - |
+    report.start_at = "unapproved-timestamp";

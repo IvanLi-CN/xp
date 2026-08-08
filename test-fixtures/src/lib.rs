@@ -59,6 +59,12 @@ struct Urls {
     tertiary_api: String,
     #[serde(rename = "loopback39043")]
     loopback_39043: String,
+    #[serde(rename = "canaryHttpsListener")]
+    canary_https_listener: String,
+    #[serde(rename = "canaryHttpsAlternate")]
+    canary_https_alternate: String,
+    #[serde(rename = "canaryHttpLoopback")]
+    canary_http_loopback: String,
     #[serde(rename = "publicOrigin")]
     public_origin: String,
 }
@@ -158,6 +164,24 @@ struct Lists {
     primary_authorities: Vec<String>,
     #[serde(rename = "tertiaryAuthorities")]
     tertiary_authorities: Vec<String>,
+    #[serde(rename = "existingAuthoritiesPort443")]
+    existing_authorities_port_443: Vec<String>,
+    #[serde(rename = "existingAndHost119Port53844")]
+    existing_and_host_119_port_53844: Vec<String>,
+    #[serde(rename = "host119Port53844")]
+    host_119_port_53844: Vec<String>,
+    #[serde(rename = "host126")]
+    host_126: Vec<String>,
+    #[serde(rename = "host126Port443")]
+    host_126_port_443: Vec<String>,
+    #[serde(rename = "host126Port53844")]
+    host_126_port_53844: Vec<String>,
+    #[serde(rename = "host130")]
+    host_130: Vec<String>,
+    #[serde(rename = "host130Port443")]
+    host_130_port_443: Vec<String>,
+    #[serde(rename = "host130Port8443")]
+    host_130_port_8443: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1055,6 +1079,10 @@ pub fn slot_s620() -> &'static str { &catalog().slots.strings[620] }
 pub fn slot_s621() -> &'static str { &catalog().slots.strings[621] }
 pub fn slot_s622() -> &'static str { &catalog().slots.strings[622] }
 pub fn slot_s623() -> &'static str { &catalog().slots.strings[623] }
+pub fn slot_s624() -> &'static str { &catalog().slots.strings[624] }
+pub fn slot_s625() -> &'static str { &catalog().slots.strings[625] }
+pub fn slot_s626() -> &'static str { &catalog().slots.strings[626] }
+pub fn slot_s627() -> &'static str { &catalog().slots.strings[627] }
 pub fn slot_n0<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[0].clone()).expect("fixture numeric slot is valid") }
 pub fn slot_n1<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[1].clone()).expect("fixture numeric slot is valid") }
 pub fn slot_n2<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[2].clone()).expect("fixture numeric slot is valid") }
@@ -1087,6 +1115,10 @@ pub fn slot_n28<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().s
 pub fn slot_n29<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[29].clone()).expect("fixture numeric slot is valid") }
 pub fn slot_n30<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[30].clone()).expect("fixture numeric slot is valid") }
 pub fn slot_n31<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[31].clone()).expect("fixture numeric slot is valid") }
+pub fn slot_n38<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[38].clone()).expect("fixture numeric slot is valid") }
+pub fn slot_n39<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[39].clone()).expect("fixture numeric slot is valid") }
+pub fn slot_n40<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[40].clone()).expect("fixture numeric slot is valid") }
+pub fn slot_n41<T: DeserializeOwned>() -> T { serde_json::from_value(catalog().slots.numbers[41].clone()).expect("fixture numeric slot is valid") }
 pub fn slot_l0() -> Vec<String> { catalog().slots.string_lists[0].clone() }
 pub fn slot_l1() -> Vec<String> { catalog().slots.string_lists[1].clone() }
 pub fn slot_l2() -> Vec<String> { catalog().slots.string_lists[2].clone() }

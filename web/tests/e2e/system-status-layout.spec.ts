@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { apiCapabilitiesFixture } from "./apiCapabilities";
 import { fixtureCatalog } from "@/fixture-policy/catalog";
+import { apiCapabilitiesFixture } from "./apiCapabilities";
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
@@ -69,12 +69,12 @@ const meshStatus = {
 			mesh_transport: {
 				protocol: "h2",
 				health: "healthy",
-				connection_generation: 4,
-				current_connection_requests: 65,
-				requests_5m: 65,
-				connection_starts_5m: 1,
-				requests_1h: 724,
-				connection_starts_1h: 2,
+				connection_generation: fixtureCatalog.slotNumber.n3(),
+				current_connection_requests: fixtureCatalog.slotNumber.n40(),
+				requests_5m: fixtureCatalog.slotNumber.n40(),
+				connection_starts_5m: fixtureCatalog.slotNumber.n0(),
+				requests_1h: fixtureCatalog.slotNumber.n41(),
+				connection_starts_1h: fixtureCatalog.slotNumber.n1(),
 				last_connection_started_at: fixtureCatalog.timestamp.recent(),
 			},
 			buckets: [],

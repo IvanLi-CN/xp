@@ -1,0 +1,12 @@
+id: fixture-policy-rust-cluster-node-helper-inputs
+language: Rust
+severity: error
+message: add_cluster_node inputs must come directly from xp_test_fixtures.
+files:
+  - src/http/tests.rs
+rule:
+  all:
+    - kind: call_expression
+    - pattern: add_cluster_node($STORE, $NODE_ID, $NODE_NAME)
+    - not:
+        pattern: add_cluster_node($STORE, xp_test_fixtures::$ID(), xp_test_fixtures::$NAME())

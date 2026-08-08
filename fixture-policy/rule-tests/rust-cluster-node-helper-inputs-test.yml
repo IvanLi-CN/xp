@@ -1,0 +1,11 @@
+id: fixture-policy-rust-cluster-node-helper-inputs
+valid:
+  - |
+    add_cluster_node(
+        &mut store,
+        xp_test_fixtures::secondary_node_id(),
+        xp_test_fixtures::secondary_node_name(),
+    );
+invalid:
+  - |
+    add_cluster_node(&mut store, "unapproved-node", "unapproved-name");

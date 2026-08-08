@@ -179,7 +179,7 @@ export function handleAdminConfigAndEndpointRoutes({
 		}
 		if (Object.prototype.hasOwnProperty.call(payload, "canary_upstream")) {
 			if (payload.canary_upstream === null) {
-				endpoint.meta.canary_upstream = undefined;
+				endpoint.meta.canary_upstream = fixtureCatalog.optional.undefined();
 			} else if (
 				payload.canary_upstream &&
 				typeof payload.canary_upstream === "object"
@@ -189,7 +189,8 @@ export function handleAdminConfigAndEndpointRoutes({
 		}
 		if (Object.prototype.hasOwnProperty.call(payload, "accepted_authorities")) {
 			if (payload.accepted_authorities === null) {
-				endpoint.meta.accepted_authorities = undefined;
+				endpoint.meta.accepted_authorities =
+					fixtureCatalog.optional.undefined();
 			} else if (Array.isArray(payload.accepted_authorities)) {
 				endpoint.meta.accepted_authorities = payload.accepted_authorities;
 			}
