@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { AdminEndpointProbeHistoryResponseSchema } from "./adminEndpointProbes";
 
 describe("AdminEndpointProbeHistoryResponseSchema", () => {
 	it("accepts legacy probe history payloads without participating_nodes", () => {
 		const parsed = AdminEndpointProbeHistoryResponseSchema.parse({
-			endpoint_id: "endpoint-1",
+			endpoint_id: fixtureCatalog.slotString.s40(),
 			expected_nodes: 2,
 			slots: [
 				{

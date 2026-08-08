@@ -1,24 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 
-import type { AdminNode } from "../api/adminNodes";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
 import { TcpConnectionUsageView } from "./TcpConnectionUsageView";
 
-const demoNode: AdminNode = {
-	node_id: "demo-node-1",
-	node_name: "tokyo-1",
-	access_host: "tokyo-1.example.com",
-	api_base_url: "https://tokyo-1.example.com",
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly",
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
-};
-
-const reports = buildDenseNodeTcpConnectionStories(demoNode);
+const reports = buildDenseNodeTcpConnectionStories();
 const tooltipPreviewMinute = "2026-03-07T01:30:00.000Z";
 
 const meta = {

@@ -1,0 +1,13 @@
+id: fixture-policy-catalog-keys
+snapshots:
+  ? |
+    { "hosts": { "unapproved": "node-z.fixture.test" } }
+  : labels:
+    - source: '"unapproved": "node-z.fixture.test"'
+      style: primary
+      start: 13
+      end: 48
+    - source: '"unapproved"'
+      style: secondary
+      start: 13
+      end: 25

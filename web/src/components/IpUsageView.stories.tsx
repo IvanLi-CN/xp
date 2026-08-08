@@ -1,24 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 
-import type { AdminNode } from "../api/adminNodes";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { IpUsageView } from "./IpUsageView";
 
-const demoNode: AdminNode = {
-	node_id: "demo-node-1",
-	node_name: "tokyo-1",
-	access_host: "tokyo-1.example.com",
-	api_base_url: "https://tokyo-1.example.com",
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly",
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
-};
-
-const reports = buildDenseNodeIpUsageStories(demoNode);
+const reports = buildDenseNodeIpUsageStories();
 
 const meta = {
 	title: "Components/IpUsageView",

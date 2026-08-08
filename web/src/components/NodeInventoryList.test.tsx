@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
 import {
@@ -54,13 +55,13 @@ vi.mock("./auth", async (importOriginal) => {
 
 const baseNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: "node-1",
-		node_name: "tokyo-1",
-		api_base_url: "https://node-1.example.com",
-		access_host: "node-1.example.com",
+		node_id: fixtureCatalog.slotString.s32(),
+		node_name: fixtureCatalog.slotString.s33(),
+		api_base_url: fixtureCatalog.slotString.s178(),
+		access_host: fixtureCatalog.slotString.s179(),
 		summary: {
 			status: "up",
-			updated_at: "2026-03-01T00:00:00Z",
+			updated_at: fixtureCatalog.slotString.s91(),
 		},
 		components: [
 			{
@@ -73,19 +74,19 @@ const baseNodes: AdminNodeRuntimeListItem[] = [
 		],
 		recent_slots: [
 			{
-				slot_start: "2026-03-01T00:00:00Z",
+				slot_start: fixtureCatalog.slotString.s91(),
 				status: "up",
 			},
 		],
 	},
 	{
-		node_id: "node-2",
-		node_name: "",
-		api_base_url: "https://node-2.example.com",
-		access_host: "node-2.example.com",
+		node_id: fixtureCatalog.slotString.s36(),
+		node_name: fixtureCatalog.slotString.s99(),
+		api_base_url: fixtureCatalog.slotString.s180(),
+		access_host: fixtureCatalog.slotString.s181(),
 		summary: {
 			status: "degraded",
-			updated_at: "2026-03-01T00:00:00Z",
+			updated_at: fixtureCatalog.slotString.s91(),
 		},
 		components: [
 			{
@@ -98,7 +99,7 @@ const baseNodes: AdminNodeRuntimeListItem[] = [
 		],
 		recent_slots: [
 			{
-				slot_start: "2026-03-01T00:00:00Z",
+				slot_start: fixtureCatalog.slotString.s91(),
 				status: "down",
 			},
 		],
@@ -109,7 +110,7 @@ describe("<NodeInventoryList />", () => {
 	beforeEach(() => {
 		window.history.replaceState(
 			{},
-			"",
+			fixtureCatalog.slotString.s99(),
 			"/nodes?view=table&login_token=old-token#history",
 		);
 	});
@@ -133,17 +134,19 @@ describe("<NodeInventoryList />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-1",
-			"/nodes/node-2",
+			`/nodes/${fixtureCatalog.slotString.s32()}`,
+			`/nodes/${fixtureCatalog.slotString.s36()}`,
 		]);
 		const openOnNodeLinks = screen.getAllByRole("link", {
 			name: "Open on node",
 		});
 		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
-			"https://node-1.example.com/nodes?view=table&login_token=xp_admin_token#history",
-			"https://node-2.example.com/nodes?view=table&login_token=xp_admin_token#history",
+			`${fixtureCatalog.slotString.s178()}/nodes?view=table&login_token=xp_admin_token#history`,
+			`${fixtureCatalog.slotString.s180()}/nodes?view=table&login_token=xp_admin_token#history`,
 		]);
-		expect(screen.getAllByText("(unnamed)").length).toBeGreaterThan(0);
+		expect(
+			screen.getAllByText(fixtureCatalog.slotString.s99()).length,
+		).toBeGreaterThan(0);
 		expect(screen.queryByText("API base URL")).toBeNull();
 		expect(screen.queryByText("Access host")).toBeNull();
 		expect(screen.queryByText("Components")).toBeNull();
@@ -184,7 +187,7 @@ describe("<NodeInventoryList />", () => {
 								...baseNodes[0],
 								summary: {
 									status: "degraded",
-									updated_at: "2026-03-01T00:00:00Z",
+									updated_at: fixtureCatalog.slotString.s91(),
 								},
 								components: [
 									{

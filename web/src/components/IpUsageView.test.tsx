@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
 import { IpUsageView, SUMMARY_HIGHLIGHT_BADGE_STYLE } from "./IpUsageView";
@@ -145,57 +146,57 @@ const baseReport: Pick<
 	| "ips"
 > = {
 	window_start: "2026-03-08T00:00:00Z",
-	window_end: "2026-03-08T00:02:00Z",
+	window_end: fixtureCatalog.slotString.s25(),
 	warnings: [],
 	unique_ip_series: [
 		{ minute: "2026-03-08T00:00:00Z", count: 1 },
-		{ minute: "2026-03-08T00:01:00Z", count: 2 },
-		{ minute: "2026-03-08T00:02:00Z", count: 1 },
+		{ minute: fixtureCatalog.slotString.s26(), count: 2 },
+		{ minute: fixtureCatalog.slotString.s25(), count: 1 },
 	],
 	timeline: [
 		{
 			lane_key: "edge-tokyo|203.0.113.7",
-			endpoint_id: "endpoint-1",
-			endpoint_tag: "edge-tokyo",
-			ip: "203.0.113.7",
+			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_tag: fixtureCatalog.slotString.s41(),
+			ip: fixtureCatalog.slotString.s29(),
 			minutes: 2,
 			segments: [
 				{
 					start_minute: "2026-03-08T00:00:00Z",
-					end_minute: "2026-03-08T00:01:00Z",
+					end_minute: fixtureCatalog.slotString.s26(),
 				},
 			],
 		},
 		{
 			lane_key: "edge-osaka|198.51.100.4",
-			endpoint_id: "endpoint-2",
-			endpoint_tag: "edge-osaka",
-			ip: "198.51.100.4",
+			endpoint_id: fixtureCatalog.slotString.s43(),
+			endpoint_tag: fixtureCatalog.slotString.s201(),
+			ip: fixtureCatalog.slotString.s202(),
 			minutes: 1,
 			segments: [
 				{
-					start_minute: "2026-03-08T00:02:00Z",
-					end_minute: "2026-03-08T00:02:00Z",
+					start_minute: fixtureCatalog.slotString.s25(),
+					end_minute: fixtureCatalog.slotString.s25(),
 				},
 			],
 		},
 	],
 	ips: [
 		{
-			ip: "203.0.113.7",
+			ip: fixtureCatalog.slotString.s29(),
 			minutes: 2,
-			endpoint_tags: ["edge-tokyo"],
+			endpoint_tags: [fixtureCatalog.slotString.s41()],
 			region: "Japan / Tokyo",
 			operator: "ExampleNet",
-			last_seen_at: "2026-03-08T00:01:00Z",
+			last_seen_at: fixtureCatalog.slotString.s26(),
 		},
 		{
-			ip: "198.51.100.4",
+			ip: fixtureCatalog.slotString.s202(),
 			minutes: 1,
-			endpoint_tags: ["edge-osaka"],
+			endpoint_tags: [fixtureCatalog.slotString.s201()],
 			region: "Singapore",
 			operator: "LionLink",
-			last_seen_at: "2026-03-08T00:02:00Z",
+			last_seen_at: fixtureCatalog.slotString.s25(),
 		},
 	],
 };
@@ -232,16 +233,20 @@ describe("<IpUsageView />", () => {
 			/>,
 		);
 
-		const ipButton = screen.getAllByRole("button", { name: "203.0.113.7" })[0];
+		const ipButton = screen.getAllByRole("button", {
+			name: fixtureCatalog.slotString.s29(),
+		})[0];
 		const tokyoRow = ipButton?.closest("tr");
 		const osakaRow = screen
-			.getAllByRole("button", { name: "198.51.100.4" })[0]
+			.getAllByRole("button", { name: fixtureCatalog.slotString.s202() })[0]
 			?.closest("tr");
 		expect(tokyoRow).not.toBeNull();
 		expect(osakaRow).not.toBeNull();
 
 		fireEvent.mouseEnter(ipButton);
-		expect(screen.getAllByText("203.0.113.7").length).toBeGreaterThan(1);
+		expect(
+			screen.getAllByText(fixtureCatalog.slotString.s29()).length,
+		).toBeGreaterThan(1);
 		expect(tokyoRow).toHaveClass("bg-info/8");
 		expect(osakaRow).toHaveClass("opacity-45");
 
@@ -251,7 +256,7 @@ describe("<IpUsageView />", () => {
 			screen.getByRole("button", { name: "Clear pinned highlight" }),
 		).toBeInTheDocument();
 		const ipBadge = screen
-			.getAllByText("203.0.113.7")
+			.getAllByText(fixtureCatalog.slotString.s29())
 			.map((node) => node.closest(".xp-badge"))
 			.find((node): node is HTMLElement => node !== null);
 		expect(ipBadge).toBeTruthy();

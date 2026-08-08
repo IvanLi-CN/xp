@@ -109,7 +109,8 @@
 - `Lifecycle`: `draft|active|superseded|retired`
 - `Implementation`: 自由文本的 current truth，例如 `未开始`、`部分完成`、`已完成`
 
-| Topic         | Lifecycle | Implementation  | Spec                             | Successor  |
-| ------------- | --------- | --------------- | -------------------------------- | ---------- |
-| Web运行时韧性 | active    | 部分完成（1/2） | `web-runtime-resilience/SPEC.md` | #227 child |
-| Mihomo SMux   | active    | complete        | `endpoint-mihomo-smux/SPEC.md`   | -          |
+| Topic                | Lifecycle | Implementation  | Spec                             | Successor  |
+| -------------------- | --------- | --------------- | -------------------------------- | ---------- |
+| Web运行时韧性        | active    | 部分完成（1/2） | `web-runtime-resilience/SPEC.md` | #227 child |
+| Mihomo SMux          | active    | complete        | `endpoint-mihomo-smux/SPEC.md`   | -          |
+| Fixture 数据策略门禁 | active    | 已实现          | `fixture-policy-gate/SPEC.md`    | -          |

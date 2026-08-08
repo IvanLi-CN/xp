@@ -1,0 +1,22 @@
+id: fixture-policy-tsx-data-source
+language: Tsx
+severity: error
+message: Fixture operational data must be a direct fixtureCatalog accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the adapter.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        regex: '^(accessHost|access_host|apiBaseUrl|api_base_url|host|hostname|serverNames|server_names|acceptedAuthorities|accepted_authorities|canaryUpstreamUrl|canary_upstream_url|canary_upstream|nodeId|node_id|nodeName|node_name|endpointId|endpoint_id|endpointTag|endpoint_tag|subscriptionToken|subscription_token|token|secret|password|lastSeenAt|last_seen_at|lastProbeAt|last_probe_at|createdAt|created_at|updatedAt|updated_at|checkedAt|checked_at|connectedAt|connected_at|latencyMs|latency_ms|probeLatencyMs|probe_latency_ms|trafficBytes|traffic_bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|xray_api_addr|tag|bind|cluster_id|leader_api_base_url|mesh_url|generated_at|last_sample_at|last_transition_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|publicOrigin)$'
+    - has:
+        field: value
+        not:
+          pattern: fixtureCatalog.$GROUP.$ACCESSOR()

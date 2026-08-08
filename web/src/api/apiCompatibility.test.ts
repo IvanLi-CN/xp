@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	API_COMPATIBILITY_WINDOW,
@@ -180,10 +181,10 @@ describe("api compatibility", () => {
 			.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
-						cluster_id: "fixture",
-						node_id: "fixture",
+						cluster_id: fixtureCatalog.slotString.s103(),
+						node_id: fixtureCatalog.slotString.s103(),
 						role: "leader",
-						leader_api_base_url: "",
+						leader_api_base_url: fixtureCatalog.slotString.s99(),
 						term: 0,
 					}),
 					{ status: 200 },
@@ -217,7 +218,7 @@ describe("api compatibility", () => {
 						current: { package: "3.21.11", release_tag: "v3.21.11" },
 						latest: { release_tag: "v3.22.5" },
 						has_update: true,
-						checked_at: "2026-08-05T00:00:00Z",
+						checked_at: fixtureCatalog.slotString.s104(),
 						compare_reason: "semver",
 						source: {
 							kind: "github-releases",

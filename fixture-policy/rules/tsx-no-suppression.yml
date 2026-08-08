@@ -1,0 +1,15 @@
+id: fixture-policy-tsx-no-suppression
+language: Tsx
+severity: error
+message: ast-grep suppression is forbidden in protected fixture sources.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+rule:
+  all:
+    - kind: comment
+    - regex: ast-grep-ignore

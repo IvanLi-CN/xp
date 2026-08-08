@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
-const NODE_ID = "node-1";
 const ENDPOINT_ID = "endpoint-managed-vless";
 
 const meta = {
@@ -15,10 +15,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: NODE_ID,
-						node_name: "tokyo-1",
-						access_host: "edge.example.test",
-						api_base_url: "https://tokyo-1.example.com",
+						node_id: fixtureCatalog.slotString.s118(),
+						node_name: fixtureCatalog.slotString.s33(),
+						access_host: fixtureCatalog.slotString.s119(),
+						api_base_url: fixtureCatalog.slotString.s34(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -29,27 +29,21 @@ const meta = {
 				],
 				endpoints: [
 					{
-						endpoint_id: ENDPOINT_ID,
-						node_id: NODE_ID,
-						tag: "managed-vless",
+						endpoint_id: fixtureCatalog.slotString.s120(),
+						node_id: fixtureCatalog.slotString.s118(),
+						tag: fixtureCatalog.slotString.s121(),
 						kind: "vless_reality_vision_tcp",
 						port: 53844,
 						meta: {
 							reality: {
-								dest: "127.0.0.1:39043",
-								server_names: ["edge.example.test"],
+								dest: fixtureCatalog.slotString.s2(),
+								server_names: fixtureCatalog.slotList.l5(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 							managed_default: true,
-							canary_upstream: {
-								url: "http://127.0.0.1:8080",
-								mode: "auto",
-							},
-							accepted_authorities: [
-								"endpoint.example.test:53844",
-								"edge.example.com:53844",
-							],
+							canary_upstream: fixtureCatalog.slotString.s122(),
+							accepted_authorities: fixtureCatalog.slotList.l6(),
 						},
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
@@ -85,10 +79,10 @@ export const ManagedDefaultAliases: Story = {
 			await canvas.findByText("acceptedAuthorities"),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findAllByText("endpoint.example.test:53844"),
+			await canvas.findAllByText(fixtureCatalog.slotList.l6()[0]),
 		).toHaveLength(2);
 		await expect(
-			await canvas.findAllByText("edge.example.com:53844"),
+			await canvas.findAllByText(fixtureCatalog.slotList.l6()[1]),
 		).toHaveLength(2);
 		await expect(
 			await canvas.findByText(
@@ -118,10 +112,10 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: NODE_ID,
-						node_name: "tokyo-1",
-						access_host: "",
-						api_base_url: "not-a-url",
+						node_id: fixtureCatalog.slotString.s118(),
+						node_name: fixtureCatalog.slotString.s33(),
+						access_host: fixtureCatalog.slotString.s99(),
+						api_base_url: fixtureCatalog.slotString.s123(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -132,27 +126,21 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: ENDPOINT_ID,
-						node_id: NODE_ID,
-						tag: "managed-vless",
+						endpoint_id: fixtureCatalog.slotString.s120(),
+						node_id: fixtureCatalog.slotString.s118(),
+						tag: fixtureCatalog.slotString.s121(),
 						kind: "vless_reality_vision_tcp",
 						port: 53844,
 						meta: {
 							reality: {
-								dest: "127.0.0.1:39043",
-								server_names: ["edge.example.test"],
+								dest: fixtureCatalog.slotString.s2(),
+								server_names: fixtureCatalog.slotList.l5(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 							managed_default: true,
-							canary_upstream: {
-								url: "http://127.0.0.1:8080",
-								mode: "auto",
-							},
-							accepted_authorities: [
-								"endpoint.example.test:53844",
-								"edge.example.com:53844",
-							],
+							canary_upstream: fixtureCatalog.slotString.s122(),
+							accepted_authorities: fixtureCatalog.slotList.l6(),
 						},
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
@@ -236,10 +224,10 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: "node-hinet",
-						node_name: "hinet",
-						access_host: "hinet-ep.707979.xyz",
-						api_base_url: "https://hinet-xp.707979.xyz",
+						node_id: fixtureCatalog.slotString.s124(),
+						node_name: fixtureCatalog.slotString.s125(),
+						access_host: fixtureCatalog.slotString.s126(),
+						api_base_url: fixtureCatalog.slotString.s127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -250,15 +238,15 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: "endpoint-hinet-managed",
-						node_id: "node-hinet",
-						tag: "managed-hinet",
+						endpoint_id: fixtureCatalog.slotString.s128(),
+						node_id: fixtureCatalog.slotString.s124(),
+						tag: fixtureCatalog.slotString.s129(),
 						kind: "vless_reality_vision_tcp",
 						port: 53844,
 						meta: {
 							reality: {
-								dest: "127.0.0.1:39043",
-								server_names: ["hinet-ep.707979.xyz"],
+								dest: fixtureCatalog.slotString.s2(),
+								server_names: fixtureCatalog.slotList.l7(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},

@@ -1,0 +1,45 @@
+id: fixture-policy-rust-data-source
+language: Rust
+severity: error
+message: Fixture operational data must be a direct xp_test_fixtures accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the Rust adapter.
+files:
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+rule:
+  all:
+    - kind: field_initializer
+    - has:
+        field: field
+        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|generated_at|last_sample_at|last_transition_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin)$'
+    # These transport records only observe values produced by the system under test.
+    # They are not fixture sources and must retain the observed value for assertions.
+    - not:
+        inside:
+          stopBy: end
+          any:
+            - pattern: Call::AddInbound { $$$ }
+            - pattern: Call::RemoveInbound { $$$ }
+            - pattern: Call::AlterInbound { $$$ }
+            - pattern: ReconcileRequest::RebuildInbound { $$$ }
+            - pattern: ReconcileRequest::RemoveInbound { $$$ }
+            - pattern: ReconcileRequest::RemoveUser { $$$ }
+            - pattern: NodeUserEndpointMembership { $$$ }
+            - pattern: SignedPayload { $$$ }
+            - pattern: NodeMeta { $$$ }
+            - pattern: 'async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Result<()> { $$$ }'
+    - not:
+        has:
+          field: value
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()
+            - pattern: xp_test_fixtures::$ACCESSOR().into()
+            - pattern: Some(xp_test_fixtures::$ACCESSOR())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
+            - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()

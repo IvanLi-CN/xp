@@ -1,0 +1,21 @@
+id: fixture-policy-typescript-data-source
+valid:
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+  - |
+    const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
+  - |
+    const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
+invalid:
+  - |
+    const fixture = { host: "unapproved.fixture.test" };
+  - |
+    const fixture = { endpointId: `endpoint-${suffix}` };
+  - |
+    const fixture = { token: process.env.TEST_TOKEN };
+  - |
+    const fixture = { updated_at: JSON.parse(raw) };
+  - |
+    const fixture = { ip: await fetch("https://input.fixture.test") };
+  - |
+    const fixture = { xray_api_addr: "127.0.0.1:10085" };

@@ -1,0 +1,27 @@
+id: fixture-policy-rust-inline-assignment-source
+valid:
+  - |
+    mod tests {
+        fn updates_node() {
+            fixture.node_id = xp_test_fixtures::primary_node_id().to_owned();
+            fixture.latency_ms = Some(xp_test_fixtures::slot_n27());
+            fixture.last_restart_at = Some(xp_test_fixtures::baseline_timestamp().parse().unwrap());
+        }
+    }
+  - |
+    fn production_update() {
+        fixture.node_id = "runtime-node".to_owned();
+    }
+invalid:
+  - |
+    mod tests {
+        fn updates_node() {
+            fixture.node_id = "unapproved-node".to_owned();
+        }
+    }
+  - |
+    mod tests {
+        fn updates_latency() {
+            fixture.latency_ms = std::env::var("TEST_LATENCY").unwrap();
+        }
+    }

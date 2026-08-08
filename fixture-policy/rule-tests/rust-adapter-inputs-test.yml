@@ -1,0 +1,21 @@
+id: fixture-policy-rust-adapter-inputs
+valid:
+  - |
+    let catalog = include_str!("../../fixture-policy/catalog.json");
+invalid:
+  - |
+    let host = std::env::var("FIXTURE_HOST");
+  - |
+    let host = std::fs::read_to_string("fixture.json");
+  - |
+    let host = serde_json::from_reader(reader);
+  - |
+    let host = std::fs::read("fixture.json");
+  - |
+    let host = std::fs::read_to_string("fixture.json");
+  - |
+    let bytes = include_bytes!("fixture.bin");
+  - |
+    let source = include_str!("fixture.json");
+  - |
+    let host = serde_json::from_str(source);

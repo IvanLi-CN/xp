@@ -1,0 +1,9 @@
+id: fixture-policy-catalog-keys
+valid:
+  - |
+    { "hosts": { "primary": "node-a.fixture.test" } }
+  - |
+    { "metrics": { "latencyLow": 12 } }
+invalid:
+  - |
+    { "hosts": { "unapproved": "node-z.fixture.test" } }

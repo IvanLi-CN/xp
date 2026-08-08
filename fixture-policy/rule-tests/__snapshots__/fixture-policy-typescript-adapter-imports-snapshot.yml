@@ -1,0 +1,8 @@
+id: fixture-policy-typescript-adapter-imports
+snapshots:
+  import catalog from "./other.json";:
+    labels:
+    - source: import catalog from "./other.json";
+      style: primary
+      start: 0
+      end: 35

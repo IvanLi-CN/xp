@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { demoMeshStatus } from "@/demo/DemoSystemStatusPage";
 
@@ -115,8 +116,8 @@ export const Down: Story = {
 							...peer,
 							current_path: "public" as const,
 							quality: "down" as const,
-							availability_1h: 0,
-							availability_24h: 0.72,
+							availability_1h: fixtureCatalog.slotNumber.n16(),
+							availability_24h: fixtureCatalog.slotNumber.n17(),
 						}
 					: peer,
 			),
@@ -193,8 +194,8 @@ export const FiftyPeers: Story = {
 					demoMeshStatus.peers[index % demoMeshStatus.peers.length];
 				return {
 					...source,
-					node_id: `${source.node_id}-${index + 1}`,
-					node_name: `${source.node_name}-${index + 1}`,
+					node_id: fixtureCatalog.slotString.s238(),
+					node_name: fixtureCatalog.slotString.s239(),
 				};
 			}),
 		},

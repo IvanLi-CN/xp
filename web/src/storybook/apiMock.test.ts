@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { createMockApi } from "../../.storybook/mocks/apiMock";
 
@@ -79,7 +80,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listRes = await mock.handle(
@@ -104,7 +106,7 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.slotString.s40(),
 						},
 					],
 				}),
@@ -119,7 +121,9 @@ describe("storybook api mock", () => {
 		};
 		expect(replaced.created + replaced.deleted).toBeGreaterThanOrEqual(0);
 		expect(replaced.items).toHaveLength(1);
-		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
+		expect(replaced.items[0]?.endpoint_id).toBe(
+			fixtureCatalog.slotString.s40(),
+		);
 		expect(replaced.items[0]?.user_id).toBe(userId);
 		expect(replaced.items[0]?.node_id.length).toBeGreaterThan(0);
 		expect(replaced.auto_assign_endpoint_kinds).toEqual([
@@ -168,7 +172,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
@@ -178,9 +183,9 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.slotString.s40(),
 						},
-						{ endpoint_id: "" },
+						{ endpoint_id: fixtureCatalog.slotString.s99() },
 					],
 				}),
 			}),
@@ -201,7 +206,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
@@ -211,10 +217,10 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.slotString.s40(),
 						},
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.slotString.s40(),
 						},
 					],
 				}),
@@ -226,7 +232,9 @@ describe("storybook api mock", () => {
 			auto_assign_endpoint_kinds: string[];
 		};
 		expect(
-			payload.items.filter((i) => i.endpoint_id === "endpoint-1"),
+			payload.items.filter(
+				(i) => i.endpoint_id === fixtureCatalog.slotString.s40(),
+			),
 		).toHaveLength(1);
 		expect(payload.auto_assign_endpoint_kinds).toEqual([
 			"vless_reality_vision_tcp",
@@ -242,8 +250,10 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const vlessUserId = usersData.items[0]?.user_id ?? "";
-		const ssUserId = usersData.items[1]?.user_id ?? "";
+		const vlessUserId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
+		const ssUserId =
+			usersData.items[1]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(vlessUserId.length).toBeGreaterThan(0);
 		expect(ssUserId.length).toBeGreaterThan(0);
 
@@ -252,14 +262,11 @@ describe("storybook api mock", () => {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					node_id: "node-1",
+					node_id: fixtureCatalog.slotString.s32(),
 					kind: "vless_reality_vision_tcp",
 					port: 9443,
-					canary_upstream: {
-						url: "http://127.0.0.1:8080",
-						mode: "auto",
-					},
-					accepted_authorities: ["EDGE.EXAMPLE.COM."],
+					canary_upstream: fixtureCatalog.slotString.s112(),
+					accepted_authorities: fixtureCatalog.slotList.l4(),
 				}),
 			}),
 		);
@@ -273,13 +280,15 @@ describe("storybook api mock", () => {
 			};
 		};
 		expect(createdEndpoint.meta.managed_default).toBe(true);
-		expect(createdEndpoint.meta.reality.server_names).toEqual([
-			"tokyo-1.example.com",
-		]);
-		expect(createdEndpoint.meta.reality.dest).toBe("127.0.0.1:39043");
-		expect(createdEndpoint.meta.accepted_authorities).toEqual([
-			"edge.example.com:443",
-		]);
+		expect(createdEndpoint.meta.reality.server_names).toEqual(
+			fixtureCatalog.slotList.l1(),
+		);
+		expect(createdEndpoint.meta.reality.dest).toBe(
+			fixtureCatalog.slotString.s2(),
+		);
+		expect(createdEndpoint.meta.accepted_authorities).toEqual(
+			fixtureCatalog.slotList.l2(),
+		);
 
 		const vlessAccessRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${vlessUserId}/access`, { method: "GET" }),
@@ -290,7 +299,7 @@ describe("storybook api mock", () => {
 			auto_assign_endpoint_kinds: string[];
 		};
 		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual([
-			"endpoint-1",
+			fixtureCatalog.slotString.s40(),
 			createdEndpoint.endpoint_id,
 		]);
 		expect(vlessAccess.auto_assign_endpoint_kinds).toEqual([
@@ -306,7 +315,7 @@ describe("storybook api mock", () => {
 			auto_assign_endpoint_kinds: string[];
 		};
 		expect(ssAccess.items.map((item) => item.endpoint_id)).toEqual([
-			"endpoint-2",
+			fixtureCatalog.slotString.s43(),
 		]);
 		expect(ssAccess.auto_assign_endpoint_kinds).toEqual([
 			"ss2022_2022_blake3_aes_128_gcm",
@@ -334,7 +343,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.slotString.s99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const subRes = await mock.handle(
@@ -380,7 +390,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.slotString.s99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const providerRes = await mock.handle(
@@ -414,7 +425,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.slotString.s99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const legacyRes = await mock.handle(
@@ -456,7 +468,7 @@ describe("storybook api mock", () => {
 					source_kind: "url",
 					source: "http://127.0.0.1:8080/raw",
 					level: "credentials",
-					source_format: "auto",
+					source_format: fixtureCatalog.slotString.s112(),
 				}),
 			}),
 		);
@@ -475,7 +487,8 @@ describe("storybook api mock", () => {
 		const usersData = (await listUsers.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listNodes = await mock.handle(
@@ -485,7 +498,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[0]?.node_id ?? fixtureCatalog.slotString.s32();
 
 		const listRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/node-weights`, { method: "GET" }),
@@ -531,7 +545,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[0]?.node_id ?? fixtureCatalog.slotString.s32();
 
 		const rowsRes = await mock.handle(
 			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/weight-rows`, {
@@ -584,7 +599,7 @@ describe("storybook api mock", () => {
 		const nodes = (await nodesRes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodes.items[0]?.node_id ?? "node-1";
+		const nodeId = nodes.items[0]?.node_id ?? fixtureCatalog.slotString.s32();
 
 		const nodeUsageRes = await mock.handle(
 			jsonRequest(`/api/admin/nodes/${nodeId}/ip-usage?window=7d`, {
@@ -606,7 +621,7 @@ describe("storybook api mock", () => {
 		const users = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = users.items[0]?.user_id ?? "";
+		const userId = users.items[0]?.user_id ?? fixtureCatalog.slotString.s99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const userUsageRes = await mock.handle(
@@ -626,10 +641,10 @@ describe("storybook api mock", () => {
 			data: {
 				nodes: [
 					{
-						node_id: "node-egress-1",
-						node_name: "node-egress-1",
-						access_host: "node-egress-1.example.invalid",
-						api_base_url: "https://node-egress-1.example.invalid",
+						node_id: fixtureCatalog.slotString.s63(),
+						node_name: fixtureCatalog.slotString.s63(),
+						access_host: fixtureCatalog.slotString.s114(),
+						api_base_url: fixtureCatalog.slotString.s115(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -637,16 +652,16 @@ describe("storybook api mock", () => {
 							tz_offset_minutes: 0,
 						},
 						egress_probe: {
-							public_ipv4: "203.0.113.8",
+							public_ipv4: fixtureCatalog.slotString.s116(),
 							public_ipv6: "2001:db8::8",
-							selected_public_ip: "203.0.113.8",
+							selected_public_ip: fixtureCatalog.slotString.s116(),
 							country_code: "TW",
 							geo_region: "Taiwan",
 							geo_city: "Taipei",
 							geo_operator: "ExampleNet",
 							subscription_region: "taiwan",
-							checked_at: "2026-04-24T00:00:00Z",
-							last_success_at: "2026-04-24T00:00:00Z",
+							checked_at: fixtureCatalog.slotString.s117(),
+							last_success_at: fixtureCatalog.slotString.s117(),
 							stale: false,
 							error_summary: null,
 						},
@@ -665,7 +680,7 @@ describe("storybook api mock", () => {
 				egress_probe?: { subscription_region: string };
 			}>;
 		};
-		const nodeId = nodes.items[0]?.node_id ?? "node-egress-1";
+		const nodeId = nodes.items[0]?.node_id ?? fixtureCatalog.slotString.s63();
 
 		const refreshRes = await mock.handle(
 			jsonRequest(`/api/admin/nodes/${nodeId}/egress-probe/refresh`, {
@@ -731,7 +746,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[0]?.node_id ?? fixtureCatalog.slotString.s32();
 
 		const policyRes = await mock.handle(
 			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/policy`, {

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 import type { ReactNode } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type {
 	AdminEndpoint,
@@ -17,28 +18,23 @@ function makeSlots(): AdminEndpointProbeSlot[] {
 			hour: `2026-02-19T${hh}:00:00Z`,
 			status: hour % 11 === 0 ? "down" : hour % 7 === 0 ? "degraded" : "up",
 			latency_ms_p50: 200 + hour,
-			checked_at: `2026-02-19T${hh}:00:10Z`,
+			checked_at: fixtureCatalog.slotString.s269(),
 		});
 	}
 	return slots;
 }
 
-const LONG_NODE_ID = "01KGRVRYQS9VA9JFEPO0NR6MD2B";
-const LONG_ENDPOINT_ID =
-	"ep_01HENDPT_THIS_IS_A_VERY_LONG_ENDPOINT_ID_FOR_LAYOUT_TESTING";
-const LONG_TAG =
-	"edge-tokyo-with-a-very-long-tag-that-should-truncate-nicely-in-the-table";
 const LONG_NODE_NAME =
 	"tokyo-edge-with-a-very-long-node-name-that-should-truncate-nicely";
 
 const ENDPOINTS: AdminEndpoint[] = [
 	{
-		endpoint_id: LONG_ENDPOINT_ID,
-		node_id: LONG_NODE_ID,
-		tag: LONG_TAG,
+		endpoint_id: fixtureCatalog.slotString.s270(),
+		node_id: fixtureCatalog.slotString.s271(),
+		tag: fixtureCatalog.slotString.s272(),
 		kind: "vless_reality_vision_tcp",
 		port: 53842,
-		meta: { public_domain: "tokyo.example.invalid" },
+		meta: { public_domain: fixtureCatalog.slotString.s212() },
 		probe: {
 			latest_checked_at: "2026-02-19T23:00:10Z",
 			latest_latency_ms_p50: 293,
@@ -46,12 +42,12 @@ const ENDPOINTS: AdminEndpoint[] = [
 		},
 	},
 	{
-		endpoint_id: "ep_01HENDPT_SHORT",
-		node_id: "01KFTEA58X1RXXVDRD6EPFB63Y",
-		tag: "osaka-ss2022",
+		endpoint_id: fixtureCatalog.slotString.s273(),
+		node_id: fixtureCatalog.slotString.s274(),
+		tag: fixtureCatalog.slotString.s275(),
 		kind: "ss2022_2022_blake3_aes_128_gcm",
 		port: 53843,
-		meta: { public_domain: "osaka.example.invalid" },
+		meta: { public_domain: fixtureCatalog.slotString.s278() },
 		probe: {
 			latest_checked_at: "2026-02-19T23:00:10Z",
 			latest_latency_ms_p50: 223,
@@ -62,18 +58,18 @@ const ENDPOINTS: AdminEndpoint[] = [
 
 const NODES: AdminNode[] = [
 	{
-		node_id: LONG_NODE_ID,
-		node_name: LONG_NODE_NAME,
-		api_base_url: "https://tokyo.example.invalid",
-		access_host: "tokyo.example.invalid",
+		node_id: fixtureCatalog.slotString.s271(),
+		node_name: fixtureCatalog.slotString.s276(),
+		api_base_url: fixtureCatalog.slotString.s211(),
+		access_host: fixtureCatalog.slotString.s212(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
-		node_id: "01KFTEA58X1RXXVDRD6EPFB63Y",
-		node_name: "osaka-1",
-		api_base_url: "https://osaka.example.invalid",
-		access_host: "osaka.example.invalid",
+		node_id: fixtureCatalog.slotString.s274(),
+		node_name: fixtureCatalog.slotString.s37(),
+		api_base_url: fixtureCatalog.slotString.s277(),
+		access_host: fixtureCatalog.slotString.s278(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},

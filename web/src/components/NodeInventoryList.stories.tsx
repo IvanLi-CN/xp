@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
 import {
@@ -20,14 +21,13 @@ function buildRecentSlots(
 
 const sampleNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: "01J000000000000000000000001",
-		node_name: "tokyo-edge-a",
-		api_base_url:
-			"https://tokyo-edge-a.example.invalid/admin/runtime/super/long/path",
-		access_host: "tokyo-edge-a.example.invalid",
+		node_id: fixtureCatalog.slotString.s229(),
+		node_name: fixtureCatalog.slotString.s280(),
+		api_base_url: fixtureCatalog.slotString.s281(),
+		access_host: fixtureCatalog.slotString.s282(),
 		summary: {
 			status: "up",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.slotString.s283(),
 		},
 		components: [
 			{
@@ -61,13 +61,13 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 		]),
 	},
 	{
-		node_id: "01J000000000000000000000002",
-		node_name: "",
-		api_base_url: "https://node-b.example.invalid",
-		access_host: "very-long-hostname-node-b.example.invalid",
+		node_id: fixtureCatalog.slotString.s233(),
+		node_name: fixtureCatalog.slotString.s99(),
+		api_base_url: fixtureCatalog.slotString.s235(),
+		access_host: fixtureCatalog.slotString.s284(),
 		summary: {
 			status: "degraded",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.slotString.s283(),
 		},
 		components: [
 			{

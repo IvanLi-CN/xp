@@ -56,7 +56,7 @@ fn request(allow_ambiguous_fallback: bool) -> MeshRequest {
         allow_ambiguous_fallback,
         request_id: "request-1".to_string(),
         route: InternalRoute::MeshV2,
-        cluster_id: "cluster-1".to_string(),
+        cluster_id: xp_test_fixtures::slot_s511().to_owned(),
         sender_id: "node-a".to_string(),
         updates_active_path: false,
     }

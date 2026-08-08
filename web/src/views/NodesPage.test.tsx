@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
@@ -86,7 +87,7 @@ function renderPage() {
 describe("<NodesPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
-		window.history.pushState({}, "", "/");
+		window.history.pushState({}, fixtureCatalog.slotString.s99(), "/");
 		globalThis.ResizeObserver = class {
 			observe() {
 				// no-op for jsdom layout tests
@@ -100,10 +101,10 @@ describe("<NodesPage />", () => {
 		} as typeof ResizeObserver;
 
 		vi.mocked(fetchClusterInfo).mockResolvedValue({
-			cluster_id: "cluster-1",
-			node_id: "node-1",
+			cluster_id: fixtureCatalog.slotString.s84(),
+			node_id: fixtureCatalog.slotString.s32(),
 			role: "leader",
-			leader_api_base_url: "https://node-1.example.com",
+			leader_api_base_url: fixtureCatalog.slotString.s178(),
 			term: 12,
 			xp_version: "1.0.0",
 		});
@@ -115,13 +116,13 @@ describe("<NodesPage />", () => {
 			unreachable_nodes: [],
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "tokyo-1",
-					api_base_url: "https://node-1.example.com",
-					access_host: "node-1.example.com",
+					node_id: fixtureCatalog.slotString.s32(),
+					node_name: fixtureCatalog.slotString.s33(),
+					api_base_url: fixtureCatalog.slotString.s178(),
+					access_host: fixtureCatalog.slotString.s179(),
 					summary: {
 						status: "up",
-						updated_at: "2026-03-01T00:00:00Z",
+						updated_at: fixtureCatalog.slotString.s91(),
 					},
 					components: [
 						{
@@ -134,19 +135,19 @@ describe("<NodesPage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: "2026-03-01T00:00:00Z",
+							slot_start: fixtureCatalog.slotString.s91(),
 							status: "up",
 						},
 					],
 				},
 				{
-					node_id: "node-2",
-					node_name: "",
-					api_base_url: "https://node-2.example.com",
-					access_host: "node-2.example.com",
+					node_id: fixtureCatalog.slotString.s36(),
+					node_name: fixtureCatalog.slotString.s99(),
+					api_base_url: fixtureCatalog.slotString.s180(),
+					access_host: fixtureCatalog.slotString.s181(),
 					summary: {
 						status: "degraded",
-						updated_at: "2026-03-01T00:00:00Z",
+						updated_at: fixtureCatalog.slotString.s91(),
 					},
 					components: [
 						{
@@ -159,7 +160,7 @@ describe("<NodesPage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: "2026-03-01T00:00:00Z",
+							slot_start: fixtureCatalog.slotString.s91(),
 							status: "degraded",
 						},
 					],
@@ -182,20 +183,24 @@ describe("<NodesPage />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-1",
-			"/nodes/node-2",
+			`/nodes/${fixtureCatalog.slotString.s32()}`,
+			`/nodes/${fixtureCatalog.slotString.s36()}`,
 		]);
 		const openOnNodeLinks = screen.getAllByRole("link", {
 			name: "Open on node",
 		});
 		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
-			"https://node-1.example.com/?login_token=admintoken",
-			"https://node-2.example.com/?login_token=admintoken",
+			`${fixtureCatalog.slotString.s178()}/?login_token=admintoken`,
+			`${fixtureCatalog.slotString.s180()}/?login_token=admintoken`,
 		]);
 	});
 
 	it("offers sign-in recovery for an unauthorized nodes request", async () => {
-		window.history.pushState({}, "", "/nodes?view=table#history");
+		window.history.pushState(
+			{},
+			fixtureCatalog.slotString.s99(),
+			"/nodes?view=table#history",
+		);
 		vi.mocked(fetchAdminNodesRuntime).mockRejectedValue(
 			new BackendApiError({
 				status: 401,
@@ -222,7 +227,7 @@ describe("<NodesPage />", () => {
 	it("keeps cached inventory visible after a refresh returns 401", async () => {
 		renderPage();
 
-		await screen.findByText("tokyo-1");
+		await screen.findByText(fixtureCatalog.slotString.s33());
 		vi.mocked(fetchAdminNodesRuntime).mockRejectedValueOnce(
 			new BackendApiError({
 				status: 401,
@@ -233,7 +238,7 @@ describe("<NodesPage />", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
 		await screen.findByText("Showing cached node inventory");
-		expect(screen.getByText("tokyo-1")).toBeVisible();
+		expect(screen.getByText(fixtureCatalog.slotString.s33())).toBeVisible();
 		expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
 			"href",
 			"/login?redirect=%2F",
