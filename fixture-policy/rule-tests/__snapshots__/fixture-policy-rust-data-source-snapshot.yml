@@ -1,0 +1,35 @@
+id: fixture-policy-rust-data-source
+snapshots:
+  ? |
+    let fixture = Config { node_id: "node-unapproved" };
+  : labels:
+    - source: 'node_id: "node-unapproved"'
+      style: primary
+      start: 23
+      end: 49
+    - source: node_id
+      style: secondary
+      start: 23
+      end: 30
+  ? |
+    let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };
+  : labels:
+    - source: 'public_ipv4: format!("192.0.2.{}", index)'
+      style: primary
+      start: 23
+      end: 64
+    - source: public_ipv4
+      style: secondary
+      start: 23
+      end: 34
+  ? |
+    let fixture = Config { timestamp: std::env::var("TEST_TIMESTAMP").unwrap() };
+  : labels:
+    - source: 'timestamp: std::env::var("TEST_TIMESTAMP").unwrap()'
+      style: primary
+      start: 23
+      end: 74
+    - source: timestamp
+      style: secondary
+      start: 23
+      end: 32

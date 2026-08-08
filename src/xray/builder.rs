@@ -473,9 +473,9 @@ mod tests {
     #[test]
     fn build_add_user_operation_vless_encodes_uuid_and_flow() {
         let endpoint = Endpoint {
-            endpoint_id: "e1".to_string(),
-            node_id: "n1".to_string(),
-            tag: "vless-e1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s597().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::slot_s601().to_owned(),
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
@@ -506,9 +506,9 @@ mod tests {
     #[test]
     fn build_add_user_operation_ss2022_extracts_user_psk_from_password() {
         let endpoint = Endpoint {
-            endpoint_id: "e2".to_string(),
-            node_id: "n1".to_string(),
-            tag: "ss-e2".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s598().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::slot_s603().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({
@@ -536,9 +536,9 @@ mod tests {
     #[test]
     fn build_add_inbound_request_vless_reality_sets_port_tag_and_reality_materials() {
         let endpoint = Endpoint {
-            endpoint_id: "e3".to_string(),
-            node_id: "n1".to_string(),
-            tag: "vless-e3".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s599().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::slot_s602().to_owned(),
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
@@ -551,7 +551,7 @@ mod tests {
 
         let req = build_add_inbound_request(&endpoint).unwrap();
         let inbound = req.inbound.unwrap();
-        assert_eq!(inbound.tag, "vless-e3");
+        assert_eq!(inbound.tag, xp_test_fixtures::slot_s602());
 
         let receiver_tm = inbound.receiver_settings.unwrap();
         assert_eq!(receiver_tm.r#type, TYPE_PROXYMAN_RECEIVER_CONFIG);
@@ -589,9 +589,9 @@ mod tests {
     #[test]
     fn build_add_inbound_request_ss2022_sets_method_server_psk_and_udp() {
         let endpoint = Endpoint {
-            endpoint_id: "e4".to_string(),
-            node_id: "n1".to_string(),
-            tag: "ss-e4".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s600().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::slot_s604().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({
@@ -602,7 +602,7 @@ mod tests {
 
         let req = build_add_inbound_request(&endpoint).unwrap();
         let inbound = req.inbound.unwrap();
-        assert_eq!(inbound.tag, "ss-e4");
+        assert_eq!(inbound.tag, xp_test_fixtures::slot_s604());
 
         let receiver_tm = inbound.receiver_settings.unwrap();
         assert_eq!(receiver_tm.r#type, TYPE_PROXYMAN_RECEIVER_CONFIG);
@@ -632,9 +632,9 @@ mod tests {
     #[test]
     fn build_add_user_operation_ss2022_rejects_method_mismatch() {
         let endpoint = Endpoint {
-            endpoint_id: "e2".to_string(),
-            node_id: "n1".to_string(),
-            tag: "ss-e2".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s598().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::slot_s603().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({

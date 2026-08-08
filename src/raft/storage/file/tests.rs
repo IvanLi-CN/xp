@@ -108,17 +108,17 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
         .unwrap();
 
     let node = Node {
-        node_id: "node_1".to_string(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
         node_name: "node-1".to_string(),
-        access_host: "example.com".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        access_host: xp_test_fixtures::slot_s465().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     let endpoint = Endpoint {
-        endpoint_id: "endpoint_1".to_string(),
-        node_id: node.node_id.clone(),
-        tag: "ss".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s480().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 8388,
         meta: json!({}),
@@ -126,7 +126,7 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
     let user = User {
         user_id: "user_1".to_string(),
         display_name: "alice".to_string(),
-        subscription_token: "sub_1".to_string(),
+        subscription_token: xp_test_fixtures::slot_s481().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::default(),

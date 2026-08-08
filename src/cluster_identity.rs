@@ -386,15 +386,15 @@ mod tests {
     #[test]
     fn join_token_roundtrip_encode_decode() {
         let now = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
-        let token = JoinToken {
-            cluster_id: "01JTESTCLUSTERID00000000000000".to_string(),
-            leader_api_base_url: "https://leader.example.com".to_string(),
-            cluster_ca_pem: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
-                .to_string(),
-            token_id: "01JTESTTOKENID000000000000000".to_string(),
-            one_time_secret: "secret".to_string(),
-            expires_at: now + chrono::Duration::seconds(60),
-        };
+        let ca = generate_cluster_ca(xp_test_fixtures::primary_cluster_id()).unwrap();
+        let token = JoinToken::issue_signed_at(
+            xp_test_fixtures::primary_cluster_id(),
+            xp_test_fixtures::primary_api_url(),
+            &ca.cert_pem,
+            60,
+            now,
+            &ca.key_pem,
+        );
 
         let encoded = token.encode_base64url_json();
         let decoded = JoinToken::decode_and_validate(&encoded, now).unwrap();
@@ -404,15 +404,15 @@ mod tests {
     #[test]
     fn join_token_expiry_is_rejected() {
         let now = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
-        let token = JoinToken {
-            cluster_id: "01JTESTCLUSTERID00000000000000".to_string(),
-            leader_api_base_url: "https://leader.example.com".to_string(),
-            cluster_ca_pem: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
-                .to_string(),
-            token_id: "01JTESTTOKENID000000000000000".to_string(),
-            one_time_secret: "secret".to_string(),
-            expires_at: now - chrono::Duration::seconds(1),
-        };
+        let ca = generate_cluster_ca(xp_test_fixtures::primary_cluster_id()).unwrap();
+        let token = JoinToken::issue_signed_at(
+            xp_test_fixtures::primary_cluster_id(),
+            xp_test_fixtures::primary_api_url(),
+            &ca.cert_pem,
+            -1,
+            now,
+            &ca.key_pem,
+        );
 
         let encoded = token.encode_base64url_json();
         let err = JoinToken::decode_and_validate(&encoded, now).unwrap_err();
@@ -422,11 +422,11 @@ mod tests {
     #[test]
     fn join_token_one_time_secret_is_verified() {
         let now = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
-        let ca = generate_cluster_ca("01JTESTCLUSTERID00000000000000").unwrap();
+        let ca = generate_cluster_ca(xp_test_fixtures::primary_cluster_id()).unwrap();
         let token = JoinToken::issue_signed_at(
-            "01JTESTCLUSTERID00000000000000",
-            "https://leader.example.com",
-            "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
+            xp_test_fixtures::primary_cluster_id(),
+            xp_test_fixtures::primary_api_url(),
+            &ca.cert_pem,
             60,
             now,
             &ca.key_pem,
@@ -434,7 +434,7 @@ mod tests {
         token.validate_one_time_secret(&ca.key_pem).unwrap();
 
         let mut tampered = token.clone();
-        tampered.cluster_id = "01JOTHERCLUSTERID0000000000000".to_string();
+        tampered.cluster_id = xp_test_fixtures::slot_s557().to_owned();
         assert!(matches!(
             tampered.validate_one_time_secret(&ca.key_pem),
             Err(JoinTokenError::InvalidOneTimeSecret)

@@ -1,0 +1,7 @@
+id: fixture-policy-catalog-string-values
+valid:
+  - '{ "hosts": { "primary": "node-a.fixture.test" } }'
+  - '{ "urls": { "primary": "tcp://origin.fixture.test:443" } }'
+  - '{ "slots": { "strings": ["2024-01-01T00:00:00.000Z"] } }'
+invalid:
+  - '{ "hosts": { "primary": "unapproved.invalid" } }'

@@ -1,0 +1,11 @@
+id: fixture-policy-rust-adapter-imports
+language: Rust
+severity: error
+message: The Rust fixture adapter may only import its static parser dependencies.
+files:
+  - test-fixtures/src/**/*.rs
+rule:
+  all:
+    - kind: use_declaration
+    - not:
+        regex: '^(use std::sync::OnceLock;|use serde::de::DeserializeOwned;|use serde::Deserialize;)$'

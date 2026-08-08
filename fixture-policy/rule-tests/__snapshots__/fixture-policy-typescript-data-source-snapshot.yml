@@ -1,0 +1,131 @@
+id: fixture-policy-typescript-data-source
+snapshots:
+  ? |
+    const fixture = { endpointId: `endpoint-${suffix}` };
+  : labels:
+    - source: 'endpointId: `endpoint-${suffix}`'
+      style: primary
+      start: 18
+      end: 50
+    - source: endpointId
+      style: secondary
+      start: 18
+      end: 28
+    - source: '`endpoint-${suffix}`'
+      style: secondary
+      start: 30
+      end: 50
+  ? |
+    const fixture = { host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 49
+    - source: host
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 24
+      end: 49
+  ? |
+    const fixture = { ip: await fetch("https://input.fixture.test") };
+  : labels:
+    - source: 'ip: await fetch("https://input.fixture.test")'
+      style: primary
+      start: 18
+      end: 63
+    - source: ip
+      style: secondary
+      start: 18
+      end: 20
+    - source: await fetch("https://input.fixture.test")
+      style: secondary
+      start: 22
+      end: 63
+  ? |
+    const fixture = { node_id: payload.node_id };
+  : labels:
+    - source: 'node_id: payload.node_id'
+      style: primary
+      start: 18
+      end: 42
+    - source: node_id
+      style: secondary
+      start: 18
+      end: 25
+    - source: payload.node_id
+      style: secondary
+      start: 27
+      end: 42
+  ? |
+    function buildNodeRuntimeListItem() {
+      return { node_id: process.env.TEST_NODE_ID };
+    }
+  : labels:
+    - source: 'node_id: process.env.TEST_NODE_ID'
+      style: primary
+      start: 49
+      end: 82
+    - source: node_id
+      style: secondary
+      start: 49
+      end: 56
+    - source: process.env.TEST_NODE_ID
+      style: secondary
+      start: 58
+      end: 82
+  ? |
+    const fixture = { timestamp: JSON.parse(raw) };
+  : labels:
+    - source: 'timestamp: JSON.parse(raw)'
+      style: primary
+      start: 18
+      end: 44
+  ? |
+    const fixture = { token: process.env.TEST_TOKEN };
+  : labels:
+    - source: 'token: process.env.TEST_TOKEN'
+      style: primary
+      start: 18
+      end: 47
+    - source: token
+      style: secondary
+      start: 18
+      end: 23
+    - source: process.env.TEST_TOKEN
+      style: secondary
+      start: 25
+      end: 47
+  ? |
+    const fixture = { updated_at: JSON.parse(raw) };
+  : labels:
+    - source: 'updated_at: JSON.parse(raw)'
+      style: primary
+      start: 18
+      end: 45
+    - source: updated_at
+      style: secondary
+      start: 18
+      end: 28
+    - source: JSON.parse(raw)
+      style: secondary
+      start: 30
+      end: 45
+  ? |
+    const fixture = { xray_api_addr: "127.0.0.1:10085" };
+  : labels:
+    - source: 'xray_api_addr: "127.0.0.1:10085"'
+      style: primary
+      start: 18
+      end: 50
+    - source: xray_api_addr
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"127.0.0.1:10085"'
+      style: secondary
+      start: 33
+      end: 50

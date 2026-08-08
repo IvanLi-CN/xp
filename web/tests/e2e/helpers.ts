@@ -1,5 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 import yaml from "js-yaml";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { handleAdminConfigAndEndpointRoutes } from "./adminEndpointRouteMocks";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
@@ -134,10 +135,10 @@ type MockState = {
 
 const defaultNodes: AdminNode[] = [
 	{
-		node_id: "node-1",
-		node_name: "alpha",
-		api_base_url: "http://127.0.0.1:62416",
-		access_host: "alpha.example.com",
+		node_id: fixtureCatalog.slotString.s32(),
+		node_name: fixtureCatalog.slotString.s86(),
+		api_base_url: fixtureCatalog.slotString.s87(),
+		access_host: fixtureCatalog.slotString.s88(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -148,9 +149,9 @@ const defaultNodes: AdminNode[] = [
 ];
 const defaultEndpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: "endpoint-1",
-		node_id: "node-1",
-		tag: "edge-1",
+		endpoint_id: fixtureCatalog.slotString.s40(),
+		node_id: fixtureCatalog.slotString.s32(),
+		tag: fixtureCatalog.slotString.s89(),
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		meta: {},
@@ -160,7 +161,7 @@ const defaultUsers: AdminUser[] = [
 	{
 		user_id: "user-1",
 		display_name: "Demo user",
-		subscription_token: "sub-user-1",
+		subscription_token: fixtureCatalog.slotString.s90(),
 		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
@@ -172,14 +173,18 @@ const defaultUsers: AdminUser[] = [
 ];
 const defaultUserAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 	"user-1": [
-		{ user_id: "user-1", endpoint_id: "endpoint-1", node_id: "node-1" },
+		{
+			user_id: "user-1",
+			endpoint_id: fixtureCatalog.slotString.s40(),
+			node_id: fixtureCatalog.slotString.s32(),
+		},
 	],
 };
 const defaultClusterInfo: ClusterInfo = {
-	cluster_id: "cluster-1",
-	node_id: "node-1",
+	cluster_id: fixtureCatalog.slotString.s84(),
+	node_id: fixtureCatalog.slotString.s32(),
 	role: "leader",
-	leader_api_base_url: "http://127.0.0.1:62416",
+	leader_api_base_url: fixtureCatalog.slotString.s87(),
 	term: 1,
 	xp_version: "v0.1.0",
 };
@@ -286,15 +291,17 @@ function canonicalizeMockMihomoProfile(
 ): CanonicalMockMihomoProfile {
 	return {
 		mixin_yaml:
-			typeof profile?.mixin_yaml === "string" ? profile.mixin_yaml : "",
+			typeof profile?.mixin_yaml === "string"
+				? profile.mixin_yaml
+				: fixtureCatalog.string.none(),
 		extra_proxies_yaml:
 			typeof profile?.extra_proxies_yaml === "string"
 				? profile.extra_proxies_yaml
-				: "",
+				: fixtureCatalog.string.none(),
 		extra_proxy_providers_yaml:
 			typeof profile?.extra_proxy_providers_yaml === "string"
 				? profile.extra_proxy_providers_yaml
-				: "",
+				: fixtureCatalog.string.none(),
 	};
 }
 
@@ -302,7 +309,7 @@ function parseYamlSequenceField(
 	raw: string,
 	fieldName: string,
 ): ParsedYamlSequenceField {
-	if (raw.trim() === "") {
+	if (raw.trim() === fixtureCatalog.string.none()) {
 		return { ok: true, value: [] };
 	}
 	let value: unknown;
@@ -327,7 +334,7 @@ function parseYamlMappingField(
 	raw: string,
 	fieldName: string,
 ): ParsedYamlMappingField {
-	if (raw.trim() === "") {
+	if (raw.trim() === fixtureCatalog.string.none()) {
 		return { ok: true, value: {} };
 	}
 	let value: unknown;
@@ -355,7 +362,7 @@ export function normalizeMockMihomoProfilePayload(
 		return { ok: false, message: "template_yaml is no longer supported" };
 	}
 	const canonical = canonicalizeMockMihomoProfile(payload);
-	if (canonical.mixin_yaml.trim() === "") {
+	if (canonical.mixin_yaml.trim() === fixtureCatalog.string.none()) {
 		return { ok: false, message: "mixin_yaml is required" };
 	}
 
@@ -375,7 +382,7 @@ export function normalizeMockMihomoProfilePayload(
 	const mixinMap = mixinRoot;
 	if (
 		Object.prototype.hasOwnProperty.call(mixinMap, "proxies") &&
-		canonical.extra_proxies_yaml.trim() !== ""
+		canonical.extra_proxies_yaml.trim() !== fixtureCatalog.string.none()
 	) {
 		return {
 			ok: false,
@@ -384,7 +391,7 @@ export function normalizeMockMihomoProfilePayload(
 	}
 	if (
 		Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers") &&
-		canonical.extra_proxy_providers_yaml.trim() !== ""
+		canonical.extra_proxy_providers_yaml.trim() !== fixtureCatalog.string.none()
 	) {
 		return {
 			ok: false,
@@ -461,9 +468,9 @@ export async function setupApiMocks(
 				(options.users ? options.users : defaultUsers).map((user) => [
 					user.user_id,
 					{
-						mixin_yaml: "",
-						extra_proxies_yaml: "",
-						extra_proxy_providers_yaml: "",
+						mixin_yaml: fixtureCatalog.string.none(),
+						extra_proxies_yaml: fixtureCatalog.string.none(),
+						extra_proxy_providers_yaml: fixtureCatalog.string.none(),
 					},
 				]),
 			),
@@ -498,10 +505,10 @@ export async function setupApiMocks(
 				},
 				latest: {
 					release_tag: "v0.1.0",
-					published_at: "2026-03-01T00:00:00Z",
+					published_at: fixtureCatalog.slotString.s91(),
 				},
 				has_update: false,
-				checked_at: "2026-03-01T00:00:00Z",
+				checked_at: fixtureCatalog.slotString.s91(),
 				compare_reason: "up_to_date",
 				source: {
 					kind: "github_release",
@@ -546,7 +553,7 @@ export async function setupApiMocks(
 					finished_at: null,
 					exit_code: null,
 					message: null,
-					updated_at: "2026-03-01T00:00:00Z",
+					updated_at: fixtureCatalog.slotString.s91(),
 				},
 			});
 			return;
@@ -558,14 +565,14 @@ export async function setupApiMocks(
 		}
 
 		if (path === "/api/admin/nodes/runtime" && method === "GET") {
-			const items = state.nodes.map((node) => ({
-				node_id: node.node_id,
-				node_name: node.node_name,
-				api_base_url: node.api_base_url,
-				access_host: node.access_host,
+			const items = state.nodes.map(() => ({
+				node_id: fixtureCatalog.slotString.s17(),
+				node_name: fixtureCatalog.slotString.s18(),
+				api_base_url: fixtureCatalog.slotString.s19(),
+				access_host: fixtureCatalog.slotString.s20(),
 				summary: {
 					status: "up",
-					updated_at: "2026-03-01T00:00:00Z",
+					updated_at: fixtureCatalog.slotString.s91(),
 				},
 				components: [
 					{
@@ -578,7 +585,7 @@ export async function setupApiMocks(
 				],
 				recent_slots: [
 					{
-						slot_start: "2026-03-01T00:00:00Z",
+						slot_start: fixtureCatalog.slotString.s91(),
 						status: "up",
 					},
 				],
@@ -596,14 +603,14 @@ export async function setupApiMocks(
 			method === "GET" &&
 			options.mockStatusEvents !== false
 		) {
-			const items = state.nodes.map((node) => ({
-				node_id: node.node_id,
-				node_name: node.node_name,
-				api_base_url: node.api_base_url,
-				access_host: node.access_host,
+			const items = state.nodes.map(() => ({
+				node_id: fixtureCatalog.slotString.s17(),
+				node_name: fixtureCatalog.slotString.s18(),
+				api_base_url: fixtureCatalog.slotString.s19(),
+				access_host: fixtureCatalog.slotString.s20(),
 				summary: {
 					status: "up",
-					updated_at: "2026-03-01T00:00:00Z",
+					updated_at: fixtureCatalog.slotString.s91(),
 				},
 				components: [
 					{
@@ -616,18 +623,18 @@ export async function setupApiMocks(
 				],
 				recent_slots: [
 					{
-						slot_start: "2026-03-01T00:00:00Z",
+						slot_start: fixtureCatalog.slotString.s91(),
 						status: "up",
 					},
 				],
 			}));
 			const payload = [
 				`event: hello\ndata: ${JSON.stringify({
-					node_id: state.clusterInfo.node_id,
-					connected_at: "2026-03-01T00:00:00Z",
+					node_id: fixtureCatalog.slotString.s57(),
+					connected_at: fixtureCatalog.slotString.s91(),
 				})}\n`,
 				`event: snapshot\ndata: ${JSON.stringify({
-					emitted_at: "2026-03-01T00:00:00Z",
+					emitted_at: fixtureCatalog.slotString.s91(),
 					health: { status: "ok" },
 					cluster_info: state.clusterInfo,
 					nodes_runtime: {
@@ -650,13 +657,13 @@ export async function setupApiMocks(
 							finished_at: null,
 							exit_code: null,
 							message: null,
-							updated_at: "2026-03-01T00:00:00Z",
+							updated_at: fixtureCatalog.slotString.s91(),
 						},
 					},
 				})}\n`,
 			]
 				.map((event) => `${event}\n`)
-				.join("");
+				.join(fixtureCatalog.string.none());
 			sseResponse(route, payload);
 			return;
 		}
@@ -723,7 +730,7 @@ export async function setupApiMocks(
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
-				subscription_token: `sub-${userId}`,
+				subscription_token: fixtureCatalog.slotString.s92(),
 				credential_epoch: 0,
 				priority_tier: "p3",
 				quota_reset:
@@ -776,7 +783,9 @@ export async function setupApiMocks(
 			const desired = new Set<string>();
 			for (const item of items) {
 				const endpointId =
-					typeof item.endpoint_id === "string" ? item.endpoint_id : "";
+					typeof item.endpoint_id === "string"
+						? item.endpoint_id
+						: fixtureCatalog.string.none();
 				if (!endpointId) {
 					errorResponse(route, "invalid endpoint_id", 400);
 					return;
@@ -803,11 +812,15 @@ export async function setupApiMocks(
 
 			const nextItems: AdminUserAccessItem[] = [...desired]
 				.sort()
-				.map((endpointId) => ({
-					user_id: userId,
-					endpoint_id: endpointId,
-					node_id: endpointById.get(endpointId)?.node_id ?? "",
-				}));
+				.map((endpointId) => {
+					const endpoint = endpointById.get(endpointId);
+					if (!endpoint) throw new Error(`missing endpoint: ${endpointId}`);
+					return {
+						user_id: userId,
+						endpoint_id: endpoint.endpoint_id,
+						node_id: endpoint.node_id,
+					};
+				});
 			state.userAccessByUserId[userId] = nextItems;
 
 			jsonResponse(route, { created, deleted, items: nextItems });
@@ -836,7 +849,9 @@ export async function setupApiMocks(
 
 		if (path.startsWith("/api/admin/users/")) {
 			const segments = path.split("/");
-			const userId = decodeURIComponent(segments[4] ?? "");
+			const userId = decodeURIComponent(
+				segments[4] ?? fixtureCatalog.string.none(),
+			);
 			const isResetToken = segments[5] === "reset-token";
 			const isResetCredentials = segments[5] === "reset-credentials";
 			const isNodeWeights = segments[5] === "node-weights";
@@ -888,7 +903,7 @@ export async function setupApiMocks(
 
 				const items = state.userNodeWeights[userId] ?? [];
 				const next: AdminUserNodeWeightItem = {
-					node_id: nodeId,
+					node_id: fixtureCatalog.slotString.s63(),
 					weight: rawWeight,
 				};
 				state.userNodeWeights[userId] = [
@@ -908,7 +923,9 @@ export async function setupApiMocks(
 				}
 				const nextToken = `reset-${tokenSeq++}-${userId}`;
 				user.subscription_token = nextToken;
-				jsonResponse(route, { subscription_token: nextToken });
+				jsonResponse(route, {
+					subscription_token: fixtureCatalog.slotString.s94(),
+				});
 				return;
 			}
 
@@ -995,7 +1012,10 @@ export async function setupApiMocks(
 				state.nodeQuotas = state.nodeQuotas.filter((q) => q.user_id !== userId);
 				delete state.userAccessByUserId[userId];
 				delete state.userMihomoProfiles[userId];
-				void route.fulfill({ status: 204, body: "" });
+				void route.fulfill({
+					status: 204,
+					body: fixtureCatalog.string.none(),
+				});
 				return;
 			}
 		}
@@ -1028,7 +1048,7 @@ export async function setAdminToken(
 export async function stubClipboard(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		// @ts-expect-error -- test-only helper
-		window.__xp_clipboard_last_write = "";
+		window.__xp_clipboard_last_write = fixtureCatalog.string.none();
 		const clipboard = {
 			writeText: async (text: string) => {
 				// @ts-expect-error -- test-only helper

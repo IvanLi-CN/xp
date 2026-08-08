@@ -1,0 +1,16 @@
+id: fixture-policy-typescript-catalog-origin
+snapshots:
+  ? |
+    const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
+  : labels:
+    - source: 'const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };'
+      style: primary
+      start: 0
+      end: 78
+  ? |
+    import { fixtureCatalog } from "./fixture-input";
+  : labels:
+    - source: import { fixtureCatalog } from "./fixture-input";
+      style: primary
+      start: 0
+      end: 49

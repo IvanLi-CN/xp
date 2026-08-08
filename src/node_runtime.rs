@@ -839,8 +839,7 @@ mod tests {
 
         xray.status = XrayStatus::Down;
         xray.restart_attempts = 1;
-        let restart_at = Utc::now();
-        xray.last_restart_at = Some(restart_at);
+        xray.last_restart_at = Some(xp_test_fixtures::baseline_timestamp().parse().unwrap());
         handle
             .apply_probe_snapshots(
                 Utc::now(),

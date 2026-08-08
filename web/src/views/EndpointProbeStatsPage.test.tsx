@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpointProbeHistory } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoint } from "../api/adminEndpoints";
@@ -36,7 +37,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 				</a>
 			);
 		},
-		useParams: () => ({ endpointId: "endpoint-1" }),
+		useParams: () => ({ endpointId: fixtureCatalog.slotString.s40() }),
 	};
 });
 
@@ -67,15 +68,15 @@ describe("<EndpointProbeStatsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-1",
-			node_id: "node-1",
-			tag: "tokyo-vless",
+			endpoint_id: fixtureCatalog.slotString.s40(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s139(),
 			kind: "ss2022_2022_blake3_aes_128_gcm",
 			port: 443,
 			meta: {},
 		});
 		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValue({
-			endpoint_id: "endpoint-1",
+			endpoint_id: fixtureCatalog.slotString.s40(),
 			participating_nodes: 2,
 			expected_nodes: 2,
 			slots: [
@@ -91,19 +92,19 @@ describe("<EndpointProbeStatsPage />", () => {
 					latency_ms_p95: 123,
 					by_node: [
 						{
-							node_id: "node-1",
+							node_id: fixtureCatalog.slotString.s32(),
 							ok: true,
 							skipped: false,
-							checked_at: "2026-03-11T11:05:00Z",
-							latency_ms: 111,
+							checked_at: fixtureCatalog.slotString.s236(),
+							latency_ms: fixtureCatalog.slotNumber.n14(),
 							config_hash: "cfg",
 						},
 						{
-							node_id: "node-2",
+							node_id: fixtureCatalog.slotString.s36(),
 							ok: true,
 							skipped: false,
-							checked_at: "2026-03-11T11:05:01Z",
-							latency_ms: 123,
+							checked_at: fixtureCatalog.slotString.s237(),
+							latency_ms: fixtureCatalog.slotNumber.n15(),
 							config_hash: "cfg",
 						},
 					],
@@ -113,18 +114,18 @@ describe("<EndpointProbeStatsPage />", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "Tokyo edge",
-					api_base_url: "https://tokyo.example.invalid",
-					access_host: "tokyo.example.invalid",
+					node_id: fixtureCatalog.slotString.s32(),
+					node_name: fixtureCatalog.slotString.s210(),
+					api_base_url: fixtureCatalog.slotString.s211(),
+					access_host: fixtureCatalog.slotString.s212(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
 				{
-					node_id: "node-2",
-					node_name: "Amsterdam edge",
-					api_base_url: "https://amsterdam.example.invalid",
-					access_host: "amsterdam.example.invalid",
+					node_id: fixtureCatalog.slotString.s36(),
+					node_name: fixtureCatalog.slotString.s207(),
+					api_base_url: fixtureCatalog.slotString.s208(),
+					access_host: fixtureCatalog.slotString.s209(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
@@ -138,7 +139,7 @@ describe("<EndpointProbeStatsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminEndpointProbeHistory).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-1",
+				fixtureCatalog.slotString.s40(),
 				24,
 				expect.any(AbortSignal),
 			);
@@ -153,7 +154,7 @@ describe("<EndpointProbeStatsPage />", () => {
 
 	it("falls back to expected_nodes for legacy probe-history payloads", async () => {
 		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValueOnce({
-			endpoint_id: "endpoint-1",
+			endpoint_id: fixtureCatalog.slotString.s40(),
 			expected_nodes: 2,
 			slots: [
 				{
@@ -167,19 +168,19 @@ describe("<EndpointProbeStatsPage />", () => {
 					latency_ms_p95: 123,
 					by_node: [
 						{
-							node_id: "node-1",
+							node_id: fixtureCatalog.slotString.s32(),
 							ok: true,
 							skipped: false,
-							checked_at: "2026-03-11T11:05:00Z",
-							latency_ms: 111,
+							checked_at: fixtureCatalog.slotString.s236(),
+							latency_ms: fixtureCatalog.slotNumber.n14(),
 							config_hash: "cfg",
 						},
 						{
-							node_id: "node-2",
+							node_id: fixtureCatalog.slotString.s36(),
 							ok: true,
 							skipped: false,
-							checked_at: "2026-03-11T11:05:01Z",
-							latency_ms: 123,
+							checked_at: fixtureCatalog.slotString.s237(),
+							latency_ms: fixtureCatalog.slotNumber.n15(),
 							config_hash: "cfg",
 						},
 					],
@@ -202,14 +203,14 @@ describe("<EndpointProbeStatsPage />", () => {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			"Amsterdam edge",
-			"Tokyo edge",
+			fixtureCatalog.slotString.s207(),
+			fixtureCatalog.slotString.s210(),
 		]);
 		expect(links.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-2",
-			"/nodes/node-1",
+			`/nodes/${fixtureCatalog.slotString.s36()}`,
+			`/nodes/${fixtureCatalog.slotString.s32()}`,
 		]);
-		expect(links[0]).toHaveAttribute("title", "node-2");
+		expect(links[0]).toHaveAttribute("title", fixtureCatalog.slotString.s36());
 	});
 
 	it("keeps probe stats available when the node-name lookup fails", async () => {
@@ -218,7 +219,9 @@ describe("<EndpointProbeStatsPage />", () => {
 		);
 		renderPage();
 
-		expect(await screen.findByText("node-1")).toBeInTheDocument();
+		expect(
+			await screen.findByText(fixtureCatalog.slotString.s32()),
+		).toBeInTheDocument();
 		expect(screen.queryByText("Failed to load probe stats")).toBeNull();
 	});
 });

@@ -111,7 +111,7 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successfu
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: "2026-04-24T00:00:00Z".to_string(),
+            checked_at: xp_test_fixtures::slot_s488().to_owned(),
             ..NodeEgressProbeState::default()
         },
     );
@@ -164,8 +164,8 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_pro
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: "2026-04-24T01:00:00Z".to_string(),
-            selected_public_ip: Some("198.51.100.9".to_string()),
+            checked_at: xp_test_fixtures::slot_s489().to_owned(),
+            selected_public_ip: Some(xp_test_fixtures::slot_s490().to_owned()),
             subscription_region: NodeSubscriptionRegion::Other,
             error_summary: Some("country.is lookup failed".to_string()),
             ..NodeEgressProbeState::default()
@@ -202,8 +202,8 @@ fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slu
     let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
     let probe = NodeEgressProbeState {
         subscription_region: NodeSubscriptionRegion::Other,
-        checked_at: "2026-04-24T01:00:00Z".to_string(),
-        selected_public_ip: Some("198.51.100.9".to_string()),
+        checked_at: xp_test_fixtures::slot_s489().to_owned(),
+        selected_public_ip: Some(xp_test_fixtures::slot_s490().to_owned()),
         classification_invalidated_at: Some("2026-04-24T01:00:00Z".to_string()),
         error_summary: Some("country.is lookup failed".to_string()),
         ..NodeEgressProbeState::default()
@@ -246,7 +246,7 @@ fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
     assert!(uri.contains("%2F"));
     assert!(uri.contains("%3D"));
     assert!(uri.contains("%3A"));
-    assert!(uri.contains("@example.com:443"));
+    assert!(uri.contains("@example.fixture.test:443"));
 }
 
 #[test]
@@ -455,7 +455,7 @@ providerB:
         .expect("proxy-groups must be a list");
     let relay_group = proxy_groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("missing per-server relay group");
     assert!(
         !proxy_groups
@@ -813,7 +813,7 @@ providerA:
         .collect::<Vec<_>>();
     assert_eq!(
         relay_names,
-        vec!["🛣️ seoul-example-com", "🛣️ shared-example-com"]
+        vec!["🛣️ seoul-fixture-test", "🛣️ shared-fixture-test"]
     );
     let relay_url = |name: &str| {
         groups
@@ -823,12 +823,12 @@ providerA:
             .and_then(Value::as_str)
     };
     assert_eq!(
-        relay_url("🛣️ shared-example-com"),
+        relay_url("🛣️ shared-fixture-test"),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
     assert_eq!(
-        relay_url("🛣️ seoul-example-com"),
-        Some("https://seoul-a.example.com/api/health")
+        relay_url("🛣️ seoul-fixture-test"),
+        Some("https://seoul-a.fixture.test/api/health")
     );
 
     let system_yaml = build_mihomo_provider_system_yaml(
@@ -875,15 +875,15 @@ providerA:
 
     assert_eq!(
         proxy_dialer("Tokyo-A-ss-chain").as_deref(),
-        Some("🛣️ shared-example-com")
+        Some("🛣️ shared-fixture-test")
     );
     assert_eq!(
         proxy_dialer("Tokyo-B-ss-chain").as_deref(),
-        Some("🛣️ shared-example-com")
+        Some("🛣️ shared-fixture-test")
     );
     assert_eq!(
         proxy_dialer("Seoul-A-ss-chain").as_deref(),
-        Some("🛣️ seoul-example-com")
+        Some("🛣️ seoul-fixture-test")
     );
 }
 
@@ -932,7 +932,7 @@ providerA:
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ relay-example-com")
+                group.get("name").and_then(Value::as_str) == Some("🛣️ relay-fixture-test")
             })
         })
         .expect("relay group should exist");
@@ -991,13 +991,13 @@ providerA:
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ shared-example-com")
+                group.get("name").and_then(Value::as_str) == Some("🛣️ shared-fixture-test")
             })
         })
         .expect("shared relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://shared-api.example.com/api/health")
+        Some("https://shared-api.fixture.test/api/health")
     );
 }
 
@@ -1041,13 +1041,13 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://endpoint-node.example.com:53844/generate_204")
+        Some("https://endpoint-node.fixture.test:53844/generate_204")
     );
 }
 
@@ -1094,13 +1094,13 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://endpoint-node.example.com:53844/generate_204")
+        Some("https://endpoint-node.fixture.test:53844/generate_204")
     );
 }
 
@@ -1144,13 +1144,13 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://xp-node.example.com/api/health")
+        Some("https://xp-node.fixture.test/api/health")
     );
 }
 
@@ -1205,14 +1205,14 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host
 
     assert_eq!(
         relay_names_for(vec![membership("u1", "n1", "e1")]),
-        vec!["🛣️ shared-example-com"]
+        vec!["🛣️ shared-fixture-test"]
     );
     assert_eq!(
         relay_names_for(vec![
             membership("u1", "n1", "e1"),
             membership("u1", "n2", "e2"),
         ]),
-        vec!["🛣️ shared-example-com"]
+        vec!["🛣️ shared-fixture-test"]
     );
 }
 
@@ -1267,11 +1267,11 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
 
     assert_eq!(
         relay_names_for(vec![membership("u1", "n1", "e1")]),
-        std::collections::BTreeSet::from(["🛣️ a-b-example-com".to_string()])
+        std::collections::BTreeSet::from(["🛣️ a-dash-dot-dash-b-fixture-test".to_string()])
     );
     assert_eq!(
         relay_names_for(vec![membership("u1", "n2", "e2")]),
-        std::collections::BTreeSet::from(["🛣️ a-dash-b-example-com".to_string()])
+        std::collections::BTreeSet::from(["🛣️ a-dash-b-fixture-test".to_string()])
     );
     assert_eq!(
         relay_names_for(vec![
@@ -1279,8 +1279,8 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
             membership("u1", "n2", "e2"),
         ]),
         std::collections::BTreeSet::from([
-            "🛣️ a-b-example-com".to_string(),
-            "🛣️ a-dash-b-example-com".to_string(),
+            "🛣️ a-dash-dot-dash-b-fixture-test".to_string(),
+            "🛣️ a-dash-b-fixture-test".to_string(),
         ])
     );
 }
@@ -1307,7 +1307,7 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
   cipher: 2022-blake3-aes-128-gcm
   password: "abc:def"
   udp: true
-  dialer-proxy: 🛣️ relay-example-com
+  dialer-proxy: 🛣️ relay-fixture-test
 "#
         .to_string(),
         extra_proxy_providers_yaml: "".to_string(),
@@ -1326,7 +1326,7 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
         .expect("custom extra proxy should exist");
     assert_eq!(
         custom.get("dialer-proxy").and_then(Value::as_str),
-        Some("🛣️ relay-example-com")
+        Some("🛣️ relay-fixture-test")
     );
 }
 
@@ -1397,12 +1397,12 @@ fn build_mihomo_yaml_generated_relay_group_wins_custom_name_collision() {
         mixin_yaml: r#"
 port: 0
 proxy-groups:
-  - name: "🛣️ relay-example-com"
+  - name: "🛣️ relay-fixture-test"
     type: select
     proxies: ["DIRECT"]
   - name: Auto
     type: select
-    proxies: ["🛣️ relay-example-com"]
+    proxies: ["🛣️ relay-fixture-test"]
 rules: []
 "#
         .to_string(),
@@ -1418,7 +1418,7 @@ rules: []
         .expect("proxy-groups must exist");
     let relay_groups = groups
         .iter()
-        .filter(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ relay-example-com"))
+        .filter(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ relay-fixture-test"))
         .collect::<Vec<_>>();
     assert_eq!(relay_groups.len(), 1);
     assert_eq!(
@@ -1434,7 +1434,7 @@ rules: []
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(auto_refs, vec!["🛣️ relay-example-com"]);
+    assert_eq!(auto_refs, vec!["🛣️ relay-fixture-test"]);
 }
 
 #[test]
@@ -1455,12 +1455,12 @@ port: 0
 proxy-groups:
   - name: Auto
     type: select
-    proxies: ["🛣️ relay-example-com"]
+    proxies: ["🛣️ relay-fixture-test"]
 rules: []
 "#
         .to_string(),
         extra_proxies_yaml: r#"
-- name: "🛣️ relay-example-com"
+- name: "🛣️ relay-fixture-test"
   type: ss
   server: custom.example.com
   port: 443
@@ -1474,7 +1474,7 @@ rules: []
   cipher: 2022-blake3-aes-128-gcm
   password: "abc:def"
   udp: true
-  dialer-proxy: "🛣️ relay-example-com"
+  dialer-proxy: "🛣️ relay-fixture-test"
 "#
         .to_string(),
         extra_proxy_providers_yaml: "".to_string(),
@@ -1493,7 +1493,7 @@ rules: []
     assert_eq!(
         err,
         SubscriptionError::MihomoReservedProxyNameConflict {
-            name: "🛣️ relay-example-com".to_string(),
+            name: "🛣️ relay-fixture-test".to_string(),
         }
     );
 }
@@ -1550,14 +1550,14 @@ providerA:
         .filter_map(|group| group.get("name").and_then(Value::as_str))
         .filter(|name| name.starts_with(MIHOMO_RELAY_GROUP_PREFIX))
         .collect::<Vec<_>>();
-    assert_eq!(relay_names, vec!["🛣️ shared-example-com"]);
+    assert_eq!(relay_names, vec!["🛣️ shared-fixture-test"]);
     let relay = groups
         .iter()
-        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ shared-example-com"))
+        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ shared-fixture-test"))
         .expect("subscribed relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://subscribed.example.com/api/health")
+        Some("https://subscribed.fixture.test/api/health")
     );
 
     let system_yaml =
@@ -1573,7 +1573,7 @@ providerA:
         })
         .and_then(|proxy| proxy.get("dialer-proxy"))
         .and_then(Value::as_str);
-    assert_eq!(chain_dialer, Some("🛣️ shared-example-com"));
+    assert_eq!(chain_dialer, Some("🛣️ shared-fixture-test"));
 }
 
 #[test]
@@ -1638,7 +1638,7 @@ providerA:
         })
         .and_then(|proxy| proxy.get("dialer-proxy"))
         .and_then(Value::as_str);
-    assert_eq!(chain_dialer, Some("🛣️ jp-example-com"));
+    assert_eq!(chain_dialer, Some("🛣️ jp-fixture-test"));
 }
 
 #[test]
@@ -1690,7 +1690,7 @@ providerA:
         .collect::<Vec<_>>();
     assert_eq!(
         relay_names,
-        vec!["🛣️ jp-example-com", "🛣️ relay-dash-jp-example-com"]
+        vec!["🛣️ jp-fixture-test", "🛣️ relay-dash-jp-fixture-test"]
     );
 
     let system_yaml =
@@ -1711,11 +1711,11 @@ providerA:
     };
     assert_eq!(
         chain_dialer("Japan-ss-chain").as_deref(),
-        Some("🛣️ jp-example-com")
+        Some("🛣️ jp-fixture-test")
     );
     assert_eq!(
         chain_dialer("relay-Japan-ss-chain").as_deref(),
-        Some("🛣️ relay-dash-jp-example-com")
+        Some("🛣️ relay-dash-jp-fixture-test")
     );
 }
 
@@ -1982,9 +1982,9 @@ providerA:
             .unwrap_or(usize::MAX)
     };
 
-    assert!(index_of("🛣️ relay-example-com") > index_of("🔒 落地"));
-    assert!(index_of("🛣️ relay-example-com") > index_of("🤯 All"));
-    assert!(index_of("🛣️ relay-example-com") > index_of("🚀 节点选择"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🔒 落地"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🤯 All"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🚀 节点选择"));
 }
 
 #[test]
@@ -2113,7 +2113,10 @@ providerA:
         ]
     );
     assert!(
-        names.ends_with(&["🛣️ relay-dash-a-example-com", "🛣️ relay-dash-b-example-com",]),
+        names.ends_with(&[
+            "🛣️ relay-dash-a-fixture-test",
+            "🛣️ relay-dash-b-fixture-test",
+        ]),
         "hidden relay groups must stay at the tail"
     );
 }
@@ -2450,7 +2453,7 @@ providerA:
 
     let relay = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group should be auto-added");
     assert_eq!(
         relay.get("type"),
@@ -2543,7 +2546,7 @@ providerA:
 
     let relay = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group should exist");
     assert_eq!(
         relay.get("filter").and_then(Value::as_str),
@@ -2654,7 +2657,7 @@ rules: []
 
     let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group must exist");
     let relay_proxy_names = relay_group
         .get("proxies")
@@ -2865,7 +2868,7 @@ rules: []
             "🛬 Tokyo-A",
             "🚀 节点选择",
             "💎 节点选择",
-            "🛣️ example-com",
+            "🛣️ example-fixture-test",
         ]
     );
 
@@ -4733,7 +4736,7 @@ rules: []
 
     let relay = groups
         .iter()
-        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ us-example-com"))
+        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ us-fixture-test"))
         .expect("relay group should exist");
     let proxies = relay
         .get("proxies")

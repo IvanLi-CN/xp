@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { TrafficReport } from "../api/adminTraffic";
 import { buildTrafficTooltipHtml } from "./TrafficView";
@@ -29,7 +30,7 @@ const report: TrafficReport = {
 	current: [
 		{
 			start_at: "2026-07-29T18:50:00Z",
-			end_at: "2026-07-29T18:55:00Z",
+			end_at: fixtureCatalog.slotString.s279(),
 			uplink_bytes: 10_485,
 			downlink_bytes: 31_457,
 			total_bytes: 41_942,
@@ -49,7 +50,7 @@ const report: TrafficReport = {
 		},
 	],
 	partial: false,
-	last_sample_at: "2026-07-29T18:55:00Z",
+	last_sample_at: fixtureCatalog.slotString.s279(),
 	warnings: [],
 };
 

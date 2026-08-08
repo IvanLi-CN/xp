@@ -16,7 +16,7 @@ async fn admin_token_set_creates_env_when_missing() {
         paths.clone(),
         AdminTokenSetArgs {
             hash: Some(VALID_HASH.to_string()),
-            token: None,
+            token: xp_test_fixtures::none(),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,
@@ -47,7 +47,7 @@ async fn admin_token_set_removes_plaintext_by_default() {
         paths.clone(),
         AdminTokenSetArgs {
             hash: Some(VALID_HASH.to_string()),
-            token: None,
+            token: xp_test_fixtures::none(),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,
@@ -75,7 +75,7 @@ async fn admin_token_set_writes_shell_safe_hash() {
         paths.clone(),
         AdminTokenSetArgs {
             hash: Some(VALID_HASH.to_string()),
-            token: None,
+            token: xp_test_fixtures::none(),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,
@@ -108,7 +108,7 @@ async fn admin_token_set_rejects_high_memory_hash() {
         paths,
         AdminTokenSetArgs {
             hash: Some(HIGH_MEMORY_HASH.to_string()),
-            token: None,
+            token: xp_test_fixtures::none(),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,
@@ -129,7 +129,7 @@ async fn admin_token_set_rejects_short_plaintext() {
         paths,
         AdminTokenSetArgs {
             hash: None,
-            token: Some("short".to_string()),
+            token: Some(xp_test_fixtures::slot_s555().to_owned()),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,

@@ -1,0 +1,8 @@
+id: fixture-policy-typescript-shorthand-data-source
+valid:
+  - |
+    const fixture = { tag: fixtureCatalog.identifier.endpointTagPrimary() };
+invalid:
+  - |
+    const tag = "unapproved";
+    const fixture = { tag };

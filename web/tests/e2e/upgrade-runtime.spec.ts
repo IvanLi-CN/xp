@@ -1,13 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 type UpgradeState = "idle" | "succeeded" | "failed" | "unsupported";
 
-function upgradeStatus(
-	state: UpgradeState,
-	updatedAt = "2026-08-07T00:00:01Z",
-) {
+function upgradeStatus(state: UpgradeState) {
 	return {
 		support: {
 			supported: true,
@@ -18,30 +16,30 @@ function upgradeStatus(
 			state,
 			target_tag: state === "idle" ? null : "v3.23.2",
 			repo: "IvanLi-CN/xp",
-			started_at: state === "idle" ? null : "2026-08-07T00:00:00Z",
-			finished_at: state === "idle" ? null : "2026-08-07T00:00:01Z",
+			started_at: state === "idle" ? null : fixtureCatalog.slotString.s82(),
+			finished_at: state === "idle" ? null : fixtureCatalog.slotString.s464(),
 			exit_code: state === "succeeded" ? 0 : state === "idle" ? null : 1,
 			message: null,
-			updated_at: updatedAt,
+			updated_at: fixtureCatalog.slotString.s464(),
 		},
 	};
 }
 
 const meshStatus = {
-	generated_at: "2026-08-07T00:00:00Z",
+	generated_at: fixtureCatalog.slotString.s82(),
 	revision: 1,
 	local: {
-		node_id: "node-1",
-		node_name: "Node 1",
-		cluster_id: "cluster-1",
+		node_id: fixtureCatalog.slotString.s32(),
+		node_name: fixtureCatalog.slotString.s83(),
+		cluster_id: fixtureCatalog.slotString.s84(),
 		role: "leader",
-		leader_api_base_url: "https://xp.example.test",
+		leader_api_base_url: fixtureCatalog.slotString.s85(),
 		term: 1,
 		mesh_proxy_status: "direct",
 		mesh_proxy_reason: null,
 		canary: {
 			enabled: false,
-			bind: null,
+			bind: fixtureCatalog.optional.none(),
 			acme_directory_url: null,
 			cert_not_after: null,
 			last_renewed_at: null,
@@ -59,17 +57,18 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 		await setAdminToken(page);
 		await setupApiMocks(page, { mockStatusEvents: false });
 
-		await page.route("**/api/version/check", async (route) => {
+		let latestUpgradeStatus = upgradeStatus("idle");
+		await page.route("**/api/version/check**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
 				body: JSON.stringify({
 					current: { package: "3.23.1", release_tag: "v3.23.1" },
 					latest: {
 						release_tag: "v3.23.2",
-						published_at: "2026-08-07T00:00:00Z",
+						published_at: fixtureCatalog.slotString.s82(),
 					},
 					has_update: true,
-					checked_at: "2026-08-07T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s82(),
 					compare_reason: "update_available",
 					source: {
 						kind: "github_release",
@@ -80,21 +79,20 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 				}),
 			});
 		});
-		await page.route("**/api/admin/upgrade/status", async (route) => {
+		await page.route("**/api/admin/upgrade/status**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
-				body: JSON.stringify(upgradeStatus("idle")),
+				body: JSON.stringify(latestUpgradeStatus),
 			});
 		});
-		await page.route("**/api/admin/upgrade/start", async (route) => {
+		await page.route("**/api/admin/upgrade/start**", async (route) => {
+			latestUpgradeStatus = upgradeStatus(terminalState);
 			await route.fulfill({
 				contentType: "application/json",
-				body: JSON.stringify(
-					upgradeStatus(terminalState, new Date().toISOString()),
-				),
+				body: JSON.stringify(latestUpgradeStatus),
 			});
 		});
-		await page.route("**/api/admin/mesh/status", async (route) => {
+		await page.route("**/api/admin/mesh/status**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
 				body: JSON.stringify(meshStatus),
@@ -115,7 +113,7 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 			.getByRole("button", {
 				name: "New version v3.23.2 is available.",
 			})
-			.click();
+			.press("Enter");
 		await page.getByRole("button", { name: "Upgrade" }).click();
 		await page.getByRole("button", { name: "Start upgrade" }).click();
 
@@ -156,17 +154,17 @@ test("clears an ambiguous start error after status confirms success", async ({
 	await setupApiMocks(page, { mockStatusEvents: false });
 
 	let latestUpgradeStatus = upgradeStatus("idle");
-	await page.route("**/api/version/check", async (route) => {
+	await page.route("**/api/version/check**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify({
 				current: { package: "3.23.1", release_tag: "v3.23.1" },
 				latest: {
 					release_tag: "v3.23.2",
-					published_at: "2026-08-07T00:00:00Z",
+					published_at: fixtureCatalog.slotString.s82(),
 				},
 				has_update: true,
-				checked_at: "2026-08-07T00:00:00Z",
+				checked_at: fixtureCatalog.slotString.s82(),
 				compare_reason: "update_available",
 				source: {
 					kind: "github_release",
@@ -177,25 +175,21 @@ test("clears an ambiguous start error after status confirms success", async ({
 			}),
 		});
 	});
-	await page.route("**/api/admin/upgrade/status", async (route) => {
+	await page.route("**/api/admin/upgrade/status**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify(latestUpgradeStatus),
 		});
 	});
-	await page.route("**/api/admin/upgrade/start", async (route) => {
-		const succeeded = upgradeStatus("succeeded");
-		latestUpgradeStatus = {
-			...succeeded,
-			status: { ...succeeded.status, updated_at: new Date().toISOString() },
-		};
+	await page.route("**/api/admin/upgrade/start**", async (route) => {
+		latestUpgradeStatus = upgradeStatus("succeeded");
 		await route.fulfill({
 			status: 502,
 			contentType: "application/json",
 			body: JSON.stringify({ message: "restart boundary" }),
 		});
 	});
-	await page.route("**/api/admin/mesh/status", async (route) => {
+	await page.route("**/api/admin/mesh/status**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify(meshStatus),
@@ -208,7 +202,7 @@ test("clears an ambiguous start error after status confirms success", async ({
 	).toBeVisible();
 	await page
 		.getByRole("button", { name: "New version v3.23.2 is available." })
-		.click();
+		.press("Enter");
 	await page.getByRole("button", { name: "Upgrade" }).click();
 	await page.getByRole("button", { name: "Start upgrade" }).click();
 

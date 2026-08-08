@@ -1,0 +1,9 @@
+id: fixture-policy-tsx-catalog-origin
+snapshots:
+  ? |
+    function fixtureCatalog() { return {}; }
+  : labels:
+    - source: function fixtureCatalog() { return {}; }
+      style: primary
+      start: 0
+      end: 40

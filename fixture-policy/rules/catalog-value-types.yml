@@ -1,0 +1,53 @@
+id: fixture-policy-catalog-value-types
+language: Json
+severity: error
+message: Fixture catalog keys must retain their fixed JSON value types.
+files:
+  - fixture-policy/catalog.json
+rule:
+  any:
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"slots"|"subscription")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"earlier"|"baseline"|"recent"|"later")$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("latencyLow"|"latencyHigh"|"trafficBytes"|"availabilityLow"|"availabilityHigh"|"availabilityFull")$'
+        - has:
+            field: value
+            not:
+              kind: number
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"primaryAuthorities"|"tertiaryAuthorities")$'
+        - has:
+            field: value
+            not:
+              kind: array
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("strings"|"numbers"|"stringLists")$'
+        - has:
+            field: value
+            not:
+              kind: array

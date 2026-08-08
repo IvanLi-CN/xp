@@ -1,0 +1,22 @@
+id: fixture-policy-tsx-catalog-origin
+language: Tsx
+severity: error
+message: fixtureCatalog must be imported from the approved fixture-policy adapter.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+rule:
+  any:
+    - pattern: const fixtureCatalog = $$$
+    - pattern: let fixtureCatalog = $$$
+    - pattern: var fixtureCatalog = $$$
+    - pattern: function fixtureCatalog($$$) { $$$ }
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog

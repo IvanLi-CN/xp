@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodesRuntimeResponse } from "../api/adminNodeRuntime";
 import { BackendApiError } from "../api/backendError";
@@ -15,13 +16,13 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 	unreachable_nodes: [],
 	items: [
 		{
-			node_id: "01J000000000000000000000001",
-			node_name: "node-a",
-			api_base_url: "https://node-a.example.invalid",
-			access_host: "node-a.example.invalid",
+			node_id: fixtureCatalog.slotString.s229(),
+			node_name: fixtureCatalog.slotString.s106(),
+			api_base_url: fixtureCatalog.slotString.s230(),
+			access_host: fixtureCatalog.slotString.s231(),
 			summary: {
 				status: "up",
-				updated_at: "2026-07-30T06:00:00.000Z",
+				updated_at: fixtureCatalog.slotString.s232(),
 			},
 			components: [
 				{
@@ -34,7 +35,7 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 			],
 			recent_slots: [
 				{
-					slot_start: "2026-07-30T06:00:00.000Z",
+					slot_start: fixtureCatalog.slotString.s232(),
 					status: "up",
 				},
 			],
@@ -119,10 +120,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: "01J000000000000000000000001",
-						node_name: "node-a",
-						access_host: "node-a.example.invalid",
-						api_base_url: "https://node-a.example.invalid",
+						node_id: fixtureCatalog.slotString.s229(),
+						node_name: fixtureCatalog.slotString.s106(),
+						access_host: fixtureCatalog.slotString.s231(),
+						api_base_url: fixtureCatalog.slotString.s230(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -131,10 +132,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: "01J000000000000000000000002",
-						node_name: "node-b",
-						access_host: "node-b.example.invalid",
-						api_base_url: "https://node-b.example.invalid",
+						node_id: fixtureCatalog.slotString.s233(),
+						node_name: fixtureCatalog.slotString.s110(),
+						access_host: fixtureCatalog.slotString.s234(),
+						api_base_url: fixtureCatalog.slotString.s235(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -248,6 +249,8 @@ export const CachedUnauthorizedInventory: Story = {
 			"href",
 			expect.stringContaining("/login?redirect="),
 		);
-		await expect(canvas.getByText("node-a")).toBeInTheDocument();
+		await expect(
+			canvas.getByText(fixtureCatalog.slotString.s106()),
+		).toBeInTheDocument();
 	},
 };

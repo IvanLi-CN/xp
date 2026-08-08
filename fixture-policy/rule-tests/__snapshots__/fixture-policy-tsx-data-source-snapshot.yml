@@ -1,0 +1,47 @@
+id: fixture-policy-tsx-data-source
+snapshots:
+  ? |
+    const fixture = { host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 49
+    - source: host
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 24
+      end: 49
+  ? |
+    const fixture = { last_synced_at: "2026-07-01T00:00:00Z" };
+  : labels:
+    - source: 'last_synced_at: "2026-07-01T00:00:00Z"'
+      style: primary
+      start: 18
+      end: 56
+    - source: last_synced_at
+      style: secondary
+      start: 18
+      end: 32
+    - source: '"2026-07-01T00:00:00Z"'
+      style: secondary
+      start: 34
+      end: 56
+  ? |
+    const fixture = { node_name: "unapproved-node" };
+  : labels:
+    - source: 'node_name: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 46
+    - source: node_name
+      style: secondary
+      start: 18
+      end: 27
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 29
+      end: 46

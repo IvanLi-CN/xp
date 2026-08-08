@@ -1,0 +1,7 @@
+id: fixture-policy-tsx-catalog-origin
+valid:
+  - |
+    import { fixtureCatalog } from "../fixture-policy/catalog";
+invalid:
+  - |
+    function fixtureCatalog() { return {}; }

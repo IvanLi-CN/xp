@@ -1,5 +1,6 @@
 import { BackendApiError } from "@/api/backendError";
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	beginUpgradeObservation,
@@ -9,7 +10,7 @@ import {
 	restoreUpgradeObservation,
 } from "./upgradeObservation";
 
-const NOW = 1_700_000_000_000;
+const NOW = Date.parse(fixtureCatalog.slotString.s4());
 const TIMEOUT_DESCRIPTION =
 	"times out after one minute and remains locked until a manual status result resolves it";
 
@@ -45,7 +46,7 @@ describe("upgrade observation", () => {
 			{
 				state: "failed",
 				target_tag: "v3.21.10",
-				updated_at: new Date(NOW).toISOString(),
+				updated_at: fixtureCatalog.slotString.s4(),
 			},
 			NOW + 2_500,
 		);
@@ -57,7 +58,7 @@ describe("upgrade observation", () => {
 				{
 					state: "succeeded",
 					target_tag: "v3.21.10",
-					updated_at: new Date(NOW + 1_000).toISOString(),
+					updated_at: fixtureCatalog.slotString.s5(),
 				},
 				NOW + 2_500,
 			),
@@ -71,7 +72,7 @@ describe("upgrade observation", () => {
 			{
 				state: "running",
 				target_tag: "v3.21.10",
-				updated_at: new Date(NOW).toISOString(),
+				updated_at: fixtureCatalog.slotString.s4(),
 			},
 			NOW + 2_500,
 		);
@@ -83,7 +84,7 @@ describe("upgrade observation", () => {
 				{
 					state: "succeeded",
 					target_tag: "v3.21.10",
-					updated_at: new Date(NOW).toISOString(),
+					updated_at: fixtureCatalog.slotString.s4(),
 				},
 				NOW + 2_500,
 			),

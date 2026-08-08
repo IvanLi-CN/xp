@@ -1,0 +1,69 @@
+id: fixture-policy-typescript-data-source
+valid:
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+  - |
+    const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
+  - |
+    const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
+  - |
+    const next = ids.map((endpointId) => {
+      const endpoint = endpointById.get(endpointId);
+      if (!endpoint) throw new Error("missing endpoint");
+      return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
+    });
+  - |
+    function buildEndpointCreateMeta() {
+      return {
+        dest: `${derived[0]}:443`,
+        server_names: derived,
+        accepted_authorities: acceptedAuthorities,
+      };
+    }
+  - |
+    function buildEndpointCreateMeta() {
+      return { server_names: [node.access_host.replace(/\.$/, "")] };
+    }
+  - |
+    function buildNodeRuntimeListItem() {
+      return { node_id: node.node_id, node_name: node.node_name };
+    }
+  - |
+    function refreshGlobalEndpointReality() {
+      return { dest: `${derived[0]}:443`, server_names: derived };
+    }
+  - |
+    function applyAutoAssignForEndpoint() {
+      return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
+    }
+  - |
+    async function handleRequest() {
+      return {
+        node_name: payload.node_name ?? node.node_name,
+        endpoint_id: endpointId,
+        node_id: payload.node_id,
+        tag: tag,
+        endpoint_tag: endpoint.tag,
+        node_id: item.node_id,
+        node_id: q.node_id,
+      };
+    }
+invalid:
+  - |
+    const fixture = { host: "unapproved.fixture.test" };
+  - |
+    const fixture = { endpointId: `endpoint-${suffix}` };
+  - |
+    const fixture = { token: process.env.TEST_TOKEN };
+  - |
+    const fixture = { updated_at: JSON.parse(raw) };
+  - |
+    const fixture = { ip: await fetch("https://input.fixture.test") };
+  - |
+    const fixture = { xray_api_addr: "127.0.0.1:10085" };
+  - |
+    const fixture = { node_id: payload.node_id };
+  - |
+    function buildNodeRuntimeListItem() {
+      return { node_id: process.env.TEST_NODE_ID };
+    }

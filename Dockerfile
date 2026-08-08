@@ -7,10 +7,14 @@ ARG XP_BUILD_VERSION=
 FROM oven/bun:${BUN_VERSION} AS web-builder
 ARG XP_BUILD_VERSION
 ENV XP_WEB_BUILD_ID=${XP_BUILD_VERSION}
+WORKDIR /app
+COPY web/package.json web/bun.lock ./web/
 WORKDIR /app/web
-COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
-COPY web/ ./
+WORKDIR /app
+COPY fixture-policy/catalog.json ./fixture-policy/catalog.json
+COPY web/ ./web/
+WORKDIR /app/web
 RUN bun run build
 
 FROM rust:1.91.0-bookworm AS builder
@@ -26,6 +30,7 @@ COPY Cargo.toml Cargo.lock build.rs rust-toolchain.toml ./
 COPY proto ./proto
 COPY src ./src
 COPY tests ./tests
+COPY test-fixtures ./test-fixtures
 COPY --from=web-builder /app/web/dist ./web/dist
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

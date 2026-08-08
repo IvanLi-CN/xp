@@ -1,0 +1,9 @@
+id: fixture-policy-rust-adapter-imports
+snapshots:
+  ? |
+    use std::fs;
+  : labels:
+    - source: use std::fs;
+      style: primary
+      start: 0
+      end: 12

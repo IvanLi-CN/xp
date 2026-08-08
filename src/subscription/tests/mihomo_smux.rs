@@ -61,7 +61,9 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
         .unwrap();
     assert_eq!(
         ss.get("server"),
-        Some(&Value::String("example.com".to_string()))
+        Some(&Value::String(
+            xp_test_fixtures::subscription_host_example().to_owned(),
+        ))
     );
     assert_eq!(ss.get("port"), Some(&Value::Number(443.into())));
     assert_eq!(
@@ -83,7 +85,9 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
         .unwrap();
     assert_eq!(
         vless.get("server"),
-        Some(&Value::String("example.com".to_string()))
+        Some(&Value::String(
+            xp_test_fixtures::subscription_host_example().to_owned(),
+        ))
     );
     assert_eq!(vless.get("port"), Some(&Value::Number(8443.into())));
     let expected_uuid =

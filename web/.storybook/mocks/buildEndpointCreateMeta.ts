@@ -1,6 +1,7 @@
 import type { AdminEndpointCreateRequest } from "../../src/api/adminEndpoints";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
@@ -69,14 +70,13 @@ export function buildEndpointCreateMeta(
 
 	const node = nodes.find((item) => item.node_id === payload.node_id);
 	if (!node) throw new Error("node not found");
-
 	const acceptedAuthorities = normalizeAcceptedAuthoritiesForMock(
 		payload.accepted_authorities ?? [],
 	);
 
 	return {
 		reality: {
-			dest: "127.0.0.1:39043",
+			dest: fixtureCatalog.address.loopback39043(),
 			server_names: [node.access_host.replace(/\.$/, "")],
 			server_names_source: "manual",
 			fingerprint: "chrome",

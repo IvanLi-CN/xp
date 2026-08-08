@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { AccessMatrix, type AccessMatrixCellState } from "./AccessMatrix";
 
@@ -19,14 +20,14 @@ function renderMatrix(args?: {
 }) {
 	return render(
 		<AccessMatrix
-			nodes={[{ nodeId: "node-a", label: "Node A" }]}
+			nodes={[{ nodeId: fixtureCatalog.slotString.s106(), label: "Node A" }]}
 			protocols={[{ protocolId: "vless", label: "VLESS" }]}
 			cells={
 				args?.cells ?? {
-					"node-a": {
+					[fixtureCatalog.slotString.s106()]: {
 						vless: {
 							value: "off",
-							meta: { port: 443, endpointId: "ep-vless" },
+							meta: { port: 443, endpointId: fixtureCatalog.slotString.s138() },
 						},
 					},
 				}
@@ -45,7 +46,10 @@ describe("<AccessMatrix />", () => {
 		fireEvent.click(screen.getByText("port 443"));
 
 		expect(onToggleCell).toHaveBeenCalledTimes(1);
-		expect(onToggleCell).toHaveBeenCalledWith("node-a", "vless");
+		expect(onToggleCell).toHaveBeenCalledWith(
+			fixtureCatalog.slotString.s106(),
+			"vless",
+		);
 	});
 
 	it("does not double toggle when the single-cell checkbox is clicked", () => {
@@ -62,13 +66,21 @@ describe("<AccessMatrix />", () => {
 		renderMatrix({
 			onToggleCellEndpoint,
 			cells: {
-				"node-a": {
+				[fixtureCatalog.slotString.s106()]: {
 					vless: {
 						value: "off",
 						meta: {
 							options: [
-								{ endpointId: "ep-1", tag: "tokyo-ss", port: 443 },
-								{ endpointId: "ep-2", tag: "tokyo-ss-2", port: 8443 },
+								{
+									endpointId: fixtureCatalog.slotString.s285(),
+									tag: fixtureCatalog.slotString.s141(),
+									port: 443,
+								},
+								{
+									endpointId: fixtureCatalog.slotString.s286(),
+									tag: fixtureCatalog.slotString.s256(),
+									port: 8443,
+								},
 							],
 						},
 					},
@@ -76,13 +88,13 @@ describe("<AccessMatrix />", () => {
 			},
 		});
 
-		fireEvent.click(screen.getByText("tokyo-ss"));
+		fireEvent.click(screen.getByText(fixtureCatalog.slotString.s141()));
 
 		expect(onToggleCellEndpoint).toHaveBeenCalledTimes(1);
 		expect(onToggleCellEndpoint).toHaveBeenCalledWith(
-			"node-a",
+			fixtureCatalog.slotString.s106(),
 			"vless",
-			"ep-1",
+			fixtureCatalog.slotString.s285(),
 			true,
 		);
 	});

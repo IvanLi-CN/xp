@@ -51,7 +51,7 @@ fn env_u16(key: &str) -> Result<u16, String> {
 
 fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
     Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::slot_s447().parse().unwrap(),
         xray_api_addr,
         xray_health_interval_secs: 2,
         xray_health_fails_before_down: 3,
@@ -71,8 +71,8 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         data_dir,
         admin_token_hash: test_admin_token_hash("testtoken"),
         node_name: "node-1".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        access_host: xp_test_fixtures::slot_s448().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             xp::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -281,7 +281,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::slot_s486().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -548,7 +548,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::slot_s486().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -820,7 +820,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::slot_s486().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
