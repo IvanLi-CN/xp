@@ -15,7 +15,8 @@ fn copy_current_xp_ops(dest: &Path) {
 fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();
-    let data_dir = tmp.path().join("data").to_string_lossy().to_string();
+    let data_dir = tmp.path().join("data");
+    let data_dir_arg = data_dir.to_string_lossy().to_string();
     let dest = tmp.path().join("xp-ops-copy");
     let backup = tmp.path().join("xp-ops-copy.bak.resume");
     copy_current_xp_ops(&dest);
@@ -24,6 +25,18 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     let workspace = tmp.path().join("tmp/xp-ops");
     fs::create_dir_all(workspace.parent().unwrap()).unwrap();
     symlink(tmp.path().join("workspace-target"), &workspace).unwrap();
+    let upgrade_dir = data_dir.join("upgrade");
+    fs::create_dir_all(&upgrade_dir).unwrap();
+    fs::write(
+        upgrade_dir.join("request.json"),
+        serde_json::json!({
+            "target_tag": "v0.1.999",
+            "repo": "o/r",
+            "requested_at": "2026-07-04T00:00:00Z"
+        })
+        .to_string(),
+    )
+    .unwrap();
 
     let mut command = assert_cmd::Command::new(&dest);
     command
@@ -36,13 +49,9 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
         .args([
             "--root",
             &root,
-            "upgrade",
-            "--version",
-            "v0.1.999",
-            "--repo",
-            "o/r",
+            "_upgrade-runner",
             "--data-dir",
-            &data_dir,
+            &data_dir_arg,
         ]);
     command.assert().failure().code(7);
 
@@ -55,4 +64,7 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
             .to_str()
             .is_none_or(|name| !name.starts_with("xp-ops-copy.failed."))
     }));
+    let status: serde_json::Value =
+        serde_json::from_slice(&fs::read(data_dir.join("upgrade/status.json")).unwrap()).unwrap();
+    assert_eq!(status["state"], "failed");
 }

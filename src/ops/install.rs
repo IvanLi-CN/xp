@@ -346,7 +346,7 @@ fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
     };
     match fs::rename(staged, dest) {
         Ok(()) => {
-            let _ = fs::remove_file(&backup);
+            fs::remove_file(&backup)?;
             Ok(())
         }
         Err(e) => {

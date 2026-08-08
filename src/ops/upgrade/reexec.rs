@@ -67,9 +67,6 @@ pub(super) fn finish_reexeced_upgrade(
             ),
         );
     }
-    if let Err(error) = finish_upgrade_runner_status(data_dir) {
-        return recover_after_complete_phase_failure(paths, data_dir, resume, error);
-    }
     if let Err(error) = std::fs::remove_file(&resume.xp_ops_backup) {
         return recover_after_complete_phase_failure(
             paths,
@@ -78,6 +75,7 @@ pub(super) fn finish_reexeced_upgrade(
             ExitError::new(7, format!("service_error: cleanup xp-ops backup: {error}")),
         );
     }
+    finish_upgrade_runner_status(data_dir)?;
     clear_upgrade_resume_env();
     super::failure::clear_upgrade_diagnostics(data_dir);
     Ok(())
