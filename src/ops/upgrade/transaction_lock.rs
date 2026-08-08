@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const TRANSACTION_LOCK_FILE: &str = "transaction.lock";
+const ACQUISITION_GUARD_FILE: &str = "transaction.lock.guard";
 
 #[derive(Debug)]
 pub(super) struct UpgradeTransactionLock {
@@ -31,6 +32,7 @@ impl UpgradeTransactionLock {
         fs::create_dir_all(&dir).map_err(|error| {
             ExitError::new(7, format!("service_error: create upgrade lock: {error}"))
         })?;
+        let _guard = AcquisitionGuard::acquire(&dir)?;
         let path = dir.join(TRANSACTION_LOCK_FILE);
         for _ in 0..2 {
             match fs::File::options().write(true).create_new(true).open(&path) {
@@ -61,6 +63,43 @@ impl UpgradeTransactionLock {
             }
         }
         Err(ExitError::new(3, "upgrade_in_progress"))
+    }
+}
+
+struct AcquisitionGuard(fs::File);
+
+impl AcquisitionGuard {
+    fn acquire(dir: &Path) -> Result<Self, ExitError> {
+        let file = fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(ACQUISITION_GUARD_FILE))
+            .map_err(|error| {
+                ExitError::new(
+                    7,
+                    format!("service_error: create upgrade lock guard: {error}"),
+                )
+            })?;
+        // Safety: `flock` operates only on this process's guard-file descriptor.
+        if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) } != 0 {
+            return Err(ExitError::new(
+                7,
+                format!(
+                    "service_error: lock upgrade transaction guard: {}",
+                    io::Error::last_os_error()
+                ),
+            ));
+        }
+        Ok(Self(file))
+    }
+}
+
+impl Drop for AcquisitionGuard {
+    fn drop(&mut self) {
+        // Safety: unlocks only this process's guard-file descriptor.
+        let _ = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.0), libc::LOCK_UN) };
     }
 }
 

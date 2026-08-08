@@ -47,9 +47,25 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
         .to_string(),
     )
     .unwrap();
+    let lock_data_dir = tmp.path().join(data_dir.strip_prefix("/").unwrap());
+    let lock_path = lock_data_dir.join("upgrade/transaction.lock");
+    fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let launcher = tmp.path().join("xp-ops-reexec-launcher");
+    fs::write(
+        &launcher,
+        concat!(
+            "#!/bin/sh\n",
+            "printf '%s\\n' \"$$\" > \"$XP_OPS_TEST_LOCK\"\n",
+            "exec \"$XP_OPS_TEST_TARGET\" \"$@\"\n",
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let mut command = assert_cmd::Command::new(&dest);
+    let mut command = assert_cmd::Command::new(&launcher);
     command
+        .env("XP_OPS_TEST_LOCK", &lock_path)
+        .env("XP_OPS_TEST_TARGET", &dest)
         .env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999")
         .env("XP_OPS_UPGRADE_RESUME_REPO", "o/r")
         .env("XP_OPS_GITHUB_REPO", "o/r")
