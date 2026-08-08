@@ -92,6 +92,20 @@
 
 ## Visual Evidence
 
+Storybook覆盖=通过
+
+视觉证据目标源=storybook_canvas
+
+视觉证据=存在
+
+空白裁剪=已裁剪
+
+聊天回图=已展示
+
+证据落盘=已落盘
+
+证据绑定sha=4ca4d4306db10fa44a936f8fa718c10e14796b4e
+
 - source_type: `storybook_canvas`
   target_program: `mock-only`
   capture_scope: `browser-viewport`
@@ -128,7 +142,6 @@
   story_id_or_title: `Pages/NodeDetailsPage/TcpConnectionsTab`
   state: `live hover keeps series visible`
   evidence_note: 验证真实 hover 打开 tooltip 后，折线与面积层仍保持可见，不会在 hover 帧里被 SVG hover 状态冲成 `none`。
-  PR: include
   image:
   ![TCP connections hover keeps series visible](./assets/node-tcp-connections-hover-proof.png)
 
@@ -144,3 +157,17 @@
   evidence_note: 验证非 Linux / 无法读取系统 socket 视图时，页面明确进入 unsupported warning 空态，而不是伪装成零值曲线。
   image:
   ![TCP connections unsupported state](./assets/tcp-connections-unsupported.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
+  requested_viewport: `1440x1000`
+  viewport_strategy: `browser-resize-fallback`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Pages/NodeDetailsPage/TcpConnectionsTab`
+  state: `dark 24h rounded step chart`
+  evidence_note: 验证 Node details 的 TCP connections 图表使用当前平顶阶梯线，并保留 endpoint 选择布局。
+  PR: include
+  image:
+  ![Node TCP connections step chart](./assets/node-tcp-connections-step.png)
