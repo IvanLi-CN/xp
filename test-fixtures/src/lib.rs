@@ -1,5 +1,4 @@
 use std::sync::OnceLock;
-
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
@@ -124,6 +123,7 @@ struct Timestamps {
     baseline: String,
     recent: String,
     later: String,
+    date: String,
 }
 
 #[derive(Deserialize)]

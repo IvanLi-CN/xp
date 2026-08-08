@@ -294,11 +294,6 @@ function ensureEndpointRecord(
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
-	const now = new Date();
-	const base = new Date(now);
-	base.setSeconds(0, 0);
-	base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
-
 	const slots: NodeRuntimeHistorySlot[] = [];
 	for (let i = total - 1; i >= 0; i -= 1) {
 		let status: NodeRuntimeHistorySlot["status"] = "up";
@@ -413,8 +408,6 @@ function buildNodeRuntimeDetail(
 }
 
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
-	const now = new Date();
-	const date = now.toISOString().slice(0, 10);
 	const components = buildRuntimeComponents(node);
 	return {
 		node_id: node.node_id,
@@ -424,7 +417,7 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 			: null,
 		daily_traffic: [
 			{
-				date,
+				date: fixtureCatalog.timestamp.date(),
 				uplink_bytes: fixtureCatalog.slotNumber.n0(),
 				downlink_bytes: fixtureCatalog.slotNumber.n1(),
 				updated_at: fixtureCatalog.slotString.s21(),
@@ -432,7 +425,7 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 		],
 		daily_component_status: [
 			{
-				date,
+				date: fixtureCatalog.timestamp.date(),
 				components: components.map((component) => ({
 					component: component.component,
 					status: component.status,
@@ -451,65 +444,82 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	};
 }
 
-function buildTrafficReport(window: TrafficWindow, factor = 1): TrafficReport {
-	const count = window === "24h" ? 288 : 31;
-	const end = new Date();
-	end.setUTCMinutes(Math.floor(end.getUTCMinutes() / 5) * 5, 0, 0);
-	const step = window === "24h" ? 5 * 60_000 : 24 * 60 * 60_000;
-	const start = new Date(end.getTime() - (count - 1) * step);
-	const current = Array.from({ length: count }, (_, index) => {
-		const at = new Date(start.getTime() + index * step);
-		const total = Math.round((120 + (index % 9) * 16) * 1024 * 1024 * factor);
-		const next = new Date(at.getTime() + step);
+function buildTrafficPoint(
+	isCurrentDay: boolean,
+	isGap = false,
+): NonNullable<TrafficReport["current"]>[number] {
+	if (isGap) {
 		return {
-			start_at: at.toISOString(),
-			end_at: next.toISOString(),
-			uplink_bytes: fixtureCatalog.slotNumber.n2(),
-			downlink_bytes: fixtureCatalog.slotNumber.n3(),
-			total_bytes: total,
-			complete: true,
-			is_current_day: window === "31d" && index === count - 1,
+			start_at: fixtureCatalog.timestamp.baseline(),
+			end_at: fixtureCatalog.timestamp.recent(),
+			uplink_bytes: null,
+			downlink_bytes: null,
+			total_bytes: null,
+			complete: false,
+			is_current_day: isCurrentDay,
 		};
-	});
-	const reference = current.map((point) => ({
-		...point,
-		start_at: new Date(
-			new Date(point.start_at).getTime() - count * step,
-		).toISOString(),
-		end_at: new Date(
-			new Date(point.end_at).getTime() - count * step,
-		).toISOString(),
-		uplink_bytes: fixtureCatalog.slotNumber.n4(),
-		downlink_bytes: fixtureCatalog.slotNumber.n5(),
-		total_bytes: Math.round((point.total_bytes ?? 0) * 0.8),
+	}
+
+	return {
+		start_at: fixtureCatalog.timestamp.baseline(),
+		end_at: fixtureCatalog.timestamp.recent(),
+		uplink_bytes: fixtureCatalog.slotNumber.n2(),
+		downlink_bytes: fixtureCatalog.slotNumber.n3(),
+		total_bytes: fixtureCatalog.slotNumber.n6(),
+		complete: true,
+		is_current_day: isCurrentDay,
+	};
+}
+
+function buildReferenceTrafficPoint(): NonNullable<
+	TrafficReport["reference"]
+>[number] {
+	return {
+		start_at: fixtureCatalog.timestamp.earlier(),
+		end_at: fixtureCatalog.timestamp.baseline(),
+		uplink_bytes: fixtureCatalog.slotNumber.n2(),
+		downlink_bytes: fixtureCatalog.slotNumber.n3(),
+		total_bytes: fixtureCatalog.slotNumber.n6(),
+		complete: true,
 		is_current_day: false,
-	}));
-	const uplink = current.reduce(
-		(sum, point) => sum + (point.uplink_bytes ?? 0),
-		0,
+	};
+}
+
+function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
+	const count = window === "24h" ? 288 : 31;
+	const current = Array.from({ length: count }, (_, index) =>
+		buildTrafficPoint(
+			window === "31d" && index === count - 1,
+			gap && index > 112 && index < 124,
+		),
 	);
-	const downlink = current.reduce(
-		(sum, point) => sum + (point.downlink_bytes ?? 0),
-		0,
+	const reference = Array.from({ length: count }, () =>
+		buildReferenceTrafficPoint(),
 	);
+	const summary =
+		window === "24h"
+			? {
+					uplink_bytes: fixtureCatalog.slotNumber.n32(),
+					downlink_bytes: fixtureCatalog.slotNumber.n33(),
+					total_bytes: fixtureCatalog.slotNumber.n34(),
+				}
+			: {
+					uplink_bytes: fixtureCatalog.slotNumber.n35(),
+					downlink_bytes: fixtureCatalog.slotNumber.n36(),
+					total_bytes: fixtureCatalog.slotNumber.n37(),
+				};
 	return {
 		window,
-		window_start_at: current[0]?.start_at ?? end.toISOString(),
-		window_end_at: current.at(-1)?.end_at ?? end.toISOString(),
+		window_start_at: fixtureCatalog.timestamp.baseline(),
+		window_end_at: fixtureCatalog.timestamp.recent(),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			cycle_start_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1),
-			).toISOString(),
-			cycle_end_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1),
-			).toISOString(),
-			uplink_bytes: fixtureCatalog.slotNumber.n6(),
-			downlink_bytes: fixtureCatalog.slotNumber.n7(),
-			total_bytes: uplink + downlink,
-			complete: true,
-			tracking_since: current[0]?.start_at ?? null,
+			cycle_start_at: fixtureCatalog.timestamp.earlier(),
+			cycle_end_at: fixtureCatalog.timestamp.later(),
+			...summary,
+			complete: !gap,
+			tracking_since: fixtureCatalog.timestamp.baseline(),
 		},
 		current,
 		reference,
@@ -520,10 +530,9 @@ function buildTrafficReport(window: TrafficWindow, factor = 1): TrafficReport {
 }
 
 function buildDefaultNodeTraffic(node: AdminNode): MockWindowedNodeTraffic {
-	const factor = node.node_id.endsWith("2") ? 0.75 : 1;
 	return {
-		"24h": { node, traffic: buildTrafficReport("24h", factor) },
-		"31d": { node, traffic: buildTrafficReport("31d", factor) },
+		"24h": { node, traffic: buildTrafficReport("24h") },
+		"31d": { node, traffic: buildTrafficReport("31d") },
 	};
 }
 
@@ -538,14 +547,14 @@ function buildDefaultUserTraffic(
 	return {
 		"24h": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("24h", 0.65),
+			traffic: buildTrafficReport("24h"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
 		},
 		"31d": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("31d", 0.65),
+			traffic: buildTrafficReport("31d"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
@@ -1240,7 +1249,7 @@ async function handleRequest(
 				status: {
 					state: "running",
 					target_tag: payload?.target_tag ?? "v0.0.0",
-					started_at: new Date().toISOString(),
+					started_at: fixtureCatalog.timestamp.recent(),
 					updated_at: fixtureCatalog.slotString.s7(),
 					message: "storybook mock upgrade started",
 				},
@@ -1266,7 +1275,7 @@ async function handleRequest(
 			{
 				event: "snapshot",
 				data: {
-					emitted_at: new Date().toISOString(),
+					emitted_at: fixtureCatalog.timestamp.recent(),
 					health: clone(state.health),
 					cluster_info: clone(state.clusterInfo),
 					nodes_runtime: clone(nodesRuntime),
@@ -2338,9 +2347,6 @@ async function handleRequest(
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const cycleEnd = new Date(
-			Date.now() + 10 * 24 * 60 * 60 * 1000,
-		).toISOString();
 		const items = state.nodeQuotas
 			.filter((q) => q.user_id === userId)
 			.map((q) => ({
@@ -2349,7 +2355,7 @@ async function handleRequest(
 				quota_limit_bytes: q.quota_limit_bytes,
 				used_bytes: 0,
 				remaining_bytes: q.quota_limit_bytes,
-				cycle_end_at: cycleEnd,
+				cycle_end_at: fixtureCatalog.timestamp.later(),
 				quota_reset_source: q.quota_reset_source,
 			}));
 

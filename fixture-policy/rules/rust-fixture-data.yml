@@ -45,3 +45,15 @@ rule:
             - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
             - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
             - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+    - not:
+        all:
+          - has:
+              field: value
+              pattern: node_id.to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: add_cluster_node

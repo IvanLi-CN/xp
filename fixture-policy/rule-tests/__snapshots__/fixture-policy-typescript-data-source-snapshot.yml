@@ -1,6 +1,21 @@
 id: fixture-policy-typescript-data-source
 snapshots:
   ? |
+    const fixture = { emitted_at: new Date().toISOString() };
+  : labels:
+    - source: 'emitted_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 54
+    - source: emitted_at
+      style: secondary
+      start: 18
+      end: 28
+    - source: new Date().toISOString()
+      style: secondary
+      start: 30
+      end: 54
+  ? |
     const fixture = { endpointId: `endpoint-${suffix}` };
   : labels:
     - source: 'endpointId: `endpoint-${suffix}`'
@@ -61,23 +76,6 @@ snapshots:
       start: 27
       end: 42
   ? |
-    function buildNodeRuntimeListItem() {
-      return { node_id: process.env.TEST_NODE_ID };
-    }
-  : labels:
-    - source: 'node_id: process.env.TEST_NODE_ID'
-      style: primary
-      start: 49
-      end: 82
-    - source: node_id
-      style: secondary
-      start: 49
-      end: 56
-    - source: process.env.TEST_NODE_ID
-      style: secondary
-      start: 58
-      end: 82
-  ? |
     const fixture = { timestamp: JSON.parse(raw) };
   : labels:
     - source: 'timestamp: JSON.parse(raw)'
@@ -99,6 +97,21 @@ snapshots:
       style: secondary
       start: 25
       end: 47
+  ? |
+    const fixture = { total_bytes: 4096 };
+  : labels:
+    - source: 'total_bytes: 4096'
+      style: primary
+      start: 18
+      end: 35
+    - source: total_bytes
+      style: secondary
+      start: 18
+      end: 29
+    - source: '4096'
+      style: secondary
+      start: 31
+      end: 35
   ? |
     const fixture = { updated_at: JSON.parse(raw) };
   : labels:
@@ -129,3 +142,20 @@ snapshots:
       style: secondary
       start: 33
       end: 50
+  ? |
+    function buildNodeRuntimeListItem() {
+      return { node_id: process.env.TEST_NODE_ID };
+    }
+  : labels:
+    - source: 'node_id: process.env.TEST_NODE_ID'
+      style: primary
+      start: 49
+      end: 82
+    - source: node_id
+      style: secondary
+      start: 49
+      end: 56
+    - source: process.env.TEST_NODE_ID
+      style: secondary
+      start: 58
+      end: 82

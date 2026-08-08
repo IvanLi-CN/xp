@@ -51,3 +51,12 @@ rule:
             field: value
             not:
               kind: array
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^"date"$'
+        - has:
+            field: value
+            not:
+              kind: string

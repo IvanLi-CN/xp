@@ -1,6 +1,21 @@
 id: fixture-policy-tsx-data-source
 snapshots:
   ? |
+    const fixture = { end_at: new Date().toISOString() };
+  : labels:
+    - source: 'end_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 50
+    - source: end_at
+      style: secondary
+      start: 18
+      end: 24
+    - source: new Date().toISOString()
+      style: secondary
+      start: 26
+      end: 50
+  ? |
     const fixture = { host: "unapproved.fixture.test" };
   : labels:
     - source: 'host: "unapproved.fixture.test"'
@@ -45,3 +60,18 @@ snapshots:
       style: secondary
       start: 29
       end: 46
+  ? |
+    const fixture = { total_bytes: 4096 };
+  : labels:
+    - source: 'total_bytes: 4096'
+      style: primary
+      start: 18
+      end: 35
+    - source: total_bytes
+      style: secondary
+      start: 18
+      end: 29
+    - source: '4096'
+      style: secondary
+      start: 31
+      end: 35

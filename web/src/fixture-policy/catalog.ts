@@ -119,6 +119,7 @@ export const fixtureCatalog = {
 		baseline: () => catalog.timestamps.baseline,
 		recent: () => catalog.timestamps.recent,
 		later: () => catalog.timestamps.later,
+		date: () => catalog.timestamps.date,
 		none: () => null,
 	},
 	metric: {

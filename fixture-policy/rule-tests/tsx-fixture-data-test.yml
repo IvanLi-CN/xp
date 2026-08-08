@@ -2,8 +2,14 @@ id: fixture-policy-tsx-data-source
 valid:
   - |
     const fixture = { host: fixtureCatalog.host.primary() };
+  - |
+    const fixture = { start_at: fixtureCatalog.timestamp.baseline() };
 invalid:
   - |
     const fixture = { host: "unapproved.fixture.test" };
   - |
     const fixture = { node_name: "unapproved-node" };
+  - |
+    const fixture = { end_at: new Date().toISOString() };
+  - |
+    const fixture = { total_bytes: 4096 };

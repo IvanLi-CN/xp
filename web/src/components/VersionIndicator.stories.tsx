@@ -296,7 +296,7 @@ export const RunningUpgrade: Story = {
 						state: "running",
 						target_tag: "v0.2.0",
 						repo: "IvanLi-CN/xp",
-						started_at: "2026-07-04T00:00:10Z",
+						started_at: fixtureCatalog.timestamp.baseline(),
 						message: "xp-ops upgrade is running.",
 					},
 				}}
@@ -372,7 +372,7 @@ export const TerminalResult: Story = {
 						...baseUpgradeStatus.status,
 						state: "succeeded",
 						target_tag: "v0.2.0",
-						finished_at: "2026-07-04T00:00:45Z",
+						finished_at: fixtureCatalog.timestamp.recent(),
 						exit_code: 0,
 					},
 				}}
@@ -466,8 +466,8 @@ export const UpgradeFailed: Story = {
 						state: "failed",
 						target_tag: "v0.2.0",
 						repo: "IvanLi-CN/xp",
-						started_at: "2026-07-04T00:00:10Z",
-						finished_at: "2026-07-04T00:00:45Z",
+						started_at: fixtureCatalog.timestamp.baseline(),
+						finished_at: fixtureCatalog.timestamp.recent(),
 						exit_code: 7,
 						message: "service_error: systemd start failed",
 					},

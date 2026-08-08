@@ -6,6 +6,13 @@ import { setAdminToken, setupApiMocks } from "./helpers";
 type UpgradeState = "idle" | "succeeded" | "failed" | "unsupported";
 
 function upgradeStatus(state: UpgradeState) {
+	const lifecycle =
+		state === "idle"
+			? { finished_at: null, started_at: null }
+			: {
+					finished_at: fixtureCatalog.slotString.s464(),
+					started_at: fixtureCatalog.slotString.s82(),
+				};
 	return {
 		support: {
 			supported: true,
@@ -16,8 +23,7 @@ function upgradeStatus(state: UpgradeState) {
 			state,
 			target_tag: state === "idle" ? null : "v3.23.2",
 			repo: "IvanLi-CN/xp",
-			started_at: state === "idle" ? null : fixtureCatalog.slotString.s82(),
-			finished_at: state === "idle" ? null : fixtureCatalog.slotString.s464(),
+			...lifecycle,
 			exit_code: state === "succeeded" ? 0 : state === "idle" ? null : 1,
 			message: null,
 			updated_at: fixtureCatalog.slotString.s464(),

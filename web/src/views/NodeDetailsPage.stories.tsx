@@ -241,8 +241,8 @@ export const RuntimeHistoryFallback: Story = {
 						daily_traffic: [
 							{
 								date: "2026-05-20",
-								uplink_bytes: 1536 * 2 ** 20,
-								downlink_bytes: 4096 * 2 ** 20,
+								uplink_bytes: fixtureCatalog.slotNumber.n2(),
+								downlink_bytes: fixtureCatalog.slotNumber.n3(),
 								updated_at: fixtureCatalog.timestamp.baseline(),
 							},
 						],
