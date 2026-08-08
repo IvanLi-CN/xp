@@ -183,14 +183,27 @@ fn transaction_backups(resume: &ResumeContext) -> Vec<&Path> {
 }
 
 fn remove_transaction_backups(resume: &ResumeContext) -> std::io::Result<()> {
-    remove_transaction_backup_paths(transaction_backups(resume), |path| {
-        std::fs::remove_file(path)
-    })
+    remove_transaction_backup_paths(
+        transaction_backups(resume),
+        |path| std::fs::remove_file(path),
+        restore_transaction_backup,
+    )
 }
 
-fn remove_transaction_backup_paths<F>(backups: Vec<&Path>, mut remove: F) -> std::io::Result<()>
+struct TransactionBackupSnapshot {
+    path: std::path::PathBuf,
+    contents: Vec<u8>,
+    mode: u32,
+}
+
+fn remove_transaction_backup_paths<F, R>(
+    backups: Vec<&Path>,
+    mut remove: F,
+    mut restore: R,
+) -> std::io::Result<()>
 where
     F: FnMut(&Path) -> std::io::Result<()>,
+    R: FnMut(&TransactionBackupSnapshot) -> std::io::Result<()>,
 {
     let snapshots = backups
         .into_iter()
@@ -205,14 +218,18 @@ where
                     ),
                 ));
             }
-            Ok((path.to_path_buf(), std::fs::read(path)?))
+            Ok(TransactionBackupSnapshot {
+                path: path.to_path_buf(),
+                contents: std::fs::read(path)?,
+                mode: std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()),
+            })
         })
         .collect::<std::io::Result<Vec<_>>>()?;
-    for (index, (path, _)) in snapshots.iter().enumerate() {
-        if let Err(error) = remove(path) {
-            for (restore_path, contents) in snapshots.iter().take(index) {
-                if !restore_path.exists() {
-                    let _ = std::fs::write(restore_path, contents);
+    for (index, snapshot) in snapshots.iter().enumerate() {
+        if let Err(error) = remove(&snapshot.path) {
+            for snapshot in snapshots.iter().take(index) {
+                if !snapshot.path.exists() {
+                    restore(snapshot)?;
                 }
             }
             return Err(error);
@@ -221,9 +238,18 @@ where
     Ok(())
 }
 
+fn restore_transaction_backup(snapshot: &TransactionBackupSnapshot) -> std::io::Result<()> {
+    std::fs::write(&snapshot.path, &snapshot.contents)?;
+    std::fs::set_permissions(
+        &snapshot.path,
+        std::os::unix::fs::PermissionsExt::from_mode(snapshot.mode),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::remove_transaction_backup_paths;
+    use super::{remove_transaction_backup_paths, restore_transaction_backup};
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn restores_removed_backups_when_later_delete_fails() {
@@ -232,20 +258,59 @@ mod tests {
         let second = tmp.path().join("xp.bak.test");
         std::fs::write(&first, b"xp-ops-old").unwrap();
         std::fs::write(&second, b"xp-old").unwrap();
+        std::fs::set_permissions(&first, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut calls = 0;
 
-        let error = remove_transaction_backup_paths(vec![&first, &second], |path| {
-            calls += 1;
-            if calls == 2 {
-                return Err(std::io::Error::other("injected deletion failure"));
-            }
-            std::fs::remove_file(path)
-        })
+        let error = remove_transaction_backup_paths(
+            vec![&first, &second],
+            |path| {
+                calls += 1;
+                if calls == 2 {
+                    return Err(std::io::Error::other("injected deletion failure"));
+                }
+                std::fs::remove_file(path)
+            },
+            restore_transaction_backup,
+        )
         .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::Other);
         assert_eq!(std::fs::read(&first).unwrap(), b"xp-ops-old");
         assert_eq!(std::fs::read(&second).unwrap(), b"xp-old");
+        assert_eq!(
+            std::fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
+    #[test]
+    fn propagates_backup_restore_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("xp-ops.bak.test");
+        let second = tmp.path().join("xp.bak.test");
+        std::fs::write(&first, b"xp-ops-old").unwrap();
+        std::fs::write(&second, b"xp-old").unwrap();
+        let mut calls = 0;
+
+        let error = remove_transaction_backup_paths(
+            vec![&first, &second],
+            |path| {
+                calls += 1;
+                if calls == 2 {
+                    return Err(std::io::Error::other("injected deletion failure"));
+                }
+                std::fs::remove_file(path)
+            },
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected restore failure",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
 
