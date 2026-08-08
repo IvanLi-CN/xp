@@ -74,10 +74,15 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
         .env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup)
         .env("XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS", service_backups)
         .env("XP_OPS_UPGRADE_RESUME_SERVICE_PHASE_COMPLETE", "1")
+        .env("XP_OPS_UPGRADE_RESUME_RUNNER", "1")
         .args([
             "--root",
             &root,
-            "_upgrade-runner",
+            "upgrade",
+            "--version",
+            "v0.1.999",
+            "--repo",
+            "o/r",
             "--data-dir",
             &data_dir_arg,
         ]);
