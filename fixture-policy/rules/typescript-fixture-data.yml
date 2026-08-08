@@ -36,3 +36,87 @@ rule:
                   if (!endpoint) throw new Error($ERROR);
                   return { $$$ };
                 }
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - regex: '^`\$\{derived\[0\]\}:443`$'
+                - pattern: derived
+                - pattern: '[$NODE.access_host.replace($$$)]'
+                - pattern: 'payload.canary_upstream ? { $$$ } : undefined'
+                - pattern: acceptedAuthorities
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: buildEndpointCreateMeta
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: node.node_id
+                - pattern: node.node_name
+                - pattern: node.api_base_url
+                - pattern: node.access_host
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    regex: '^(buildNodeRuntimeListItem|buildNodeHistory|buildDefaultUserTraffic)$'
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - regex: '^`\$\{derived\[0\]\}:443`$'
+                - pattern: derived
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: refreshGlobalEndpointReality
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: endpoint.endpoint_id
+                - pattern: endpoint.node_id
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: applyAutoAssignForEndpoint
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: payload.node_name ?? node.node_name
+                - pattern: payload.access_host ?? node.access_host
+                - pattern: payload.api_base_url ?? node.api_base_url
+                - pattern: endpointId
+                - pattern: payload.node_id
+                - pattern: tag
+                - pattern: nodeId
+                - pattern: endpoint.endpoint_id
+                - pattern: endpoint.tag
+                - pattern: item.node_id
+                - pattern: q.node_id
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest

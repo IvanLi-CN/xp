@@ -325,6 +325,7 @@ fn vless_server_names_empty_is_error() {
     );
 }
 
+#[test]
 fn empty_membership_list_produces_empty_output() {
     let u = user("u1", "alice");
     let n = node("n1", "node-1", "example.com");

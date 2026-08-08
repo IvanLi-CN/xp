@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 function Empty() {
 	return <></>;
@@ -109,7 +110,9 @@ export const MainFlow: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Quota status" }),
 		);
-		await expect(await canvas.findByText("node-tokyo-1")).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(fixtureCatalog.identifier.nodePrimary()),
+		).toBeInTheDocument();
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);

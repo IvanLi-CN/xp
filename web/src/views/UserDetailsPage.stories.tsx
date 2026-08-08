@@ -11,11 +11,18 @@ import {
 
 const USER_ID_1 = fixtureCatalog.identifier.userPrimary();
 const USER_ID_2 = fixtureCatalog.identifier.userSecondary();
+const ACCESS_NODE_HINT = [
+	"Node all-select covers current endpoints on",
+	fixtureCatalog.identifier.nodeNameSecondary(),
+	"and",
+	fixtureCatalog.identifier.nodeNamePrimary(),
+	"only. Future endpoints still follow protocol all-select defaults.",
+].join(" ");
 
 const nodes: AdminNode[] = [
 	{
 		node_id: fixtureCatalog.identifier.nodePrimary(),
-		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNameSecondary(),
 		access_host: fixtureCatalog.host.primary(),
 		api_base_url: fixtureCatalog.url.primaryApi(),
 		quota_limit_bytes: 0,
@@ -192,11 +199,7 @@ export const AccessTab: Story = {
 				"After Apply access, new VLESS and SS2022 endpoints will be assigned to this user automatically.",
 			),
 		).toBeInTheDocument();
-		await expect(
-			await canvas.findByText(
-				"Node all-select covers current endpoints on tokyo-1 and osaka-1 only. Future endpoints still follow protocol all-select defaults.",
-			),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(ACCESS_NODE_HINT)).toBeInTheDocument();
 	},
 };
 
@@ -237,13 +240,19 @@ export const UsageDetailsTab: Story = {
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo-1" }),
+			await canvas.findByRole("tab", {
+				name: fixtureCatalog.identifier.nodeNamePrimary(),
+			}),
 		).toHaveAttribute("aria-selected", "true");
 		await expect(
-			await canvas.findByText("Usage details · tokyo-1"),
+			await canvas.findByText(
+				`Usage details · ${fixtureCatalog.identifier.nodeNamePrimary()}`,
+			),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.57" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -293,12 +302,12 @@ export const UsageDetailsDuplicateNames: Story = {
 		);
 		await expect(
 			await canvas.findByRole("tab", {
-				name: `${fixtureCatalog.identifier.nodeNamePrimary()} · ${fixtureCatalog.host.primary()}`,
+				name: `fixture-duplicate · ${fixtureCatalog.host.primary()}`,
 			}),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("tab", {
-				name: `${fixtureCatalog.identifier.nodeNamePrimary()} · ${fixtureCatalog.host.secondary()}`,
+				name: `fixture-duplicate · ${fixtureCatalog.host.secondary()}`,
 			}),
 		).toBeInTheDocument();
 	},
@@ -310,16 +319,24 @@ export const UsageDetailsTab7d: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
-		await userEvent.click(await canvas.findByRole("tab", { name: "osaka-1" }));
+		await userEvent.click(
+			await canvas.findByRole("tab", {
+				name: fixtureCatalog.identifier.nodeNamePrimary(),
+			}),
+		);
 		await expect(
-			await canvas.findByRole("heading", { name: "Usage details · osaka-1" }),
+			await canvas.findByRole("heading", {
+				name: `Usage details · ${fixtureCatalog.identifier.nodeNamePrimary()}`,
+			}),
 		).toBeInTheDocument();
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
 		await expect(
 			await canvas.findByRole("button", { name: "7d" }),
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.99" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };

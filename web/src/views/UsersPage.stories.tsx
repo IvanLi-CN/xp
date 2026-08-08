@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
-const USER_ID_1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-const USER_ID_2 = "01HF7YAT01YVKWQ847J5T9EY84";
+const USER_ID_1 = fixtureCatalog.identifier.userPrimary();
+const USER_ID_2 = fixtureCatalog.identifier.userSecondary();
 
 const meta = {
 	title: "Pages/UsersPage",
@@ -118,7 +118,7 @@ export const LongValues: Story = {
 			await canvas.findByText(/Alice with a very long display name/),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText(/sub_01HF7YAT00T6RTJH6T9Z8ZPMDV/),
+			await canvas.findByText(fixtureCatalog.slotString.s170()),
 		).toBeInTheDocument();
 	},
 };
