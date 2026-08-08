@@ -472,7 +472,10 @@ run_success_case() {
 
   "$XP_BIN" init
   start_xp
-  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION"
+  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION" || {
+    dump_case_debug success-startup
+    return 1
+  }
 
   local user_id
   user_id="$(curl -sS --fail-with-body -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -499,7 +502,10 @@ run_success_case() {
     dump_case_debug success
     return 1
   }
-  wait_version "$XP_API_BASE_URL" "$XP_NEW_VERSION"
+  wait_version "$XP_API_BASE_URL" "$XP_NEW_VERSION" || {
+    dump_case_debug success-version
+    return 1
+  }
   curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
     "$XP_API_BASE_URL/api/admin/users/$user_id" \
     | python3 -c '"'"'
@@ -531,7 +537,10 @@ run_rollback_case() {
 
   "$XP_BIN" init
   start_xp
-  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION"
+  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION" || {
+    dump_case_debug rollback-startup
+    return 1
+  }
   touch "$RESTART_FAIL_FILE"
 
   local start_body="$case_dir/start-upgrade.body"
@@ -549,9 +558,23 @@ run_rollback_case() {
     dump_case_debug rollback
     return 1
   }
-  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION"
+  wait_version "$XP_API_BASE_URL" "$XP_OLD_VERSION" || {
+    dump_case_debug rollback-version
+    return 1
+  }
   "$XP_BIN" --version | grep -q "$XP_OLD_VERSION"
-  find "$TEST_ROOT/usr/local/bin" -name "xp.failed.*" -print -quit | grep -q .
+  ! find "$TEST_ROOT/usr/local/bin" -type f \( -name '*.bak.*' -o -name '*.failed.*' \) -print -quit | grep -q . || {
+    dump_case_debug rollback-artifacts
+    return 1
+  }
+  test -s "$XP_DATA_DIR/upgrade/diagnostics.json" || {
+    dump_case_debug rollback-diagnostics
+    return 1
+  }
+  test "$(wc -c < "$XP_DATA_DIR/upgrade/diagnostics.json")" -le 8192 || {
+    dump_case_debug rollback-diagnostics-size
+    return 1
+  }
 }
 
 run_success_case

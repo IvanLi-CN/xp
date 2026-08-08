@@ -30,7 +30,6 @@ const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
-
 #[derive(Debug, Clone, Copy)]
 enum Platform {
     LinuxX86_64,
@@ -51,7 +50,6 @@ impl Platform {
         }
     }
 }
-
 fn detect_platform() -> Result<Platform, ExitError> {
     if std::env::consts::OS != "linux" {
         return Err(ExitError::new(2, "unsupported_platform"));
@@ -450,7 +448,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             ),
         ));
     }
-
     let phase_result = async {
         upgrade_xp(
             &paths,
@@ -459,6 +456,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             xp_asset_name,
             &xp_backup,
             &args.data_dir,
+            args.allow_internal_auth_v2_cutover,
         )
         .await?;
         // A new process consumes the cutover marker at startup. Once the v2 epoch is durable,
@@ -481,7 +479,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             rollback_xp_on_runtime_failure,
         )
         .await?;
-
         if resume.is_some() {
             clear_upgrade_resume_env();
         } else {
@@ -495,22 +492,24 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             )
             .await?;
         }
-
         Ok(())
     }
     .await;
-
     match phase_result {
-        Ok(()) => {
-            cleanup_managed_artifacts_for(&paths, &[&xp_ops_dest]).map_err(|error| {
-                ExitError::new(
+        Ok(()) => match cleanup_managed_artifacts_for(&paths, &[&xp_ops_dest]) {
+            Ok(_) => {
+                clear_upgrade_diagnostics(&args.data_dir);
+                Ok(())
+            }
+            Err(error) => {
+                let error = ExitError::new(
                     7,
                     format!("service_error: cleanup upgrade artifacts: {error}"),
-                )
-            })?;
-            clear_upgrade_diagnostics(&args.data_dir);
-            Ok(())
-        }
+                );
+                write_upgrade_diagnostics(&args.data_dir, &release.tag_name, &checksums, &error);
+                Err(error)
+            }
+        },
         Err(err) => {
             if args.allow_internal_auth_v2_cutover
                 && matches!(
@@ -559,7 +558,6 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         }
     }
 }
-
 pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result<(), ExitError> {
     let request = crate::upgrade_job::prepare_runner_request(&args.data_dir, DEFAULT_GITHUB_REPO)?;
     let starting = crate::upgrade_job::status_for_runner_start(&request);
@@ -589,7 +587,6 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     }
     result
 }
-
 async fn upgrade_xp(
     paths: &Paths,
     release: &GitHubRelease,
@@ -597,6 +594,7 @@ async fn upgrade_xp(
     asset_name: &str,
     backup: &Path,
     data_dir: &Path,
+    allow_internal_auth_v2_cutover: bool,
 ) -> Result<(), ExitError> {
     let Some(asset_url) = find_asset_url(release, asset_name) else {
         return Err(ExitError::new(
@@ -646,28 +644,32 @@ async fn upgrade_xp(
 
     if (!is_test_root(paths.root()) || test_enable_service_restart()) && !restart_xp_service(paths)
     {
-        match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
-            Ok(true) => {
-                return Err(ExitError::new(
-                    7,
-                    concat!(
-                        "service_error: restart failed after internal-auth v2 epoch was consumed; ",
-                        "v1 rollback is blocked"
-                    ),
-                ));
-            }
-            Ok(false) => {}
-            Err(error) => {
-                return Err(ExitError::new(
-                    7,
-                    format!(
+        if allow_internal_auth_v2_cutover {
+            match crate::internal_auth_epoch::is_v2_epoch(data_dir) {
+                Ok(true) => {
+                    return Err(ExitError::new(
+                        7,
                         concat!(
-                            "service_error: restart failed and internal-auth epoch is unreadable; ",
-                            "v1 rollback is blocked: {}"
+                            "service_error: restart failed after internal-auth v2 epoch ",
+                            "was consumed; ",
+                            "v1 rollback is blocked"
                         ),
-                        error
-                    ),
-                ));
+                    ));
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    return Err(ExitError::new(
+                        7,
+                        format!(
+                            concat!(
+                                "service_error: restart failed and internal-auth epoch is ",
+                                "unreadable; ",
+                                "v1 rollback is blocked: {}"
+                            ),
+                            error
+                        ),
+                    ));
+                }
             }
         }
         let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));

@@ -46,7 +46,7 @@ pub(crate) fn ensure_upgrade_space_for(paths: &Paths, extra: &[&Path]) -> Result
 fn assess_upgrade_storage_for(paths: &Paths, extra: &[&Path]) -> io::Result<UpgradeStorage> {
     let artifacts = managed_artifacts(paths, extra)?;
     let workspace = workspace_path(paths);
-    let workspace_reclaimable = workspace_reclaimable(&workspace)?;
+    let workspace_reclaimable = workspace_reclaimable(paths.root(), &workspace)?;
     let install = managed_binaries(paths)
         .into_iter()
         .chain(extra.iter().map(|path| path.to_path_buf()))
@@ -77,11 +77,20 @@ pub(crate) fn cleanup_managed_artifacts_for(paths: &Paths, extra: &[&Path]) -> i
             fs::remove_file(artifact)?;
         }
     }
-    reclaimed = reclaimed.saturating_add(cleanup_workspace(&workspace_path(paths))?);
+    reclaimed = reclaimed.saturating_add(cleanup_workspace_from(
+        paths.root(),
+        &workspace_path(paths),
+    )?);
     Ok(reclaimed)
 }
 
 pub(crate) fn cleanup_workspace(workspace: &Path) -> io::Result<u64> {
+    let root = workspace.parent().unwrap_or(workspace);
+    cleanup_workspace_from(root, workspace)
+}
+
+fn cleanup_workspace_from(root: &Path, workspace: &Path) -> io::Result<u64> {
+    ensure_no_symlinked_ancestors_from(root, workspace)?;
     let metadata = match fs::symlink_metadata(workspace) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
@@ -128,6 +137,7 @@ fn managed_artifacts(paths: &Paths, extra: &[&Path]) -> io::Result<Vec<PathBuf>>
         if !seen_dirs.insert((key.clone(), name.to_string())) {
             continue;
         }
+        ensure_no_symlinked_ancestors_from(paths.root(), &key)?;
         match fs::symlink_metadata(&key) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(io::Error::new(
@@ -207,7 +217,8 @@ fn volume_for(
     })
 }
 
-fn workspace_reclaimable(workspace: &Path) -> io::Result<u64> {
+fn workspace_reclaimable(root: &Path, workspace: &Path) -> io::Result<u64> {
+    ensure_no_symlinked_ancestors_from(root, workspace)?;
     match fs::symlink_metadata(workspace) {
         Ok(metadata) if metadata.file_type().is_dir() => directory_regular_file_bytes(workspace),
         Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::new(
@@ -239,6 +250,36 @@ fn existing_ancestor(path: &Path) -> io::Result<PathBuf> {
         .find(|candidate| candidate.exists())
         .map(Path::to_path_buf)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no existing filesystem path"))
+}
+
+fn ensure_no_symlinked_ancestors_from(root: &Path, path: &Path) -> io::Result<()> {
+    let ancestors = path
+        .ancestors()
+        .take_while(|ancestor| ancestor.starts_with(root))
+        .collect::<Vec<_>>();
+    if ancestors.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing managed path outside root: {}", path.display()),
+        ));
+    }
+    for ancestor in ancestors.into_iter().rev() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "refusing path with symlinked ancestor: {}",
+                        ancestor.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn same_filesystem(left: &Path, right: &Path) -> io::Result<bool> {
@@ -324,12 +365,12 @@ mod tests {
         assert!(outside.exists());
 
         fs::remove_file(&workspace).unwrap();
-        let bin_parent = tmp.path().join("usr/local");
-        fs::create_dir_all(&bin_parent).unwrap();
-        let outside_bin = tmp.path().join("outside-bin");
-        fs::create_dir(&outside_bin).unwrap();
-        symlink(&outside_bin, bin_parent.join("bin")).unwrap();
+        let usr = tmp.path().join("usr");
+        fs::create_dir_all(&usr).unwrap();
+        let outside_local = tmp.path().join("outside-local");
+        fs::create_dir(&outside_local).unwrap();
+        symlink(&outside_local, usr.join("local")).unwrap();
         assert!(cleanup_managed_artifacts_for(&paths, &[]).is_err());
-        assert!(outside_bin.exists());
+        assert!(outside_local.exists());
     }
 }
