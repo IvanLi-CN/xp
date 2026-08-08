@@ -647,6 +647,30 @@ async fn ensure_existing_inbound_treats_existing_tag_found_as_ok() {
     let _ = shutdown.send(());
 }
 
+#[test]
+fn desired_inbound_hash_ignores_mihomo_smux_policy() {
+    let mut endpoint = Endpoint {
+        endpoint_id: "endpoint-1".to_string(),
+        node_id: "node-1".to_string(),
+        tag: "ss2022-endpoint-1".to_string(),
+        kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+        port: 443,
+        meta: serde_json::json!({
+            "method": crate::protocol::SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
+            "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA==",
+            "mihomo_smux": {
+                "enabled": true,
+                "max_connections": 4,
+                "min_streams": 4,
+                "only_tcp": true
+            }
+        }),
+    };
+    let initial_hash = desired_inbound_hash(&endpoint).unwrap();
+    endpoint.meta["mihomo_smux"]["max_connections"] = serde_json::json!(16);
+    assert_eq!(desired_inbound_hash(&endpoint).unwrap(), initial_hash);
+}
+
 #[tokio::test]
 async fn rebuild_inbound_existing_tag_found_keeps_retrying_until_rebuilt() {
     let calls = Arc::new(Mutex::new(Vec::<Call>::new()));
