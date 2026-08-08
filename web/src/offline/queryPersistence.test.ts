@@ -4,6 +4,7 @@ import {
 	isPersistedQueryCacheFresh,
 	isPersistedQuerySnapshotFresh,
 	mergePersistedQueries,
+	shouldPersistQuery,
 	snapshotStoredAt,
 } from "./queryPersistence";
 
@@ -86,5 +87,14 @@ describe("persisted query snapshot freshness", () => {
 	it("keeps hydrated snapshots anchored to their data timestamp", () => {
 		expect(snapshotStoredAt(1_000, 9_000)).toBe(1_000);
 		expect(snapshotStoredAt(0, 9_000)).toBe(9_000);
+	});
+
+	it("persists node and user traffic reports", () => {
+		expect(
+			shouldPersistQuery(["adminNodeTraffic", "token", "node-1", "24h"]),
+		).toBe(true);
+		expect(
+			shouldPersistQuery(["adminUserTraffic", "token", "user-1", "31d", null]),
+		).toBe(true);
 	});
 });

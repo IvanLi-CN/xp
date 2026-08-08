@@ -60,6 +60,10 @@ export const Dense7d: Story = {
 	},
 };
 
+export const LoadingLatest: Story = {
+	args: { isWindowPending: true },
+};
+
 export const TooltipBreakdownPreview: Story = {
 	args: {
 		window: "24h",

@@ -19,7 +19,9 @@ import type {
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageNodeGroup,
 } from "../api/adminIpUsage";
-import { alertClass, badgeClass, tableClass } from "./ui-helpers";
+import { ChartLoadingOverlay } from "./ChartLoadingOverlay";
+import { IpGeoSourceNotice, IpUsageWarningList } from "./IpUsageNotices";
+import { badgeClass, tableClass } from "./ui-helpers";
 
 const SVG_RENDERER = { renderer: "svg" } as const;
 const AREA_CHART_HEIGHT = 224;
@@ -77,6 +79,7 @@ type IpUsageViewProps = {
 	onWindowChange: (window: AdminIpUsageWindow) => void;
 	report: SharedIpUsageReport;
 	isFetching?: boolean;
+	isWindowPending?: boolean;
 	emptyTitle?: string;
 };
 
@@ -628,12 +631,14 @@ function UniqueIpAreaChart({
 	onClearHover,
 	onHoverTimeRange,
 	onSelectTimeRange,
+	isWindowPending,
 }: {
 	activeHighlight: ActiveHighlight;
 	ipRangeIndex: Map<string, TimeRange[]>;
 	onClearHover: () => void;
 	onHoverTimeRange: (timeRange: TimeRange | null) => void;
 	onSelectTimeRange: (timeRange: TimeRange) => void;
+	isWindowPending: boolean;
 	report: SharedIpUsageReport;
 	window: AdminIpUsageWindow;
 }) {
@@ -834,11 +839,14 @@ function UniqueIpAreaChart({
 				itemStyle: { color: palette.line },
 				lineStyle: {
 					color: palette.line,
+					join: "round",
 					opacity: 1,
 					width: activeHighlight.timeRange ? 2.08 : 2,
 				},
+				connectNulls: false,
 				showSymbol: false,
-				smooth: 0.22,
+				smooth: false,
+				step: "end",
 				symbol: "none",
 				type: "line",
 				z: 2,
@@ -951,6 +959,7 @@ function UniqueIpAreaChart({
 						onEvents={onEvents}
 						option={option}
 					/>
+					{isWindowPending ? <ChartLoadingOverlay /> : null}
 					{timeBandOverlay ? (
 						<div
 							data-ip-usage-time-band="true"
@@ -1004,12 +1013,14 @@ function TimelineChart({
 	onClearHover,
 	onHoverSegment,
 	onSelectSegment,
+	isWindowPending,
 }: {
 	activeHighlight: ActiveHighlight;
 	lanes: AdminIpUsageTimelineLane[];
 	onClearHover: () => void;
 	onHoverSegment: (ip: string, timeRange: TimeRange) => void;
 	onSelectSegment: (ip: string, timeRange: TimeRange) => void;
+	isWindowPending: boolean;
 	window: AdminIpUsageWindow;
 	windowEnd: string;
 	windowStart: string;
@@ -1452,7 +1463,7 @@ function TimelineChart({
 				</div>
 				<div className={badgeClass("outline")}>{lanes.length} lanes</div>
 			</div>
-			{lanes.length === 0 ? (
+			{lanes.length === 0 && !isWindowPending ? (
 				<div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
 					No occupancy lanes in this window.
 				</div>
@@ -1467,6 +1478,7 @@ function TimelineChart({
 							onEvents={onEvents}
 							option={option}
 						/>
+						{isWindowPending ? <ChartLoadingOverlay /> : null}
 						{timelineBandOverlay ? (
 							<div
 								data-ip-usage-timeline-band="true"
@@ -1637,45 +1649,6 @@ function IpListTable({
 	);
 }
 
-function WarningList({ warnings }: { warnings: AdminIpUsageWarning[] }) {
-	if (warnings.length === 0) return null;
-	return (
-		<div className="space-y-2">
-			{warnings.map((warning) => (
-				<div
-					key={warning.code}
-					className={alertClass(
-						warning.code === "online_stats_unavailable" ? "warning" : "info",
-					)}
-				>
-					<span>{warning.message}</span>
-				</div>
-			))}
-		</div>
-	);
-}
-
-function GeoSourceNotice({ geoSource }: { geoSource?: AdminIpGeoSource }) {
-	if (!geoSource) return null;
-	const message = (() => {
-		switch (geoSource) {
-			case "country_is":
-				return "Geo enrichment uses the free country.is hosted API.";
-			case "managed_dbip_lite":
-				return "Geo enrichment uses legacy managed DB-IP Lite MMDB data.";
-			case "external_override":
-				return "Geo enrichment uses a legacy external MMDB override.";
-			case "missing":
-				return "Geo enrichment is disabled (set XP_IP_GEO_ENABLED=true to enable country.is lookups).";
-		}
-	})();
-	return (
-		<div className={alertClass("info", "py-2 text-sm")}>
-			<span>{message}</span>
-		</div>
-	);
-}
-
 export function IpUsageView({
 	title,
 	description,
@@ -1684,6 +1657,7 @@ export function IpUsageView({
 	onWindowChange,
 	report,
 	isFetching = false,
+	isWindowPending = false,
 	emptyTitle = "No inbound IP data",
 }: IpUsageViewProps) {
 	const [hoveredIp, setHoveredIp] = useState<string | null>(null);
@@ -1830,8 +1804,8 @@ export function IpUsageView({
 					</div>
 				</div>
 
-				<WarningList warnings={report.warnings} />
-				<GeoSourceNotice geoSource={geoSource} />
+				<IpUsageWarningList warnings={report.warnings} />
+				<IpGeoSourceNotice geoSource={geoSource} />
 
 				{blockingWarning && empty ? (
 					<div className="xp-alert xp-alert-warning flex-col items-center rounded-2xl px-4 py-10 text-center">
@@ -1843,7 +1817,7 @@ export function IpUsageView({
 							per-minute inbound IP occupancy.
 						</p>
 					</div>
-				) : empty ? (
+				) : empty && !isWindowPending ? (
 					<div className="rounded-2xl border border-dashed border-border/70 px-4 py-10 text-center">
 						<p className="text-base font-semibold">{emptyTitle}</p>
 						<p className="mt-2 text-sm opacity-70">
@@ -1859,6 +1833,7 @@ export function IpUsageView({
 						/>
 						<UniqueIpAreaChart
 							activeHighlight={activeHighlight}
+							isWindowPending={isWindowPending}
 							ipRangeIndex={ipRangeIndex}
 							onClearHover={clearHover}
 							onHoverTimeRange={(timeRange) =>
@@ -1872,6 +1847,7 @@ export function IpUsageView({
 						/>
 						<TimelineChart
 							activeHighlight={activeHighlight}
+							isWindowPending={isWindowPending}
 							lanes={report.timeline}
 							onClearHover={clearHover}
 							onHoverSegment={setHoveredSegmentStable}

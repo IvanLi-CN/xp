@@ -106,6 +106,10 @@ export const SamplingGap: Story = {
 	args: { report: makeReport("24h", true) },
 };
 
+export const LoadingLatest: Story = {
+	args: { isWindowPending: true },
+};
+
 export const TooltipPreview: Story = {
 	args: { tooltipPreviewIndex: 144 },
 	play: async ({ canvasElement }) => {

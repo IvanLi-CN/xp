@@ -25,9 +25,12 @@ mod runtime_defaults_tests;
 mod status;
 mod tui;
 mod upgrade;
+pub(crate) mod upgrade_artifacts;
 mod util;
 mod xp;
 mod xp_env;
+
+pub(crate) use paths::Paths;
 
 pub fn process_env_has_legacy_relay_probe_vars() -> bool {
     xp_env::process_env_has_legacy_relay_probe_vars()

@@ -18,6 +18,7 @@ import type {
 } from "../api/adminTraffic";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { Button } from "./Button";
+import { ChartLoadingOverlay } from "./ChartLoadingOverlay";
 import { PageState } from "./PageState";
 import {
 	type EChartsThemePalette,
@@ -42,6 +43,7 @@ type TrafficViewProps = {
 	window: TrafficWindow;
 	onWindowChange: (window: TrafficWindow) => void;
 	isFetching?: boolean;
+	isWindowPending?: boolean;
 	nodeSelector?: ReactNode;
 	tooltipPreviewIndex?: number | null;
 };
@@ -183,6 +185,7 @@ export function TrafficView({
 	window,
 	onWindowChange,
 	isFetching,
+	isWindowPending = false,
 	nodeSelector,
 	tooltipPreviewIndex = null,
 }: TrafficViewProps) {
@@ -355,7 +358,8 @@ export function TrafficView({
 				</div>
 			) : null}
 			<div className="rounded-xl border border-border/70 bg-card p-2 sm:p-4">
-				{report.current.every((point) => point.total_bytes == null) &&
+				{!isWindowPending &&
+				report.current.every((point) => point.total_bytes == null) &&
 				(report.reference?.every((point) => point.total_bytes == null) ??
 					true) ? (
 					<PageState
@@ -372,6 +376,7 @@ export function TrafficView({
 							style={{ height: 320, width: "100%" }}
 							opts={{ renderer: "svg" }}
 						/>
+						{isWindowPending ? <ChartLoadingOverlay /> : null}
 						{tooltipPreviewIndex !== null ? (
 							<TrafficTooltipPreviewCard
 								index={tooltipPreviewIndex}

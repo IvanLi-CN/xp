@@ -356,4 +356,21 @@ describe("<IpUsageView />", () => {
 			screen.getByText("statsUserOnline is unavailable."),
 		).toBeInTheDocument();
 	});
+
+	it("keeps both time charts visible under loading overlays", () => {
+		render(
+			<IpUsageView
+				title="IP usage"
+				description="Node inbound IP snapshots"
+				window="24h"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+				isWindowPending
+			/>,
+		);
+
+		expect(
+			screen.getAllByRole("status", { name: "Loading latest data" }),
+		).toHaveLength(2);
+	});
 });

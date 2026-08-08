@@ -115,8 +115,8 @@ mod linux {
         assert!(
             fs::read_dir(installed.parent().unwrap())
                 .unwrap()
-                .any(|entry| {
-                    entry
+                .all(|entry| {
+                    !entry
                         .unwrap()
                         .file_name()
                         .to_string_lossy()

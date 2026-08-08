@@ -14,6 +14,7 @@ import type {
 	AdminTcpConnectionUsageWindow,
 } from "../api/adminTcpConnections";
 import { Button } from "./Button";
+import { ChartLoadingOverlay } from "./ChartLoadingOverlay";
 import { PageState } from "./PageState";
 import {
 	type EChartsTooltipPalette,
@@ -43,6 +44,7 @@ type TcpConnectionUsageViewProps = {
 		| "per_endpoint_series"
 	>;
 	isFetching?: boolean;
+	isWindowPending?: boolean;
 	tooltipPreviewMinute?: string | null;
 };
 
@@ -345,6 +347,7 @@ export function TcpConnectionUsageView({
 	onWindowChange,
 	report,
 	isFetching = false,
+	isWindowPending = false,
 	tooltipPreviewMinute = null,
 }: TcpConnectionUsageViewProps) {
 	const palette = useEChartsThemePalette();
@@ -515,6 +518,8 @@ export function TcpConnectionUsageView({
 			},
 			xAxis: {
 				type: "time",
+				min: safeTimestamp(report.window_start) ?? undefined,
+				max: safeTimestamp(report.window_end) ?? undefined,
 				axisLabel: {
 					color: palette.axis,
 					formatter: (value: number) => formatAxisTime(value, window),
@@ -547,6 +552,8 @@ export function TcpConnectionUsageView({
 			series: [
 				{
 					type: "line",
+					connectNulls: false,
+					step: "end",
 					smooth: false,
 					showSymbol: false,
 					emphasis: STATIC_LINE_SERIES_EMPHASIS,
@@ -554,6 +561,7 @@ export function TcpConnectionUsageView({
 					lineStyle: {
 						width: 2,
 						color: chartLineColor,
+						join: "round",
 					},
 					areaStyle: {
 						color: chartLineColor,
@@ -569,6 +577,8 @@ export function TcpConnectionUsageView({
 		compactTimeAxis,
 		minuteBreakdownByMs,
 		palette,
+		report.window_end,
+		report.window_start,
 		selectedEndpoints,
 		tooltipPalette,
 		window,
@@ -689,7 +699,7 @@ export function TcpConnectionUsageView({
 								</Button>
 							}
 						/>
-					) : aggregatedSeries.length === 0 ? (
+					) : aggregatedSeries.length === 0 && !isWindowPending ? (
 						<PageState
 							variant="empty"
 							title="No TCP connection history yet"
@@ -702,6 +712,7 @@ export function TcpConnectionUsageView({
 								option={chartOption}
 								chartRef={chartRef}
 							/>
+							{isWindowPending ? <ChartLoadingOverlay /> : null}
 							{previewTooltipData ? (
 								<TooltipPreviewCard
 									data={previewTooltipData}

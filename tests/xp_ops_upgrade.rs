@@ -215,7 +215,7 @@ mod linux {
         let xp_asset = xp_asset_name();
         let xp_ops_asset = xp_ops_asset_name();
         let new_xp = b"xp-new-binary";
-        let new_xp_ops = b"xp-ops-new-binary".to_vec();
+        let new_xp_ops = current_xp_ops_bytes();
         let xp_checksum = sha256_hex(new_xp);
         let xp_ops_checksum = sha256_hex(&new_xp_ops);
         mount_latest_and_tag_release(&server, "v0.1.999", xp_asset, xp_ops_asset).await;
@@ -283,9 +283,7 @@ mod linux {
         cmd.assert().success();
         let new_xp_bytes = fs::read(&xp_path).unwrap();
         assert_eq!(new_xp_bytes, new_xp);
-        let xp_backup = find_backup(xp_path.parent().unwrap(), "xp.bak.").unwrap();
-        let xp_backup_bytes = fs::read(xp_backup).unwrap();
-        assert_eq!(xp_backup_bytes, b"xp-old-binary");
+        assert!(find_backup(xp_path.parent().unwrap(), "xp.bak.").is_none());
         let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
         assert!(xray_config.contains("\"handshake\": 4"));
         assert!(xray_config.contains("\"connIdle\": 300"));
@@ -296,30 +294,7 @@ mod linux {
         assert!(marker_raw.contains("systemctl restart xp.service"));
         assert!(marker_raw.contains("systemctl restart xray.service"));
         let prefix = format!("{}.bak.", dest.file_name().unwrap().to_string_lossy());
-        let xp_ops_backup = find_backup(tmp.path(), &prefix).unwrap();
-        let xp_ops_backup_bytes = fs::read(&xp_ops_backup).unwrap();
-        assert_eq!(xp_ops_backup_bytes, original_xp_ops);
-        fs::write(&marker, "").unwrap();
-        fs::write(&expected_xp_ops, &new_xp_ops).unwrap();
-        let mut resumed = assert_cmd::Command::cargo_bin("xp-ops").unwrap();
-        resumed.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
-        resumed.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
-        resumed.env("XP_OPS_TEST_MARKER", &marker);
-        resumed.env("PATH", prepend_path(&bin_dir));
-        resumed.env("T", &dest);
-        resumed.env("E", &expected_xp_ops);
-        resumed.env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999");
-        resumed.env("XP_OPS_UPGRADE_RESUME_REPO", "o/r");
-        resumed.env("XP_OPS_UPGRADE_RESUME_API_BASE", server.uri());
-        resumed.env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest);
-        resumed.env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &xp_ops_backup);
-        resumed.args(["--root", &root, "upgrade", "--repo", "o/r"]);
-        resumed.assert().success();
-        assert_eq!(fs::read(&dest).unwrap(), new_xp_ops);
-        assert_eq!(fs::read(&xp_ops_backup).unwrap(), original_xp_ops);
-        let marker_raw = fs::read_to_string(&marker).unwrap();
-        assert!(marker_raw.contains("systemctl restart xp.service"));
-        assert!(marker_raw.contains("systemctl restart xray.service"));
+        assert!(find_backup(tmp.path(), &prefix).is_none());
     }
 
     #[tokio::test]
@@ -620,10 +595,7 @@ mod linux {
         let bytes = fs::read(&xp_path).unwrap();
         assert_eq!(bytes, b"xp-old-binary");
 
-        let failed = find_backup(xp_path.parent().unwrap(), "xp.failed.").unwrap();
-        let failed_bytes = fs::read(failed).unwrap();
-        assert_eq!(failed_bytes, new_xp);
-
+        assert!(find_backup(xp_path.parent().unwrap(), "xp.failed.").is_none());
         assert!(find_backup(xp_path.parent().unwrap(), "xp.bak.").is_none());
 
         let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
@@ -717,10 +689,7 @@ mod linux {
         let bytes = fs::read(&xp_path).unwrap();
         assert_eq!(bytes, b"xp-old-binary");
 
-        let failed = find_backup(xp_path.parent().unwrap(), "xp.failed.").unwrap();
-        let failed_bytes = fs::read(failed).unwrap();
-        assert_eq!(failed_bytes, new_xp);
-
+        assert!(find_backup(xp_path.parent().unwrap(), "xp.failed.").is_none());
         assert!(find_backup(xp_path.parent().unwrap(), "xp.bak.").is_none());
 
         let xray_config = fs::read_to_string(tmp.path().join("etc/xray/config.json")).unwrap();
@@ -801,7 +770,6 @@ mod linux {
 
         let dest = tmp.path().join("xp-ops-copy");
         copy_current_xp_ops(&dest);
-        let upgraded_xp_ops = fs::read(&dest).unwrap();
 
         let backup = tmp.path().join("xp-ops-copy.bak.resume");
         let original_xp_ops = b"xp-ops-old-backup".to_vec();
@@ -817,6 +785,7 @@ mod linux {
         cmd.env("XP_OPS_UPGRADE_RESUME_API_BASE", server.uri());
         cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_DEST", &dest);
         cmd.env("XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP", &backup);
+        cmd.env("XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS", "[]");
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
 
         cmd.assert()
@@ -830,8 +799,7 @@ mod linux {
         assert_eq!(fs::read(&dest).unwrap(), original_xp_ops);
         assert!(!backup.exists());
 
-        let failed_xp_ops = find_backup(tmp.path(), "xp-ops-copy.failed.").unwrap();
-        assert_eq!(fs::read(failed_xp_ops).unwrap(), upgraded_xp_ops);
+        assert!(find_backup(tmp.path(), "xp-ops-copy.failed.").is_none());
 
         let marker_raw = fs::read_to_string(&marker).unwrap();
         assert!(marker_raw.contains("systemctl restart xp.service"));
