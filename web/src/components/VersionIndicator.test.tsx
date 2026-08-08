@@ -75,6 +75,112 @@ function UpgradeHarness() {
 }
 
 describe("<VersionIndicator /> upgrade observation", () => {
+	it("shows managed cleanup without disabling a viable upgrade", () => {
+		render(
+			<VersionIndicator
+				xpVersion="v3.21.8"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v3.21.10",
+					checked_at: "2026-08-03T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={{
+					support: {
+						supported: true,
+						reason: null,
+						trigger: "systemd",
+						storage: {
+							install: {
+								path: "/usr/local/bin",
+								available_bytes: 96 * 1024 * 1024,
+								reclaimable_bytes: 48 * 1024 * 1024,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							workspace: {
+								path: "/tmp/xp-ops",
+								available_bytes: 256 * 1024 * 1024,
+								reclaimable_bytes: 0,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							cleanup_required: true,
+						},
+					},
+					status: {
+						state: "idle",
+						target_tag: null,
+						repo: null,
+						started_at: null,
+						finished_at: null,
+						exit_code: null,
+						message: null,
+						updated_at: "2026-08-03T00:00:00Z",
+					},
+				}}
+			/>,
+		);
+
+		expect(
+			screen.getByText("将自动清理历史升级文件后继续。"),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Upgrade" })).toBeEnabled();
+	});
+
+	it("blocks upgrade when cleanup cannot reach the space floor", () => {
+		render(
+			<VersionIndicator
+				xpVersion="v3.21.8"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v3.21.10",
+					checked_at: "2026-08-03T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={{
+					support: {
+						supported: true,
+						reason: null,
+						trigger: "systemd",
+						storage: {
+							install: {
+								path: "/usr/local/bin",
+								available_bytes: 72 * 1024 * 1024,
+								reclaimable_bytes: 8 * 1024 * 1024,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: false,
+							},
+							workspace: {
+								path: "/tmp/xp-ops",
+								available_bytes: 256 * 1024 * 1024,
+								reclaimable_bytes: 0,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							cleanup_required: true,
+						},
+					},
+					status: {
+						state: "idle",
+						target_tag: null,
+						repo: null,
+						started_at: null,
+						finished_at: null,
+						exit_code: null,
+						message: null,
+						updated_at: "2026-08-03T00:00:00Z",
+					},
+				}}
+			/>,
+		);
+
+		expect(screen.getByText(/insufficient_upgrade_space/)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Unavailable" })).toBeDisabled();
+	});
+
 	it("keeps the popover open and locks Upgrade after confirmation", async () => {
 		render(<UpgradeHarness />);
 

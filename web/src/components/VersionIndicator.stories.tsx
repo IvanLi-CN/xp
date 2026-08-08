@@ -172,6 +172,95 @@ export const UpdateAvailableUnsupported: Story = {
 	),
 };
 
+export const UpdateAvailableCleansHistory: Story = {
+	render: () => (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={{
+					...baseUpgradeStatus,
+					support: {
+						...baseUpgradeStatus.support,
+						storage: {
+							install: {
+								path: "/usr/local/bin",
+								available_bytes: 96 * 1024 * 1024,
+								reclaimable_bytes: 48 * 1024 * 1024,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							workspace: {
+								path: "/tmp/xp-ops",
+								available_bytes: 256 * 1024 * 1024,
+								reclaimable_bytes: 0,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							cleanup_required: true,
+						},
+					},
+				}}
+			/>
+		</Wrap>
+	),
+};
+
+export const UpdateAvailableInsufficientSpace: Story = {
+	render: () => (
+		<Wrap>
+			<VersionIndicator
+				xpVersion="0.1.0"
+				defaultOpen
+				versionCheck={{
+					kind: "update_available",
+					latest_tag: "v0.2.0",
+					checked_at: "2026-07-04T00:00:00Z",
+					repo: "IvanLi-CN/xp",
+				}}
+				upgradeStatus={{
+					...baseUpgradeStatus,
+					support: {
+						...baseUpgradeStatus.support,
+						storage: {
+							install: {
+								path: "/usr/local/bin",
+								available_bytes: 72 * 1024 * 1024,
+								reclaimable_bytes: 8 * 1024 * 1024,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: false,
+							},
+							workspace: {
+								path: "/tmp/xp-ops",
+								available_bytes: 256 * 1024 * 1024,
+								reclaimable_bytes: 0,
+								required_bytes: 128 * 1024 * 1024,
+								sufficient_after_cleanup: true,
+							},
+							cleanup_required: true,
+						},
+					},
+				}}
+			/>
+		</Wrap>
+	),
+};
+
+export const UpdateAvailableInsufficientSpaceMobile: Story = {
+	...UpdateAvailableInsufficientSpace,
+	parameters: {
+		viewport: {
+			defaultViewport: "mobile1",
+		},
+	},
+};
+
 export const RunningUpgrade: Story = {
 	render: () => (
 		<Wrap>

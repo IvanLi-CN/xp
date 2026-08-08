@@ -729,7 +729,19 @@ Host-managed root delegation:
 
 Rollback notes:
 
-- The upgrade keeps a backup next to the install path as `<path>.bak.<unix-ts>`.
+- Before every host-managed upgrade, `xp-ops` removes only its own old regular-file artifacts:
+  `.bak.*`, `.failed.*`, and staged files for `xp`, `xp-ops`, Xray, and cloudflared, plus the exact
+  `/tmp/xp-ops` work directory. It never follows symlinks and never cleans `/var/backups/xp`,
+  configuration, credentials, certificates, or Raft data.
+- All host-managed nodes use the same retention contract, regardless of disk size. A backup exists
+  only for the active replacement transaction. After a successful upgrade or a successful rollback,
+  no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.
+- Upgrades require at least `128 MiB` available on both the installation and download-workspace
+  filesystems after that managed cleanup. The Web status endpoint reports the current available and
+  reclaimable bytes; the root runner performs the authoritative check before downloading anything.
+- A failed upgrade records only the latest `${XP_DATA_DIR}/upgrade/diagnostics.json` (release tag,
+  asset SHA-256 values, phase, exit code, and a bounded error summary). A later successful upgrade
+  deletes that diagnostic file.
 - On `xp` restart failures, `xp-ops upgrade` automatically rolls back to the previous `xp` binary.
 - On managed-runtime or restart failures, `xp-ops upgrade` restores the previous Xray/cloudflared binaries, Xray config, and `xp` before returning failure.
 - If that failure happened after a self-upgrade re-exec, `xp-ops upgrade` also restores the previous `xp-ops` binary instead of leaving the node on the newer operator binary.

@@ -1,3 +1,4 @@
+use super::failure::rollback_xp_after_xray_failure;
 use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::runtime_activation::{
@@ -479,6 +480,21 @@ pub(super) fn rollback_runtime_binaries(backups: &[RuntimeBinaryBackup]) -> Resu
             fs::rename(backup, &installed.dest).map_err(|e| {
                 ExitError::new(8, format!("rollback_failed: restore runtime binary: {e}"))
             })?;
+        }
+        let failed_prefix = installed
+            .dest
+            .file_name()
+            .map(|name| format!("{}.failed.", name.to_string_lossy()));
+        if let (Some(parent), Some(prefix)) = (installed.dest.parent(), failed_prefix)
+            && let Ok(entries) = fs::read_dir(parent)
+        {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with(&prefix)
+                    && entry.file_type().is_ok_and(|kind| kind.is_file())
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
         }
     }
     Ok(())

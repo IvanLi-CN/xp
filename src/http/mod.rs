@@ -4416,6 +4416,11 @@ async fn admin_start_upgrade(
             StatusCode::SERVICE_UNAVAILABLE,
             message,
         ),
+        UpgradeStartError::InsufficientSpace(message) => ApiError::new(
+            "insufficient_upgrade_space",
+            StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        ),
         UpgradeStartError::InvalidTarget(message) => {
             ApiError::new("invalid_upgrade_target", StatusCode::BAD_REQUEST, message)
         }

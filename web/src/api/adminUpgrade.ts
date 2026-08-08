@@ -15,6 +15,25 @@ export const UpgradeSupportSchema = z.object({
 	supported: z.boolean(),
 	reason: z.string().nullable().optional(),
 	trigger: z.string().nullable().optional(),
+	storage: z
+		.object({
+			install: z.object({
+				path: z.string(),
+				available_bytes: z.number(),
+				reclaimable_bytes: z.number(),
+				required_bytes: z.number(),
+				sufficient_after_cleanup: z.boolean(),
+			}),
+			workspace: z.object({
+				path: z.string(),
+				available_bytes: z.number(),
+				reclaimable_bytes: z.number(),
+				required_bytes: z.number(),
+				sufficient_after_cleanup: z.boolean(),
+			}),
+			cleanup_required: z.boolean(),
+		})
+		.optional(),
 });
 
 export const UpgradeJobStatusSchema = z.object({

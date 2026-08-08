@@ -118,6 +118,16 @@ Under `${XP_DATA_DIR}`:
 
 - `upgrade/request.json`: Web start API 写入的受限请求。
 - `upgrade/status.json`: runner 与 `xp` 共同读写的最近状态。
+- `support.storage` 是可选的加法字段，分别返回安装目录和下载工作区的可用空间、可回收历史
+  artifact 空间、`128 MiB` 门槛与清理后是否可启动。Web 仅把它用于当前节点升级的预测；root
+  runner 在清理后重新检查，作为最终事实。
+- 所有 host-managed systemd/OpenRC 节点共享同一保留策略：二进制备份只存在于当前升级事务，
+  成功或成功回滚后 `.bak.*` 与 `.failed.*` 均为零；不按总磁盘容量保留离线 fallback。失败时只
+  保留一份不超过 `8 KiB` 的 `${XP_DATA_DIR}/upgrade/diagnostics.json`，下一次成功删除、下一次
+  失败覆盖。开始前仅清理受管二进制的普通文件 artifact 和精确 `/tmp/xp-ops` 工作目录，绝不
+  跟随符号链接或触及 `/var/backups/xp`、配置、凭据、证书和 Raft 数据。
+- 当安装或工作区文件系统在可回收 artifact 清理后仍低于 `128 MiB` 时，
+  `POST /api/admin/upgrade/start` 返回 `503 insufficient_upgrade_space`，不得下载、替换或重启。
 - 如果委托 one-shot 在 `_upgrade-runner` 写入 terminal result 前失败，status API 必须把
   durable active status 收敛为 `failed`，不得让 UI 永久显示 `running`。
 
