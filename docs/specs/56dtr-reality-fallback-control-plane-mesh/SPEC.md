@@ -153,9 +153,10 @@
 - 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
   invalid ack/auth 仍不得降级。
 - 长驻 SSE、Raft burst、8 MiB snapshot 与普通 fan-out 在同一 H2 connection 上并行。
-- 50-peer 15 分钟 workload 中 XP peak PSS 不超过 18,432 KiB，候选完整栈不高于基线
-  1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少减少 90%。该门禁不代表完整
-  托管栈已经满足 64 MiB 总预算。
+- 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
+  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
+  减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB
+  总预算。
 - Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。

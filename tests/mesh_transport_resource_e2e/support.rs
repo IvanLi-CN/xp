@@ -37,6 +37,8 @@ const BODY_LIMIT: usize = 16 * 1024 * 1024;
 #[derive(Debug)]
 pub struct ResourceRun {
     pub xp_peak_pss_kib: u64,
+    pub xp_peak_anon_pss_kib: u64,
+    pub xp_peak_file_pss_kib: u64,
     pub stack_peak_pss_kib: u64,
     pub cpu_ticks: u64,
     pub tls_accepts: usize,
@@ -44,6 +46,13 @@ pub struct ResourceRun {
     pub requests_per_peer: Vec<usize>,
     pub active_per_peer: Vec<usize>,
     pub peak_active_per_peer: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PssSample {
+    total_kib: u64,
+    anon_kib: u64,
+    file_kib: u64,
 }
 
 #[derive(Clone)]
@@ -372,17 +381,24 @@ async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {
     }
 }
 
-fn read_pss_kib(pid: u32) -> Option<u64> {
+fn read_pss(pid: u32) -> Option<PssSample> {
     let rollup = PathBuf::from(format!("/proc/{pid}/smaps_rollup"));
     let fallback = PathBuf::from(format!("/proc/{pid}/smaps"));
-    let raw = fs::read_to_string(if rollup.exists() { rollup } else { fallback }).ok()?;
-    let pss = raw
-        .lines()
-        .filter_map(|line| line.strip_prefix("Pss:"))
-        .filter_map(|value| value.split_whitespace().next())
-        .filter_map(|value| value.parse::<u64>().ok())
-        .sum();
-    (pss > 0).then_some(pss)
+    let uses_rollup = rollup.exists();
+    let raw = fs::read_to_string(if uses_rollup { rollup } else { fallback }).ok()?;
+    let metric = |name: &str| {
+        raw.lines()
+            .filter_map(|line| line.strip_prefix(name))
+            .filter_map(|value| value.split_whitespace().next())
+            .filter_map(|value| value.parse::<u64>().ok())
+            .sum::<u64>()
+    };
+    let total_kib = metric("Pss:");
+    (total_kib > 0).then_some(PssSample {
+        total_kib,
+        anon_kib: if uses_rollup { metric("Pss_Anon:") } else { 0 },
+        file_kib: if uses_rollup { metric("Pss_File:") } else { 0 },
+    })
 }
 
 fn read_cpu_ticks(pid: u32) -> u64 {
@@ -439,6 +455,8 @@ pub async fn run_resource_workload(
     let pid = child.id();
     let cpu_started = read_cpu_ticks(pid);
     let mut xp_peak_pss_kib = 0;
+    let mut xp_peak_anon_pss_kib = 0;
+    let mut xp_peak_file_pss_kib = 0;
     let mut stack_peak_pss_kib = 0;
     let deadline = Instant::now() + duration;
     while Instant::now() < deadline {
@@ -446,15 +464,19 @@ pub async fn run_resource_workload(
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             panic!("XP exited during {label} workload with {status}:\n{log}");
         }
-        let xp_pss = read_pss_kib(pid).expect("read XP PSS");
+        let xp_pss = read_pss(pid).expect("read XP PSS");
         let support_pss = support_pids
             .iter()
             .map(|pid| {
-                read_pss_kib(*pid).unwrap_or_else(|| panic!("read support process {pid} PSS"))
+                read_pss(*pid)
+                    .unwrap_or_else(|| panic!("read support process {pid} PSS"))
+                    .total_kib
             })
             .sum::<u64>();
-        xp_peak_pss_kib = xp_peak_pss_kib.max(xp_pss);
-        stack_peak_pss_kib = stack_peak_pss_kib.max(xp_pss.saturating_add(support_pss));
+        xp_peak_pss_kib = xp_peak_pss_kib.max(xp_pss.total_kib);
+        xp_peak_anon_pss_kib = xp_peak_anon_pss_kib.max(xp_pss.anon_kib);
+        xp_peak_file_pss_kib = xp_peak_file_pss_kib.max(xp_pss.file_kib);
+        stack_peak_pss_kib = stack_peak_pss_kib.max(xp_pss.total_kib.saturating_add(support_pss));
         sleep(Duration::from_secs(1)).await;
     }
     let cpu_ticks = read_cpu_ticks(pid).saturating_sub(cpu_started);
@@ -486,6 +508,8 @@ pub async fn run_resource_workload(
     stop_child(&mut child).await;
     ResourceRun {
         xp_peak_pss_kib,
+        xp_peak_anon_pss_kib,
+        xp_peak_file_pss_kib,
         stack_peak_pss_kib,
         cpu_ticks,
         tls_accepts,

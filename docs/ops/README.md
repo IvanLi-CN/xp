@@ -152,6 +152,27 @@ last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect the
 `GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
 accepts only current remote member IDs.
 
+Raft, leader forwarding, node history, probes, runtime, alerts, quota, traffic, IP usage, TCP
+history, endpoint probes and SSE share one process-wide Mesh client. Its managed route is
+HTTP/2-only, retains at most one idle connection per origin for 120 seconds, and does not send H2
+PING frames. The normal 60-second probe cadence keeps an active peer connection reusable. Public
+direct and optional relay fallback use separate long-lived compatibility clients, so the strict H2
+contract never changes public-origin compatibility. H2 transport failures enter the existing
+breaker/fallback path; invalid authentication or acknowledgement remains terminal and never
+downgrades to public transport.
+
+When the `admin.mesh-transport-reuse` capability is present, each peer status may report protocol,
+connection generation, current-generation request count, and 5-minute/1-hour request and connection
+start totals. These values contain no host, IP, socket, port or certificate identity. A healthy peer
+uses H2 and starts at most two connections in five minutes; more starts or a protocol mismatch is
+`churning`, while a peer without evidence is `unknown`. Public fallback retains the last Mesh reuse
+evidence for diagnosis.
+
+The node TCP chart remains an aggregate of business ingress connections and Mesh, and its 24-hour
+peak remains visible until the historical window rolls over. After an upgrade, validate reuse with
+the peer's 5-minute `mesh_connection_starts` and source-specific TCP samples; do not use an old
+24-hour peak alone to judge the rollout.
+
 ### Auth epoch cutover
 
 A multi-node cluster cannot cross to internal-auth v2 through the Web upgrade action. The already

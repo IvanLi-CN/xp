@@ -81,7 +81,10 @@ Key facts:
 ## Runtime model (important)
 
 - `xp` binds loopback by default: `127.0.0.1:62416` (HTTP).
-- Inter-node connectivity is based on `Node.api_base_url` (recommended to be an **HTTPS origin**). Provide HTTPS via your reverse proxy / tunnel / mesh and forward to the local loopback HTTP listener.
+- Inter-node connectivity uses a shared HTTP/2 control-plane Mesh connection when a managed Reality
+  ingress is available, with `Node.api_base_url` retained as the public compatibility origin.
+  Provide HTTPS for that public origin via your reverse proxy or Tunnel and forward it to the local
+  loopback HTTP listener.
 - Optional control-plane relay: set `XP_MESH_PROXY_URL` / `--mesh-proxy-url` to route Raft RPC and node-to-node admin fan-out through a local proxy such as the `xp-ops init` Xray SOCKS listener (`socks5h://127.0.0.1:10808`). `Node.api_base_url` remains the bootstrap and fallback origin.
 - `xray` runs locally and should expose its gRPC API on loopback (default: `127.0.0.1:10085`). See `docs/desgin/xray.md`.
 

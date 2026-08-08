@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use rustls::crypto::aws_lc_rs;
+use rustls::crypto::ring;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -22,7 +22,7 @@ fn reject_legacy_relay_probe_env() -> Result<()> {
 }
 
 fn install_rustls_crypto_provider() {
-    let _ = aws_lc_rs::default_provider().install_default();
+    let _ = ring::default_provider().install_default();
 }
 
 fn disable_managed_vless_reconcile_for_canary_result(

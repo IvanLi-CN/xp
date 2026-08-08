@@ -9,7 +9,7 @@ use http_body_util::BodyExt;
 use rcgen::{
     CertificateParams, DistinguishedName, DnType, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256,
 };
-use rustls::crypto::aws_lc_rs;
+use rustls::crypto::ring;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{net::SocketAddr, sync::Once};
@@ -21,7 +21,7 @@ static RUSTLS_PROVIDER: Once = Once::new();
 
 fn install_test_crypto_provider() {
     RUSTLS_PROVIDER.call_once(|| {
-        let _ = aws_lc_rs::default_provider().install_default();
+        let _ = ring::default_provider().install_default();
     });
 }
 

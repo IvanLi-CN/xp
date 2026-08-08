@@ -249,7 +249,7 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
     if std::env::var("XP_E2E_XRAY_MODE").ok().as_deref() != Some("external") {
         return;
     }
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let xray_api_addr: SocketAddr = std::env::var("XP_E2E_XRAY_API_ADDR")
         .expect("XP_E2E_XRAY_API_ADDR")
         .parse()

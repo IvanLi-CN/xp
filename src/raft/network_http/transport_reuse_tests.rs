@@ -238,7 +238,7 @@ fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
 
 #[tokio::test]
 async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
@@ -303,15 +303,19 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
 
 #[tokio::test]
 async fn mesh_request_reconnects_once_after_the_active_connection_is_cut() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
         .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
+    let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
+    let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
+        .expect("Mesh telemetry");
     let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
         .expect("network factory")
-        .mesh_client();
+        .mesh_client()
+        .with_mesh_observability(telemetry.clone());
     let target = mesh_target(server.addr);
 
     let first = client
@@ -336,7 +340,7 @@ async fn mesh_request_reconnects_once_after_the_active_connection_is_cut() {
 
 #[tokio::test]
 async fn mesh_pool_discards_idle_connections_after_the_policy_timeout() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
@@ -372,7 +376,7 @@ async fn mesh_pool_discards_idle_connections_after_the_policy_timeout() {
 
 #[tokio::test]
 async fn h2_transport_failure_uses_the_compatible_public_client() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
@@ -406,7 +410,7 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
 
 #[tokio::test]
 async fn invalid_h2_ack_never_downgrades_to_public_transport() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
@@ -431,15 +435,19 @@ async fn invalid_h2_ack_never_downgrades_to_public_transport() {
 
 #[tokio::test]
 async fn long_lived_stream_and_large_request_share_one_h2_connection() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
     let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
         .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
+    let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
+    let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
+        .expect("Mesh telemetry");
     let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
         .expect("network factory")
-        .mesh_client();
+        .mesh_client()
+        .with_mesh_observability(telemetry.clone());
     let target = mesh_target(server.addr);
 
     let mut stream_request = mesh_request(0);
@@ -473,24 +481,50 @@ async fn long_lived_stream_and_large_request_share_one_h2_connection() {
     fanout.route = InternalRoute::MeshV2;
     fanout.path_and_query = "/api/admin/_internal/nodes/runtime/local".to_string();
     requests.push(fanout);
+    for request in &mut requests {
+        request.total_budget = std::time::Duration::from_secs(30);
+    }
 
     let responses = join_all(requests.into_iter().map(|request| {
+        let request_path = request.path_and_query.clone();
         let client = client.clone();
         let target = target.clone();
         let ca_key_pem = ca.key_pem.clone();
         let ca_cert_pem = ca.cert_pem.clone();
         async move {
-            client
-                .send_peer_request(&target, request, &ca_key_pem, &ca_cert_pem)
-                .await
+            (
+                request_path,
+                client
+                    .send_peer_request(&target, request, &ca_key_pem, &ca_cert_pem)
+                    .await,
+            )
         }
     }))
     .await;
 
     assert_eq!(stream_response.version(), Version::HTTP_2);
-    for response in responses {
+    let failures = responses
+        .iter()
+        .filter_map(|(request_path, response)| {
+            response
+                .as_ref()
+                .err()
+                .map(|error| format!("{request_path}: {error:?}"))
+        })
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        panic!(
+            "multiplexed Mesh failures: {failures:?}; telemetry: {:?}",
+            telemetry.snapshot().await.events
+        );
+    }
+    for (request_path, response) in responses {
         assert_eq!(
-            response.expect("multiplexed Mesh response").version(),
+            response
+                .unwrap_or_else(|error| panic!(
+                    "multiplexed Mesh response for {request_path}: {error:?}"
+                ))
+                .version(),
             Version::HTTP_2
         );
     }
