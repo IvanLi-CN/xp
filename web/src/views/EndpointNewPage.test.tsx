@@ -173,6 +173,12 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["edge.example.com:443"],
+				mihomo_smux: {
+					enabled: true,
+					max_connections: 4,
+					min_streams: 4,
+					only_tcp: true,
+				},
 			});
 		});
 		expect(createAdminEndpoint).not.toHaveBeenCalledWith(
@@ -245,6 +251,12 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["node-xp.example.test:443"],
+				mihomo_smux: {
+					enabled: true,
+					max_connections: 4,
+					min_streams: 4,
+					only_tcp: true,
+				},
 			});
 		});
 	});
@@ -355,6 +367,12 @@ describe("EndpointNewPage", () => {
 					node_id: "node-alpha",
 					port: 8443,
 					accepted_authorities: ["node-xp.example.test:8443"],
+					mihomo_smux: {
+						enabled: true,
+						max_connections: 4,
+						min_streams: 4,
+						only_tcp: true,
+					},
 				});
 			});
 		},
@@ -452,6 +470,12 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["hinet-ep.707979.xyz:443"],
+				mihomo_smux: {
+					enabled: true,
+					max_connections: 4,
+					min_streams: 4,
+					only_tcp: true,
+				},
 			});
 		});
 	});
@@ -474,6 +498,50 @@ describe("EndpointNewPage", () => {
 			await screen.findByText("400 invalid_request: invalid canary upstream"),
 		).toBeInTheDocument();
 		expect(createAdminEndpoint).toHaveBeenCalledTimes(1);
+	});
+
+	it("submits the editable Mihomo SMux policy for SS2022", async () => {
+		vi.mocked(createAdminEndpoint).mockResolvedValue({
+			endpoint_id: "ep-smux",
+			node_id: "node-alpha",
+			tag: "ep-smux",
+			kind: "ss2022_2022_blake3_aes_128_gcm",
+			port: 443,
+			meta: {},
+		});
+
+		renderPage();
+		fireEvent.click(await screen.findByLabelText("Kind"));
+		fireEvent.click(
+			await screen.findByRole("option", { name: "SS2022 BLAKE3 AES-128-GCM" }),
+		);
+		fireEvent.change(await screen.findByLabelText("最大物理连接数"), {
+			target: { value: "8" },
+		});
+		fireEvent.change(await screen.findByLabelText("扩容前最小流数"), {
+			target: { value: "6" },
+		});
+		fireEvent.click(await screen.findByLabelText("仅复用 TCP"));
+		fireEvent.click(await screen.findByLabelText("启用 SMux"));
+		expect(await screen.findByLabelText("最大物理连接数")).toBeDisabled();
+		expect(await screen.findByLabelText("仅复用 TCP")).toBeDisabled();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Create endpoint" }),
+		);
+
+		await waitFor(() => {
+			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
+				kind: "ss2022_2022_blake3_aes_128_gcm",
+				node_id: "node-alpha",
+				port: 443,
+				mihomo_smux: {
+					enabled: false,
+					max_connections: 8,
+					min_streams: 6,
+					only_tcp: false,
+				},
+			});
+		});
 	});
 
 	it("hides managed VLESS-only fields when switched to SS2022", async () => {

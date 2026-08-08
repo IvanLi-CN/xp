@@ -446,6 +446,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             active_short_id: short_id,
             canary_upstream: None,
             accepted_authorities: Vec::new(),
+            mihomo_smux: Default::default(),
             managed_default: true,
         };
         Ok(Endpoint {
@@ -498,6 +499,7 @@ impl ManagedEndpointSpec for DefaultSsEndpointSpec {
         let meta = Ss2022EndpointMeta {
             method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
             server_psk_b64: generate_ss2022_psk_b64(&mut rng),
+            mihomo_smux: Default::default(),
             managed_default: true,
         };
         Ok(Endpoint {

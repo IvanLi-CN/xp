@@ -326,74 +326,6 @@ fn vless_server_names_empty_is_error() {
 }
 
 #[test]
-fn build_clash_yaml_has_proxies_and_derived_secrets() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
-
-    let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
-    ];
-
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
-
-    let yaml = build_clash_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
-    let v: Value = serde_yaml::from_str(&yaml).unwrap();
-    let proxies = v
-        .get("proxies")
-        .and_then(|x| x.as_sequence())
-        .expect("proxies must be a list");
-    assert_eq!(proxies.len(), 2);
-
-    let ss = proxies
-        .iter()
-        .find(|p| p.get("type") == Some(&Value::String("ss".to_string())))
-        .unwrap();
-    assert_eq!(
-        ss.get("server"),
-        Some(&Value::String("example.com".to_string()))
-    );
-    assert_eq!(ss.get("port"), Some(&Value::Number(443.into())));
-    assert_eq!(
-        ss.get("cipher"),
-        Some(&Value::String(
-            SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string()
-        ))
-    );
-
-    let expected_user_psk =
-        crate::credentials::derive_ss2022_user_psk_b64(SEED, "u1", u.credential_epoch).unwrap();
-    let expected_password = format!("AAAAAAAAAAAAAAAAAAAAAA==:{expected_user_psk}");
-    assert_eq!(ss.get("password"), Some(&Value::String(expected_password)));
-    assert_eq!(ss.get("udp"), Some(&Value::Bool(true)));
-
-    let vless = proxies
-        .iter()
-        .find(|p| p.get("type") == Some(&Value::String("vless".to_string())))
-        .unwrap();
-    assert_eq!(
-        vless.get("server"),
-        Some(&Value::String("example.com".to_string()))
-    );
-    assert_eq!(vless.get("port"), Some(&Value::Number(8443.into())));
-
-    let expected_uuid =
-        crate::credentials::derive_vless_uuid(SEED, "u1", u.credential_epoch).unwrap();
-    assert_eq!(vless.get("uuid"), Some(&Value::String(expected_uuid)));
-}
-
-#[test]
 fn empty_membership_list_produces_empty_output() {
     let u = user("u1", "alice");
     let n = node("n1", "node-1", "example.com");
@@ -5252,6 +5184,8 @@ rules: []
         .collect::<Vec<_>>();
     assert_eq!(refs, vec!["Alpha-reality"]);
 }
+
+mod mihomo_smux;
 
 #[test]
 fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {

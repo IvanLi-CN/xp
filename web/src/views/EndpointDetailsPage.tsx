@@ -8,8 +8,11 @@ import {
 	runAdminEndpointProbeRun,
 } from "../api/adminEndpointProbes";
 import {
+	DEFAULT_MIHOMO_SMUX_CONFIG,
+	type MihomoSmuxConfig,
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
+	parseMihomoSmuxConfig,
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
@@ -19,6 +22,7 @@ import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { EndpointMihomoSmuxSettings } from "../components/EndpointMihomoSmuxSettings";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
@@ -64,6 +68,10 @@ import {
 	canaryUpstreamSuggestionsFromAuthorities,
 } from "../utils/managedVlessForm";
 import {
+	buildMihomoSmuxConfig,
+	mihomoSmuxConfigsEqual,
+} from "../utils/mihomoSmux";
+import {
 	normalizeRealityServerName,
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
@@ -92,13 +100,11 @@ export function EndpointDetailsPage() {
 
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
-
 	const endpointQuery = useQuery({
 		queryKey: ["adminEndpoint", adminToken, endpointId],
 		enabled: adminToken.length > 0 && endpointsCapability.available,
 		queryFn: ({ signal }) => fetchAdminEndpoint(adminToken, endpointId, signal),
 	});
-
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled: adminToken.length > 0 && nodesCapability.available,
@@ -114,6 +120,11 @@ export function EndpointDetailsPage() {
 	const [upstreamUrl, setUpstreamUrl] = useState("");
 	const [upstreamMode, setUpstreamMode] = useState<CanaryUpstreamMode>("auto");
 	const [acceptedAuthorities, setAcceptedAuthorities] = useState<string[]>([]);
+	const [mihomoSmux, setMihomoSmux] = useState<MihomoSmuxConfig>(
+		DEFAULT_MIHOMO_SMUX_CONFIG,
+	);
+	const [mihomoSmuxMaxConnections, setMihomoSmuxMaxConnections] = useState("4");
+	const [mihomoSmuxMinStreams, setMihomoSmuxMinStreams] = useState("4");
 	const [canaryProbeResult, setCanaryProbeResult] = useState<{
 		endpointId: string;
 		result: AdminEndpointCanaryProbeResponse;
@@ -125,6 +136,10 @@ export function EndpointDetailsPage() {
 		const endpoint = endpointQuery.data;
 		if (!endpoint) return;
 		setPort(String(endpoint.port));
+		const smux = parseMihomoSmuxConfig(endpoint.meta.mihomo_smux);
+		setMihomoSmux(smux);
+		setMihomoSmuxMaxConnections(String(smux.max_connections));
+		setMihomoSmuxMinStreams(String(smux.min_streams));
 		if (endpoint.kind === "vless_reality_vision_tcp") {
 			const metaSnapshot = parseVlessMeta(endpoint.meta);
 			setRealityDest(metaSnapshot.realityDest);
@@ -151,6 +166,11 @@ export function EndpointDetailsPage() {
 			if (!Number.isFinite(portNumber) || portNumber <= 0) {
 				throw new Error("Please enter a valid port.");
 			}
+			const nextMihomoSmux = buildMihomoSmuxConfig(
+				mihomoSmux,
+				mihomoSmuxMaxConnections,
+				mihomoSmuxMinStreams,
+			);
 
 			const payload: {
 				port?: number;
@@ -162,7 +182,14 @@ export function EndpointDetailsPage() {
 				};
 				canary_upstream?: { url: string; mode: CanaryUpstreamMode } | null;
 				accepted_authorities?: string[] | null;
+				mihomo_smux?: MihomoSmuxConfig;
 			} = { port: portNumber };
+			const currentMihomoSmux = parseMihomoSmuxConfig(
+				endpoint.meta.mihomo_smux,
+			);
+			if (!mihomoSmuxConfigsEqual(nextMihomoSmux, currentMihomoSmux)) {
+				payload.mihomo_smux = nextMihomoSmux;
+			}
 
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
@@ -756,6 +783,17 @@ export function EndpointDetailsPage() {
 										/>
 									</div>
 								) : null}
+
+								<EndpointMihomoSmuxSettings
+									config={mihomoSmux}
+									disabled={patchMutation.isPending || runtime.isReadOnly}
+									inputClass={inputClass}
+									maxConnections={mihomoSmuxMaxConnections}
+									minStreams={mihomoSmuxMinStreams}
+									onConfigChange={setMihomoSmux}
+									onMaxConnectionsChange={setMihomoSmuxMaxConnections}
+									onMinStreamsChange={setMihomoSmuxMinStreams}
+								/>
 							</div>
 						</div>
 

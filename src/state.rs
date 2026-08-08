@@ -18,17 +18,18 @@ use crate::{
         GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
     },
     protocol::{
-        RealityKeys, RealityServerNamesSource, RotateShortIdResult,
-        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
-        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
-        generate_ss2022_psk_b64, normalize_accepted_authorities, rotate_short_ids_in_place,
-        validate_canary_upstream, validate_reality_dest, validate_reality_server_name,
+        RealityServerNamesSource, RotateShortIdResult, VlessRealityVisionTcpEndpointMeta,
+        normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
+        validate_reality_dest, validate_reality_server_name,
     },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
         TcpConnectionUsageWarning,
     },
 };
+
+mod endpoint_meta;
+use endpoint_meta::build_endpoint_meta;
 
 pub const SCHEMA_VERSION: u32 = 12;
 const SCHEMA_VERSION_V11: u32 = 11;
@@ -4343,53 +4344,6 @@ impl JsonSnapshotStore {
             .unwrap_or_default()
             .into_iter()
             .collect())
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct VlessRealityEndpointMetaInput {
-    reality: crate::protocol::RealityConfig,
-    #[serde(default)]
-    canary_upstream: Option<crate::protocol::CanaryUpstreamConfig>,
-    #[serde(default)]
-    accepted_authorities: Vec<String>,
-}
-
-fn build_endpoint_meta(
-    kind: &EndpointKind,
-    meta_input: serde_json::Value,
-) -> Result<serde_json::Value, StoreError> {
-    let mut rng = rand::rngs::OsRng;
-
-    match kind {
-        EndpointKind::VlessRealityVisionTcp => {
-            let input: VlessRealityEndpointMetaInput = serde_json::from_value(meta_input)?;
-            let keypair = generate_reality_keypair(&mut rng);
-            let short_id = generate_short_id_16hex(&mut rng);
-
-            let meta = VlessRealityVisionTcpEndpointMeta {
-                reality: input.reality,
-                reality_keys: RealityKeys {
-                    private_key: keypair.private_key,
-                    public_key: keypair.public_key,
-                },
-                short_ids: vec![short_id.clone()],
-                active_short_id: short_id,
-                canary_upstream: input.canary_upstream,
-                accepted_authorities: input.accepted_authorities,
-                managed_default: false,
-            };
-
-            Ok(serde_json::to_value(meta)?)
-        }
-        EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
-            let server_psk_b64 = generate_ss2022_psk_b64(&mut rng);
-            Ok(serde_json::to_value(Ss2022EndpointMeta {
-                method: SS2022_METHOD_2022_BLAKE3_AES_128_GCM.to_string(),
-                server_psk_b64,
-                managed_default: false,
-            })?)
-        }
     }
 }
 

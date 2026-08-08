@@ -28,6 +28,7 @@ use tokio::{
 };
 
 mod embedded_ui;
+mod endpoint_requests;
 mod mesh;
 use mesh::{
     admin_get_mesh_status, admin_internal_raft_client_write, admin_run_mesh_probes,
@@ -80,8 +81,7 @@ use crate::{
         RuntimeSummaryStatus,
     },
     protocol::{
-        CanaryUpstreamConfig, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
-        normalize_accepted_authorities,
+        RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta, normalize_accepted_authorities,
     },
     raft::{
         app::RaftFacade,
@@ -111,6 +111,8 @@ use crate::{
 mod capabilities;
 mod version_check;
 mod web_assets;
+
+use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
 
 use capabilities::api_capabilities;
 use version_check::{VersionCheckCache, api_version_check};
@@ -824,91 +826,6 @@ struct GetUserAccessResponse {
 struct ResetUserCredentialsResponse {
     user_id: String,
     credential_epoch: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-struct RealityConfig {
-    dest: String,
-    server_names: Vec<String>,
-    #[serde(default)]
-    server_names_source: RealityServerNamesSource,
-    fingerprint: String,
-}
-
-fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(Some(value))
-}
-
-fn deserialize_optional_reality<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<RealityConfig>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<RealityConfig>::deserialize(deserializer)?;
-    Ok(Some(value))
-}
-
-fn deserialize_optional_canary_upstream<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<CanaryUpstreamConfig>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<CanaryUpstreamConfig>::deserialize(deserializer)?;
-    Ok(Some(value))
-}
-
-fn deserialize_optional_string_array<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<Vec<String>>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<Vec<String>>::deserialize(deserializer)?;
-    Ok(Some(value))
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum CreateEndpointRequest {
-    VlessRealityVisionTcp {
-        node_id: String,
-        port: u16,
-        #[serde(default)]
-        reality: Option<RealityConfig>,
-        #[serde(default)]
-        canary_upstream: Option<CanaryUpstreamConfig>,
-        #[serde(default)]
-        accepted_authorities: Option<Vec<String>>,
-    },
-    #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
-    Ss2022_2022Blake3Aes128Gcm {
-        node_id: String,
-        port: u16,
-        #[serde(default)]
-        canary_upstream: Option<CanaryUpstreamConfig>,
-        #[serde(default)]
-        accepted_authorities: Option<Vec<String>>,
-    },
-}
-
-#[derive(Deserialize)]
-struct PatchEndpointRequest {
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
-    node_id: Option<Option<String>>,
-    port: Option<u16>,
-    #[serde(default, deserialize_with = "deserialize_optional_reality")]
-    reality: Option<Option<RealityConfig>>,
-    #[serde(default, deserialize_with = "deserialize_optional_canary_upstream")]
-    canary_upstream: Option<Option<CanaryUpstreamConfig>>,
-    #[serde(default, deserialize_with = "deserialize_optional_string_array")]
-    accepted_authorities: Option<Option<Vec<String>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4529,7 +4446,10 @@ async fn admin_create_endpoint(
             reality,
             canary_upstream,
             accepted_authorities,
+            mihomo_smux,
         } => {
+            let mihomo_smux = mihomo_smux.unwrap_or_default();
+            mihomo_smux.validate().map_err(ApiError::invalid_request)?;
             let store = state.store.lock().await;
             if let Some(reality) = reality {
                 if canary_upstream.is_some() {
@@ -4546,7 +4466,7 @@ async fn admin_create_endpoint(
                     node_id,
                     crate::domain::EndpointKind::VlessRealityVisionTcp,
                     port,
-                    json!({ "reality": reality }),
+                    json!({ "reality": reality, "mihomo_smux": mihomo_smux }),
                 )?
             } else {
                 let node = store.get_node(&node_id).ok_or_else(|| {
@@ -4581,6 +4501,7 @@ async fn admin_create_endpoint(
                                 "invalid accepted_authority: {authority} ({reason})"
                             ))
                         })?;
+                meta.mihomo_smux = mihomo_smux;
                 endpoint.meta =
                     serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
                 endpoint
@@ -4591,6 +4512,7 @@ async fn admin_create_endpoint(
             port,
             canary_upstream,
             accepted_authorities,
+            mihomo_smux,
         } => {
             if canary_upstream.is_some() {
                 return Err(ApiError::invalid_request(
@@ -4602,12 +4524,14 @@ async fn admin_create_endpoint(
                     "accepted_authorities is only supported for managed vless endpoints",
                 ));
             }
+            let mihomo_smux = mihomo_smux.unwrap_or_default();
+            mihomo_smux.validate().map_err(ApiError::invalid_request)?;
             let store = state.store.lock().await;
             store.build_endpoint(
                 node_id,
                 crate::domain::EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                 port,
-                json!({}),
+                json!({ "mihomo_smux": mihomo_smux }),
             )?
         }
     };
@@ -5949,6 +5873,13 @@ async fn admin_patch_endpoint(
                             ))
                         })?;
             }
+            if let Some(mihomo_smux) = req.mihomo_smux {
+                let Some(mihomo_smux) = mihomo_smux else {
+                    return Err(ApiError::invalid_request("mihomo_smux cannot be null"));
+                };
+                mihomo_smux.validate().map_err(ApiError::invalid_request)?;
+                meta.mihomo_smux = mihomo_smux;
+            }
             if meta.managed_default {
                 let desired_node = nodes
                     .iter()
@@ -5979,6 +5910,18 @@ async fn admin_patch_endpoint(
                 return Err(ApiError::invalid_request(
                     "accepted_authorities is only supported for managed vless endpoints",
                 ));
+            }
+            if let Some(mihomo_smux) = req.mihomo_smux {
+                let Some(mihomo_smux) = mihomo_smux else {
+                    return Err(ApiError::invalid_request("mihomo_smux cannot be null"));
+                };
+                mihomo_smux.validate().map_err(ApiError::invalid_request)?;
+                let mut meta: crate::protocol::Ss2022EndpointMeta =
+                    serde_json::from_value(endpoint.meta.clone())
+                        .map_err(|e| ApiError::internal(e.to_string()))?;
+                meta.mihomo_smux = mihomo_smux;
+                endpoint.meta =
+                    serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
             }
         }
     }
