@@ -2,6 +2,10 @@ import type { AdminEndpointCreateRequest } from "../../src/api/adminEndpoints";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+import {
+	normalizeAcceptedAuthority,
+	validateAcceptedAuthority,
+} from "../../src/utils/acceptedAuthority";
 
 export function deriveGlobalServerNames(
 	domains: AdminRealityDomain[],
@@ -17,6 +21,21 @@ export function deriveGlobalServerNames(
 		if (seen.has(key)) continue;
 		seen.add(key);
 		out.push(trimmed);
+	}
+	return out;
+}
+
+function normalizeAcceptedAuthoritiesForMock(values: string[]): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const normalized = normalizeAcceptedAuthority(value);
+		if (!normalized) continue;
+		const err = validateAcceptedAuthority(normalized);
+		if (err) throw new Error(err);
+		if (seen.has(normalized)) continue;
+		seen.add(normalized);
+		out.push(normalized);
 	}
 	return out;
 }
@@ -42,8 +61,8 @@ export function buildEndpointCreateMeta(
 		return {
 			reality: {
 				...payload.reality,
-				dest: fixtureCatalog.slotString.s1(),
-				server_names: fixtureCatalog.slotList.l0(),
+				dest: `${derived[0]}:443`,
+				server_names: derived,
 				server_names_source: source,
 			},
 		};
@@ -51,16 +70,24 @@ export function buildEndpointCreateMeta(
 
 	const node = nodes.find((item) => item.node_id === payload.node_id);
 	if (!node) throw new Error("node not found");
+	const acceptedAuthorities = normalizeAcceptedAuthoritiesForMock(
+		payload.accepted_authorities ?? [],
+	);
 
 	return {
 		reality: {
-			dest: fixtureCatalog.slotString.s2(),
-			server_names: fixtureCatalog.slotList.l1(),
+			dest: fixtureCatalog.address.loopback39043(),
+			server_names: [node.access_host.replace(/\.$/, "")],
 			server_names_source: "manual",
 			fingerprint: "chrome",
 		},
 		managed_default: true,
-		canary_upstream: fixtureCatalog.slotString.s3(),
-		accepted_authorities: fixtureCatalog.slotList.l2(),
+		canary_upstream: payload.canary_upstream
+			? {
+					...payload.canary_upstream,
+					url: payload.canary_upstream.url.trim(),
+				}
+			: undefined,
+		accepted_authorities: acceptedAuthorities,
 	};
 }

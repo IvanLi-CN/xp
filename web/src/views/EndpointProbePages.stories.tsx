@@ -9,7 +9,7 @@ import type {
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 
-const ENDPOINT_ID = "endpoint-probe-demo";
+const ENDPOINT_ID = fixtureCatalog.slotString.s120();
 const RUN_ID = "run-probe-demo";
 const HOUR = "2026-07-28T14:00:00Z";
 const CONFIG_HASH = "config-demo-20260728";
@@ -110,21 +110,53 @@ const run: AdminEndpointProbeRunStatusResponse = {
 	status: "finished",
 	hour: HOUR,
 	config_hash: CONFIG_HASH,
-	nodes: history.slots[0].by_node.map((sample) => ({
-		node_id: fixtureCatalog.slotString.s220(),
-		status: "finished",
-		progress: {
-			run_id: RUN_ID,
-			hour: HOUR,
-			config_hash: CONFIG_HASH,
+	nodes: [
+		{
+			node_id: fixtureCatalog.slotString.s134(),
 			status: "finished",
-			endpoints_total: 1,
-			endpoints_done: 1,
-			started_at: "2026-07-28T14:00:00Z",
-			updated_at: fixtureCatalog.slotString.s221(),
-			finished_at: sample.checked_at,
+			progress: {
+				run_id: RUN_ID,
+				hour: HOUR,
+				config_hash: CONFIG_HASH,
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: "2026-07-28T14:00:00Z",
+				updated_at: fixtureCatalog.slotString.s221(),
+				finished_at: fixtureCatalog.slotString.s218(),
+			},
 		},
-	})),
+		{
+			node_id: fixtureCatalog.slotString.s206(),
+			status: "finished",
+			progress: {
+				run_id: RUN_ID,
+				hour: HOUR,
+				config_hash: CONFIG_HASH,
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: "2026-07-28T14:00:00Z",
+				updated_at: fixtureCatalog.slotString.s221(),
+				finished_at: fixtureCatalog.slotString.s219(),
+			},
+		},
+		{
+			node_id: fixtureCatalog.slotString.s213(),
+			status: "finished",
+			progress: {
+				run_id: RUN_ID,
+				hour: HOUR,
+				config_hash: CONFIG_HASH,
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: "2026-07-28T14:00:00Z",
+				updated_at: fixtureCatalog.slotString.s221(),
+				finished_at: fixtureCatalog.slotString.s217(),
+			},
+		},
+	],
 };
 
 function Empty() {
@@ -171,10 +203,8 @@ export const HistoryWithNodeNames: Story = {
 		expect(links.map((link) => link.textContent)).toEqual([
 			fixtureCatalog.slotString.s207(),
 			fixtureCatalog.slotString.s210(),
+			fixtureCatalog.slotString.s99(),
 		]);
-		expect(
-			await canvas.findByText(fixtureCatalog.slotString.s213()),
-		).toBeInTheDocument();
 	},
 };
 
@@ -193,9 +223,7 @@ export const LiveRunWithNodeNames: Story = {
 		expect(links.map((link) => link.textContent)).toEqual([
 			fixtureCatalog.slotString.s207(),
 			fixtureCatalog.slotString.s210(),
+			fixtureCatalog.slotString.s99(),
 		]);
-		expect(
-			await canvas.findByText(fixtureCatalog.slotString.s213()),
-		).toBeInTheDocument();
 	},
 };

@@ -386,10 +386,10 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 			? "degraded"
 			: "up";
 	return {
-		node_id: fixtureCatalog.slotString.s17(),
-		node_name: fixtureCatalog.slotString.s18(),
-		api_base_url: fixtureCatalog.slotString.s19(),
-		access_host: fixtureCatalog.slotString.s20(),
+		node_id: node.node_id,
+		node_name: node.node_name,
+		api_base_url: node.api_base_url,
+		access_host: node.access_host,
 		summary: {
 			status: summaryStatus,
 			updated_at: fixtureCatalog.slotString.s7(),
@@ -417,7 +417,7 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	const date = now.toISOString().slice(0, 10);
 	const components = buildRuntimeComponents(node);
 	return {
-		node_id: fixtureCatalog.slotString.s17(),
+		node_id: node.node_id,
 		last_synced_at: fixtureCatalog.slotString.s21(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
@@ -531,9 +531,9 @@ function buildDefaultUserTraffic(
 	user: AdminUser,
 	nodes: AdminNode[],
 ): MockWindowedUserTraffic {
-	const nodeOptions = nodes.map(() => ({
-		node_id: fixtureCatalog.slotString.s17(),
-		node_name: fixtureCatalog.slotString.s18(),
+	const nodeOptions = nodes.map((node) => ({
+		node_id: node.node_id,
+		node_name: node.node_name,
 	}));
 	return {
 		"24h": {
@@ -577,8 +577,8 @@ function refreshGlobalEndpointReality(state: MockState): void {
 
 		meta.reality = {
 			...reality,
-			dest: fixtureCatalog.slotString.s1(),
-			server_names: fixtureCatalog.slotList.l0(),
+			dest: `${derived[0]}:443`,
+			server_names: derived,
 			server_names_source: "global",
 		};
 	}
@@ -768,11 +768,10 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	];
 
-	// Keep IDs close to prod behavior: user_id is a ULID, token is `sub_<ulid>`.
-	const userId1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-	const userId2 = "01HF7YAT01YVKWQ847J5T9EY84";
-	const subToken1 = `sub_${userId1}`;
-	const subToken2 = `sub_${userId2}`;
+	const userId1 = fixtureCatalog.identifier.userPrimary();
+	const userId2 = fixtureCatalog.identifier.userSecondary();
+	const subToken1 = fixtureCatalog.slotString.s45();
+	const subToken2 = fixtureCatalog.slotString.s46();
 
 	const users: AdminUser[] = [
 		{
@@ -1153,8 +1152,8 @@ function applyAutoAssignForEndpoint(
 		}
 		items.push({
 			user_id: userId,
-			endpoint_id: fixtureCatalog.slotString.s68(),
-			node_id: fixtureCatalog.slotString.s32(),
+			endpoint_id: endpoint.endpoint_id,
+			node_id: endpoint.node_id,
 		});
 		items.sort((a, b) => a.endpoint_id.localeCompare(b.endpoint_id));
 	}
@@ -1345,12 +1344,12 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 		return jsonResponse({
-			node_id: fixtureCatalog.slotString.s32(),
+			node_id: nodeId,
 			endpoints: state.endpoints
 				.filter((endpoint) => endpoint.node_id === nodeId)
 				.map((endpoint) => ({
-					endpoint_id: fixtureCatalog.slotString.s55(),
-					tag: fixtureCatalog.slotString.s64(),
+					endpoint_id: endpoint.endpoint_id,
+					tag: endpoint.tag,
 					kind: endpoint.kind,
 					port: endpoint.port,
 				})),
@@ -1367,7 +1366,7 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 		return jsonResponse({
-			node_id: fixtureCatalog.slotString.s63(),
+			node_id: nodeId,
 			accepted: true,
 			egress_probe: clone(node.egress_probe),
 		});
@@ -1784,9 +1783,9 @@ async function handleRequest(
 			}
 			const updated: AdminNode = {
 				...node,
-				node_name: fixtureCatalog.slotString.s65(),
-				access_host: fixtureCatalog.slotString.s66(),
-				api_base_url: fixtureCatalog.slotString.s67(),
+				node_name: payload.node_name ?? node.node_name,
+				access_host: payload.access_host ?? node.access_host,
+				api_base_url: payload.api_base_url ?? node.api_base_url,
 				quota_limit_bytes: payload.quota_limit_bytes ?? node.quota_limit_bytes,
 				quota_reset: payload.quota_reset ?? node.quota_reset,
 			};
@@ -1965,7 +1964,8 @@ async function handleRequest(
 				"missing required endpoint fields",
 			);
 		}
-		state.counters.endpoint += 1;
+		const endpointId = `endpoint-mock-${state.counters.endpoint++}`;
+		const tag = `${payload.kind}-${endpointId}`;
 		let meta: Record<string, unknown> = {};
 		try {
 			meta = buildEndpointCreateMeta(
@@ -1981,9 +1981,9 @@ async function handleRequest(
 			);
 		}
 		const endpoint: AdminEndpoint = {
-			endpoint_id: fixtureCatalog.slotString.s68(),
-			node_id: fixtureCatalog.slotString.s69(),
-			tag: fixtureCatalog.identifier.endpointTagPrimary(),
+			endpoint_id: endpointId,
+			node_id: payload.node_id,
+			tag: tag,
 			kind: payload.kind,
 			port: payload.port,
 			meta,
@@ -2014,7 +2014,7 @@ async function handleRequest(
 		endpoint.active_short_id = nextShortId;
 		endpoint.short_ids = [nextShortId, ...endpoint.short_ids].slice(0, 5);
 		return jsonResponse({
-			endpoint_id: fixtureCatalog.slotString.s55(),
+			endpoint_id: endpoint.endpoint_id,
 			active_short_id: endpoint.active_short_id,
 			short_ids: clone(endpoint.short_ids),
 		});
@@ -2046,10 +2046,10 @@ async function handleRequest(
 		const authority =
 			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
 		return jsonResponse({
-			endpoint_id: fixtureCatalog.slotString.s55(),
+			endpoint_id: endpoint.endpoint_id,
 			url: `https://${authority}/generate_204`,
-			nodes: state.nodes.map(() => ({
-				node_id: fixtureCatalog.slotString.s70(),
+			nodes: state.nodes.map((item) => ({
+				node_id: item.node_id,
 				ok: true,
 				status: 204,
 				latency_ms: fixtureCatalog.slotNumber.n8(),
@@ -2306,35 +2306,17 @@ async function handleRequest(
 			if (!desiredEndpointIds.has(id)) deleted += 1;
 		}
 
-		const nextItems: AdminUserAccessItem[] = [
-			...(desiredEndpointIds.has(fixtureCatalog.slotString.s40())
-				? [
-						{
-							user_id: userId,
-							endpoint_id: fixtureCatalog.slotString.s40(),
-							node_id: fixtureCatalog.slotString.s32(),
-						},
-					]
-				: []),
-			...(desiredEndpointIds.has(fixtureCatalog.slotString.s43())
-				? [
-						{
-							user_id: userId,
-							endpoint_id: fixtureCatalog.slotString.s43(),
-							node_id: fixtureCatalog.slotString.s36(),
-						},
-					]
-				: []),
-			...(desiredEndpointIds.has(fixtureCatalog.slotString.s68())
-				? [
-						{
-							user_id: userId,
-							endpoint_id: fixtureCatalog.slotString.s68(),
-							node_id: fixtureCatalog.slotString.s32(),
-						},
-					]
-				: []),
-		];
+		const nextItems: AdminUserAccessItem[] = [...desiredEndpointIds]
+			.sort()
+			.map((endpointId) => {
+				const endpoint = endpointById.get(endpointId);
+				if (!endpoint) throw new Error("endpoint not found");
+				return {
+					user_id: userId,
+					endpoint_id: endpoint.endpoint_id,
+					node_id: endpoint.node_id,
+				};
+			});
 
 		state.userAccessByUserId[userId] = nextItems;
 		const autoAssignKinds = inferAutoAssignEndpointKinds(state, nextItems);
@@ -2363,7 +2345,7 @@ async function handleRequest(
 			.filter((q) => q.user_id === userId)
 			.map((q) => ({
 				user_id: q.user_id,
-				node_id: fixtureCatalog.slotString.s73(),
+				node_id: q.node_id,
 				quota_limit_bytes: q.quota_limit_bytes,
 				used_bytes: 0,
 				remaining_bytes: q.quota_limit_bytes,

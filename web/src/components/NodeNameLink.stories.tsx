@@ -28,8 +28,13 @@ export const Resolved: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const link = await canvas.findByRole("link", { name: /Tokyo edge 01/i });
-		expect(link).toHaveAttribute("href", "/nodes/01KYWKVPF8BEJ5C5XWN657AS0YW");
+		const link = await canvas.findByRole("link", {
+			name: new RegExp(fixtureCatalog.slotString.s291()),
+		});
+		expect(link).toHaveAttribute(
+			"href",
+			`/nodes/${fixtureCatalog.slotString.s290()}`,
+		);
 		expect(link).toHaveAttribute("title", fixtureCatalog.slotString.s290());
 	},
 };
@@ -44,7 +49,7 @@ export const LongName: Story = {
 export const NameUnavailable: Story = {
 	args: {
 		nodeId: fixtureCatalog.slotString.s290(),
-		nodeName: fixtureCatalog.slotString.s293(),
+		nodeName: fixtureCatalog.string.none(),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -80,7 +85,7 @@ export const StateMatrix: Story = {
 				<p className="text-sm text-muted-foreground">Name unavailable</p>
 				<NodeNameLink
 					nodeId={fixtureCatalog.slotString.s290()}
-					nodeName={fixtureCatalog.slotString.s293()}
+					nodeName={fixtureCatalog.string.none()}
 				/>
 			</div>
 		</div>

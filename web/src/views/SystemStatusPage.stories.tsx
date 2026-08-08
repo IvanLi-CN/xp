@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, userEvent, within } from "@storybook/test";
 import { fixtureCatalog } from "../fixture-policy/catalog";
+import { fixtureStoryData } from "../fixture-policy/storybook";
 
 import { demoMeshStatus } from "@/demo/DemoSystemStatusPage";
 
@@ -227,15 +228,7 @@ export const FiftyPeers: Story = {
 	args: {
 		status: {
 			...demoMeshStatus,
-			peers: Array.from({ length: 50 }, (_, index) => {
-				const source =
-					demoMeshStatus.peers[index % demoMeshStatus.peers.length];
-				return {
-					...source,
-					node_id: fixtureCatalog.slotString.s238(),
-					node_name: fixtureCatalog.slotString.s239(),
-				};
-			}),
+			peers: fixtureStoryData.fiftyMeshPeers(),
 		},
 	},
 	play: async ({ canvasElement }) => {

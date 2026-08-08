@@ -265,8 +265,8 @@ describe("storybook api mock", () => {
 					node_id: fixtureCatalog.slotString.s32(),
 					kind: "vless_reality_vision_tcp",
 					port: 9443,
-					canary_upstream: fixtureCatalog.slotString.s112(),
-					accepted_authorities: fixtureCatalog.slotList.l4(),
+					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				}),
 			}),
 		);
@@ -280,14 +280,14 @@ describe("storybook api mock", () => {
 			};
 		};
 		expect(createdEndpoint.meta.managed_default).toBe(true);
-		expect(createdEndpoint.meta.reality.server_names).toEqual(
-			fixtureCatalog.slotList.l1(),
-		);
+		expect(createdEndpoint.meta.reality.server_names).toEqual([
+			fixtureCatalog.slotString.s35(),
+		]);
 		expect(createdEndpoint.meta.reality.dest).toBe(
-			fixtureCatalog.slotString.s2(),
+			fixtureCatalog.address.loopback39043(),
 		);
 		expect(createdEndpoint.meta.accepted_authorities).toEqual(
-			fixtureCatalog.slotList.l2(),
+			fixtureCatalog.authority.edgeExamplePort443(),
 		);
 
 		const vlessAccessRes = await mock.handle(
