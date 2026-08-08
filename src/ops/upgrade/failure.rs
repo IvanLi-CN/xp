@@ -1,7 +1,9 @@
 use crate::ops::Paths;
 use crate::ops::cli::ExitError;
 use crate::ops::runtime_activation::restart_xp_service;
-use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, ensure_upgrade_space_for};
+use crate::ops::upgrade_artifacts::{
+    cleanup_managed_artifacts_for, ensure_upgrade_space_for, has_managed_backup_for,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
 use std::fs;
@@ -102,6 +104,10 @@ pub(super) fn record_early_upgrade_failure(
     checksums: &HashMap<String, [u8; 32]>,
     error: ExitError,
 ) -> ExitError {
+    if preserves_unrestored_transaction_backup(&error) {
+        write_upgrade_diagnostics(data_dir, release_tag, checksums, &error);
+        return error;
+    }
     let error = match cleanup_managed_artifacts_for(paths, &[]) {
         Ok(_) => error,
         Err(cleanup_error) => ExitError::new(
@@ -176,11 +182,17 @@ pub(super) fn restore_after_failed_xp_ops_verification(dest: &Path, backup: &Pat
 
 pub(super) fn preflight_upgrade(
     paths: &Paths,
+    data_dir: &Path,
     xp_dest: &Path,
     xp_ops_dest: &Path,
 ) -> Result<(), ExitError> {
     if !xp_dest.exists() {
         return Err(ExitError::new(3, "invalid_args: xp is not installed"));
+    }
+    if manual_recovery_is_required(paths, data_dir, &[xp_ops_dest])? {
+        return Err(unrestored_transaction_backup_error(
+            "manual recovery is required before another upgrade",
+        ));
     }
     cleanup_managed_artifacts_for(paths, &[xp_ops_dest]).map_err(|error| {
         ExitError::new(
@@ -189,6 +201,33 @@ pub(super) fn preflight_upgrade(
         )
     })?;
     ensure_upgrade_space_for(paths, &[xp_ops_dest]).map_err(|message| ExitError::new(3, message))
+}
+
+fn manual_recovery_is_required(
+    paths: &Paths,
+    data_dir: &Path,
+    extra: &[&Path],
+) -> Result<bool, ExitError> {
+    let Ok(raw) = fs::read(diagnostics_path(data_dir)) else {
+        return Ok(false);
+    };
+    let requires_manual_recovery = serde_json::from_slice::<serde_json::Value>(&raw)
+        .ok()
+        .is_some_and(|value| {
+            value
+                .get("error_summary")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|summary| summary.contains(UNRESTORED_TRANSACTION_BACKUP_PREFIX))
+        });
+    if !requires_manual_recovery {
+        return Ok(false);
+    }
+    has_managed_backup_for(paths, extra).map_err(|error| {
+        ExitError::new(
+            7,
+            format!("service_error: inspect preserved transaction backup: {error}"),
+        )
+    })
 }
 
 pub(super) fn write_upgrade_diagnostics(
@@ -347,5 +386,31 @@ mod tests {
         );
         assert_eq!(recovered_failure.code, 7);
         assert!(!backup.exists());
+    }
+
+    #[test]
+    fn preflight_preserves_a_backup_pending_manual_recovery() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let xp_dest = paths.usr_local_bin_xp();
+        let xp_ops_dest = paths.usr_local_bin_xp_ops();
+        fs::create_dir_all(xp_dest.parent().unwrap()).unwrap();
+        fs::write(&xp_dest, b"xp").unwrap();
+        let backup = xp_dest.with_extension("bak.transaction");
+        fs::write(&backup, b"xp-old").unwrap();
+        let preserved = record_early_upgrade_failure(
+            &paths,
+            tmp.path(),
+            "v0.2.0",
+            &HashMap::new(),
+            unrestored_transaction_backup_error("restore xp"),
+        );
+        assert_eq!(preserved.code, ROLLBACK_FAILURE_EXIT_CODE);
+        assert!(backup.exists());
+
+        let error = preflight_upgrade(&paths, tmp.path(), &xp_dest, &xp_ops_dest).unwrap_err();
+        assert_eq!(error.code, ROLLBACK_FAILURE_EXIT_CODE);
+        assert!(error.message.contains("manual recovery is required"));
+        assert!(backup.exists());
     }
 }

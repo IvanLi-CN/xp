@@ -14,12 +14,11 @@ pub(super) struct UpgradeTransactionLock {
 pub(super) fn begin(
     data_dir: &Path,
     is_real_upgrade: bool,
-    is_resumed_upgrade: bool,
 ) -> Result<Option<UpgradeTransactionLock>, ExitError> {
     if !is_real_upgrade {
         return Ok(None);
     }
-    if is_resumed_upgrade && current_process_owns_lock(data_dir)? {
+    if current_process_owns_lock(data_dir)? {
         return Ok(None);
     }
     UpgradeTransactionLock::acquire(data_dir).map(Some)
@@ -186,8 +185,15 @@ mod tests {
     #[test]
     fn resumed_upgrade_without_a_lock_acquires_one() {
         let tmp = tempfile::tempdir().unwrap();
-        let lock = begin(tmp.path(), true, true).unwrap();
+        let lock = begin(tmp.path(), true).unwrap();
         assert!(lock.is_some());
+    }
+
+    #[test]
+    fn nested_upgrade_inherits_the_current_process_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _lock = UpgradeTransactionLock::acquire(tmp.path()).unwrap();
+        assert!(begin(tmp.path(), true).unwrap().is_none());
     }
 
     #[test]
@@ -211,7 +217,7 @@ mod tests {
         let path = upgrade_dir.join(TRANSACTION_LOCK_FILE);
         std::fs::write(&path, "1\n").unwrap();
 
-        assert!(begin(tmp.path(), true, true).is_err());
+        assert!(begin(tmp.path(), true).is_err());
         release(tmp.path());
         assert!(path.exists());
     }

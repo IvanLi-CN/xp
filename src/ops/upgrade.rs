@@ -35,6 +35,7 @@ use reexec::{
     ReexecTransaction, clear_upgrade_resume_env, finish_reexeced_upgrade,
     resume_with_upgraded_xp_ops,
 };
+use transaction_lock::UpgradeTransactionLock;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -254,8 +255,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         .map_err(|error| ExitError::new(7, format!("install_failed: current_exe: {error}")))?;
     let resume = load_resume_context(args.release.repo.as_deref())?;
     let lock_data_dir = paths.map_abs(&args.data_dir);
-    let _transaction_lock =
-        transaction_lock::begin(&lock_data_dir, mode == Mode::Real, resume.is_some())?;
+    let _transaction_lock = transaction_lock::begin(&lock_data_dir, mode == Mode::Real)?;
     let release_args = resume
         .as_ref()
         .map(|ctx| ctx.release.release_args())
@@ -300,7 +300,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
 
     if mode == Mode::Real
         && resume.is_none()
-        && let Err(error) = preflight_upgrade(&paths, &xp_dest, &xp_ops_dest)
+        && let Err(error) = preflight_upgrade(&paths, &args.data_dir, &xp_dest, &xp_ops_dest)
     {
         return Err(record_early_upgrade_failure(
             &paths,
@@ -556,6 +556,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     }
 }
 pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result<(), ExitError> {
+    let lock_data_dir = paths.map_abs(&args.data_dir);
+    let _transaction_lock = UpgradeTransactionLock::acquire(&lock_data_dir)?;
     let request = crate::upgrade_job::prepare_runner_request(&args.data_dir, DEFAULT_GITHUB_REPO)?;
     let starting = crate::upgrade_job::status_for_runner_start(&request);
     crate::upgrade_job::write_status(&args.data_dir, &starting)

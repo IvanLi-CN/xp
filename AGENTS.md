@@ -61,7 +61,8 @@
   must reconcile the durable `running` / `restarting` status to `failed`.
 - All host-managed upgrade paths share one disk-retention contract: transaction-local binary
   backups only, zero `.bak.*`/`.failed.*` binaries after success or successful rollback; a
-  `rollback_failed` filesystem error preserves the affected transaction backup for manual recovery;
+  `rollback_failed` filesystem error preserves the affected transaction backup for manual recovery
+  and rejects a later upgrade until that backup has been recovered;
   no capacity-tiered offline fallback. Before any download or replacement, managed stale artifacts
   and the exact `/tmp/xp-ops` workspace are cleaned without following symlinks, then both write
   filesystems must have at least `128 MiB` free. Existing `/var/backups/xp`, configuration,

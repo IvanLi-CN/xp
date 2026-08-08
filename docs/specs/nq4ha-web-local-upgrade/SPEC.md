@@ -127,7 +127,8 @@ Under `${XP_DATA_DIR}`:
   失败覆盖。开始前仅清理受管二进制的普通文件 artifact 和精确 `/tmp/xp-ops` 工作目录，绝不
   跟随符号链接或触及 `/var/backups/xp`、配置、凭据、证书和 Raft 数据。
 - 若文件系统阻止恢复事务备份，升级必须返回 `rollback_failed` 并保留受影响的 `.bak.*` 供人工
-  恢复；不得为了常规零 artifact 终态删除唯一已知旧二进制。
+  恢复；不得为了常规零 artifact 终态删除唯一已知旧二进制。该备份仍存在时，后续升级必须拒绝
+  启动，直至人工恢复完成。
 - 当安装或工作区文件系统在可回收 artifact 清理后仍低于 `128 MiB` 时，
   `POST /api/admin/upgrade/start` 返回 `503 insufficient_upgrade_space`，不得下载、替换或重启。
 - 如果委托 one-shot 在 `_upgrade-runner` 写入 terminal result 前失败，status API 必须把

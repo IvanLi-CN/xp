@@ -738,7 +738,8 @@ Rollback notes:
   no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.
 - If the filesystem prevents restoring a transaction backup, `xp-ops` returns `rollback_failed` and
   preserves that affected `.bak.*` file for manual recovery. It never deletes the only known old
-  binary merely to reach the normal zero-artifact terminal state.
+  binary merely to reach the normal zero-artifact terminal state. A later upgrade is rejected while
+  that preserved backup remains; recover it first, then rerun the upgrade.
 - Upgrades require at least `128 MiB` available on both the installation and download-workspace
   filesystems after that managed cleanup. The Web status endpoint reports the current available and
   reclaimable bytes; the root runner performs the authoritative check before downloading anything.

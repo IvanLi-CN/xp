@@ -71,6 +71,15 @@ pub(crate) fn cleanup_managed_artifacts_for(paths: &Paths, extra: &[&Path]) -> i
     cleanup_managed_artifacts_excluding(paths, extra, &[])
 }
 
+pub(crate) fn has_managed_backup_for(paths: &Paths, extra: &[&Path]) -> io::Result<bool> {
+    Ok(managed_artifacts(paths, extra)?.iter().any(|artifact| {
+        artifact
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains(".bak."))
+    }))
+}
+
 pub(crate) fn cleanup_managed_artifacts_excluding(
     paths: &Paths,
     extra: &[&Path],
