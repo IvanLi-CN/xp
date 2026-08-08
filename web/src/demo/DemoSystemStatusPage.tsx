@@ -32,6 +32,8 @@ function buckets(pattern: Array<"mesh" | "fallback" | "slow" | "down">) {
 		latency_samples_ms: [
 			item === "slow" ? 680 : item === "fallback" ? 190 : 36,
 		],
+		mesh_h2_requests: item === "mesh" || item === "slow" ? 1 : 0,
+		mesh_connection_starts: 0,
 	}));
 }
 
@@ -75,6 +77,17 @@ export const demoMeshStatus: AdminMeshStatus = {
 			mesh_availability_24h: 0.998,
 			latency_p50_ms: 24,
 			latency_p95_ms: 39,
+			mesh_transport: {
+				protocol: "h2",
+				health: "healthy",
+				connection_generation: 3,
+				current_connection_requests: 58,
+				requests_5m: 58,
+				connection_starts_5m: 1,
+				requests_1h: 684,
+				connection_starts_1h: 2,
+				last_connection_started_at: "2026-08-03T09:03:00Z",
+			},
 			buckets: buckets([
 				"mesh",
 				"mesh",
@@ -106,6 +119,17 @@ export const demoMeshStatus: AdminMeshStatus = {
 			mesh_availability_24h: 0.862,
 			latency_p50_ms: 184,
 			latency_p95_ms: 680,
+			mesh_transport: {
+				protocol: "h2",
+				health: "churning",
+				connection_generation: 18,
+				current_connection_requests: 2,
+				requests_5m: 17,
+				connection_starts_5m: 4,
+				requests_1h: 219,
+				connection_starts_1h: 18,
+				last_connection_started_at: "2026-08-03T09:46:00Z",
+			},
 			buckets: buckets([
 				"mesh",
 				"slow",
@@ -167,6 +191,7 @@ export function DemoSystemStatusPage() {
 	return (
 		<SystemStatusSurface
 			status={demoMeshStatus}
+			showMeshTransportReuse
 			components={[
 				{ component: "xp", status: "up" },
 				{ component: "xray", status: "up" },

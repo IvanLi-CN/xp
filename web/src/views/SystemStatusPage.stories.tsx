@@ -10,6 +10,7 @@ const meta = {
 	component: SystemStatusSurface,
 	tags: ["autodocs", "coverage-ui", "system-status"],
 	parameters: { layout: "fullscreen" },
+	args: { showMeshTransportReuse: true },
 } satisfies Meta<typeof SystemStatusSurface>;
 
 export default meta;
@@ -72,6 +73,13 @@ export const Healthy: Story = {
 		await expect(
 			(await canvas.findAllByText("Using public fallback")).length,
 		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("H2 · 58 req / 1 starts · gen 3")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("Churning · H2 · 17 req / 4 starts · gen 18"))
+				.length,
+		).toBeGreaterThan(0);
 		await userEvent.click(probe);
 		await expect(args.onProbePeer).toHaveBeenCalledWith(
 			demoMeshStatus.peers[0].node_id,
@@ -85,6 +93,36 @@ export const Empty: Story = {
 	args: {
 		status: { ...demoMeshStatus, peers: [], events: [] },
 		components: [],
+	},
+};
+
+export const ReuseUnavailable: Story = {
+	args: {
+		status: {
+			...demoMeshStatus,
+			peers: demoMeshStatus.peers.map((peer, index) =>
+				index === 0 ? { ...peer, mesh_transport: undefined } : peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			(await canvas.findAllByText("Reuse data unavailable")).length,
+		).toBeGreaterThan(0);
+	},
+};
+
+export const LegacyBackend: Story = {
+	args: {
+		status: demoMeshStatus,
+		showMeshTransportReuse: false,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.queryByText("H2 · 58 req / 1 starts · gen 3"),
+		).not.toBeInTheDocument();
 	},
 };
 
@@ -198,5 +236,12 @@ export const FiftyPeers: Story = {
 				};
 			}),
 		},
+	},
+	play: async ({ canvasElement }) => {
+		const rows = canvasElement.querySelectorAll("[data-peer-row]");
+		await expect(rows).toHaveLength(50);
+		await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
+			canvasElement.clientWidth,
+		);
 	},
 };

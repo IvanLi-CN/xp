@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { apiCapabilitiesFixture } from "./apiCapabilities";
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
@@ -64,6 +65,17 @@ const meshStatus = {
 			mesh_availability_24h: 1,
 			latency_p50_ms: 155,
 			latency_p95_ms: 303,
+			mesh_transport: {
+				protocol: "h2",
+				health: "healthy",
+				connection_generation: 4,
+				current_connection_requests: 65,
+				requests_5m: 65,
+				connection_starts_5m: 1,
+				requests_1h: 724,
+				connection_starts_1h: 2,
+				last_connection_started_at: "2026-08-07T04:02:00Z",
+			},
 			buckets: [],
 		},
 		{
@@ -93,6 +105,18 @@ const meshStatus = {
 async function openSystemStatus(page: import("@playwright/test").Page) {
 	await setAdminToken(page);
 	await setupApiMocks(page, { mockStatusEvents: false });
+	await page.route("**/api/capabilities", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				...apiCapabilitiesFixture,
+				capabilities: [
+					...apiCapabilitiesFixture.capabilities,
+					"admin.mesh-transport-reuse",
+				],
+			}),
+		});
+	});
 	await page.route("**/api/admin/mesh/status", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
@@ -114,6 +138,9 @@ test("keeps peer row actions inside the real AppShell content column", async ({
 	await expect(page.locator("[data-peer-row]")).toHaveCount(
 		meshStatus.peers.length,
 	);
+	await expect(
+		page.locator('[data-mesh-transport="healthy"]:visible'),
+	).toContainText("H2 · 65 req / 1 starts · gen 4");
 
 	const bounds = await page.evaluate(() => {
 		const panel = document.querySelector<HTMLElement>("main.xp-panel");
@@ -170,6 +197,9 @@ test("keeps the stacked mobile peer actions free of horizontal overflow", async 
 	await expect(
 		page.getByRole("link", { name: "Details" }).first(),
 	).toBeVisible();
+	await expect(
+		page.locator('[data-mesh-transport="healthy"]:visible'),
+	).toContainText("H2 · 65 req / 1 starts · gen 4");
 	const viewport = await page.evaluate(() => ({
 		clientWidth: document.documentElement.clientWidth,
 		scrollWidth: document.documentElement.scrollWidth,
