@@ -164,7 +164,7 @@ describe("useTimeWindowTransition", () => {
 		expect(result.current.isWindowPending).toBe(true);
 	});
 
-	it("stops the overlay after a failed refresh while preserving fallback data", () => {
+	it("returns to an error empty state after a failed refresh without target cache", () => {
 		const { result, rerender } = renderHook(useTransition, {
 			initialProps: {
 				data: "current",
@@ -191,7 +191,40 @@ describe("useTimeWindowTransition", () => {
 			window: "7d",
 		});
 
-		expect(result.current.data).toBe("empty:7d");
+		expect(result.current.data).toBeUndefined();
+		expect(result.current.isWindowPending).toBe(false);
+	});
+
+	it("keeps target cache visible after its refresh fails", () => {
+		const { result, rerender } = renderHook(useTransition, {
+			initialProps: {
+				data: "current",
+				dataUpdatedAt: 2,
+				isError: false,
+				isFetching: false,
+				window: "24h",
+			},
+		});
+
+		rerender({
+			data: "target-cache",
+			dataUpdatedAt: 1,
+			isError: false,
+			isFetchedAfterMount: false,
+			isFetching: true,
+			window: "7d",
+		});
+		act(() => vi.advanceTimersByTime(300));
+		rerender({
+			data: "target-cache",
+			dataUpdatedAt: 1,
+			isError: true,
+			isFetchedAfterMount: false,
+			isFetching: false,
+			window: "7d",
+		});
+
+		expect(result.current.data).toBe("target-cache:7d");
 		expect(result.current.isWindowPending).toBe(false);
 	});
 

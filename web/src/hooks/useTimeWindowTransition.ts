@@ -136,6 +136,12 @@ export function useTimeWindowTransition<T, W>({
 			if (!active || active !== transition || active.window !== window) return;
 			active.holdExpired = true;
 			const latest = latestRef.current;
+			if (latest.isError && latest.data === undefined) {
+				transitionRef.current = null;
+				setDisplay(null);
+				setPhase("idle");
+				return;
+			}
 			const nextData = latest.data
 				? latest.alignData(latest.data, window, latest.now())
 				: latest.createEmptyData(previousDisplay.data, window, latest.now());
@@ -191,6 +197,7 @@ export function useTimeWindowTransition<T, W>({
 
 		if (isError && transition.holdExpired) {
 			transitionRef.current = null;
+			if (data === undefined) setDisplay(null);
 			setPhase("idle");
 		}
 	}, [
