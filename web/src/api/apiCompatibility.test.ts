@@ -243,6 +243,15 @@ describe("api compatibility", () => {
 		);
 	});
 
+	it("requires an inventoried capability to select an additive profile", () => {
+		expect(
+			resolveApiCompatibility({
+				releaseTag: "v3.23.0",
+				capabilities: ["admin.endpoint-mihomo-smux"],
+			}).kind,
+		).toBe("incompatible");
+	});
+
 	it("does not downgrade a malformed capabilities response", async () => {
 		const fetchMock = vi
 			.fn()
