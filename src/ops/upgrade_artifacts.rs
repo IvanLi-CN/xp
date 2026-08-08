@@ -307,7 +307,10 @@ fn available_bytes(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     let stats = unsafe { stats.assume_init() };
-    let available_blocks: u64 = stats.f_bavail.into();
+    #[cfg(target_os = "macos")]
+    let available_blocks = u64::from(stats.f_bavail);
+    #[cfg(not(target_os = "macos"))]
+    let available_blocks = stats.f_bavail;
     Ok(available_blocks.saturating_mul(stats.f_frsize))
 }
 
