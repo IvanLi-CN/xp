@@ -101,10 +101,9 @@ export const IpUsageTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.88" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "203.0.113.55" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -118,7 +117,9 @@ export const IpUsageTab7d: Story = {
 			await canvas.findByRole("button", { name: "7d" }),
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.88" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -136,7 +137,9 @@ export const TcpConnectionsTab: Story = {
 			await canvas.findByText(/Connections per minute/i),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText(/node-a-edge-a :443/i),
+			await canvas.findByText(
+				new RegExp(`${fixtureCatalog.identifier.endpointTagPrimary()} :443`),
+			),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(/Combined across selected endpoints/i),
@@ -169,7 +172,9 @@ export const MetadataEgressProbe: Story = {
 		await expect(
 			await canvas.findByText("Node egress probe"),
 		).toBeInTheDocument();
-		await expect(await canvas.findAllByText("203.0.113.8")).toHaveLength(2);
+		await expect(
+			await canvas.findAllByText(fixtureCatalog.address.tertiaryIpv4()),
+		).toHaveLength(2);
 		await expect(await canvas.findByText("ExampleNet")).toBeInTheDocument();
 	},
 };
@@ -200,8 +205,12 @@ export const DeleteWithEndpointCleanup: Story = {
 		await expect(
 			await screen.findByText("Endpoints to delete: 2"),
 		).toBeVisible();
-		await expect(await screen.findByText("node-a-ss")).toBeVisible();
-		await expect(await screen.findByText("node-a-reality")).toBeVisible();
+		await expect(
+			await screen.findByText(fixtureCatalog.identifier.endpointTagPrimary()),
+		).toBeVisible();
+		await expect(
+			await screen.findByText(fixtureCatalog.identifier.endpointTagSecondary()),
+		).toBeVisible();
 		await expect(
 			await screen.findByRole("button", {
 				name: "Delete node and endpoints",

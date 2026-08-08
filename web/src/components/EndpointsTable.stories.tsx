@@ -24,8 +24,7 @@ function makeSlots(): AdminEndpointProbeSlot[] {
 	return slots;
 }
 
-const LONG_NODE_NAME =
-	"tokyo-edge-with-a-very-long-node-name-that-should-truncate-nicely";
+const LONG_NODE_NAME = fixtureCatalog.slotString.s276();
 
 const ENDPOINTS: AdminEndpoint[] = [
 	{
@@ -123,7 +122,7 @@ export const ResponsiveNoScroll: Story = {
 		}
 
 		// Sanity-check key fields are rendered (CSS truncation doesn't change textContent).
-		const tags = await canvas.findAllByText(/edge-tokyo-with-a-very-long-tag/);
+		const tags = await canvas.findAllByText(fixtureCatalog.slotString.s272());
 		expect(tags).toHaveLength(2);
 
 		const vless = await canvas.findAllByText("VLESS");

@@ -1080,6 +1080,7 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
     assert!(state.endpoints.is_empty());
 }
 
+#[test]
 fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
     let mut state = PersistedState::empty();
 

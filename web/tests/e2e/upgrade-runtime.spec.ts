@@ -5,10 +5,7 @@ import { setAdminToken, setupApiMocks } from "./helpers";
 
 type UpgradeState = "idle" | "succeeded" | "failed" | "unsupported";
 
-function upgradeStatus(
-	state: UpgradeState,
-	updatedAt = "2026-08-07T00:00:01Z",
-) {
+function upgradeStatus(state: UpgradeState) {
 	return {
 		support: {
 			supported: true,
@@ -20,10 +17,10 @@ function upgradeStatus(
 			target_tag: state === "idle" ? null : "v3.23.2",
 			repo: "IvanLi-CN/xp",
 			started_at: state === "idle" ? null : fixtureCatalog.slotString.s82(),
-			finished_at: state === "idle" ? null : "2026-08-07T00:00:01Z",
+			finished_at: state === "idle" ? null : fixtureCatalog.slotString.s464(),
 			exit_code: state === "succeeded" ? 0 : state === "idle" ? null : 1,
 			message: null,
-			updated_at: fixtureCatalog.slotString.s81(),
+			updated_at: fixtureCatalog.slotString.s464(),
 		},
 	};
 }
@@ -60,7 +57,8 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 		await setAdminToken(page);
 		await setupApiMocks(page, { mockStatusEvents: false });
 
-		await page.route("**/api/version/check", async (route) => {
+		let latestUpgradeStatus = upgradeStatus("idle");
+		await page.route("**/api/version/check**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
 				body: JSON.stringify({
@@ -81,21 +79,20 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 				}),
 			});
 		});
-		await page.route("**/api/admin/upgrade/status", async (route) => {
+		await page.route("**/api/admin/upgrade/status**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
-				body: JSON.stringify(upgradeStatus("idle")),
+				body: JSON.stringify(latestUpgradeStatus),
 			});
 		});
-		await page.route("**/api/admin/upgrade/start", async (route) => {
+		await page.route("**/api/admin/upgrade/start**", async (route) => {
+			latestUpgradeStatus = upgradeStatus(terminalState);
 			await route.fulfill({
 				contentType: "application/json",
-				body: JSON.stringify(
-					upgradeStatus(terminalState, new Date().toISOString()),
-				),
+				body: JSON.stringify(latestUpgradeStatus),
 			});
 		});
-		await page.route("**/api/admin/mesh/status", async (route) => {
+		await page.route("**/api/admin/mesh/status**", async (route) => {
 			await route.fulfill({
 				contentType: "application/json",
 				body: JSON.stringify(meshStatus),
@@ -116,7 +113,7 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 			.getByRole("button", {
 				name: "New version v3.23.2 is available.",
 			})
-			.click();
+			.press("Enter");
 		await page.getByRole("button", { name: "Upgrade" }).click();
 		await page.getByRole("button", { name: "Start upgrade" }).click();
 
@@ -157,7 +154,7 @@ test("clears an ambiguous start error after status confirms success", async ({
 	await setupApiMocks(page, { mockStatusEvents: false });
 
 	let latestUpgradeStatus = upgradeStatus("idle");
-	await page.route("**/api/version/check", async (route) => {
+	await page.route("**/api/version/check**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify({
@@ -178,28 +175,21 @@ test("clears an ambiguous start error after status confirms success", async ({
 			}),
 		});
 	});
-	await page.route("**/api/admin/upgrade/status", async (route) => {
+	await page.route("**/api/admin/upgrade/status**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify(latestUpgradeStatus),
 		});
 	});
-	await page.route("**/api/admin/upgrade/start", async (route) => {
-		const succeeded = upgradeStatus("succeeded");
-		latestUpgradeStatus = {
-			...succeeded,
-			status: {
-				...succeeded.status,
-				updated_at: fixtureCatalog.slotString.s7(),
-			},
-		};
+	await page.route("**/api/admin/upgrade/start**", async (route) => {
+		latestUpgradeStatus = upgradeStatus("succeeded");
 		await route.fulfill({
 			status: 502,
 			contentType: "application/json",
 			body: JSON.stringify({ message: "restart boundary" }),
 		});
 	});
-	await page.route("**/api/admin/mesh/status", async (route) => {
+	await page.route("**/api/admin/mesh/status**", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
 			body: JSON.stringify(meshStatus),
@@ -212,7 +202,7 @@ test("clears an ambiguous start error after status confirms success", async ({
 	).toBeVisible();
 	await page
 		.getByRole("button", { name: "New version v3.23.2 is available." })
-		.click();
+		.press("Enter");
 	await page.getByRole("button", { name: "Upgrade" }).click();
 	await page.getByRole("button", { name: "Start upgrade" }).click();
 

@@ -3,6 +3,7 @@ import type {
 	AdminNodeIpUsageResponse,
 	AdminUserIpUsageResponse,
 } from "../api/adminIpUsage";
+import type { AdminMeshPeer } from "../api/adminMesh";
 import type { AdminNode } from "../api/adminNodes";
 import type {
 	AdminNodeTcpConnectionsResponse,
@@ -237,6 +238,82 @@ function duplicateNameUserIpUsage(
 	};
 }
 
+function fiftyMeshPeers(): AdminMeshPeer[] {
+	const nodeIds = [
+		fixtureCatalog.slotString.s17(),
+		fixtureCatalog.slotString.s32(),
+		fixtureCatalog.slotString.s36(),
+		fixtureCatalog.slotString.s56(),
+		fixtureCatalog.slotString.s57(),
+		fixtureCatalog.slotString.s63(),
+		fixtureCatalog.slotString.s69(),
+		fixtureCatalog.slotString.s70(),
+		fixtureCatalog.slotString.s72(),
+		fixtureCatalog.slotString.s73(),
+		fixtureCatalog.slotString.s77(),
+		fixtureCatalog.slotString.s93(),
+		fixtureCatalog.slotString.s98(),
+		fixtureCatalog.slotString.s106(),
+		fixtureCatalog.slotString.s110(),
+		fixtureCatalog.slotString.s113(),
+		fixtureCatalog.slotString.s118(),
+		fixtureCatalog.slotString.s124(),
+		fixtureCatalog.slotString.s134(),
+		fixtureCatalog.slotString.s145(),
+		fixtureCatalog.slotString.s149(),
+		fixtureCatalog.slotString.s153(),
+		fixtureCatalog.slotString.s182(),
+		fixtureCatalog.slotString.s187(),
+		fixtureCatalog.slotString.s188(),
+		fixtureCatalog.slotString.s189(),
+		fixtureCatalog.slotString.s190(),
+		fixtureCatalog.slotString.s206(),
+		fixtureCatalog.slotString.s213(),
+		fixtureCatalog.slotString.s220(),
+		fixtureCatalog.slotString.s224(),
+		fixtureCatalog.slotString.s229(),
+		fixtureCatalog.slotString.s233(),
+		fixtureCatalog.slotString.s238(),
+		fixtureCatalog.slotString.s241(),
+		fixtureCatalog.slotString.s243(),
+		fixtureCatalog.slotString.s246(),
+		fixtureCatalog.slotString.s258(),
+		fixtureCatalog.slotString.s263(),
+		fixtureCatalog.slotString.s271(),
+		fixtureCatalog.slotString.s274(),
+		fixtureCatalog.slotString.s290(),
+		fixtureCatalog.slotString.s301(),
+		fixtureCatalog.slotString.s312(),
+		fixtureCatalog.slotString.s317(),
+		fixtureCatalog.slotString.s325(),
+		fixtureCatalog.slotString.s329(),
+		fixtureCatalog.slotString.s332(),
+		fixtureCatalog.slotString.s335(),
+		fixtureCatalog.slotString.s338(),
+	];
+
+	return nodeIds.map((nodeId) => ({
+		node_id: nodeId,
+		node_name: fixtureCatalog.slotString.s291(),
+		api_base_url: fixtureCatalog.url.primaryApi(),
+		mesh_url: fixtureCatalog.url.primaryApi(),
+		mesh_capability: "enabled",
+		mesh_reason: "mesh_available",
+		current_path: "mesh",
+		quality: "good",
+		stale: false,
+		breaker: "closed",
+		last_sample_at: fixtureCatalog.timestamp.recent(),
+		last_transition_at: fixtureCatalog.timestamp.baseline(),
+		availability_1h: fixtureCatalog.metric.availabilityFull(),
+		availability_24h: fixtureCatalog.metric.availabilityHigh(),
+		mesh_availability_24h: fixtureCatalog.metric.availabilityHigh(),
+		latency_p50_ms: fixtureCatalog.metric.latencyLow(),
+		latency_p95_ms: fixtureCatalog.metric.latencyHigh(),
+		buckets: [],
+	}));
+}
+
 export const fixtureStoryData = {
 	node: () => structuredClone(storyNode),
 	nodeTcpConnections: () => ({
@@ -267,4 +344,5 @@ export const fixtureStoryData = {
 		"24h": duplicateNameUserIpUsage("24h"),
 		"7d": duplicateNameUserIpUsage("7d"),
 	}),
+	fiftyMeshPeers: () => fiftyMeshPeers(),
 } as const;
