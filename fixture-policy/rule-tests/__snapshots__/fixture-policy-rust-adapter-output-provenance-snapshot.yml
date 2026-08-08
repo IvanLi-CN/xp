@@ -1,6 +1,25 @@
 id: fixture-policy-rust-adapter-output-provenance
 snapshots:
   ? |
+    const LIVE: &str = "live.example";
+  : labels:
+    - source: 'const LIVE: &str = "live.example";'
+      style: primary
+      start: 0
+      end: 34
+  ? |
+    fn helper() -> &'static str {
+        "live.example"
+    }
+  : labels:
+    - source: |-
+        fn helper() -> &'static str {
+            "live.example"
+        }
+      style: primary
+      start: 0
+      end: 50
+  ? |
     pub fn injected_host() -> &'static str {
         "unapproved.fixture.test"
     }
@@ -12,6 +31,20 @@ snapshots:
       style: primary
       start: 0
       end: 72
+  ? |
+    pub fn injected_host() -> &'static str {
+        let _ = catalog();
+        LIVE
+    }
+  : labels:
+    - source: |-
+        pub fn injected_host() -> &'static str {
+            let _ = catalog();
+            LIVE
+        }
+      style: primary
+      start: 0
+      end: 74
   ? |
     pub fn injected_metric() -> u64 {
         4096

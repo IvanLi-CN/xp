@@ -111,18 +111,99 @@ rule:
         all:
           - has:
               field: value
+              pattern: payload.node_name ?? node.node_name
+          - has:
+              field: key
+              regex: '^node_name$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest
+    - not:
+        all:
+          - has:
+              field: value
               any:
-                - pattern: payload.node_name ?? node.node_name
                 - pattern: payload.access_host ?? node.access_host
+                - pattern: node.access_host
+          - has:
+              field: key
+              regex: '^access_host$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest
+    - not:
+        all:
+          - has:
+              field: value
+              any:
                 - pattern: payload.api_base_url ?? node.api_base_url
+                - pattern: node.api_base_url
+          - has:
+              field: key
+              regex: '^api_base_url$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest
+    - not:
+        all:
+          - has:
+              field: value
+              any:
                 - pattern: endpointId
                 - pattern: payload.node_id
-                - pattern: tag
                 - pattern: nodeId
-                - pattern: endpoint.endpoint_id
-                - pattern: endpoint.tag
                 - pattern: item.node_id
                 - pattern: q.node_id
+                - pattern: node.node_id
+          - has:
+              field: key
+              regex: '^node_id$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: endpointId
+                - pattern: endpoint.endpoint_id
+          - has:
+              field: key
+              regex: '^endpoint_id$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: handleRequest
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: tag
+                - pattern: endpoint.tag
+          - has:
+              field: key
+              regex: '^(tag|endpoint_tag)$'
           - inside:
               stopBy: end
               all:

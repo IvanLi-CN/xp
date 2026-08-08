@@ -78,7 +78,9 @@
   `@ast-grep/cli` 运行规则测试和错误级扫描。
 - 受保护的 Web 源包括所有 `web/src/**/*.test.{ts,tsx}`、`*.spec.{ts,tsx}`、
   `*.stories.{ts,tsx}`、`web/tests/**/*.{ts,tsx}`、`web/.storybook/mocks/**/*.{ts,tsx}`、
-  `web/src/storybook/**/*.{ts,tsx}` 与 `web/src/demo/fixtures.ts`；受保护的 Rust 源包括
+  `web/src/storybook/**/*.{ts,tsx}`、`web/src/demo/fixtures.ts` 与
+  `web/src/fixture-policy/storybook.ts`；后者是只读 catalog 的确定性 Storybook factory，禁止
+  runtime import、环境、网络、存储与行内操作型字面量。受保护的 Rust 源包括
   `tests/**/*.rs`、`src/**/*_tests.rs`、`src/**/tests.rs`、`src/**/tests/**/*.rs`、
   `src/**/test_fixtures.rs`，以及 `src/**/*.rs` 内的 `mod ...tests` 单元测试模块。这些路径中的
   操作型地址、端点、节点标识、凭据样式、遥测和时间字段只能使用 checked-in synthetic catalog

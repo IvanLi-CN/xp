@@ -3,6 +3,7 @@ language: Rust
 severity: error
 message: xp_test_fixtures must resolve to the approved path dev crate.
 files:
+  - src/**/*.rs
   - tests/**/*.rs
   - src/**/*_tests.rs
   - src/**/tests.rs

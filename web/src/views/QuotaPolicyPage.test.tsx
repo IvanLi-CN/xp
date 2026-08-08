@@ -71,14 +71,14 @@ function renderPage() {
 	);
 }
 
-async function openNodeTab(
-	container: HTMLElement,
-	nodeName = fixtureCatalog.slotString.s33(),
-) {
+async function openNodeTab(container: HTMLElement, nodeName?: string) {
+	const resolvedNodeName = nodeName ?? fixtureCatalog.slotString.s33();
 	const tablist = await within(container).findByRole("tablist", {
 		name: "Weight configuration tabs",
 	});
-	const tab = within(tablist).getByText(nodeName, { selector: "button" });
+	const tab = within(tablist).getByText(resolvedNodeName, {
+		selector: "button",
+	});
 	fireEvent.click(tab);
 }
 

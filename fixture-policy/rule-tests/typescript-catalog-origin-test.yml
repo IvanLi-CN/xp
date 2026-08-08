@@ -13,3 +13,7 @@ invalid:
     import fixtureCatalog from "./fixture-input";
   - |
     import { value as fixtureCatalog } from "./fixture-input";
+  - |
+    const build = (fixtureCatalog: unknown) => fixtureCatalog;
+  - |
+    try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }

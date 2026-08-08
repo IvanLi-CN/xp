@@ -1,0 +1,15 @@
+id: fixture-policy-typescript-storybook-node-list
+language: TypeScript
+severity: error
+message: Storybook mesh node IDs must be direct fixture catalog accessors.
+files:
+  - web/src/fixture-policy/storybook.ts
+rule:
+  all:
+    - kind: array
+    - inside:
+        stopBy: end
+        pattern: const nodeIds = [$VALUES]
+    - has:
+        stopBy: end
+        kind: string

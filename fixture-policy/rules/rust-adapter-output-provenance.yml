@@ -8,6 +8,16 @@ rule:
   any:
     - all:
         - kind: function_item
+        - regex: '^fn '
+        - not:
+            regex: '^fn (load_catalog|catalog)\('
+    - kind: const_item
+    - all:
+        - kind: static_item
+        - not:
+            regex: '^static CATALOG: OnceLock<Catalog>'
+    - all:
+        - kind: function_item
         - regex: '^pub fn '
         - not:
             any:
@@ -16,8 +26,8 @@ rule:
                     None
                   }
               - has:
-                  stopBy: end
-                  pattern: catalog()
+                  field: body
+                  regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\s+as\s+u32)?\)|serde_json::from_value\(catalog\(\)\.slots\.numbers\[[0-9]+\]\.clone\(\)\)\s*\.expect\("fixture numeric slot is valid"\))\s*\}$'
     - all:
         - kind: string_literal
         - inside:

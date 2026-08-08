@@ -11,3 +11,7 @@ invalid:
     const primary = () => `live.${suffix}`;
   - |
     const primary = () => (catalog.hosts.primary, "live.example");
+  - |
+    const slots = Object.fromEntries([
+      ["unsafe", () => "live.example"],
+    ]);
