@@ -250,7 +250,9 @@ fn restore_transaction_backup(snapshot: &TransactionBackupSnapshot) -> std::io::
 
 #[cfg(test)]
 mod tests {
-    use super::{remove_transaction_backup_paths, restore_transaction_backup};
+    use super::{
+        ensure_runner_status_writable, remove_transaction_backup_paths, restore_transaction_backup,
+    };
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -312,6 +314,14 @@ mod tests {
         )
         .unwrap_err();
 
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn runner_status_preflight_rejects_a_non_file_temporary_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("upgrade/status.json.tmp")).unwrap();
+        let error = ensure_runner_status_writable(tmp.path()).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
