@@ -18,8 +18,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod failure;
 mod managed_runtimes;
 use failure::{
-    clear_upgrade_diagnostics, preflight_upgrade, record_early_upgrade_failure,
-    rollback_xp_ops_after_resumed_failure, write_upgrade_diagnostics,
+    cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
+    record_early_upgrade_failure, restore_after_failed_install,
+    restore_after_failed_xp_ops_verification, rollback_xp_ops_after_resumed_failure,
+    write_upgrade_diagnostics,
 };
 use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
@@ -30,6 +32,7 @@ const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
+const ROLLBACK_FAILURE_EXIT_CODE: i32 = 8;
 #[derive(Debug, Clone, Copy)]
 enum Platform {
     LinuxX86_64,
@@ -539,19 +542,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             } else {
                 err
             };
-            let err = match cleanup_managed_artifacts_for(&paths, &[&xp_ops_dest]) {
-                Ok(_) => err,
-                Err(cleanup_error) => ExitError::new(
-                    7,
-                    format!(
-                        concat!(
-                            "service_error: cleanup failed upgrade artifacts: ",
-                            "{}; original error: {}"
-                        ),
-                        cleanup_error, err.message
-                    ),
-                ),
-            };
+            let err = cleanup_after_upgrade_failure(&paths, &[&xp_ops_dest], err);
             write_upgrade_diagnostics(&args.data_dir, &release.tag_name, &checksums, &err);
             Err(err)
         }
@@ -633,9 +624,14 @@ async fn upgrade_xp(
     })?;
 
     if let Err(e) = fs::rename(&staged, &dest) {
-        let _ = fs::rename(backup, &dest);
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(7, format!("service_error: {e}")));
+        return Err(restore_after_failed_install(
+            backup,
+            &dest,
+            &staged,
+            "xp",
+            "service_error",
+            &e,
+        ));
     }
 
     chmod(&dest, 0o755).ok();
@@ -748,9 +744,14 @@ async fn install_xp_ops_binary(
     }
 
     if let Err(e) = fs::rename(&staged, dest) {
-        let _ = fs::rename(backup, dest);
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(7, format!("install_failed: {e}")));
+        return Err(restore_after_failed_install(
+            backup,
+            dest,
+            &staged,
+            "xp-ops",
+            "install_failed",
+            &e,
+        ));
     }
 
     chmod(dest, 0o755).ok();
@@ -789,13 +790,7 @@ fn verify_upgraded_xp_ops(
         return Ok(());
     }
 
-    let bad = dest.with_extension(format!("failed.{}", now_unix_secs()));
-    let _ = fs::rename(dest, &bad);
-    let restored = fs::rename(backup, dest).is_ok();
-    if restored {
-        let _ = fs::remove_file(&bad);
-    }
-    Err(ExitError::new(7, "install_failed: verify failed"))
+    Err(restore_after_failed_xp_ops_verification(dest, backup))
 }
 
 fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeContext>, ExitError> {

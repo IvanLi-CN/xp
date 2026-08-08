@@ -736,6 +736,9 @@ Rollback notes:
 - All host-managed nodes use the same retention contract, regardless of disk size. A backup exists
   only for the active replacement transaction. After a successful upgrade or a successful rollback,
   no `.bak.*` or `.failed.*` binary remains. There is no persistent local binary fallback.
+- If the filesystem prevents restoring a transaction backup, `xp-ops` returns `rollback_failed` and
+  preserves that affected `.bak.*` file for manual recovery. It never deletes the only known old
+  binary merely to reach the normal zero-artifact terminal state.
 - Upgrades require at least `128 MiB` available on both the installation and download-workspace
   filesystems after that managed cleanup. The Web status endpoint reports the current available and
   reclaimable bytes; the root runner performs the authoritative check before downloading anything.

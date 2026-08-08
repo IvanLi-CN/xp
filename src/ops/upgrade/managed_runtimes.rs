@@ -454,7 +454,14 @@ async fn install_release_binary(
     };
     if let Err(err) = fs::rename(&staged, dest) {
         if let Some(backup) = backup.as_ref() {
-            let _ = fs::rename(backup, dest);
+            return Err(super::failure::restore_after_failed_install(
+                backup,
+                dest,
+                &staged,
+                "managed runtime",
+                "install_failed",
+                &err,
+            ));
         }
         let _ = fs::remove_file(&staged);
         return Err(ExitError::new(7, format!("install_failed: {err}")));

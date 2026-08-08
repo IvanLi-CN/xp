@@ -1,3 +1,4 @@
+use super::ROLLBACK_FAILURE_EXIT_CODE;
 use crate::ops::Paths;
 use crate::ops::cli::ExitError;
 use crate::ops::runtime_activation::restart_xp_service;
@@ -116,6 +117,68 @@ pub(super) fn record_early_upgrade_failure(
     };
     write_upgrade_diagnostics(data_dir, release_tag, checksums, &error);
     error
+}
+
+pub(super) fn cleanup_after_upgrade_failure(
+    paths: &Paths,
+    extra: &[&Path],
+    error: ExitError,
+) -> ExitError {
+    if error.code == ROLLBACK_FAILURE_EXIT_CODE {
+        return error;
+    }
+    match cleanup_managed_artifacts_for(paths, extra) {
+        Ok(_) => error,
+        Err(cleanup_error) => ExitError::new(
+            7,
+            format!(
+                concat!(
+                    "service_error: cleanup failed upgrade artifacts: ",
+                    "{}; original error: {}"
+                ),
+                cleanup_error, error.message
+            ),
+        ),
+    }
+}
+
+pub(super) fn restore_after_failed_install(
+    backup: &Path,
+    dest: &Path,
+    staged: &Path,
+    binary: &str,
+    error_prefix: &str,
+    install_error: &std::io::Error,
+) -> ExitError {
+    let _ = fs::remove_file(staged);
+    match fs::rename(backup, dest) {
+        Ok(()) => ExitError::new(7, format!("{error_prefix}: {install_error}")),
+        Err(restore_error) => ExitError::new(
+            ROLLBACK_FAILURE_EXIT_CODE,
+            format!(
+                "rollback_failed: restore {binary} after install: {restore_error}; \
+                 original install error: {install_error}"
+            ),
+        ),
+    }
+}
+
+pub(super) fn restore_after_failed_xp_ops_verification(dest: &Path, backup: &Path) -> ExitError {
+    let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
+    if let Err(error) = fs::rename(dest, &failed) {
+        return ExitError::new(
+            ROLLBACK_FAILURE_EXIT_CODE,
+            format!("rollback_failed: stash unverified xp-ops: {error}"),
+        );
+    }
+    if let Err(error) = fs::rename(backup, dest) {
+        return ExitError::new(
+            ROLLBACK_FAILURE_EXIT_CODE,
+            format!("rollback_failed: restore xp-ops after verify failure: {error}"),
+        );
+    }
+    let _ = fs::remove_file(&failed);
+    ExitError::new(7, "install_failed: verify failed")
 }
 
 pub(super) fn preflight_upgrade(
@@ -256,5 +319,31 @@ mod tests {
         );
 
         assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn rollback_failure_preserves_the_unrestored_binary_backup() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let bin_dir = paths.usr_local_bin_xp().parent().unwrap().to_path_buf();
+        fs::create_dir_all(&bin_dir).unwrap();
+        let backup = bin_dir.join("xp.bak.transaction");
+        fs::write(&backup, b"xp-old").unwrap();
+
+        let rollback_failed = cleanup_after_upgrade_failure(
+            &paths,
+            &[],
+            ExitError::new(ROLLBACK_FAILURE_EXIT_CODE, "rollback_failed: restore xp"),
+        );
+        assert_eq!(rollback_failed.code, ROLLBACK_FAILURE_EXIT_CODE);
+        assert!(backup.exists());
+
+        let recovered_failure = cleanup_after_upgrade_failure(
+            &paths,
+            &[],
+            ExitError::new(7, "service_error: recovered"),
+        );
+        assert_eq!(recovered_failure.code, 7);
+        assert!(!backup.exists());
     }
 }
