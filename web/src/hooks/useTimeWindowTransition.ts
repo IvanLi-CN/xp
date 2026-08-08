@@ -45,6 +45,9 @@ export function useTimeWindowTransition<T, W>({
 }: UseTimeWindowTransitionOptions<T, W>) {
 	const isRestoring = useIsRestoring();
 	const initialNow = now();
+	const mountedAtRef = useRef(initialNow);
+	const restorationSeenRef = useRef(isRestoring);
+	if (isRestoring) restorationSeenRef.current = true;
 	const [display, setDisplayState] = useState<DisplayState<T, W> | null>(() =>
 		data
 			? {
@@ -89,6 +92,22 @@ export function useTimeWindowTransition<T, W>({
 		clearTimeout(timerRef.current);
 		timerRef.current = null;
 	}, []);
+
+	const normalizeIncomingData = useCallback(
+		(incoming: T, updatedAt: number, incomingWindow: W) => {
+			const wasRestored =
+				restorationSeenRef.current && updatedAt < mountedAtRef.current;
+			restorationSeenRef.current = false;
+			return wasRestored
+				? latestRef.current.alignData(
+						incoming,
+						incomingWindow,
+						latestRef.current.now(),
+					)
+				: incoming;
+		},
+		[],
+	);
 
 	useLayoutEffect(() => {
 		if (identityRef.current !== identity) {
@@ -163,7 +182,7 @@ export function useTimeWindowTransition<T, W>({
 					dataUpdatedAt > displayRef.current.dataUpdatedAt)
 			) {
 				setDisplay({
-					data: isRestoring ? alignData(data, window, now()) : data,
+					data: normalizeIncomingData(data, dataUpdatedAt, window),
 					dataUpdatedAt,
 					window,
 				});
@@ -179,7 +198,7 @@ export function useTimeWindowTransition<T, W>({
 			clearTimer();
 			transitionRef.current = null;
 			setDisplay({
-				data: isRestoring ? alignData(data, window, now()) : data,
+				data: normalizeIncomingData(data, dataUpdatedAt, window),
 				dataUpdatedAt,
 				window,
 			});
@@ -192,13 +211,11 @@ export function useTimeWindowTransition<T, W>({
 			setPhase("idle");
 		}
 	}, [
-		alignData,
 		clearTimer,
 		data,
 		dataUpdatedAt,
 		isError,
-		isRestoring,
-		now,
+		normalizeIncomingData,
 		setDisplay,
 		window,
 	]);

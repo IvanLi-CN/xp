@@ -1,6 +1,6 @@
 import { IsRestoringProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimeWindowTransition } from "./useTimeWindowTransition";
@@ -27,6 +27,18 @@ function useTransition(props: HookProps) {
 		identity: "report",
 		now: () => 1_000,
 	});
+}
+
+function restorationWrapper() {
+	let finishRestoring = () => {};
+	const Wrapper = ({ children }: { children: ReactNode }) => {
+		const [isRestoring, setIsRestoring] = useState(true);
+		finishRestoring = () => setIsRestoring(false);
+		return (
+			<IsRestoringProvider value={isRestoring}>{children}</IsRestoringProvider>
+		);
+	};
+	return { finishRestoring: () => finishRestoring(), Wrapper };
 }
 
 describe("useTimeWindowTransition", () => {
@@ -96,9 +108,7 @@ describe("useTimeWindowTransition", () => {
 	});
 
 	it("aligns persisted data restored asynchronously after mount", () => {
-		const wrapper = ({ children }: { children: ReactNode }) => (
-			<IsRestoringProvider value={true}>{children}</IsRestoringProvider>
-		);
+		const restoration = restorationWrapper();
 		const { result, rerender } = renderHook(useTransition, {
 			initialProps: {
 				data: undefined,
@@ -107,18 +117,44 @@ describe("useTimeWindowTransition", () => {
 				isFetching: false,
 				window: "24h",
 			},
-			wrapper,
+			wrapper: restoration.Wrapper,
 		});
+		act(() => restoration.finishRestoring());
 
 		rerender({
 			data: "restored-cache",
-			dataUpdatedAt: 1,
+			dataUpdatedAt: 900,
 			isError: false,
 			isFetching: false,
 			window: "24h",
 		});
 
 		expect(result.current.data).toBe("restored-cache:24h");
+	});
+
+	it("keeps the first network response raw after an empty restoration", () => {
+		const restoration = restorationWrapper();
+		const { result, rerender } = renderHook(useTransition, {
+			initialProps: {
+				data: undefined,
+				dataUpdatedAt: 0,
+				isError: false,
+				isFetching: false,
+				window: "24h",
+			},
+			wrapper: restoration.Wrapper,
+		});
+		act(() => restoration.finishRestoring());
+
+		rerender({
+			data: "fresh",
+			dataUpdatedAt: 1_001,
+			isError: false,
+			isFetching: false,
+			window: "24h",
+		});
+
+		expect(result.current.data).toBe("fresh");
 	});
 
 	it("shows the aligned target cache after the hold expires", () => {
