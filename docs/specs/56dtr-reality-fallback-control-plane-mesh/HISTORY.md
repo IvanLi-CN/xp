@@ -18,6 +18,13 @@
 - HTTP/2 ingress may expose an absolute-form URI. Canary forwarding must discard its origin and
   combine only the authenticated raw path/query with the fixed XP loopback origin; forcing
   HTTP/1.1 would hide the defect instead of preserving the transport contract.
+- Disabling reqwest idle pooling fixed a historical Cloudflare stale-socket failure, but it is not
+  suitable for periodic Reality Mesh traffic: each request creates a new TLS/TCP connection while
+  Xray retains the idle inbound for five minutes. Mesh therefore uses one strict shared H2 pool with
+  a 120-second idle bound; public direct and relay keep separate compatibility pools.
+- Connection reuse telemetry derives an ephemeral fingerprint from socket metadata but persists
+  only aggregate generations and counters. This makes churn diagnosable without exposing network
+  identity.
 
 ## Supersession
 

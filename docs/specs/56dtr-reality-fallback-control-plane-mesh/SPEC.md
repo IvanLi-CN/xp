@@ -17,6 +17,8 @@
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
+- 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
+- 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
 
 ## 非目标
@@ -26,6 +28,8 @@
 - 不为响应 body 或 SSE event 单独增加 MAC。
 - 不实现 nonce replay cache、强制选路、breaker reset 或自动修复。
 - 不保证 50 个以上 peer 的性能。
+- 不修改 Xray inbound、`connIdle`、Reality 端口或用户代理流量。
+- 不为 Mesh pool、idle timeout、flow-control window 或 keepalive 暴露 operator 配置。
 
 ## 范围
 
@@ -64,6 +68,15 @@
 
 ## 传输与幂等
 
+- 进程启动时只构造一份 Mesh transport bundle，并注入 Raft、leader forwarding、node
+  history、定时与手动 probes、runtime、alerts、quota、traffic、IP usage、TCP history、
+  endpoint probes 和 SSE fan-out；请求 handler 不得读取证书或创建短生命周期 client。
+- Mesh client 固定使用 HTTP/2 prior knowledge，每个 origin 最多保留一条 idle connection，
+  pool idle timeout 固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
+- 公网 direct 与可选 relay 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
+  fallback。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理。
+- 同一 target 的顺序请求、并发 fan-out、Raft burst、8 MiB snapshot 与长驻 SSE 必须复用同一
+  HTTP/2 connection。主动断链或 idle timeout 后允许新建一条；重连交叠瞬间最多两条，随后回到一条。
 - 每个 peer 连续三次可重试 Mesh transport 失败后打开 breaker。
 - breaker 退避为 `30/60/120/240/300s`。
 - half-open 只允许一次探测性 Mesh 请求。
@@ -90,6 +103,15 @@
 - status SSE 只发布合并后的 telemetry revision。
 - 质量枚举固定为 good、slow、unstable、down 与 unknown。
 - Mesh 失败但公网成功代表端到端成功，并单独记录 fallback。
+- 成功 Mesh response 的 HTTP version 与 socket tuple 只用于进程内识别连接；原始地址、源 IP、
+  本地端口、远端端口和证书信息不得进入 telemetry、API、日志或 UI。
+- 每分钟 bucket 追加 `mesh_h2_requests` 与 `mesh_connection_starts`；peer 保存连接 generation、
+  当前 generation 请求数和最后建连时间。旧 telemetry 缺字段时按零值读取，schema version 不变，
+  且不得因此增加每请求持久化次数。
+- status peer 可选返回 `mesh_transport`：`protocol`、`health`、`connection_generation`、
+  `current_connection_requests`、5m/1h 请求数与建连数、`last_connection_started_at`。
+- `health` 固定为：无传输样本时 unknown；HTTP/2 且最近 5 分钟建连不超过两次时 healthy；
+  协议异常或最近 5 分钟建连超过两次时 churning。public fallback 保留最近一次 Mesh 复用证据。
 
 ## Web
 
@@ -100,6 +122,9 @@
 - 移动布局按 peer 堆叠，不能隐藏 uptime strip。
 - 页首显示本机、leader、term、XP、Xray、cloudflared、DDNS 与 canary 摘要。
 - 离线时只展示带时间戳的持久快照，并禁用 probe。
+- capability `admin.mesh-transport-reuse` 声明后，peer 当前路径区域行内显示
+  `H2 · N req / M starts · gen G`；无传输样本显示 `Reuse data unavailable`。
+  旧 API 或未声明 capability 时隐藏该信息，不新增页面、卡片或表格列。
 
 ## 升级
 
@@ -123,6 +148,15 @@
 - 已执行但响应丢失的 mutation 复用 request ID，只返回第一次结果。
 - breaker、预算、ack、降级规则、header 清洗、SSRF/self-loop 与 body limit 有测试。
 - 真实流量和主动 probe 均更新本地 telemetry。
+- 真实 TLS counting proxy 下，32 次顺序请求和 16 次并发 signed Mesh 请求仅产生一次 TCP
+  accept，且所有 response 为 HTTP/2；主动断链后下一请求成功并将总 accept 增至两次。
+- 缩短的测试 policy 证明 idle timeout 会丢弃旧连接；H2 不可用只触发 transport fallback，
+  invalid ack/auth 仍不得降级。
+- 长驻 SSE、Raft burst、8 MiB snapshot 与普通 fan-out 在同一 H2 connection 上并行。
+- 50-peer 15 分钟 workload 中 XP peak anonymous PSS 不超过 18,432 KiB，XP total PSS 与
+  候选完整栈均不高于各自基线 1,024 KiB，XP CPU-seconds 不高于基线 5%，TLS/TCP 建连至少
+  减少 90%。file-backed PSS 仍计入 total PSS；该相对门禁不代表完整托管栈已经满足 64 MiB
+  总预算。
 - Web 覆盖 healthy、fallback、slow、down、stale、empty、partial 与 50 peers。
 - 后端通过 fmt、clippy 和 test；前端通过 lint、typecheck、Vitest、
   Storybook、Playwright 与 style budget。

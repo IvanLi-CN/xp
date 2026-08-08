@@ -34,6 +34,7 @@ export type SystemStatusSurfaceProps = {
 	isRefreshing?: boolean;
 	isProbing?: boolean;
 	readOnly?: boolean;
+	showMeshTransportReuse?: boolean;
 	onRefresh?: () => void;
 	onProbeAll?: () => void;
 	onProbePeer?: (nodeId: string) => void;
@@ -98,6 +99,29 @@ function reasonLabel(peer: AdminMeshPeer) {
 		: "Mesh reason unknown";
 }
 
+function meshTransportLabel(peer: AdminMeshPeer) {
+	const transport = peer.mesh_transport;
+	if (
+		!transport ||
+		transport.protocol !== "h2" ||
+		transport.connection_generation === 0
+	) {
+		return "Reuse data unavailable";
+	}
+	const prefix = transport.health === "churning" ? "Churning · " : "";
+	return (
+		`${prefix}H2 · ${transport.requests_5m} req / ` +
+		`${transport.connection_starts_5m} starts · gen ${transport.connection_generation}`
+	);
+}
+
+function meshTransportTitle(peer: AdminMeshPeer) {
+	const transport = peer.mesh_transport;
+	return transport
+		? `1h: ${transport.requests_1h} requests / ${transport.connection_starts_1h} starts`
+		: undefined;
+}
+
 function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
 	const label =
 		state === "half_open"
@@ -123,7 +147,15 @@ function PeerRows({
 	peer,
 	onProbe,
 	probeDisabled,
-}: { peer: AdminMeshPeer; onProbe?: () => void; probeDisabled?: boolean }) {
+	showMeshTransportReuse,
+}: {
+	peer: AdminMeshPeer;
+	onProbe?: () => void;
+	probeDisabled?: boolean;
+	showMeshTransportReuse?: boolean;
+}) {
+	const showTransport =
+		showMeshTransportReuse && peer.mesh_capability === "enabled";
 	const content = (
 		<>
 			<div className="min-w-0">
@@ -147,6 +179,19 @@ function PeerRows({
 				<p className="mt-1 truncate text-xs text-muted-foreground">
 					{reasonLabel(peer)}
 				</p>
+				{showTransport ? (
+					<p
+						data-mesh-transport={peer.mesh_transport?.health ?? "unknown"}
+						className={`mt-1 break-words text-xs leading-5 ${
+							peer.mesh_transport?.health === "churning"
+								? "font-medium text-warning"
+								: "text-muted-foreground"
+						}`}
+						title={meshTransportTitle(peer)}
+					>
+						{meshTransportLabel(peer)}
+					</p>
+				) : null}
 				<p className="mt-1 text-xs text-muted-foreground">
 					{timestamp(peer.last_transition_at)}
 				</p>
@@ -242,6 +287,7 @@ export function SystemStatusSurface({
 	isRefreshing,
 	isProbing,
 	readOnly,
+	showMeshTransportReuse,
 	onRefresh,
 	onProbeAll,
 	onProbePeer,
@@ -369,6 +415,7 @@ export function SystemStatusSurface({
 							<PeerRows
 								key={peer.node_id}
 								peer={peer}
+								showMeshTransportReuse={showMeshTransportReuse}
 								probeDisabled={readOnly}
 								onProbe={
 									readOnly ? undefined : () => onProbePeer?.(peer.node_id)
@@ -450,6 +497,9 @@ export function SystemStatusPage() {
 	const runtime = useAppRuntime();
 	const [adminToken] = useState(() => readAdminToken());
 	const meshCapability = useApiCapability("admin.mesh");
+	const meshTransportCapability = useApiCapability(
+		"admin.mesh-transport-reuse",
+	);
 	const nodesCapability = useApiCapability("admin.nodes");
 	const alertsCapability = useApiCapability("admin.alerts");
 	const meshQuery = useQuery({
@@ -573,6 +623,7 @@ export function SystemStatusPage() {
 				isRefreshing={meshState.isFetching}
 				isProbing={probe.isPending}
 				readOnly={runtime.isReadOnly}
+				showMeshTransportReuse={meshTransportCapability.available}
 				onRefresh={() => meshState.refetch()}
 				onProbeAll={
 					meshCapability.available ? () => probe.mutate([]) : undefined

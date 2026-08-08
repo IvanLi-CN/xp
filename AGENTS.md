@@ -29,10 +29,12 @@
 - Managed-default VLESS/REALITY endpoints also provide the control-plane Mesh ingress: signed
   `health-v2` and `mesh-v2` traffic is routed by the canary only to fixed local XP loopback paths;
   public `/generate_204` and authority-based camouflage remain separate. `XP_MESH_PROXY_URL` is
-  public-fallback egress compatibility, not a Mesh tunnel. Multi-node internal-auth v2 upgrades
-  require a one-shot maintenance marker: host-managed nodes bootstrap from a verified target
-  `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the target
-  image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
+  public-fallback egress compatibility, not a Mesh tunnel. All outbound Mesh users share one
+  process-wide HTTP/2-only client with one idle connection per origin and a 120-second idle bound;
+  public direct and relay fallback use separate compatibility clients. An internal-auth v2 cluster
+  upgrade requires a one-shot maintenance marker: host-managed nodes bootstrap from a verified
+  target `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the
+  target image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.

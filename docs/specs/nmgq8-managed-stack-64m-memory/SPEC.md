@@ -38,6 +38,9 @@
 - 诊断子预算为 `xp <=18 MiB`、`xray <=22 MiB`、`cloudflared <=18 MiB`、
   临时 canary `<=4 MiB`；总预算是唯一发布硬门禁。
 - 任一 OOM、非预期重启、采样缺口或总峰值超限均失败。
+- Reality Mesh 的 50-peer transport workload 另设 `xp <=18 MiB`、候选完整栈相对基线
+  `+1 MiB`、XP CPU-seconds 相对基线 `+5%` 的回归门禁。通过该门禁只证明连接复用没有引入
+  显著资源回归，不等价于本规格的 64 MiB 完整托管栈门禁通过。
 
 ## 部署与回滚
 
@@ -76,3 +79,4 @@ PR: none
 - `docs/specs/38wmj-cluster-node-onboarding/SPEC.md`
 - `docs/specs/k9n2r-xp-ops-admin-token-ops/SPEC.md`
 - `docs/solutions/ci/real-xray-e2e-runner-guardrails.md`
+- `../56dtr-reality-fallback-control-plane-mesh/SPEC.md`

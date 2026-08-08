@@ -44,7 +44,22 @@ struct AdminMeshPeerStatus {
     mesh_availability_24h: Option<f64>,
     latency_p50_ms: Option<u32>,
     latency_p95_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mesh_transport: Option<AdminMeshTransportStatus>,
     buckets: Vec<crate::mesh_telemetry::MeshTelemetryBucket>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminMeshTransportStatus {
+    protocol: Option<MeshTransportProtocol>,
+    health: MeshTransportHealth,
+    connection_generation: u64,
+    current_connection_requests: u64,
+    requests_5m: u32,
+    connection_starts_5m: u32,
+    requests_1h: u32,
+    connection_starts_1h: u32,
+    last_connection_started_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -267,6 +282,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 mesh_availability_24h,
                 latency_p50_ms,
                 latency_p95_ms,
+                mesh_transport: mesh_transport_status_for(mesh_enabled, peer, now),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -299,6 +315,33 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         peers,
         events: telemetry.events,
     }
+}
+
+fn mesh_transport_status_for(
+    mesh_enabled: bool,
+    peer: Option<&crate::mesh_telemetry::MeshPeerTelemetry>,
+    now: DateTime<Utc>,
+) -> Option<AdminMeshTransportStatus> {
+    if !mesh_enabled {
+        return None;
+    }
+    let (requests_5m, connection_starts_5m) = peer
+        .map(|peer| mesh_transport_counts_for(peer, 5, now))
+        .unwrap_or_default();
+    let (requests_1h, connection_starts_1h) = peer
+        .map(|peer| mesh_transport_counts_for(peer, 60, now))
+        .unwrap_or_default();
+    Some(AdminMeshTransportStatus {
+        protocol: peer.and_then(|peer| peer.last_mesh_protocol),
+        health: mesh_transport_health_for(peer, now),
+        connection_generation: peer.map_or(0, |peer| peer.connection_generation),
+        current_connection_requests: peer.map_or(0, |peer| peer.current_connection_requests),
+        requests_5m,
+        connection_starts_5m,
+        requests_1h,
+        connection_starts_1h,
+        last_connection_started_at: peer.and_then(|peer| peer.last_connection_started_at.clone()),
+    })
 }
 
 fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -> BreakerState {
@@ -344,6 +387,98 @@ mod tests {
 
         assert_eq!(mesh_availability_for(&peer, now), Some(0.0));
     }
+
+    #[test]
+    fn mesh_transport_status_is_optional_and_preserves_unknown_state() {
+        let now = Utc::now();
+        assert!(mesh_transport_status_for(false, None, now).is_none());
+
+        let unknown = mesh_transport_status_for(true, None, now).unwrap();
+        assert_eq!(unknown.health, MeshTransportHealth::Unknown);
+        assert_eq!(unknown.protocol, None);
+        assert_eq!(unknown.connection_generation, 0);
+
+        let peer = crate::mesh_telemetry::MeshPeerTelemetry {
+            last_mesh_protocol: Some(MeshTransportProtocol::H2),
+            connection_generation: 1,
+            current_connection_requests: 12,
+            buckets: std::collections::VecDeque::from([
+                crate::mesh_telemetry::MeshTelemetryBucket {
+                    minute: now.to_rfc3339(),
+                    mesh_h2_requests: 12,
+                    mesh_connection_starts: 1,
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+        let healthy = mesh_transport_status_for(true, Some(&peer), now).unwrap();
+        assert_eq!(healthy.health, MeshTransportHealth::Healthy);
+        assert_eq!(healthy.requests_5m, 12);
+        assert_eq!(healthy.connection_starts_5m, 1);
+    }
+
+    #[test]
+    fn mesh_status_etag_tracks_reuse_evidence_but_not_generation_time() {
+        fn response(generated_at: &str, connection_starts_5m: u32) -> AdminMeshStatusResponse {
+            AdminMeshStatusResponse {
+                generated_at: generated_at.to_string(),
+                revision: 7,
+                local: AdminMeshLocalStatus {
+                    node_id: "local".to_string(),
+                    node_name: "local".to_string(),
+                    cluster_id: "cluster".to_string(),
+                    role: "leader".to_string(),
+                    leader_api_base_url: "https://local.example.test".to_string(),
+                    term: 3,
+                    mesh_proxy_status: "disabled".to_string(),
+                    mesh_proxy_reason: None,
+                    canary: crate::vless_https_canary::VlessHttpsCanaryStatus::disabled(
+                        std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+                    ),
+                },
+                peers: vec![AdminMeshPeerStatus {
+                    node_id: "peer".to_string(),
+                    node_name: "peer".to_string(),
+                    api_base_url: "https://peer.example.test".to_string(),
+                    mesh_url: Some("https://peer.example.test:443".to_string()),
+                    mesh_capability: Some("enabled".to_string()),
+                    mesh_reason: Some(crate::mesh_telemetry::MeshPeerReason::MeshAvailable),
+                    current_path: Some(TelemetryPath::Mesh),
+                    quality: MeshQuality::Good,
+                    stale: false,
+                    breaker: BreakerState::Closed,
+                    last_sample_at: None,
+                    last_transition_at: None,
+                    availability_1h: Some(1.0),
+                    availability_24h: Some(1.0),
+                    mesh_availability_24h: Some(1.0),
+                    latency_p50_ms: Some(10),
+                    latency_p95_ms: Some(20),
+                    mesh_transport: Some(AdminMeshTransportStatus {
+                        protocol: Some(MeshTransportProtocol::H2),
+                        health: MeshTransportHealth::Healthy,
+                        connection_generation: 2,
+                        current_connection_requests: 12,
+                        requests_5m: 12,
+                        connection_starts_5m,
+                        requests_1h: 60,
+                        connection_starts_1h: 2,
+                        last_connection_started_at: None,
+                    }),
+                    buckets: Vec::new(),
+                }],
+                events: Vec::new(),
+            }
+        }
+
+        let first = response("2026-08-08T10:00:00Z", 1);
+        let generated_later = response("2026-08-08T10:01:00Z", 1);
+        let churning = response("2026-08-08T10:01:00Z", 3);
+
+        assert_eq!(mesh_status_etag(&first), mesh_status_etag(&generated_later));
+        assert_ne!(mesh_status_etag(&first), mesh_status_etag(&churning));
+    }
 }
 
 fn mesh_availability_for(
@@ -385,10 +520,7 @@ pub(super) async fn admin_get_mesh_status(
     headers: HeaderMap,
 ) -> Response {
     let snapshot = build_admin_mesh_status_response(&state).await;
-    let mut stable_snapshot = snapshot.clone();
-    stable_snapshot.generated_at.clear();
-    let stable_bytes = serde_json::to_vec(&stable_snapshot).expect("serialize mesh status ETag");
-    let etag = format!("\"mesh-{}\"", hex::encode(Sha256::digest(stable_bytes)));
+    let etag = mesh_status_etag(&snapshot);
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
@@ -397,6 +529,13 @@ pub(super) async fn admin_get_mesh_status(
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
     (StatusCode::OK, [(header::ETAG, etag)], Json(snapshot)).into_response()
+}
+
+fn mesh_status_etag(snapshot: &AdminMeshStatusResponse) -> String {
+    let mut stable_snapshot = snapshot.clone();
+    stable_snapshot.generated_at.clear();
+    let stable_bytes = serde_json::to_vec(&stable_snapshot).expect("serialize mesh status ETag");
+    format!("\"mesh-{}\"", hex::encode(Sha256::digest(stable_bytes)))
 }
 
 pub(super) async fn admin_run_mesh_probes(
@@ -582,7 +721,7 @@ async fn run_mesh_health_probe(
     if public_only {
         peer.mesh_base_url = None;
     }
-    let client = build_cluster_http_client(state)?;
+    let client = state.mesh_client.clone();
     client
         .send_peer_request(
             &peer,

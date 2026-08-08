@@ -1,7 +1,7 @@
 use crate::{
     control_plane_mesh::{
         MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
-        apply_optional_proxy, peer_target_from_node,
+        build_mesh_http_client, build_unauthenticated_mesh_http_client, peer_target_from_node,
     },
     internal_auth::InternalRoute,
     mesh_telemetry::MeshTelemetryHandle,
@@ -39,10 +39,10 @@ pub struct HttpNetworkFactory {
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
-        let client = raft_http_client_builder().build().expect("reqwest client");
         let state = MeshProxyStateHandle::disabled();
         Self {
-            client: MeshAwareHttpClient::new(client, None, state),
+            client: build_unauthenticated_mesh_http_client(state)
+                .expect("build unauthenticated Mesh transport clients"),
             mesh_auth: None,
         }
     }
@@ -82,40 +82,15 @@ impl HttpNetworkFactory {
         mesh_proxy_url: Option<&str>,
         state: MeshProxyStateHandle,
     ) -> anyhow::Result<Self> {
-        let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-            .context("parse cluster_ca_pem")?;
-        let identity_pem = format!("{node_cert_pem}\n{node_key_pem}");
-        let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
-            .context("parse node identity pem")?;
-
-        let direct = raft_http_client_builder()
-            .add_root_certificate(ca)
-            .identity(identity)
-            .build()
-            .context("build reqwest client")?;
-        let relay = if let Some(proxy_url) = mesh_proxy_url {
-            let ca = reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes())
-                .context("parse cluster_ca_pem")?;
-            let identity_pem = format!("{node_cert_pem}\n{node_key_pem}");
-            let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
-                .context("parse node identity pem")?;
-            let relay_builder = apply_optional_proxy(
-                raft_http_client_builder()
-                    .add_root_certificate(ca)
-                    .identity(identity),
-                Some(proxy_url),
-            )
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-            Some(
-                relay_builder
-                    .build()
-                    .context("build relay reqwest client")?,
-            )
-        } else {
-            None
-        };
         Ok(Self {
-            client: MeshAwareHttpClient::new(direct, relay, state),
+            client: build_mesh_http_client(
+                cluster_ca_pem,
+                node_cert_pem,
+                node_key_pem,
+                mesh_proxy_url,
+                state,
+            )
+            .context("build Mesh transport clients")?,
             mesh_auth: None,
         })
     }
@@ -154,12 +129,6 @@ impl Default for HttpNetworkFactory {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn raft_http_client_builder() -> reqwest::ClientBuilder {
-    // Raft heartbeats are sparse in WAN mode. Cloudflare Tunnel can close idle
-    // TLS connections between heartbeats, so do not reuse idle connections.
-    reqwest::Client::builder().pool_max_idle_per_host(0)
 }
 
 #[derive(Clone)]
@@ -359,3 +328,6 @@ mod tests {
             .expect("mtls");
     }
 }
+
+#[cfg(test)]
+mod transport_reuse_tests;

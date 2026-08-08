@@ -13,10 +13,17 @@ use crate::{
     internal_auth::{self, InternalRoute, RequestContext},
     managed_default_endpoints::managed_default_vless_endpoint,
     mesh_telemetry::{
-        BreakerState, MeshPeerReason, MeshTelemetryHandle, MeshTelemetrySample, TelemetryPath,
+        BreakerState, MeshConnectionFingerprint, MeshPeerReason, MeshTelemetryHandle,
+        MeshTelemetrySample, MeshTransportObservation, MeshTransportProtocol, TelemetryPath,
     },
     protocol::validate_reality_server_name,
 };
+
+mod transport;
+#[cfg(test)]
+pub(crate) use transport::build_mesh_http_client_with_policy;
+pub(crate) use transport::build_unauthenticated_mesh_http_client;
+pub use transport::{MESH_POOL_IDLE_TIMEOUT, MeshTransportPolicy, build_mesh_http_client};
 
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
 pub const MESH_BACKOFF: [Duration; 5] = [
@@ -307,8 +314,9 @@ pub fn apply_optional_proxy(
 
 #[derive(Clone)]
 pub struct MeshAwareHttpClient {
-    direct: reqwest::Client,
-    relay: Option<reqwest::Client>,
+    mesh: reqwest::Client,
+    public_direct: reqwest::Client,
+    public_relay: Option<reqwest::Client>,
     state: MeshProxyStateHandle,
     circuits: PeerCircuitBreakers,
     telemetry: Option<MeshTelemetryHandle>,
@@ -320,9 +328,19 @@ impl MeshAwareHttpClient {
         relay: Option<reqwest::Client>,
         state: MeshProxyStateHandle,
     ) -> Self {
+        Self::from_transport_clients(direct.clone(), direct, relay, state)
+    }
+
+    pub fn from_transport_clients(
+        mesh: reqwest::Client,
+        public_direct: reqwest::Client,
+        public_relay: Option<reqwest::Client>,
+        state: MeshProxyStateHandle,
+    ) -> Self {
         Self {
-            direct,
-            relay,
+            mesh,
+            public_direct,
+            public_relay,
             state,
             circuits: PeerCircuitBreakers::default(),
             telemetry: None,
@@ -330,11 +348,11 @@ impl MeshAwareHttpClient {
     }
 
     pub fn direct(&self) -> &reqwest::Client {
-        &self.direct
+        &self.public_direct
     }
 
     pub fn relay_enabled(&self) -> bool {
-        self.relay.is_some()
+        self.public_relay.is_some()
     }
 
     pub fn state(&self) -> MeshProxyStateHandle {
@@ -363,7 +381,7 @@ impl MeshAwareHttpClient {
     where
         F: Fn(&reqwest::Client) -> reqwest::RequestBuilder,
     {
-        if let Some(relay) = &self.relay {
+        if let Some(relay) = &self.public_relay {
             let relay_budget =
                 std::cmp::min(budget / 2, Duration::from_secs(1)).max(Duration::from_millis(1));
             match tokio::time::timeout(relay_budget, build_request(relay).send()).await {
@@ -379,7 +397,7 @@ impl MeshAwareHttpClient {
                         "control-plane relay request failed; falling back to direct"
                     );
 
-                    match build_request(&self.direct).send().await {
+                    match build_request(&self.public_direct).send().await {
                         Ok(response) => {
                             self.state.mark_fallback(relay_reason).await;
                             return Ok(response);
@@ -402,7 +420,7 @@ impl MeshAwareHttpClient {
                         "control-plane relay request failed; falling back to direct"
                     );
 
-                    match build_request(&self.direct).send().await {
+                    match build_request(&self.public_direct).send().await {
                         Ok(response) => {
                             self.state.mark_fallback(relay_reason).await;
                             return Ok(response);
@@ -420,7 +438,7 @@ impl MeshAwareHttpClient {
             }
         }
 
-        build_request(&self.direct).send().await
+        build_request(&self.public_direct).send().await
     }
 
     /// Sends through Mesh first, then public only after a retryable transport failure.
@@ -459,7 +477,7 @@ impl MeshAwareHttpClient {
             match tokio::time::timeout(
                 budget,
                 signed_send(
-                    &self.direct,
+                    &self.mesh,
                     &mesh_url,
                     &request,
                     &context,
@@ -470,6 +488,15 @@ impl MeshAwareHttpClient {
             .await
             {
                 Ok(Ok((response, verified))) => {
+                    let transport = mesh_transport_observation(&response);
+                    if transport.protocol != MeshTransportProtocol::H2 {
+                        self.circuits.release_half_open_probe(&peer.node_id).await;
+                        self.record_mesh_protocol_failure(peer).await;
+                        self.record_terminal_failure(peer).await;
+                        return Err(MeshRequestError::Protocol(
+                            "Mesh response did not use HTTP/2".to_string(),
+                        ));
+                    }
                     if let Some(ack) = response
                         .headers()
                         .get(internal_auth::INTERNAL_ACK_HEADER)
@@ -496,11 +523,14 @@ impl MeshAwareHttpClient {
                         }
                         self.record_sample(
                             peer,
-                            TelemetryPath::Mesh,
-                            true,
-                            started.elapsed(),
-                            false,
-                            request.updates_active_path,
+                            telemetry_sample(
+                                TelemetryPath::Mesh,
+                                true,
+                                started.elapsed(),
+                                false,
+                                request.updates_active_path,
+                                Some(transport),
+                            ),
                         )
                         .await;
                         return Ok(response);
@@ -561,11 +591,14 @@ impl MeshAwareHttpClient {
             Err(error) => {
                 self.record_sample(
                     peer,
-                    TelemetryPath::Public,
-                    false,
-                    started.elapsed(),
-                    fallback,
-                    request.updates_active_path,
+                    telemetry_sample(
+                        TelemetryPath::Public,
+                        false,
+                        started.elapsed(),
+                        fallback,
+                        request.updates_active_path,
+                        None,
+                    ),
                 )
                 .await;
                 return Err(error);
@@ -573,11 +606,14 @@ impl MeshAwareHttpClient {
         };
         self.record_sample(
             peer,
-            TelemetryPath::Public,
-            true,
-            started.elapsed(),
-            fallback,
-            request.updates_active_path,
+            telemetry_sample(
+                TelemetryPath::Public,
+                true,
+                started.elapsed(),
+                fallback,
+                request.updates_active_path,
+                None,
+            ),
         )
         .await;
         if fallback && peer.mesh_base_url.is_some() {
@@ -596,7 +632,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         budget: Duration,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        let (response, verified, relay_succeeded) = if let Some(relay) = &self.relay {
+        let (response, verified, relay_succeeded) = if let Some(relay) = &self.public_relay {
             let relay_budget = std::cmp::max(Duration::from_millis(1), budget / 2);
             let relay_started = Instant::now();
             match tokio::time::timeout(
@@ -652,7 +688,7 @@ impl MeshAwareHttpClient {
             let (response, verified) = tokio::time::timeout(
                 budget,
                 signed_send(
-                    &self.direct,
+                    &self.public_direct,
                     url,
                     request,
                     context,
@@ -675,7 +711,7 @@ impl MeshAwareHttpClient {
             .get(internal_auth::INTERNAL_ACK_HEADER)
             .and_then(|value| value.to_str().ok())
         else {
-            if self.relay.is_some() {
+            if self.public_relay.is_some() {
                 self.state
                     .mark_degraded(format!("{response_source} has no signed acknowledgement"))
                     .await;
@@ -692,7 +728,7 @@ impl MeshAwareHttpClient {
             response.status().as_u16(),
             ack,
         ) {
-            if self.relay.is_some() {
+            if self.public_relay.is_some() {
                 self.state
                     .mark_degraded(format!(
                         "{response_source} acknowledgement failed verification: {error}"
@@ -720,7 +756,7 @@ impl MeshAwareHttpClient {
         let result = tokio::time::timeout(
             budget,
             signed_send(
-                &self.direct,
+                &self.public_direct,
                 url,
                 request,
                 context,
@@ -753,11 +789,14 @@ impl MeshAwareHttpClient {
         let state = self.circuits.record_retryable_failure(&peer.node_id).await;
         self.record_sample(
             peer,
-            TelemetryPath::Mesh,
-            false,
-            Duration::ZERO,
-            false,
-            false,
+            telemetry_sample(
+                TelemetryPath::Mesh,
+                false,
+                Duration::ZERO,
+                false,
+                false,
+                None,
+            ),
         )
         .await;
         self.record_mesh_reason(peer, mesh_reason).await;
@@ -780,11 +819,14 @@ impl MeshAwareHttpClient {
     async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
         self.record_sample(
             peer,
-            TelemetryPath::Mesh,
-            false,
-            Duration::ZERO,
-            false,
-            false,
+            telemetry_sample(
+                TelemetryPath::Mesh,
+                false,
+                Duration::ZERO,
+                false,
+                false,
+                None,
+            ),
         )
         .await;
         self.record_mesh_reason(peer, MeshPeerReason::ProtocolRejected)
@@ -799,32 +841,13 @@ impl MeshAwareHttpClient {
         }
     }
 
-    async fn record_sample(
-        &self,
-        peer: &MeshPeerTarget,
-        path: TelemetryPath,
-        success: bool,
-        elapsed: Duration,
-        fallback: bool,
-        updates_active_path: bool,
-    ) {
+    async fn record_sample(&self, peer: &MeshPeerTarget, sample: MeshTelemetrySample) {
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
-                .record_sample(
-                    &peer.node_id,
-                    &peer.node_name,
-                    MeshTelemetrySample {
-                        path,
-                        success,
-                        latency_ms: success
-                            .then_some(elapsed.as_millis().min(u32::MAX as u128) as u32),
-                        fallback,
-                        updates_active_path,
-                    },
-                )
+                .record_sample(&peer.node_id, &peer.node_name, sample)
                 .await;
         }
-        if success && path == TelemetryPath::Mesh {
+        if sample.success && sample.path == TelemetryPath::Mesh {
             self.record_mesh_reason(peer, MeshPeerReason::MeshAvailable)
                 .await;
         }
@@ -836,6 +859,43 @@ impl MeshAwareHttpClient {
                 .record_terminal_failure(&peer.node_id, &peer.node_name)
                 .await;
         }
+    }
+}
+
+fn telemetry_sample(
+    path: TelemetryPath,
+    success: bool,
+    elapsed: Duration,
+    fallback: bool,
+    updates_active_path: bool,
+    transport: Option<MeshTransportObservation>,
+) -> MeshTelemetrySample {
+    MeshTelemetrySample {
+        path,
+        success,
+        latency_ms: success.then_some(elapsed.as_millis().min(u32::MAX as u128) as u32),
+        fallback,
+        updates_active_path,
+        transport,
+    }
+}
+
+fn mesh_transport_observation(response: &reqwest::Response) -> MeshTransportObservation {
+    let protocol = if response.version() == reqwest::Version::HTTP_2 {
+        MeshTransportProtocol::H2
+    } else {
+        MeshTransportProtocol::Other
+    };
+    let fingerprint = response
+        .extensions()
+        .get::<hyper_util::client::legacy::connect::HttpInfo>()
+        .map(|info| MeshConnectionFingerprint {
+            local_addr: info.local_addr(),
+            remote_addr: info.remote_addr(),
+        });
+    MeshTransportObservation {
+        protocol,
+        fingerprint,
     }
 }
 

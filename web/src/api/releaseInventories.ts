@@ -3,7 +3,6 @@ import {
 	type ReleaseFixtureResponse,
 	statusEventFixture,
 } from "./releaseInventoryFixtures";
-
 export const API_COMPATIBILITY_WINDOW = ["3.22", "3.21", "3.20"] as const;
 export type ApiCompatibilityMinor = (typeof API_COMPATIBILITY_WINDOW)[number];
 export const API_CAPABILITIES = [
@@ -18,6 +17,7 @@ export const API_CAPABILITIES = [
 	"admin.status-events",
 	"admin.upgrade",
 	"admin.mesh",
+	"admin.mesh-transport-reuse",
 	"admin.reality-domains",
 	"admin.node-probes",
 	"admin.traffic-usage",

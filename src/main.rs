@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use rustls::crypto::aws_lc_rs;
+use rustls::crypto::ring;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -22,7 +22,7 @@ fn reject_legacy_relay_probe_env() -> Result<()> {
 }
 
 fn install_rustls_crypto_provider() {
-    let _ = aws_lc_rs::default_provider().install_default();
+    let _ = ring::default_provider().install_default();
 }
 
 fn disable_managed_vless_reconcile_for_canary_result(
@@ -348,7 +348,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     )?
     .with_mesh_observability(mesh_telemetry.clone());
     let mesh_client = raft_network.mesh_client();
-    let mesh_circuits = mesh_client.circuits();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),
@@ -503,7 +502,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         node_history.clone(),
         cluster_ca_key_pem_required.clone(),
         cluster_ca_pem.clone(),
-        mesh_client,
+        mesh_client.clone(),
     );
 
     let probe_secret = cluster_ca_key_pem_required.clone();
@@ -545,7 +544,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         geo_db_update,
         mesh_proxy_state,
         mesh_telemetry,
-        mesh_circuits,
+        mesh_client,
     )
     .layer(TraceLayer::new_for_http())
     .layer(CorsLayer::permissive());

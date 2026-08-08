@@ -13,6 +13,7 @@ import {
 import { ClusterInfoResponseSchema } from "./clusterInfo";
 import { HealthResponseSchema } from "./health";
 import {
+	API_CAPABILITIES,
 	API_CAPABILITIES_PATH,
 	API_COMPATIBILITY_WINDOW,
 	RELEASE_API_FIXTURES,
@@ -298,6 +299,8 @@ describe("immutable release inventories", () => {
 		);
 		expect(current?.capabilities).toContain("admin.mihomo-resource-policy");
 		expect(legacy?.capabilities).not.toContain("admin.mihomo-resource-policy");
+		expect(API_CAPABILITIES).toContain("admin.mesh-transport-reuse");
+		expect(current?.capabilities).not.toContain("admin.mesh-transport-reuse");
 		expect(current?.responseSchemas["GET /api/admin/status/events"]).toContain(
 			"mesh_revision",
 		);

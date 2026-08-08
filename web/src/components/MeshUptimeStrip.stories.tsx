@@ -13,6 +13,8 @@ function buckets(values: Array<"good" | "fallback" | "slow" | "down">) {
 		end_to_end_success: value === "down" ? 0 : 1,
 		end_to_end_failure: value === "down" ? 1 : 0,
 		latency_samples_ms: [value === "slow" ? 640 : 32],
+		mesh_h2_requests: value === "good" || value === "slow" ? 1 : 0,
+		mesh_connection_starts: 0,
 	}));
 }
 

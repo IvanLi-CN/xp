@@ -25,6 +25,8 @@
 
 - 不统计 IP 数、online user 数、Xray `statsUserOnline` 或 access log 派生指标。
 - 不实现新建连接次数、连接生命周期事件数或严格会话数。
+- 图表按业务 endpoint 监听端口统计，因此会混合用户代理连接与经过 managed Reality ingress
+  的 Mesh 控制面连接；它不是 Mesh 专用指标，也不能按 source 去重。
 - 不扩展到 `UserDetailsPage`、dashboard 或告警系统。
 - 不与现有 `IP usage` 面板做双线图、差值摘要或联动高亮。
 
@@ -66,6 +68,8 @@
 - Given 选中多个 endpoint，When 页面渲染图表，Then 每分钟值等于这些 endpoint 当分钟连接数的直接求和。
 - Given 切换 `24h` 与 `7d`，When API 与页面刷新，Then 返回与展示对应固定窗口边界。
 - Given 当前平台不支持 Linux socket 视图，When API/页面请求，Then 返回明确 unsupported warning，而不是正常零值曲线。
+- Given Mesh 连接复用刚部署，When 查看 24h/7d 图表，Then 历史峰值仍保留在窗口内；是否改善应以
+  部署后的 Mesh transport 指标和 source-specific socket 采样判定，而不是用未滚出窗口的 peak 判定。
 
 ## 质量门槛（Quality Gates）
 

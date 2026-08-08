@@ -38,6 +38,20 @@ export const AdminMeshBucketSchema = z.object({
 	end_to_end_success: z.number(),
 	end_to_end_failure: z.number(),
 	latency_samples_ms: z.array(z.number()),
+	mesh_h2_requests: z.number().int().nonnegative().default(0),
+	mesh_connection_starts: z.number().int().nonnegative().default(0),
+});
+
+export const AdminMeshTransportSchema = z.object({
+	protocol: z.enum(["h2", "other"]).nullable(),
+	health: z.enum(["unknown", "healthy", "churning"]),
+	connection_generation: z.number().int().nonnegative(),
+	current_connection_requests: z.number().int().nonnegative(),
+	requests_5m: z.number().int().nonnegative(),
+	connection_starts_5m: z.number().int().nonnegative(),
+	requests_1h: z.number().int().nonnegative(),
+	connection_starts_1h: z.number().int().nonnegative(),
+	last_connection_started_at: z.string().nullable(),
 });
 
 export const AdminMeshPeerSchema = z.object({
@@ -58,6 +72,7 @@ export const AdminMeshPeerSchema = z.object({
 	mesh_availability_24h: z.number().nullable(),
 	latency_p50_ms: z.number().nullable(),
 	latency_p95_ms: z.number().nullable(),
+	mesh_transport: AdminMeshTransportSchema.optional(),
 	buckets: z.array(AdminMeshBucketSchema),
 });
 
