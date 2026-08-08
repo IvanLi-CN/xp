@@ -17,6 +17,7 @@ const PERSISTED_QUERY_ROOTS = new Set([
 	"adminNodeRuntime",
 	"adminNodeHistory",
 	"adminNodeIpUsage",
+	"adminNodeTraffic",
 	"adminNodeTcpConnections",
 	"adminQuotaPolicyGlobalWeightRows",
 	"adminQuotaPolicyNodePolicy",
@@ -24,6 +25,7 @@ const PERSISTED_QUERY_ROOTS = new Set([
 	"adminUpgradeStatus",
 	"adminUser",
 	"adminUserIpUsage",
+	"adminUserTraffic",
 	"adminUserMihomoProfile",
 	"adminUsers",
 	"adminUserAccess",
@@ -121,7 +123,7 @@ const persister: PersistQueryClientProviderProps["persistOptions"]["persister"] 
 		},
 	};
 
-function shouldPersistQuery(queryKey: readonly unknown[]) {
+export function shouldPersistQuery(queryKey: readonly unknown[]) {
 	const root = queryKey[0];
 	return typeof root === "string" && PERSISTED_QUERY_ROOTS.has(root);
 }

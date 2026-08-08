@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { TrafficReport } from "../api/adminTraffic";
-import { buildTrafficTooltipHtml } from "./TrafficView";
+import { TrafficView, buildTrafficTooltipHtml } from "./TrafficView";
 
 const tooltipPalette = {
 	background: "var(--popover)",
@@ -54,6 +55,21 @@ const report: TrafficReport = {
 };
 
 describe("buildTrafficTooltipHtml", () => {
+	it("shows a nonblocking loading status over the chart", () => {
+		render(
+			<TrafficView
+				report={report}
+				window="24h"
+				onWindowChange={vi.fn()}
+				isWindowPending
+			/>,
+		);
+
+		expect(
+			screen.getByRole("status", { name: "Loading latest data" }),
+		).toHaveClass("pointer-events-none");
+	});
+
 	it("renders current and reference byte totals with themed foregrounds", () => {
 		const tooltip = buildTrafficTooltipHtml(report, "24h", tooltipPalette, 0);
 

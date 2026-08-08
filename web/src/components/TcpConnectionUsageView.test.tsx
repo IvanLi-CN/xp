@@ -245,4 +245,19 @@ describe("<TcpConnectionUsageView />", () => {
 			}),
 		).toBeInTheDocument();
 	});
+
+	it("shows a nonblocking loading status over the chart", () => {
+		render(
+			<TcpConnectionUsageView
+				window="24h"
+				onWindowChange={vi.fn()}
+				report={baseReport}
+				isWindowPending
+			/>,
+		);
+
+		expect(
+			screen.getByRole("status", { name: "Loading latest data" }),
+		).toHaveClass("pointer-events-none");
+	});
 });

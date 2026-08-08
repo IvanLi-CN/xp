@@ -4,16 +4,12 @@ import yaml from "js-yaml";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
-import {
-	type AdminIpUsageWindow,
-	type AdminUserIpUsageNodeGroup,
-	fetchAdminUserIpUsage,
+import type {
+	AdminIpUsageWindow,
+	AdminUserIpUsageNodeGroup,
 } from "../api/adminIpUsage";
 import { fetchAdminNodes } from "../api/adminNodes";
-import {
-	type UserTrafficNodeOption,
-	fetchAdminUserTraffic,
-} from "../api/adminTraffic";
+import type { UserTrafficNodeOption } from "../api/adminTraffic";
 import {
 	fetchAdminUserAccess,
 	putAdminUserAccess,
@@ -50,6 +46,7 @@ import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
+import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { SubscriptionFormatSegmentedControl } from "../components/SubscriptionFormatSegmentedControl";
 import { SubscriptionPreviewDialog } from "../components/SubscriptionPreviewDialog";
@@ -71,6 +68,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useUserTimeWindowReports } from "../hooks/useUserTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
 	formatSyncTimestamp,
@@ -84,9 +82,7 @@ const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
-
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
-
 type MihomoProfileDraft = {
 	mixin_yaml: string;
 	extra_proxies_yaml: string;
@@ -350,32 +346,16 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
-	const ipUsageQuery = useQuery({
-		queryKey: ["adminUserIpUsage", adminToken, userId, ipUsageWindow],
-		enabled: enabledFor(trafficCapability) && tab === "usageDetails",
-		queryFn: ({ signal }) =>
-			fetchAdminUserIpUsage(adminToken, userId, ipUsageWindow, signal),
-		placeholderData: (previousData) =>
-			previousData?.user.user_id === userId ? previousData : undefined,
-	});
-	const trafficQuery = useQuery({
-		queryKey: [
-			"adminUserTraffic",
+	const { ipUsageDisplay, ipUsageQuery, trafficDisplay, trafficQuery } =
+		useUserTimeWindowReports({
 			adminToken,
+			ipUsageEnabled: enabledFor(trafficCapability) && tab === "usageDetails",
+			ipUsageWindow,
+			nodeId: activeTrafficNodeId,
+			trafficEnabled: enabledFor(trafficCapability) && tab === "traffic",
+			trafficWindow: prefs.trafficWindow,
 			userId,
-			prefs.trafficWindow,
-			activeTrafficNodeId,
-		],
-		enabled: enabledFor(trafficCapability) && tab === "traffic",
-		queryFn: ({ signal }) =>
-			fetchAdminUserTraffic(
-				adminToken,
-				userId,
-				prefs.trafficWindow,
-				activeTrafficNodeId,
-				signal,
-			),
-	});
+		});
 	useEffect(() => {
 		if (trafficQuery.data?.nodes) {
 			setTrafficNodeOptions(trafficQuery.data.nodes);
@@ -410,7 +390,7 @@ export function UserDetailsPage() {
 			</SelectContent>
 		</Select>
 	);
-	const usageGroups = ipUsageQuery.data?.groups ?? [];
+	const usageGroups = ipUsageDisplay.data?.groups ?? [];
 	const usageTabLabels = useMemo(() => {
 		const counts = new Map<string, number>();
 		for (const group of usageGroups) {
@@ -1499,14 +1479,14 @@ export function UserDetailsPage() {
 			) : null}
 			{tab === "traffic" ? (
 				<div className="space-y-4">
-					{trafficQuery.isLoading && !trafficQuery.data ? (
+					{trafficQuery.isLoading && !trafficDisplay.data ? (
 						<PageState
 							variant="loading"
 							title="Loading traffic"
 							description="Fetching actual user traffic across the selected nodes."
 						/>
 					) : null}
-					{!trafficQuery.data &&
+					{!trafficDisplay.data &&
 					queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
 						<PageState
 							variant="offline"
@@ -1516,7 +1496,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{trafficQuery.isError &&
-					!trafficQuery.data &&
+					!trafficDisplay.data &&
 					!queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
 						<QueryErrorState
 							title="Failed to load traffic"
@@ -1527,18 +1507,27 @@ export function UserDetailsPage() {
 							beforeRetry={trafficNodeSelector}
 						/>
 					) : null}
-					{trafficQuery.data ? (
+					{trafficQuery.isError && trafficDisplay.data ? (
+						<QueryRefreshError
+							title="Traffic refresh failed"
+							description={formatError(trafficQuery.error)}
+							error={trafficQuery.error}
+							loading={trafficQuery.isFetching}
+							onRetry={() => trafficQuery.refetch()}
+						/>
+					) : null}
+					{trafficDisplay.data ? (
 						<TrafficView
 							report={{
-								...trafficQuery.data.traffic,
+								...trafficDisplay.data.traffic,
 								partial:
-									trafficQuery.data.traffic.partial ||
-									trafficQuery.data.partial,
+									trafficDisplay.data.traffic.partial ||
+									trafficDisplay.data.partial,
 								warnings: [
-									...trafficQuery.data.traffic.warnings,
-									...(trafficQuery.data.unreachable_nodes.length > 0
+									...trafficDisplay.data.traffic.warnings,
+									...(trafficDisplay.data.unreachable_nodes.length > 0
 										? [
-												`Unreachable nodes: ${trafficQuery.data.unreachable_nodes.join(", ")}`,
+												`Unreachable nodes: ${trafficDisplay.data.unreachable_nodes.join(", ")}`,
 											]
 										: []),
 								],
@@ -1546,6 +1535,7 @@ export function UserDetailsPage() {
 							window={prefs.trafficWindow}
 							onWindowChange={(next) => prefs.setTrafficWindow(next)}
 							isFetching={trafficQuery.isFetching}
+							isWindowPending={trafficDisplay.isWindowPending}
 							nodeSelector={trafficNodeSelector}
 						/>
 					) : null}
@@ -1553,14 +1543,14 @@ export function UserDetailsPage() {
 			) : null}
 			{tab === "usageDetails" ? (
 				<div className="space-y-4">
-					{ipUsageQuery.isLoading && !ipUsageQuery.data ? (
+					{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
 						<PageState
 							variant="loading"
 							title="Loading usage details"
 							description="Fetching minute-level inbound IP usage grouped by node."
 						/>
 					) : null}
-					{!ipUsageQuery.data &&
+					{!ipUsageDisplay.data &&
 					queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
 						<PageState
 							variant="offline"
@@ -1569,7 +1559,7 @@ export function UserDetailsPage() {
 						/>
 					) : null}
 					{ipUsageQuery.isError &&
-					!ipUsageQuery.data &&
+					!ipUsageDisplay.data &&
 					!queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
 						<QueryErrorState
 							title="Failed to load usage details"
@@ -1579,18 +1569,27 @@ export function UserDetailsPage() {
 							onRetry={() => ipUsageQuery.refetch()}
 						/>
 					) : null}
-					{ipUsageQuery.data?.partial ? (
+					{ipUsageQuery.isError && ipUsageDisplay.data ? (
+						<QueryRefreshError
+							title="Usage details refresh failed"
+							description={formatError(ipUsageQuery.error)}
+							error={ipUsageQuery.error}
+							loading={ipUsageQuery.isFetching}
+							onRetry={() => ipUsageQuery.refetch()}
+						/>
+					) : null}
+					{ipUsageDisplay.data?.partial ? (
 						<div className="xp-alert xp-alert-warning px-4 py-2">
 							<div className="space-y-1">
 								<div>Usage details are partial.</div>
 								<div className="font-mono text-xs">
 									Unreachable nodes:{" "}
-									{ipUsageQuery.data.unreachable_nodes.join(", ")}
+									{ipUsageDisplay.data.unreachable_nodes.join(", ")}
 								</div>
 							</div>
 						</div>
 					) : null}
-					{ipUsageQuery.data ? (
+					{ipUsageDisplay.data ? (
 						usageGroups.length > 0 ? (
 							<div className="space-y-4">
 								<div className="overflow-x-auto">
@@ -1633,11 +1632,12 @@ export function UserDetailsPage() {
 										onWindowChange={setIpUsageWindow}
 										report={activeUsageGroup}
 										isFetching={ipUsageQuery.isFetching}
+										isWindowPending={ipUsageDisplay.isWindowPending}
 										emptyTitle="No inbound IP activity for this node"
 									/>
 								) : null}
 							</div>
-						) : ipUsageQuery.data.partial ? (
+						) : ipUsageDisplay.data.partial ? (
 							<PageState
 								variant="empty"
 								title="Usage details unavailable"
