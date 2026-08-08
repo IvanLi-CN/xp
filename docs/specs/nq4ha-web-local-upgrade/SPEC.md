@@ -235,6 +235,40 @@ PR: include
 ![Version indicator unsupported latest](./assets/version-indicator-unsupported-latest.png)
 
 - source_type: storybook_canvas
+  - story_id_or_title: `Components/VersionIndicator/UpdateAvailableInsufficientSpace`
+  - target_program: mock-only
+  - capture_scope: element
+  - requested_viewport: none
+  - viewport_strategy: storybook-viewport
+  - margin_policy: require_margin
+  - evidence_surface: component
+  - sensitive_exclusion: N/A
+  - submission_gate: pending-owner-approval
+  - state: storage remains below the floor after managed cleanup
+  - evidence_note: desktop popover exposes the `128 MiB` blocker and disabled
+    Upgrade action
+
+PR: include
+![Version indicator insufficient space desktop](./assets/upgrade-space-desktop.png)
+
+- source_type: storybook_canvas
+  - story_id_or_title: `Components/VersionIndicator/UpdateAvailableInsufficientSpaceMobile`
+  - target_program: mock-only
+  - capture_scope: element
+  - requested_viewport: 393x852
+  - viewport_strategy: storybook-viewport
+  - margin_policy: require_margin
+  - evidence_surface: component
+  - sensitive_exclusion: N/A
+  - submission_gate: pending-owner-approval
+  - state: storage blocker at the required mobile viewport
+  - evidence_note: the fixed `393x852` Storybook viewport keeps the error,
+    actions, and disabled Upgrade control readable
+
+PR: include
+![Version indicator insufficient space mobile](./assets/upgrade-space-mobile.png)
+
+- source_type: storybook_canvas
   - story_id_or_title: `Components/VersionIndicator/Reconnecting`
   - target_program: mock-only
   - capture_scope: element

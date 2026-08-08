@@ -256,7 +256,14 @@ export const UpdateAvailableInsufficientSpaceMobile: Story = {
 	...UpdateAvailableInsufficientSpace,
 	parameters: {
 		viewport: {
-			defaultViewport: "mobile1",
+			defaultViewport: "upgradeStorageMobile",
+			viewports: {
+				upgradeStorageMobile: {
+					name: "Upgrade storage mobile (393x852)",
+					styles: { height: "852px", width: "393px" },
+					type: "mobile",
+				},
+			},
 		},
 	},
 };
