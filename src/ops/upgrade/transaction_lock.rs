@@ -10,6 +10,21 @@ pub(super) struct UpgradeTransactionLock {
     path: PathBuf,
 }
 
+pub(super) fn begin(
+    data_dir: &Path,
+    is_real_upgrade: bool,
+    is_resumed_upgrade: bool,
+) -> Result<Option<UpgradeTransactionLock>, ExitError> {
+    if !is_real_upgrade {
+        return Ok(None);
+    }
+    if is_resumed_upgrade {
+        verify_resume_owner(data_dir)?;
+        return Ok(None);
+    }
+    UpgradeTransactionLock::acquire(data_dir).map(Some)
+}
+
 impl UpgradeTransactionLock {
     pub(super) fn acquire(data_dir: &Path) -> Result<Self, ExitError> {
         let dir = crate::upgrade_job::upgrade_dir(data_dir);
@@ -57,17 +72,35 @@ impl Drop for UpgradeTransactionLock {
 
 pub(super) fn release(data_dir: &Path) {
     let path = crate::upgrade_job::upgrade_dir(data_dir).join(TRANSACTION_LOCK_FILE);
-    if let Err(error) = fs::remove_file(path)
-        && error.kind() != io::ErrorKind::NotFound
-    {
-        tracing::warn!(error = %error, "could not release upgrade transaction lock");
+    match lock_owner_pid(&path) {
+        Ok(Some(pid)) if pid == current_pid() => {
+            if let Err(error) = fs::remove_file(path) {
+                tracing::warn!(error = %error, "could not release upgrade transaction lock");
+            }
+        }
+        Ok(Some(_)) => tracing::warn!(
+            "refusing to release an upgrade transaction lock owned by another process"
+        ),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(error = %error.message, "could not inspect upgrade transaction lock")
+        }
     }
 }
 
+pub(super) fn verify_resume_owner(data_dir: &Path) -> Result<(), ExitError> {
+    let path = crate::upgrade_job::upgrade_dir(data_dir).join(TRANSACTION_LOCK_FILE);
+    if lock_owner_pid(&path)? == Some(current_pid()) {
+        return Ok(());
+    }
+    Err(ExitError::new(
+        3,
+        "invalid_args: resumed upgrade lock is not owned by current process",
+    ))
+}
+
 fn lock_owner_is_running(path: &Path) -> Result<bool, ExitError> {
-    let raw = fs::read_to_string(path)
-        .map_err(|error| ExitError::new(7, format!("service_error: read upgrade lock: {error}")))?;
-    let Ok(pid) = raw.trim().parse::<i32>() else {
+    let Some(pid) = lock_owner_pid(path)? else {
         return Ok(false);
     };
     // Safety: kill with signal zero only probes a local process; it sends no signal.
@@ -82,9 +115,25 @@ fn lock_owner_is_running(path: &Path) -> Result<bool, ExitError> {
     }
 }
 
+fn lock_owner_pid(path: &Path) -> Result<Option<i32>, ExitError> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| ExitError::new(7, format!("service_error: read upgrade lock: {error}")))?;
+    let Ok(pid) = raw.trim().parse::<i32>() else {
+        return Ok(None);
+    };
+    if pid <= 0 {
+        return Ok(None);
+    }
+    Ok(Some(pid))
+}
+
+fn current_pid() -> i32 {
+    i32::try_from(std::process::id()).unwrap_or(-1)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UpgradeTransactionLock;
+    use super::{TRANSACTION_LOCK_FILE, UpgradeTransactionLock, release, verify_resume_owner};
 
     #[test]
     fn rejects_a_second_live_upgrade_transaction() {
@@ -93,5 +142,28 @@ mod tests {
         let error = UpgradeTransactionLock::acquire(tmp.path()).unwrap_err();
         assert_eq!(error.code, 3);
         assert_eq!(error.message, "upgrade_in_progress");
+    }
+
+    #[test]
+    fn reclaims_a_zero_pid_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let upgrade_dir = tmp.path().join("upgrade");
+        std::fs::create_dir_all(&upgrade_dir).unwrap();
+        std::fs::write(upgrade_dir.join(TRANSACTION_LOCK_FILE), "0\n").unwrap();
+        let lock = UpgradeTransactionLock::acquire(tmp.path()).unwrap();
+        drop(lock);
+    }
+
+    #[test]
+    fn foreign_resume_cannot_release_another_transaction_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let upgrade_dir = tmp.path().join("upgrade");
+        std::fs::create_dir_all(&upgrade_dir).unwrap();
+        let path = upgrade_dir.join(TRANSACTION_LOCK_FILE);
+        std::fs::write(&path, format!("{}\n", std::process::id() + 1)).unwrap();
+
+        assert!(verify_resume_owner(tmp.path()).is_err());
+        release(tmp.path());
+        assert!(path.exists());
     }
 }
