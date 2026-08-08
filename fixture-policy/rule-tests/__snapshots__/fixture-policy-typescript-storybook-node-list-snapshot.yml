@@ -1,0 +1,17 @@
+id: fixture-policy-typescript-storybook-node-list
+snapshots:
+  ? |
+    const nodeIds = ["node-live"];
+  : labels:
+    - source: '["node-live"]'
+      style: primary
+      start: 16
+      end: 29
+    - source: const nodeIds = ["node-live"];
+      style: secondary
+      start: 0
+      end: 30
+    - source: '"node-live"'
+      style: secondary
+      start: 17
+      end: 28

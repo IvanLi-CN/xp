@@ -133,6 +133,34 @@ type MockState = {
 	userMihomoProfiles: Record<string, MockMihomoProfile>;
 };
 
+function buildNodeRuntimeListItem(node: AdminNode) {
+	return {
+		node_id: node.node_id,
+		node_name: node.node_name,
+		api_base_url: node.api_base_url,
+		access_host: node.access_host,
+		summary: {
+			status: "up",
+			updated_at: fixtureCatalog.slotString.s91(),
+		},
+		components: [
+			{
+				component: "xp",
+				status: "up",
+				consecutive_failures: 0,
+				recoveries_observed: 1,
+				restart_attempts: 0,
+			},
+		],
+		recent_slots: [
+			{
+				slot_start: fixtureCatalog.slotString.s91(),
+				status: "up",
+			},
+		],
+	};
+}
+
 const defaultNodes: AdminNode[] = [
 	{
 		node_id: fixtureCatalog.slotString.s32(),
@@ -564,31 +592,7 @@ export async function setupApiMocks(
 		}
 
 		if (path === "/api/admin/nodes/runtime" && method === "GET") {
-			const items = state.nodes.map(() => ({
-				node_id: fixtureCatalog.slotString.s17(),
-				node_name: fixtureCatalog.slotString.s18(),
-				api_base_url: fixtureCatalog.slotString.s19(),
-				access_host: fixtureCatalog.slotString.s20(),
-				summary: {
-					status: "up",
-					updated_at: fixtureCatalog.slotString.s91(),
-				},
-				components: [
-					{
-						component: "xp",
-						status: "up",
-						consecutive_failures: 0,
-						recoveries_observed: 1,
-						restart_attempts: 0,
-					},
-				],
-				recent_slots: [
-					{
-						slot_start: fixtureCatalog.slotString.s91(),
-						status: "up",
-					},
-				],
-			}));
+			const items = state.nodes.map(buildNodeRuntimeListItem);
 			jsonResponse(route, {
 				partial: false,
 				unreachable_nodes: [],
@@ -602,31 +606,7 @@ export async function setupApiMocks(
 			method === "GET" &&
 			options.mockStatusEvents !== false
 		) {
-			const items = state.nodes.map(() => ({
-				node_id: fixtureCatalog.slotString.s17(),
-				node_name: fixtureCatalog.slotString.s18(),
-				api_base_url: fixtureCatalog.slotString.s19(),
-				access_host: fixtureCatalog.slotString.s20(),
-				summary: {
-					status: "up",
-					updated_at: fixtureCatalog.slotString.s91(),
-				},
-				components: [
-					{
-						component: "xp",
-						status: "up",
-						consecutive_failures: 0,
-						recoveries_observed: 1,
-						restart_attempts: 0,
-					},
-				],
-				recent_slots: [
-					{
-						slot_start: fixtureCatalog.slotString.s91(),
-						status: "up",
-					},
-				],
-			}));
+			const items = state.nodes.map(buildNodeRuntimeListItem);
 			const payload = [
 				`event: hello\ndata: ${JSON.stringify({
 					node_id: fixtureCatalog.slotString.s57(),

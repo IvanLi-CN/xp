@@ -1,0 +1,7 @@
+id: fixture-policy-typescript-storybook-fixture-data
+valid:
+  - 'const item = { access_host: fixtureCatalog.host.primary() };'
+  - 'const item = { minute: minuteFromOffset(start, 1) };'
+invalid:
+  - |
+    const item = { access_host: "live.example" };

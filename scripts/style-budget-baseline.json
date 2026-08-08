@@ -1114,6 +1114,10 @@
     "long_line_count": 1,
     "max_line_length": 102
   },
+  "fixture-policy/rules/rust-adapter-output-provenance.yml": {
+    "long_line_count": 1,
+    "max_line_length": 325
+  },
   "fixture-policy/rules/rust-fixture-data.yml": {
     "long_line_count": 3,
     "max_line_length": 632
@@ -1142,6 +1146,10 @@
     "long_line_count": 1,
     "max_line_length": 103
   },
+  "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
+    "long_line_count": 1,
+    "max_line_length": 321
+  },
   "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
     "long_line_count": 1,
     "max_line_length": 144
@@ -1165,6 +1173,6 @@
   "test-fixtures/src/lib.rs": {
     "long_line_count": 36,
     "max_line_length": 147,
-    "source_lines": 1160
+    "source_lines": 2688
   }
 }

@@ -17,3 +17,14 @@ invalid:
     pub fn injected_metric() -> u64 {
         4096
     }
+  - |
+    const LIVE: &str = "live.example";
+  - |
+    fn helper() -> &'static str {
+        "live.example"
+    }
+  - |
+    pub fn injected_host() -> &'static str {
+        let _ = catalog();
+        LIVE
+    }

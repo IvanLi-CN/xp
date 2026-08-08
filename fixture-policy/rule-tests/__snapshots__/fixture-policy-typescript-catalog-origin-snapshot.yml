@@ -1,6 +1,13 @@
 id: fixture-policy-typescript-catalog-origin
 snapshots:
   ? |
+    const build = (fixtureCatalog: unknown) => fixtureCatalog;
+  : labels:
+    - source: 'fixtureCatalog: unknown'
+      style: primary
+      start: 15
+      end: 38
+  ? |
     const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
   : labels:
     - source: 'const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };'
@@ -35,3 +42,10 @@ snapshots:
       style: primary
       start: 0
       end: 58
+  ? |
+    try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }
+  : labels:
+    - source: catch (fixtureCatalog) { consume(fixtureCatalog); }
+      style: primary
+      start: 16
+      end: 67

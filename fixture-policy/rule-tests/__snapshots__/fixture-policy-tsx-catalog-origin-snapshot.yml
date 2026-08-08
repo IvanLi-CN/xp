@@ -1,6 +1,13 @@
 id: fixture-policy-tsx-catalog-origin
 snapshots:
   ? |
+    const build = (fixtureCatalog: unknown) => fixtureCatalog;
+  : labels:
+    - source: 'fixtureCatalog: unknown'
+      style: primary
+      start: 15
+      end: 38
+  ? |
     function fixtureCatalog() { return {}; }
   : labels:
     - source: function fixtureCatalog() { return {}; }
@@ -21,3 +28,10 @@ snapshots:
       style: primary
       start: 0
       end: 45
+  ? |
+    try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }
+  : labels:
+    - source: catch (fixtureCatalog) { consume(fixtureCatalog); }
+      style: primary
+      start: 16
+      end: 67

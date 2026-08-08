@@ -29,4 +29,4 @@ rule:
               regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
           - inside:
               stopBy: end
-              pattern: Object.fromEntries($$$)
+              pattern: catalog.slots.$SLOTS.map(($VALUE, $INDEX) => [$KEY, $$$])

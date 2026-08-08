@@ -21,3 +21,12 @@ snapshots:
       style: primary
       start: 16
       end: 38
+  ? |
+    const slots = Object.fromEntries([
+      ["unsafe", () => "live.example"],
+    ]);
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 48
+      end: 68
