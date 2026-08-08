@@ -58,7 +58,10 @@ export type MockStateSeed = {
 
 export const DEFAULT_API_CAPABILITIES = {
 	release_tag: "v3.22.5",
-	capabilities: [...API_CAPABILITIES] satisfies ApiCapability[],
+	capabilities: [
+		...API_CAPABILITIES,
+		"admin.endpoint-mihomo-smux",
+	] satisfies ApiCapability[],
 	fingerprint: Object.fromEntries(
 		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [
 			path,
