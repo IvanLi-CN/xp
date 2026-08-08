@@ -77,7 +77,8 @@
   - success case 从 `XP_BUILD_VERSION=0.2.0` 升级到 `0.2.1`，验证
     `/api/cluster/info` 返回新版本，并确认升级前创建的用户仍可读取。
   - rollback case 故意让 `xp.service` restart 失败，验证 durable status 进入
-    `failed`、旧版本 `xp` 继续提供服务、升级失败二进制被保留为 `xp.failed.*`。
+    `failed`、旧版本 `xp` 继续提供服务、受管 `.bak.*`/`.failed.*` 均被清理，并只保留
+    不超过 `8 KiB` 的失败诊断 JSON。
   - migration smoke 覆盖 legacy state JSON、state/usage version skew recovery 与 legacy grants
     snapshot install migration。
 - Web:

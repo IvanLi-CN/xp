@@ -1,7 +1,7 @@
 use crate::ops::cli::{ExitError, UpgradeArgs, UpgradeReleaseArgs, UpgradeRunnerArgs};
 use crate::ops::paths::Paths;
-use crate::ops::platform::{CpuArch, detect_cpu_arch};
 use crate::ops::runtime_activation::restart_xp_service;
+use crate::ops::upgrade_artifacts::{cleanup_managed_artifacts_for, workspace_path};
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, tmp_path_next_to};
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -14,8 +14,28 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+mod failure;
+mod inputs;
 mod managed_runtimes;
-use managed_runtimes::upgrade_and_reconcile_managed_runtimes;
+mod reexec;
+mod transaction_lock;
+use failure::{
+    cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
+    record_early_upgrade_failure, restore_after_failed_install,
+    restore_after_failed_xp_ops_verification, rollback_xp_ops_after_resumed_failure,
+    unrestored_transaction_backup_error, write_upgrade_diagnostics,
+};
+use inputs::{
+    detect_platform, github_api_base, parse_owner_repo, resolve_repo, validate_release_args,
+};
+use managed_runtimes::{
+    RuntimeBinaryBackup, rollback_complete_phase_binaries, upgrade_and_reconcile_managed_runtimes,
+};
+use reexec::{
+    ReexecTransaction, clear_upgrade_resume_env, finish_reexeced_upgrade,
+    resume_with_upgraded_xp_ops,
+};
+use transaction_lock::UpgradeTransactionLock;
 const DEFAULT_GITHUB_REPO: &str = "IvanLi-CN/xp";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
 const CHECKSUMS_ASSET_NAME: &str = "checksums.txt";
@@ -24,9 +44,10 @@ const UPGRADE_RESUME_REPO: &str = "XP_OPS_UPGRADE_RESUME_REPO";
 const UPGRADE_RESUME_API_BASE: &str = "XP_OPS_UPGRADE_RESUME_API_BASE";
 const UPGRADE_RESUME_XP_OPS_DEST: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_DEST";
 const UPGRADE_RESUME_XP_OPS_BACKUP: &str = "XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP";
-
+const UPGRADE_RESUME_SERVICE_BACKUPS: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS";
+const UPGRADE_RESUME_SERVICE_PHASE_COMPLETE: &str = "XP_OPS_UPGRADE_RESUME_SERVICE_PHASE_COMPLETE";
 #[derive(Debug, Clone, Copy)]
-enum Platform {
+pub(super) enum Platform {
     LinuxX86_64,
     LinuxAarch64,
 }
@@ -45,58 +66,6 @@ impl Platform {
         }
     }
 }
-
-fn detect_platform() -> Result<Platform, ExitError> {
-    if std::env::consts::OS != "linux" {
-        return Err(ExitError::new(2, "unsupported_platform"));
-    }
-    match detect_cpu_arch() {
-        CpuArch::X86_64 => Ok(Platform::LinuxX86_64),
-        CpuArch::Aarch64 => Ok(Platform::LinuxAarch64),
-        CpuArch::Other(_) => Err(ExitError::new(2, "unsupported_platform")),
-    }
-}
-
-fn github_api_base() -> String {
-    std::env::var("XP_OPS_GITHUB_API_BASE_URL").unwrap_or_else(|_| DEFAULT_GITHUB_API_BASE.into())
-}
-
-fn resolve_repo(args_repo: Option<&str>) -> Result<(String, String), ExitError> {
-    let repo = args_repo
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("XP_OPS_GITHUB_REPO").ok())
-        .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string());
-
-    let Some((owner, name)) = parse_owner_repo(repo.as_str()) else {
-        return Err(ExitError::new(
-            3,
-            format!("invalid_args: invalid --repo (expected owner/repo): {repo}"),
-        ));
-    };
-    Ok((owner, name))
-}
-
-fn parse_owner_repo(v: &str) -> Option<(String, String)> {
-    let (owner, repo) = v.split_once('/')?;
-    if owner.trim().is_empty() || repo.trim().is_empty() {
-        return None;
-    }
-    if repo.contains('/') {
-        return None;
-    }
-    Some((owner.trim().to_string(), repo.trim().to_string()))
-}
-
-fn validate_release_args(args: &UpgradeReleaseArgs) -> Result<(), ExitError> {
-    if args.prerelease && args.version != "latest" {
-        return Err(ExitError::new(
-            3,
-            "invalid_args: --prerelease only works with --version latest",
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Debug, serde::Deserialize)]
 struct GitHubAsset {
     name: String,
@@ -134,6 +103,8 @@ struct ResumeContext {
     release: LockedRelease,
     xp_ops_dest: PathBuf,
     xp_ops_backup: PathBuf,
+    service_backups: Vec<RuntimeBinaryBackup>,
+    service_phase_complete: bool,
 }
 
 async fn fetch_release(
@@ -283,6 +254,8 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let current_exe = std::env::current_exe()
         .map_err(|error| ExitError::new(7, format!("install_failed: current_exe: {error}")))?;
     let resume = load_resume_context(args.release.repo.as_deref())?;
+    let lock_data_dir = paths.map_abs(&args.data_dir);
+    let _transaction_lock = transaction_lock::begin(&lock_data_dir, mode == Mode::Real)?;
     let release_args = resume
         .as_ref()
         .map(|ctx| ctx.release.release_args())
@@ -290,27 +263,14 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
     let (owner, repo) = resume
         .as_ref()
         .map(|ctx| (ctx.release.owner.clone(), ctx.release.repo.clone()))
-        .unwrap_or(resolve_repo(release_args.repo.as_deref())?);
+        .unwrap_or(resolve_repo(
+            release_args.repo.as_deref(),
+            DEFAULT_GITHUB_REPO,
+        )?);
     let api_base = resume
         .as_ref()
         .map(|ctx| ctx.release.api_base.clone())
-        .unwrap_or_else(github_api_base);
-    let release = fetch_release(&api_base, &owner, &repo, &release_args)
-        .await
-        .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
-
-    eprintln!(
-        "resolved release: {}/{} {}{}",
-        owner,
-        repo,
-        release.tag_name,
-        if release.prerelease {
-            " (prerelease)"
-        } else {
-            ""
-        }
-    );
-
+        .unwrap_or_else(|| github_api_base(DEFAULT_GITHUB_API_BASE));
     let xp_dest = paths.usr_local_bin_xp();
     let xp_backup = backup_path(&xp_dest);
     let xp_asset_name = platform.xp_asset_name();
@@ -330,6 +290,56 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         .map(|ctx| ctx.xp_ops_backup.clone())
         .unwrap_or_else(|| backup_path(&xp_ops_dest));
     let xp_ops_asset_name = platform.xp_ops_asset_name();
+
+    if mode == Mode::Real
+        && let Some(resume) = resume.as_ref()
+        && resume.service_phase_complete
+    {
+        return finish_reexeced_upgrade(&paths, &args.data_dir, resume);
+    }
+
+    if mode == Mode::Real
+        && resume.is_none()
+        && let Err(error) = preflight_upgrade(&paths, &args.data_dir, &xp_dest, &xp_ops_dest)
+    {
+        return Err(record_early_upgrade_failure(
+            &paths,
+            &args.data_dir,
+            &release_args.version,
+            &HashMap::new(),
+            error,
+        ));
+    }
+
+    let release = match fetch_release(&api_base, &owner, &repo, &release_args).await {
+        Ok(release) => release,
+        Err(error) => {
+            let error = ExitError::new(5, format!("download_failed: {error}"));
+            return Err(if mode == Mode::Real {
+                record_early_upgrade_failure(
+                    &paths,
+                    &args.data_dir,
+                    &release_args.version,
+                    &HashMap::new(),
+                    error,
+                )
+            } else {
+                error
+            });
+        }
+    };
+
+    eprintln!(
+        "resolved release: {}/{} {}{}",
+        owner,
+        repo,
+        release.tag_name,
+        if release.prerelease {
+            " (prerelease)"
+        } else {
+            ""
+        }
+    );
 
     if mode == Mode::DryRun {
         if args.allow_internal_auth_v2_cutover {
@@ -356,35 +366,67 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
         return Ok(());
     }
 
-    if !xp_dest.exists() {
-        return Err(ExitError::new(3, "invalid_args: xp is not installed"));
+    let tmp_dir = workspace_path(&paths);
+    if let Err(error) = ensure_dir(&tmp_dir) {
+        return Err(record_early_upgrade_failure(
+            &paths,
+            &args.data_dir,
+            &release.tag_name,
+            &HashMap::new(),
+            ExitError::new(7, format!("service_error: {error}")),
+        ));
     }
 
-    let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
-    ensure_dir(&tmp_dir).map_err(|e| ExitError::new(7, format!("service_error: {e}")))?;
-
     let Some(checksums_url) = find_asset_url(&release, CHECKSUMS_ASSET_NAME) else {
-        return Err(ExitError::new(
-            5,
-            format!("download_failed: missing asset {CHECKSUMS_ASSET_NAME}"),
+        return Err(record_early_upgrade_failure(
+            &paths,
+            &args.data_dir,
+            &release.tag_name,
+            &HashMap::new(),
+            ExitError::new(
+                5,
+                format!("download_failed: missing asset {CHECKSUMS_ASSET_NAME}"),
+            ),
         ));
     };
 
     let checksums_path = tmp_dir.join("checksums.txt");
-    download_to_path(checksums_url, &checksums_path)
-        .await
-        .map_err(|e| ExitError::new(5, format!("download_failed: {e}")))?;
-    let checksums = read_checksums(&checksums_path)?;
+    if let Err(error) = download_to_path(checksums_url, &checksums_path).await {
+        return Err(record_early_upgrade_failure(
+            &paths,
+            &args.data_dir,
+            &release.tag_name,
+            &HashMap::new(),
+            ExitError::new(5, format!("download_failed: {error}")),
+        ));
+    }
+    let checksums = match read_checksums(&checksums_path) {
+        Ok(checksums) => checksums,
+        Err(error) => {
+            return Err(record_early_upgrade_failure(
+                &paths,
+                &args.data_dir,
+                &release.tag_name,
+                &HashMap::new(),
+                error,
+            ));
+        }
+    };
 
-    if args.allow_internal_auth_v2_cutover {
-        crate::internal_auth_epoch::write_cutover_marker(&args.data_dir).map_err(|error| {
+    if args.allow_internal_auth_v2_cutover
+        && let Err(error) = crate::internal_auth_epoch::write_cutover_marker(&args.data_dir)
+    {
+        return Err(record_early_upgrade_failure(
+            &paths,
+            &args.data_dir,
+            &release.tag_name,
+            &checksums,
             ExitError::new(
                 7,
                 format!("service_error: write internal-auth v2 cutover marker: {error}"),
-            )
-        })?;
+            ),
+        ));
     }
-
     let phase_result = async {
         upgrade_xp(
             &paths,
@@ -406,7 +448,7 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     ),
                 )
             })?;
-        upgrade_and_reconcile_managed_runtimes(
+        let runtime_backups = upgrade_and_reconcile_managed_runtimes(
             &paths,
             &release,
             &checksums,
@@ -415,27 +457,68 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
             rollback_xp_on_runtime_failure,
         )
         .await?;
-
+        let mut service_backups = vec![RuntimeBinaryBackup {
+            dest: xp_dest.clone(),
+            backup: Some(xp_backup.clone()),
+        }];
+        service_backups.extend(runtime_backups);
         if resume.is_some() {
             clear_upgrade_resume_env();
         } else {
-            let _ = upgrade_xp_ops(
+            install_xp_ops_binary(
                 &paths,
                 &release,
                 &checksums,
                 xp_ops_asset_name,
                 &xp_ops_dest,
                 &xp_ops_backup,
+                false,
             )
             .await?;
+            if let Err(error) = resume_with_upgraded_xp_ops(
+                &paths,
+                &args,
+                &release,
+                &format!("{owner}/{repo}"),
+                &api_base,
+                ReexecTransaction {
+                    xp_ops_dest: &xp_ops_dest,
+                    xp_ops_backup: &xp_ops_backup,
+                    service_backups: &service_backups,
+                },
+            ) {
+                let error = match rollback_complete_phase_binaries(&paths, &service_backups) {
+                    Ok(()) => error,
+                    Err(rollback) => ExitError::new(
+                        rollback.code,
+                        format!(
+                            "{}; service binary rollback failed: {}",
+                            error.message, rollback.message
+                        ),
+                    ),
+                };
+                return rollback_xp_ops_after_resumed_failure(&xp_ops_dest, &xp_ops_backup, error);
+            }
+            unreachable!("xp-ops self-reexec must replace the current process");
         }
-
         Ok(())
     }
     .await;
-
     match phase_result {
-        Ok(()) => Ok(()),
+        Ok(()) => match cleanup_managed_artifacts_for(&paths, &[&xp_ops_dest]) {
+            Ok(_) => {
+                clear_upgrade_diagnostics(&args.data_dir);
+                Ok(())
+            }
+            Err(error) => {
+                let error = ExitError::new(
+                    7,
+                    format!("service_error: cleanup upgrade artifacts: {error}"),
+                );
+                write_upgrade_diagnostics(&args.data_dir, &release.tag_name, &checksums, &error);
+                Err(error)
+            }
+        },
         Err(err) => {
             if args.allow_internal_auth_v2_cutover
                 && matches!(
@@ -453,24 +536,33 @@ pub async fn cmd_upgrade(paths: Paths, args: UpgradeArgs) -> Result<(), ExitErro
                     )
                 );
             }
-            if let Some(resume) = resume.as_ref() {
+            let err = if let Some(resume) = resume.as_ref() {
                 clear_upgrade_resume_env();
-                return rollback_xp_ops_after_resumed_failure(
+                match rollback_xp_ops_after_resumed_failure(
                     &resume.xp_ops_dest,
                     &resume.xp_ops_backup,
                     err,
-                );
-            }
+                ) {
+                    Err(error) => error,
+                    Ok(()) => unreachable!("rollback failure helper must return an error"),
+                }
+            } else {
+                err
+            };
+            let err = cleanup_after_upgrade_failure(&paths, &[&xp_ops_dest], err);
+            write_upgrade_diagnostics(&args.data_dir, &release.tag_name, &checksums, &err);
             Err(err)
         }
     }
 }
-
 pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result<(), ExitError> {
+    let lock_data_dir = paths.map_abs(&args.data_dir);
+    let _transaction_lock = UpgradeTransactionLock::acquire(&lock_data_dir)?;
     let request = crate::upgrade_job::prepare_runner_request(&args.data_dir, DEFAULT_GITHUB_REPO)?;
     let starting = crate::upgrade_job::status_for_runner_start(&request);
     crate::upgrade_job::write_status(&args.data_dir, &starting)
         .map_err(|e| ExitError::new(7, format!("service_error: write upgrade status: {e}")))?;
+    reexec::mark_upgrade_runner_resume();
 
     let release_args = UpgradeReleaseArgs {
         version: request.target_tag.clone(),
@@ -485,6 +577,7 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     };
 
     let result = cmd_upgrade(paths, upgrade_args).await;
+    clear_upgrade_resume_env();
     let final_status =
         crate::upgrade_job::status_for_runner_finish(&request, result.as_ref().map(|_| ()));
     if let Err(err) = crate::upgrade_job::write_status(&args.data_dir, &final_status) {
@@ -495,7 +588,6 @@ pub async fn cmd_upgrade_runner(paths: Paths, args: UpgradeRunnerArgs) -> Result
     }
     result
 }
-
 async fn upgrade_xp(
     paths: &Paths,
     release: &GitHubRelease,
@@ -543,9 +635,14 @@ async fn upgrade_xp(
     })?;
 
     if let Err(e) = fs::rename(&staged, &dest) {
-        let _ = fs::rename(backup, &dest);
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(7, format!("service_error: {e}")));
+        return Err(restore_after_failed_install(
+            backup,
+            &dest,
+            &staged,
+            "xp",
+            "service_error",
+            &e,
+        ));
     }
 
     chmod(&dest, 0o755).ok();
@@ -557,7 +654,8 @@ async fn upgrade_xp(
                 return Err(ExitError::new(
                     7,
                     concat!(
-                        "service_error: restart failed after internal-auth v2 epoch was consumed; ",
+                        "service_error: restart failed after internal-auth v2 epoch ",
+                        "was consumed; ",
                         "v1 rollback is blocked"
                     ),
                 ));
@@ -568,7 +666,8 @@ async fn upgrade_xp(
                     7,
                     format!(
                         concat!(
-                            "service_error: restart failed and internal-auth epoch is unreadable; ",
+                            "service_error: restart failed and internal-auth epoch is ",
+                            "unreadable; ",
                             "v1 rollback is blocked: {}"
                         ),
                         error
@@ -576,33 +675,23 @@ async fn upgrade_xp(
                 ));
             }
         }
-        let _ = fs::rename(
-            &dest,
-            dest.with_extension(format!("failed.{}", now_unix_secs())),
-        );
+        let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));
+        let _ = fs::rename(&dest, &failed);
         let rollback_ok = fs::rename(backup, &dest).is_ok();
         if rollback_ok {
+            let _ = fs::remove_file(&failed);
             let _ = restart_xp_service(paths);
             return Err(ExitError::new(
                 7,
                 "service_error: restart failed; rolled back",
             ));
         }
-        return Err(ExitError::new(8, "rollback_failed"));
+        return Err(unrestored_transaction_backup_error(
+            "restore xp after restart failure",
+        ));
     }
 
     Ok(())
-}
-
-async fn upgrade_xp_ops(
-    paths: &Paths,
-    release: &GitHubRelease,
-    checksums: &HashMap<String, [u8; 32]>,
-    asset_name: &str,
-    dest: &Path,
-    backup: &Path,
-) -> Result<bool, ExitError> {
-    install_xp_ops_binary(paths, release, checksums, asset_name, dest, backup, false).await
 }
 
 async fn install_xp_ops_binary(
@@ -657,9 +746,14 @@ async fn install_xp_ops_binary(
     }
 
     if let Err(e) = fs::rename(&staged, dest) {
-        let _ = fs::rename(backup, dest);
-        let _ = fs::remove_file(&staged);
-        return Err(ExitError::new(7, format!("install_failed: {e}")));
+        return Err(restore_after_failed_install(
+            backup,
+            dest,
+            &staged,
+            "xp-ops",
+            "install_failed",
+            &e,
+        ));
     }
 
     chmod(dest, 0o755).ok();
@@ -698,10 +792,7 @@ fn verify_upgraded_xp_ops(
         return Ok(());
     }
 
-    let bad = dest.with_extension(format!("failed.{}", now_unix_secs()));
-    let _ = fs::rename(dest, &bad);
-    let _ = fs::rename(backup, dest);
-    Err(ExitError::new(7, "install_failed: verify failed"))
+    Err(restore_after_failed_xp_ops_verification(dest, backup))
 }
 
 fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeContext>, ExitError> {
@@ -736,6 +827,19 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
                 "invalid_args: missing XP_OPS_UPGRADE_RESUME_XP_OPS_BACKUP",
             )
         })?);
+    let service_backups =
+        serde_json::from_str(&std::env::var(UPGRADE_RESUME_SERVICE_BACKUPS).map_err(|_| {
+            ExitError::new(
+                3,
+                "invalid_args: missing XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS",
+            )
+        })?)
+        .map_err(|error| {
+            ExitError::new(
+                3,
+                format!("invalid_args: parse XP_OPS_UPGRADE_RESUME_SERVICE_BACKUPS: {error}"),
+            )
+        })?;
     Ok(Some(ResumeContext {
         release: LockedRelease {
             owner,
@@ -745,97 +849,12 @@ fn load_resume_context(repo_override: Option<&str>) -> Result<Option<ResumeConte
         },
         xp_ops_dest,
         xp_ops_backup,
+        service_backups,
+        service_phase_complete: matches!(
+            std::env::var(UPGRADE_RESUME_SERVICE_PHASE_COMPLETE).as_deref(),
+            Ok("1")
+        ),
     }))
-}
-
-fn clear_upgrade_resume_env() {
-    // Safety: env vars are process-local and no other threads mutate them in `xp-ops`.
-    unsafe {
-        std::env::remove_var(UPGRADE_RESUME_TAG);
-        std::env::remove_var(UPGRADE_RESUME_REPO);
-        std::env::remove_var(UPGRADE_RESUME_API_BASE);
-        std::env::remove_var(UPGRADE_RESUME_XP_OPS_DEST);
-        std::env::remove_var(UPGRADE_RESUME_XP_OPS_BACKUP);
-    }
-}
-
-fn rollback_xp_ops_after_resumed_failure(
-    dest: &Path,
-    backup: &Path,
-    original_err: ExitError,
-) -> Result<(), ExitError> {
-    if dest.exists() {
-        let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));
-        fs::rename(dest, &failed).map_err(|e| {
-            ExitError::new(
-                8,
-                format!(
-                    "rollback_failed: stash upgraded xp-ops after resumed failure: {e}; original error: {}",
-                    original_err.message
-                ),
-            )
-        })?;
-    }
-
-    fs::rename(backup, dest).map_err(|e| {
-        ExitError::new(
-            8,
-            format!(
-                "rollback_failed: restore xp-ops after resumed failure: {e}; original error: {}",
-                original_err.message
-            ),
-        )
-    })?;
-
-    Err(ExitError::new(
-        original_err.code,
-        format!("{}; rolled back xp-ops", original_err.message),
-    ))
-}
-
-fn rollback_xp_after_xray_failure(
-    paths: &Paths,
-    backup: &Path,
-    original_err: ExitError,
-) -> Result<(), ExitError> {
-    let dest = paths.usr_local_bin_xp();
-    if dest.exists() {
-        let failed = dest.with_extension(format!("failed.{}", now_unix_secs()));
-        fs::rename(&dest, &failed).map_err(|e| {
-            ExitError::new(
-                8,
-                format!(
-                    "rollback_failed: stash upgraded xp after xray failure: {e}; original error: {}",
-                    original_err.message
-                ),
-            )
-        })?;
-    }
-
-    fs::rename(backup, &dest).map_err(|e| {
-        ExitError::new(
-            8,
-            format!(
-                "rollback_failed: restore xp after xray failure: {e}; original error: {}",
-                original_err.message
-            ),
-        )
-    })?;
-
-    if !restart_xp_service(paths) {
-        return Err(ExitError::new(
-            8,
-            format!(
-                "rollback_failed: xp rollback restart failed after xray failure; original error: {}",
-                original_err.message
-            ),
-        ));
-    }
-
-    Err(ExitError::new(
-        original_err.code,
-        format!("{}; rolled back xp", original_err.message),
-    ))
 }
 
 fn preserve_control_plane_listeners(

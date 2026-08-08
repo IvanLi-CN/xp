@@ -26,6 +26,37 @@ describe("AdminUpgradeStatusResponseSchema", () => {
 		expect(parsed.status.state).toBe("idle");
 	});
 
+	it("parses additive storage prediction", () => {
+		const parsed = AdminUpgradeStatusResponseSchema.parse({
+			support: {
+				supported: true,
+				storage: {
+					install: {
+						path: "/usr/local/bin",
+						available_bytes: 100,
+						reclaimable_bytes: 30,
+						required_bytes: 128,
+						sufficient_after_cleanup: true,
+					},
+					workspace: {
+						path: "/tmp/xp-ops",
+						available_bytes: 200,
+						reclaimable_bytes: 0,
+						required_bytes: 128,
+						sufficient_after_cleanup: true,
+					},
+					cleanup_required: true,
+				},
+			},
+			status: {
+				state: "idle",
+				updated_at: "2026-07-04T00:00:00Z",
+			},
+		});
+
+		expect(parsed.support.storage?.cleanup_required).toBe(true);
+	});
+
 	it("parses unsupported container status", () => {
 		const parsed = AdminUpgradeStatusResponseSchema.parse({
 			support: {

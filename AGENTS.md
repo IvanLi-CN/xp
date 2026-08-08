@@ -59,6 +59,15 @@
   pass `XP_DATA_DIR` through the unit environment, not through shell-expanded `--data-dir` command
   text. If the one-shot runner fails before writing a terminal status, the admin upgrade status API
   must reconcile the durable `running` / `restarting` status to `failed`.
+- All host-managed upgrade paths share one disk-retention contract: transaction-local binary
+  backups only, zero `.bak.*`/`.failed.*` binaries after success or successful rollback; a
+  `rollback_failed` filesystem error preserves the affected transaction backup for manual recovery
+  and rejects a later upgrade until that backup has been recovered;
+  no capacity-tiered offline fallback. Before any download or replacement, managed stale artifacts
+  and the exact `/tmp/xp-ops` workspace are cleaned without following symlinks, then both write
+  filesystems must have at least `128 MiB` free. Existing `/var/backups/xp`, configuration,
+  credentials, certificates, Raft/WAL, and unknown files are out of scope. The latest failure may
+  retain only bounded `${XP_DATA_DIR}/upgrade/diagnostics.json`; success removes it.
 - The Web client must treat an unstructured start 5xx or a restart-boundary network interruption as
   an unknown result, not a terminal failure: maintain a same-tab 60-second status observation with
   2.5-second polling, preserve only the remaining window through refresh, and end only on a

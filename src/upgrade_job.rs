@@ -1,4 +1,8 @@
-use crate::ops::cli::ExitError;
+use crate::ops::{
+    Paths,
+    cli::ExitError,
+    upgrade_artifacts::{UpgradeStorage, assess_upgrade_storage},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -6,7 +10,6 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
 const UPGRADE_DIR: &str = "upgrade";
 const LOCK_FILE: &str = "start.lock";
 const REQUEST_FILE: &str = "request.json";
@@ -27,7 +30,6 @@ const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
 const OPENRC_UPGRADE_TRIGGER_PATH: &str = "/usr/local/libexec/xp-openrc-upgrade-trigger";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UpgradeJobState {
@@ -44,14 +46,12 @@ impl UpgradeJobState {
         matches!(self, Self::Running | Self::Restarting)
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpgradeRequest {
     pub target_tag: String,
     pub repo: Option<String>,
     pub requested_at: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpgradeJobStatus {
     pub state: UpgradeJobState,
@@ -63,23 +63,23 @@ pub struct UpgradeJobStatus {
     pub message: Option<String>,
     pub updated_at: String,
 }
-
 #[derive(Debug, Clone, Serialize)]
 pub struct UpgradeSupport {
     pub supported: bool,
     pub reason: Option<String>,
     pub trigger: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<UpgradeStorage>,
 }
-
 #[derive(Debug)]
 pub enum UpgradeStartError {
     Active,
     Unsupported(String),
+    InsufficientSpace(String),
     InvalidTarget(String),
     Io(io::Error),
     TriggerFailed(String),
 }
-
 impl From<io::Error> for UpgradeStartError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
@@ -89,15 +89,12 @@ impl From<io::Error> for UpgradeStartError {
 pub fn request_path(data_dir: &Path) -> PathBuf {
     data_dir.join(UPGRADE_DIR).join(REQUEST_FILE)
 }
-
 pub fn status_path(data_dir: &Path) -> PathBuf {
     data_dir.join(UPGRADE_DIR).join(STATUS_FILE)
 }
-
 pub fn upgrade_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(UPGRADE_DIR)
 }
-
 fn lock_path(data_dir: &Path) -> PathBuf {
     upgrade_dir(data_dir).join(LOCK_FILE)
 }
@@ -231,6 +228,7 @@ fn validate_target_tag_for_runner(target_tag: &str) -> Result<(), ExitError> {
         UpgradeStartError::Unsupported(message) => {
             ExitError::new(3, format!("invalid_args: {message}"))
         }
+        UpgradeStartError::InsufficientSpace(message) => ExitError::new(3, message),
         UpgradeStartError::Io(err) => {
             ExitError::new(7, format!("service_error: validate upgrade target: {err}"))
         }
@@ -257,11 +255,7 @@ pub fn support_status() -> UpgradeSupport {
 
 fn support_status_for_root(root: &Path) -> UpgradeSupport {
     if let Some(trigger) = test_forced_host_trigger() {
-        return UpgradeSupport {
-            supported: true,
-            reason: None,
-            trigger: Some(trigger),
-        };
+        return supported_host(root, trigger);
     }
 
     if is_container_runtime() {
@@ -271,26 +265,19 @@ fn support_status_for_root(root: &Path) -> UpgradeSupport {
                 "web upgrades are only supported on host-managed systemd/OpenRC nodes".to_string(),
             ),
             trigger: None,
+            storage: None,
         };
     }
 
     if command_exists("systemctl") && systemd_upgrade_delegate_installed(root) {
-        return UpgradeSupport {
-            supported: true,
-            reason: None,
-            trigger: Some("systemd"),
-        };
+        return supported_host(root, "systemd");
     }
 
     if command_exists("doas")
         && command_exists(OPENRC_RC_SERVICE)
         && openrc_upgrade_delegate_installed(root)
     {
-        return UpgradeSupport {
-            supported: true,
-            reason: None,
-            trigger: Some("openrc"),
-        };
+        return supported_host(root, "openrc");
     }
 
     UpgradeSupport {
@@ -299,6 +286,7 @@ fn support_status_for_root(root: &Path) -> UpgradeSupport {
             "missing installed upgrade delegate; rerun xp-ops init on this host".to_string(),
         ),
         trigger: None,
+        storage: None,
     }
 }
 
@@ -482,6 +470,14 @@ pub fn start_upgrade(
         write_status(data_dir, &status)?;
         return Err(UpgradeStartError::Unsupported(reason));
     }
+    if let Some(storage) = support.storage.as_ref()
+        && (!storage.install.sufficient_after_cleanup
+            || !storage.workspace.sufficient_after_cleanup)
+    {
+        return Err(UpgradeStartError::InsufficientSpace(
+            "insufficient_upgrade_space: require at least 128 MiB free after cleanup".to_string(),
+        ));
+    }
 
     let now = now_rfc3339();
     let request = UpgradeRequest {
@@ -520,6 +516,15 @@ pub fn start_upgrade(
     }
 
     Ok(status)
+}
+
+fn supported_host(root: &Path, trigger: &'static str) -> UpgradeSupport {
+    UpgradeSupport {
+        supported: true,
+        reason: None,
+        trigger: Some(trigger),
+        storage: assess_upgrade_storage(&Paths::new(root.to_path_buf())).ok(),
+    }
 }
 
 pub fn status_for_runner_start(request: &UpgradeRequest) -> UpgradeJobStatus {

@@ -67,12 +67,20 @@ export function VersionIndicator({
 		versionCheck.kind === "update_available" ? versionCheck.latest_tag : null;
 	const job = upgradeStatus?.status ?? null;
 	const support = upgradeStatus?.support ?? null;
+	const storage = support?.storage;
+	const storageBlocked = Boolean(
+		storage &&
+			(!storage.install.sufficient_after_cleanup ||
+				!storage.workspace.sufficient_after_cleanup),
+	);
 	const jobActive = job?.state === "running" || job?.state === "restarting";
 	const observingUpgrade = upgradeObservation?.phase === "observing";
 	const upgradeUnavailableReason =
 		support && !support.supported
 			? (support.reason ?? "Web automatic upgrade is not supported here.")
-			: null;
+			: storageBlocked
+				? "insufficient_upgrade_space: at least 128 MiB must be free after cleanup."
+				: null;
 	const upgradeLocked =
 		upgradeObservation?.phase === "observing" ||
 		upgradeObservation?.phase === "timed_out";
@@ -81,7 +89,8 @@ export function VersionIndicator({
 		Boolean(support?.supported) &&
 		!jobActive &&
 		!upgradeLocked &&
-		!upgradeStarting;
+		!upgradeStarting &&
+		!storageBlocked;
 	const upgradeButtonLabel = upgradeUnavailableReason
 		? "Unavailable"
 		: upgradeLocked
@@ -244,6 +253,19 @@ export function VersionIndicator({
 							) : upgradeStatusError ? (
 								<p className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs">
 									{upgradeStatusError}
+								</p>
+							) : null}
+
+							{storage?.cleanup_required && !storageBlocked ? (
+								<p className="xp-alert xp-alert-warning rounded-lg px-2.5 py-2 text-xs">
+									将自动清理历史升级文件后继续。
+								</p>
+							) : storageBlocked ? (
+								<p
+									className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
+									role="alert"
+								>
+									{upgradeUnavailableReason}
 								</p>
 							) : null}
 
@@ -422,6 +444,13 @@ function describeUpgrade(
 				{support.reason ?? "not supported here"}
 			</span>
 		);
+	}
+	if (
+		support?.storage &&
+		(!support.storage.install.sufficient_after_cleanup ||
+			!support.storage.workspace.sufficient_after_cleanup)
+	) {
+		return <span className="text-destructive">insufficient space</span>;
 	}
 	if (!support)
 		return <span className="text-muted-foreground">sign in required</span>;

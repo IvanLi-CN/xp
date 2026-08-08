@@ -1,6 +1,7 @@
 use crate::ops::cli::{ExitError, InstallArgs, InstallOnly};
 use crate::ops::paths::Paths;
 use crate::ops::platform::{CpuArch, Distro, detect_cpu_arch, detect_distro};
+use crate::ops::upgrade_artifacts::{cleanup_workspace, workspace_path};
 use crate::ops::util::{
     Mode, chmod, ensure_dir, is_executable, is_test_root, tmp_path_next_to, write_bytes_if_changed,
 };
@@ -181,24 +182,38 @@ async fn install_xray(
         .map(|a| a.browser_download_url)
         .ok_or_else(|| ExitError::new(3, format!("install_failed: missing asset {asset}")))?;
 
-    let tmp_dir = paths.map_abs(Path::new("/tmp/xp-ops"));
+    let tmp_dir = workspace_path(paths);
     ensure_dir(&tmp_dir).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
-    let zip_path = tmp_dir.join(format!("xray-{asset}"));
-    download_to_path(&download_url, &zip_path)
-        .await
-        .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+    let result = async {
+        let zip_path = tmp_dir.join(format!("xray-{asset}"));
+        download_to_path(&download_url, &zip_path)
+            .await
+            .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
 
-    let dest = paths.usr_local_bin_xray();
-    if let Some(parent) = dest.parent() {
-        ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        let dest = paths.usr_local_bin_xray();
+        if let Some(parent) = dest.parent() {
+            ensure_dir(parent).map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        }
+        extract_xray_binary_from_zip_to_path(&zip_path, &dest)
+            .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
+        chmod(&dest, 0o755).ok();
+
+        verify_xray(paths, Mode::Real, &dest)
     }
-    extract_xray_binary_from_zip_to_path(&zip_path, &dest)
-        .map_err(|e| ExitError::new(3, format!("install_failed: {e}")))?;
-    chmod(&dest, 0o755).ok();
-
-    verify_xray(paths, Mode::Real, Path::new("/usr/local/bin/xray"))?;
-
-    Ok(())
+    .await;
+    let cleanup = cleanup_workspace(&tmp_dir);
+    match (result, cleanup) {
+        (Err(error), Err(cleanup_error)) => Err(ExitError::new(
+            error.code,
+            format!("{}; cleanup workspace: {cleanup_error}", error.message),
+        )),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(()), Ok(_)) => Ok(()),
+        (Ok(()), Err(error)) => Err(ExitError::new(
+            3,
+            format!("install_failed: cleanup workspace: {error}"),
+        )),
+    }
 }
 
 fn verify_xray(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), ExitError> {
@@ -207,7 +222,11 @@ fn verify_xray(paths: &Paths, mode: Mode, bin_abs: &Path) -> Result<(), ExitErro
         return Ok(());
     }
 
-    let bin = paths.map_abs(bin_abs);
+    let bin = if bin_abs.starts_with(paths.root()) {
+        bin_abs.to_path_buf()
+    } else {
+        paths.map_abs(bin_abs)
+    };
     if !bin.exists() || !is_executable(&bin) {
         return Err(ExitError::new(4, "verification_failed"));
     }
@@ -330,7 +349,10 @@ fn replace_file_with_backup(dest: &Path, staged: &Path) -> anyhow::Result<()> {
         }
     };
     match fs::rename(staged, dest) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            fs::remove_file(&backup)?;
+            Ok(())
+        }
         Err(e) => {
             let _ = fs::rename(&backup, dest);
             Err(e.into())
