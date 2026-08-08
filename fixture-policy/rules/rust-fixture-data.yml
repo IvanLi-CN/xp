@@ -24,6 +24,8 @@ rule:
             - pattern: Call::AddInbound { $$$ }
             - pattern: Call::RemoveInbound { $$$ }
             - pattern: Call::AlterInbound { $$$ }
+            - pattern: AlterInboundRequest { $$$ }
+            - pattern: RemoveInboundRequest { $$$ }
             - pattern: ReconcileRequest::RebuildInbound { $$$ }
             - pattern: ReconcileRequest::RemoveInbound { $$$ }
             - pattern: ReconcileRequest::RemoveUser { $$$ }

@@ -21,3 +21,18 @@ rule:
         field: value
         not:
           pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+    - not:
+        all:
+          - has:
+              field: value
+              any:
+                - pattern: endpoint.endpoint_id
+                - pattern: endpoint.node_id
+          - inside:
+              stopBy: end
+              pattern: |
+                ($ENDPOINT_ID) => {
+                  const endpoint = endpointById.get($ENDPOINT_ID);
+                  if (!endpoint) throw new Error($ERROR);
+                  return { $$$ };
+                }

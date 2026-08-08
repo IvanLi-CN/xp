@@ -426,6 +426,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         serde_json::from_slice(&bytes).unwrap()
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
         .as_str()
         .unwrap()
@@ -494,7 +495,7 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
     let mut client = xray::connect(xray_api_addr).await.unwrap();
     let _ = client
         .remove_inbound(RemoveInboundRequest {
-            tag: xp_test_fixtures::slot_s487().to_owned(),
+            tag: endpoint_tag_ss,
         })
         .await;
 }
@@ -691,6 +692,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         serde_json::from_slice(&bytes).unwrap()
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
         .as_str()
         .unwrap()
@@ -765,7 +767,7 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
     let mut client = xray::connect(xray_api_addr).await.unwrap();
     let _ = client
         .remove_inbound(RemoveInboundRequest {
-            tag: xp_test_fixtures::slot_s487().to_owned(),
+            tag: endpoint_tag_ss,
         })
         .await;
 }
@@ -940,6 +942,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         serde_json::from_slice(&bytes).unwrap()
     };
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let server_psk_b64 = endpoint_ss["meta"]["server_psk_b64"]
         .as_str()
         .unwrap()
@@ -999,7 +1002,7 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
     let mut client = xray::connect(xray_api_addr).await.unwrap();
     let _ = client
         .remove_inbound(RemoveInboundRequest {
-            tag: xp_test_fixtures::slot_s487().to_owned(),
+            tag: endpoint_tag_ss,
         })
         .await;
 }

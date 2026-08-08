@@ -1,0 +1,16 @@
+id: fixture-policy-typescript-adapter-output-provenance
+language: TypeScript
+severity: error
+message: Fixture adapter accessors must derive values from the checked-in catalog.
+files:
+  - web/src/fixture-policy/catalog.ts
+rule:
+  all:
+    - kind: arrow_function
+    - not:
+        any:
+          - pattern: '() => null'
+          - pattern: '() => undefined'
+          - has:
+              stopBy: end
+              pattern: catalog.$$$

@@ -1,0 +1,11 @@
+id: fixture-policy-typescript-adapter-output-provenance
+valid:
+  - |
+    const primary = () => catalog.hosts.primary;
+  - |
+    const absent = () => null;
+invalid:
+  - |
+    const primary = () => "live.example";
+  - |
+    const primary = () => `live.${suffix}`;
