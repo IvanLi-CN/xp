@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent } from "@storybook/test";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminUpgradeStatusResponse } from "@/api/adminUpgrade";
 import type { UpgradeObservation } from "@/offline/upgradeObservation";
@@ -22,7 +23,7 @@ const baseUpgradeStatus: AdminUpgradeStatusResponse = {
 		finished_at: null,
 		exit_code: null,
 		message: null,
-		updated_at: "2026-07-04T00:00:00Z",
+		updated_at: fixtureCatalog.slotString.s203(),
 	},
 };
 
@@ -83,7 +84,7 @@ function UpgradeObservationHarness() {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={baseUpgradeStatus}
@@ -133,7 +134,7 @@ export const UpdateAvailable: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={baseUpgradeStatus}
@@ -154,7 +155,7 @@ export const UpdateAvailableUnsupported: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -285,7 +286,7 @@ export const RunningUpgrade: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -316,7 +317,7 @@ export const Reconnecting: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={baseUpgradeStatus}
@@ -339,7 +340,7 @@ export const StatusTimedOut: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={baseUpgradeStatus}
@@ -362,7 +363,7 @@ export const TerminalResult: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -455,7 +456,7 @@ export const UpgradeFailed: Story = {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v0.2.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -487,7 +488,7 @@ export const UpToDateComparable: Story = {
 				versionCheck={{
 					kind: "up_to_date",
 					latest_tag: "v0.1.0",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					comparable: true,
 					repo: "IvanLi-CN/xp",
 				}}
@@ -505,7 +506,7 @@ export const UpToDateUncomparable: Story = {
 				versionCheck={{
 					kind: "up_to_date",
 					latest_tag: "main",
-					checked_at: "2026-07-04T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s203(),
 					comparable: false,
 					repo: "IvanLi-CN/xp",
 				}}

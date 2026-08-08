@@ -1,0 +1,42 @@
+id: fixture-policy-rust-inline-data-source
+language: Rust
+severity: error
+message: Inline Rust unit-test fixture data must use a direct xp_test_fixtures accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the Rust adapter.
+files:
+  - src/**/*.rs
+rule:
+  all:
+    - kind: field_initializer
+    - inside:
+        stopBy: end
+        pattern: |
+          mod $MODULE {
+            $$$
+          }
+    - has:
+        field: field
+        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|node_name|endpoint_id|endpoint_tag|subscription_token|token|token_id|secret|one_time_secret|password|cluster_ca_pem|last_seen_at|last_probe_at|last_synced_at|last_ok_at|last_fail_at|down_since|last_restart_at|last_restart_fail_at|slot_start|observed_at|occurred_at|window_start|window_end|minute|start_minute|end_minute|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|uplink_bytes|downlink_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|generated_at|last_sample_at|last_transition_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin)$'
+    # This rollback test must pass paths created by its temporary directory to the system under test.
+    - not:
+        inside:
+          stopBy: end
+          pattern: |
+            fn runtime_rollback_restores_both_binaries() {
+              $$$
+            }
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()
+            - pattern: xp_test_fixtures::$ACCESSOR().into()
+            - pattern: Some(xp_test_fixtures::$ACCESSOR())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
+            - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+constraints:
+  MODULE:
+    regex: '^[a-z_]*tests?$'

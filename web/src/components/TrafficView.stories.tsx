@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 import { useState } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type {
 	TrafficReport,
@@ -65,7 +66,7 @@ function makeReport(window: TrafficWindow, gap = false): TrafficReport {
 		current,
 		reference,
 		partial: gap,
-		last_sample_at: "2026-07-28T12:00:00Z",
+		last_sample_at: fixtureCatalog.slotString.s177(),
 		warnings: gap ? ["sampling gap in current window"] : [],
 	};
 }

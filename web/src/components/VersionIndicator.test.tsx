@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { UpgradeObservation } from "@/offline/upgradeObservation";
 
@@ -44,7 +45,7 @@ function UpgradeHarness() {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v3.21.10",
-					checked_at: "2026-08-03T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s294(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -57,7 +58,7 @@ function UpgradeHarness() {
 						finished_at: null,
 						exit_code: null,
 						message: null,
-						updated_at: "2026-08-03T00:00:00Z",
+						updated_at: fixtureCatalog.slotString.s294(),
 					},
 				}}
 				upgradeObservation={observation}

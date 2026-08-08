@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 const userIdA = "01JQUSER000000000000000000";
 const userIdB = "01JQUSER000000000000000001";
@@ -14,10 +15,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: "node-tokyo-a",
-						node_name: "Tokyo-A",
-						access_host: "tokyo-a.example.invalid",
-						api_base_url: "https://tokyo-a.example.invalid",
+						node_id: fixtureCatalog.slotString.s145(),
+						node_name: fixtureCatalog.slotString.s146(),
+						access_host: fixtureCatalog.slotString.s147(),
+						api_base_url: fixtureCatalog.slotString.s148(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -26,10 +27,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: "node-frankfurt-b",
-						node_name: "Frankfurt-B",
-						access_host: "frankfurt-b.example.invalid",
-						api_base_url: "https://frankfurt-b.example.invalid",
+						node_id: fixtureCatalog.slotString.s149(),
+						node_name: fixtureCatalog.slotString.s150(),
+						access_host: fixtureCatalog.slotString.s151(),
+						api_base_url: fixtureCatalog.slotString.s152(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -38,10 +39,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: "node-sydney-c",
-						node_name: "Sydney-C",
-						access_host: "sydney-c.example.invalid",
-						api_base_url: "https://sydney-c.example.invalid",
+						node_id: fixtureCatalog.slotString.s153(),
+						node_name: fixtureCatalog.slotString.s154(),
+						access_host: fixtureCatalog.slotString.s155(),
+						api_base_url: fixtureCatalog.slotString.s156(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -52,24 +53,24 @@ const meta = {
 				],
 				endpoints: [
 					{
-						endpoint_id: "ep-tokyo-a-vless",
-						node_id: "node-tokyo-a",
-						tag: "tokyo-a-vless",
+						endpoint_id: fixtureCatalog.slotString.s157(),
+						node_id: fixtureCatalog.slotString.s145(),
+						tag: fixtureCatalog.slotString.s158(),
 						kind: "vless_reality_vision_tcp",
 						port: 443,
 						meta: {
 							reality: {
-								dest: "example.com:443",
-								server_names: ["example.com"],
+								dest: fixtureCatalog.slotString.s159(),
+								server_names: fixtureCatalog.slotList.l9(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-tokyo-a-ss",
-						node_id: "node-tokyo-a",
-						tag: "tokyo-a-ss",
+						endpoint_id: fixtureCatalog.slotString.s160(),
+						node_id: fixtureCatalog.slotString.s145(),
+						tag: fixtureCatalog.slotString.s161(),
 						kind: "ss2022_2022_blake3_aes_128_gcm",
 						port: 8443,
 						meta: {
@@ -77,30 +78,30 @@ const meta = {
 						},
 					},
 					{
-						endpoint_id: "ep-frankfurt-b-vless",
-						node_id: "node-frankfurt-b",
-						tag: "frankfurt-b-vless",
+						endpoint_id: fixtureCatalog.slotString.s162(),
+						node_id: fixtureCatalog.slotString.s149(),
+						tag: fixtureCatalog.slotString.s163(),
 						kind: "vless_reality_vision_tcp",
 						port: 444,
 						meta: {
 							reality: {
-								dest: "example.org:443",
-								server_names: ["example.org"],
+								dest: fixtureCatalog.slotString.s164(),
+								server_names: fixtureCatalog.slotList.l10(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-sydney-c-vless",
-						node_id: "node-sydney-c",
-						tag: "sydney-c-vless",
+						endpoint_id: fixtureCatalog.slotString.s165(),
+						node_id: fixtureCatalog.slotString.s153(),
+						tag: fixtureCatalog.slotString.s166(),
 						kind: "vless_reality_vision_tcp",
 						port: 445,
 						meta: {
 							reality: {
-								dest: "example.net:443",
-								server_names: ["example.net"],
+								dest: fixtureCatalog.slotString.s167(),
+								server_names: fixtureCatalog.slotList.l11(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -111,7 +112,7 @@ const meta = {
 					{
 						user_id: userIdA,
 						display_name: "Ivan",
-						subscription_token: `sub_${userIdA}`,
+						subscription_token: fixtureCatalog.slotString.s168(),
 						credential_epoch: 0,
 						priority_tier: "p1",
 						quota_reset: {
@@ -123,7 +124,7 @@ const meta = {
 					{
 						user_id: userIdB,
 						display_name: "Koha",
-						subscription_token: `sub_${userIdB}`,
+						subscription_token: fixtureCatalog.slotString.s169(),
 						credential_epoch: 0,
 						priority_tier: "p2",
 						quota_reset: {
@@ -135,14 +136,14 @@ const meta = {
 				],
 				userNodeWeights: {
 					[userIdA]: [
-						{ node_id: "node-tokyo-a", weight: 6500 },
-						{ node_id: "node-frankfurt-b", weight: 5000 },
-						{ node_id: "node-sydney-c", weight: 2000 },
+						{ node_id: fixtureCatalog.slotString.s145(), weight: 6500 },
+						{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
+						{ node_id: fixtureCatalog.slotString.s153(), weight: 2000 },
 					],
 					[userIdB]: [
-						{ node_id: "node-tokyo-a", weight: 3500 },
-						{ node_id: "node-frankfurt-b", weight: 5000 },
-						{ node_id: "node-sydney-c", weight: 8000 },
+						{ node_id: fixtureCatalog.slotString.s145(), weight: 3500 },
+						{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
+						{ node_id: fixtureCatalog.slotString.s153(), weight: 8000 },
 					],
 				},
 				userGlobalWeights: {
@@ -150,16 +151,16 @@ const meta = {
 					[userIdB]: 3500,
 				},
 				nodeWeightPolicies: {
-					"node-tokyo-a": {
-						node_id: "node-tokyo-a",
+					[fixtureCatalog.slotString.s145()]: {
+						node_id: fixtureCatalog.slotString.s145(),
 						inherit_global: false,
 					},
-					"node-frankfurt-b": {
-						node_id: "node-frankfurt-b",
+					[fixtureCatalog.slotString.s149()]: {
+						node_id: fixtureCatalog.slotString.s149(),
 						inherit_global: false,
 					},
-					"node-sydney-c": {
-						node_id: "node-sydney-c",
+					[fixtureCatalog.slotString.s153()]: {
+						node_id: fixtureCatalog.slotString.s153(),
 						inherit_global: false,
 					},
 				},

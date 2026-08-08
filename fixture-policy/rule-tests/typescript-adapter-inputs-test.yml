@@ -1,0 +1,27 @@
+id: fixture-policy-typescript-adapter-inputs
+valid:
+  - |
+    import catalog from "../../../fixture-policy/catalog.json";
+invalid:
+  - |
+    const host = process.env.FIXTURE_HOST;
+  - |
+    const host = process["env"].FIXTURE_HOST;
+  - |
+    const host = await fetch("https://input.fixture.test");
+  - |
+    const host = await globalThis.fetch("https://input.fixture.test");
+  - |
+    const host = await globalThis["fetch"]("https://input.fixture.test");
+  - |
+    const host = JSON.parse(raw);
+  - |
+    const host = globalThis.JSON.parse(raw);
+  - |
+    const host = globalThis["JSON"].parse(raw);
+  - |
+    const module = await import("./fixture-input");
+  - |
+    const host = await Deno.readTextFile("fixture.json");
+  - |
+    const host = Bun.file("fixture.json");

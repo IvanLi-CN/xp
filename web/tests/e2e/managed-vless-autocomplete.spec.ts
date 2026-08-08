@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 test.describe("managed VLESS autocomplete", () => {
@@ -8,13 +9,13 @@ test.describe("managed VLESS autocomplete", () => {
 	}) => {
 		await setAdminToken(page);
 		await setupApiMocks(page, {
-			adminConfigVlessCanaryBind: "127.0.0.1:39043",
+			adminConfigVlessCanaryBind: fixtureCatalog.address.loopback39043(),
 			nodes: [
 				{
-					node_id: "node-alpha",
-					node_name: "alpha",
-					api_base_url: "https://node-xp.example.test:443",
-					access_host: "node-xp.example.test",
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodePrimary(),
+					api_base_url: fixtureCatalog.url.primaryApi(),
+					access_host: fixtureCatalog.host.primary(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -25,16 +26,16 @@ test.describe("managed VLESS autocomplete", () => {
 			],
 			endpoints: [
 				{
-					endpoint_id: "endpoint-existing",
-					node_id: "node-alpha",
-					tag: "managed-alpha",
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					tag: fixtureCatalog.identifier.endpointTagPrimary(),
 					kind: "vless_reality_vision_tcp",
 					port: 443,
 					meta: {
 						managed_default: true,
 						reality: {
-							dest: "127.0.0.1:49043",
-							server_names: ["node-xp.example.test"],
+							dest: fixtureCatalog.address.loopback49043(),
+							server_names: fixtureCatalog.list.primaryServerNames(),
 							server_names_source: "manual",
 							fingerprint: "chrome",
 						},
@@ -76,7 +77,7 @@ test.describe("managed VLESS autocomplete", () => {
 		await expect(
 			page
 				.getByTestId("tag-input-suggestions")
-				.getByText("node-xp.example.test:8443"),
+				.getByText(`${fixtureCatalog.host.primary()}:8443`),
 		).toBeVisible();
 	});
 
@@ -88,10 +89,10 @@ test.describe("managed VLESS autocomplete", () => {
 		await setupApiMocks(page, {
 			nodes: [
 				{
-					node_id: "node-hinet",
-					node_name: "hinet",
-					api_base_url: "https://hinet-xp.707979.xyz",
-					access_host: "hinet-ep.707979.xyz",
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					node_name: fixtureCatalog.identifier.nodeSecondary(),
+					api_base_url: fixtureCatalog.url.secondaryApi(),
+					access_host: fixtureCatalog.host.secondary(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -102,16 +103,16 @@ test.describe("managed VLESS autocomplete", () => {
 			],
 			endpoints: [
 				{
-					endpoint_id: "endpoint-hinet-managed",
-					node_id: "node-hinet",
-					tag: "managed-hinet",
+					endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					tag: fixtureCatalog.identifier.endpointTagSecondary(),
 					kind: "vless_reality_vision_tcp",
 					port: 53844,
 					meta: {
 						managed_default: true,
 						reality: {
-							dest: "127.0.0.1:39043",
-							server_names: ["hinet-ep.707979.xyz"],
+							dest: fixtureCatalog.address.loopback39043(),
+							server_names: fixtureCatalog.list.secondaryServerNames(),
 							server_names_source: "manual",
 							fingerprint: "chrome",
 						},
@@ -148,10 +149,12 @@ test.describe("managed VLESS autocomplete", () => {
 		await expect(
 			page
 				.getByTestId("tag-input-suggestions")
-				.getByText("hinet-ep.707979.xyz"),
+				.getByText(fixtureCatalog.host.secondary()),
 		).toBeVisible();
 
-		await page.goto("/endpoints/endpoint-hinet-managed");
+		await page.goto(
+			`/endpoints/${fixtureCatalog.identifier.endpointSecondary()}`,
+		);
 		await expect(
 			page.getByRole("heading", { name: "Endpoint details", exact: true }),
 		).toBeVisible();
@@ -179,7 +182,7 @@ test.describe("managed VLESS autocomplete", () => {
 		await expect(
 			page
 				.getByTestId("tag-input-suggestions")
-				.getByText("hinet-ep.707979.xyz"),
+				.getByText(fixtureCatalog.host.secondary()),
 		).toBeVisible();
 	});
 });

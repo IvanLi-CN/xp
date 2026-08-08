@@ -14,7 +14,7 @@ fn migration_args(dry_run: bool) -> CloudflareProvisionArgs {
         tunnel_name: Some("xp-next".to_string()),
         account_id: "account".to_string(),
         zone_id: "zone".to_string(),
-        hostname: "xp.example.com".to_string(),
+        hostname: xp_test_fixtures::slot_s554().to_owned(),
         origin_url: "http://127.0.0.1:62416".to_string(),
         dns_record_id_override: None,
         tunnel_id_override: None,
@@ -48,7 +48,7 @@ fn write_migration_files(paths: &Paths) {
             "origin_url": "http://127.0.0.1:62416",
             "account_id": "account",
             "zone_id": "zone",
-            "hostname": "xp.example.com",
+            "hostname": "xp.fixture.test",
             "tunnel_id": "old",
             "dns_record_id": "record"
         })
@@ -106,7 +106,7 @@ async fn mount_old_tunnel_preflight(server: &MockServer, ingress: serde_json::Va
             ResponseTemplate::new(200).set_body_json(response(serde_json::json!([{
                 "id": "record",
                 "type": "CNAME",
-                "name": "xp.example.com",
+                "name": "xp.fixture.test",
                 "content": "old.cfargotunnel.com",
                 "proxied": true,
                 "ttl": 1
@@ -151,7 +151,7 @@ async fn shared_legacy_tunnel_fails_before_any_cloudflare_write() {
     mount_old_tunnel_preflight(
         &server,
         serde_json::json!([
-            { "hostname": "xp.example.com", "service": "http://old" },
+            { "hostname": "xp.fixture.test", "service": "http://old" },
             { "hostname": "ssh.example.com", "service": "ssh://localhost:22" },
             { "service": "http_status:404" }
         ]),
@@ -196,7 +196,7 @@ async fn existing_target_migration_dry_run_uses_only_get_requests() {
     mount_old_tunnel_preflight(
         &server,
         serde_json::json!([
-            { "hostname": "xp.example.com", "service": "http://old" },
+            { "hostname": "xp.fixture.test", "service": "http://old" },
             { "service": "http_status:404" }
         ]),
     )
@@ -267,8 +267,8 @@ async fn single_hostname_legacy_tunnel_migrates_automatically() {
     mount_old_tunnel_preflight(
         &server,
         serde_json::json!([
-            { "hostname": "xp.example.com", "path": "/old", "service": "http://old" },
-            { "hostname": "xp.example.com", "service": "http://also-old" },
+            { "hostname": "xp.fixture.test", "path": "/old", "service": "http://old" },
+            { "hostname": "xp.fixture.test", "service": "http://also-old" },
             { "service": "http_status:404" }
         ]),
     )
@@ -341,7 +341,7 @@ async fn existing_target_migration_runs_without_compatibility_flag() {
     mount_old_tunnel_preflight(
         &server,
         serde_json::json!([
-            { "hostname": "xp.example.com", "service": "http://old" },
+            { "hostname": "xp.fixture.test", "service": "http://old" },
             { "service": "http_status:404" }
         ]),
     )

@@ -1,0 +1,9 @@
+id: fixture-policy-rust-adapter-imports
+valid:
+  - |
+    use std::sync::OnceLock;
+  - |
+    use serde::Deserialize;
+invalid:
+  - |
+    use std::fs;

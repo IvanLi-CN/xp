@@ -1,0 +1,58 @@
+id: fixture-policy-catalog-value-types
+snapshots:
+  '{ "latencyLow": "12" }':
+    labels:
+    - source: '"latencyLow": "12"'
+      style: primary
+      start: 2
+      end: 20
+    - source: '"latencyLow"'
+      style: secondary
+      start: 2
+      end: 14
+    - source: '"12"'
+      style: secondary
+      start: 16
+      end: 20
+  '{ "metrics": true }':
+    labels:
+    - source: '"metrics": true'
+      style: primary
+      start: 2
+      end: 17
+    - source: '"metrics"'
+      style: secondary
+      start: 2
+      end: 11
+    - source: 'true'
+      style: secondary
+      start: 13
+      end: 17
+  '{ "primary": 12 }':
+    labels:
+    - source: '"primary": 12'
+      style: primary
+      start: 2
+      end: 15
+    - source: '"primary"'
+      style: secondary
+      start: 2
+      end: 11
+    - source: '12'
+      style: secondary
+      start: 13
+      end: 15
+  '{ "primaryServerNames": "edge-a.fixture.test" }':
+    labels:
+    - source: '"primaryServerNames": "edge-a.fixture.test"'
+      style: primary
+      start: 2
+      end: 45
+    - source: '"primaryServerNames"'
+      style: secondary
+      start: 2
+      end: 22
+    - source: '"edge-a.fixture.test"'
+      style: secondary
+      start: 24
+      end: 45

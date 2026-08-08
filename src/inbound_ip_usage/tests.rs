@@ -12,18 +12,29 @@ impl GeoLookup for TestGeoLookup {
 fn sample(
     membership_key: &str,
     user_id: &str,
-    node_id: &str,
-    endpoint_id: &str,
-    endpoint_tag: &str,
+    _node_id: &str,
+    _endpoint_id: &str,
+    _endpoint_tag: &str,
     ips: &[&str],
 ) -> InboundIpMinuteSample {
-    InboundIpMinuteSample {
-        membership_key: membership_key.to_string(),
-        user_id: user_id.to_string(),
-        node_id: node_id.to_string(),
-        endpoint_id: endpoint_id.to_string(),
-        endpoint_tag: endpoint_tag.to_string(),
-        ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
+    match membership_key {
+        "u1::e1" => InboundIpMinuteSample {
+            membership_key: membership_key.to_string(),
+            user_id: user_id.to_string(),
+            node_id: xp_test_fixtures::slot_s468().to_owned(),
+            endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
+            endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
+            ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
+        },
+        "u2::e2" => InboundIpMinuteSample {
+            membership_key: membership_key.to_string(),
+            user_id: user_id.to_string(),
+            node_id: xp_test_fixtures::slot_s468().to_owned(),
+            endpoint_id: xp_test_fixtures::slot_s502().to_owned(),
+            endpoint_tag: xp_test_fixtures::slot_s503().to_owned(),
+            ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
+        },
+        _ => panic!("unknown inbound IP fixture membership: {membership_key}"),
     }
 }
 
@@ -240,9 +251,9 @@ fn normalize_recomputes_minutes_and_prunes_memberships() {
             "u1::e1".to_string(),
             PersistedInboundIpMembership {
                 user_id: "u1".to_string(),
-                node_id: "n1".to_string(),
-                endpoint_id: "e1".to_string(),
-                endpoint_tag: "ep-1".to_string(),
+                node_id: xp_test_fixtures::slot_s468().to_owned(),
+                endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
+                endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
                 ips: BTreeMap::from([(
                     "203.0.113.7".to_string(),
                     PersistedInboundIpRecord {
@@ -253,7 +264,7 @@ fn normalize_recomputes_minutes_and_prunes_memberships() {
                         },
                         minutes: 99,
                         first_seen_at: "2026-03-08T10:11:00Z".to_string(),
-                        last_seen_at: "2026-03-08T10:11:00Z".to_string(),
+                        last_seen_at: xp_test_fixtures::slot_s501().to_owned(),
                         geo: PersistedInboundIpGeo::default(),
                     },
                 )]),
@@ -316,13 +327,13 @@ fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
         &[
             InboundIpUsageMembershipView {
                 membership_key: "u1::e1".to_string(),
-                endpoint_id: "e1".to_string(),
-                endpoint_tag: "ep-1".to_string(),
+                endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
+                endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
             },
             InboundIpUsageMembershipView {
                 membership_key: "u2::e2".to_string(),
-                endpoint_id: "e2".to_string(),
-                endpoint_tag: "ep-2".to_string(),
+                endpoint_id: xp_test_fixtures::slot_s502().to_owned(),
+                endpoint_tag: xp_test_fixtures::slot_s503().to_owned(),
             },
         ],
         Vec::new(),
@@ -341,13 +352,16 @@ fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
     assert_eq!(ip.minutes, 3);
     assert_eq!(
         ip.endpoint_tags,
-        vec!["ep-1".to_string(), "ep-2".to_string()]
+        vec![
+            xp_test_fixtures::slot_s500().to_owned(),
+            xp_test_fixtures::slot_s503().to_owned(),
+        ]
     );
 
     let lane = view
         .timeline
         .iter()
-        .find(|lane| lane.lane_key == "ep-1|203.0.113.7")
+        .find(|lane| lane.lane_key == "endpoint_2|203.0.113.7")
         .unwrap();
     assert_eq!(lane.minutes, 3);
     assert_eq!(lane.segments.len(), 1);

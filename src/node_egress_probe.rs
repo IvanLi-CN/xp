@@ -372,30 +372,29 @@ mod tests {
 
     #[test]
     fn stale_detection_uses_last_success_time() {
+        let last_success_at = DateTime::parse_from_rfc3339(xp_test_fixtures::baseline_timestamp())
+            .unwrap()
+            .with_timezone(&Utc);
         let state = NodeEgressProbeState {
-            last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+            last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
             ..NodeEgressProbeState::default()
         };
         assert!(!is_node_egress_probe_stale(
             &state,
-            DateTime::parse_from_rfc3339("2026-04-24T00:59:59Z")
-                .unwrap()
-                .with_timezone(&Utc)
+            last_success_at + chrono::Duration::seconds(NODE_EGRESS_PROBE_STALE_AFTER_SECS - 1)
         ));
         assert!(is_node_egress_probe_stale(
             &state,
-            DateTime::parse_from_rfc3339("2026-04-24T01:00:01Z")
-                .unwrap()
-                .with_timezone(&Utc)
+            last_success_at + chrono::Duration::seconds(NODE_EGRESS_PROBE_STALE_AFTER_SECS + 1)
         ));
     }
 
     #[test]
     fn ip_change_invalidates_previous_region_when_geo_refresh_fails() {
         let previous = NodeEgressProbeState {
-            selected_public_ip: Some("203.0.113.8".to_string()),
+            selected_public_ip: Some(xp_test_fixtures::slot_s613().to_owned()),
             subscription_region: NodeSubscriptionRegion::Japan,
-            last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+            last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
             geo: crate::inbound_ip_usage::PersistedInboundIpGeo {
                 country: "JP".to_string(),
                 region: "Tokyo".to_string(),
@@ -405,20 +404,23 @@ mod tests {
             ..NodeEgressProbeState::default()
         };
         let mut next = previous.clone();
-        next.checked_at = "2026-04-24T01:00:00Z".to_string();
+        next.checked_at = xp_test_fixtures::recent_timestamp().to_owned();
 
         invalidate_previous_classification_on_selected_ip_change(
             &previous,
-            &Some("198.51.100.9".to_string()),
+            &Some(xp_test_fixtures::secondary_ipv4().to_owned()),
             &mut next,
         );
 
-        assert_eq!(next.selected_public_ip.as_deref(), Some("198.51.100.9"));
+        assert_eq!(
+            next.selected_public_ip.as_deref(),
+            Some(xp_test_fixtures::secondary_ipv4())
+        );
         assert_eq!(next.subscription_region, NodeSubscriptionRegion::Other);
         assert!(next.last_success_at.is_none());
         assert_eq!(
             next.classification_invalidated_at.as_deref(),
-            Some("2026-04-24T01:00:00Z")
+            Some(xp_test_fixtures::recent_timestamp())
         );
         assert!(next.geo.country.is_empty());
     }

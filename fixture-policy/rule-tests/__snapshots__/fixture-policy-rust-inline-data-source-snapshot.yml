@@ -1,0 +1,58 @@
+id: fixture-policy-rust-inline-data-source
+snapshots:
+  ? |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: "unapproved-node".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'node_id: "unapproved-node".to_owned()'
+      style: primary
+      start: 64
+      end: 101
+    - source: |-
+        mod tests {
+            fn builds_node() {
+                let fixture = Node { node_id: "unapproved-node".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 112
+    - source: node_id
+      style: secondary
+      start: 64
+      end: 71
+    - source: '"unapproved-node".to_owned()'
+      style: secondary
+      start: 73
+      end: 101
+  ? |
+    mod tests {
+        fn builds_token() {
+            let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'one_time_secret: "unapproved-secret".to_owned()'
+      style: primary
+      start: 70
+      end: 117
+    - source: |-
+        mod tests {
+            fn builds_token() {
+                let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 128
+    - source: one_time_secret
+      style: secondary
+      start: 70
+      end: 85
+    - source: '"unapproved-secret".to_owned()'
+      style: secondary
+      start: 87
+      end: 117

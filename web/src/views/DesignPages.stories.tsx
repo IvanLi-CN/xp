@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
@@ -35,8 +36,8 @@ const DESIGN_ALERTS: AlertsResponse = {
 			type: "quota_banned_membership",
 			membership_key: "u_01HUSERAAAAAA::ep_01HENDPTAAAAAA",
 			user_id: "u_01HUSERAAAAAA",
-			endpoint_id: "ep_01HENDPTAAAAAA",
-			owner_node_id: "n1",
+			endpoint_id: fixtureCatalog.slotString.s240(),
+			owner_node_id: fixtureCatalog.slotString.s241(),
 			quota_banned: true,
 			quota_banned_at: "2026-03-01T00:00:00Z",
 			message: "Quota enforced on owner node (membership is blocked).",
@@ -47,10 +48,10 @@ const DESIGN_ALERTS: AlertsResponse = {
 
 const DESIGN_NODES: AdminNode[] = [
 	{
-		node_id: "n1",
-		node_name: "tokyo-1",
-		access_host: "tokyo.example.com",
-		api_base_url: "https://n1:62416",
+		node_id: fixtureCatalog.slotString.s241(),
+		node_name: fixtureCatalog.slotString.s33(),
+		access_host: fixtureCatalog.slotString.s137(),
+		api_base_url: fixtureCatalog.slotString.s242(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -59,10 +60,10 @@ const DESIGN_NODES: AdminNode[] = [
 		} satisfies NodeQuotaReset,
 	},
 	{
-		node_id: "n2",
-		node_name: "osaka-1",
-		access_host: "osaka.example.com",
-		api_base_url: "https://n2:62416",
+		node_id: fixtureCatalog.slotString.s243(),
+		node_name: fixtureCatalog.slotString.s37(),
+		access_host: fixtureCatalog.slotString.s244(),
+		api_base_url: fixtureCatalog.slotString.s245(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -71,10 +72,10 @@ const DESIGN_NODES: AdminNode[] = [
 		} satisfies NodeQuotaReset,
 	},
 	{
-		node_id: "n3",
-		node_name: "nagoya-1",
-		access_host: "nagoya.example.com",
-		api_base_url: "https://n3:62416",
+		node_id: fixtureCatalog.slotString.s246(),
+		node_name: fixtureCatalog.slotString.s247(),
+		access_host: fixtureCatalog.slotString.s248(),
+		api_base_url: fixtureCatalog.slotString.s249(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "unlimited",
@@ -87,32 +88,29 @@ const DESIGN_ENDPOINTS: Array<
 	AdminEndpoint & { short_ids?: string[]; active_short_id?: string }
 > = [
 	{
-		endpoint_id: "ep_01HENDPTAAAAAA",
-		node_id: "n1",
-		tag: "tokyo-vless",
+		endpoint_id: fixtureCatalog.slotString.s240(),
+		node_id: fixtureCatalog.slotString.s241(),
+		tag: fixtureCatalog.slotString.s139(),
 		kind: "vless_reality_vision_tcp",
 		port: 443,
 		meta: {
 			reality: {
-				dest: "127.0.0.1:39043",
-				server_names: ["tokyo.example.com"],
+				dest: fixtureCatalog.slotString.s2(),
+				server_names: fixtureCatalog.slotList.l20(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
-			canary_upstream: {
-				url: "http://127.0.0.1:8080",
-				mode: "auto",
-			},
-			accepted_authorities: ["edge.example.com:443", "edge.example.test:443"],
+			canary_upstream: fixtureCatalog.slotString.s173(),
+			accepted_authorities: fixtureCatalog.slotList.l21(),
 			managed_default: true,
 		},
 		short_ids: ["2a3b4c", "5d6e7f"],
 		active_short_id: "2a3b4c",
 	},
 	{
-		endpoint_id: "ep_01HENDPTBBBBBB",
-		node_id: "n2",
-		tag: "osaka-ss",
+		endpoint_id: fixtureCatalog.slotString.s250(),
+		node_id: fixtureCatalog.slotString.s243(),
+		tag: fixtureCatalog.slotString.s251(),
 		kind: "ss2022_2022_blake3_aes_128_gcm",
 		port: 8443,
 		meta: {
@@ -127,7 +125,7 @@ const DESIGN_USERS: AdminUser[] = [
 	{
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Customer A",
-		subscription_token: "sub_9c1234d2",
+		subscription_token: fixtureCatalog.slotString.s252(),
 		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
@@ -139,7 +137,7 @@ const DESIGN_USERS: AdminUser[] = [
 	{
 		user_id: "u_01HUSERBBBBBB",
 		display_name: "Customer B",
-		subscription_token: "sub_af5678e9",
+		subscription_token: fixtureCatalog.slotString.s253(),
 		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
@@ -154,15 +152,15 @@ const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
 	u_01HUSERAAAAAA: [
 		{
 			user_id: "u_01HUSERAAAAAA",
-			endpoint_id: "ep_01HENDPTAAAAAA",
-			node_id: "n1",
+			endpoint_id: fixtureCatalog.slotString.s240(),
+			node_id: fixtureCatalog.slotString.s241(),
 		},
 	],
 	u_01HUSERBBBBBB: [
 		{
 			user_id: "u_01HUSERBBBBBB",
-			endpoint_id: "ep_01HENDPTBBBBBB",
-			node_id: "n2",
+			endpoint_id: fixtureCatalog.slotString.s250(),
+			node_id: fixtureCatalog.slotString.s243(),
 		},
 	],
 };
@@ -170,7 +168,7 @@ const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
 		user_id: "u_01HUSERAAAAAA",
-		node_id: "n1",
+		node_id: fixtureCatalog.slotString.s241(),
 		quota_limit_bytes: 10 * 2 ** 30,
 		quota_reset_source: "user",
 	},
@@ -185,10 +183,10 @@ const DESIGN_MOCK_API = {
 	data: {
 		health: { status: "ok" as const },
 		clusterInfo: {
-			cluster_id: "cluster-alpha",
-			node_id: "n1",
+			cluster_id: fixtureCatalog.slotString.s53(),
+			node_id: fixtureCatalog.slotString.s241(),
 			role: "leader" as const,
-			leader_api_base_url: "https://n1:62416",
+			leader_api_base_url: fixtureCatalog.slotString.s242(),
 			term: 42,
 			xp_version: "0.0.0",
 		},
@@ -236,10 +234,10 @@ export const DashboardUpdateAvailable: Story = {
 					current: { package: "0.1.0", release_tag: "v0.1.0" },
 					latest: {
 						release_tag: "v0.2.0",
-						published_at: "2026-01-31T00:00:00Z",
+						published_at: fixtureCatalog.slotString.s54(),
 					},
 					has_update: true,
-					checked_at: "2026-01-31T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s54(),
 					compare_reason: "semver",
 					source: {
 						kind: "github-releases",

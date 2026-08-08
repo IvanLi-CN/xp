@@ -7,6 +7,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import {
@@ -118,7 +119,7 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
-		subscription_token: "subtoken",
+		subscription_token: fixtureCatalog.slotString.s254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
@@ -127,10 +128,10 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-tokyo",
-				node_name: "Tokyo",
-				api_base_url: "https://tokyo.example.com",
-				access_host: "tokyo.example.com",
+				node_id: fixtureCatalog.slotString.s134(),
+				node_name: fixtureCatalog.slotString.s135(),
+				api_base_url: fixtureCatalog.slotString.s136(),
+				access_host: fixtureCatalog.slotString.s137(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -144,25 +145,25 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
-				endpoint_id: "ep-vless",
-				node_id: "node-tokyo",
-				tag: "tokyo-vless",
+				endpoint_id: fixtureCatalog.slotString.s138(),
+				node_id: fixtureCatalog.slotString.s134(),
+				tag: fixtureCatalog.slotString.s139(),
 				kind: "vless_reality_vision_tcp",
 				port: 443,
 				meta: {},
 			},
 			{
-				endpoint_id: "ep-ss",
-				node_id: "node-tokyo",
-				tag: "tokyo-ss",
+				endpoint_id: fixtureCatalog.slotString.s140(),
+				node_id: fixtureCatalog.slotString.s134(),
+				tag: fixtureCatalog.slotString.s141(),
 				kind: "ss2022_2022_blake3_aes_128_gcm",
 				port: 8443,
 				meta: {},
 			},
 			{
-				endpoint_id: "ep-ss-2",
-				node_id: "node-tokyo",
-				tag: "tokyo-ss-2",
+				endpoint_id: fixtureCatalog.slotString.s255(),
+				node_id: fixtureCatalog.slotString.s134(),
+				tag: fixtureCatalog.slotString.s256(),
 				kind: "ss2022_2022_blake3_aes_128_gcm",
 				port: 9443,
 				meta: {},
@@ -179,7 +180,7 @@ function setupMocks(args?: {
 		items: [
 			{
 				user_id: "u_01HUSERAAAAAA",
-				node_id: "node-tokyo",
+				node_id: fixtureCatalog.slotString.s134(),
 				quota_limit_bytes: 0,
 				quota_reset_source: "user",
 			},
@@ -192,7 +193,7 @@ function setupMocks(args?: {
 		items: [
 			{
 				user_id: "u_01HUSERAAAAAA",
-				node_id: "node-tokyo",
+				node_id: fixtureCatalog.slotString.s134(),
 				quota_limit_bytes: 1024,
 				used_bytes: 0,
 				remaining_bytes: 1024,
@@ -217,10 +218,10 @@ function setupMocks(args?: {
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo.example.com",
-							access_host: "tokyo.example.com",
+							node_id: fixtureCatalog.slotString.s134(),
+							node_name: fixtureCatalog.slotString.s135(),
+							api_base_url: fixtureCatalog.slotString.s136(),
+							access_host: fixtureCatalog.slotString.s137(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -229,36 +230,36 @@ function setupMocks(args?: {
 							},
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
+						window_start: fixtureCatalog.slotString.s24(),
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
 						unique_ip_series: [
-							{ minute: "2026-03-08T00:00:00Z", count: 1 },
-							{ minute: "2026-03-08T00:01:00Z", count: 2 },
+							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+							{ minute: fixtureCatalog.slotString.s26(), count: 2 },
 						],
 						timeline: [
 							{
 								lane_key: "edge-tokyo|203.0.113.7",
-								endpoint_id: "endpoint-1",
-								endpoint_tag: "edge-tokyo",
-								ip: "203.0.113.7",
+								endpoint_id: fixtureCatalog.slotString.s40(),
+								endpoint_tag: fixtureCatalog.slotString.s41(),
+								ip: fixtureCatalog.slotString.s29(),
 								minutes: 2,
 								segments: [
 									{
-										start_minute: "2026-03-08T00:00:00Z",
-										end_minute: "2026-03-08T00:01:00Z",
+										start_minute: fixtureCatalog.slotString.s24(),
+										end_minute: fixtureCatalog.slotString.s26(),
 									},
 								],
 							},
 						],
 						ips: [
 							{
-								ip: "203.0.113.7",
+								ip: fixtureCatalog.slotString.s29(),
 								minutes: 2,
-								endpoint_tags: ["edge-tokyo"],
+								endpoint_tags: [fixtureCatalog.slotString.s41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: "2026-03-08T00:01:00Z",
+								last_seen_at: fixtureCatalog.slotString.s26(),
 							},
 						],
 					},
@@ -274,14 +275,14 @@ function setupMocks(args?: {
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
-		node_id: "node-tokyo",
+		node_id: fixtureCatalog.slotString.s134(),
 		quota_limit_bytes: 0,
 		quota_reset_source: "user",
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
 		display_name: "Ivan",
-		subscription_token: "subtoken",
+		subscription_token: fixtureCatalog.slotString.s254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
@@ -300,7 +301,7 @@ function setupMocks(args?: {
 		extra_proxy_providers_yaml: "",
 	});
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
-		subscription_token: "sub_new",
+		subscription_token: fixtureCatalog.slotString.s257(),
 	});
 	vi.mocked(resetAdminUserCredentials).mockResolvedValue({
 		user_id: "u_01HUSERAAAAAA",
@@ -326,8 +327,8 @@ describe("<UserDetailsPage />", () => {
 			access: [
 				{
 					user_id: "u_01HUSERAAAAAA",
-					endpoint_id: "ep-vless",
-					node_id: "node-tokyo",
+					endpoint_id: fixtureCatalog.slotString.s138(),
+					node_id: fixtureCatalog.slotString.s134(),
 				},
 			],
 		});
@@ -340,7 +341,9 @@ describe("<UserDetailsPage />", () => {
 		const accessTab = await screenByRole("button", "Access");
 		fireEvent.click(accessTab);
 
-		const checkbox = await screenByLabel("Toggle Tokyo VLESS");
+		const checkbox = await screenByLabel(
+			`Toggle ${fixtureCatalog.slotString.s135()} VLESS`,
+		);
 		expect(checkbox).toBeChecked();
 	});
 
@@ -352,7 +355,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
-		expect(await queryByText("node-tokyo")).toBeNull();
+		expect(await queryByText(fixtureCatalog.slotString.s134())).toBeNull();
 	});
 
 	it("applies selected endpoints via putAdminUserAccess", async () => {
@@ -360,7 +363,9 @@ describe("<UserDetailsPage />", () => {
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle Tokyo VLESS"));
+		fireEvent.click(
+			await screenByLabel(`Toggle ${fixtureCatalog.slotString.s135()} VLESS`),
+		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
@@ -370,7 +375,7 @@ describe("<UserDetailsPage />", () => {
 				{
 					items: [
 						{
-							endpoint_id: "ep-vless",
+							endpoint_id: fixtureCatalog.slotString.s138(),
 						},
 					],
 				},
@@ -397,11 +402,13 @@ describe("<UserDetailsPage />", () => {
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle row Tokyo"));
+		fireEvent.click(
+			await screenByLabel(`Toggle row ${fixtureCatalog.slotString.s135()}`),
+		);
 
 		expect(
 			await screenByText(
-				"Node all-select covers current endpoints on Tokyo only. Future endpoints still follow protocol all-select defaults.",
+				`Node all-select covers current endpoints on ${fixtureCatalog.slotString.s135()} only. Future endpoints still follow protocol all-select defaults.`,
 			),
 		).toBeTruthy();
 	});
@@ -411,15 +418,17 @@ describe("<UserDetailsPage />", () => {
 			access: [
 				{
 					user_id: "u_01HUSERAAAAAA",
-					endpoint_id: "ep-vless",
-					node_id: "node-tokyo",
+					endpoint_id: fixtureCatalog.slotString.s138(),
+					node_id: fixtureCatalog.slotString.s134(),
 				},
 			],
 		});
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle Tokyo VLESS"));
+		fireEvent.click(
+			await screenByLabel(`Toggle ${fixtureCatalog.slotString.s135()} VLESS`),
+		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
@@ -448,12 +457,12 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
@@ -464,8 +473,8 @@ describe("<UserDetailsPage />", () => {
 				"u_01HUSERAAAAAA",
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: "ep-ss" },
-						{ endpoint_id: "ep-ss-2" },
+						{ endpoint_id: fixtureCatalog.slotString.s140() },
+						{ endpoint_id: fixtureCatalog.slotString.s255() },
 					]),
 				},
 			);
@@ -479,12 +488,14 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		const allToggle = await screenByLabel("Toggle all");
-		const rowToggle = await screenByLabel("Toggle row Tokyo");
+		const rowToggle = await screenByLabel(
+			`Toggle row ${fixtureCatalog.slotString.s135()}`,
+		);
 		const columnToggle = await screenByLabel("Toggle SS2022");
 
 		expect(allToggle).not.toBeChecked();
@@ -501,10 +512,12 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("button", "Access"));
 
-		expect(await queryByLabel("Toggle Tokyo SS2022")).toBeNull();
+		expect(
+			await queryByLabel(`Toggle ${fixtureCatalog.slotString.s135()} SS2022`),
+		).toBeNull();
 		expect(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeTruthy();
 	});
@@ -516,18 +529,18 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 
@@ -539,8 +552,8 @@ describe("<UserDetailsPage />", () => {
 				"u_01HUSERAAAAAA",
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: "ep-ss" },
-						{ endpoint_id: "ep-ss-2" },
+						{ endpoint_id: fixtureCatalog.slotString.s140() },
+						{ endpoint_id: fixtureCatalog.slotString.s255() },
 					]),
 				},
 			);
@@ -563,7 +576,7 @@ describe("<UserDetailsPage />", () => {
 
 		const tree = await screenByRole(
 			"tree",
-			"Endpoint options for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			`Endpoint options for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 		);
 		expect((tree.parentElement as HTMLElement | null)?.className).not.toContain(
 			"absolute",
@@ -577,28 +590,28 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle endpoint tree for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle endpoint tree for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 	});
@@ -622,7 +635,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "raw");
+			expect(fetchSubscription).toHaveBeenCalledWith(
+				fixtureCatalog.slotString.s254(),
+				"raw",
+			);
 		});
 		expect(await screenByText("Subscription preview")).toBeTruthy();
 	});
@@ -644,7 +660,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "mihomo");
+			expect(fetchSubscription).toHaveBeenCalledWith(
+				fixtureCatalog.slotString.s254(),
+				"mihomo",
+			);
 		});
 	});
 
@@ -668,7 +687,7 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith(
-				"subtoken",
+				fixtureCatalog.slotString.s254(),
 				"mihomo",
 				"mirror",
 			);
@@ -816,11 +835,11 @@ rules: []
 		setupMocks();
 		vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValueOnce({
 			partial: true,
-			unreachable_nodes: ["node-osaka"],
+			unreachable_nodes: [fixtureCatalog.slotString.s258()],
 			items: [
 				{
 					user_id: "u_01HUSERAAAAAA",
-					node_id: "node-tokyo",
+					node_id: fixtureCatalog.slotString.s134(),
 					quota_limit_bytes: 1024,
 					used_bytes: 0,
 					remaining_bytes: 1024,
@@ -833,7 +852,11 @@ rules: []
 
 		fireEvent.click(await screenByRole("button", "Quota status"));
 		expect(await screenByText("Quota status is partial.")).toBeTruthy();
-		expect(await screenByText("Unreachable nodes: node-osaka")).toBeTruthy();
+		expect(
+			await screenByText(
+				`Unreachable nodes: ${fixtureCatalog.slotString.s258()}`,
+			),
+		).toBeTruthy();
 	});
 
 	it("renders usage details groups and refetches when the window changes", async () => {
@@ -850,10 +873,10 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo.example.com",
-							access_host: "tokyo.example.com",
+							node_id: fixtureCatalog.slotString.s134(),
+							node_name: fixtureCatalog.slotString.s135(),
+							api_base_url: fixtureCatalog.slotString.s136(),
+							access_host: fixtureCatalog.slotString.s137(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -862,28 +885,30 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
+						window_start: fixtureCatalog.slotString.s24(),
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+						],
 						timeline: [],
 						ips: [
 							{
-								ip: "203.0.113.7",
+								ip: fixtureCatalog.slotString.s29(),
 								minutes: 1,
-								endpoint_tags: ["edge-tokyo"],
+								endpoint_tags: [fixtureCatalog.slotString.s41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: "2026-03-08T00:00:00Z",
+								last_seen_at: fixtureCatalog.slotString.s24(),
 							},
 						],
 					},
 					{
 						node: {
-							node_id: "node-osaka",
-							node_name: "Osaka",
-							api_base_url: "https://osaka.example.com",
-							access_host: "osaka.example.com",
+							node_id: fixtureCatalog.slotString.s258(),
+							node_name: fixtureCatalog.slotString.s259(),
+							api_base_url: fixtureCatalog.slotString.s260(),
+							access_host: fixtureCatalog.slotString.s244(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -892,19 +917,21 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
+						window_start: fixtureCatalog.slotString.s24(),
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+						],
 						timeline: [],
 						ips: [
 							{
-								ip: "198.51.100.9",
+								ip: fixtureCatalog.slotString.s142(),
 								minutes: 1,
 								endpoint_tags: ["edge-osaka"],
 								region: "Japan / Osaka",
 								operator: "CarrierNet",
-								last_seen_at: "2026-03-08T00:00:00Z",
+								last_seen_at: fixtureCatalog.slotString.s24(),
 							},
 						],
 					},
@@ -924,22 +951,28 @@ rules: []
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getByText("Usage details · Tokyo")).toBeInTheDocument();
+			expect(
+				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s135()}`),
+			).toBeInTheDocument();
 		});
-		expect(screen.getByRole("tab", { name: "Tokyo" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
-		expect(screen.queryByText("Usage details · Osaka")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.slotString.s135() }),
+		).toHaveAttribute("aria-selected", "true");
+		expect(
+			screen.queryByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+		).not.toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("tab", { name: "Osaka" }));
-		await waitFor(() => {
-			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
-		});
-		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
-			"aria-selected",
-			"true",
+		fireEvent.click(
+			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
 		);
+		await waitFor(() => {
+			expect(
+				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+			).toBeInTheDocument();
+		});
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
+		).toHaveAttribute("aria-selected", "true");
 		expect(
 			screen.getByText("Geo enrichment uses the free country.is hosted API."),
 		).toBeInTheDocument();
@@ -954,13 +987,16 @@ rules: []
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+			expect(
+				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+			).toBeInTheDocument();
 		});
-		expect(screen.queryByText("Usage details · Tokyo")).not.toBeInTheDocument();
-		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
+		expect(
+			screen.queryByText(`Usage details · ${fixtureCatalog.slotString.s135()}`),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
+		).toHaveAttribute("aria-selected", "true");
 	});
 
 	it("disambiguates usage detail node tabs when node names repeat", async () => {
@@ -977,10 +1013,10 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo-a",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo-a.example.com",
-							access_host: "tokyo-a.example.com",
+							node_id: fixtureCatalog.slotString.s145(),
+							node_name: fixtureCatalog.slotString.s135(),
+							api_base_url: fixtureCatalog.slotString.s261(),
+							access_host: fixtureCatalog.slotString.s262(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -989,19 +1025,21 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
+						window_start: fixtureCatalog.slotString.s24(),
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+						],
 						timeline: [],
 						ips: [],
 					},
 					{
 						node: {
-							node_id: "node-tokyo-b",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo-b.example.com",
-							access_host: "tokyo-b.example.com",
+							node_id: fixtureCatalog.slotString.s263(),
+							node_name: fixtureCatalog.slotString.s135(),
+							api_base_url: fixtureCatalog.slotString.s264(),
+							access_host: fixtureCatalog.slotString.s265(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -1010,10 +1048,12 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
+						window_start: fixtureCatalog.slotString.s24(),
 						window_end: "2026-03-08T00:02:00Z",
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+						],
 						timeline: [],
 						ips: [],
 					},
@@ -1026,11 +1066,15 @@ rules: []
 
 		await waitFor(() => {
 			expect(
-				screen.getByRole("tab", { name: "Tokyo · tokyo-a.example.com" }),
+				screen.getByRole("tab", {
+					name: `${fixtureCatalog.slotString.s135()} · ${fixtureCatalog.slotString.s262()}`,
+				}),
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByRole("tab", { name: "Tokyo · tokyo-b.example.com" }),
+			screen.getByRole("tab", {
+				name: `${fixtureCatalog.slotString.s135()} · ${fixtureCatalog.slotString.s265()}`,
+			}),
 		).toBeInTheDocument();
 	});
 
@@ -1043,7 +1087,7 @@ rules: []
 				},
 				window: "24h",
 				partial: true,
-				unreachable_nodes: ["node-osaka"],
+				unreachable_nodes: [fixtureCatalog.slotString.s258()],
 				warnings: [],
 				groups: [],
 			},
@@ -1057,7 +1101,9 @@ rules: []
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByText("Unreachable nodes: node-osaka"),
+			screen.getByText(
+				`Unreachable nodes: ${fixtureCatalog.slotString.s258()}`,
+			),
 		).toBeInTheDocument();
 		expect(screen.getByText("Usage details unavailable")).toBeInTheDocument();
 		expect(

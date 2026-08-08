@@ -1,0 +1,25 @@
+id: fixture-policy-rust-inline-data-source
+valid:
+  - |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: xp_test_fixtures::primary_node_id().to_owned() };
+        }
+    }
+  - |
+    fn production_value() {
+        let fixture = Node { node_id: "runtime-node".to_owned() };
+    }
+invalid:
+  - |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: "unapproved-node".to_owned() };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_token() {
+            let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }

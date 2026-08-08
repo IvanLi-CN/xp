@@ -1,0 +1,6 @@
+id: fixture-policy-catalog-number-values
+valid:
+  - '{ "metrics": { "latencyLow": 12 } }'
+  - '{ "slots": { "numbers": [0.72] } }'
+invalid:
+  - '{ "slots": { "numbers": [1000000] } }'

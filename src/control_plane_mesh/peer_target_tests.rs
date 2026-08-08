@@ -2,20 +2,20 @@ use super::*;
 
 fn peer_node() -> Node {
     Node {
-        node_id: "peer-a".to_string(),
+        node_id: xp_test_fixtures::slot_s504().to_owned(),
         node_name: "peer-a".to_string(),
-        access_host: "peer-a.example.test".to_string(),
-        api_base_url: "https://public-peer-a.example.test".to_string(),
+        access_host: xp_test_fixtures::slot_s505().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s506().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     }
 }
 
-fn managed_vless_endpoint(endpoint_id: &str, port: u16) -> Endpoint {
+fn managed_vless_endpoint(_endpoint_id: &str, port: u16) -> Endpoint {
     Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: "peer-a".to_string(),
-        tag: format!("vless-vision-{endpoint_id}"),
+        endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
+        node_id: xp_test_fixtures::slot_s504().to_owned(),
+        tag: xp_test_fixtures::slot_s507().to_owned(),
         kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
         port,
         meta: serde_json::json!({
@@ -41,7 +41,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     let unique = peer_target_from_node(&node, &[managed_vless_endpoint("one", 443)]);
     assert_eq!(
         unique.mesh_base_url.as_deref(),
-        Some("https://peer-a.example.test:443")
+        Some(format!("https://{}:443", xp_test_fixtures::slot_s505()).as_str())
     );
     assert_eq!(unique.mesh_reason, MeshPeerReason::MeshAvailable);
     assert_eq!(unique.public_base_url, node.api_base_url);
@@ -49,7 +49,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(missing.mesh_base_url.is_none());
     assert_eq!(missing.mesh_reason, MeshPeerReason::MissingEndpoint);
     let missing_access_host = Node {
-        access_host: String::new(),
+        access_host: xp_test_fixtures::slot_s492().to_owned(),
         ..node.clone()
     };
     assert!(
@@ -63,7 +63,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         MeshPeerReason::InvalidAccessHost
     );
     let invalid_access_host = Node {
-        access_host: "https://peer-a.example.test:443/mesh".to_string(),
+        access_host: xp_test_fixtures::slot_s508().to_owned(),
         ..node.clone()
     };
     assert!(
@@ -77,14 +77,14 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         MeshPeerReason::InvalidAccessHost
     );
     let absolute_fqdn = Node {
-        access_host: "peer-a.example.test.".to_string(),
+        access_host: xp_test_fixtures::slot_s509().to_owned(),
         ..node.clone()
     };
     assert_eq!(
         peer_target_from_node(&absolute_fqdn, &[managed_vless_endpoint("one", 443)],)
             .mesh_base_url
             .as_deref(),
-        Some("https://peer-a.example.test:443")
+        Some(format!("https://{}:443", xp_test_fixtures::slot_s505()).as_str())
     );
     let ambiguous = peer_target_from_node(
         &node,

@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { AdminConfigResponseSchema } from "./adminConfig";
 
 const baseConfig = {
-	bind: "127.0.0.1:62416",
-	xray_api_addr: "127.0.0.1:10085",
+	bind: fixtureCatalog.address.loopback39043(),
+	xray_api_addr: fixtureCatalog.address.loopback49043(),
 	data_dir: "/var/lib/xp",
-	node_name: "fixture-node",
-	access_host: "fixture.example",
-	api_base_url: "https://fixture.example",
-	vless_https_canary_bind: "127.0.0.1:18080",
+	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+	access_host: fixtureCatalog.host.primary(),
+	api_base_url: fixtureCatalog.url.primaryApi(),
+	vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 	quota_poll_interval_secs: 60,
 	quota_auto_unban: false,
 	ip_geo_enabled: false,

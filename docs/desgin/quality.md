@@ -72,6 +72,26 @@
 - 示例地址必须使用 RFC 保留域名或本地地址，例如 `example.test`、`example.invalid`、`127.0.0.1`；需要表达业务语义时只使用脱敏、不可解析的占位值。
 - 视觉证据在回传或入库前必须检查可见文本，确认不存在真实线上内容。
 
+### 2.5 Fixture 数据策略门禁
+
+- `bun run check:fixture-policy` 必须在本地与 CI 使用根 `bun.lock` 固定的
+  `@ast-grep/cli` 运行规则测试和错误级扫描。
+- 受保护的 Web 源包括所有 `web/src/**/*.test.{ts,tsx}`、`*.spec.{ts,tsx}`、
+  `*.stories.{ts,tsx}`、`web/tests/**/*.{ts,tsx}`、`web/.storybook/mocks/**/*.{ts,tsx}`、
+  `web/src/storybook/**/*.{ts,tsx}` 与 `web/src/demo/fixtures.ts`；受保护的 Rust 源包括
+  `tests/**/*.rs`、`src/**/*_tests.rs`、`src/**/tests.rs`、`src/**/tests/**/*.rs`、
+  `src/**/test_fixtures.rs`，以及 `src/**/*.rs` 内的 `mod ...tests` 单元测试模块。这些路径中的
+  操作型地址、端点、节点标识、凭据样式、遥测和时间字段只能使用 checked-in synthetic catalog
+  adapter。
+- catalog 仅可保存 `.test`、文档保留地址段、固定测试标识与确定性指标；adapter 不得读取
+  环境变量、文件、网络或反序列化输入。
+- 所有已声明 Web test/spec/story、Storybook 数据或 mock、demo fixture、Rust test、fixture
+  helper 与两种 adapter 路径不得使用 `ast-grep-ignore`。新增 fixture 值须先扩展 catalog 和
+  adapter，不能以行内豁免绕过策略。
+- policy、catalog、adapter、scanner 锁定和 CI workflow 由 `.github/CODEOWNERS` 指定安全
+  所有者。GitHub 仓库设置还必须将 `fixture-policy` 设为 required check，并要求该路径的
+  code-owner review。
+
 ## 3. Storybook（必须，且每个组件都要 stories）
 
 ### 3.1 强制要求

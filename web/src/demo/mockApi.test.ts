@@ -4,6 +4,7 @@ import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	SUBSCRIPTION_FORMAT_OPTIONS,
 } from "@/api/subscription";
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import { createDemoState } from "./fixtures";
 import { fetchDemoSubscription } from "./mockApi";
@@ -19,7 +20,7 @@ describe("demo mock API", () => {
 	it("uses the shared subscription format contract", async () => {
 		vi.useFakeTimers();
 		const state = createDemoState("normal");
-		const user = getDemoUser(state, "user-sato");
+		const user = getDemoUser(state, fixtureCatalog.identifier.userTertiary());
 
 		const pending = fetchDemoSubscription(
 			state,
@@ -40,7 +41,7 @@ describe("demo mock API", () => {
 	it("returns provider-mode Mihomo output for format=mihomo", async () => {
 		vi.useFakeTimers();
 		const state = createDemoState("normal");
-		const user = getDemoUser(state, "user-sato");
+		const user = getDemoUser(state, fixtureCatalog.identifier.userTertiary());
 
 		const pending = fetchDemoSubscription(state, user, "mihomo");
 		await vi.advanceTimersByTimeAsync(240);

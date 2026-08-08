@@ -1,0 +1,10 @@
+id: fixture-policy-typescript-no-suppression
+snapshots:
+  ? |
+    // ast-grep-ignore: fixture-policy-typescript-data-source
+    const fixture = { host: fixtureCatalog.host.primary() };
+  : labels:
+    - source: '// ast-grep-ignore: fixture-policy-typescript-data-source'
+      style: primary
+      start: 0
+      end: 57
