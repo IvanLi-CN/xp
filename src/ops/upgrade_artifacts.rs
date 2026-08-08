@@ -68,8 +68,19 @@ fn assess_upgrade_storage_for(paths: &Paths, extra: &[&Path]) -> io::Result<Upgr
 }
 
 pub(crate) fn cleanup_managed_artifacts_for(paths: &Paths, extra: &[&Path]) -> io::Result<u64> {
+    cleanup_managed_artifacts_excluding(paths, extra, &[])
+}
+
+pub(crate) fn cleanup_managed_artifacts_excluding(
+    paths: &Paths,
+    extra: &[&Path],
+    excluded: &[&Path],
+) -> io::Result<u64> {
     let mut reclaimed = 0u64;
     for artifact in managed_artifacts(paths, extra)? {
+        if excluded.iter().any(|path| artifact == *path) {
+            continue;
+        }
         if let Ok(metadata) = fs::symlink_metadata(&artifact)
             && metadata.file_type().is_file()
         {

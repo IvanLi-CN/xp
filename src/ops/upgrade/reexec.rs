@@ -5,7 +5,7 @@ use super::{
 };
 use crate::ops::Paths;
 use crate::ops::cli::{ExitError, UpgradeArgs};
-use crate::ops::upgrade_artifacts::cleanup_managed_artifacts_for;
+use crate::ops::upgrade_artifacts::cleanup_managed_artifacts_excluding;
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -52,26 +52,52 @@ pub(super) fn finish_reexeced_upgrade(
     data_dir: &Path,
     resume: &ResumeContext,
 ) -> Result<(), ExitError> {
-    match cleanup_managed_artifacts_for(paths, &[&resume.xp_ops_dest]) {
-        Ok(_) => {
+    let cleanup = cleanup_managed_artifacts_excluding(
+        paths,
+        &[&resume.xp_ops_dest],
+        &[&resume.xp_ops_backup],
+    )
+    .and_then(|_| std::fs::remove_file(&resume.xp_ops_backup));
+    match cleanup {
+        Ok(()) => {
             clear_upgrade_resume_env();
             super::failure::clear_upgrade_diagnostics(data_dir);
             Ok(())
         }
-        Err(error) => {
-            let error = ExitError::new(
+        Err(cleanup_error) => recover_after_complete_phase_failure(
+            paths,
+            data_dir,
+            resume,
+            ExitError::new(
                 7,
-                format!("service_error: cleanup upgrade artifacts: {error}"),
-            );
-            super::failure::write_upgrade_diagnostics(
-                data_dir,
-                &resume.release.tag,
-                &HashMap::new(),
-                &error,
-            );
-            Err(error)
-        }
+                format!("service_error: cleanup upgrade artifacts: {cleanup_error}"),
+            ),
+        ),
     }
+}
+
+fn recover_after_complete_phase_failure(
+    paths: &Paths,
+    data_dir: &Path,
+    resume: &ResumeContext,
+    error: ExitError,
+) -> Result<(), ExitError> {
+    let error = match super::failure::rollback_xp_ops_after_resumed_failure(
+        &resume.xp_ops_dest,
+        &resume.xp_ops_backup,
+        error,
+    ) {
+        Err(error) => error,
+        Ok(()) => unreachable!("xp-ops rollback helper must return an error"),
+    };
+    let error = super::failure::cleanup_after_upgrade_failure(paths, &[&resume.xp_ops_dest], error);
+    super::failure::write_upgrade_diagnostics(
+        data_dir,
+        &resume.release.tag,
+        &HashMap::new(),
+        &error,
+    );
+    Err(error)
 }
 
 pub(super) fn clear_upgrade_resume_env() {
