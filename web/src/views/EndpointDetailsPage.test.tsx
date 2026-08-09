@@ -224,7 +224,7 @@ describe("EndpointDetailsPage", () => {
 		});
 	});
 
-	it("defaults legacy endpoint SMux and persists an edited policy", async () => {
+	it("does not render or submit SMux settings for VLESS endpoints", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
 			endpoint_id: "endpoint-managed-vless",
 			node_id: "node-1",
@@ -235,18 +235,8 @@ describe("EndpointDetailsPage", () => {
 		});
 
 		renderPage();
-		const enabled = await screen.findByLabelText("启用 SMux");
-		expect(enabled).toHaveAttribute("data-state", "checked");
-		fireEvent.change(await screen.findByLabelText("最大物理连接数"), {
-			target: { value: "8" },
-		});
-		fireEvent.change(await screen.findByLabelText("扩容前最小流数"), {
-			target: { value: "6" },
-		});
-		fireEvent.click(await screen.findByLabelText("仅复用 TCP"));
-		fireEvent.click(enabled);
-		expect(await screen.findByLabelText("最大物理连接数")).toBeDisabled();
-		expect(await screen.findByLabelText("仅复用 TCP")).toBeDisabled();
+		expect(await screen.findByLabelText("port")).toBeInTheDocument();
+		expect(screen.queryByLabelText("启用 SMux")).toBeNull();
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Save changes" }),
 		);
@@ -255,25 +245,25 @@ describe("EndpointDetailsPage", () => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
 				"endpoint-managed-vless",
-				{
-					port: 53844,
-					mihomo_smux: {
-						enabled: false,
-						max_connections: 8,
-						min_streams: 6,
-						only_tcp: false,
-					},
-				},
+				{ port: 53844 },
 			);
 		});
 	});
 
 	it("does not render or submit SMux settings to a legacy endpoint API", async () => {
+		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+			endpoint_id: "endpoint-managed-vless",
+			node_id: "node-1",
+			tag: "legacy-ss2022",
+			kind: "ss2022_2022_blake3_aes_128_gcm",
+			port: 53844,
+			meta: {},
+		});
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
 			endpoint_id: "endpoint-managed-vless",
 			node_id: "node-1",
-			tag: "managed-vless",
-			kind: "vless_reality_vision_tcp",
+			tag: "legacy-ss2022",
+			kind: "ss2022_2022_blake3_aes_128_gcm",
 			port: 53844,
 			meta: {},
 		});

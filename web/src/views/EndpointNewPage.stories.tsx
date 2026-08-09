@@ -71,7 +71,15 @@ export const MihomoSmuxDefaults: Story = {
 	tags: ["coverage-ui", "endpoint-mihomo-smux"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await canvas.findByText("高级设置：连接复用 (SMux)"));
+		await userEvent.click(await canvas.findByLabelText("Kind"));
+		await userEvent.click(
+			await within(document.body).findByRole("option", {
+				name: "SS2022 BLAKE3 AES-128-GCM",
+			}),
+		);
+		await userEvent.click(
+			await canvas.findByText("高级设置：SS2022 连接复用 (SMux)"),
+		);
 		await expect(await canvas.findByLabelText("启用 SMux")).toBeChecked();
 		await expect(await canvas.findByLabelText("最大物理连接数")).toHaveValue(4);
 		await expect(

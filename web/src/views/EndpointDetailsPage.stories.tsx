@@ -100,9 +100,27 @@ export const ManagedDefaultAliases: Story = {
 
 export const MihomoSmuxDefaults: Story = {
 	tags: ["coverage-ui", "endpoint-mihomo-smux"],
+	parameters: {
+		mockApi: {
+			data: {
+				endpoints: [
+					{
+						endpoint_id: ENDPOINT_ID,
+						node_id: NODE_ID,
+						tag: "legacy-ss2022",
+						kind: "ss2022_2022_blake3_aes_128_gcm",
+						port: 443,
+						meta: {},
+					},
+				],
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(await canvas.findByText("高级设置：连接复用 (SMux)"));
+		await userEvent.click(
+			await canvas.findByText("高级设置：SS2022 连接复用 (SMux)"),
+		);
 		await expect(await canvas.findByLabelText("启用 SMux")).toBeChecked();
 		await expect(await canvas.findByLabelText("最大物理连接数")).toHaveValue(4);
 		await expect(

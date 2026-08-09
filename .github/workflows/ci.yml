@@ -29,6 +29,10 @@ jobs:
       - name: style budget
         run: python3 scripts/check-style-budget.py
 
+      - name: Mihomo subscription fixture
+        shell: bash
+        run: ./.github/scripts/test-mihomo-fixture.sh
+
       - name: setup bun
         uses: oven-sh/setup-bun@v2.2.0
         with:

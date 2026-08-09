@@ -26,8 +26,6 @@ pub(super) struct ClashVlessProxy {
     pub(super) reality_opts: ClashRealityOpts,
     #[serde(rename = "dialer-proxy", skip_serializing_if = "Option::is_none")]
     pub(super) dialer_proxy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) smux: Option<ClashSmuxConfig>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
