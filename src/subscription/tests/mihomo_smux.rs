@@ -23,7 +23,7 @@ fn assert_default_smux(proxy: &Value) {
 #[test]
 fn build_clash_yaml_has_proxies_and_derived_secrets() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -99,7 +99,7 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
 #[test]
 fn mihomo_system_payload_uses_endpoint_smux_and_raw_uris_stay_standard() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let mut endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
