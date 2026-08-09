@@ -465,7 +465,7 @@ pub(super) fn egress_probe(
         },
         subscription_region: region,
         checked_at: xp_test_fixtures::slot_s464().to_owned(),
-        last_success_at: Some("2099-01-01T00:00:00Z".to_string()),
+        last_success_at: Some(xp_test_fixtures::slot_s464().to_owned()),
         classification_invalidated_at: None,
         error_summary: None,
     }

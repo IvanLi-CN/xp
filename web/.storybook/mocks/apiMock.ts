@@ -111,7 +111,6 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 		joinToken: number;
 		realityDomain: number;
 		shortId: number;
-		subscription: number;
 		user: number;
 	};
 };
@@ -1037,7 +1036,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		joinToken: 1,
 		realityDomain: 1,
 		shortId: 1,
-		subscription: 1,
 		user: 1,
 	};
 
@@ -1210,6 +1208,7 @@ function buildAdminUpgradeStatus(
 async function handleRequest(
 	state: MockState,
 	req: Request,
+	nextSubscriptionToken: () => string,
 ): Promise<Response> {
 	const method = req.method.toUpperCase();
 	const url = new URL(req.url, "http://localhost");
@@ -2178,11 +2177,10 @@ async function handleRequest(
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
 		const userId = `user-mock-${state.counters.user++}`;
-		const token = `sub-mock-${state.counters.subscription++}`;
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: fixtureCatalog.slotString.s71(),
+			subscription_token: nextSubscriptionToken(),
 			credential_epoch: 0,
 			priority_tier: "p2",
 			quota_reset:
@@ -2195,7 +2193,10 @@ async function handleRequest(
 		};
 		state.users = [...state.users, user];
 		state.userAccessByUserId[userId] = [];
-		state.subscriptions[token] = buildSubscriptionText(token, null);
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(
+			user.subscription_token,
+			null,
+		);
 		return jsonResponse(user);
 	}
 
@@ -2243,17 +2244,18 @@ async function handleRequest(
 		if (!user) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const token = `sub-mock-${state.counters.subscription++}`;
-		const updated: AdminUser = {
-			...user,
-			subscription_token: fixtureCatalog.slotString.s71(),
-		};
+		const previousSubscriptionToken = user.subscription_token;
+		user.subscription_token = nextSubscriptionToken();
 		state.users = state.users.map((item) =>
-			item.user_id === userId ? updated : item,
+			item.user_id === userId ? user : item,
 		);
-		state.subscriptions[token] = buildSubscriptionText(token, null);
+		delete state.subscriptions[previousSubscriptionToken];
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(
+			user.subscription_token,
+			null,
+		);
 		const response: AdminUserTokenResponse = {
-			subscription_token: fixtureCatalog.slotString.s71(),
+			subscription_token: user.subscription_token,
 		};
 		return jsonResponse(response);
 	}
@@ -2405,14 +2407,19 @@ async function handleRequest(
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
 	let probe = config?.probe;
+	let nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
 			probe = nextConfig?.probe;
+			nextSubscriptionToken =
+				fixtureCatalog.identifier.createSubscriptionTokenFactory();
 		},
 		async handle(req: Request) {
 			return (
-				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
+				handleEndpointProbeRequest(req, probe) ??
+				handleRequest(state, req, nextSubscriptionToken)
 			);
 		},
 	};

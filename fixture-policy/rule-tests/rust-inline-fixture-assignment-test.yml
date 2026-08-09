@@ -28,7 +28,13 @@ invalid:
     }
   - |
     mod tests {
-        fn updates_mesh_target() {
-            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
-        }
+      fn updates_mesh_target() {
+        fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+      }
+    }
+  - |
+    mod tests {
+      fn updates_probe() {
+        fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned());
+      }
     }

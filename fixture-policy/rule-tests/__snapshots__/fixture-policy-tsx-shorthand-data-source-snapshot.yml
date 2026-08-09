@@ -1,6 +1,14 @@
 id: fixture-policy-tsx-shorthand-data-source
 snapshots:
   ? |
+    const config_hash = "unapproved-config";
+    const fixture = { config_hash };
+  : labels:
+    - source: config_hash
+      style: primary
+      start: 59
+      end: 70
+  ? |
     const last_synced_at = new Date().toISOString();
     const fixture = { last_synced_at };
   : labels:
@@ -8,6 +16,14 @@ snapshots:
       style: primary
       start: 67
       end: 81
+  ? |
+    const latest_checked_at = "2026-03-11T11:00:00Z";
+    const fixture = { latest_checked_at };
+  : labels:
+    - source: latest_checked_at
+      style: primary
+      start: 68
+      end: 85
   ? |
     const tag = "unapproved";
     const fixture = { tag };

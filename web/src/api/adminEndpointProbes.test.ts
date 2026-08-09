@@ -10,7 +10,7 @@ describe("AdminEndpointProbeHistoryResponseSchema", () => {
 			expected_nodes: 2,
 			slots: [
 				{
-					hour: "2026-03-11T11:00:00Z",
+					hour: fixtureCatalog.timestamp.probeHour(),
 					status: "up",
 					ok_count: 2,
 					sample_count: 2,

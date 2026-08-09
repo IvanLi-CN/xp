@@ -84,3 +84,59 @@ snapshots:
       style: secondary
       start: 62
       end: 90
+  ? |
+    mod tests {
+      fn updates_mesh_target() {
+        fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+      }
+    }
+  : labels:
+    - source: fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: primary
+      start: 45
+      end: 114
+    - source: |-
+        mod tests {
+          fn updates_mesh_target() {
+            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+          }
+        }
+      style: secondary
+      start: 0
+      end: 121
+    - source: fixture.mesh_base_url
+      style: secondary
+      start: 45
+      end: 66
+    - source: Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: secondary
+      start: 69
+      end: 114
+  ? |
+    mod tests {
+      fn updates_probe() {
+        fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned());
+      }
+    }
+  : labels:
+    - source: fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned())
+      style: primary
+      start: 39
+      end: 104
+    - source: |-
+        mod tests {
+          fn updates_probe() {
+            fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned());
+          }
+        }
+      style: secondary
+      start: 0
+      end: 111
+    - source: fixture.last_success_at
+      style: secondary
+      start: 39
+      end: 62
+    - source: Some("2026-03-11T11:00:00Z".to_owned())
+      style: secondary
+      start: 65
+      end: 104

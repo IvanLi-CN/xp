@@ -71,3 +71,7 @@ invalid:
     let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
   - |
     let payload = SignedPayload { cluster_id: "unapproved-cluster" };
+  - |
+    let sample = EndpointProbeSample { hour: "2026-03-11T11:00:00Z".to_owned() };
+  - |
+    let sample = EndpointProbeSample { config_hash: std::env::var("TEST_CONFIG_HASH").unwrap() };

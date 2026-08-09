@@ -10,9 +10,6 @@ import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 
 const ENDPOINT_ID = fixtureCatalog.slotString.s120();
-const RUN_ID = "run-probe-demo";
-const HOUR = "2026-07-28T14:00:00Z";
-const CONFIG_HASH = "config-demo-20260728";
 
 const nodes: AdminNode[] = [
 	{
@@ -54,7 +51,7 @@ const endpoints: AdminEndpoint[] = [
 			latest_latency_ms_p50: 32,
 			slots: [
 				{
-					hour: HOUR,
+					hour: fixtureCatalog.timestamp.probeHour(),
 					status: "up",
 					checked_at: fixtureCatalog.slotString.s217(),
 					latency_ms_p50: 32,
@@ -69,7 +66,7 @@ const history: AdminEndpointProbeHistoryResponse = {
 	participating_nodes: 3,
 	slots: [
 		{
-			hour: HOUR,
+			hour: fixtureCatalog.timestamp.probeHour(),
 			status: "up",
 			participating_nodes: 3,
 			ok_count: 3,
@@ -84,21 +81,21 @@ const history: AdminEndpointProbeHistoryResponse = {
 					ok: true,
 					checked_at: fixtureCatalog.slotString.s218(),
 					latency_ms: fixtureCatalog.slotNumber.n9(),
-					config_hash: CONFIG_HASH,
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
 					node_id: fixtureCatalog.slotString.s206(),
 					ok: true,
 					checked_at: fixtureCatalog.slotString.s219(),
 					latency_ms: fixtureCatalog.slotNumber.n10(),
-					config_hash: CONFIG_HASH,
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
 					node_id: fixtureCatalog.slotString.s213(),
 					ok: true,
 					checked_at: fixtureCatalog.slotString.s217(),
 					latency_ms: fixtureCatalog.slotNumber.n11(),
-					config_hash: CONFIG_HASH,
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 			],
 		},
@@ -106,18 +103,18 @@ const history: AdminEndpointProbeHistoryResponse = {
 };
 
 const run: AdminEndpointProbeRunStatusResponse = {
-	run_id: RUN_ID,
+	run_id: fixtureCatalog.identifier.probeRunPrimary(),
 	status: "finished",
-	hour: HOUR,
-	config_hash: CONFIG_HASH,
+	hour: fixtureCatalog.timestamp.probeHour(),
+	config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 	nodes: [
 		{
 			node_id: fixtureCatalog.slotString.s134(),
 			status: "finished",
 			progress: {
-				run_id: RUN_ID,
-				hour: HOUR,
-				config_hash: CONFIG_HASH,
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				status: "finished",
 				endpoints_total: 1,
 				endpoints_done: 1,
@@ -130,9 +127,9 @@ const run: AdminEndpointProbeRunStatusResponse = {
 			node_id: fixtureCatalog.slotString.s206(),
 			status: "finished",
 			progress: {
-				run_id: RUN_ID,
-				hour: HOUR,
-				config_hash: CONFIG_HASH,
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				status: "finished",
 				endpoints_total: 1,
 				endpoints_done: 1,
@@ -145,9 +142,9 @@ const run: AdminEndpointProbeRunStatusResponse = {
 			node_id: fixtureCatalog.slotString.s213(),
 			status: "finished",
 			progress: {
-				run_id: RUN_ID,
-				hour: HOUR,
-				config_hash: CONFIG_HASH,
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				status: "finished",
 				endpoints_total: 1,
 				endpoints_done: 1,
@@ -179,7 +176,7 @@ const meta = {
 					[ENDPOINT_ID]: history,
 				},
 				runsByRunId: {
-					[RUN_ID]: run,
+					[fixtureCatalog.identifier.probeRunPrimary()]: run,
 				},
 			},
 		},
@@ -211,7 +208,9 @@ export const HistoryWithNodeNames: Story = {
 export const LiveRunWithNodeNames: Story = {
 	render: () => <></>,
 	parameters: {
-		router: { initialEntry: `/endpoints/probe/runs/${RUN_ID}` },
+		router: {
+			initialEntry: `/endpoints/probe/runs/${fixtureCatalog.identifier.probeRunPrimary()}`,
+		},
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

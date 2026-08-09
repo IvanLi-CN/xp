@@ -457,7 +457,8 @@ export async function setupApiMocks(
 	page: Page,
 	options: MockApiOptions = {},
 ): Promise<MockState> {
-	const nextResetToken = fixtureCatalog.identifier.createResetTokenFactory();
+	const nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	const state: MockState = {
 		users: options.users ? [...options.users] : [...defaultUsers],
 		nodes: options.nodes ? [...options.nodes] : [...defaultNodes],
@@ -710,7 +711,7 @@ export async function setupApiMocks(
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
-				subscription_token: fixtureCatalog.slotString.s92(),
+				subscription_token: nextSubscriptionToken(),
 				credential_epoch: 0,
 				priority_tier: "p3",
 				quota_reset:
@@ -901,7 +902,7 @@ export async function setupApiMocks(
 					errorResponse(route, `User not found: ${userId}`, 404);
 					return;
 				}
-				user.subscription_token = nextResetToken();
+				user.subscription_token = nextSubscriptionToken();
 				jsonResponse(route, {
 					subscription_token: user.subscription_token,
 				});

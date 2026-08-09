@@ -10,13 +10,96 @@ import { EndpointProbeBar } from "./EndpointProbeBar";
 function createSlots(
 	statuses: AdminEndpointProbeSlot["status"][],
 ): AdminEndpointProbeSlot[] {
-	return statuses.map((status, index) => ({
-		hour: `${String(index).padStart(2, fixtureCatalog.slotString.s268())}:00`,
-		status,
-		checked_at: fixtureCatalog.slotString.s268(),
-		latency_ms_p50:
-			status === "missing" || status === "down" ? undefined : 40 + index * 3,
-	}));
+	const [
+		slot0,
+		slot1,
+		slot2,
+		slot3,
+		slot4,
+		slot5,
+		slot6,
+		slot7,
+		slot8,
+		slot9,
+		slot10,
+		slot11,
+	] = statuses;
+	return [
+		{
+			hour: fixtureCatalog.slotString.s4(),
+			status: slot0,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot0 === "missing" || slot0 === "down" ? undefined : 40,
+		},
+		{
+			hour: fixtureCatalog.slotString.s5(),
+			status: slot1,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot1 === "missing" || slot1 === "down" ? undefined : 43,
+		},
+		{
+			hour: fixtureCatalog.slotString.s6(),
+			status: slot2,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot2 === "missing" || slot2 === "down" ? undefined : 46,
+		},
+		{
+			hour: fixtureCatalog.slotString.s7(),
+			status: slot3,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot3 === "missing" || slot3 === "down" ? undefined : 49,
+		},
+		{
+			hour: fixtureCatalog.slotString.s8(),
+			status: slot4,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot4 === "missing" || slot4 === "down" ? undefined : 52,
+		},
+		{
+			hour: fixtureCatalog.slotString.s9(),
+			status: slot5,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot5 === "missing" || slot5 === "down" ? undefined : 55,
+		},
+		{
+			hour: fixtureCatalog.slotString.s10(),
+			status: slot6,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot6 === "missing" || slot6 === "down" ? undefined : 58,
+		},
+		{
+			hour: fixtureCatalog.slotString.s11(),
+			status: slot7,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot7 === "missing" || slot7 === "down" ? undefined : 61,
+		},
+		{
+			hour: fixtureCatalog.slotString.s12(),
+			status: slot8,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot8 === "missing" || slot8 === "down" ? undefined : 64,
+		},
+		{
+			hour: fixtureCatalog.slotString.s13(),
+			status: slot9,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50: slot9 === "missing" || slot9 === "down" ? undefined : 67,
+		},
+		{
+			hour: fixtureCatalog.slotString.s14(),
+			status: slot10,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50:
+				slot10 === "missing" || slot10 === "down" ? undefined : 70,
+		},
+		{
+			hour: fixtureCatalog.slotString.s15(),
+			status: slot11,
+			checked_at: fixtureCatalog.slotString.s268(),
+			latency_ms_p50:
+				slot11 === "missing" || slot11 === "down" ? undefined : 73,
+		},
+	];
 }
 
 function EndpointProbeBarStory({ slots }: { slots: AdminEndpointProbeSlot[] }) {

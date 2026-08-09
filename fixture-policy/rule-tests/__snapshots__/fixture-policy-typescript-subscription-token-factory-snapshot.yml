@@ -1,0 +1,95 @@
+id: fixture-policy-typescript-subscription-token-factory
+snapshots:
+  ? |
+    const nextSubscriptionToken = () => process.env.TEST_TOKEN;
+  : labels:
+    - source: nextSubscriptionToken = () => process.env.TEST_TOKEN
+      style: primary
+      start: 6
+      end: 58
+    - source: nextSubscriptionToken
+      style: secondary
+      start: 6
+      end: 27
+    - source: () => process.env.TEST_TOKEN
+      style: secondary
+      start: 30
+      end: 58
+  ? |
+    function createMockApi() {
+      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+      return handleRequest(state, req, () => process.env.TEST_TOKEN);
+    }
+  : labels:
+    - source: handleRequest(state, req, () => process.env.TEST_TOKEN)
+      style: primary
+      start: 128
+      end: 183
+    - source: handleRequest
+      style: secondary
+      start: 128
+      end: 141
+  ? |
+    function createMockApi(nextSubscriptionToken: () => string) {
+      return handleRequest(state, req, nextSubscriptionToken);
+    }
+  : labels:
+    - source: |-
+        function createMockApi(nextSubscriptionToken: () => string) {
+          return handleRequest(state, req, nextSubscriptionToken);
+        }
+      style: primary
+      start: 0
+      end: 122
+    - source: nextSubscriptionToken
+      style: secondary
+      start: 23
+      end: 44
+    - source: 'nextSubscriptionToken: () => string'
+      style: secondary
+      start: 23
+      end: 58
+    - source: 'nextSubscriptionToken: () => string'
+      style: secondary
+      start: 23
+      end: 58
+  ? |
+    function proxy(nextSubscriptionToken: () => string) {
+      return handleRequest(state, req, nextSubscriptionToken);
+    }
+  : labels:
+    - source: |-
+        function proxy(nextSubscriptionToken: () => string) {
+          return handleRequest(state, req, nextSubscriptionToken);
+        }
+      style: primary
+      start: 0
+      end: 114
+    - source: nextSubscriptionToken
+      style: secondary
+      start: 15
+      end: 36
+    - source: 'nextSubscriptionToken: () => string'
+      style: secondary
+      start: 15
+      end: 50
+    - source: 'nextSubscriptionToken: () => string'
+      style: secondary
+      start: 15
+      end: 50
+  ? |
+    let nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+    nextSubscriptionToken = () => process.env.TEST_TOKEN;
+  : labels:
+    - source: nextSubscriptionToken = () => process.env.TEST_TOKEN
+      style: primary
+      start: 88
+      end: 140
+    - source: nextSubscriptionToken
+      style: secondary
+      start: 88
+      end: 109
+    - source: () => process.env.TEST_TOKEN
+      style: secondary
+      start: 112
+      end: 140
