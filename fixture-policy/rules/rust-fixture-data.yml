@@ -31,30 +31,7 @@ rule:
             - pattern: ReconcileRequest::RemoveUser { $$$ }
             - pattern: NodeUserEndpointMembership { $$$ }
             - pattern: SignedPayload { $$$ }
-            - pattern: NodeMeta { $$$ }
             - pattern: 'async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Result<()> { $$$ }'
-            # These helpers wire real ephemeral listeners and persisted SUT state.
-            # Their values are observed runtime topology, not synthetic fixtures.
-            - pattern: |
-                fn mesh_request($$$) -> MeshRequest {
-                  $$$
-                }
-            - pattern: |
-                fn mesh_target($$$) -> MeshPeerTarget {
-                  $$$
-                }
-            - pattern: |
-                async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect() {
-                  $$$
-                }
-            - pattern: |
-                async fn spawn_peer_fleet($$$) -> PeerFleet {
-                  $$$
-                }
-            - pattern: |
-                fn prepare_peer_state($$$) {
-                  $$$
-                }
     - not:
         has:
           field: value
@@ -67,6 +44,118 @@ rule:
             - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
             - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
             - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+    # These values are derived from the test's own ephemeral process, listeners, or state.
+    # The exceptions are deliberately constrained to one field/value/record combination.
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^cluster_id$'
+          - has:
+              field: value
+              regex: '^cluster[.]cluster_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: PeerServerState { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^requests$'
+          - has:
+              field: value
+              regex: '^requests[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: PeerServerState { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_id$'
+          - has:
+              field: value
+              regex: '^target[.]node_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^access_host$'
+          - has:
+              field: value
+              regex: '^target[.]access_host[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              regex: '^"http://127[.]0[.]0[.]1:9"[.]to_string\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^endpoint_id$'
+          - has:
+              field: value
+              regex: '^xp::id::new_ulid_string\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_id$'
+          - has:
+              field: value
+              regex: '^target[.]node_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              regex: '^format!\("vless-mesh-resource-\{index:02\}"\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^dest$'
+          - has:
+              field: value
+              regex: '^format!\("host[.]docker[.]internal:\{\}", canary[.]addr[.]port\(\)\)$'
+          - inside:
+              stopBy: end
+              pattern: RealityConfig { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              regex: '^endpoint[.]tag$'
+          - inside:
+              stopBy: end
+              pattern: xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest { $$$ }
     - not:
         all:
           - has:

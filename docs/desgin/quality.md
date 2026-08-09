@@ -87,9 +87,10 @@
   adapter。
 - catalog 仅可保存 `.test`、文档保留地址段、固定测试标识与确定性指标；adapter 不得读取
   环境变量、文件、网络或反序列化输入。
-- 只有规则以精确结构识别的 SUT runtime topology（临时 listener、已持久化的 SUT state 与
-  观测到的 transport 时钟）可以在对应 integration helper 中传递运行值；它们不是 synthetic
-  fixture 来源，不能扩展为一般 test helper、环境输入或行内 fixture 值。
+- 只有规则以字段名、完整值表达式和具体 record 结构共同识别的 SUT runtime topology
+  （临时 listener、已持久化的 SUT state 与观测到的 transport 时钟）可以在对应 integration
+  helper 中传递运行值；它们不是 synthetic fixture 来源，不能扩展为函数级、一般 test helper、
+  环境输入或行内 fixture 值。
 - 所有已声明 Web test/spec/story、Storybook 数据或 mock、demo fixture、Rust test、fixture
   helper 与两种 adapter 路径不得使用 `ast-grep-ignore`。新增 fixture 值须先扩展 catalog 和
   adapter，不能以行内豁免绕过策略。

@@ -5,28 +5,42 @@ message: Fixture adapter accessors must derive values from the checked-in catalo
 files:
   - web/src/fixture-policy/catalog.ts
 rule:
-  all:
-    - kind: arrow_function
-    - not:
-        any:
-          - has:
-              field: body
-              regex: '^null$'
-          - has:
-              field: body
-              regex: '^undefined$'
-          - has:
-              field: body
-              regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+$'
-          - has:
-              field: body
-              regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
-          - has:
-              field: body
-              regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
-          - has:
-              field: body
-              regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
-          - inside:
-              stopBy: end
-              pattern: catalog.slots.$SLOTS.map(($VALUE, $INDEX) => [$KEY, $$$])
+  any:
+    - all:
+        - kind: function_declaration
+        - not:
+            any:
+              - pattern: |
+                  function stringSlotEntry(_value: string, index: number) {
+                    return [`s${index}`, () => catalog.slots.strings[index]];
+                  }
+              - pattern: |
+                  function numberSlotEntry(_value: number, index: number) {
+                    return [`n${index}`, () => catalog.slots.numbers[index]];
+                  }
+              - pattern: |
+                  function listSlotEntry(_value: string[], index: number) {
+                    return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
+                  }
+    - all:
+        - kind: arrow_function
+        - not:
+            any:
+              - has:
+                  field: body
+                  regex: '^null$'
+              - has:
+                  field: body
+                  regex: '^undefined$'
+              - has:
+                  field: body
+                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+$'
+              - has:
+                  field: body
+                  regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+              - has:
+                  field: body
+                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
+              - has:
+                  field: body
+                  regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'

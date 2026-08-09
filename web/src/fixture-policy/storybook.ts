@@ -25,7 +25,7 @@ const ONE_MINUTE_MS = 60_000;
 
 const storyNode: AdminNode = {
 	node_id: fixtureCatalog.identifier.nodePrimary(),
-	node_name: "fixture-node-a",
+	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 	access_host: fixtureCatalog.host.primary(),
 	api_base_url: fixtureCatalog.url.primaryApi(),
 	quota_limit_bytes: 0,
@@ -216,7 +216,7 @@ function duplicateNameUserIpUsage(
 				node: {
 					...structuredClone(storyNode),
 					node_id: fixtureCatalog.identifier.endpointPrimary(),
-					node_name: "fixture-duplicate",
+					node_name: fixtureCatalog.slotString.s640(),
 					access_host: fixtureCatalog.host.primary(),
 					api_base_url: fixtureCatalog.url.primaryApi(),
 				},
@@ -227,7 +227,7 @@ function duplicateNameUserIpUsage(
 				node: {
 					...structuredClone(storyNode),
 					node_id: fixtureCatalog.identifier.endpointSecondary(),
-					node_name: "fixture-duplicate",
+					node_name: fixtureCatalog.slotString.s640(),
 					access_host: fixtureCatalog.host.secondary(),
 					api_base_url: fixtureCatalog.url.secondaryApi(),
 				},

@@ -409,6 +409,10 @@ pub fn primary_authorities() -> Vec<String> {
     catalog().lists.primary_authorities.clone()
 }
 
+pub fn primary_authority() -> &'static str {
+    &catalog().lists.primary_authorities[0]
+}
+
 pub fn subscription_node_n1() -> &'static str {
     &catalog().subscription.node_ids[0]
 }

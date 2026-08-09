@@ -13,3 +13,9 @@ invalid:
     const build = (fixtureCatalog: unknown) => fixtureCatalog;
   - |
     try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }
+  - |
+    class fixtureCatalog {}
+  - |
+    const { fixtureCatalog } = source;
+  - |
+    const { source: fixtureCatalog } = source;

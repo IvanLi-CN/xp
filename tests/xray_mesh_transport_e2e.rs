@@ -40,9 +40,6 @@ use xp::{
     xray,
 };
 
-const CLUSTER_ID: &str = "01JTESTCLUSTERID00000000000000";
-const SENDER_ID: &str = "01JTESTSENDER0000000000000000";
-const TARGET_ID: &str = "01JTESTTARGET0000000000000000";
 const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 
 #[derive(Clone)]
@@ -104,15 +101,15 @@ async fn signed_health(
         &uri,
         &headers,
         &body,
-        CLUSTER_ID,
-        TARGET_ID,
+        xp_test_fixtures::primary_cluster_id(),
+        xp_test_fixtures::primary_node_id(),
     )
     .expect("valid signed request");
     let ack = internal_auth::sign_ack_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
         &verified,
-        TARGET_ID,
+        xp_test_fixtures::primary_node_id(),
         StatusCode::OK.as_u16(),
     )
     .expect("sign acknowledgement");
@@ -127,7 +124,7 @@ async fn spawn_signed_tls_server(ca_key_pem: &str, ca_cert_pem: &str) -> TestSer
     let ca_key = KeyPair::from_pem(ca_key_pem).expect("CA key");
     let ca_cert = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key).expect("CA certificate");
     let cert_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("server key");
-    let cert = CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+    let cert = CertificateParams::new(xp_test_fixtures::primary_server_names())
         .expect("certificate params")
         .signed_by(&cert_key, &ca_cert)
         .expect("server certificate");
@@ -213,15 +210,15 @@ fn mesh_request(index: usize) -> MeshRequest {
         allow_ambiguous_fallback: true,
         request_id: format!("xray-mesh-{index}"),
         route: InternalRoute::HealthV2,
-        cluster_id: CLUSTER_ID.to_string(),
-        sender_id: SENDER_ID.to_string(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
+        sender_id: xp_test_fixtures::secondary_node_id().to_owned(),
         updates_active_path: true,
     }
 }
 
 fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
     MeshPeerTarget {
-        node_id: TARGET_ID.to_string(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: "xray-target".to_string(),
         mesh_base_url: Some(format!("https://localhost:{}", proxy.addr.port())),
         mesh_reason: MeshPeerReason::MeshAvailable,
@@ -259,23 +256,30 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
         .parse()
         .expect("valid VLESS port");
 
-    let ca = xp::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = xp::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = xp::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = xp::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr =
+        xp::cluster_identity::generate_node_keypair_and_csr(xp_test_fixtures::secondary_node_id())
+            .expect("node CSR");
+    let node_cert = xp::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let canary = spawn_signed_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let keypair = generate_reality_keypair(&mut OsRng);
     let short_id = generate_short_id_16hex(&mut OsRng);
     let endpoint = Endpoint {
-        endpoint_id: "xray-mesh-e2e".to_string(),
-        node_id: TARGET_ID.to_string(),
-        tag: "vless-xray-mesh-e2e".to_string(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: vless_port,
         meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
             reality: RealityConfig {
                 dest: format!("host.docker.internal:{}", canary.addr.port()),
-                server_names: vec!["localhost".to_string()],
+                server_names: xp_test_fixtures::primary_server_names(),
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             },
@@ -285,8 +289,8 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
             },
             short_ids: vec![short_id.clone()],
             active_short_id: short_id,
-            canary_upstream: None,
-            accepted_authorities: Vec::new(),
+            canary_upstream: xp_test_fixtures::none(),
+            accepted_authorities: xp_test_fixtures::secondary_server_names(),
             mihomo_smux: MihomoSmuxConfig::default(),
             managed_default: true,
         })

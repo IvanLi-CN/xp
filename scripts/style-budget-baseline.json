@@ -1148,11 +1148,11 @@
   },
   "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 321
+    "max_line_length": 331
   },
   "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
     "long_line_count": 1,
-    "max_line_length": 144
+    "max_line_length": 148
   },
   "fixture-policy/rules/typescript-fixture-assignment.yml": {
     "long_line_count": 1,
@@ -1173,6 +1173,6 @@
   "test-fixtures/src/lib.rs": {
     "long_line_count": 36,
     "max_line_length": 147,
-    "source_lines": 2688
+    "source_lines": 2692
   }
 }

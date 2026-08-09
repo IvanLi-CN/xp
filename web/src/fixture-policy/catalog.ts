@@ -2,23 +2,26 @@ import catalog from "../../../fixture-policy/catalog.json" with {
 	type: "json",
 };
 
+function stringSlotEntry(_value: string, index: number) {
+	return [`s${index}`, () => catalog.slots.strings[index]];
+}
+
+function numberSlotEntry(_value: number, index: number) {
+	return [`n${index}`, () => catalog.slots.numbers[index]];
+}
+
+function listSlotEntry(_value: string[], index: number) {
+	return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
+}
+
 const slotString = Object.fromEntries(
-	catalog.slots.strings.map((_, index) => [
-		`s${index}`,
-		() => catalog.slots.strings[index],
-	]),
+	catalog.slots.strings.map(stringSlotEntry),
 ) as Record<`s${number}`, () => string>;
 const slotNumber = Object.fromEntries(
-	catalog.slots.numbers.map((_, index) => [
-		`n${index}`,
-		() => catalog.slots.numbers[index],
-	]),
+	catalog.slots.numbers.map(numberSlotEntry),
 ) as Record<`n${number}`, () => number>;
 const slotList = Object.fromEntries(
-	catalog.slots.stringLists.map((_, index) => [
-		`l${index}`,
-		() => [...catalog.slots.stringLists[index]],
-	]),
+	catalog.slots.stringLists.map(listSlotEntry),
 ) as Record<`l${number}`, () => string[]>;
 
 export const fixtureCatalog = {

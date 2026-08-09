@@ -16,6 +16,13 @@ rule:
     - pattern: let fixtureCatalog = $$$
     - pattern: var fixtureCatalog = $$$
     - pattern: function fixtureCatalog($$$) { $$$ }
+    - pattern: class fixtureCatalog { $$$ }
+    - pattern: const { fixtureCatalog } = $$$
+    - pattern: let { fixtureCatalog } = $$$
+    - pattern: var { fixtureCatalog } = $$$
+    - pattern: 'const { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'let { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'var { $KEY: fixtureCatalog } = $$$'
     - all:
         - kind: required_parameter
         - regex: '\bfixtureCatalog\b'
