@@ -566,6 +566,43 @@ describe("EndpointNewPage", () => {
 		});
 	});
 
+	it("does not validate hidden SS2022 SMux values after switching to VLESS", async () => {
+		vi.mocked(createAdminEndpoint).mockResolvedValue({
+			endpoint_id: "ep-vless",
+			node_id: "node-alpha",
+			tag: "ep-vless",
+			kind: "vless_reality_vision_tcp",
+			port: 443,
+			meta: {},
+		});
+
+		renderPage();
+		fireEvent.click(await screen.findByLabelText("Kind"));
+		fireEvent.click(
+			await screen.findByRole("option", { name: "SS2022 BLAKE3 AES-128-GCM" }),
+		);
+		fireEvent.change(await screen.findByLabelText("最大物理连接数"), {
+			target: { value: "17" },
+		});
+		fireEvent.click(await screen.findByLabelText("Kind"));
+		fireEvent.click(
+			await screen.findByRole("option", { name: "VLESS Reality Vision TCP" }),
+		);
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Create endpoint" }),
+		);
+
+		await waitFor(() => {
+			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
+				kind: "vless_reality_vision_tcp",
+				node_id: "node-alpha",
+				port: 443,
+				canary_upstream: undefined,
+				accepted_authorities: undefined,
+			});
+		});
+	});
+
 	it("hides managed VLESS-only fields when switched to SS2022", async () => {
 		renderPage();
 

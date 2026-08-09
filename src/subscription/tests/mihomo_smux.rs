@@ -137,21 +137,24 @@ fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_stand
             assert!(proxy.get("smux").is_none());
         }
     }
-    let vless_proxies = proxies
+    let direct_vless = proxies
         .iter()
-        .filter(|proxy| proxy["type"].as_str() == Some("vless"))
-        .collect::<Vec<_>>();
-    assert_eq!(vless_proxies.len(), 2);
-    assert!(
-        vless_proxies
-            .iter()
-            .any(|proxy| proxy.get("dialer-proxy").is_none())
+        .find(|proxy| proxy["name"].as_str() == Some("node-1-reality"))
+        .expect("system provider must retain the direct VLESS entry");
+    assert_eq!(direct_vless["type"].as_str(), Some("vless"));
+    assert!(direct_vless.get("dialer-proxy").is_none());
+    assert!(direct_vless.get("smux").is_none());
+
+    let chained_vless = proxies
+        .iter()
+        .find(|proxy| proxy["name"].as_str() == Some("node-1-reality-chain"))
+        .expect("system provider must retain the chained VLESS entry");
+    assert_eq!(chained_vless["type"].as_str(), Some("vless"));
+    assert_eq!(
+        chained_vless["dialer-proxy"].as_str(),
+        Some("🛣️ example-com")
     );
-    assert!(
-        vless_proxies
-            .iter()
-            .any(|proxy| proxy.get("dialer-proxy").is_some())
-    );
+    assert!(chained_vless.get("smux").is_none());
 
     endpoints[0].meta["mihomo_smux"] = serde_json::json!({
         "enabled": false,

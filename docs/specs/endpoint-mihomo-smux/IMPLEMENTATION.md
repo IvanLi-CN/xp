@@ -16,7 +16,8 @@
   VLESS Reality/Vision 永不输出该字段，Raw/Base64 URI 不变。
 - 接入点新建和详情页仅为 SS2022 提供可编辑的高级设置；旧 API 未广告
   `admin.endpoint-mihomo-smux` 时界面不发送该字段。
-- 脱敏 VLESS Reality 与 SS2022 fixture 已由官方 Mihomo `v1.19.29` 的 `-t` 配置检查解析通过。
+- CI 下载经 SHA-256 校验的官方 Mihomo `v1.19.29`，并以 `-t` 验证脱敏的 VLESS
+  Reality 与 SS2022 fixture。
 
 ## Validation Coverage
 

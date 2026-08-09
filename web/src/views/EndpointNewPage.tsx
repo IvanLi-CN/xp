@@ -143,6 +143,12 @@ export function EndpointNewPage() {
 	const nodeId = form.watch("nodeId");
 	const port = form.watch("port") as number | string | undefined;
 	const mihomoSmuxEnabled = form.watch("mihomoSmuxEnabled");
+	const resetMihomoSmuxFields = () => {
+		form.resetField("mihomoSmuxEnabled");
+		form.resetField("mihomoSmuxMaxConnections");
+		form.resetField("mihomoSmuxMinStreams");
+		form.resetField("mihomoSmuxOnlyTcp");
+	};
 	const nodes = nodesQuery.data?.items ?? [];
 	const selectedNode = nodes.find((node) => node.node_id === nodeId);
 	const canaryUpstreamSuggestions = mergeManagedVlessAutocompleteSuggestions([
@@ -383,7 +389,12 @@ export function EndpointNewPage() {
 											<FormLabel>Kind</FormLabel>
 											<Select
 												value={field.value}
-												onValueChange={field.onChange}
+												onValueChange={(nextKind) => {
+													field.onChange(nextKind);
+													if (nextKind === "vless_reality_vision_tcp") {
+														resetMihomoSmuxFields();
+													}
+												}}
 											>
 												<FormControl>
 													<SelectTrigger>
