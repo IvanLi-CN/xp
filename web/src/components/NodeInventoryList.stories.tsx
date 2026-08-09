@@ -8,13 +8,53 @@ import {
 	NodeInventoryList,
 } from "./NodeInventoryList";
 
-function buildRecentSlots(
-	statuses: Array<"up" | "degraded" | "down" | "unknown">,
-) {
-	return statuses.map((status) => ({
-		slot_start: fixtureCatalog.timestamp.baseline(),
-		status,
-	}));
+type RecentSlotStatus = "up" | "degraded" | "down" | "unknown";
+
+type RecentSlotStatuses = readonly [
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+];
+
+function buildRecentSlots(statuses: RecentSlotStatuses) {
+	const [
+		slot0,
+		slot1,
+		slot2,
+		slot3,
+		slot4,
+		slot5,
+		slot6,
+		slot7,
+		slot8,
+		slot9,
+		slot10,
+		slot11,
+	] = statuses;
+
+	return [
+		{ slot_start: fixtureCatalog.slotString.s4(), status: slot0 },
+		{ slot_start: fixtureCatalog.slotString.s5(), status: slot1 },
+		{ slot_start: fixtureCatalog.slotString.s6(), status: slot2 },
+		{ slot_start: fixtureCatalog.slotString.s7(), status: slot3 },
+		{ slot_start: fixtureCatalog.slotString.s8(), status: slot4 },
+		{ slot_start: fixtureCatalog.slotString.s9(), status: slot5 },
+		{ slot_start: fixtureCatalog.slotString.s10(), status: slot6 },
+		{ slot_start: fixtureCatalog.slotString.s11(), status: slot7 },
+		{ slot_start: fixtureCatalog.slotString.s12(), status: slot8 },
+		{ slot_start: fixtureCatalog.slotString.s13(), status: slot9 },
+		{ slot_start: fixtureCatalog.slotString.s14(), status: slot10 },
+		{ slot_start: fixtureCatalog.slotString.s15(), status: slot11 },
+	];
 }
 
 const sampleNodes: AdminNodeRuntimeListItem[] = [
