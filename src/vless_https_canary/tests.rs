@@ -46,7 +46,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: "hash".to_string(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s465().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], 39043)),
@@ -760,7 +760,7 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
     store
         .upsert_node(Node {
             node_id: xp_test_fixtures::slot_s472().to_owned(),
-            node_name: "sender".to_string(),
+            node_name: xp_test_fixtures::slot_s652().to_owned(),
             access_host: xp_test_fixtures::slot_s473().to_owned(),
             api_base_url: xp_test_fixtures::slot_s474().to_owned(),
             quota_limit_bytes: 0,

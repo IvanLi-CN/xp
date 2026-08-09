@@ -15,23 +15,6 @@ rule:
     - has:
         field: field
         regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin)$'
-    # These transport records only observe values produced by the system under test.
-    # They are not fixture sources and must retain the observed value for assertions.
-    - not:
-        inside:
-          stopBy: end
-          any:
-            - pattern: Call::AddInbound { $$$ }
-            - pattern: Call::RemoveInbound { $$$ }
-            - pattern: Call::AlterInbound { $$$ }
-            - pattern: AlterInboundRequest { $$$ }
-            - pattern: RemoveInboundRequest { $$$ }
-            - pattern: ReconcileRequest::RebuildInbound { $$$ }
-            - pattern: ReconcileRequest::RemoveInbound { $$$ }
-            - pattern: ReconcileRequest::RemoveUser { $$$ }
-            - pattern: NodeUserEndpointMembership { $$$ }
-            - pattern: SignedPayload { $$$ }
-            - pattern: 'async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Result<()> { $$$ }'
     - not:
         has:
           field: value
@@ -44,6 +27,134 @@ rule:
             - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
             - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
             - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              any:
+                - pattern: inbound.tag.clone()
+                - pattern: req.tag.clone()
+                - pattern: request.tag.clone()
+                - pattern: observed_tag.clone()
+                - pattern: tag.to_owned()
+          - inside:
+              stopBy: end
+              any:
+                - pattern: Call::AddInbound { $$$ }
+                - pattern: Call::RemoveInbound { $$$ }
+                - pattern: Call::AlterInbound { $$$ }
+                - pattern: ReconcileRequest::RemoveInbound { $$$ }
+                - pattern: AlterInboundRequest { $$$ }
+                - pattern: RemoveInboundRequest { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              any:
+                - pattern: remote_tag
+                - pattern: endpoint_tag_ss
+          - inside:
+              stopBy: end
+              any:
+                - pattern: ReconcileRequest::RemoveInbound { $$$ }
+                - pattern: RemoveInboundRequest { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^endpoint_id$'
+          - has:
+              field: value
+              pattern: endpoint_id.clone()
+          - inside:
+              stopBy: end
+              pattern: ReconcileRequest::RebuildInbound { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^(user_id|node_id|endpoint_id)$'
+          - has:
+              field: value
+              any:
+                - pattern: user.user_id.clone()
+                - pattern: endpoint.node_id.clone()
+                - pattern: endpoint.endpoint_id.clone()
+          - inside:
+              stopBy: end
+              pattern: NodeUserEndpointMembership { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              pattern: admin_base_url.clone()
+          - inside:
+              stopBy: end
+              pattern: NodeMeta { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bind$'
+          - has:
+              field: value
+              pattern: admin_addr
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^access_host$'
+          - has:
+              field: value
+              pattern: cluster.access_host.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              pattern: admin_base_url.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^cluster_id$'
+          - has:
+              field: value
+              pattern: '&cluster.cluster_id'
+          - inside:
+              stopBy: end
+              pattern: SignedPayload { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^leader_api_base_url$'
+          - has:
+              field: value
+              pattern: '&cluster.api_base_url'
+          - inside:
+              stopBy: end
+              pattern: SignedPayload { $$$ }
     # These values are derived from the test's own ephemeral process, listeners, or state.
     # The exceptions are deliberately constrained to one field/value/record combination.
     - not:

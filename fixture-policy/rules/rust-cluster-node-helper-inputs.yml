@@ -9,4 +9,4 @@ rule:
     - kind: call_expression
     - pattern: add_cluster_node($STORE, $NODE_ID, $NODE_NAME)
     - not:
-        pattern: add_cluster_node($STORE, xp_test_fixtures::$ID(), xp_test_fixtures::$NAME())
+        pattern: add_cluster_node($STORE, xp_test_fixtures::$ID(), xp_test_fixtures::$NAME)

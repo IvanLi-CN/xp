@@ -356,7 +356,7 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle {
             cloudflare: true,
@@ -420,7 +420,7 @@ async fn build_plan_allows_default_vless_port_without_server_names() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
@@ -474,7 +474,7 @@ async fn build_plan_rejects_zero_managed_default_ports() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
@@ -540,7 +540,7 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
@@ -610,7 +610,7 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),

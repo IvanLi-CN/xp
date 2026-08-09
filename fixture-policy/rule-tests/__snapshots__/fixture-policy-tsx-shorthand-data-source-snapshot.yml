@@ -1,6 +1,14 @@
 id: fixture-policy-tsx-shorthand-data-source
 snapshots:
   ? |
+    const last_synced_at = new Date().toISOString();
+    const fixture = { last_synced_at };
+  : labels:
+    - source: last_synced_at
+      style: primary
+      start: 67
+      end: 81
+  ? |
     const tag = "unapproved";
     const fixture = { tag };
   : labels:
@@ -8,3 +16,11 @@ snapshots:
       style: primary
       start: 44
       end: 47
+  ? |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  : labels:
+    - source: total_bytes
+      style: primary
+      start: 44
+      end: 55

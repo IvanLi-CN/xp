@@ -121,6 +121,8 @@ struct Identifiers {
     endpoint_tag_secondary: String,
     #[serde(rename = "endpointTagTertiary")]
     endpoint_tag_tertiary: String,
+    #[serde(rename = "endpointTagMissing")]
+    endpoint_tag_missing: String,
 }
 
 #[derive(Deserialize)]
@@ -347,6 +349,10 @@ pub fn tertiary_token() -> &'static str {
 
 pub fn primary_endpoint_tag() -> &'static str {
     &catalog().identifiers.endpoint_tag_primary
+}
+
+pub fn missing_endpoint_tag() -> &'static str {
+    &catalog().identifiers.endpoint_tag_missing
 }
 
 pub fn secondary_endpoint_tag() -> &'static str {
@@ -2442,6 +2448,159 @@ pub fn slot_s626() -> &'static str {
 }
 pub fn slot_s627() -> &'static str {
     &catalog().slots.strings[627]
+}
+pub fn slot_s628() -> &'static str {
+    &catalog().slots.strings[628]
+}
+pub fn slot_s629() -> &'static str {
+    &catalog().slots.strings[629]
+}
+pub fn slot_s630() -> &'static str {
+    &catalog().slots.strings[630]
+}
+pub fn slot_s631() -> &'static str {
+    &catalog().slots.strings[631]
+}
+pub fn slot_s632() -> &'static str {
+    &catalog().slots.strings[632]
+}
+pub fn slot_s633() -> &'static str {
+    &catalog().slots.strings[633]
+}
+pub fn slot_s634() -> &'static str {
+    &catalog().slots.strings[634]
+}
+pub fn slot_s635() -> &'static str {
+    &catalog().slots.strings[635]
+}
+pub fn slot_s636() -> &'static str {
+    &catalog().slots.strings[636]
+}
+pub fn slot_s637() -> &'static str {
+    &catalog().slots.strings[637]
+}
+pub fn slot_s638() -> &'static str {
+    &catalog().slots.strings[638]
+}
+pub fn slot_s639() -> &'static str {
+    &catalog().slots.strings[639]
+}
+pub fn slot_s640() -> &'static str {
+    &catalog().slots.strings[640]
+}
+pub fn slot_s641() -> &'static str {
+    &catalog().slots.strings[641]
+}
+pub fn slot_s642() -> &'static str {
+    &catalog().slots.strings[642]
+}
+pub fn slot_s643() -> &'static str {
+    &catalog().slots.strings[643]
+}
+pub fn slot_s644() -> &'static str {
+    &catalog().slots.strings[644]
+}
+pub fn slot_s645() -> &'static str {
+    &catalog().slots.strings[645]
+}
+pub fn slot_s646() -> &'static str {
+    &catalog().slots.strings[646]
+}
+pub fn slot_s647() -> &'static str {
+    &catalog().slots.strings[647]
+}
+pub fn slot_s648() -> &'static str {
+    &catalog().slots.strings[648]
+}
+pub fn slot_s649() -> &'static str {
+    &catalog().slots.strings[649]
+}
+pub fn slot_s650() -> &'static str {
+    &catalog().slots.strings[650]
+}
+pub fn slot_s651() -> &'static str {
+    &catalog().slots.strings[651]
+}
+pub fn slot_s652() -> &'static str {
+    &catalog().slots.strings[652]
+}
+pub fn slot_s653() -> &'static str {
+    &catalog().slots.strings[653]
+}
+pub fn slot_s654() -> &'static str {
+    &catalog().slots.strings[654]
+}
+pub fn slot_s655() -> &'static str {
+    &catalog().slots.strings[655]
+}
+pub fn slot_s656() -> &'static str {
+    &catalog().slots.strings[656]
+}
+pub fn slot_s657() -> &'static str {
+    &catalog().slots.strings[657]
+}
+pub fn slot_s658() -> &'static str {
+    &catalog().slots.strings[658]
+}
+pub fn slot_s659() -> &'static str {
+    &catalog().slots.strings[659]
+}
+pub fn slot_s660() -> &'static str {
+    &catalog().slots.strings[660]
+}
+pub fn slot_s661() -> &'static str {
+    &catalog().slots.strings[661]
+}
+pub fn slot_s662() -> &'static str {
+    &catalog().slots.strings[662]
+}
+pub fn slot_s663() -> &'static str {
+    &catalog().slots.strings[663]
+}
+pub fn slot_s664() -> &'static str {
+    &catalog().slots.strings[664]
+}
+pub fn slot_s665() -> &'static str {
+    &catalog().slots.strings[665]
+}
+pub fn slot_s666() -> &'static str {
+    &catalog().slots.strings[666]
+}
+pub fn slot_s667() -> &'static str {
+    &catalog().slots.strings[667]
+}
+pub fn slot_s668() -> &'static str {
+    &catalog().slots.strings[668]
+}
+pub fn slot_s669() -> &'static str {
+    &catalog().slots.strings[669]
+}
+pub fn slot_s670() -> &'static str {
+    &catalog().slots.strings[670]
+}
+pub fn slot_s671() -> &'static str {
+    &catalog().slots.strings[671]
+}
+pub fn slot_s672() -> &'static str {
+    &catalog().slots.strings[672]
+}
+pub fn slot_s673() -> &'static str {
+    &catalog().slots.strings[673]
+}
+pub fn slot_s674() -> &'static str {
+    &catalog().slots.strings[674]
+}
+pub fn slot_s675() -> &'static str {
+    &catalog().slots.strings[675]
+}
+pub fn slot_s676() -> &'static str {
+    &catalog().slots.strings[676]
+}
+pub fn slot_s677() -> &'static str {
+    &catalog().slots.strings[677]
+}
+pub fn slot_s678() -> &'static str {
+    &catalog().slots.strings[678]
 }
 pub fn slot_n0<T: DeserializeOwned>() -> T {
     serde_json::from_value(catalog().slots.numbers[0].clone())

@@ -16,7 +16,7 @@ fn test_store_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),
         bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     }
@@ -109,7 +109,7 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s477().to_owned(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s465().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,

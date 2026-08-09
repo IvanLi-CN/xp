@@ -169,7 +169,7 @@ function setupMocks(args?: {
 		],
 		recent_slots: [
 			{
-				slot_start: "2026-03-08T00:30:00Z",
+				slot_start: fixtureCatalog.slotString.s655(),
 				status: "up",
 			},
 		],
@@ -214,7 +214,7 @@ function setupMocks(args?: {
 			component_status_events: [
 				{
 					event_id: "history-evt-1",
-					occurred_at: "2026-03-08T00:55:00Z",
+					occurred_at: fixtureCatalog.slotString.s656(),
 					component: "xray",
 					message: "xray status changed: up -> down",
 					from_status: "up",
@@ -232,12 +232,14 @@ function setupMocks(args?: {
 				node,
 				window,
 				geo_source: "country_is",
-				window_start:
-					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
+				window_start: fixtureCatalog.slotString.s47(),
 				window_end: fixtureCatalog.slotString.s48(),
 				warnings: [],
 				unique_ip_series: [
-					{ minute: "2026-03-08T00:58:00Z", count: window === "24h" ? 1 : 3 },
+					{
+						minute: fixtureCatalog.slotString.s52(),
+						count: window === "24h" ? 1 : 3,
+					},
 					{
 						minute: fixtureCatalog.slotString.s48(),
 						count: window === "24h" ? 2 : 4,
@@ -252,7 +254,7 @@ function setupMocks(args?: {
 						minutes: window === "24h" ? 2 : 12,
 						segments: [
 							{
-								start_minute: "2026-03-08T00:58:00Z",
+								start_minute: fixtureCatalog.slotString.s52(),
 								end_minute: fixtureCatalog.slotString.s48(),
 							},
 						],
@@ -275,8 +277,7 @@ function setupMocks(args?: {
 			args?.nodeTcpConnections ?? {
 				node,
 				window,
-				window_start:
-					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
+				window_start: fixtureCatalog.slotString.s47(),
 				window_end: fixtureCatalog.slotString.s48(),
 				warnings: [],
 				endpoints: [
@@ -298,7 +299,7 @@ function setupMocks(args?: {
 						port: 443,
 						series: [
 							{
-								minute: "2026-03-08T00:58:00Z",
+								minute: fixtureCatalog.slotString.s52(),
 								count: window === "24h" ? 2 : 6,
 							},
 							{
@@ -313,7 +314,7 @@ function setupMocks(args?: {
 						port: 8388,
 						series: [
 							{
-								minute: "2026-03-08T00:58:00Z",
+								minute: fixtureCatalog.slotString.s52(),
 								count: window === "24h" ? 1 : 4,
 							},
 							{
@@ -595,7 +596,7 @@ describe("<NodeDetailsPage />", () => {
 				},
 				window: "24h",
 				geo_source: "country_is",
-				window_start: "2026-03-07T01:00:00Z",
+				window_start: fixtureCatalog.slotString.s47(),
 				window_end: fixtureCatalog.slotString.s48(),
 				warnings: [
 					{

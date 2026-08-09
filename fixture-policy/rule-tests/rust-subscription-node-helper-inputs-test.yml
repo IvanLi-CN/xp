@@ -1,0 +1,25 @@
+id: fixture-policy-rust-subscription-node-helper-inputs
+valid:
+  - |
+    let fixture = node(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+    );
+  - |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+        xp_test_fixtures::subscription_api_loopback(),
+    );
+invalid:
+  - |
+    let fixture = node("n1", unsafe_name, "host.fixture.test");
+  - |
+    let fixture = node_with_api_base(
+        "n1",
+        || "unapproved-node",
+        "host.fixture.test",
+        "https://api.fixture.test",
+    );

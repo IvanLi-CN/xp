@@ -1,0 +1,12 @@
+id: fixture-policy-rust-node-name-source
+valid:
+  - |
+    let node = Node { node_name: xp_test_fixtures::primary_node_name().to_owned() };
+invalid:
+  - |
+    let node = Node { node_name: "live-node".to_owned() };
+  - |
+    let node = Node { node_name: std::env::var("TEST_NODE_NAME").unwrap() };
+  - |
+    let unsafe_name = "live-node";
+    let node = Node { node_name: unsafe_name.to_owned() };

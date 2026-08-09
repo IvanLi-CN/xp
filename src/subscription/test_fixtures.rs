@@ -4,20 +4,20 @@ use std::collections::BTreeMap;
 
 pub(super) const SEED: &str = "seed";
 
-pub(super) fn node(node_id: &str, node_name: &str, access_host: &str) -> Node {
+pub(super) fn node(node_id: &str, node_name: fn() -> &'static str, access_host: &str) -> Node {
     node_with_api_base(node_id, node_name, access_host, "http://127.0.0.1:0")
 }
 
 pub(super) fn node_with_api_base(
     node_id: &str,
-    node_name: &str,
+    node_name: fn() -> &'static str,
     access_host: &str,
     api_base_url: &str,
 ) -> Node {
     match (node_id, access_host, api_base_url) {
         ("n1", "example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_example().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -25,7 +25,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "", "http://127.0.0.1:0") | ("n1", "   ", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_empty().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -33,7 +33,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "tokyo-a.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_tokyo_a().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -41,7 +41,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "singapore-a.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_singapore().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -49,7 +49,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "relay.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_relay().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -57,7 +57,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "jp.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_jp().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -65,7 +65,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "relay-a.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_relay_a().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -73,7 +73,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "new-host.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_new().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -81,7 +81,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "us.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_us().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -89,7 +89,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "alpha.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_alpha().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -97,7 +97,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_example().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -105,7 +105,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "hkl.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_hkl().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -113,7 +113,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "relay-b.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_relay_b().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -121,7 +121,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "relay-jp.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_relay_jp().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -129,7 +129,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "beta.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_beta().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -137,7 +137,7 @@ pub(super) fn node_with_api_base(
         },
         ("n3", "mystery.example.com", "http://127.0.0.1:0") => Node {
             node_id: xp_test_fixtures::subscription_node_n3().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_mystery().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback().to_owned(),
             quota_limit_bytes: 0,
@@ -145,7 +145,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "shared.example.com", "https://tokyo-a.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_tokyo_a().to_owned(),
             quota_limit_bytes: 0,
@@ -153,7 +153,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "shared.example.com", "https://tokyo-b.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_tokyo_b().to_owned(),
             quota_limit_bytes: 0,
@@ -161,7 +161,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "shared.example.com", "https://tokyo-b.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_tokyo_b().to_owned(),
             quota_limit_bytes: 0,
@@ -169,7 +169,7 @@ pub(super) fn node_with_api_base(
         },
         ("n3", "seoul.example.com", "https://seoul-a.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n3().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_seoul().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_seoul_a().to_owned(),
             quota_limit_bytes: 0,
@@ -177,7 +177,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "relay.example.com", "https://127.0.0.1:62416") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_relay().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
             quota_limit_bytes: 0,
@@ -185,7 +185,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "shared.example.com", "https://shared-api.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_shared().to_owned(),
             quota_limit_bytes: 0,
@@ -193,7 +193,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "shared.example.com", "https://shared-api.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_shared().to_owned(),
             quota_limit_bytes: 0,
@@ -201,7 +201,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "endpoint-node.example.com", "https://xp-node.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_endpoint_node().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_xp_node().to_owned(),
             quota_limit_bytes: 0,
@@ -209,7 +209,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "shared.example.com", "https://aardvark.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_aardvark().to_owned(),
             quota_limit_bytes: 0,
@@ -217,7 +217,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "a.b.example.com", "https://dot.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_dot().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_dot().to_owned(),
             quota_limit_bytes: 0,
@@ -225,7 +225,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "a-b.example.com", "https://dash.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_dash().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_dash().to_owned(),
             quota_limit_bytes: 0,
@@ -233,7 +233,7 @@ pub(super) fn node_with_api_base(
         },
         ("n1", "shared.example.com", "https://unsubscribed.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_unsubscribed().to_owned(),
             quota_limit_bytes: 0,
@@ -241,7 +241,7 @@ pub(super) fn node_with_api_base(
         },
         ("n2", "shared.example.com", "https://subscribed.example.com") => Node {
             node_id: xp_test_fixtures::subscription_node_n2().to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::subscription_host_shared().to_owned(),
             api_base_url: xp_test_fixtures::subscription_api_subscribed().to_owned(),
             quota_limit_bytes: 0,

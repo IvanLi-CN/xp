@@ -231,7 +231,7 @@ function setupMocks(args?: {
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.slotString.s24(),
-						window_end: "2026-03-08T00:02:00Z",
+						window_end: fixtureCatalog.slotString.s25(),
 						warnings: [],
 						unique_ip_series: [
 							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
@@ -886,7 +886,7 @@ rules: []
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.slotString.s24(),
-						window_end: "2026-03-08T00:02:00Z",
+						window_end: fixtureCatalog.slotString.s25(),
 						warnings: [],
 						unique_ip_series: [
 							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
@@ -918,7 +918,7 @@ rules: []
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.slotString.s24(),
-						window_end: "2026-03-08T00:02:00Z",
+						window_end: fixtureCatalog.slotString.s25(),
 						warnings: [],
 						unique_ip_series: [
 							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
@@ -1026,7 +1026,7 @@ rules: []
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.slotString.s24(),
-						window_end: "2026-03-08T00:02:00Z",
+						window_end: fixtureCatalog.slotString.s25(),
 						warnings: [],
 						unique_ip_series: [
 							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
@@ -1049,7 +1049,7 @@ rules: []
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.slotString.s24(),
-						window_end: "2026-03-08T00:02:00Z",
+						window_end: fixtureCatalog.slotString.s25(),
 						warnings: [],
 						unique_ip_series: [
 							{ minute: fixtureCatalog.slotString.s24(), count: 1 },

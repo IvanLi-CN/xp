@@ -715,7 +715,7 @@
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,
-    "max_line_length": 218
+    "max_line_length": 237
   },
   "src/state.rs": {
     "long_line_count": 2,
@@ -1098,17 +1098,21 @@
     "max_line_length": 84,
     "source_lines": 1063
   },
+  "web/src/fixture-policy/storybook.ts": {
+    "long_line_count": 1,
+    "max_line_length": 109
+  },
   "fixture-policy/rules/catalog-keys.yml": {
     "long_line_count": 1,
-    "max_line_length": 1298
+    "max_line_length": 1319
   },
   "fixture-policy/rules/catalog-string-values.yml": {
     "long_line_count": 1,
-    "max_line_length": 1657
+    "max_line_length": 1946
   },
   "fixture-policy/rules/catalog-value-types.yml": {
     "long_line_count": 4,
-    "max_line_length": 756
+    "max_line_length": 777
   },
   "fixture-policy/rules/rust-adapter-imports.yml": {
     "long_line_count": 1,
@@ -1132,15 +1136,15 @@
   },
   "fixture-policy/rules/tsx-fixture-assignment.yml": {
     "long_line_count": 1,
-    "max_line_length": 1287
+    "max_line_length": 1748
   },
   "fixture-policy/rules/tsx-fixture-data.yml": {
-    "long_line_count": 1,
-    "max_line_length": 971
+    "long_line_count": 3,
+    "max_line_length": 711
   },
   "fixture-policy/rules/tsx-shorthand-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 849
+    "max_line_length": 1750
   },
   "fixture-policy/rules/typescript-adapter-imports.yml": {
     "long_line_count": 1,
@@ -1148,23 +1152,23 @@
   },
   "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 335
+    "max_line_length": 392
   },
   "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
-    "long_line_count": 3,
+    "long_line_count": 4,
     "max_line_length": 148
   },
   "fixture-policy/rules/typescript-fixture-assignment.yml": {
     "long_line_count": 1,
-    "max_line_length": 1464
+    "max_line_length": 1748
   },
   "fixture-policy/rules/typescript-fixture-data.yml": {
-    "long_line_count": 1,
-    "max_line_length": 1148
+    "long_line_count": 3,
+    "max_line_length": 711
   },
   "fixture-policy/rules/typescript-shorthand-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 1054
+    "max_line_length": 1750
   },
   "package.json": {
     "long_line_count": 1,
@@ -1173,6 +1177,6 @@
   "test-fixtures/src/lib.rs": {
     "long_line_count": 36,
     "max_line_length": 147,
-    "source_lines": 2704
+    "source_lines": 2863
   }
 }

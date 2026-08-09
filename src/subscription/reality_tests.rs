@@ -27,7 +27,7 @@ fn group_proxies(group: &Value) -> Vec<&str> {
 #[test]
 fn reality_direct_candidates_are_exposed_in_both_mihomo_routes() {
     let user = user("u1", "alice");
-    let node = node("n1", "Tokyo A", "example.com");
+    let node = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -161,7 +161,7 @@ fn provider_reality_direct_names_follow_base_order() {
 #[test]
 fn user_reality_named_proxy_is_not_injected_into_system_node_selector() {
     let user = user("u1", "alice");
-    let node = node("n1", "Tokyo A", "example.com");
+    let node = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",

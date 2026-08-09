@@ -310,7 +310,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
         DesiredStateCommand::UpsertNode {
             node: Node {
                 node_id: target.node_id.clone(),
-                node_name: format!("mesh-resource-peer-{index:02}"),
+                node_name: xp_test_fixtures::primary_node_name().to_owned(),
                 access_host: target.access_host.clone(),
                 api_base_url: "http://127.0.0.1:9".to_string(),
                 quota_limit_bytes: 0,

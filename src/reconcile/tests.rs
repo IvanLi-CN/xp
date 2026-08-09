@@ -251,7 +251,7 @@ fn test_store_init(
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir: tmp_dir.to_path_buf(),
         admin_token_hash: String::new(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
@@ -365,7 +365,7 @@ async fn remote_endpoints_are_skipped_for_apply_and_explicit_remove() {
         let _ = store
             .upsert_node(Node {
                 node_id: xp_test_fixtures::slot_s450().to_owned(),
-                node_name: "node-2".to_string(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
                 access_host: xp_test_fixtures::slot_s448().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s451().to_owned(),
                 quota_limit_bytes: 0,
@@ -856,10 +856,10 @@ async fn remove_requests_issue_calls_and_treat_not_found_as_ok() {
 
     let mut pending = PendingBatch::default();
     pending.add(ReconcileRequest::RemoveInbound {
-        tag: "missing-inbound".to_string(),
+        tag: xp_test_fixtures::missing_endpoint_tag().to_owned(),
     });
     pending.add(ReconcileRequest::RemoveUser {
-        tag: "missing-inbound".to_string(),
+        tag: xp_test_fixtures::missing_endpoint_tag().to_owned(),
         email: "m:missing::missing".to_string(),
     });
 
@@ -878,9 +878,9 @@ async fn remove_requests_issue_calls_and_treat_not_found_as_ok() {
     assert!(
         calls
             .iter()
-            .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == "missing-inbound"))
+            .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == xp_test_fixtures::missing_endpoint_tag()))
     );
-    assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "m:missing::missing")));
+    assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == xp_test_fixtures::missing_endpoint_tag() && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "m:missing::missing")));
 
     let _ = shutdown.send(());
 }
