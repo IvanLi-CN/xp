@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import yaml from "js-yaml";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -43,6 +42,7 @@ import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
+import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
@@ -77,146 +77,13 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
 
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
-type MihomoProfileDraft = {
-	mixin_yaml: string;
-	extra_proxies_yaml: string;
-	extra_proxy_providers_yaml: string;
-};
-
-const { dump, load } = yaml;
-function isYamlMapping(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function parseYamlSequenceOrNull(raw: string): unknown[] | null {
-	if (raw.trim() === "") {
-		return [];
-	}
-	try {
-		const value = load(raw);
-		return Array.isArray(value) ? value : null;
-	} catch {
-		return null;
-	}
-}
-function parseYamlMappingOrNull(raw: string): Record<string, unknown> | null {
-	if (raw.trim() === "") {
-		return {};
-	}
-	try {
-		const value = load(raw);
-		return isYamlMapping(value) ? value : null;
-	} catch {
-		return null;
-	}
-}
-
-function getYamlProxyName(proxy: unknown): string | null {
-	return isYamlMapping(proxy) && typeof proxy.name === "string"
-		? proxy.name
-		: null;
-}
-
-function mergeLegacyProxiesPreferExtra(
-	extraProxies: unknown[],
-	legacyProxies: unknown[],
-): unknown[] | null {
-	const existingNames = new Set<string>();
-	for (const proxy of extraProxies) {
-		const name = getYamlProxyName(proxy);
-		if (!name) {
-			return null;
-		}
-		existingNames.add(name);
-	}
-
-	const merged = [...extraProxies];
-	for (const proxy of legacyProxies) {
-		const name = getYamlProxyName(proxy);
-		if (!name) {
-			return null;
-		}
-		if (existingNames.has(name)) {
-			continue;
-		}
-		merged.push(proxy);
-	}
-	return merged;
-}
-
-function normalizeMihomoProfileDraftForSave(
-	profile: MihomoProfileDraft,
-): MihomoProfileDraft {
-	if (profile.mixin_yaml.trim() === "") {
-		return profile;
-	}
-
-	let mixinRoot: unknown;
-	try {
-		mixinRoot = load(profile.mixin_yaml);
-	} catch {
-		return profile;
-	}
-	if (!isYamlMapping(mixinRoot)) {
-		return profile;
-	}
-
-	let mixinMap: Record<string, unknown> = { ...mixinRoot };
-	let mixinChanged = false;
-	let extraProxiesYaml = profile.extra_proxies_yaml;
-	let extraProxyProvidersYaml = profile.extra_proxy_providers_yaml;
-
-	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
-		const value = mixinMap.proxies;
-		if (!Array.isArray(value)) {
-			return profile;
-		}
-		const extraProxies = parseYamlSequenceOrNull(extraProxiesYaml);
-		if (extraProxies === null) {
-			return profile;
-		}
-		const merged = mergeLegacyProxiesPreferExtra(extraProxies, value);
-		if (merged === null) {
-			return profile;
-		}
-		extraProxiesYaml = dump(merged);
-		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
-		mixinMap = nextMixinMap;
-		mixinChanged = true;
-	}
-
-	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers")) {
-		const value = mixinMap["proxy-providers"];
-		if (!isYamlMapping(value)) {
-			return profile;
-		}
-		const extraProxyProviders = parseYamlMappingOrNull(extraProxyProvidersYaml);
-		if (extraProxyProviders === null) {
-			return profile;
-		}
-		extraProxyProvidersYaml = dump({ ...value, ...extraProxyProviders });
-		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
-			mixinMap;
-		mixinMap = nextMixinMap;
-		mixinChanged = true;
-	}
-
-	if (!mixinChanged) {
-		return profile;
-	}
-
-	return {
-		mixin_yaml: dump(mixinMap),
-		extra_proxies_yaml: extraProxiesYaml,
-		extra_proxy_providers_yaml: extraProxyProvidersYaml,
-	};
-}
-
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
 		const code = err.code ? ` ${err.code}` : "";
@@ -453,13 +320,6 @@ export function UserDetailsPage() {
 		}
 		return url.toString();
 	}, [subFormat, subscriptionToken, useExternalResourceMirror]);
-
-	useEffect(() => {
-		if (!userId) return;
-		setIpUsageWindow("24h");
-		setActiveTrafficNodeId(null);
-		setTrafficNodeOptions([]);
-	}, [userId]);
 
 	useEffect(() => {
 		if (!user) return;
@@ -776,9 +636,67 @@ export function UserDetailsPage() {
 		!nodesQuery.isError &&
 		!endpointsQuery.isError &&
 		!accessQuery.isError;
+	const profileDirty = useMemo(() => {
+		if (!user) return false;
+		const quotaReset = user.quota_reset;
+		return (
+			displayName.trim() !== user.display_name ||
+			resetPolicy !== quotaReset.policy ||
+			(resetPolicy === "monthly" &&
+				(quotaReset.policy !== "monthly" ||
+					resetDay !== quotaReset.day_of_month)) ||
+			resetTzOffsetMinutes !== quotaReset.tz_offset_minutes
+		);
+	}, [displayName, resetDay, resetPolicy, resetTzOffsetMinutes, user]);
+	const accessDirty = useMemo(() => {
+		if (!isAccessReady) return false;
+		const currentIds = access
+			.map((item) => item.endpoint_id)
+			.sort()
+			.join("|");
+		return [...selectedEndpointIds].sort().join("|") !== currentIds;
+	}, [access, isAccessReady, selectedEndpointIds]);
+	const mihomoProfileDirty = useMemo(() => {
+		if (!mihomoProfileQuery.data) return false;
+		return (
+			mihomoMixinYaml !== mihomoProfileQuery.data.mixin_yaml ||
+			mihomoExtraProxiesYaml !== mihomoProfileQuery.data.extra_proxies_yaml ||
+			mihomoExtraProxyProvidersYaml !==
+				mihomoProfileQuery.data.extra_proxy_providers_yaml
+		);
+	}, [
+		mihomoExtraProxiesYaml,
+		mihomoExtraProxyProvidersYaml,
+		mihomoMixinYaml,
+		mihomoProfileQuery.data,
+	]);
 
-	async function applyAccessMatrix() {
-		if (!adminToken || !userId || !isAccessReady) return;
+	useObjectNavigationDirtySections(`user:${userId}`, [
+		{
+			id: "profile",
+			label: "user profile",
+			isDirty: () => profileDirty,
+			save: saveUserProfile,
+			discard: discardUserProfileDraft,
+		},
+		{
+			id: "access",
+			label: "access",
+			isDirty: () => accessDirty,
+			save: applyAccessMatrix,
+			discard: discardAccessDraft,
+		},
+		{
+			id: "mihomo-profile",
+			label: "Mihomo profile",
+			isDirty: () => mihomoProfileDirty,
+			save: saveUserMihomoProfile,
+			discard: discardMihomoProfileDraft,
+		},
+	]);
+
+	async function applyAccessMatrix(): Promise<boolean> {
+		if (!adminToken || !userId || !isAccessReady) return false;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
@@ -793,8 +711,10 @@ export function UserDetailsPage() {
 				variant: "success",
 				message: `Access updated (+${res.created} -${res.deleted})`,
 			});
+			return true;
 		} catch (error) {
 			setAccessError(formatError(error));
+			return false;
 		} finally {
 			setIsApplyingAccess(false);
 		}
@@ -836,19 +756,19 @@ export function UserDetailsPage() {
 		]);
 	}
 
-	async function saveUserProfile() {
-		if (!adminToken || !userId) return;
+	async function saveUserProfile(): Promise<boolean> {
+		if (!adminToken || !userId) return false;
 		const normalizedDisplayName = displayName.trim();
 		if (normalizedDisplayName.length === 0) {
 			setUserSaveError("Display name is required.");
-			return;
+			return false;
 		}
 		if (
 			resetPolicy === "monthly" &&
 			(!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31)
 		) {
 			setUserSaveError("Day of month must be between 1 and 31.");
-			return;
+			return false;
 		}
 		if (
 			!Number.isInteger(resetTzOffsetMinutes) ||
@@ -856,7 +776,7 @@ export function UserDetailsPage() {
 			resetTzOffsetMinutes > 840
 		) {
 			setUserSaveError("TZ offset must be between -720 and 840 minutes.");
-			return;
+			return false;
 		}
 
 		setIsSavingUser(true);
@@ -879,15 +799,17 @@ export function UserDetailsPage() {
 			});
 			await userQuery.refetch();
 			pushToast({ variant: "success", message: "User updated" });
+			return true;
 		} catch (error) {
 			setUserSaveError(formatError(error));
+			return false;
 		} finally {
 			setIsSavingUser(false);
 		}
 	}
 
-	async function saveUserMihomoProfile() {
-		if (!adminToken || !userId) return;
+	async function saveUserMihomoProfile(): Promise<boolean> {
+		if (!adminToken || !userId) return false;
 		setIsSavingMihomoProfile(true);
 		setMihomoProfileSaveError(null);
 		try {
@@ -899,11 +821,41 @@ export function UserDetailsPage() {
 			await putAdminUserMihomoProfile(adminToken, userId, profile);
 			await mihomoProfileQuery.refetch();
 			pushToast({ variant: "success", message: "Mihomo mixin updated" });
+			return true;
 		} catch (error) {
 			setMihomoProfileSaveError(formatError(error));
+			return false;
 		} finally {
 			setIsSavingMihomoProfile(false);
 		}
+	}
+
+	function discardUserProfileDraft() {
+		if (!user) return;
+		setDisplayName(user.display_name);
+		if (user.quota_reset.policy === "monthly") {
+			setResetPolicy("monthly");
+			setResetDay(user.quota_reset.day_of_month);
+		} else {
+			setResetPolicy("unlimited");
+			setResetDay(1);
+		}
+		setResetTzOffsetMinutes(user.quota_reset.tz_offset_minutes);
+		setUserSaveError(null);
+	}
+
+	function discardAccessDraft() {
+		setAccessError(null);
+		setAccessInitForUserId(null);
+	}
+
+	function discardMihomoProfileDraft() {
+		const profile = mihomoProfileQuery.data;
+		if (!profile) return;
+		setMihomoMixinYaml(profile.mixin_yaml);
+		setMihomoExtraProxiesYaml(profile.extra_proxies_yaml);
+		setMihomoExtraProxyProvidersYaml(profile.extra_proxy_providers_yaml);
+		setMihomoProfileSaveError(null);
 	}
 
 	async function confirmResetToken() {

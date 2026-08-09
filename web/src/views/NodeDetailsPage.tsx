@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -30,12 +30,12 @@ import {
 } from "../api/adminNodes";
 import type { AdminTcpConnectionUsageWindow } from "../api/adminTcpConnections";
 import { isBackendApiError } from "../api/backendError";
-import type { NodeQuotaReset } from "../api/quotaReset";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
+import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
@@ -75,6 +75,11 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import {
+	isNodeQuotaDraftDirty,
+	nodeQuotaDraftFromNode,
+	toNodeQuotaReset,
+} from "./nodeQuotaDraft";
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
 		const code = error.code ? ` ${error.code}` : "";
@@ -542,9 +547,6 @@ export function NodeDetailsPage() {
 		setRuntimeLive(null);
 		setRuntimeSseError(null);
 		setRuntimeSseConnected(false);
-		setActiveTab("runtime");
-		setIpUsageWindow("24h");
-		setTcpConnectionsWindow("24h");
 	}, [nodeId]);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
@@ -555,6 +557,7 @@ export function NodeDetailsPage() {
 	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
 		AdminNodeDeletePreviewEndpoint[]
 	>([]);
+	const displayedNodeIdRef = useRef(nodeId);
 	const quotaForm = useForm<QuotaResetFormInput, unknown, QuotaResetFormValues>(
 		{
 			resolver: zodResolver(quotaResetSchema),
@@ -568,19 +571,22 @@ export function NodeDetailsPage() {
 
 	const resetQuotaForm = quotaForm.reset;
 
-	useEffect(() => {
+	const resetQuotaDraft = useCallback(() => {
 		if (!nodeQuery.data) return;
-		const q = nodeQuery.data.quota_reset;
-		resetQuotaForm({
-			resetPolicy: q.policy === "monthly" ? "monthly" : "unlimited",
-			resetDay: q.policy === "monthly" ? q.day_of_month : 1,
-			resetTzOffsetMinutes:
-				q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
-					? ""
-					: String(q.tz_offset_minutes),
-		});
+		resetQuotaForm(nodeQuotaDraftFromNode(nodeQuery.data));
 		setSaveError(null);
 	}, [nodeQuery.data, resetQuotaForm]);
+
+	useEffect(() => {
+		resetQuotaDraft();
+	}, [resetQuotaDraft]);
+
+	useEffect(() => {
+		if (displayedNodeIdRef.current === nodeId) return;
+		displayedNodeIdRef.current = nodeId;
+		setDeleteOpen(false);
+		setDeletePreviewEndpoints([]);
+	}, [nodeId]);
 
 	useEffect(() => {
 		if (runtimeQuery.data) {
@@ -663,52 +669,21 @@ export function NodeDetailsPage() {
 
 	const quotaValues = quotaForm.watch();
 
-	const desiredQuotaReset: NodeQuotaReset = useMemo(() => {
-		const raw = quotaValues.resetTzOffsetMinutes.trim();
-		const tz = raw.length === 0 ? undefined : Number(raw);
-		return quotaValues.resetPolicy === "monthly"
-			? {
-					policy: "monthly",
-					day_of_month: Number(quotaValues.resetDay),
-					...(tz === undefined ? {} : { tz_offset_minutes: tz }),
-				}
-			: {
-					policy: "unlimited",
-					...(tz === undefined ? {} : { tz_offset_minutes: tz }),
-				};
-	}, [
-		quotaValues.resetDay,
-		quotaValues.resetPolicy,
-		quotaValues.resetTzOffsetMinutes,
-	]);
+	const desiredQuotaReset = useMemo(
+		() => toNodeQuotaReset(quotaValues),
+		[quotaValues],
+	);
+	const isDirty = useMemo(
+		() => isNodeQuotaDraftDirty(nodeQuery.data, quotaValues),
+		[nodeQuery.data, quotaValues],
+	);
 
-	const isDirty = useMemo(() => {
+	const saveQuotaReset = useCallback(async (): Promise<boolean> => {
 		if (!nodeQuery.data) return false;
-		const q = nodeQuery.data.quota_reset;
-		const currentPolicy = q.policy;
-		const currentDay = currentPolicy === "monthly" ? q.day_of_month : 1;
-		const currentTz =
-			q.tz_offset_minutes === null || q.tz_offset_minutes === undefined
-				? ""
-				: String(q.tz_offset_minutes);
-		return (
-			quotaValues.resetPolicy !== currentPolicy ||
-			(quotaValues.resetPolicy === "monthly" &&
-				quotaValues.resetDay !== currentDay) ||
-			quotaValues.resetTzOffsetMinutes.trim() !== currentTz
-		);
-	}, [
-		nodeQuery.data,
-		quotaValues.resetDay,
-		quotaValues.resetPolicy,
-		quotaValues.resetTzOffsetMinutes,
-	]);
-
-	const handleSaveQuotaReset = quotaForm.handleSubmit(async () => {
-		if (!nodeQuery.data) return;
+		const valid = await quotaForm.trigger();
+		if (!valid) return false;
 		if (!isDirty) {
-			pushToast({ variant: "info", message: "No changes to save." });
-			return;
+			return true;
 		}
 		setIsSaving(true);
 		setSaveError(null);
@@ -721,6 +696,7 @@ export function NodeDetailsPage() {
 			await patchAdminNode(adminToken, nodeId, payload);
 			pushToast({ variant: "success", message: "Node updated." });
 			await nodeQuery.refetch();
+			return true;
 		} catch (error) {
 			const message = formatErrorMessage(error);
 			setSaveError(message);
@@ -728,10 +704,33 @@ export function NodeDetailsPage() {
 				variant: "error",
 				message: "Failed to update node.",
 			});
+			return false;
 		} finally {
 			setIsSaving(false);
 		}
+	}, [
+		adminToken,
+		desiredQuotaReset,
+		isDirty,
+		nodeId,
+		nodeQuery,
+		pushToast,
+		quotaForm,
+	]);
+
+	const handleSaveQuotaReset = quotaForm.handleSubmit(() => {
+		void saveQuotaReset();
 	});
+
+	useObjectNavigationDirtySections(`node:${nodeId}`, [
+		{
+			id: "quota-reset",
+			label: "quota reset",
+			isDirty: () => isDirty,
+			save: saveQuotaReset,
+			discard: resetQuotaDraft,
+		},
+	]);
 
 	const handleRefreshEgressProbe = async () => {
 		setIsRefreshingEgressProbe(true);

@@ -1,4 +1,9 @@
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
+import {
+	Link,
+	Outlet,
+	useNavigate,
+	useRouterState,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
@@ -20,6 +25,14 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
+import {
+	ObjectNavigationGuardProvider,
+	useObjectNavigationGuard,
+} from "../components/ObjectNavigationGuard";
+import {
+	ResourceNavigation,
+	type ResourceNavigationGroup,
+} from "../components/ResourceNavigation";
 import { ToastProvider } from "../components/Toast";
 import {
 	Sheet,
@@ -89,17 +102,23 @@ export function DemoLoginRoute() {
 export function DemoAppRoute() {
 	return (
 		<DemoProvider>
-			<ToastProvider>
-				<DemoShell>
-					<Outlet />
-				</DemoShell>
-			</ToastProvider>
+			<ObjectNavigationGuardProvider>
+				<ToastProvider>
+					<DemoShell>
+						<Outlet />
+					</DemoShell>
+				</ToastProvider>
+			</ObjectNavigationGuardProvider>
 		</DemoProvider>
 	);
 }
 
 function DemoShell({ children }: { children: ReactNode }) {
 	const navigate = useNavigate();
+	const pathname = useRouterState({
+		select: (router) => router.location.pathname,
+	});
+	const { requestNavigation } = useObjectNavigationGuard();
 	const { state, logout, resetScenario } = useDemo();
 	const prefs = useUiPrefs();
 	const [mobileOpen, setMobileOpen] = useState(false);
@@ -215,36 +234,70 @@ function DemoShell({ children }: { children: ReactNode }) {
 		</Popover>
 	);
 
+	const resourceNavigationGroups = useMemo<ResourceNavigationGroup[]>(
+		() =>
+			navGroups.map((group) => ({
+				title: group.title,
+				items: group.items.map((item) => {
+					const resourceId =
+						item.to === "/demo/nodes"
+							? "nodes"
+							: item.to === "/demo/endpoints"
+								? "endpoints"
+								: item.to === "/demo/users"
+									? "users"
+									: null;
+					const children =
+						resourceId === "nodes"
+							? state.nodes.map((node) => ({
+									id: node.id,
+									label: node.name || "Unnamed node",
+									href: `/demo/nodes/${encodeURIComponent(node.id)}`,
+									ariaLabel: `Node ${node.name || "unnamed"} (${node.id})`,
+								}))
+							: resourceId === "endpoints"
+								? state.endpoints.map((endpoint) => ({
+										id: endpoint.id,
+										label: endpoint.name || "Untitled endpoint",
+										href: `/demo/endpoints/${encodeURIComponent(endpoint.id)}`,
+										ariaLabel: `Endpoint ${endpoint.name || "untitled"} (${endpoint.id})`,
+									}))
+								: resourceId === "users"
+									? state.users.map((user) => ({
+											id: user.id,
+											label: user.displayName || "Unnamed user",
+											href: `/demo/users/${encodeURIComponent(user.id)}`,
+											ariaLabel: `User ${user.displayName || "unnamed"} (${user.id})`,
+										}))
+									: undefined;
+					return {
+						id: resourceId ?? item.to,
+						label: item.label,
+						href: item.to,
+						icon: item.icon,
+						...(resourceId ? { children } : {}),
+					};
+				}),
+			})),
+		[state.endpoints, state.nodes, state.users],
+	);
+
 	const nav = (
-		<nav aria-label="Demo navigation" className="xp-panel p-4">
-			<div className="space-y-6">
-				{navGroups.map((group) => (
-					<div key={group.title} className="space-y-2">
-						<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-							{group.title}
-						</p>
-						<ul className="space-y-1.5">
-							{group.items.map((item) => (
-								<li key={item.to}>
-									<Link
-										to={item.to}
-										className="flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/60 hover:text-foreground"
-										activeProps={{
-											className:
-												"border-primary/25 bg-primary/10 text-foreground shadow-sm",
-										}}
-										onClick={() => setMobileOpen(false)}
-									>
-										<Icon name={item.icon} className="size-5 opacity-80" />
-										<span>{item.label}</span>
-									</Link>
-								</li>
-							))}
-						</ul>
-					</div>
-				))}
-			</div>
-		</nav>
+		<ResourceNavigation
+			ariaLabel="Demo navigation"
+			groups={resourceNavigationGroups}
+			pathname={pathname}
+			onNavigate={(href) => {
+				setMobileOpen(false);
+				void navigate({ to: href as never });
+			}}
+			onResourceNavigate={(href) => {
+				requestNavigation(() => {
+					setMobileOpen(false);
+					void navigate({ to: href as never });
+				});
+			}}
+		/>
 	);
 
 	return (
