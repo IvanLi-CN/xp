@@ -3,7 +3,7 @@ use super::*;
 fn peer_node() -> Node {
     Node {
         node_id: xp_test_fixtures::slot_s504().to_owned(),
-        node_name: "peer-a".to_string(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
         access_host: xp_test_fixtures::slot_s505().to_owned(),
         api_base_url: xp_test_fixtures::slot_s506().to_owned(),
         quota_limit_bytes: 0,

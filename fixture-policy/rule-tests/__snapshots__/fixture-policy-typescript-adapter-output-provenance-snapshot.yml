@@ -1,6 +1,18 @@
 id: fixture-policy-typescript-adapter-output-provenance
 snapshots:
   ? |
+    const injectedHost = function () {
+      return "live.example";
+    };
+  : labels:
+    - source: |-
+        function () {
+          return "live.example";
+        }
+      style: primary
+      start: 21
+      end: 61
+  ? |
     const primary = () => "live.example";
   : labels:
     - source: () => "live.example"

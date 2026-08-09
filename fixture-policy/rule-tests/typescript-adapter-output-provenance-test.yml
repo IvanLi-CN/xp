@@ -5,6 +5,18 @@ valid:
       return [`s${index}`, () => catalog.slots.strings[index]];
     }
   - |
+    function nextResetToken() {
+      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+      resetTokenIndex += 1;
+      return accessor();
+    }
+  - |
+    function nextMeshPeerNodeId() {
+      const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+      meshPeerNodeIdIndex += 1;
+      return catalog.slots.strings[slotIndex];
+    }
+  - |
     const primary = () => catalog.hosts.primary;
   - |
     const absent = () => null;
@@ -23,3 +35,7 @@ invalid:
     function injectedHost() {
       return "live.example";
     }
+  - |
+    const injectedHost = function () {
+      return "live.example";
+    };

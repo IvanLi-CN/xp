@@ -8,6 +8,28 @@ snapshots:
       start: 0
       end: 23
   ? |
+    const [fixtureCatalog] = source;
+  : labels:
+    - source: '[fixtureCatalog]'
+      style: primary
+      start: 6
+      end: 22
+    - source: fixtureCatalog
+      style: secondary
+      start: 7
+      end: 21
+  ? |
+    const [other, fixtureCatalog] = source;
+  : labels:
+    - source: '[other, fixtureCatalog]'
+      style: primary
+      start: 6
+      end: 29
+    - source: fixtureCatalog
+      style: secondary
+      start: 14
+      end: 28
+  ? |
     const build = (fixtureCatalog: unknown) => fixtureCatalog;
   : labels:
     - source: 'fixtureCatalog: unknown'

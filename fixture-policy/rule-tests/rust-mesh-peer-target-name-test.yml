@@ -1,0 +1,14 @@
+id: fixture-policy-rust-mesh-peer-target-name
+valid:
+  - |
+    let target = MeshPeerTarget {
+      node_name: xp_test_fixtures::primary_node_name().to_owned(),
+    };
+invalid:
+  - |
+    let target = MeshPeerTarget {
+      node_name: "live-peer".to_owned(),
+    };
+  - |
+    let unsafe_name = std::env::var("TEST_NODE_NAME").unwrap();
+    let target = MeshPeerTarget { node_name: unsafe_name };

@@ -7,3 +7,6 @@ invalid:
     const item = { access_host: "live.example" };
   - |
     const item = { node_name: "unapproved-node" };
+  - |
+    const unsafe = "live.example";
+    const item = { node_id: unsafe };

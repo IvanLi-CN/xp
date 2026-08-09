@@ -23,6 +23,36 @@ const slotNumber = Object.fromEntries(
 const slotList = Object.fromEntries(
 	catalog.slots.stringLists.map(listSlotEntry),
 ) as Record<`l${number}`, () => string[]>;
+const resetTokenAccessors = [
+	() => catalog.identifiers.tokenPrimary,
+	() => catalog.identifiers.tokenSecondary,
+	() => catalog.identifiers.tokenTertiary,
+	() => catalog.identifiers.tokenQuaternary,
+	() => catalog.identifiers.tokenQuinary,
+] as const;
+let resetTokenIndex = 0;
+
+function nextResetToken() {
+	const accessor =
+		resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+	resetTokenIndex += 1;
+	return accessor();
+}
+
+const meshPeerNodeIdIndexes = [
+	17, 32, 36, 56, 57, 63, 69, 70, 72, 73, 77, 93, 98, 106, 110, 113, 118, 124,
+	134, 145, 149, 153, 182, 187, 188, 189, 190, 206, 213, 220, 224, 229, 233,
+	238, 241, 243, 246, 258, 263, 271, 274, 290, 301, 312, 317, 325, 329, 332,
+	335, 338,
+] as const;
+let meshPeerNodeIdIndex = 0;
+
+function nextMeshPeerNodeId() {
+	const slotIndex =
+		meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+	meshPeerNodeIdIndex += 1;
+	return catalog.slots.strings[slotIndex];
+}
 
 export const fixtureCatalog = {
 	slotString,
@@ -103,6 +133,8 @@ export const fixtureCatalog = {
 		userTertiary: () => catalog.identifiers.userTertiary,
 		userQuaternary: () => catalog.identifiers.userQuaternary,
 		userQuinary: () => catalog.identifiers.userQuinary,
+		tokenAfterReset: nextResetToken,
+		nextMeshPeerNodeId,
 		tokenPrimary: () => catalog.identifiers.tokenPrimary,
 		tokenSecondary: () => catalog.identifiers.tokenSecondary,
 		tokenTertiary: () => catalog.identifiers.tokenTertiary,

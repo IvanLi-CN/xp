@@ -65,6 +65,8 @@ struct Urls {
     canary_https_alternate: String,
     #[serde(rename = "canaryHttpLoopback")]
     canary_http_loopback: String,
+    #[serde(rename = "publicFallback")]
+    public_fallback: String,
     #[serde(rename = "publicOrigin")]
     public_origin: String,
 }
@@ -160,6 +162,8 @@ struct Lists {
     secondary_server_names: Vec<String>,
     #[serde(rename = "tertiaryServerNames")]
     tertiary_server_names: Vec<String>,
+    #[serde(rename = "loopbackServerNames")]
+    loopback_server_names: Vec<String>,
     #[serde(rename = "primaryAuthorities")]
     primary_authorities: Vec<String>,
     #[serde(rename = "tertiaryAuthorities")]
@@ -267,6 +271,10 @@ pub fn tertiary_api_url() -> &'static str {
 
 pub fn loopback_39043_url() -> &'static str {
     &catalog().urls.loopback_39043
+}
+
+pub fn public_fallback_url() -> &'static str {
+    &catalog().urls.public_fallback
 }
 
 pub fn loopback_39043_address() -> &'static str {
@@ -403,6 +411,10 @@ pub fn primary_server_names() -> Vec<String> {
 
 pub fn secondary_server_names() -> Vec<String> {
     catalog().lists.secondary_server_names.clone()
+}
+
+pub fn loopback_server_names() -> Vec<String> {
+    catalog().lists.loopback_server_names.clone()
 }
 
 pub fn primary_authorities() -> Vec<String> {

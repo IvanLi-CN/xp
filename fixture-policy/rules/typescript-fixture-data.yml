@@ -215,6 +215,23 @@ rule:
         all:
           - has:
               field: value
+              pattern: user.subscription_token
+          - has:
+              field: key
+              regex: '^subscription_token$'
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    any:
+                      - pattern: handleRequest
+                      - pattern: setupApiMocks
+    - not:
+        all:
+          - has:
+              field: value
               pattern: nodeId
           - has:
               field: key

@@ -4,6 +4,7 @@ valid:
     mod tests {
         fn updates_node() {
             fixture.node_id = xp_test_fixtures::primary_node_id().to_owned();
+            fixture.public_base_url = xp_test_fixtures::public_fallback_url().to_owned();
             fixture.latency_ms = Some(xp_test_fixtures::slot_n27());
             fixture.last_restart_at = Some(xp_test_fixtures::baseline_timestamp().parse().unwrap());
         }
@@ -23,5 +24,11 @@ invalid:
     mod tests {
         fn updates_latency() {
             fixture.latency_ms = std::env::var("TEST_LATENCY").unwrap();
+        }
+    }
+  - |
+    mod tests {
+        fn updates_mesh_target() {
+            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
         }
     }

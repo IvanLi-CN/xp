@@ -1,6 +1,26 @@
 id: fixture-policy-rust-data-source
 snapshots:
   ? |
+    let fixture = Config {
+      mesh_base_url: Some(format!(
+        "https://{}",
+        std::env::var("TEST_HOST").unwrap(),
+      )),
+    };
+  : labels:
+    - source: |-
+        mesh_base_url: Some(format!(
+            "https://{}",
+            std::env::var("TEST_HOST").unwrap(),
+          ))
+      style: primary
+      start: 25
+      end: 117
+    - source: mesh_base_url
+      style: secondary
+      start: 25
+      end: 38
+  ? |
     let fixture = Config { api_base_url: "http://127.0.0.2:9".to_string() };
   : labels:
     - source: 'api_base_url: "http://127.0.0.2:9".to_string()'
@@ -33,6 +53,17 @@ snapshots:
       style: secondary
       start: 23
       end: 30
+  ? |
+    let fixture = Config { public_base_url: "https://unapproved.invalid".to_owned() };
+  : labels:
+    - source: 'public_base_url: "https://unapproved.invalid".to_owned()'
+      style: primary
+      start: 23
+      end: 79
+    - source: public_base_url
+      style: secondary
+      start: 23
+      end: 38
   ? |
     let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };
   : labels:

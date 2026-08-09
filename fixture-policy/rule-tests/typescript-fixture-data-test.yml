@@ -50,6 +50,7 @@ valid:
         endpoint_tag: endpoint.tag,
         node_id: item.node_id,
         node_id: q.node_id,
+        subscription_token: user.subscription_token,
       };
     }
 invalid:
@@ -75,3 +76,5 @@ invalid:
     function buildNodeRuntimeListItem() {
       return { node_id: process.env.TEST_NODE_ID };
     }
+  - |
+    const fixture = { subscription_token: user.subscription_token };

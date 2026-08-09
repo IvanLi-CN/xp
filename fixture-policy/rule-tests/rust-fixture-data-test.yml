@@ -30,6 +30,20 @@ valid:
       dest: format!("host.docker.internal:{}", canary.addr.port()),
     };
   - |
+    let target = MeshPeerTarget {
+      mesh_base_url: Some(format!(
+        "https://{}:{}",
+        xp_test_fixtures::loopback_address(),
+        proxy.addr.port(),
+      )),
+      public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+    };
+  - |
+    let target = MeshPeerTarget {
+      mesh_base_url: Some(format!("https://{addr}")),
+      public_base_url: format!("http://{}", server.addr),
+    };
+  - |
     let request = xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest {
       tag: endpoint.tag,
     };
@@ -44,3 +58,12 @@ invalid:
     let fixture = Config { api_base_url: "http://127.0.0.2:9".to_string() };
   - |
     let fixture = Config { dest: format!("host.docker.internal:443") };
+  - |
+    let fixture = Config { public_base_url: "https://unapproved.invalid".to_owned() };
+  - |
+    let fixture = Config {
+      mesh_base_url: Some(format!(
+        "https://{}",
+        std::env::var("TEST_HOST").unwrap(),
+      )),
+    };

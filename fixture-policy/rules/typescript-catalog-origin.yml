@@ -24,6 +24,11 @@ rule:
     - pattern: 'let { $KEY: fixtureCatalog } = $$$'
     - pattern: 'var { $KEY: fixtureCatalog } = $$$'
     - all:
+        - kind: array_pattern
+        - has:
+            stopBy: end
+            pattern: fixtureCatalog
+    - all:
         - kind: required_parameter
         - regex: '\bfixtureCatalog\b'
     - all:

@@ -22,6 +22,7 @@
     "canaryHttpsListener": "https://127.0.0.1:39043",
     "canaryHttpsAlternate": "https://127.0.0.1:49043",
     "canaryHttpLoopback": "http://127.0.0.1:8080",
+    "publicFallback": "http://127.0.0.1:9",
     "publicOrigin": "https://public.fixture.test"
   },
   "identifiers": {
@@ -72,6 +73,9 @@
     "secondaryServerNames": [],
     "tertiaryServerNames": [
       "edge-b.fixture.test"
+    ],
+    "loopbackServerNames": [
+      "127.0.0.1"
     ],
     "primaryAuthorities": [
       "node-a.fixture.test:443"
