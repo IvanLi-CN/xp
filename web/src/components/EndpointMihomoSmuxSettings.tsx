@@ -39,11 +39,11 @@ export function EndpointMihomoSmuxSettings({
 	return (
 		<details className="rounded-xl border border-border/70 bg-muted/35">
 			<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
-				高级设置：连接复用 (SMux)
+				高级设置：SS2022 连接复用 (SMux)
 			</summary>
 			<div className="space-y-4 border-t border-border/70 px-4 py-4">
 				<p className="text-xs text-muted-foreground">
-					仅写入 YAML 订阅，要求 Mihomo &gt;= v1.19.29。VLESS/SS URI
+					仅写入 SS2022 Mihomo YAML，要求 Mihomo &gt;= v1.19.29。URI
 					不包含此设置。
 				</p>
 				<div className="flex items-center gap-2">

@@ -4994,7 +4994,6 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
-                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(proxy).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5036,7 +5035,6 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: Some(relay_group_name.clone()),
-                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
                 out.push(serde_yaml::to_value(chain).map_err(|e| {
                     SubscriptionError::YamlSerialize {
@@ -5236,7 +5234,6 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                         short_id: sid.to_string(),
                     },
                     dialer_proxy: None,
-                    smux: mihomo_smux_config(&meta.mihomo_smux),
                 });
 
                 (uri, proxy)

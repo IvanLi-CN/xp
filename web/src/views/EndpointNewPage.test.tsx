@@ -186,12 +186,6 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["edge.example.com:443"],
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 		expect(createAdminEndpoint).not.toHaveBeenCalledWith(
@@ -208,7 +202,7 @@ describe("EndpointNewPage", () => {
 		});
 	});
 
-	it("omits SMux controls and payload for a legacy endpoint API", async () => {
+	it("omits SMux controls and payload for VLESS endpoints", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
 			endpoint_id: "ep-legacy",
 			node_id: "node-alpha",
@@ -218,14 +212,14 @@ describe("EndpointNewPage", () => {
 			meta: { managed_default: true },
 		});
 
-		renderPage({ smuxSupported: false });
+		renderPage();
 
+		expect(screen.queryByLabelText("启用 SMux")).toBeNull();
 		expect(
-			await screen.findByText(
+			screen.queryByText(
 				"This server does not support per-endpoint Mihomo SMux settings.",
 			),
-		).toBeInTheDocument();
-		expect(screen.queryByLabelText("启用 SMux")).toBeNull();
+		).toBeNull();
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Create endpoint" }),
 		);
@@ -297,12 +291,6 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["node-xp.example.test:443"],
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 	});
@@ -413,12 +401,6 @@ describe("EndpointNewPage", () => {
 					node_id: "node-alpha",
 					port: 8443,
 					accepted_authorities: ["node-xp.example.test:8443"],
-					mihomo_smux: {
-						enabled: true,
-						max_connections: 4,
-						min_streams: 4,
-						only_tcp: true,
-					},
 				});
 			});
 		},
@@ -516,12 +498,6 @@ describe("EndpointNewPage", () => {
 					mode: "auto",
 				},
 				accepted_authorities: ["hinet-ep.707979.xyz:443"],
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 	});

@@ -1,7 +1,7 @@
 port: 0
 mode: rule
 proxies:
-  - name: xp-vless-smux
+  - name: xp-vless-reality
     type: vless
     server: vless.example.test
     port: 443
@@ -15,14 +15,6 @@ proxies:
     reality-opts:
       public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
       short-id: 0123456789abcdef
-    smux:
-      enabled: true
-      protocol: smux
-      max-connections: 4
-      min-streams: 4
-      padding: false
-      statistic: false
-      only-tcp: true
   - name: xp-ss2022-smux
     type: ss
     server: ss.example.test
@@ -42,7 +34,7 @@ proxy-groups:
   - name: Proxy
     type: select
     proxies:
-      - xp-vless-smux
+      - xp-vless-reality
       - xp-ss2022-smux
 rules:
   - MATCH,Proxy

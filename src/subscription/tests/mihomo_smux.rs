@@ -89,11 +89,11 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
     let expected_uuid =
         crate::credentials::derive_vless_uuid(SEED, "u1", u.credential_epoch).unwrap();
     assert_eq!(vless.get("uuid"), Some(&Value::String(expected_uuid)));
-    assert_default_smux(vless);
+    assert!(vless.get("smux").is_none());
 }
 
 #[test]
-fn mihomo_system_payload_uses_endpoint_smux_and_raw_uris_stay_standard() {
+fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_standard() {
     let u = user("u1", "alice");
     let n = node("n1", "node-1", "example.com");
     let mut endpoints = vec![
@@ -106,6 +106,12 @@ fn mihomo_system_payload_uses_endpoint_smux_and_raw_uris_stay_standard() {
             vless_meta("example.com:443", &["sni.example.com"], false),
         ),
     ];
+    endpoints[1].meta["mihomo_smux"] = serde_json::json!({
+        "enabled": true,
+        "max_connections": 4,
+        "min_streams": 4,
+        "only_tcp": true
+    });
     let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
     let raw_before =
         build_raw_text(SEED, &u, &memberships, &endpoints, std::slice::from_ref(&n)).unwrap();
@@ -125,8 +131,27 @@ fn mihomo_system_payload_uses_endpoint_smux_and_raw_uris_stay_standard() {
     let proxies = root["proxies"].as_sequence().unwrap();
     assert_eq!(proxies.len(), 4);
     for proxy in proxies {
-        assert_default_smux(proxy);
+        if proxy["type"].as_str() == Some("ss") {
+            assert_default_smux(proxy);
+        } else {
+            assert!(proxy.get("smux").is_none());
+        }
     }
+    let vless_proxies = proxies
+        .iter()
+        .filter(|proxy| proxy["type"].as_str() == Some("vless"))
+        .collect::<Vec<_>>();
+    assert_eq!(vless_proxies.len(), 2);
+    assert!(
+        vless_proxies
+            .iter()
+            .any(|proxy| proxy.get("dialer-proxy").is_none())
+    );
+    assert!(
+        vless_proxies
+            .iter()
+            .any(|proxy| proxy.get("dialer-proxy").is_some())
+    );
 
     endpoints[0].meta["mihomo_smux"] = serde_json::json!({
         "enabled": false,
@@ -155,7 +180,7 @@ fn mihomo_system_payload_uses_endpoint_smux_and_raw_uris_stay_standard() {
         if name.contains("-ss") {
             assert!(proxy.get("smux").is_none());
         } else {
-            assert_default_smux(proxy);
+            assert!(proxy.get("smux").is_none());
         }
     }
 }

@@ -176,14 +176,16 @@ export function EndpointDetailsPage() {
 				accepted_authorities?: string[] | null;
 				mihomo_smux?: MihomoSmuxConfig;
 			} = { port: portNumber };
-			const changedMihomoSmux = changedMihomoSmuxConfig(
-				mihomoSmuxCapability.available,
-				endpoint.meta.mihomo_smux,
-				mihomoSmux,
-				mihomoSmuxMaxConnections,
-				mihomoSmuxMinStreams,
-			);
-			if (changedMihomoSmux) payload.mihomo_smux = changedMihomoSmux;
+			if (endpoint.kind === "ss2022_2022_blake3_aes_128_gcm") {
+				const changedMihomoSmux = changedMihomoSmuxConfig(
+					mihomoSmuxCapability.available,
+					endpoint.meta.mihomo_smux,
+					mihomoSmux,
+					mihomoSmuxMaxConnections,
+					mihomoSmuxMinStreams,
+				);
+				if (changedMihomoSmux) payload.mihomo_smux = changedMihomoSmux;
+			}
 
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
@@ -778,17 +780,20 @@ export function EndpointDetailsPage() {
 									</div>
 								) : null}
 
-								<EndpointMihomoSmuxSettings
-									config={mihomoSmux}
-									available={mihomoSmuxCapability.available}
-									disabled={patchMutation.isPending || runtime.isReadOnly}
-									inputClass={inputClass}
-									maxConnections={mihomoSmuxMaxConnections}
-									minStreams={mihomoSmuxMinStreams}
-									onConfigChange={setMihomoSmux}
-									onMaxConnectionsChange={setMihomoSmuxMaxConnections}
-									onMinStreamsChange={setMihomoSmuxMinStreams}
-								/>
+								{endpointQuery.data?.kind ===
+								"ss2022_2022_blake3_aes_128_gcm" ? (
+									<EndpointMihomoSmuxSettings
+										config={mihomoSmux}
+										available={mihomoSmuxCapability.available}
+										disabled={patchMutation.isPending || runtime.isReadOnly}
+										inputClass={inputClass}
+										maxConnections={mihomoSmuxMaxConnections}
+										minStreams={mihomoSmuxMinStreams}
+										onConfigChange={setMihomoSmux}
+										onMaxConnectionsChange={setMihomoSmuxMaxConnections}
+										onMinStreamsChange={setMihomoSmuxMinStreams}
+									/>
+								) : null}
 							</div>
 						</div>
 
