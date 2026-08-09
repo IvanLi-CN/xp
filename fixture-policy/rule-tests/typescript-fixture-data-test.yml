@@ -9,59 +9,15 @@ valid:
   - |
     const fixture = { started_at: fixtureCatalog.timestamp.baseline() };
   - |
+    const fixture = {
+      owner_node_id: fixtureCatalog.identifier.nodePrimary(),
+      bootstrap_node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+      bootstrap_access_host: fixtureCatalog.host.primary(),
+      bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
+      first_seen_at: fixtureCatalog.timestamp.recent(),
+    };
+  - |
     const fixture = { finished_at: null };
-  - |
-    const next = ids.map((endpointId) => {
-      const endpoint = endpointById.get(endpointId);
-      if (!endpoint) throw new Error("missing endpoint");
-      return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
-    });
-  - |
-    function buildEndpointCreateMeta() {
-      return {
-        dest: `${derived[0]}:443`,
-        server_names: derived,
-        accepted_authorities: acceptedAuthorities,
-      };
-    }
-  - |
-    function buildEndpointCreateMeta() {
-      return { server_names: [node.access_host.replace(/\.$/, "")] };
-    }
-  - |
-    function buildNodeRuntimeListItem() {
-      return { node_id: node.node_id, node_name: node.node_name };
-    }
-  - |
-    function refreshGlobalEndpointReality() {
-      return { dest: `${derived[0]}:443`, server_names: derived };
-    }
-  - |
-    function applyAutoAssignForEndpoint() {
-      return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
-    }
-  - |
-    async function handleRequest(nextSubscriptionToken: () => string) {
-      return {
-        node_name: payload.node_name ?? node.node_name,
-        endpoint_id: endpointId,
-        node_id: payload.node_id,
-        tag: tag,
-        endpoint_tag: endpoint.tag,
-        node_id: item.node_id,
-        node_id: q.node_id,
-        subscription_token: user.subscription_token,
-      };
-    }
-  - |
-    async function setupApiMocks() {
-      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
-      return { subscription_token: nextSubscriptionToken() };
-    }
-  - |
-    function handleEndpointProbeRequest() {
-      return { run_id: run.run_id };
-    }
 invalid:
   - |
     const fixture = { host: "unapproved.fixture.test" };
@@ -84,9 +40,17 @@ invalid:
   - |
     const fixture = { node_id: payload.node_id };
   - |
-    function buildNodeRuntimeListItem() {
-      return { node_id: process.env.TEST_NODE_ID };
+    async function handleRequest(nextSubscriptionToken: () => string) {
+      return { subscription_token: nextSubscriptionToken() };
     }
+  - |
+    const fixture = { owner_node_id: "unapproved-node" };
+  - |
+    const fixture = { bootstrap_node_name: process.env.TEST_NODE_NAME };
+  - |
+    const fixture = { bootstrap_access_host: "unapproved.fixture.test" };
+  - |
+    const fixture = { first_seen_at: new Date().toISOString() };
   - |
     const fixture = { subscription_token: user.subscription_token };
   - |

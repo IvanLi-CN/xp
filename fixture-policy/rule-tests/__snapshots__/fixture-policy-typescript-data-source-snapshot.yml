@@ -1,6 +1,53 @@
 id: fixture-policy-typescript-data-source
 snapshots:
   ? |
+    async function handleRequest(nextSubscriptionToken: () => string) {
+      return { subscription_token: nextSubscriptionToken() };
+    }
+  : labels:
+    - source: 'subscription_token: nextSubscriptionToken()'
+      style: primary
+      start: 79
+      end: 122
+    - source: subscription_token
+      style: secondary
+      start: 79
+      end: 97
+    - source: nextSubscriptionToken()
+      style: secondary
+      start: 99
+      end: 122
+  ? |
+    const fixture = { bootstrap_access_host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'bootstrap_access_host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 66
+    - source: bootstrap_access_host
+      style: secondary
+      start: 18
+      end: 39
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 41
+      end: 66
+  ? |
+    const fixture = { bootstrap_node_name: process.env.TEST_NODE_NAME };
+  : labels:
+    - source: 'bootstrap_node_name: process.env.TEST_NODE_NAME'
+      style: primary
+      start: 18
+      end: 65
+    - source: bootstrap_node_name
+      style: secondary
+      start: 18
+      end: 37
+    - source: process.env.TEST_NODE_NAME
+      style: secondary
+      start: 39
+      end: 65
+  ? |
     const fixture = { config_hash: "unapproved-config" };
   : labels:
     - source: 'config_hash: "unapproved-config"'
@@ -60,6 +107,21 @@ snapshots:
       style: secondary
       start: 30
       end: 50
+  ? |
+    const fixture = { first_seen_at: new Date().toISOString() };
+  : labels:
+    - source: 'first_seen_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 57
+    - source: first_seen_at
+      style: secondary
+      start: 18
+      end: 31
+    - source: new Date().toISOString()
+      style: secondary
+      start: 33
+      end: 57
   ? |
     const fixture = { host: "unapproved.fixture.test" };
   : labels:
@@ -150,6 +212,21 @@ snapshots:
       style: secondary
       start: 27
       end: 42
+  ? |
+    const fixture = { owner_node_id: "unapproved-node" };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 50
+    - source: owner_node_id
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 33
+      end: 50
   ? |
     const fixture = { run_id: "unapproved-run" };
   : labels:
@@ -262,6 +339,40 @@ snapshots:
       style: secondary
       start: 33
       end: 50
+  ? |
+    function buildEndpointCreateMeta() {
+      return { token: derived };
+    }
+  : labels:
+    - source: 'token: derived'
+      style: primary
+      start: 48
+      end: 62
+    - source: token
+      style: secondary
+      start: 48
+      end: 53
+    - source: derived
+      style: secondary
+      start: 55
+      end: 62
+  ? |
+    function buildNodeHistory() {
+      return { token: node.node_id };
+    }
+  : labels:
+    - source: 'token: node.node_id'
+      style: primary
+      start: 41
+      end: 60
+    - source: token
+      style: secondary
+      start: 41
+      end: 46
+    - source: node.node_id
+      style: secondary
+      start: 48
+      end: 60
   ? |
     function buildNodeRuntimeListItem() {
       return { node_id: process.env.TEST_NODE_ID };

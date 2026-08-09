@@ -1,6 +1,21 @@
 id: fixture-policy-tsx-assignment-source
 snapshots:
   ? |
+    report.bootstrapAccessHost = "unapproved.fixture.test";
+  : labels:
+    - source: report.bootstrapAccessHost = "unapproved.fixture.test"
+      style: primary
+      start: 0
+      end: 54
+    - source: report.bootstrapAccessHost
+      style: secondary
+      start: 0
+      end: 26
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 29
+      end: 54
+  ? |
     report.config_hash = "unapproved-config";
   : labels:
     - source: report.config_hash = "unapproved-config"

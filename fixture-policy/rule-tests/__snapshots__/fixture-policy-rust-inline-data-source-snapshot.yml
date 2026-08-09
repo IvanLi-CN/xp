@@ -2,6 +2,186 @@ id: fixture-policy-rust-inline-data-source
 snapshots:
   ? |
     mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_access_host: "unapproved.fixture.test".to_owned(),
+            };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_access_host: "unapproved.fixture.test".to_owned()'
+      style: primary
+      start: 91
+      end: 150
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit {
+                    bootstrap_access_host: "unapproved.fixture.test".to_owned(),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 170
+    - source: bootstrap_access_host
+      style: secondary
+      start: 91
+      end: 112
+    - source: '"unapproved.fixture.test".to_owned()'
+      style: secondary
+      start: 114
+      end: 150
+  ? |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned(),
+            };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned()'
+      style: primary
+      start: 91
+      end: 159
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit {
+                    bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned(),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 179
+    - source: bootstrap_api_base_url
+      style: secondary
+      start: 91
+      end: 113
+    - source: '"https://unapproved.fixture.test".to_owned()'
+      style: secondary
+      start: 115
+      end: 159
+  ? |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_node_name: "unapproved-node".to_owned(),
+            };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_node_name: "unapproved-node".to_owned()'
+      style: primary
+      start: 91
+      end: 140
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit {
+                    bootstrap_node_name: "unapproved-node".to_owned(),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 160
+    - source: bootstrap_node_name
+      style: secondary
+      start: 91
+      end: 110
+    - source: '"unapproved-node".to_owned()'
+      style: secondary
+      start: 112
+      end: 140
+  ? |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit { bootstrap_access_host: "unapproved.fixture.test".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_access_host: "unapproved.fixture.test".to_owned()'
+      style: primary
+      start: 79
+      end: 138
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit { bootstrap_access_host: "unapproved.fixture.test".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 149
+    - source: bootstrap_access_host
+      style: secondary
+      start: 79
+      end: 100
+    - source: '"unapproved.fixture.test".to_owned()'
+      style: secondary
+      start: 102
+      end: 138
+  ? |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit { bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned()'
+      style: primary
+      start: 79
+      end: 147
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit { bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 158
+    - source: bootstrap_api_base_url
+      style: secondary
+      start: 79
+      end: 101
+    - source: '"https://unapproved.fixture.test".to_owned()'
+      style: secondary
+      start: 103
+      end: 147
+  ? |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'bootstrap_node_name: "unapproved-node".to_owned()'
+      style: primary
+      start: 79
+      end: 128
+    - source: |-
+        mod tests {
+            fn builds_bootstrap_node() {
+                let fixture = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 139
+    - source: bootstrap_node_name
+      style: secondary
+      start: 79
+      end: 98
+    - source: '"unapproved-node".to_owned()'
+      style: secondary
+      start: 100
+      end: 128
+  ? |
+    mod tests {
         fn builds_mesh_target() {
             let fixture = MeshPeerTarget {
                 mesh_base_url: Some("https://unapproved.invalid".to_owned()),

@@ -18,6 +18,12 @@ valid:
     fn production_value() {
         let fixture = Node { node_id: "runtime-node".to_owned() };
     }
+  - |
+    mod tests {
+        fn empty_bootstrap_node_is_allowed() {
+            let fixture = StoreInit { bootstrap_node_id: None };
+        }
+    }
 invalid:
   - |
     mod tests {
@@ -46,6 +52,30 @@ invalid:
                 run_id: "unapproved-run".to_owned(),
                 hour: "2026-03-11T11:00:00Z".to_owned(),
                 config_hash: "unapproved-config".to_owned(),
+            };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_node_name: "unapproved-node".to_owned(),
+            };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_access_host: "unapproved.fixture.test".to_owned(),
+            };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_bootstrap_node() {
+            let fixture = StoreInit {
+                bootstrap_api_base_url: "https://unapproved.fixture.test".to_owned(),
             };
         }
     }

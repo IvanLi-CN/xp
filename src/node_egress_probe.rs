@@ -431,9 +431,9 @@ mod tests {
         let store = JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: tmp.path().to_path_buf(),
             bootstrap_node_id: None,
-            bootstrap_node_name: "node-a".to_string(),
-            bootstrap_access_host: "node-a.example.invalid".to_string(),
-            bootstrap_api_base_url: "https://node-a.example.invalid".to_string(),
+            bootstrap_node_name: xp_test_fixtures::slot_s615().to_owned(),
+            bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         })
         .unwrap();
         let store = Arc::new(Mutex::new(store));
@@ -447,7 +447,7 @@ mod tests {
 
         let handle = NodeEgressProbeHandle {
             inner: Arc::new(NodeEgressProbeHandleInner {
-                local_node_id: "node-a".to_string(),
+                local_node_id: xp_test_fixtures::slot_s615().to_owned(),
                 store,
                 trigger_tx: Some(tx),
             }),

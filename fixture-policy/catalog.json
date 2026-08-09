@@ -71,6 +71,111 @@
     "availabilityHigh": 0.986,
     "availabilityFull": 1
   },
+  "operations": {
+    "endpoint": {
+      "vlessKind": "vless_reality_vision_tcp",
+      "ssKind": "ss2022_2022_blake3_aes_128_gcm",
+      "port443": 443,
+      "port8443": 8443,
+      "port9443": 9443,
+      "port53843": 53843,
+      "port53844": 53844,
+      "reality": {
+        "dest": "127.0.0.1:39043",
+        "server_names": [
+          "host-35.fixture.test"
+        ],
+        "server_names_source": "manual",
+        "fingerprint": "chrome"
+      },
+      "realityAlternate": {
+        "dest": "127.0.0.1:49043",
+        "server_names": [
+          "edge-a.fixture.test",
+          "edge-b.fixture.test"
+        ],
+        "server_names_source": "manual",
+        "fingerprint": "chrome"
+      },
+      "realityKeys": {
+        "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "public_key": ""
+      },
+      "vlessMeta": {
+        "reality": {
+          "dest": "127.0.0.1:39043",
+          "server_names": [
+            "host-35.fixture.test"
+          ],
+          "server_names_source": "manual",
+          "fingerprint": "chrome"
+        },
+        "reality_keys": {
+          "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "public_key": ""
+        },
+        "short_ids": [
+          "0123456789abcdef"
+        ],
+        "active_short_id": "0123456789abcdef"
+      },
+      "ssMeta": {
+        "method": "ss2022_2022_blake3_aes_128_gcm",
+        "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+      },
+      "ssMetaAlternate": {
+        "method": "ss2022_2022_blake3_aes_128_gcm",
+        "server_psk_b64": "BBBBBBBBBBBBBBBBBBBBBB=="
+      },
+      "ssMetaEscaped": {
+        "method": "ss2022_2022_blake3_aes_128_gcm",
+        "server_psk_b64": "+/v7+/v7+/v7+/v7+/v7+w=="
+      },
+      "shortIds": [
+        "0123456789abcdef"
+      ],
+      "activeShortId": "0123456789abcdef",
+      "serverPskB64": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "serverPskB64Alternate": "BBBBBBBBBBBBBBBBBBBBBB==",
+      "serverPskB64Escaped": "+/v7+/v7+/v7+/v7+/v7+w==",
+      "userPskB64": "AQEBAQEBAQEBAQEBAQEBAQ==",
+      "authority53844": "edge-a.fixture.test:53844",
+      "authorityAlias": "Edge-A.Fixture.Test.",
+      "canaryH2c": "h2c"
+    },
+    "quota": {
+      "limitBytes": 1024,
+      "usedBytes": 0,
+      "remainingBytes": 1024,
+      "reset": {
+        "policy": "monthly",
+        "day_of_month": 1,
+        "tz_offset_minutes": 480
+      },
+      "resetSource": "user"
+    },
+    "subscription": {
+      "rawUri": "vless://node-a.fixture.test?encryption=none",
+      "providerSystemUrl": "https://node-a.fixture.test/api/sub/fixture-token-alpha/system",
+      "mihomoMirrorBase": "https://node-a.fixture.test/api/mihomo/resources",
+      "healthSeoulA": "https://seoul-a.fixture.test/api/health",
+      "healthShared": "https://shared-api.fixture.test/api/health",
+      "healthEndpointNode": "https://endpoint-node.fixture.test:53844/generate_204",
+      "healthXpNode": "https://xp-node.fixture.test/api/health",
+      "healthSubscribed": "https://subscribed.fixture.test/api/health",
+      "clashLines": [
+        "proxies:",
+        "  - name: demo",
+        "    type: vless",
+        "    servername: edge-a.fixture.test",
+        "    reality-opts:",
+        "      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "      short-id: 0123456789abcdef"
+      ],
+      "providerHost": "node-b.fixture.test",
+      "providerPassword": "fixture-password"
+    }
+  },
   "lists": {
     "primaryServerNames": [
       "edge-a.fixture.test",
@@ -123,7 +228,74 @@
   "subscription": {
     "nodeIds": ["n1", "n2", "n3"],
     "endpointIds": ["e1", "e2", "e3", "e4"],
+    "userIds": ["u1"],
     "tags": ["ss", "vless", "tag-1", "tag-2"],
+    "tokens": [
+      "fixture-token-00",
+      "fixture-token-01",
+      "fixture-token-02",
+      "fixture-token-03",
+      "fixture-token-04",
+      "fixture-token-05",
+      "fixture-token-06",
+      "fixture-token-07",
+      "fixture-token-08",
+      "fixture-token-09",
+      "fixture-token-10",
+      "fixture-token-11",
+      "fixture-token-12",
+      "fixture-token-13",
+      "fixture-token-14",
+      "fixture-token-15",
+      "fixture-token-16",
+      "fixture-token-17",
+      "fixture-token-18",
+      "fixture-token-19",
+      "fixture-token-20",
+      "fixture-token-21",
+      "fixture-token-22",
+      "fixture-token-23",
+      "fixture-token-24",
+      "fixture-token-25",
+      "fixture-token-26",
+      "fixture-token-27",
+      "fixture-token-28",
+      "fixture-token-29",
+      "fixture-token-30",
+      "fixture-token-31",
+      "fixture-token-32",
+      "fixture-token-33",
+      "fixture-token-34",
+      "fixture-token-35",
+      "fixture-token-36",
+      "fixture-token-37",
+      "fixture-token-38",
+      "fixture-token-39",
+      "fixture-token-40",
+      "fixture-token-41",
+      "fixture-token-42",
+      "fixture-token-43",
+      "fixture-token-44",
+      "fixture-token-45",
+      "fixture-token-46",
+      "fixture-token-47",
+      "fixture-token-48",
+      "fixture-token-49",
+      "fixture-token-50",
+      "fixture-token-51",
+      "fixture-token-52",
+      "fixture-token-53",
+      "fixture-token-54",
+      "fixture-token-55",
+      "fixture-token-56",
+      "fixture-token-57",
+      "fixture-token-58",
+      "fixture-token-59",
+      "fixture-token-60",
+      "fixture-token-61",
+      "fixture-token-62",
+      "fixture-token-63"
+    ],
     "accessHosts": [
       "example.fixture.test",
       "tokyo-a.fixture.test",
@@ -842,7 +1014,13 @@
       "node-1",
       "relay-Japan",
       "singapore-a",
-      "tokyo-a"
+      "tokyo-a",
+      "2026-05-19T00:00:00Z",
+      "2026-04-01T00:00:00Z",
+      "2026-07-01T00:00:00Z",
+      "2026-08-01T00:00:00Z",
+      "2026-09-01T00:00:00Z",
+      "2026-03-08T10:11:00Z"
     ],
     "numbers": [
       1,

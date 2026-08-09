@@ -98,6 +98,17 @@ snapshots:
       start: 23
       end: 32
   ? |
+    let init = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+  : labels:
+    - source: 'bootstrap_node_name: "unapproved-node".to_owned()'
+      style: primary
+      start: 23
+      end: 72
+    - source: bootstrap_node_name
+      style: secondary
+      start: 23
+      end: 42
+  ? |
     let payload = SignedPayload { cluster_id: "unapproved-cluster" };
   : labels:
     - source: 'cluster_id: "unapproved-cluster"'
@@ -130,3 +141,36 @@ snapshots:
       style: secondary
       start: 35
       end: 39
+  ? |
+    let sample = Probe { first_seen_at: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'first_seen_at: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 21
+      end: 69
+    - source: first_seen_at
+      style: secondary
+      start: 21
+      end: 34
+  ? |
+    let sample = Probe { owner_node_id: "unapproved-node".to_owned() };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node".to_owned()'
+      style: primary
+      start: 21
+      end: 64
+    - source: owner_node_id
+      style: secondary
+      start: 21
+      end: 34
+  ? |
+    let sample = Probe { start_at: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'start_at: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 21
+      end: 64
+    - source: start_at
+      style: secondary
+      start: 21
+      end: 29

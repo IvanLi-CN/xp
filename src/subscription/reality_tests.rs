@@ -1,8 +1,14 @@
-use super::test_fixtures::{SEED, endpoint_vless, membership, node, probe_map, user, vless_meta};
+use super::test_fixtures::{
+    SEED, VlessFixtureMode, endpoint_vless, membership, node, probe_map, user,
+};
 use super::*;
 
 use pretty_assertions::assert_eq;
 use serde_yaml::Value;
+use xp_test_fixtures::{
+    slot_s670 as fixture_slot_s670, subscription_host_example as fixture_host_example,
+    subscription_node_n1 as fixture_node_n1,
+};
 
 fn group<'a>(root: &'a Value, name: &str) -> &'a Value {
     root.get("proxy-groups")
@@ -26,16 +32,16 @@ fn group_proxies(group: &Value) -> Vec<&str> {
 
 #[test]
 fn reality_direct_candidates_are_exposed_in_both_mihomo_routes() {
-    let user = user("u1", "alice");
-    let node = node("n1", xp_test_fixtures::slot_s670, "example.com");
+    let user = user("alice");
+    let node = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        vless_meta("example.com:443", &["sni.example.com"], true),
+        VlessFixtureMode::ManagedDefault,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -87,7 +93,7 @@ rules: []
         &[node],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let provider_root: Value = serde_yaml::from_str(&provider_yaml).unwrap();
@@ -160,16 +166,16 @@ fn provider_reality_direct_names_follow_base_order() {
 
 #[test]
 fn user_reality_named_proxy_is_not_injected_into_system_node_selector() {
-    let user = user("u1", "alice");
-    let node = node("n1", xp_test_fixtures::slot_s670, "example.com");
+    let user = user("alice");
+    let node = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        vless_meta("example.com:443", &["sni.example.com"], true),
+        VlessFixtureMode::ManagedDefault,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -213,7 +219,7 @@ fn user_reality_named_proxy_is_not_injected_into_system_node_selector() {
         &[node],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let provider_root: Value = serde_yaml::from_str(&provider_yaml).unwrap();

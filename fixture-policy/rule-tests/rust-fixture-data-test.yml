@@ -47,6 +47,13 @@ valid:
     let request = xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest {
       tag: endpoint.tag,
     };
+  - |
+    let init = StoreInit {
+      bootstrap_node_id: None,
+      bootstrap_node_name: config.node_name.clone(),
+      bootstrap_access_host: config.access_host.clone(),
+      bootstrap_api_base_url: config.api_base_url.clone(),
+    };
 invalid:
   - |
     let fixture = Config { node_id: "node-unapproved" };
@@ -75,3 +82,11 @@ invalid:
     let sample = EndpointProbeSample { hour: "2026-03-11T11:00:00Z".to_owned() };
   - |
     let sample = EndpointProbeSample { config_hash: std::env::var("TEST_CONFIG_HASH").unwrap() };
+  - |
+    let init = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+  - |
+    let sample = Probe { owner_node_id: "unapproved-node".to_owned() };
+  - |
+    let sample = Probe { first_seen_at: "2026-03-11T11:00:00Z".to_owned() };
+  - |
+    let sample = Probe { start_at: "2026-03-11T11:00:00Z".to_owned() };

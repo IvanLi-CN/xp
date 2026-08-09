@@ -26,12 +26,12 @@ rule:
                   function createSubscriptionTokenFactory() {
                     let subscriptionTokenIndex = 0;
                     return () => {
-                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
-                      if (!accessor) {
-                        throw new Error("synthetic subscription token sequence exhausted");
+                      const token = catalog.subscription.tokens[subscriptionTokenIndex];
+                      if (!token) {
+                        throw new Error("synthetic subscription token catalog exhausted");
                       }
                       subscriptionTokenIndex += 1;
-                      return accessor();
+                      return token;
                     };
                   }
               - pattern: |
@@ -40,7 +40,17 @@ rule:
                     meshPeerNodeIdIndex += 1;
                     return catalog.slots.strings[slotIndex];
                   }
+              - pattern: |
+                  function nextSubscriptionToken() {
+                    const token = catalog.subscription.tokens[nextSubscriptionTokenIndex];
+                    if (!token) {
+                      throw new Error("synthetic subscription token catalog exhausted");
+                    }
+                    nextSubscriptionTokenIndex += 1;
+                    return token;
+                  }
     - kind: function_expression
+    - kind: method_definition
     - all:
         - kind: arrow_function
         - not:
@@ -56,12 +66,12 @@ rule:
                   field: body
                   pattern: |
                     {
-                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
-                      if (!accessor) {
-                        throw new Error("synthetic subscription token sequence exhausted");
+                      const token = catalog.subscription.tokens[subscriptionTokenIndex];
+                      if (!token) {
+                        throw new Error("synthetic subscription token catalog exhausted");
                       }
                       subscriptionTokenIndex += 1;
-                      return accessor();
+                      return token;
                     }
         - not:
             any:
@@ -82,7 +92,13 @@ rule:
                   regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
               - has:
                   field: body
+                  regex: '^\[\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+              - has:
+                  field: body
                   regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
               - has:
                   field: body
                   regex: '^createSubscriptionTokenFactory\(\)$'
+              - has:
+                  field: body
+                  regex: '^catalog[.]operations[.]subscription[.]clashLines[.]join\("\\n"\)$'

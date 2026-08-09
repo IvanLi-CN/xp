@@ -2258,7 +2258,7 @@ mod tests {
     ) -> TrafficReport {
         TrafficReport {
             window: "24h".to_string(),
-            window_start_at: "2026-05-19T00:00:00Z".to_string(),
+            window_start_at: xp_test_fixtures::slot_s679().to_owned(),
             window_end_at: window_end_at.to_string(),
             timezone: "UTC".to_string(),
             summary: TrafficSummary {
@@ -2456,8 +2456,8 @@ mod tests {
                     complete: true,
                     warnings: Vec::new(),
                     cycle: Some(TrafficCycleContext {
-                        start_at: "2026-05-01T00:00:00Z".to_string(),
-                        end_at: "2026-06-01T00:00:00Z".to_string(),
+                        start_at: xp_test_fixtures::slot_s624().to_owned(),
+                        end_at: xp_test_fixtures::slot_s625().to_owned(),
                         mode: TrafficCycleMode::Monthly,
                     }),
                     user_cycles: BTreeMap::new(),
@@ -2571,14 +2571,14 @@ mod tests {
     #[test]
     fn cycle_accumulator_can_be_complete_after_a_valid_starting_bucket() {
         let context = TrafficCycleContext {
-            start_at: "2026-05-01T00:00:00Z".to_string(),
-            end_at: "2026-06-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s624().to_owned(),
+            end_at: xp_test_fixtures::slot_s625().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let mut accumulator = Some(TrafficCycleAccumulator {
             mode: "monthly".to_string(),
-            start_at: "2026-04-01T00:00:00Z".to_string(),
-            end_at: "2026-05-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s680().to_owned(),
+            end_at: xp_test_fixtures::slot_s624().to_owned(),
             uplink_bytes: xp_test_fixtures::slot_n30(),
             downlink_bytes: xp_test_fixtures::slot_n31(),
             complete: true,
@@ -2600,13 +2600,13 @@ mod tests {
     #[test]
     fn cycle_configuration_warning_is_included_in_report_warnings() {
         let first = TrafficCycleContext {
-            start_at: "2026-05-01T00:00:00Z".to_string(),
-            end_at: "2026-06-15T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s624().to_owned(),
+            end_at: xp_test_fixtures::slot_s627().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let second = TrafficCycleContext {
-            start_at: "2026-06-01T00:00:00Z".to_string(),
-            end_at: "2026-07-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s625().to_owned(),
+            end_at: xp_test_fixtures::slot_s681().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let mut accumulator = None;
@@ -2722,8 +2722,8 @@ mod tests {
             }],
             cycle: Some(TrafficCycleAccumulator {
                 mode: "monthly".to_string(),
-                start_at: "2026-07-01T00:00:00Z".to_string(),
-                end_at: "2026-08-01T00:00:00Z".to_string(),
+                start_at: xp_test_fixtures::slot_s681().to_owned(),
+                end_at: xp_test_fixtures::slot_s682().to_owned(),
                 uplink_bytes: xp_test_fixtures::slot_n24(),
                 downlink_bytes: xp_test_fixtures::slot_n19(),
                 complete: true,
@@ -2744,8 +2744,8 @@ mod tests {
             }],
             cycle: Some(TrafficCycleAccumulator {
                 mode: "monthly".to_string(),
-                start_at: "2026-08-01T00:00:00Z".to_string(),
-                end_at: "2026-09-01T00:00:00Z".to_string(),
+                start_at: xp_test_fixtures::slot_s682().to_owned(),
+                end_at: xp_test_fixtures::slot_s683().to_owned(),
                 uplink_bytes: xp_test_fixtures::slot_n25(),
                 downlink_bytes: xp_test_fixtures::slot_n26(),
                 complete: true,
@@ -2870,13 +2870,13 @@ mod tests {
         let first = "2026-05-31T23:55:00Z".parse::<DateTime<Utc>>().unwrap();
         let second = "2026-06-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let old_cycle = TrafficCycleContext {
-            start_at: "2026-05-01T00:00:00Z".to_string(),
-            end_at: "2026-06-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s624().to_owned(),
+            end_at: xp_test_fixtures::slot_s625().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let new_cycle = TrafficCycleContext {
-            start_at: "2026-06-01T00:00:00Z".to_string(),
-            end_at: "2026-07-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s625().to_owned(),
+            end_at: xp_test_fixtures::slot_s681().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
 
@@ -3099,8 +3099,8 @@ mod tests {
                 }],
                 cycle: Some(TrafficCycleAccumulator {
                     mode: "monthly".to_string(),
-                    start_at: "2026-05-01T00:00:00Z".to_string(),
-                    end_at: "2026-06-01T00:00:00Z".to_string(),
+                    start_at: xp_test_fixtures::slot_s624().to_owned(),
+                    end_at: xp_test_fixtures::slot_s625().to_owned(),
                     uplink_bytes: xp_test_fixtures::slot_n24(),
                     downlink_bytes: xp_test_fixtures::slot_n19(),
                     complete: true,
@@ -3224,8 +3224,8 @@ mod tests {
         let removed = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
         let expired = "2026-08-19T00:15:00Z".parse::<DateTime<Utc>>().unwrap();
         let cycle = TrafficCycleContext {
-            start_at: "2026-05-01T00:00:00Z".to_string(),
-            end_at: "2026-06-01T00:00:00Z".to_string(),
+            start_at: xp_test_fixtures::slot_s624().to_owned(),
+            end_at: xp_test_fixtures::slot_s625().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let cycles = || BTreeMap::from([("user-a".to_string(), cycle.clone())]);

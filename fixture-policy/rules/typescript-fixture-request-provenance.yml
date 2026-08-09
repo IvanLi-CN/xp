@@ -1,0 +1,43 @@
+id: fixture-policy-typescript-request-provenance
+language: TypeScript
+severity: error
+message: Fixture operational fields cannot be populated from request payloads.
+note: Return a direct fixtureCatalog accessor instead.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  any:
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^(kind|port|reality|quota_limit_bytes|quota_reset)$'
+              - regex: '^(quota_reset_source|user_id|node_id|endpoint_id)$'
+              - regex: '^(access_host|api_base_url)$'
+        - has:
+            field: value
+            pattern: payload.$VALUE
+    - all:
+        - kind: assignment_expression
+        - has:
+            field: left
+            pattern: $OBJECT.$FIELD
+        - has:
+            field: right
+            pattern: payload.$VALUE
+    - all:
+        - kind: spread_element
+        - regex: '^\.\.\.payload\.reality$'
+constraints:
+  FIELD:
+    any:
+      - regex: '^(kind|port|reality|quota_limit_bytes|quota_reset)$'
+      - regex: '^(quota_reset_source|user_id|node_id|endpoint_id)$'
+      - regex: '^(access_host|api_base_url)$'

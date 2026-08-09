@@ -25,10 +25,6 @@ snapshots:
       style: primary
       start: 128
       end: 183
-    - source: handleRequest
-      style: secondary
-      start: 128
-      end: 141
   ? |
     function createMockApi(nextSubscriptionToken: () => string) {
       return handleRequest(state, req, nextSubscriptionToken);

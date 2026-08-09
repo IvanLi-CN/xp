@@ -1,6 +1,49 @@
 id: fixture-policy-rust-subscription-node-helper-inputs
 snapshots:
   ? |
+    let endpoint = endpoint_ss("e1", "n1", "ss", 443, "unsafe-credential");
+  : labels:
+    - source: endpoint_ss("e1", "n1", "ss", 443, "unsafe-credential")
+      style: primary
+      start: 15
+      end: 70
+  ? |
+    let endpoint = endpoint_vless(
+      "e1",
+      "n1",
+      "vless",
+      8443,
+      serde_json::json!({ "reality": { "dest": "live.example:443" } }),
+    );
+  : labels:
+    - source: |-
+        endpoint_vless(
+          "e1",
+          "n1",
+          "vless",
+          8443,
+          serde_json::json!({ "reality": { "dest": "live.example:443" } }),
+        )
+      style: primary
+      start: 15
+      end: 135
+  ? |
+    let fixture = node(
+        "unapproved-node",
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+    );
+  : labels:
+    - source: |-
+        node(
+            "unapproved-node",
+            xp_test_fixtures::slot_s670,
+            xp_test_fixtures::subscription_host_example(),
+        )
+      style: primary
+      start: 14
+      end: 128
+  ? |
     let fixture = node("n1", unsafe_name, "host.fixture.test");
   : labels:
     - source: node("n1", unsafe_name, "host.fixture.test")
@@ -25,3 +68,39 @@ snapshots:
       style: primary
       start: 14
       end: 128
+  ? |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        "unapproved.fixture.test",
+        xp_test_fixtures::subscription_api_loopback(),
+    );
+  : labels:
+    - source: |-
+        node_with_api_base(
+            xp_test_fixtures::subscription_node_n1(),
+            xp_test_fixtures::slot_s670,
+            "unapproved.fixture.test",
+            xp_test_fixtures::subscription_api_loopback(),
+        )
+      style: primary
+      start: 14
+      end: 196
+  ? |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+        "https://unapproved.fixture.test",
+    );
+  : labels:
+    - source: |-
+        node_with_api_base(
+            xp_test_fixtures::subscription_node_n1(),
+            xp_test_fixtures::slot_s670,
+            xp_test_fixtures::subscription_host_example(),
+            "https://unapproved.fixture.test",
+        )
+      style: primary
+      start: 14
+      end: 204

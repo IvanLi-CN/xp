@@ -14,33 +14,44 @@ function listSlotEntry(_value: string[], index: number) {
 	return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
 }
 
+type SlotIndex<
+	Limit extends number,
+	Indexes extends number[] = [],
+> = Indexes["length"] extends Limit
+	? Indexes[number]
+	: SlotIndex<Limit, [...Indexes, Indexes["length"]]>;
+
 const slotString = Object.fromEntries(
 	catalog.slots.strings.map(stringSlotEntry),
-) as Record<`s${number}`, () => string>;
+) as Record<`s${SlotIndex<685>}`, () => string>;
 const slotNumber = Object.fromEntries(
 	catalog.slots.numbers.map(numberSlotEntry),
-) as Record<`n${number}`, () => number>;
+) as Record<`n${SlotIndex<42>}`, () => number>;
 const slotList = Object.fromEntries(
 	catalog.slots.stringLists.map(listSlotEntry),
-) as Record<`l${number}`, () => string[]>;
-const subscriptionTokenAccessors = [
-	() => catalog.identifiers.tokenPrimary,
-	() => catalog.identifiers.tokenSecondary,
-	() => catalog.identifiers.tokenTertiary,
-	() => catalog.identifiers.tokenQuaternary,
-	() => catalog.identifiers.tokenQuinary,
-] as const;
+) as Record<`l${SlotIndex<38>}`, () => string[]>;
 
 function createSubscriptionTokenFactory() {
 	let subscriptionTokenIndex = 0;
 	return () => {
-		const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
-		if (!accessor) {
-			throw new Error("synthetic subscription token sequence exhausted");
+		const token = catalog.subscription.tokens[subscriptionTokenIndex];
+		if (!token) {
+			throw new Error("synthetic subscription token catalog exhausted");
 		}
 		subscriptionTokenIndex += 1;
-		return accessor();
+		return token;
 	};
+}
+
+let nextSubscriptionTokenIndex = 0;
+
+function nextSubscriptionToken() {
+	const token = catalog.subscription.tokens[nextSubscriptionTokenIndex];
+	if (!token) {
+		throw new Error("synthetic subscription token catalog exhausted");
+	}
+	nextSubscriptionTokenIndex += 1;
+	return token;
 }
 
 const meshPeerNodeIdIndexes = [
@@ -138,6 +149,7 @@ export const fixtureCatalog = {
 		userQuaternary: () => catalog.identifiers.userQuaternary,
 		userQuinary: () => catalog.identifiers.userQuinary,
 		createSubscriptionTokenFactory: () => createSubscriptionTokenFactory(),
+		nextSubscriptionToken,
 		nextMeshPeerNodeId,
 		tokenPrimary: () => catalog.identifiers.tokenPrimary,
 		tokenSecondary: () => catalog.identifiers.tokenSecondary,
@@ -172,7 +184,43 @@ export const fixtureCatalog = {
 		availabilityFull: () => catalog.metrics.availabilityFull,
 		none: () => null,
 	},
+	endpoint: {
+		vlessKind: () =>
+			catalog.operations.endpoint.vlessKind as "vless_reality_vision_tcp",
+		ssKind: () =>
+			catalog.operations.endpoint.ssKind as "ss2022_2022_blake3_aes_128_gcm",
+		port443: () => catalog.operations.endpoint.port443,
+		port8443: () => catalog.operations.endpoint.port8443,
+		port9443: () => catalog.operations.endpoint.port9443,
+		reality: () => catalog.operations.endpoint.reality,
+		realityAlternate: () => catalog.operations.endpoint.realityAlternate,
+		realityKeys: () => catalog.operations.endpoint.realityKeys,
+		shortIds: () => catalog.operations.endpoint.shortIds,
+		activeShortId: () => catalog.operations.endpoint.activeShortId,
+		serverPskB64: () => catalog.operations.endpoint.serverPskB64,
+		serverPskB64Alternate: () =>
+			catalog.operations.endpoint.serverPskB64Alternate,
+		serverPskB64Escaped: () => catalog.operations.endpoint.serverPskB64Escaped,
+		userPskB64: () => catalog.operations.endpoint.userPskB64,
+		authority53844: () => catalog.operations.endpoint.authority53844,
+		authorityAlias: () => catalog.operations.endpoint.authorityAlias,
+		canaryH2c: () => catalog.operations.endpoint.canaryH2c as "h2c",
+	},
+	quota: {
+		limitBytes: () => catalog.operations.quota.limitBytes,
+		usedBytes: () => catalog.operations.quota.usedBytes,
+		remainingBytes: () => catalog.operations.quota.remainingBytes,
+		reset: () => catalog.operations.quota.reset,
+		resetSource: () => catalog.operations.quota.resetSource as "user",
+	},
+	subscription: {
+		rawUri: () => catalog.operations.subscription.rawUri,
+		clash: () => catalog.operations.subscription.clashLines.join("\n"),
+		providerHost: () => catalog.operations.subscription.providerHost,
+		providerPassword: () => catalog.operations.subscription.providerPassword,
+	},
 	list: {
+		serverName35: () => [catalog.slots.strings[35]],
 		primaryServerNames: () => [...catalog.lists.primaryServerNames],
 		secondaryServerNames: () => [...catalog.lists.secondaryServerNames],
 		tertiaryServerNames: () => [...catalog.lists.tertiaryServerNames],

@@ -1,22 +1,9 @@
 import { expect, test } from "@playwright/test";
-
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await setAdminToken(page);
-	await setupApiMocks(page, {
-		users: [],
-		subscriptionContentRaw:
-			"vless://example-host?encryption=none\nvless://second-host?encryption=none\n",
-		subscriptionContentClash: `proxies:
-  - name: demo
-    type: vless
-    servername: example.com
-    reality-opts:
-      public-key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      short-id: 0123456789abcdef
-`,
-	});
+	await setupApiMocks(page, { users: [] });
 
 	await page.goto("/users");
 	await expect(page.getByText("No users yet")).toBeVisible();
@@ -40,7 +27,7 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	await expect(previewFormat.locator('input[value="raw"]')).toBeChecked();
 	await expect(rawDialog.getByLabel("Search")).toHaveCount(0);
 	await expect(rawDialog.getByTestId("subscription-code-scroll")).toContainText(
-		"vless://example-host?encryption=none",
+		fixtureCatalog.subscription.rawUri(),
 	);
 	await previewFormat.locator("label").nth(1).click();
 	await expect(previewFormat.locator('input[value="clash"]')).toBeChecked();
@@ -58,9 +45,7 @@ test("creates and deletes a user, fetches subscription", async ({ page }) => {
 	).toContainText("reality-opts:");
 	await expect(
 		clashDialog.getByTestId("subscription-code-scroll"),
-	).toContainText(
-		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	);
+	).toContainText(fixtureCatalog.endpoint.realityKeys().public_key);
 	await clashDialog.locator("[data-sub-preview-close]").click();
 
 	await page.getByRole("button", { name: "Delete user" }).click();

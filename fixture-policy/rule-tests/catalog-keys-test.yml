@@ -13,6 +13,8 @@ valid:
   - |
     { "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }
   - |
+    { "subscription": { "tokens": ["fixture-token-00"] } }
+  - |
     {
       "identifiers": { "probeRunPrimary": "run-fixture-a" },
       "timestamps": { "probeHour": "2026-03-11T11:00:00Z" }

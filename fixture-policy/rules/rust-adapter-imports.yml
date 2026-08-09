@@ -8,4 +8,10 @@ rule:
   all:
     - kind: use_declaration
     - not:
-        regex: '^(use std::sync::OnceLock;|use serde::de::DeserializeOwned;|use serde::Deserialize;)$'
+        any:
+          - regex: '^use super::catalog;$'
+          - regex: '^use std::sync::OnceLock;$'
+          - regex: '^use serde::de::DeserializeOwned;$'
+          - regex: '^use serde::Deserialize;$'
+          - regex: '^pub use network::\*;$'
+          - regex: '^pub use operations::\*;$'

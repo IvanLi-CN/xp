@@ -1,0 +1,70 @@
+id: fixture-policy-rust-json-fixture-literal
+snapshots:
+  ? |
+    let meta = json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": "live.example:443" }
+        })
+      style: primary
+      start: 11
+      end: 65
+  ? |
+    let meta = json!({
+      "reality": { "dest": request.destination }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": request.destination }
+        })
+      style: primary
+      start: 11
+      end: 66
+  ? |
+    let meta = serde_json::json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  : labels:
+    - source: '"live.example:443"'
+      style: primary
+      start: 54
+      end: 72
+    - source: |-
+        serde_json::json!({
+          "reality": { "dest": "live.example:443" }
+        })
+      style: secondary
+      start: 11
+      end: 77
+  ? |
+    let meta = serde_json::json!({
+      "reality": { "dest": "node.fixture.test:443" },
+      "reality_keys": { "private_key": "private" },
+      "short_ids": ["0123456789abcdef"]
+    });
+  : labels:
+    - source: |-
+        serde_json::json!({
+          "reality": { "dest": "node.fixture.test:443" },
+          "reality_keys": { "private_key": "private" },
+          "short_ids": ["0123456789abcdef"]
+        })
+      style: primary
+      start: 11
+      end: 167
+  ? |
+    let meta = serde_json::json!({
+      "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+    });
+  : labels:
+    - source: |-
+        serde_json::json!({
+          "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+        })
+      style: primary
+      start: 11
+      end: 109

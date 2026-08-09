@@ -657,7 +657,7 @@ fn desired_inbound_hash_ignores_mihomo_smux_policy() {
         port: 443,
         meta: serde_json::json!({
             "method": crate::protocol::SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-            "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA==",
+            "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64(),
             "mihomo_smux": {
                 "enabled": true,
                 "max_connections": 4,
@@ -801,7 +801,7 @@ async fn config_change_triggers_automatic_rebuild_inbound() {
         let mut store = store.lock().await;
         let mut endpoint = store.get_endpoint(&endpoint_id).unwrap();
         let mut meta: Ss2022EndpointMeta = serde_json::from_value(endpoint.meta.clone()).unwrap();
-        meta.server_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==".to_string();
+        meta.server_psk_b64 = xp_test_fixtures::endpoint_user_psk_b64().to_owned();
         endpoint.meta = serde_json::to_value(meta).unwrap();
         store
             .state_mut()

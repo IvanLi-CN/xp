@@ -47,16 +47,6 @@ rule:
               pattern: handleRequest
     - all:
         - kind: call_expression
-        - has:
-            field: function
-            pattern: handleRequest
+        - pattern: handleRequest($STATE, $REQUEST, $TOKEN)
         - not:
-            all:
-              - pattern: handleRequest($STATE, $REQUEST, nextSubscriptionToken)
-              - inside:
-                  stopBy: end
-                  all:
-                    - kind: function_declaration
-                    - has:
-                        field: name
-                        pattern: createMockApi
+            pattern: handleRequest($STATE, $REQUEST, nextSubscriptionToken)

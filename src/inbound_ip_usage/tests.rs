@@ -263,7 +263,7 @@ fn normalize_recomputes_minutes_and_prunes_memberships() {
                             bitmap
                         },
                         minutes: 99,
-                        first_seen_at: "2026-03-08T10:11:00Z".to_string(),
+                        first_seen_at: xp_test_fixtures::slot_s684().to_owned(),
                         last_seen_at: xp_test_fixtures::slot_s501().to_owned(),
                         geo: PersistedInboundIpGeo::default(),
                     },

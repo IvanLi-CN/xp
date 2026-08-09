@@ -18,7 +18,7 @@ fn test_store_init(tmp_dir: &Path) -> StoreInit {
         bootstrap_node_id: None,
         bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
 }
 
@@ -61,11 +61,7 @@ async fn upsert_endpoint_change_requests_rebuild_inbound() {
                 EndpointKind::VlessRealityVisionTcp,
                 443,
                 json!({
-                    "reality": {
-                        "dest": "example.com:443",
-                        "server_names": ["example.com"],
-                        "fingerprint": "chrome"
-                    }
+                    "reality": xp_test_fixtures::endpoint_reality()
                 }),
             )
             .unwrap();

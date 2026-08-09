@@ -18,3 +18,6 @@ invalid:
   - |
     const hour = "2026-03-11T11:00:00Z";
     const fixture = { hour };
+  - |
+    const bootstrap_access_host = "unapproved.fixture.test";
+    const fixture = { bootstrap_access_host };

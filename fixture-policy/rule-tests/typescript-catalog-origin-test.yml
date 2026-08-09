@@ -2,11 +2,17 @@ id: fixture-policy-typescript-catalog-origin
 valid:
   - |
     import { fixtureCatalog } from "../fixture-policy/catalog";
+  - |
+    import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 invalid:
   - |
     const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
   - |
     import { fixtureCatalog } from "./fixture-input";
+  - |
+    import { fixtureCatalog } from "../fixture-policy/catalog-proxy";
+  - |
+    import { fixtureCatalog } from "./catalog";
   - |
     import * as fixtureCatalog from "./fixture-input";
   - |

@@ -1,0 +1,36 @@
+id: fixture-policy-rust-json-fixture-literal
+language: Rust
+severity: error
+message: Rust JSON fixture macros must not embed operational literals.
+note: Use a direct xp_test_fixtures accessor instead.
+files:
+  - tests/**/*.rs
+  - src/**/*.rs
+rule:
+  all:
+    - kind: macro_invocation
+    - any:
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(dest|server_names|public_domain|server_name)"\s*:
+            \s*(\[?\s*)?"
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(private_key|public_key|short_ids|active_short_id)"\s*:
+            \s*(\[?\s*)?"
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(server_psk_b64|user_psk_b64|password)"\s*:
+            \s*(\[?\s*)?"
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(dest|server_names|public_domain|server_name)"\s*:
+            \s*(?:std::|serde_json::from_|request|payload|body)
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(private_key|public_key|short_ids|active_short_id)"\s*:
+            \s*(?:std::|serde_json::from_|request|payload|body)
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(server_psk_b64|user_psk_b64|password)"\s*:
+            \s*(?:std::|serde_json::from_|request|payload|body)

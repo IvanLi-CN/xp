@@ -18,3 +18,6 @@ invalid:
   - |
     const latest_checked_at = "2026-03-11T11:00:00Z";
     const fixture = { latest_checked_at };
+  - |
+    const bootstrapApiBaseUrl = "https://unapproved.fixture.test";
+    const fixture = { bootstrapApiBaseUrl };

@@ -16,6 +16,36 @@ snapshots:
       start: 28
       end: 42
   ? |
+    const item = { bootstrap_access_host: "live.example" };
+  : labels:
+    - source: 'bootstrap_access_host: "live.example"'
+      style: primary
+      start: 15
+      end: 52
+    - source: bootstrap_access_host
+      style: secondary
+      start: 15
+      end: 36
+    - source: '"live.example"'
+      style: secondary
+      start: 38
+      end: 52
+  ? |
+    const item = { first_seen_at: new Date().toISOString() };
+  : labels:
+    - source: 'first_seen_at: new Date().toISOString()'
+      style: primary
+      start: 15
+      end: 54
+    - source: first_seen_at
+      style: secondary
+      start: 15
+      end: 28
+    - source: new Date().toISOString()
+      style: secondary
+      start: 30
+      end: 54
+  ? |
     const item = { minute: new Date().toISOString() };
   : labels:
     - source: 'minute: new Date().toISOString()'
@@ -45,6 +75,21 @@ snapshots:
       style: secondary
       start: 26
       end: 43
+  ? |
+    const item = { owner_node_id: "unapproved-node" };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node"'
+      style: primary
+      start: 15
+      end: 47
+    - source: owner_node_id
+      style: secondary
+      start: 15
+      end: 28
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 30
+      end: 47
   ? |
     const item = { token: process.env.LIVE_TOKEN };
   : labels:

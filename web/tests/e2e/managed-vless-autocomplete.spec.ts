@@ -9,7 +9,6 @@ test.describe("managed VLESS autocomplete", () => {
 	}) => {
 		await setAdminToken(page);
 		await setupApiMocks(page, {
-			adminConfigVlessCanaryBind: fixtureCatalog.address.loopback39043(),
 			nodes: [
 				{
 					node_id: fixtureCatalog.identifier.nodePrimary(),

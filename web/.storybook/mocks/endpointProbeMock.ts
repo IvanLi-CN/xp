@@ -9,15 +9,54 @@ export type StorybookEndpointProbeMock = {
 	runsByRunId?: Record<string, AdminEndpointProbeRunStatusResponse>;
 };
 
+function fixtureProbeHistory(): AdminEndpointProbeHistoryResponse {
+	return {
+		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+		participating_nodes: fixtureCatalog.slotNumber.n1(),
+		expected_nodes: fixtureCatalog.slotNumber.n1(),
+		slots: [
+			{
+				hour: fixtureCatalog.timestamp.probeHour(),
+				status: "up",
+				participating_nodes: fixtureCatalog.slotNumber.n1(),
+				ok_count: fixtureCatalog.slotNumber.n1(),
+				sample_count: fixtureCatalog.slotNumber.n1(),
+				latency_ms_p50: fixtureCatalog.metric.latencyLow(),
+				latency_ms_p95: fixtureCatalog.metric.latencyHigh(),
+				by_node: [
+					{
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						ok: true,
+						checked_at: fixtureCatalog.timestamp.probeLatest(),
+						latency_ms: fixtureCatalog.metric.latencyLow(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+					},
+				],
+			},
+		],
+	};
+}
+
+function fixtureProbeRun(): AdminEndpointProbeRunStatusResponse {
+	return {
+		run_id: fixtureCatalog.identifier.probeRunPrimary(),
+		status: "finished",
+		hour: fixtureCatalog.timestamp.probeHour(),
+		config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+		nodes: [
+			{
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				status: "finished",
+			},
+		],
+	};
+}
+
 function jsonResponse(data: unknown): Response {
 	return new Response(JSON.stringify(data), {
 		status: 200,
 		headers: { "Content-Type": "application/json" },
 	});
-}
-
-function notFound(message: string): Response {
-	return jsonResponse({ error: { code: "not_found", message, details: {} } });
 }
 
 function sseResponse(
@@ -39,7 +78,7 @@ function sseResponse(
 
 export function handleEndpointProbeRequest(
 	req: Request,
-	probe?: StorybookEndpointProbeMock,
+	_probe?: StorybookEndpointProbeMock,
 ): Response | undefined {
 	const method = req.method.toUpperCase();
 	const path = new URL(req.url, "http://localhost").pathname;
@@ -47,27 +86,20 @@ export function handleEndpointProbeRequest(
 		/^\/api\/admin\/endpoints\/([^/]+)\/probe-history$/,
 	);
 	if (historyMatch && method === "GET") {
-		const endpointId = decodeURIComponent(historyMatch[1]);
-		const history = probe?.historyByEndpointId?.[endpointId];
-		return history
-			? jsonResponse(history)
-			: notFound("probe history not found");
+		return jsonResponse(fixtureProbeHistory());
 	}
 
 	const eventsMatch = path.match(
 		/^\/api\/admin\/endpoints\/probe\/runs\/([^/]+)\/events$/,
 	);
 	if (eventsMatch && method === "GET") {
-		const runId = decodeURIComponent(eventsMatch[1]);
-		const run = probe?.runsByRunId?.[runId];
-		if (!run) return notFound("probe run not found");
 		return sseResponse([
 			{
 				event: "hello",
 				data: {
-					run_id: run.run_id,
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
 					connected_at: fixtureCatalog.slotString.s0(),
-					nodes: run.nodes.map((node) => node.node_id),
+					nodes: [fixtureCatalog.identifier.nodePrimary()],
 				},
 			},
 		]);
@@ -77,9 +109,7 @@ export function handleEndpointProbeRequest(
 		/^\/api\/admin\/endpoints\/probe\/runs\/([^/]+)$/,
 	);
 	if (runMatch && method === "GET") {
-		const runId = decodeURIComponent(runMatch[1]);
-		const run = probe?.runsByRunId?.[runId];
-		return run ? jsonResponse(run) : notFound("probe run not found");
+		return jsonResponse(fixtureProbeRun());
 	}
 
 	return undefined;

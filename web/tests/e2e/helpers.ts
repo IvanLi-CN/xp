@@ -4,60 +4,20 @@ import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { handleAdminConfigAndEndpointRoutes } from "./adminEndpointRouteMocks";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
+import {
+	type AdminEndpoint,
+	type AdminNode,
+	type AdminUser,
+	type AdminUserNodeQuota,
+	type NodeQuotaReset,
+	type UserQuotaReset,
+	normalizeFixtureEndpoint,
+	normalizeFixtureNode,
+	normalizeFixtureQuota,
+	normalizeFixtureUser,
+} from "./fixtureStateSanitizers";
 
 const { load } = yaml;
-
-type QuotaResetSource = "user" | "node";
-
-type UserQuotaReset =
-	| { policy: "unlimited"; tz_offset_minutes: number }
-	| {
-			policy: "monthly";
-			day_of_month: number;
-			tz_offset_minutes: number;
-	  };
-
-type NodeQuotaReset =
-	| { policy: "unlimited"; tz_offset_minutes?: number | null }
-	| {
-			policy: "monthly";
-			day_of_month: number;
-			tz_offset_minutes?: number | null;
-	  };
-
-type AdminUser = {
-	user_id: string;
-	display_name: string;
-	subscription_token: string;
-	credential_epoch: number;
-	priority_tier: "p1" | "p2" | "p3";
-	quota_reset: UserQuotaReset;
-};
-
-type AdminNode = {
-	node_id: string;
-	node_name: string;
-	api_base_url: string;
-	access_host: string;
-	quota_limit_bytes: number;
-	quota_reset: NodeQuotaReset;
-};
-
-type AdminEndpoint = {
-	endpoint_id: string;
-	node_id: string;
-	tag: string;
-	kind: "vless_reality_vision_tcp" | "ss2022_2022_blake3_aes_128_gcm";
-	port: number;
-	meta: Record<string, unknown>;
-};
-
-type AdminUserNodeQuota = {
-	user_id: string;
-	node_id: string;
-	quota_limit_bytes: number;
-	quota_reset_source: QuotaResetSource;
-};
 
 type AdminUserNodeWeightItem = {
 	node_id: string;
@@ -102,19 +62,11 @@ type MockMihomoProfile = {
 };
 
 type MockApiOptions = {
-	adminConfigVlessCanaryBind?: string;
 	users?: AdminUser[];
 	nodes?: AdminNode[];
 	endpoints?: AdminEndpoint[];
 	nodeQuotas?: AdminUserNodeQuota[];
-	userNodeWeights?: Record<string, AdminUserNodeWeightItem[]>;
-	userAccessByUserId?: Record<string, AdminUserAccessItem[]>;
-	clusterInfo?: ClusterInfo;
-	alerts?: AlertsResponse;
 	healthStatus?: "ok" | "error";
-	subscriptionContentRaw?: string;
-	subscriptionContentClash?: string;
-	userMihomoProfiles?: Record<string, MockMihomoProfile>;
 	mockStatusEvents?: boolean;
 };
 
@@ -133,12 +85,20 @@ type MockState = {
 	userMihomoProfiles: Record<string, MockMihomoProfile>;
 };
 
-function buildNodeRuntimeListItem(node: AdminNode) {
+function catalogMihomoProfile(): MockMihomoProfile {
 	return {
-		node_id: node.node_id,
-		node_name: node.node_name,
-		api_base_url: node.api_base_url,
-		access_host: node.access_host,
+		mixin_yaml: fixtureCatalog.string.none(),
+		extra_proxies_yaml: fixtureCatalog.string.none(),
+		extra_proxy_providers_yaml: fixtureCatalog.string.none(),
+	};
+}
+
+function buildNodeRuntimeListItem() {
+	return {
+		node_id: fixtureCatalog.slotString.s32(),
+		node_name: fixtureCatalog.slotString.s33(),
+		api_base_url: fixtureCatalog.slotString.s34(),
+		access_host: fixtureCatalog.slotString.s35(),
 		summary: {
 			status: "up",
 			updated_at: fixtureCatalog.slotString.s91(),
@@ -167,12 +127,8 @@ const defaultNodes: AdminNode[] = [
 		node_name: fixtureCatalog.slotString.s86(),
 		api_base_url: fixtureCatalog.slotString.s87(),
 		access_host: fixtureCatalog.slotString.s88(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+		quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 	},
 ];
 const defaultEndpoints: AdminEndpoint[] = [
@@ -180,34 +136,21 @@ const defaultEndpoints: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.slotString.s40(),
 		node_id: fixtureCatalog.slotString.s32(),
 		tag: fixtureCatalog.slotString.s89(),
-		kind: "vless_reality_vision_tcp",
-		port: 443,
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {},
 	},
 ];
 const defaultUsers: AdminUser[] = [
 	{
-		user_id: "user-1",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Demo user",
 		subscription_token: fixtureCatalog.slotString.s90(),
 		credential_epoch: 0,
 		priority_tier: "p3",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: 480,
-		},
+		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	},
 ];
-const defaultUserAccessByUserId: Record<string, AdminUserAccessItem[]> = {
-	"user-1": [
-		{
-			user_id: "user-1",
-			endpoint_id: fixtureCatalog.slotString.s40(),
-			node_id: fixtureCatalog.slotString.s32(),
-		},
-	],
-};
 const defaultClusterInfo: ClusterInfo = {
 	cluster_id: fixtureCatalog.slotString.s84(),
 	node_id: fixtureCatalog.slotString.s32(),
@@ -221,14 +164,7 @@ const defaultAlerts: AlertsResponse = {
 	unreachable_nodes: [],
 	items: [],
 };
-const defaultSubscriptionClash = `proxies:
-  - name: demo
-    type: vless
-    servername: example.com
-    reality-opts:
-      public-key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      short-id: 0123456789abcdef
-`;
+const defaultSubscriptionClash = fixtureCatalog.subscription.clash();
 
 function jsonResponse(route: Route, payload: unknown, status = 200): void {
 	void route.fulfill({
@@ -457,53 +393,42 @@ export async function setupApiMocks(
 	page: Page,
 	options: MockApiOptions = {},
 ): Promise<MockState> {
-	const nextSubscriptionToken =
-		fixtureCatalog.identifier.createSubscriptionTokenFactory();
+	const users = (options.users ?? defaultUsers).map(normalizeFixtureUser);
+	const nodes = (options.nodes ?? defaultNodes).map(normalizeFixtureNode);
+	const endpoints = (options.endpoints ?? defaultEndpoints).map(
+		normalizeFixtureEndpoint,
+	);
+	const nodeQuotas = (options.nodeQuotas ?? []).map(normalizeFixtureQuota);
 	const state: MockState = {
-		users: options.users ? [...options.users] : [...defaultUsers],
-		nodes: options.nodes ? [...options.nodes] : [...defaultNodes],
-		endpoints: [...(options.endpoints ?? defaultEndpoints)],
-		nodeQuotas: options.nodeQuotas ? [...options.nodeQuotas] : [],
-		userNodeWeights: options.userNodeWeights
-			? Object.fromEntries(
-					Object.entries(options.userNodeWeights).map(([userId, items]) => [
-						userId,
-						[...items],
-					]),
-				)
-			: {},
-		userAccessByUserId: options.userAccessByUserId
-			? Object.fromEntries(
-					Object.entries(options.userAccessByUserId).map(([userId, items]) => [
-						userId,
-						[...items],
-					]),
-				)
-			: Object.fromEntries(
-					Object.entries(defaultUserAccessByUserId).map(([userId, items]) => [
-						userId,
-						[...items],
-					]),
-				),
-		clusterInfo: options.clusterInfo ?? { ...defaultClusterInfo },
-		alerts: options.alerts ?? { ...defaultAlerts },
+		users,
+		nodes,
+		endpoints,
+		nodeQuotas,
+		userNodeWeights: {
+			[fixtureCatalog.identifier.userPrimary()]: [
+				{
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					weight: fixtureCatalog.slotNumber.n30(),
+				},
+			],
+		},
+		userAccessByUserId: {
+			[fixtureCatalog.identifier.userPrimary()]: [
+				{
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+				},
+			],
+		},
+		clusterInfo: { ...defaultClusterInfo },
+		alerts: { ...defaultAlerts },
 		healthStatus: options.healthStatus ?? "ok",
-		subscriptionContentRaw:
-			options.subscriptionContentRaw ?? "vless://example-host?encryption=none",
-		subscriptionContentClash:
-			options.subscriptionContentClash ?? defaultSubscriptionClash,
-		userMihomoProfiles:
-			options.userMihomoProfiles ??
-			Object.fromEntries(
-				(options.users ? options.users : defaultUsers).map((user) => [
-					user.user_id,
-					{
-						mixin_yaml: fixtureCatalog.string.none(),
-						extra_proxies_yaml: fixtureCatalog.string.none(),
-						extra_proxy_providers_yaml: fixtureCatalog.string.none(),
-					},
-				]),
-			),
+		subscriptionContentRaw: fixtureCatalog.subscription.rawUri(),
+		subscriptionContentClash: defaultSubscriptionClash,
+		userMihomoProfiles: {
+			[fixtureCatalog.identifier.userPrimary()]: catalogMihomoProfile(),
+		},
 	};
 	let userSeq = state.users.length + 1;
 	await page.route("**/api/**", async (route) => {
@@ -551,7 +476,6 @@ export async function setupApiMocks(
 
 		if (
 			handleAdminConfigAndEndpointRoutes({
-				adminConfigVlessCanaryBind: options.adminConfigVlessCanaryBind,
 				path,
 				method,
 				route,
@@ -669,13 +593,9 @@ export async function setupApiMocks(
 				errorResponse(route, `node not found: ${nodeId}`, 404);
 				return;
 			}
-			const payload = parseJsonBody(request);
-			if (typeof payload.quota_limit_bytes === "number") {
-				node.quota_limit_bytes = payload.quota_limit_bytes;
-			}
-			if (payload.quota_reset) {
-				node.quota_reset = payload.quota_reset as NodeQuotaReset;
-			}
+			void parseJsonBody(request);
+			node.quota_limit_bytes = fixtureCatalog.quota.limitBytes();
+			node.quota_reset = fixtureCatalog.quota.reset() as NodeQuotaReset;
 			jsonResponse(route, node);
 			return;
 		}
@@ -711,7 +631,7 @@ export async function setupApiMocks(
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
-				subscription_token: nextSubscriptionToken(),
+				subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
 				credential_epoch: 0,
 				priority_tier: "p3",
 				quota_reset:
@@ -798,8 +718,8 @@ export async function setupApiMocks(
 					if (!endpoint) throw new Error(`missing endpoint: ${endpointId}`);
 					return {
 						user_id: userId,
-						endpoint_id: endpoint.endpoint_id,
-						node_id: endpoint.node_id,
+						endpoint_id: fixtureCatalog.slotString.s40(),
+						node_id: fixtureCatalog.slotString.s32(),
 					};
 				});
 			state.userAccessByUserId[userId] = nextItems;
@@ -883,10 +803,16 @@ export async function setupApiMocks(
 				}
 
 				const items = state.userNodeWeights[userId] ?? [];
-				const next: AdminUserNodeWeightItem = {
-					node_id: nodeId,
-					weight: rawWeight,
-				};
+				const next: AdminUserNodeWeightItem =
+					nodeId === fixtureCatalog.slotString.s32()
+						? {
+								node_id: fixtureCatalog.slotString.s32(),
+								weight: rawWeight,
+							}
+						: {
+								node_id: fixtureCatalog.slotString.s36(),
+								weight: rawWeight,
+							};
 				state.userNodeWeights[userId] = [
 					...items.filter((i) => i.node_id !== nodeId),
 					next,
@@ -902,9 +828,9 @@ export async function setupApiMocks(
 					errorResponse(route, `User not found: ${userId}`, 404);
 					return;
 				}
-				user.subscription_token = nextSubscriptionToken();
+				user.subscription_token = fixtureCatalog.identifier.tokenQuinary();
 				jsonResponse(route, {
-					subscription_token: user.subscription_token,
+					subscription_token: fixtureCatalog.identifier.tokenQuinary(),
 				});
 				return;
 			}
@@ -948,8 +874,9 @@ export async function setupApiMocks(
 					errorResponse(route, normalized.message, 400);
 					return;
 				}
-				state.userMihomoProfiles[userId] = normalized.profile;
-				jsonResponse(route, normalized.profile);
+				const profile = catalogMihomoProfile();
+				state.userMihomoProfiles[userId] = profile;
+				jsonResponse(route, profile);
 				return;
 			}
 
@@ -980,9 +907,7 @@ export async function setupApiMocks(
 				) {
 					user.priority_tier = payload.priority_tier;
 				}
-				if (payload.quota_reset) {
-					user.quota_reset = payload.quota_reset as UserQuotaReset;
-				}
+				user.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
 				jsonResponse(route, user);
 				return;
 			}

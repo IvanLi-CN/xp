@@ -25,11 +25,7 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -91,11 +87,7 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
             "PATCH",
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
-              "reality": {
-                "dest": "edge.example.com:443",
-                "server_names": ["edge.example.com"],
-                "fingerprint": "firefox"
-              }
+              "reality": xp_test_fixtures::endpoint_reality_alternate()
             }),
         ))
         .await

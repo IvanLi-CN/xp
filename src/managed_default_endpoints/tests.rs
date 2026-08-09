@@ -7,18 +7,12 @@ fn endpoint_vless(
     managed_default: Option<bool>,
 ) -> Endpoint {
     let mut meta = serde_json::json!({
-        "reality": {
-            "dest": "example.com:443",
-            "server_names": server_names,
-            "fingerprint": "chrome"
-        },
-        "reality_keys": {
-            "private_key": "private",
-            "public_key": "public"
-        },
-        "short_ids": ["0123456789abcdef"],
-        "active_short_id": "0123456789abcdef"
+        "reality": xp_test_fixtures::endpoint_reality(),
+        "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+        "short_ids": xp_test_fixtures::endpoint_short_ids(),
+        "active_short_id": xp_test_fixtures::endpoint_active_short_id()
     });
+    meta["reality"]["server_names"] = serde_json::json!(server_names);
     if let Some(value) = managed_default {
         meta["managed_default"] = serde_json::Value::Bool(value);
     }
@@ -46,7 +40,7 @@ fn endpoint_vless(
 fn endpoint_ss(endpoint_id: &str, port: u16, managed_default: Option<bool>) -> Endpoint {
     let mut meta = serde_json::json!({
         "method": SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-        "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+        "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64()
     });
     if let Some(value) = managed_default {
         meta["managed_default"] = serde_json::Value::Bool(value);

@@ -54,11 +54,18 @@ import {
 	DEFAULT_API_CAPABILITIES,
 	type MockStateSeed,
 } from "./apiMockContract";
-import {
-	buildEndpointCreateMeta,
-	deriveGlobalServerNames,
-} from "./buildEndpointCreateMeta";
+import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
+import {
+	sanitizeFixtureEndpoint,
+	sanitizeFixtureNode,
+	sanitizeFixtureQuota,
+	sanitizeFixtureUser,
+} from "./fixtureStateSanitizers";
+import {
+	buildNodeDeletePreviewEndpoint,
+	buildUserNodeQuotaStatusItem,
+} from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
@@ -279,16 +286,12 @@ function sseResponse(
 
 function ensureEndpointRecord(
 	seed: MockEndpointSeed,
-	counters: MockState["counters"],
+	_counters: MockState["counters"],
 ): MockEndpointRecord {
-	const shortIds = seed.short_ids?.length
-		? [...seed.short_ids]
-		: [`short-${counters.shortId++}`, `short-${counters.shortId++}`];
-	const activeShortId = seed.active_short_id ?? shortIds[0];
 	return {
 		...seed,
-		short_ids: shortIds,
-		active_short_id: activeShortId,
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	};
 }
 
@@ -380,10 +383,10 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 			? "degraded"
 			: "up";
 	return {
-		node_id: node.node_id,
-		node_name: node.node_name,
-		api_base_url: node.api_base_url,
-		access_host: node.access_host,
+		node_id: fixtureCatalog.slotString.s32(),
+		node_name: fixtureCatalog.slotString.s33(),
+		api_base_url: fixtureCatalog.slotString.s34(),
+		access_host: fixtureCatalog.slotString.s35(),
 		summary: {
 			status: summaryStatus,
 			updated_at: fixtureCatalog.slotString.s7(),
@@ -409,7 +412,7 @@ function buildNodeRuntimeDetail(
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	const components = buildRuntimeComponents(node);
 	return {
-		node_id: node.node_id,
+		node_id: fixtureCatalog.slotString.s32(),
 		last_synced_at: fixtureCatalog.slotString.s21(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
@@ -539,10 +542,23 @@ function buildDefaultUserTraffic(
 	user: AdminUser,
 	nodes: AdminNode[],
 ): MockWindowedUserTraffic {
-	const nodeOptions = nodes.map((node) => ({
-		node_id: node.node_id,
-		node_name: node.node_name,
-	}));
+	const nodeOptions = nodes.map((node, index) => {
+		const option = {
+			node_id: fixtureCatalog.slotString.s36(),
+			node_name: fixtureCatalog.slotString.s37(),
+		};
+		if (node.node_id === fixtureCatalog.identifier.nodePrimary()) {
+			option.node_id = fixtureCatalog.identifier.nodePrimary();
+			option.node_name = fixtureCatalog.identifier.nodeNameSecondary();
+		} else if (node.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+			option.node_id = fixtureCatalog.identifier.nodeSecondary();
+			option.node_name = fixtureCatalog.identifier.nodeNamePrimary();
+		} else if (index === 0) {
+			option.node_id = fixtureCatalog.slotString.s32();
+			option.node_name = fixtureCatalog.slotString.s33();
+		}
+		return option;
+	});
 	return {
 		"24h": {
 			user: { user_id: user.user_id, display_name: user.display_name },
@@ -577,23 +593,11 @@ function refreshGlobalEndpointReality(state: MockState): void {
 		if (!reality || typeof reality !== "object") continue;
 		if (reality.server_names_source !== "global") continue;
 
-		const derived = deriveGlobalServerNames(
-			state.realityDomains,
-			endpoint.node_id,
-		);
-		if (derived.length === 0) continue;
-
-		meta.reality = {
-			...reality,
-			dest: `${derived[0]}:443`,
-			server_names: derived,
-			server_names_source: "global",
-		};
+		meta.reality = fixtureCatalog.endpoint.reality();
 	}
 }
 
 function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
-	const endpointTag = `${node.node_name || node.node_id}-edge-a`;
 	return {
 		node,
 		window: "24h",
@@ -608,7 +612,7 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		],
 		timeline: [
 			{
-				lane_key: `${node.node_id}::203.0.113.7`,
+				lane_key: fixtureCatalog.slotString.s29(),
 				endpoint_id: fixtureCatalog.slotString.s27(),
 				endpoint_tag: fixtureCatalog.slotString.s28(),
 				ip: fixtureCatalog.slotString.s29(),
@@ -625,7 +629,7 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 			{
 				ip: fixtureCatalog.slotString.s29(),
 				minutes: 2,
-				endpoint_tags: [endpointTag],
+				endpoint_tags: [fixtureCatalog.slotString.s28()],
 				region: "Japan / Tokyo",
 				operator: "ExampleNet",
 				last_seen_at: fixtureCatalog.slotString.s26(),
@@ -641,7 +645,7 @@ function buildDefaultUserIpUsage(
 	const groups: AdminUserIpUsageResponse["groups"] = nodes
 		.slice(0, 2)
 		.map((node, index) => {
-			const endpointTag = `${node.node_name || node.node_id}-edge-${index + 1}`;
+			const endpointTag = fixtureCatalog.slotString.s28();
 			return {
 				node,
 				geo_source: index === 0 ? "country_is" : "country_is",
@@ -654,7 +658,7 @@ function buildDefaultUserIpUsage(
 				],
 				timeline: [
 					{
-						lane_key: `${node.node_id}::${user.user_id}::203.0.113.${index + 7}`,
+						lane_key: fixtureCatalog.slotString.s31(),
 						endpoint_id: fixtureCatalog.slotString.s30(),
 						endpoint_tag: fixtureCatalog.slotString.s28(),
 						ip: fixtureCatalog.slotString.s31(),
@@ -694,34 +698,22 @@ function buildDefaultUserIpUsage(
 }
 
 function createDefaultSeed(): MockStateSeed {
-	const defaultNodeQuotaReset = (dayOfMonth: number): NodeQuotaReset => ({
-		policy: "monthly",
-		day_of_month: dayOfMonth,
-		tz_offset_minutes: null,
-	});
-
-	const defaultUserQuotaReset = (dayOfMonth: number): UserQuotaReset => ({
-		policy: "monthly",
-		day_of_month: dayOfMonth,
-		tz_offset_minutes: 480,
-	});
-
 	const nodes: AdminNode[] = [
 		{
 			node_id: fixtureCatalog.slotString.s32(),
 			node_name: fixtureCatalog.slotString.s33(),
 			api_base_url: fixtureCatalog.slotString.s34(),
 			access_host: fixtureCatalog.slotString.s35(),
-			quota_limit_bytes: 0,
-			quota_reset: defaultNodeQuotaReset(1),
+			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
 		{
 			node_id: fixtureCatalog.slotString.s36(),
 			node_name: fixtureCatalog.slotString.s37(),
 			api_base_url: fixtureCatalog.slotString.s38(),
 			access_host: fixtureCatalog.slotString.s39(),
-			quota_limit_bytes: 0,
-			quota_reset: defaultNodeQuotaReset(15),
+			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
 	];
 
@@ -730,48 +722,45 @@ function createDefaultSeed(): MockStateSeed {
 			endpoint_id: fixtureCatalog.slotString.s40(),
 			node_id: fixtureCatalog.slotString.s32(),
 			tag: fixtureCatalog.slotString.s41(),
-			kind: "vless_reality_vision_tcp",
-			port: 443,
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port443(),
 			meta: {
-				public_domain: "edge.tokyo.example.com",
-				reality: {
-					dest: fixtureCatalog.slotString.s42(),
-					server_names: fixtureCatalog.slotList.l3(),
-					server_names_source: "manual",
-					fingerprint: "chrome",
-				},
+				reality: fixtureCatalog.endpoint.reality(),
+				reality_keys: fixtureCatalog.endpoint.realityKeys(),
+				short_ids: fixtureCatalog.endpoint.shortIds(),
+				active_short_id: fixtureCatalog.endpoint.activeShortId(),
 			},
-			short_ids: ["2a3b4c", "5d6e7f"],
-			active_short_id: "2a3b4c",
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		},
 		{
 			endpoint_id: fixtureCatalog.slotString.s43(),
 			node_id: fixtureCatalog.slotString.s36(),
 			tag: fixtureCatalog.slotString.s44(),
-			kind: "ss2022_2022_blake3_aes_128_gcm",
-			port: 8443,
+			kind: fixtureCatalog.endpoint.ssKind(),
+			port: fixtureCatalog.endpoint.port8443(),
 			meta: {
-				method: "2022-blake3-aes-128-gcm",
+				server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
 			},
-			short_ids: ["aa11bb"],
-			active_short_id: "aa11bb",
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		},
 	];
 
 	const realityDomains: AdminRealityDomain[] = [
 		{
-			domain_id: "seed_public_sn_files_1drv_com",
-			server_name: "cdn-a.example.test",
+			domain_id: fixtureCatalog.identifier.endpointPrimary(),
+			server_name: fixtureCatalog.host.serverPrimary(),
 			disabled_node_ids: [],
 		},
 		{
-			domain_id: "seed_public_bn_files_1drv_com",
-			server_name: "cdn-b.example.test",
+			domain_id: fixtureCatalog.identifier.endpointSecondary(),
+			server_name: fixtureCatalog.host.serverSecondary(),
 			disabled_node_ids: [],
 		},
 		{
-			domain_id: "seed_oneclient_sfx_ms",
-			server_name: "origin.example.test",
+			domain_id: fixtureCatalog.identifier.endpointTertiary(),
+			server_name: fixtureCatalog.host.tertiary(),
 			disabled_node_ids: [fixtureCatalog.slotString.s36()],
 		},
 	];
@@ -788,7 +777,7 @@ function createDefaultSeed(): MockStateSeed {
 			subscription_token: fixtureCatalog.slotString.s45(),
 			credential_epoch: 0,
 			priority_tier: "p3",
-			quota_reset: defaultUserQuotaReset(1),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 		{
 			user_id: userId2,
@@ -796,17 +785,22 @@ function createDefaultSeed(): MockStateSeed {
 			subscription_token: fixtureCatalog.slotString.s46(),
 			credential_epoch: 0,
 			priority_tier: "p3",
-			quota_reset: defaultUserQuotaReset(15),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 	];
 
 	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> = {
-		[userId1]: [{ node_id: fixtureCatalog.slotString.s32(), weight: 120 }],
+		[userId1]: [
+			{
+				node_id: fixtureCatalog.slotString.s32(),
+				weight: fixtureCatalog.slotNumber.n30(),
+			},
+		],
 		[userId2]: [],
 	};
 	const userGlobalWeights: Record<string, number> = {
-		[userId1]: 120,
-		[userId2]: 80,
+		[userId1]: fixtureCatalog.slotNumber.n30(),
+		[userId2]: fixtureCatalog.slotNumber.n30(),
 	};
 	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
 		[fixtureCatalog.slotString.s32()]: {
@@ -844,26 +838,12 @@ function createDefaultSeed(): MockStateSeed {
 	const alerts: AlertsResponse = {
 		partial: false,
 		unreachable_nodes: [],
-		items: [
-			{
-				type: "quota_banned_membership",
-				membership_key: `${userId1}::endpoint-1`,
-				user_id: userId1,
-				endpoint_id: fixtureCatalog.slotString.s40(),
-				owner_node_id: "node-1",
-				quota_banned: true,
-				quota_banned_at: null,
-				message: "Quota enforced on owner node (membership is blocked).",
-				action_hint: "Wait for rollover/unban or adjust quota policy.",
-			},
-		],
+		items: [],
 	};
 
 	const subscriptions: Record<string, string> = {
-		[subToken1]: `# raw subscription for ${subToken1}
-node-1`,
-		[subToken2]: `# raw subscription for ${subToken2}
-node-2`,
+		[subToken1]: fixtureCatalog.subscription.rawUri(),
+		[subToken2]: fixtureCatalog.subscription.rawUri(),
 	};
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
@@ -881,19 +861,19 @@ node-2`,
 					{
 						endpoint_id: fixtureCatalog.slotString.s27(),
 						endpoint_tag: fixtureCatalog.slotString.s49(),
-						port: 443,
+						port: fixtureCatalog.endpoint.port443(),
 					},
 					{
 						endpoint_id: fixtureCatalog.slotString.s50(),
 						endpoint_tag: fixtureCatalog.slotString.s51(),
-						port: 8388,
+						port: fixtureCatalog.endpoint.port8443(),
 					},
 				],
 				per_endpoint_series: [
 					{
 						endpoint_id: fixtureCatalog.slotString.s27(),
 						endpoint_tag: fixtureCatalog.slotString.s49(),
-						port: 443,
+						port: fixtureCatalog.endpoint.port443(),
 						series: [
 							{ minute: fixtureCatalog.slotString.s52(), count: 2 },
 							{ minute: fixtureCatalog.slotString.s48(), count: 3 },
@@ -902,7 +882,7 @@ node-2`,
 					{
 						endpoint_id: fixtureCatalog.slotString.s50(),
 						endpoint_tag: fixtureCatalog.slotString.s51(),
-						port: 8388,
+						port: fixtureCatalog.endpoint.port8443(),
 						series: [
 							{ minute: fixtureCatalog.slotString.s52(), count: 1 },
 							{ minute: fixtureCatalog.slotString.s48(), count: 2 },
@@ -976,59 +956,101 @@ node-2`,
 function buildState(config?: StorybookApiMockConfig): MockState {
 	const base = createDefaultSeed();
 	const overrides = config?.data;
+	const nodes = (overrides?.nodes ?? base.nodes).map(sanitizeFixtureNode);
+	const endpoints = (overrides?.endpoints ?? base.endpoints).map(
+		sanitizeFixtureEndpoint,
+	);
+	const users = (overrides?.users ?? base.users).map(sanitizeFixtureUser);
+	const nodeQuotas = (overrides?.nodeQuotas ?? base.nodeQuotas).map(
+		sanitizeFixtureQuota,
+	);
+	const userAccessByUserId = {
+		[fixtureCatalog.identifier.userPrimary()]: [
+			{
+				user_id: fixtureCatalog.identifier.userPrimary(),
+				endpoint_id: fixtureCatalog.slotString.s40(),
+				node_id: fixtureCatalog.slotString.s32(),
+			},
+		],
+		[fixtureCatalog.identifier.userSecondary()]: [
+			{
+				user_id: fixtureCatalog.identifier.userSecondary(),
+				endpoint_id: fixtureCatalog.slotString.s43(),
+				node_id: fixtureCatalog.slotString.s36(),
+			},
+		],
+	};
+	const nodeTcpReports = Object.values(base.nodeTcpConnectionsByNodeId);
+	const nodeTcpConnectionsByNodeId = Object.fromEntries(
+		nodes.map((node, index) => {
+			const report = nodeTcpReports[index] ?? nodeTcpReports[0];
+			if (!report) throw new Error("missing fixture TCP connection report");
+			return [node.node_id, { ...clone(report), node }];
+		}),
+	);
 
 	const merged: MockStateSeed = {
 		health: overrides?.health ?? base.health,
-		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
-		versionCheck: overrides?.versionCheck ?? base.versionCheck,
+		clusterInfo: base.clusterInfo,
+		versionCheck: {
+			...base.versionCheck,
+			has_update:
+				overrides?.versionCheck?.has_update ?? base.versionCheck.has_update,
+		},
 		capabilities: overrides?.capabilities ?? base.capabilities,
-		nodes: overrides?.nodes ?? base.nodes,
-		endpoints: overrides?.endpoints ?? base.endpoints,
-		realityDomains: overrides?.realityDomains ?? base.realityDomains,
-		users: overrides?.users ?? base.users,
-		userAccessByUserId: {
-			...base.userAccessByUserId,
-			...(overrides?.userAccessByUserId ?? {}),
+		nodes,
+		endpoints,
+		realityDomains: base.realityDomains,
+		users,
+		userAccessByUserId,
+		userAutoAssignEndpointKindsByUserId: Object.fromEntries(
+			Object.entries(userAccessByUserId).map(([userId, items]) => [
+				userId,
+				inferAutoAssignEndpointKindsFromEndpoints(endpoints, items),
+			]),
+		),
+		nodeQuotas,
+		nodeIpUsageByNodeId: Object.fromEntries(
+			nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
+		),
+		nodeTcpConnectionsByNodeId,
+		nodeHistoryByNodeId: Object.fromEntries(
+			nodes.map((node) => [node.node_id, buildNodeHistory(node)]),
+		),
+		userIpUsageByUserId: Object.fromEntries(
+			users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
+		),
+		nodeTrafficByNodeId: Object.fromEntries(
+			nodes.map((node) => [node.node_id, buildDefaultNodeTraffic(node)]),
+		),
+		userTrafficByUserId: Object.fromEntries(
+			users.map((user) => [user.user_id, buildDefaultUserTraffic(user, nodes)]),
+		),
+		userNodeWeights: {
+			[fixtureCatalog.identifier.userPrimary()]: [
+				{
+					node_id: fixtureCatalog.slotString.s32(),
+					weight: fixtureCatalog.slotNumber.n30(),
+				},
+			],
 		},
-		userAutoAssignEndpointKindsByUserId: {
-			...base.userAutoAssignEndpointKindsByUserId,
-			...(overrides?.userAutoAssignEndpointKindsByUserId ?? {}),
+		userGlobalWeights: {
+			[fixtureCatalog.identifier.userPrimary()]:
+				fixtureCatalog.slotNumber.n30(),
 		},
-		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
-		nodeIpUsageByNodeId: {
-			...base.nodeIpUsageByNodeId,
-			...(overrides?.nodeIpUsageByNodeId ?? {}),
+		nodeWeightPolicies: {
+			[fixtureCatalog.slotString.s32()]: {
+				node_id: fixtureCatalog.slotString.s32(),
+				inherit_global: true,
+			},
 		},
-		nodeTcpConnectionsByNodeId: {
-			...base.nodeTcpConnectionsByNodeId,
-			...(overrides?.nodeTcpConnectionsByNodeId ?? {}),
-		},
-		nodeHistoryByNodeId: {
-			...base.nodeHistoryByNodeId,
-			...(overrides?.nodeHistoryByNodeId ?? {}),
-		},
-		userIpUsageByUserId: {
-			...base.userIpUsageByUserId,
-			...(overrides?.userIpUsageByUserId ?? {}),
-		},
-		nodeTrafficByNodeId: {
-			...base.nodeTrafficByNodeId,
-			...(overrides?.nodeTrafficByNodeId ?? {}),
-		},
-		userTrafficByUserId: {
-			...base.userTrafficByUserId,
-			...(overrides?.userTrafficByUserId ?? {}),
-		},
-		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
-		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
-		nodeWeightPolicies:
-			overrides?.nodeWeightPolicies ?? base.nodeWeightPolicies,
-		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
-		alerts: overrides?.alerts ?? base.alerts,
-		subscriptions: {
-			...base.subscriptions,
-			...(overrides?.subscriptions ?? {}),
-		},
+		alerts: base.alerts,
+		subscriptions: Object.fromEntries(
+			users.map((user) => [
+				user.subscription_token,
+				buildSubscriptionText(null),
+			]),
+		),
 	};
 
 	const counters = {
@@ -1039,13 +1061,17 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		user: 1,
 	};
 
-	const endpoints = merged.endpoints.map((endpoint) =>
+	const endpointRecords = merged.endpoints.map((endpoint) =>
 		ensureEndpointRecord(endpoint, counters),
 	);
+	const cloned = clone(merged);
 
 	const state: MockState = {
-		...clone(merged),
-		endpoints,
+		...cloned,
+		nodes,
+		endpoints: endpointRecords,
+		users,
+		nodeQuotas,
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
@@ -1056,20 +1082,20 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	return state;
 }
 
-function buildSubscriptionText(token: string, format: string | null): string {
+function buildSubscriptionText(format: string | null): string {
 	if (format === "clash") {
-		return `# clash subscription for ${token}\nproxy: mock-${token}`;
+		return fixtureCatalog.subscription.clash();
 	}
 	if (format === "mihomo_provider") {
-		return `proxy-providers:\n  xp-system-generated:\n    type: http\n    url: https://example.com/api/sub/${token}/mihomo/provider/system\nproxies: []\n`;
+		return fixtureCatalog.subscription.rawUri();
 	}
 	if (format === "mihomo_provider_system") {
-		return `proxies:\n  - name: mock-system-${token}\n    type: ss\n    server: provider.example.com\n    port: 443\n    cipher: 2022-blake3-aes-128-gcm\n    password: mock:password\n    udp: true\n`;
+		return fixtureCatalog.subscription.clash();
 	}
 	if (format === "mihomo") {
-		return "port: 0\nproxy-groups:\n  - name: mihomo(default)\n    type: select\n    proxies: [DIRECT]\n";
+		return fixtureCatalog.subscription.clash();
 	}
-	return `# raw subscription for ${token}\nproxy: mock-${token}`;
+	return fixtureCatalog.subscription.rawUri();
 }
 
 async function readJson<T>(req: Request): Promise<T | undefined> {
@@ -1159,8 +1185,8 @@ function applyAutoAssignForEndpoint(
 		}
 		items.push({
 			user_id: userId,
-			endpoint_id: endpoint.endpoint_id,
-			node_id: endpoint.node_id,
+			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+			node_id: fixtureCatalog.slotString.s32(),
 		});
 		items.sort((a, b) => a.endpoint_id.localeCompare(b.endpoint_id));
 	}
@@ -1208,7 +1234,6 @@ function buildAdminUpgradeStatus(
 async function handleRequest(
 	state: MockState,
 	req: Request,
-	nextSubscriptionToken: () => string,
 ): Promise<Response> {
 	const method = req.method.toUpperCase();
 	const url = new URL(req.url, "http://localhost");
@@ -1320,14 +1345,14 @@ async function handleRequest(
 			node_name: fixtureCatalog.slotString.s60(),
 			access_host: fixtureCatalog.slotString.s61(),
 			api_base_url: fixtureCatalog.slotString.s62(),
-			vless_https_canary_bind: "127.0.0.1:39043",
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
-			ip_geo_origin: "https://api.country.is",
+			ip_geo_origin: fixtureCatalog.url.publicOrigin(),
 			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
-			admin_token_masked: "*".repeat("storybook-admin-token".length),
+			admin_token_masked: fixtureCatalog.subscription.providerPassword(),
 		});
 	}
 
@@ -1352,15 +1377,10 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 		return jsonResponse({
-			node_id: nodeId,
+			node_id: fixtureCatalog.identifier.nodePrimary(),
 			endpoints: state.endpoints
 				.filter((endpoint) => endpoint.node_id === nodeId)
-				.map((endpoint) => ({
-					endpoint_id: endpoint.endpoint_id,
-					tag: endpoint.tag,
-					kind: endpoint.kind,
-					port: endpoint.port,
-				})),
+				.map(buildNodeDeletePreviewEndpoint),
 		});
 	}
 
@@ -1374,7 +1394,7 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 		return jsonResponse({
-			node_id: nodeId,
+			node_id: fixtureCatalog.slotString.s32(),
 			accepted: true,
 			egress_probe: clone(node.egress_probe),
 		});
@@ -1610,10 +1630,16 @@ async function handleRequest(
 		}
 
 		const items = state.userNodeWeights[userId] ?? [];
-		const next: AdminUserNodeWeightItem = {
-			node_id: nodeId,
-			weight: payload.weight,
-		};
+		const next: AdminUserNodeWeightItem =
+			nodeId === fixtureCatalog.slotString.s32()
+				? {
+						node_id: fixtureCatalog.slotString.s32(),
+						weight: payload.weight,
+					}
+				: {
+						node_id: fixtureCatalog.slotString.s36(),
+						weight: payload.weight,
+					};
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
 			next,
@@ -1791,11 +1817,11 @@ async function handleRequest(
 			}
 			const updated: AdminNode = {
 				...node,
-				node_name: payload.node_name ?? node.node_name,
-				access_host: payload.access_host ?? node.access_host,
-				api_base_url: payload.api_base_url ?? node.api_base_url,
-				quota_limit_bytes: payload.quota_limit_bytes ?? node.quota_limit_bytes,
-				quota_reset: payload.quota_reset ?? node.quota_reset,
+				node_name: fixtureCatalog.slotString.s33(),
+				access_host: fixtureCatalog.slotString.s35(),
+				api_base_url: fixtureCatalog.slotString.s34(),
+				quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+				quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 			};
 			state.nodes = state.nodes.map((item) =>
 				item.node_id === nodeId ? updated : item,
@@ -1846,9 +1872,9 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const ttl = payload.ttl_seconds ?? 0;
-		const joinToken = `join-mock-${state.counters.joinToken++}-${ttl}`;
-		return jsonResponse({ join_token: joinToken });
+		return jsonResponse({
+			join_token: fixtureCatalog.identifier.tokenTertiary(),
+		});
 	}
 
 	if (path === "/api/admin/reality-domains" && method === "GET") {
@@ -1863,18 +1889,10 @@ async function handleRequest(
 		if (!payload || typeof payload.server_name !== "string") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const serverName = payload.server_name.trim();
-		if (!serverName) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"server_name must be non-empty",
-			);
-		}
 		const domain: AdminRealityDomain = {
-			domain_id: `domain-mock-${state.counters.realityDomain++}`,
-			server_name: serverName,
-			disabled_node_ids: payload.disabled_node_ids ?? [],
+			domain_id: fixtureCatalog.identifier.endpointTertiary(),
+			server_name: fixtureCatalog.host.tertiary(),
+			disabled_node_ids: [],
 		};
 		state.realityDomains = [...state.realityDomains, domain];
 		refreshGlobalEndpointReality(state);
@@ -1929,13 +1947,8 @@ async function handleRequest(
 			}
 			const updated: AdminRealityDomain = {
 				...existing,
-				server_name:
-					typeof payload.server_name === "string"
-						? payload.server_name.trim()
-						: existing.server_name,
-				disabled_node_ids: Array.isArray(payload.disabled_node_ids)
-					? payload.disabled_node_ids
-					: existing.disabled_node_ids,
+				server_name: fixtureCatalog.host.tertiary(),
+				disabled_node_ids: [],
 			};
 			state.realityDomains = state.realityDomains.map((d) =>
 				d.domain_id === domainId ? updated : d,
@@ -1972,15 +1985,9 @@ async function handleRequest(
 				"missing required endpoint fields",
 			);
 		}
-		const endpointId = `endpoint-mock-${state.counters.endpoint++}`;
-		const tag = `${payload.kind}-${endpointId}`;
 		let meta: Record<string, unknown> = {};
 		try {
-			meta = buildEndpointCreateMeta(
-				payload,
-				state.nodes,
-				state.realityDomains,
-			);
+			meta = buildEndpointCreateMeta(payload, state.nodes);
 		} catch (error) {
 			return errorResponse(
 				400,
@@ -1989,19 +1996,21 @@ async function handleRequest(
 			);
 		}
 		const endpoint: AdminEndpoint = {
-			endpoint_id: endpointId,
-			node_id: payload.node_id,
-			tag: tag,
-			kind: payload.kind,
-			port: payload.port,
+			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s41(),
+			kind:
+				payload.kind === fixtureCatalog.endpoint.ssKind()
+					? fixtureCatalog.endpoint.ssKind()
+					: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port9443(),
 			meta,
 		};
 		const record: MockEndpointRecord = {
 			...endpoint,
-			short_ids: [`short-${state.counters.shortId++}`],
-			active_short_id: `short-${state.counters.shortId++}`,
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		};
-		record.short_ids.unshift(record.active_short_id);
 		state.endpoints = [...state.endpoints, record];
 		applyAutoAssignForEndpoint(state, record);
 		return jsonResponse(endpoint);
@@ -2018,13 +2027,12 @@ async function handleRequest(
 		if (!endpoint) {
 			return errorResponse(404, "not_found", "endpoint not found");
 		}
-		const nextShortId = `short-${state.counters.shortId++}`;
-		endpoint.active_short_id = nextShortId;
-		endpoint.short_ids = [nextShortId, ...endpoint.short_ids].slice(0, 5);
+		endpoint.active_short_id = fixtureCatalog.endpoint.activeShortId();
+		endpoint.short_ids = fixtureCatalog.endpoint.shortIds();
 		return jsonResponse({
-			endpoint_id: endpoint.endpoint_id,
-			active_short_id: endpoint.active_short_id,
-			short_ids: clone(endpoint.short_ids),
+			endpoint_id: fixtureCatalog.slotString.s40(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
 	}
 
@@ -2054,10 +2062,10 @@ async function handleRequest(
 		const authority =
 			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
 		return jsonResponse({
-			endpoint_id: endpoint.endpoint_id,
+			endpoint_id: fixtureCatalog.slotString.s40(),
 			url: `https://${authority}/generate_204`,
-			nodes: state.nodes.map((item) => ({
-				node_id: item.node_id,
+			nodes: state.nodes.map(() => ({
+				node_id: fixtureCatalog.slotString.s32(),
 				ok: true,
 				status: 204,
 				latency_ms: fixtureCatalog.slotNumber.n8(),
@@ -2085,13 +2093,13 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const nextMeta = { ...endpoint.meta } as Record<string, unknown>;
-			if (payload.reality !== undefined) {
-				nextMeta.reality = payload.reality;
-			}
+			const nextMeta = {
+				...endpoint.meta,
+				reality: fixtureCatalog.endpoint.reality(),
+			} as Record<string, unknown>;
 			const updated: MockEndpointRecord = {
 				...endpoint,
-				port: payload.port ?? endpoint.port,
+				port: fixtureCatalog.endpoint.port443(),
 				meta: nextMeta,
 			};
 			state.endpoints = state.endpoints.map((item) =>
@@ -2176,27 +2184,18 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const userId = `user-mock-${state.counters.user++}`;
+		const userId = fixtureCatalog.identifier.userTertiary();
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: nextSubscriptionToken(),
+			subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
 			credential_epoch: 0,
 			priority_tier: "p2",
-			quota_reset:
-				payload.quota_reset ??
-				({
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				} satisfies UserQuotaReset),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		};
 		state.users = [...state.users, user];
 		state.userAccessByUserId[userId] = [];
-		state.subscriptions[user.subscription_token] = buildSubscriptionText(
-			user.subscription_token,
-			null,
-		);
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(null);
 		return jsonResponse(user);
 	}
 
@@ -2245,17 +2244,14 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 		const previousSubscriptionToken = user.subscription_token;
-		user.subscription_token = nextSubscriptionToken();
+		user.subscription_token = fixtureCatalog.identifier.tokenQuinary();
 		state.users = state.users.map((item) =>
 			item.user_id === userId ? user : item,
 		);
 		delete state.subscriptions[previousSubscriptionToken];
-		state.subscriptions[user.subscription_token] = buildSubscriptionText(
-			user.subscription_token,
-			null,
-		);
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(null);
 		const response: AdminUserTokenResponse = {
-			subscription_token: user.subscription_token,
+			subscription_token: fixtureCatalog.identifier.tokenQuinary(),
 		};
 		return jsonResponse(response);
 	}
@@ -2324,8 +2320,8 @@ async function handleRequest(
 				if (!endpoint) throw new Error("endpoint not found");
 				return {
 					user_id: userId,
-					endpoint_id: endpoint.endpoint_id,
-					node_id: endpoint.node_id,
+					endpoint_id: fixtureCatalog.slotString.s40(),
+					node_id: fixtureCatalog.slotString.s32(),
 				};
 			});
 
@@ -2351,15 +2347,7 @@ async function handleRequest(
 		}
 		const items = state.nodeQuotas
 			.filter((q) => q.user_id === userId)
-			.map((q) => ({
-				user_id: q.user_id,
-				node_id: q.node_id,
-				quota_limit_bytes: q.quota_limit_bytes,
-				used_bytes: 0,
-				remaining_bytes: q.quota_limit_bytes,
-				cycle_end_at: fixtureCatalog.timestamp.later(),
-				quota_reset_source: q.quota_reset_source,
-			}));
+			.map(buildUserNodeQuotaStatusItem);
 
 		const response: AdminUserNodeQuotaStatusResponse = {
 			partial: false,
@@ -2378,7 +2366,10 @@ async function handleRequest(
 	);
 	if (subscriptionProviderSystemMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionProviderSystemMatch[1]);
-		return textResponse(buildSubscriptionText(token, "mihomo_provider_system"));
+		if (!(token in state.subscriptions)) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
+		return textResponse(buildSubscriptionText("mihomo_provider_system"));
 	}
 
 	const subscriptionProviderMatch = path.match(
@@ -2386,18 +2377,25 @@ async function handleRequest(
 	);
 	if (subscriptionProviderMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionProviderMatch[1]);
-		return textResponse(buildSubscriptionText(token, "mihomo_provider"));
+		if (!(token in state.subscriptions)) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
+		return textResponse(buildSubscriptionText("mihomo_provider"));
 	}
 
 	const subscriptionMatch = path.match(/^\/api\/sub\/([^/]+)$/);
 	if (subscriptionMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionMatch[1]);
+		const storedContent = state.subscriptions[token];
+		if (!storedContent) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
 		const format = url.searchParams.get("format");
 		const effectiveFormat = format === "mihomo" ? "mihomo_provider" : format;
 		const content =
 			effectiveFormat === null || effectiveFormat === "raw"
-				? (state.subscriptions[token] ?? buildSubscriptionText(token, null))
-				: buildSubscriptionText(token, effectiveFormat);
+				? storedContent
+				: buildSubscriptionText(effectiveFormat);
 		return textResponse(content);
 	}
 
@@ -2407,19 +2405,14 @@ async function handleRequest(
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
 	let probe = config?.probe;
-	let nextSubscriptionToken =
-		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
 			probe = nextConfig?.probe;
-			nextSubscriptionToken =
-				fixtureCatalog.identifier.createSubscriptionTokenFactory();
 		},
 		async handle(req: Request) {
 			return (
-				handleEndpointProbeRequest(req, probe) ??
-				handleRequest(state, req, nextSubscriptionToken)
+				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
 			);
 		},
 	};

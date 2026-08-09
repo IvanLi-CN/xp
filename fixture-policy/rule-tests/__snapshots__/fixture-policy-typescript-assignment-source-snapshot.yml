@@ -1,6 +1,36 @@
 id: fixture-policy-typescript-assignment-source
 snapshots:
   ? |
+    endpoint.canary_upstream = payload.canary_upstream;
+  : labels:
+    - source: endpoint.canary_upstream = payload.canary_upstream
+      style: primary
+      start: 0
+      end: 50
+    - source: endpoint.canary_upstream
+      style: secondary
+      start: 0
+      end: 24
+    - source: payload.canary_upstream
+      style: secondary
+      start: 27
+      end: 50
+  ? |
+    report.bootstrap_api_base_url = "https://unapproved.fixture.test";
+  : labels:
+    - source: report.bootstrap_api_base_url = "https://unapproved.fixture.test"
+      style: primary
+      start: 0
+      end: 65
+    - source: report.bootstrap_api_base_url
+      style: secondary
+      start: 0
+      end: 29
+    - source: '"https://unapproved.fixture.test"'
+      style: secondary
+      start: 32
+      end: 65
+  ? |
     report.cycle_end_at = new Date().toISOString();
   : labels:
     - source: report.cycle_end_at = new Date().toISOString()

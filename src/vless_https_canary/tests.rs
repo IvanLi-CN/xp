@@ -392,18 +392,10 @@ fn managed_vless_matching_keeps_unconfigured_upstream_diagnostic() {
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-a.fixture.test"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
             "managed_default": true
         }),
     };
@@ -431,22 +423,14 @@ fn managed_vless_matching_requires_managed_default_flag_and_port() {
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-a.fixture.test"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["edge-a.fixture.test:53844"],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_53844()],
             "canary_upstream": {
-                "url": "http://127.0.0.1:8080",
-                "mode": "h2c"
+                "url": xp_test_fixtures::canary_http_loopback_url(),
+                "mode": xp_test_fixtures::endpoint_canary_h2c()
             },
             "managed_default": false
         }),
@@ -492,21 +476,13 @@ fn managed_vless_matching_accepts_alias_without_explicit_port_as_https_443() {
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-a.fixture.test"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["Edge-A.Fixture.Test."],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_alias()],
             "canary_upstream": {
-                "url": "http://127.0.0.1:8080",
+                "url": xp_test_fixtures::canary_http_loopback_url(),
                 "mode": "auto"
             },
             "managed_default": true
@@ -534,19 +510,11 @@ fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-a.fixture.test"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["edge-a.fixture.test:53844"],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_53844()],
             "managed_default": true
         }),
     };
@@ -573,18 +541,10 @@ fn managed_vless_matching_accepts_canonical_authority() {
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-a.fixture.test"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
             "managed_default": true
         }),
     };
@@ -751,10 +711,10 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
     let tmp = tempdir().unwrap();
     let mut store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: tmp.path().join("store"),
-        bootstrap_node_id: Some(target_id.to_owned()),
-        bootstrap_node_name: "target".to_string(),
-        bootstrap_access_host: "canary.example.com".to_string(),
-        bootstrap_api_base_url: "https://target.example.com".to_string(),
+        bootstrap_node_id: Some(xp_test_fixtures::slot_s475().to_owned()),
+        bootstrap_node_name: xp_test_fixtures::slot_s651().to_owned(),
+        bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+        bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
     })
     .unwrap();
     store

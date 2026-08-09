@@ -3326,11 +3326,7 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3356,11 +3352,7 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
             "PATCH",
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
-              "reality": {
-                "dest": "edge.example.com:443",
-                "server_names": ["edge.example.com"],
-                "fingerprint": "firefox"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3439,11 +3431,7 @@ async fn patch_managed_vless_updates_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3524,11 +3512,7 @@ async fn patch_managed_vless_rejects_invalid_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3596,11 +3580,7 @@ async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3661,11 +3641,7 @@ async fn create_vless_rejects_canary_upstream_for_unmanaged_endpoint() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              },
+              "reality": xp_test_fixtures::endpoint_reality(),
               "canary_upstream": {
                 "url": "http://127.0.0.1:8080",
                 "mode": "auto"
@@ -3708,11 +3684,7 @@ async fn create_vless_rejects_accepted_authorities_for_unmanaged_endpoint() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              },
+              "reality": xp_test_fixtures::endpoint_reality(),
               "accepted_authorities": ["edge.example.com:443"]
             }),
         ))
@@ -3753,11 +3725,7 @@ async fn patch_unmanaged_vless_rejects_canary_upstream() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3815,11 +3783,7 @@ async fn patch_unmanaged_vless_rejects_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3940,11 +3904,7 @@ async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
               "port": 8389,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4015,11 +3975,7 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4090,11 +4046,7 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-1.example.com"],
-                "fingerprint": "firefox"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4160,11 +4112,7 @@ async fn patch_admin_endpoint_rejects_unknown_node_id() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4245,11 +4193,7 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4557,11 +4501,7 @@ async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4616,11 +4556,7 @@ async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 8443,
-              "reality": {
-                "dest": "second.example.com:443",
-                "server_names": ["second.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4816,11 +4752,7 @@ async fn post_rotate_shortid_schedules_rebuild_inbound() {
                 EndpointKind::VlessRealityVisionTcp,
                 443,
                 json!({
-                  "reality": {
-                    "dest": "example.com:443",
-                    "server_names": ["example.com"],
-                    "fingerprint": "chrome"
-                  }
+                  "reality": xp_test_fixtures::endpoint_reality()
                 }),
             )
             .unwrap();
@@ -5620,11 +5552,7 @@ async fn mihomo_subscription_paths_are_provider_only() {
               "node_id": fixtures.node_id.clone(),
               "kind": "vless_reality_vision_tcp",
               "port": 8443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -8608,11 +8536,7 @@ async fn vless_endpoint_creation_persists_reality_materials_and_derived_uuid_is_
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -8697,11 +8621,7 @@ async fn rotate_shortid_updates_persisted_meta_and_rejects_non_vless_endpoints()
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -9647,7 +9567,7 @@ async fn reality_domains_crud_and_reorder_works() {
             "POST",
             "/api/admin/reality-domains",
             json!({
-              "server_name": "example.com",
+              "server_name": xp_test_fixtures::primary_host(),
               "disabled_node_ids": [node_id]
             }),
         ))

@@ -79,6 +79,20 @@ snapshots:
       start: 0
       end: 45
   ? |
+    import { fixtureCatalog } from "../fixture-policy/catalog-proxy";
+  : labels:
+    - source: import { fixtureCatalog } from "../fixture-policy/catalog-proxy";
+      style: primary
+      start: 0
+      end: 65
+  ? |
+    import { fixtureCatalog } from "./catalog";
+  : labels:
+    - source: import { fixtureCatalog } from "./catalog";
+      style: primary
+      start: 0
+      end: 43
+  ? |
     import { fixtureCatalog } from "./fixture-input";
   : labels:
     - source: import { fixtureCatalog } from "./fixture-input";

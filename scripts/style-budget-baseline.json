@@ -1089,70 +1089,57 @@
     "long_line_count": 4,
     "max_line_length": 131
   },
-  "web/tests/e2e/helpers.ts": {
-    "long_line_count": 0,
-    "max_line_length": 84,
-    "source_lines": 1063
-  },
   "web/src/fixture-policy/storybook.ts": {
     "long_line_count": 1,
     "max_line_length": 109
   },
-  "fixture-policy/rules/catalog-keys.yml": {
-    "long_line_count": 1,
-    "max_line_length": 1404
-  },
   "fixture-policy/rule-tests/__snapshots__/fixture-policy-rust-inline-data-source-snapshot.yml": {
-    "long_line_count": 2,
+    "long_line_count": 5,
     "max_line_length": 162
-  },
-  "fixture-policy/rules/catalog-string-values.yml": {
-    "long_line_count": 1,
-    "max_line_length": 2021
   },
   "fixture-policy/rules/catalog-value-types.yml": {
     "long_line_count": 4,
     "max_line_length": 862
-  },
-  "fixture-policy/rules/rust-adapter-imports.yml": {
-    "long_line_count": 1,
-    "max_line_length": 102
   },
   "fixture-policy/rules/rust-adapter-output-provenance.yml": {
     "long_line_count": 1,
     "max_line_length": 325
   },
   "fixture-policy/rules/rust-fixture-data.yml": {
-    "long_line_count": 4,
-    "max_line_length": 720
+    "long_line_count": 3,
+    "max_line_length": 887
   },
   "fixture-policy/rules/rust-inline-fixture-assignment.yml": {
     "long_line_count": 2,
-    "max_line_length": 943
+    "max_line_length": 1100
   },
   "fixture-policy/rules/rust-inline-fixture-data.yml": {
     "long_line_count": 3,
-    "max_line_length": 947
+    "max_line_length": 1104
+  },
+  "fixture-policy/rules/tsx-catalog-origin.yml": {
+    "long_line_count": 4,
+    "max_line_length": 161
   },
   "fixture-policy/rules/tsx-fixture-assignment.yml": {
     "long_line_count": 1,
-    "max_line_length": 1853
+    "max_line_length": 2062
   },
   "fixture-policy/rules/tsx-fixture-data.yml": {
     "long_line_count": 3,
-    "max_line_length": 780
+    "max_line_length": 806
   },
   "fixture-policy/rules/tsx-shorthand-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 1855
+    "max_line_length": 2064
   },
   "fixture-policy/rules/typescript-adapter-imports.yml": {
     "long_line_count": 1,
     "max_line_length": 103
   },
   "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
-    "long_line_count": 1,
-    "max_line_length": 392
+    "long_line_count": 4,
+    "max_line_length": 806
   },
   "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
     "long_line_count": 4,
@@ -1160,15 +1147,19 @@
   },
   "fixture-policy/rules/typescript-fixture-assignment.yml": {
     "long_line_count": 1,
-    "max_line_length": 1853
+    "max_line_length": 2062
   },
   "fixture-policy/rules/typescript-fixture-data.yml": {
     "long_line_count": 3,
-    "max_line_length": 780
+    "max_line_length": 806
   },
   "fixture-policy/rules/typescript-shorthand-fixture-data.yml": {
     "long_line_count": 1,
-    "max_line_length": 1855
+    "max_line_length": 2064
+  },
+  "fixture-policy/rules/typescript-catalog-origin.yml": {
+    "long_line_count": 4,
+    "max_line_length": 173
   },
   "package.json": {
     "long_line_count": 1,
@@ -1177,6 +1168,6 @@
   "test-fixtures/src/lib.rs": {
     "long_line_count": 36,
     "max_line_length": 147,
-    "source_lines": 2893
+    "source_lines": 2912
   }
 }

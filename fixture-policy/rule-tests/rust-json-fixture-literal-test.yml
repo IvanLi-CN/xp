@@ -1,0 +1,29 @@
+id: fixture-policy-rust-json-fixture-literal
+valid:
+  - |
+    let meta = serde_json::json!({
+      "reality": xp_test_fixtures::endpoint_vless_meta(),
+    });
+  - |
+    let meta = json!({
+      "dest": xp_test_fixtures::endpoint_authority_53844(),
+    });
+invalid:
+  - |
+    let meta = json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  - |
+    let meta = serde_json::json!({
+      "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+    });
+  - |
+    let meta = serde_json::json!({
+      "reality": { "dest": "node.fixture.test:443" },
+      "reality_keys": { "private_key": "private" },
+      "short_ids": ["0123456789abcdef"]
+    });
+  - |
+    let meta = json!({
+      "reality": { "dest": request.destination }
+    });

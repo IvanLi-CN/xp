@@ -1,6 +1,14 @@
 id: fixture-policy-tsx-shorthand-data-source
 snapshots:
   ? |
+    const bootstrapApiBaseUrl = "https://unapproved.fixture.test";
+    const fixture = { bootstrapApiBaseUrl };
+  : labels:
+    - source: bootstrapApiBaseUrl
+      style: primary
+      start: 81
+      end: 100
+  ? |
     const config_hash = "unapproved-config";
     const fixture = { config_hash };
   : labels:

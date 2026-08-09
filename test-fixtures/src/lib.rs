@@ -2,6 +2,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::sync::OnceLock;
 
+mod network;
+mod operations;
+
+pub use network::*;
+pub use operations::*;
+
 #[derive(Deserialize)]
 #[allow(dead_code)]
 #[serde(deny_unknown_fields)]
@@ -12,6 +18,7 @@ struct Catalog {
     identifiers: Identifiers,
     timestamps: Timestamps,
     metrics: Metrics,
+    operations: operations::Operations,
     lists: Lists,
     slots: Slots,
     subscription: Subscription,
@@ -218,7 +225,10 @@ struct Subscription {
     node_ids: Vec<String>,
     #[serde(rename = "endpointIds")]
     endpoint_ids: Vec<String>,
+    #[serde(rename = "userIds")]
+    user_ids: Vec<String>,
     tags: Vec<String>,
+    tokens: Vec<String>,
     #[serde(rename = "accessHosts")]
     access_hosts: Vec<String>,
     #[serde(rename = "apiBases")]
@@ -243,14 +253,6 @@ pub fn secondary_host() -> &'static str {
 
 pub fn tertiary_host() -> &'static str {
     &catalog().hosts.tertiary
-}
-
-pub fn primary_server_name() -> &'static str {
-    &catalog().hosts.server_primary
-}
-
-pub fn secondary_server_name() -> &'static str {
-    &catalog().hosts.server_secondary
 }
 
 pub fn primary_ipv4() -> &'static str {
@@ -279,22 +281,6 @@ pub fn secondary_api_url() -> &'static str {
 
 pub fn tertiary_api_url() -> &'static str {
     &catalog().urls.tertiary_api
-}
-
-pub fn loopback_39043_url() -> &'static str {
-    &catalog().urls.loopback_39043
-}
-
-pub fn public_fallback_url() -> &'static str {
-    &catalog().urls.public_fallback
-}
-
-pub fn loopback_39043_address() -> &'static str {
-    &catalog().addresses.loopback_39043
-}
-
-pub fn loopback_49043_address() -> &'static str {
-    &catalog().addresses.loopback_49043
 }
 
 pub fn primary_node_id() -> &'static str {
@@ -481,6 +467,9 @@ pub fn subscription_endpoint_e3() -> &'static str {
 }
 pub fn subscription_endpoint_e4() -> &'static str {
     &catalog().subscription.endpoint_ids[3]
+}
+pub fn subscription_user_u1() -> &'static str {
+    &catalog().subscription.user_ids[0]
 }
 pub fn subscription_tag_ss() -> &'static str {
     &catalog().subscription.tags[0]
@@ -2631,6 +2620,24 @@ pub fn slot_s677() -> &'static str {
 }
 pub fn slot_s678() -> &'static str {
     &catalog().slots.strings[678]
+}
+pub fn slot_s679() -> &'static str {
+    &catalog().slots.strings[679]
+}
+pub fn slot_s680() -> &'static str {
+    &catalog().slots.strings[680]
+}
+pub fn slot_s681() -> &'static str {
+    &catalog().slots.strings[681]
+}
+pub fn slot_s682() -> &'static str {
+    &catalog().slots.strings[682]
+}
+pub fn slot_s683() -> &'static str {
+    &catalog().slots.strings[683]
+}
+pub fn slot_s684() -> &'static str {
+    &catalog().slots.strings[684]
 }
 pub fn slot_n0<T: DeserializeOwned>() -> T {
     serde_json::from_value(catalog().slots.numbers[0].clone())

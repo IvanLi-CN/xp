@@ -2,6 +2,10 @@ use super::*;
 
 use pretty_assertions::assert_eq;
 use serde_yaml::Value;
+use xp_test_fixtures::{
+    slot_s675 as fixture_slot_s675, subscription_host_example as fixture_host_example,
+    subscription_node_n1 as fixture_node_n1,
+};
 
 fn assert_default_smux(proxy: &Value) {
     let smux = proxy.get("smux").expect("generated proxy must use SMux");
@@ -22,31 +26,19 @@ fn assert_default_smux(proxy: &Value) {
 
 #[test]
 fn build_clash_yaml_has_proxies_and_derived_secrets() {
-    let u = user("u1", "alice");
-    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
+    let u = user("alice");
+    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
+        endpoint_ss(
+            "e1",
             "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["sni.example.com"],
-                "fingerprint": "chrome"
-              },
-              "reality_keys": {
-                "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                "public_key": "PBK"
-              },
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
+            "ss",
+            443,
+            xp_test_fixtures::endpoint_server_psk_b64(),
         ),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let yaml = build_clash_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
     let value: Value = serde_yaml::from_str(&yaml).unwrap();
     let proxies = value
@@ -61,9 +53,7 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
         .unwrap();
     assert_eq!(
         ss.get("server"),
-        Some(&Value::String(
-            xp_test_fixtures::subscription_host_example().to_owned(),
-        ))
+        Some(&Value::String(fixture_host_example().to_owned(),))
     );
     assert_eq!(ss.get("port"), Some(&Value::Number(443.into())));
     assert_eq!(
@@ -85,9 +75,7 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
         .unwrap();
     assert_eq!(
         vless.get("server"),
-        Some(&Value::String(
-            xp_test_fixtures::subscription_host_example().to_owned(),
-        ))
+        Some(&Value::String(fixture_host_example().to_owned(),))
     );
     assert_eq!(vless.get("port"), Some(&Value::Number(8443.into())));
     let expected_uuid =
@@ -101,13 +89,19 @@ fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_stand
     let u = user("u1", "alice");
     let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let mut endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss(
+            "e1",
+            "n1",
+            "ss",
+            443,
+            xp_test_fixtures::endpoint_server_psk_b64(),
+        ),
         endpoint_vless(
             "e2",
             "n1",
             "vless",
             8443,
-            vless_meta("example.com:443", &["sni.example.com"], false),
+            VlessFixtureMode::ExplicitlyUnmanaged,
         ),
     ];
     endpoints[1].meta["mihomo_smux"] = serde_json::json!({

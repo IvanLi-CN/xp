@@ -19,17 +19,10 @@ fn managed_vless_endpoint(_endpoint_id: &str, port: u16) -> Endpoint {
         kind: crate::domain::EndpointKind::VlessRealityVisionTcp,
         port,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["0123456789abcdef"],
-            "active_short_id": "0123456789abcdef",
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
             "managed_default": true
         }),
     }

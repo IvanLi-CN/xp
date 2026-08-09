@@ -33,7 +33,7 @@ fn test_init(tmp_dir: &Path) -> StoreInit {
         bootstrap_node_id: Some(xp_test_fixtures::slot_s457().to_owned()),
         bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
 }
 
@@ -247,11 +247,11 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
         serde_json::to_vec_pretty(&serde_json::json!({
           "schema_version": 1,
           "nodes": {
-            "node_1": {
-              "node_id": "node_1",
-              "node_name": "node-1",
-              "public_domain": "example.com",
-              "api_base_url": "https://127.0.0.1:62416"
+            xp_test_fixtures::primary_node_id(): {
+              "node_id": xp_test_fixtures::primary_node_id(),
+              "node_name": xp_test_fixtures::primary_node_name(),
+              "public_domain": xp_test_fixtures::primary_host(),
+              "api_base_url": xp_test_fixtures::primary_api_url()
             }
           }
         }))
@@ -264,7 +264,7 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
         bootstrap_node_id: None,
         bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     })
     .unwrap();
 

@@ -8,12 +8,12 @@ valid:
     function createSubscriptionTokenFactory() {
       let subscriptionTokenIndex = 0;
       return () => {
-        const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
-        if (!accessor) {
-          throw new Error("synthetic subscription token sequence exhausted");
+        const token = catalog.subscription.tokens[subscriptionTokenIndex];
+        if (!token) {
+          throw new Error("synthetic subscription token catalog exhausted");
         }
         subscriptionTokenIndex += 1;
-        return accessor();
+        return token;
       };
     }
   - |
@@ -28,6 +28,17 @@ valid:
     const absent = () => null;
   - |
     const createSubscriptionTokenFactoryAccessor = () => createSubscriptionTokenFactory();
+  - |
+    const clash = () => catalog.operations.subscription.clashLines.join("\n");
+  - |
+    function nextSubscriptionToken() {
+      const token = catalog.subscription.tokens[nextSubscriptionTokenIndex];
+      if (!token) {
+        throw new Error("synthetic subscription token catalog exhausted");
+      }
+      nextSubscriptionTokenIndex += 1;
+      return token;
+    }
 invalid:
   - |
     const primary = () => "live.example";
@@ -44,6 +55,18 @@ invalid:
       return "live.example";
     }
   - |
+    function stringSlotEntry(_value: string, index: number) {
+      return [`s${index}`, () => "live.example"];
+    }
+  - |
     const injectedHost = function () {
       return "live.example";
+    };
+  - |
+    const fixtureCatalog = {
+      host: { primary() { return "live.example"; } },
+    };
+  - |
+    const fixtureCatalog = {
+      host: { get primary() { return "live.example"; } },
     };

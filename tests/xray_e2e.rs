@@ -413,12 +413,8 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
               "node_id": endpoint_ss["node_id"],
               "kind": "vless_reality_vision_tcp",
               "port": 31081,
-              "public_domain": "example.com",
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "public_domain": xp_test_fixtures::primary_host(),
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await

@@ -223,11 +223,11 @@ mod tests {
 
         let v1 = serde_json::json!({
           "schema_version": 1,
-          "cluster_id": "cluster_1",
-          "node_id": "node_1",
-          "node_name": "node-1",
-          "public_domain": "example.com",
-          "api_base_url": "https://127.0.0.1:62416",
+          "cluster_id": xp_test_fixtures::primary_cluster_id(),
+          "node_id": xp_test_fixtures::primary_node_id(),
+          "node_name": xp_test_fixtures::primary_node_name(),
+          "public_domain": xp_test_fixtures::primary_host(),
+          "api_base_url": xp_test_fixtures::primary_api_url(),
           "has_cluster_ca_key": false
         });
         fs::write(
@@ -238,7 +238,7 @@ mod tests {
 
         let meta = ClusterMetadata::load(tmp.path()).unwrap();
         assert_eq!(meta.schema_version, CLUSTER_METADATA_SCHEMA_VERSION);
-        assert_eq!(meta.access_host, "example.com");
+        assert_eq!(meta.access_host, xp_test_fixtures::primary_host());
 
         let bytes = fs::read(&paths.metadata_json).unwrap();
         let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();

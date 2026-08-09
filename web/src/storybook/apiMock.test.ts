@@ -38,7 +38,7 @@ describe("storybook api mock", () => {
 		);
 		expect(createRes.ok).toBe(true);
 		const created = (await createRes.json()) as { user_id: string };
-		expect(created.user_id).toContain("user-mock-");
+		expect(created.user_id).toBe(fixtureCatalog.identifier.userTertiary());
 
 		const patchRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${created.user_id}`, {
@@ -108,7 +108,9 @@ describe("storybook api mock", () => {
 				jsonRequest(`/api/sub/${encodeURIComponent(token)}`, { method: "GET" }),
 			);
 			expect(subscriptionRes.ok).toBe(true);
-			expect(await subscriptionRes.text()).toContain(token);
+			expect(await subscriptionRes.text()).toBe(
+				fixtureCatalog.subscription.rawUri(),
+			);
 		}
 
 		const resetRes = await mock.handle(
@@ -127,8 +129,8 @@ describe("storybook api mock", () => {
 			}),
 		);
 		expect(resetSubscriptionRes.ok).toBe(true);
-		expect(await resetSubscriptionRes.text()).toContain(
-			reset.subscription_token,
+		expect(await resetSubscriptionRes.text()).toBe(
+			fixtureCatalog.subscription.rawUri(),
 		);
 	});
 
@@ -418,7 +420,7 @@ describe("storybook api mock", () => {
 		expect(subRes.ok).toBe(true);
 		expect(subRes.headers.get("content-type")).toContain("text/plain");
 		const text = await subRes.text();
-		expect(text).toContain(token);
+		expect(text).toBe(fixtureCatalog.subscription.rawUri());
 	});
 
 	it("rejects removed admin config patch route", async () => {
@@ -463,7 +465,7 @@ describe("storybook api mock", () => {
 			}),
 		);
 		expect(providerRes.ok).toBe(true);
-		expect(await providerRes.text()).toContain("xp-system-generated");
+		expect(await providerRes.text()).toBe(fixtureCatalog.subscription.rawUri());
 
 		const providerSystemRes = await mock.handle(
 			jsonRequest(
@@ -475,7 +477,9 @@ describe("storybook api mock", () => {
 			),
 		);
 		expect(providerSystemRes.ok).toBe(true);
-		expect(await providerSystemRes.text()).toContain("mock-system");
+		expect(await providerSystemRes.text()).toBe(
+			fixtureCatalog.subscription.clash(),
+		);
 	});
 
 	it("returns not found for removed mihomo legacy route", async () => {

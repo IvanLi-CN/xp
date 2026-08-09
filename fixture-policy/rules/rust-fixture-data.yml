@@ -14,7 +14,7 @@ rule:
     - kind: field_initializer
     - has:
         field: field
-        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at|hour)$'
+        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|node_name|owner_node_id|bootstrap_node_id|bootstrap_node_name|bootstrap_access_host|bootstrap_api_base_url|endpoint_id|endpoint_tag|subscription_token|token|secret|password|first_seen_at|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|start_at|end_at|window_start_at|window_end_at|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at|hour)$'
     - not:
         has:
           field: value
@@ -93,6 +93,54 @@ rule:
         all:
           - has:
               field: field
+              regex: '^node_name$'
+          - has:
+              field: value
+              pattern: node_name().to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: node_with_api_base
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^(node_id|access_host|api_base_url)$'
+          - has:
+              field: value
+              any:
+                - pattern: node_id.to_owned()
+                - pattern: access_host.to_owned()
+                - pattern: api_base_url.to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: node_with_api_base
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_name$'
+          - has:
+              field: value
+              pattern: node_name().to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: add_cluster_node
+    - not:
+        all:
+          - has:
+              field: field
               regex: '^api_base_url$'
           - has:
               field: value
@@ -100,6 +148,75 @@ rule:
           - inside:
               stopBy: end
               pattern: NodeMeta { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bootstrap_node_id$'
+          - has:
+              field: value
+              any:
+                - pattern: bootstrap_node_id
+                - pattern: Some(bootstrap_node_id)
+                - pattern: None
+                - pattern: Some(cluster.node_id.clone())
+          - inside:
+              stopBy: end
+              pattern: StoreInit { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bootstrap_node_name$'
+          - has:
+              field: value
+              any:
+                - pattern: node_name.to_string()
+                - pattern: node_name
+                - pattern: config.node_name.clone()
+                - pattern: cluster.node_name.clone()
+          - inside:
+              stopBy: end
+              pattern: StoreInit { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bootstrap_access_host$'
+          - has:
+              field: value
+              any:
+                - pattern: '"" .to_string()'
+                - pattern: config.access_host.clone()
+                - pattern: cluster.access_host.clone()
+          - inside:
+              stopBy: end
+              pattern: StoreInit { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bootstrap_api_base_url$'
+          - has:
+              field: value
+              any:
+                - pattern: api_base_url.to_string()
+                - pattern: config.api_base_url.clone()
+                - pattern: cluster.api_base_url.clone()
+          - inside:
+              stopBy: end
+              pattern: StoreInit { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_name$'
+          - has:
+              field: value
+              pattern: cluster.node_name.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
     - not:
         all:
           - has:

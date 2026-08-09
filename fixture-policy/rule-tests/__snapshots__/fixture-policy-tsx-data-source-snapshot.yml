@@ -1,6 +1,21 @@
 id: fixture-policy-tsx-data-source
 snapshots:
   ? |
+    const fixture = { bootstrap_api_base_url: "https://unapproved.fixture.test" };
+  : labels:
+    - source: 'bootstrap_api_base_url: "https://unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 75
+    - source: bootstrap_api_base_url
+      style: secondary
+      start: 18
+      end: 40
+    - source: '"https://unapproved.fixture.test"'
+      style: secondary
+      start: 42
+      end: 75
+  ? |
     const fixture = { config_hash: "unapproved-config" };
   : labels:
     - source: 'config_hash: "unapproved-config"'
@@ -30,6 +45,21 @@ snapshots:
       style: secondary
       start: 26
       end: 50
+  ? |
+    const fixture = { first_seen_at: new Date().toISOString() };
+  : labels:
+    - source: 'first_seen_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 57
+    - source: first_seen_at
+      style: secondary
+      start: 18
+      end: 31
+    - source: new Date().toISOString()
+      style: secondary
+      start: 33
+      end: 57
   ? |
     const fixture = { host: "unapproved.fixture.test" };
   : labels:
@@ -135,6 +165,21 @@ snapshots:
       style: secondary
       start: 29
       end: 46
+  ? |
+    const fixture = { owner_node_id: "unapproved-node" };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 50
+    - source: owner_node_id
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 33
+      end: 50
   ? |
     const fixture = { run_id: "unapproved-run" };
   : labels:

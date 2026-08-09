@@ -40,19 +40,19 @@ rule:
         - kind: import_statement
         - regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][^"'']+["''];?$'
         - not:
-            regex: fixture-policy/catalog
+            regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''](?:@/fixture-policy/catalog|(?:\.\./)+(?:src/)?fixture-policy/catalog)["''];?$'
     - all:
         - kind: import_statement
         - regex: '^import\s+\*\s+as\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
         - not:
-            regex: fixture-policy/catalog
+            regex: '^import\s+\*\s+as\s+fixtureCatalog\s+from\s+["''](?:@/fixture-policy/catalog|(?:\.\./)+(?:src/)?fixture-policy/catalog)["''];?$'
     - all:
         - kind: import_statement
         - regex: '^import\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
         - not:
-            regex: fixture-policy/catalog
+            regex: '^import\s+fixtureCatalog\s+from\s+["''](?:@/fixture-policy/catalog|(?:\.\./)+(?:src/)?fixture-policy/catalog)["''];?$'
     - all:
         - kind: import_statement
         - regex: '^import\s+\{[^}]*\bas\s+fixtureCatalog\b[^}]*\}\s+from\s+["''][^"'']+["''];?$'
         - not:
-            regex: fixture-policy/catalog
+            regex: '^import\s+\{[^}]*\bas\s+fixtureCatalog\b[^}]*\}\s+from\s+["''](?:@/fixture-policy/catalog|(?:\.\./)+(?:src/)?fixture-policy/catalog)["''];?$'

@@ -479,10 +479,10 @@ mod tests {
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
-                "reality": {"dest": "example.com:443", "server_names": ["example.com"], "fingerprint": "chrome"},
-                "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": ""},
-                "short_ids": ["0123456789abcdef"],
-                "active_short_id": "0123456789abcdef"
+                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id()
             }),
         };
 
@@ -513,12 +513,12 @@ mod tests {
             port: 8388,
             meta: serde_json::json!({
                 "method": "2022-blake3-aes-128-gcm",
-                "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+                "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64()
             }),
         };
 
         let email = "m:u1::e2";
-        let user_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==";
+        let user_psk_b64 = xp_test_fixtures::endpoint_user_psk_b64();
 
         let tm = build_add_user_operation(&endpoint, email, None, Some(user_psk_b64)).unwrap();
         assert_eq!(tm.r#type, TYPE_ADD_USER_OPERATION);
@@ -542,10 +542,10 @@ mod tests {
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
             meta: serde_json::json!({
-                "reality": {"dest": "example.com:443", "server_names": ["example.com"], "fingerprint": "chrome"},
-                "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": ""},
-                "short_ids": ["0123456789abcdef"],
-                "active_short_id": "0123456789abcdef"
+                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id()
             }),
         };
 
@@ -570,7 +570,12 @@ mod tests {
         let reality_tm = &stream.security_settings[0];
         assert_eq!(reality_tm.r#type, TYPE_REALITY_SECURITY_CONFIG);
         let reality: xray::transport::internet::reality::Config = decode_typed(reality_tm);
-        assert_eq!(reality.dest, "example.com:443");
+        assert_eq!(
+            reality.dest,
+            xp_test_fixtures::endpoint_reality()["dest"]
+                .as_str()
+                .unwrap()
+        );
         assert_eq!(reality.fingerprint, "chrome");
         assert_eq!(
             reality.private_key,
@@ -596,7 +601,7 @@ mod tests {
             port: 8388,
             meta: serde_json::json!({
                 "method": "2022-blake3-aes-128-gcm",
-                "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+                "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64()
             }),
         };
 
@@ -639,12 +644,12 @@ mod tests {
             port: 8388,
             meta: serde_json::json!({
                 "method": "2022-blake3-aes-256-gcm",
-                "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+                "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64()
             }),
         };
 
         let email = "m:u1::e2";
-        let user_psk_b64 = "AQEBAQEBAQEBAQEBAQEBAQ==";
+        let user_psk_b64 = xp_test_fixtures::endpoint_user_psk_b64();
         let err = build_add_user_operation(&endpoint, email, None, Some(user_psk_b64)).unwrap_err();
         assert!(format!("{err}").contains("ss2022 method must be"));
     }

@@ -1,0 +1,13 @@
+id: fixture-policy-typescript-request-provenance
+valid:
+  - |
+    const endpoint = { port: fixtureCatalog.endpoint.port443() };
+  - |
+    endpoint.reality = fixtureCatalog.endpoint.reality();
+invalid:
+  - |
+    const endpoint = { kind: payload.kind, port: payload.port };
+  - |
+    endpoint.reality = payload.reality;
+  - |
+    const meta = { ...payload.reality };

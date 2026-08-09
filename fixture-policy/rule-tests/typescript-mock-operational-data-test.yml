@@ -1,0 +1,13 @@
+id: fixture-policy-typescript-mock-operational-data
+valid:
+  - |
+    const endpoint = {
+      port: fixtureCatalog.endpoint.port443(),
+      kind: fixtureCatalog.endpoint.vlessKind(),
+      short_ids: fixtureCatalog.endpoint.shortIds(),
+    };
+invalid:
+  - |
+    const endpoint = { port: 8443, public_domain: "live.example" };
+  - |
+    const endpoint = { port: payload.port, short_ids: request.short_ids };

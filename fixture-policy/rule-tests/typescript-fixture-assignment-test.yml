@@ -5,10 +5,7 @@ valid:
   - |
     report.total_bytes = null;
   - |
-    async function setupApiMocks() {
-      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
-      user.subscription_token = nextSubscriptionToken();
-    }
+    report.bootstrap_access_host = fixtureCatalog.host.primary();
 invalid:
   - |
     report.start_at = "unapproved-timestamp";
@@ -16,3 +13,7 @@ invalid:
     report.total_bytes = Number.parseInt(raw, 10);
   - |
     report.cycle_end_at = new Date().toISOString();
+  - |
+    report.bootstrap_api_base_url = "https://unapproved.fixture.test";
+  - |
+    endpoint.canary_upstream = payload.canary_upstream;

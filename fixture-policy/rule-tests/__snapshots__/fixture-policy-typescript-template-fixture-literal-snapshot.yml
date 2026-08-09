@@ -1,0 +1,13 @@
+id: fixture-policy-typescript-template-fixture-literal
+snapshots:
+  ? |
+    const subscription = `server: live.example.com\npassword: unsafe`;
+  : labels:
+    - source: 'server: live.example.com'
+      style: primary
+      start: 22
+      end: 46
+    - source: '`server: live.example.com\npassword: unsafe`'
+      style: secondary
+      start: 21
+      end: 65

@@ -1,0 +1,53 @@
+id: fixture-policy-typescript-storybook-catalog-origin
+language: TypeScript
+severity: error
+message: Storybook fixtureCatalog must be imported from the approved local adapter.
+files:
+  - web/src/fixture-policy/storybook.ts
+rule:
+  any:
+    - pattern: const fixtureCatalog = $$$
+    - pattern: let fixtureCatalog = $$$
+    - pattern: var fixtureCatalog = $$$
+    - pattern: function fixtureCatalog($$$) { $$$ }
+    - pattern: class fixtureCatalog { $$$ }
+    - pattern: const { fixtureCatalog } = $$$
+    - pattern: let { fixtureCatalog } = $$$
+    - pattern: var { fixtureCatalog } = $$$
+    - pattern: 'const { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'let { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'var { $KEY: fixtureCatalog } = $$$'
+    - all:
+        - kind: array_pattern
+        - has:
+            stopBy: end
+            pattern: fixtureCatalog
+    - pattern: 'const { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'let { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'var { $KEY: { fixtureCatalog } } = $$$'
+    - all:
+        - kind: required_parameter
+        - regex: '\bfixtureCatalog\b'
+    - all:
+        - kind: catch_clause
+        - regex: '\bfixtureCatalog\b'
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][.]/catalog["''];?$'
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\*\s+as\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: '^import\s+\*\s+as\s+fixtureCatalog\s+from\s+["''][.]/catalog["''];?$'
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: '^import\s+fixtureCatalog\s+from\s+["''][.]/catalog["''];?$'
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{[^}]*as\s+fixtureCatalog[^}]*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: '^import\s+\{[^}]*as\s+fixtureCatalog[^}]*\}\s+from\s+["''][.]/catalog["''];?$'

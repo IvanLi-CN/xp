@@ -4,11 +4,23 @@ valid:
     const fixture = { host: fixtureCatalog.host.primary() };
   - |
     const fixture = { start_at: fixtureCatalog.timestamp.baseline() };
+  - |
+    const fixture = {
+      owner_node_id: fixtureCatalog.identifier.nodePrimary(),
+      bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
+      first_seen_at: fixtureCatalog.timestamp.recent(),
+    };
 invalid:
   - |
     const fixture = { host: "unapproved.fixture.test" };
   - |
     const fixture = { node_name: "unapproved-node" };
+  - |
+    const fixture = { owner_node_id: "unapproved-node" };
+  - |
+    const fixture = { bootstrap_api_base_url: "https://unapproved.fixture.test" };
+  - |
+    const fixture = { first_seen_at: new Date().toISOString() };
   - |
     const fixture = { end_at: new Date().toISOString() };
   - |

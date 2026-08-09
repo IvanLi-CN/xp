@@ -2,6 +2,8 @@ id: fixture-policy-tsx-assignment-source
 valid:
   - |
     report.start_at = fixtureCatalog.timestamp.baseline();
+  - |
+    report.bootstrapApiBaseUrl = fixtureCatalog.url.primaryApi();
 invalid:
   - |
     report.start_at = "unapproved-timestamp";
@@ -11,3 +13,5 @@ invalid:
     report.config_hash = "unapproved-config";
   - |
     report.hour = new Date().toISOString();
+  - |
+    report.bootstrapAccessHost = "unapproved.fixture.test";

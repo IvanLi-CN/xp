@@ -1,6 +1,24 @@
 id: fixture-policy-typescript-adapter-output-provenance
 snapshots:
   ? |
+    const fixtureCatalog = {
+      host: { get primary() { return "live.example"; } },
+    };
+  : labels:
+    - source: get primary() { return "live.example"; }
+      style: primary
+      start: 35
+      end: 75
+  ? |
+    const fixtureCatalog = {
+      host: { primary() { return "live.example"; } },
+    };
+  : labels:
+    - source: primary() { return "live.example"; }
+      style: primary
+      start: 35
+      end: 71
+  ? |
     const injectedHost = function () {
       return "live.example";
     };
@@ -54,3 +72,15 @@ snapshots:
       style: primary
       start: 0
       end: 52
+  ? |
+    function stringSlotEntry(_value: string, index: number) {
+      return [`s${index}`, () => "live.example"];
+    }
+  : labels:
+    - source: |-
+        function stringSlotEntry(_value: string, index: number) {
+          return [`s${index}`, () => "live.example"];
+        }
+      style: primary
+      start: 0
+      end: 105
