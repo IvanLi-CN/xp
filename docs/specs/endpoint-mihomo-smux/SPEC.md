@@ -84,11 +84,16 @@
 
 ## Visual Evidence
 
-PR: none
+PR: include
+SS2022 接入点创建页的默认 SMux 设置。
+![SS2022 接入点创建页](./assets/endpoint-new-smux.png)
+
+PR: include
+SS2022 接入点详情页的 SMux 设置。
+![SS2022 接入点详情页](./assets/endpoint-details-smux.png)
 
 受控 Storybook 画布覆盖 `Components/EndpointMihomoSmuxSettings` 的默认、禁用和旧服务状态，
-以及两个接入点页面的 SS2022 默认值交互。该修复不提交截图资产；PR 不复用此前仅适用于
-VLESS 的旧截图。
+以及两个接入点页面的 SS2022 默认值交互。
 
 ## 假设
 
