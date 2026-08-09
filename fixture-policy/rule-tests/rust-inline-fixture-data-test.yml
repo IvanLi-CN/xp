@@ -1,0 +1,51 @@
+id: fixture-policy-rust-inline-data-source
+valid:
+  - |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: xp_test_fixtures::primary_node_id().to_owned() };
+        }
+    }
+  - |
+    mod tests {
+      fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+            };
+      }
+    }
+  - |
+    fn production_value() {
+        let fixture = Node { node_id: "runtime-node".to_owned() };
+    }
+invalid:
+  - |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: "unapproved-node".to_owned() };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_token() {
+            let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+            };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_probe() {
+            let fixture = Probe {
+                run_id: "unapproved-run".to_owned(),
+                hour: "2026-03-11T11:00:00Z".to_owned(),
+                config_hash: "unapproved-config".to_owned(),
+            };
+        }
+    }

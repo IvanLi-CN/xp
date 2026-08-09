@@ -1,0 +1,56 @@
+id: fixture-policy-typescript-adapter-output-provenance
+snapshots:
+  ? |
+    const injectedHost = function () {
+      return "live.example";
+    };
+  : labels:
+    - source: |-
+        function () {
+          return "live.example";
+        }
+      style: primary
+      start: 21
+      end: 61
+  ? |
+    const primary = () => "live.example";
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 16
+      end: 36
+  ? |
+    const primary = () => (catalog.hosts.primary, "live.example");
+  : labels:
+    - source: () => (catalog.hosts.primary, "live.example")
+      style: primary
+      start: 16
+      end: 61
+  ? |
+    const primary = () => `live.${suffix}`;
+  : labels:
+    - source: () => `live.${suffix}`
+      style: primary
+      start: 16
+      end: 38
+  ? |
+    const slots = Object.fromEntries([
+      ["unsafe", () => "live.example"],
+    ]);
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 48
+      end: 68
+  ? |
+    function injectedHost() {
+      return "live.example";
+    }
+  : labels:
+    - source: |-
+        function injectedHost() {
+          return "live.example";
+        }
+      style: primary
+      start: 0
+      end: 52

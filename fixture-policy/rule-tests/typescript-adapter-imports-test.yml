@@ -1,0 +1,5 @@
+id: fixture-policy-typescript-adapter-imports
+valid:
+  - 'import catalog from "../../../fixture-policy/catalog.json" with { type: "json" };'
+invalid:
+  - 'import catalog from "./other.json";'

@@ -1,0 +1,4 @@
+ruleDirs:
+  - fixture-policy/rules
+testConfigs:
+  - testDir: fixture-policy/rule-tests

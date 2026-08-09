@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { setAdminToken, setupApiMocks } from "./helpers";
 
@@ -442,6 +443,8 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 	page,
 }) => {
 	const token = `${Date.now()}`;
+	const tokenStorageKey = fixtureCatalog.slotString.s79();
+	const tokenStorageValue = fixtureCatalog.slotString.s80();
 	await page.goto("/__e2e_legacy_client__.html");
 	const legacyCacheName = await page.evaluate(
 		() => `workbox-precache-v2-${location.origin}/`,
@@ -456,39 +459,46 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 			"/__e2e_legacy_worker__.js",
 		),
 	);
-	await page.evaluate(async (legacyCache) => {
-		await caches.open(legacyCache);
-		localStorage.setItem("xp_admin_token", "preserved-token");
-		localStorage.setItem("xp_ui_density", "compact");
-		await new Promise<void>((resolve, reject) => {
-			const request = indexedDB.open("xp", 1);
-			request.onupgradeneeded = () => {
-				if (!request.result.objectStoreNames.contains("react_query_cache"))
-					request.result.createObjectStore("react_query_cache");
-			};
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => {
-				const db = request.result;
-				const transaction = db.transaction("react_query_cache", "readwrite");
-				transaction
-					.objectStore("react_query_cache")
-					.put("preserved-query-cache", "legacy-sentinel");
-				transaction.onerror = () => reject(transaction.error);
-				transaction.oncomplete = () => {
-					db.close();
-					resolve();
+	await page.evaluate(
+		async ({ legacyCache, tokenKey, tokenValue }) => {
+			await caches.open(legacyCache);
+			localStorage.setItem(tokenKey, tokenValue);
+			localStorage.setItem("xp_ui_density", "compact");
+			await new Promise<void>((resolve, reject) => {
+				const request = indexedDB.open("xp", 1);
+				request.onupgradeneeded = () => {
+					if (!request.result.objectStoreNames.contains("react_query_cache"))
+						request.result.createObjectStore("react_query_cache");
 				};
-			};
-		});
-		let controllerChanges = 0;
-		navigator.serviceWorker.addEventListener("controllerchange", () => {
-			controllerChanges += 1;
-		});
-		Object.defineProperty(window, "__xp_e2e_controller_changes", {
-			get: () => controllerChanges,
-			configurable: true,
-		});
-	}, legacyCacheName);
+				request.onerror = () => reject(request.error);
+				request.onsuccess = () => {
+					const db = request.result;
+					const transaction = db.transaction("react_query_cache", "readwrite");
+					transaction
+						.objectStore("react_query_cache")
+						.put("preserved-query-cache", "legacy-sentinel");
+					transaction.onerror = () => reject(transaction.error);
+					transaction.oncomplete = () => {
+						db.close();
+						resolve();
+					};
+				};
+			});
+			let controllerChanges = 0;
+			navigator.serviceWorker.addEventListener("controllerchange", () => {
+				controllerChanges += 1;
+			});
+			Object.defineProperty(window, "__xp_e2e_controller_changes", {
+				get: () => controllerChanges,
+				configurable: true,
+			});
+		},
+		{
+			legacyCache: legacyCacheName,
+			tokenKey: tokenStorageKey,
+			tokenValue: tokenStorageValue,
+		},
+	);
 
 	const predecessorBuildId = `e2e-legacy-predecessor-${token}`;
 	await page.evaluate(async (workerToken) => {
@@ -591,7 +601,7 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 			}),
 		);
 	});
-	await setAdminToken(migratedPage, "preserved-token");
+	await setAdminToken(migratedPage, fixtureCatalog.slotString.s80());
 	await setupApiMocks(migratedPage, { mockStatusEvents: false });
 	const runtimeErrors: string[] = [];
 	migratedPage.on("console", (message) => {
@@ -625,7 +635,7 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 		},
 	);
 
-	const preservedState = await migratedPage.evaluate(async () => {
+	const preservedState = await migratedPage.evaluate(async (tokenKey) => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open("xp");
 			request.onerror = () => reject(request.error);
@@ -641,13 +651,13 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 		});
 		db.close();
 		return {
-			token: localStorage.getItem("xp_admin_token"),
+			storedToken: localStorage.getItem(tokenKey),
 			density: localStorage.getItem("xp_ui_density"),
 			queryCache,
 		};
-	});
+	}, tokenStorageKey);
 	expect(preservedState).toEqual({
-		token: "preserved-token",
+		storedToken: tokenStorageValue,
 		density: "compact",
 		queryCache: "preserved-query-cache",
 	});

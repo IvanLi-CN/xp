@@ -1,0 +1,9 @@
+id: fixture-policy-rust-cluster-node-helper-inputs
+snapshots:
+  ? |
+    add_cluster_node(&mut store, "unapproved-node", "unapproved-name");
+  : labels:
+    - source: add_cluster_node(&mut store, "unapproved-node", "unapproved-name")
+      style: primary
+      start: 0
+      end: 66

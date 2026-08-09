@@ -408,7 +408,7 @@
     "max_line_length": 189
   },
   "docs/specs/README.md": {
-    "long_line_count": 40,
+    "long_line_count": 43,
     "max_line_length": 486
   },
   "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
@@ -588,7 +588,7 @@
   "src/http/tests.rs": {
     "long_line_count": 3,
     "max_line_length": 142,
-    "source_lines": 9902
+    "source_lines": 9924
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -689,7 +689,7 @@
   },
   "src/quota/tests.rs": {
     "long_line_count": 6,
-    "max_line_length": 117,
+    "max_line_length": 151,
     "source_lines": 3902
   },
   "src/raft/README.md": {
@@ -715,15 +715,15 @@
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,
-    "max_line_length": 218
+    "max_line_length": 237
   },
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4431
+    "source_lines": 4438
   },
   "src/state/tests.rs": {
-    "source_lines": 2296
+    "source_lines": 2432
   },
   "src/subscription.rs": {
     "long_line_count": 5,
@@ -1080,9 +1080,9 @@
     "max_line_length": 136
   },
   "web/src/views/UserDetailsPage.test.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 122,
-    "source_lines": 1108
+    "long_line_count": 8,
+    "max_line_length": 152,
+    "source_lines": 1154
   },
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
@@ -1096,6 +1096,91 @@
   "web/tests/e2e/helpers.ts": {
     "long_line_count": 0,
     "max_line_length": 84,
-    "source_lines": 1043
+    "source_lines": 1063
+  },
+  "web/src/fixture-policy/storybook.ts": {
+    "long_line_count": 1,
+    "max_line_length": 109
+  },
+  "fixture-policy/rules/catalog-keys.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1404
+  },
+  "fixture-policy/rule-tests/__snapshots__/fixture-policy-rust-inline-data-source-snapshot.yml": {
+    "long_line_count": 2,
+    "max_line_length": 162
+  },
+  "fixture-policy/rules/catalog-string-values.yml": {
+    "long_line_count": 1,
+    "max_line_length": 2021
+  },
+  "fixture-policy/rules/catalog-value-types.yml": {
+    "long_line_count": 4,
+    "max_line_length": 862
+  },
+  "fixture-policy/rules/rust-adapter-imports.yml": {
+    "long_line_count": 1,
+    "max_line_length": 102
+  },
+  "fixture-policy/rules/rust-adapter-output-provenance.yml": {
+    "long_line_count": 1,
+    "max_line_length": 325
+  },
+  "fixture-policy/rules/rust-fixture-data.yml": {
+    "long_line_count": 4,
+    "max_line_length": 720
+  },
+  "fixture-policy/rules/rust-inline-fixture-assignment.yml": {
+    "long_line_count": 2,
+    "max_line_length": 943
+  },
+  "fixture-policy/rules/rust-inline-fixture-data.yml": {
+    "long_line_count": 3,
+    "max_line_length": 947
+  },
+  "fixture-policy/rules/tsx-fixture-assignment.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1853
+  },
+  "fixture-policy/rules/tsx-fixture-data.yml": {
+    "long_line_count": 3,
+    "max_line_length": 780
+  },
+  "fixture-policy/rules/tsx-shorthand-fixture-data.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1855
+  },
+  "fixture-policy/rules/typescript-adapter-imports.yml": {
+    "long_line_count": 1,
+    "max_line_length": 103
+  },
+  "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
+    "long_line_count": 1,
+    "max_line_length": 392
+  },
+  "fixture-policy/rules/typescript-adapter-output-provenance.yml": {
+    "long_line_count": 4,
+    "max_line_length": 148
+  },
+  "fixture-policy/rules/typescript-fixture-assignment.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1853
+  },
+  "fixture-policy/rules/typescript-fixture-data.yml": {
+    "long_line_count": 3,
+    "max_line_length": 780
+  },
+  "fixture-policy/rules/typescript-shorthand-fixture-data.yml": {
+    "long_line_count": 1,
+    "max_line_length": 1855
+  },
+  "package.json": {
+    "long_line_count": 1,
+    "max_line_length": 208
+  },
+  "test-fixtures/src/lib.rs": {
+    "long_line_count": 36,
+    "max_line_length": 147,
+    "source_lines": 2893
   }
 }

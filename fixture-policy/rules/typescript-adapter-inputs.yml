@@ -1,0 +1,29 @@
+id: fixture-policy-typescript-adapter-inputs
+language: TypeScript
+severity: error
+message: The fixture adapter may only read the checked-in JSON catalog.
+files:
+  - web/src/fixture-policy/catalog.ts
+  - web/src/fixture-policy/storybook.ts
+rule:
+  any:
+    - pattern: process.env.$NAME
+    - pattern: process[$NAME]
+    - pattern: globalThis.process.env.$NAME
+    - pattern: globalThis.process[$NAME]
+    - pattern: globalThis["process"].env.$NAME
+    - pattern: globalThis["process"][$NAME]
+    - pattern: import.meta.env.$NAME
+    - pattern: fetch($$$)
+    - pattern: globalThis.fetch($$$)
+    - pattern: globalThis["fetch"]($$$)
+    - pattern: JSON.parse($$$)
+    - pattern: globalThis.JSON.parse($$$)
+    - pattern: globalThis["JSON"].parse($$$)
+    - pattern: import($$$)
+    - pattern: Bun.file($$$)
+    - pattern: Deno.readFile($$$)
+    - pattern: Deno.readTextFile($$$)
+    - pattern: localStorage.$METHOD($$$)
+    - pattern: sessionStorage.$METHOD($$$)
+    - pattern: Date.now()

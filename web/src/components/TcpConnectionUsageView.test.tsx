@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeTcpConnectionsResponse } from "../api/adminTcpConnections";
 import {
@@ -16,42 +17,45 @@ const baseReport: Pick<
 	| "endpoints"
 	| "per_endpoint_series"
 > = {
-	window_start: "2026-03-07T01:00:00Z",
-	window_end: "2026-03-08T00:59:00Z",
+	window_start: fixtureCatalog.slotString.s47(),
+	window_end: fixtureCatalog.slotString.s48(),
 	warnings: [],
 	endpoints: [
 		{
-			endpoint_id: "endpoint-a",
-			endpoint_tag: "tokyo-edge-a",
+			endpoint_id: fixtureCatalog.slotString.s287(),
+			endpoint_tag: fixtureCatalog.slotString.s280(),
 			port: 443,
 		},
 		{
-			endpoint_id: "endpoint-b",
-			endpoint_tag: "tokyo-edge-b",
+			endpoint_id: fixtureCatalog.slotString.s288(),
+			endpoint_tag: fixtureCatalog.slotString.s289(),
 			port: 8443,
 		},
 	],
 	per_endpoint_series: [
 		{
-			endpoint_id: "endpoint-a",
-			endpoint_tag: "tokyo-edge-a",
+			endpoint_id: fixtureCatalog.slotString.s287(),
+			endpoint_tag: fixtureCatalog.slotString.s280(),
 			port: 443,
 			series: [
-				{ minute: "2026-03-08T00:58:00Z", count: 2 },
-				{ minute: "2026-03-08T00:59:00Z", count: 4 },
+				{ minute: fixtureCatalog.slotString.s52(), count: 2 },
+				{ minute: fixtureCatalog.slotString.s48(), count: 4 },
 			],
 		},
 		{
-			endpoint_id: "endpoint-b",
-			endpoint_tag: "tokyo-edge-b",
+			endpoint_id: fixtureCatalog.slotString.s288(),
+			endpoint_tag: fixtureCatalog.slotString.s289(),
 			port: 8443,
 			series: [
-				{ minute: "2026-03-08T00:58:00Z", count: 1 },
-				{ minute: "2026-03-08T00:59:00Z", count: 3 },
+				{ minute: fixtureCatalog.slotString.s52(), count: 1 },
+				{ minute: fixtureCatalog.slotString.s48(), count: 3 },
 			],
 		},
 	],
 };
+
+const endpointALabel = `${fixtureCatalog.slotString.s280()} :443`;
+const endpointBLabel = `${fixtureCatalog.slotString.s289()} :8443`;
 
 describe("<TcpConnectionUsageView />", () => {
 	it("builds tooltip content with total and per-endpoint counts", () => {
@@ -79,9 +83,9 @@ describe("<TcpConnectionUsageView />", () => {
 
 		expect(tooltipHtml).toContain("Total");
 		expect(tooltipHtml).toContain("7 connections");
-		expect(tooltipHtml).toContain("tokyo-edge-a :443");
+		expect(tooltipHtml).toContain(endpointALabel);
 		expect(tooltipHtml).toContain("4 connections");
-		expect(tooltipHtml).toContain("tokyo-edge-b :8443");
+		expect(tooltipHtml).toContain(endpointBLabel);
 		expect(tooltipHtml).toContain("3 connections");
 		expect(tooltipHtml).toContain("width:min(260px,100%);max-width:100%");
 		expect(tooltipHtml).not.toContain("min-width:260px");
@@ -126,7 +130,7 @@ describe("<TcpConnectionUsageView />", () => {
 			screen.queryByRole("button", { name: "Reset all" }),
 		).not.toBeInTheDocument();
 
-		fireEvent.click(screen.getByLabelText("tokyo-edge-b :8443"));
+		fireEvent.click(screen.getByLabelText(endpointBLabel));
 
 		expect(
 			screen.getByRole("img", {
@@ -186,8 +190,8 @@ describe("<TcpConnectionUsageView />", () => {
 			/>,
 		);
 
-		fireEvent.click(screen.getByLabelText("tokyo-edge-a :443"));
-		fireEvent.click(screen.getByLabelText("tokyo-edge-b :8443"));
+		fireEvent.click(screen.getByLabelText(endpointALabel));
+		fireEvent.click(screen.getByLabelText(endpointBLabel));
 
 		expect(screen.getByText("No endpoints selected")).toBeInTheDocument();
 		expect(

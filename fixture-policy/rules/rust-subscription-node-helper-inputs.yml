@@ -1,0 +1,26 @@
+id: fixture-policy-rust-subscription-node-helper-inputs
+language: Rust
+severity: error
+message: Subscription node names must be direct xp_test_fixtures accessors.
+note: Pass a zero-argument accessor from the approved Rust fixture adapter.
+files:
+  - src/subscription/**/*_tests.rs
+  - src/subscription/**/tests.rs
+rule:
+  any:
+    - all:
+        - kind: call_expression
+        - pattern: node($NODE_ID, $NODE_NAME, $ACCESS_HOST)
+        - not:
+            pattern: node($NODE_ID, xp_test_fixtures::$ACCESSOR, $ACCESS_HOST)
+    - all:
+        - kind: call_expression
+        - pattern: node_with_api_base($NODE_ID, $NODE_NAME, $ACCESS_HOST, $API_BASE_URL)
+        - not:
+            pattern: |
+              node_with_api_base(
+                  $NODE_ID,
+                  xp_test_fixtures::$ACCESSOR,
+                  $ACCESS_HOST,
+                  $API_BASE_URL,
+              )

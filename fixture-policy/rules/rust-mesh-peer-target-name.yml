@@ -1,0 +1,26 @@
+id: fixture-policy-rust-mesh-peer-target-name
+language: Rust
+severity: error
+message: Mesh peer target names must use a direct xp_test_fixtures accessor call.
+note: Mesh peer target names are routing identities, not free-form assertion labels.
+files:
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+rule:
+  all:
+    - kind: field_initializer
+    - inside:
+        stopBy: end
+        pattern: MeshPeerTarget { $$$ }
+    - has:
+        field: field
+        regex: '^node_name$'
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()

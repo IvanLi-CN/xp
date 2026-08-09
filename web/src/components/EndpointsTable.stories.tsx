@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 import type { ReactNode } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type {
 	AdminEndpoint,
@@ -10,50 +11,179 @@ import type { AdminNode } from "../api/adminNodes";
 import { EndpointsTable } from "./EndpointsTable";
 
 function makeSlots(): AdminEndpointProbeSlot[] {
-	const slots: AdminEndpointProbeSlot[] = [];
-	for (let hour = 0; hour < 24; hour++) {
-		const hh = String(hour).padStart(2, "0");
-		slots.push({
-			hour: `2026-02-19T${hh}:00:00Z`,
-			status: hour % 11 === 0 ? "down" : hour % 7 === 0 ? "degraded" : "up",
-			latency_ms_p50: 200 + hour,
-			checked_at: `2026-02-19T${hh}:00:10Z`,
-		});
-	}
-	return slots;
+	return [
+		{
+			hour: fixtureCatalog.slotString.s4(),
+			status: "down",
+			latency_ms_p50: 200,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s5(),
+			status: "up",
+			latency_ms_p50: 201,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s6(),
+			status: "up",
+			latency_ms_p50: 202,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s7(),
+			status: "up",
+			latency_ms_p50: 203,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s8(),
+			status: "up",
+			latency_ms_p50: 204,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s9(),
+			status: "up",
+			latency_ms_p50: 205,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s10(),
+			status: "up",
+			latency_ms_p50: 206,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s11(),
+			status: "degraded",
+			latency_ms_p50: 207,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s12(),
+			status: "up",
+			latency_ms_p50: 208,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s13(),
+			status: "up",
+			latency_ms_p50: 209,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s14(),
+			status: "up",
+			latency_ms_p50: 210,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s15(),
+			status: "down",
+			latency_ms_p50: 211,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s16(),
+			status: "up",
+			latency_ms_p50: 212,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s21(),
+			status: "up",
+			latency_ms_p50: 213,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s22(),
+			status: "degraded",
+			latency_ms_p50: 214,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s23(),
+			status: "up",
+			latency_ms_p50: 215,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s24(),
+			status: "up",
+			latency_ms_p50: 216,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s25(),
+			status: "up",
+			latency_ms_p50: 217,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s26(),
+			status: "up",
+			latency_ms_p50: 218,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s47(),
+			status: "up",
+			latency_ms_p50: 219,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s48(),
+			status: "up",
+			latency_ms_p50: 220,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s52(),
+			status: "degraded",
+			latency_ms_p50: 221,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s54(),
+			status: "down",
+			latency_ms_p50: 222,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s81(),
+			status: "up",
+			latency_ms_p50: 223,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+	];
 }
 
-const LONG_NODE_ID = "01KGRVRYQS9VA9JFEPO0NR6MD2B";
-const LONG_ENDPOINT_ID =
-	"ep_01HENDPT_THIS_IS_A_VERY_LONG_ENDPOINT_ID_FOR_LAYOUT_TESTING";
-const LONG_TAG =
-	"edge-tokyo-with-a-very-long-tag-that-should-truncate-nicely-in-the-table";
-const LONG_NODE_NAME =
-	"tokyo-edge-with-a-very-long-node-name-that-should-truncate-nicely";
+const LONG_NODE_NAME = fixtureCatalog.slotString.s276();
 
 const ENDPOINTS: AdminEndpoint[] = [
 	{
-		endpoint_id: LONG_ENDPOINT_ID,
-		node_id: LONG_NODE_ID,
-		tag: LONG_TAG,
+		endpoint_id: fixtureCatalog.slotString.s270(),
+		node_id: fixtureCatalog.slotString.s271(),
+		tag: fixtureCatalog.slotString.s272(),
 		kind: "vless_reality_vision_tcp",
 		port: 53842,
-		meta: { public_domain: "tokyo.example.invalid" },
+		meta: { public_domain: fixtureCatalog.slotString.s212() },
 		probe: {
-			latest_checked_at: "2026-02-19T23:00:10Z",
+			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 293,
 			slots: makeSlots(),
 		},
 	},
 	{
-		endpoint_id: "ep_01HENDPT_SHORT",
-		node_id: "01KFTEA58X1RXXVDRD6EPFB63Y",
-		tag: "osaka-ss2022",
+		endpoint_id: fixtureCatalog.slotString.s273(),
+		node_id: fixtureCatalog.slotString.s274(),
+		tag: fixtureCatalog.slotString.s275(),
 		kind: "ss2022_2022_blake3_aes_128_gcm",
 		port: 53843,
-		meta: { public_domain: "osaka.example.invalid" },
+		meta: { public_domain: fixtureCatalog.slotString.s278() },
 		probe: {
-			latest_checked_at: "2026-02-19T23:00:10Z",
+			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 223,
 			slots: makeSlots(),
 		},
@@ -62,18 +192,18 @@ const ENDPOINTS: AdminEndpoint[] = [
 
 const NODES: AdminNode[] = [
 	{
-		node_id: LONG_NODE_ID,
-		node_name: LONG_NODE_NAME,
-		api_base_url: "https://tokyo.example.invalid",
-		access_host: "tokyo.example.invalid",
+		node_id: fixtureCatalog.slotString.s271(),
+		node_name: fixtureCatalog.slotString.s276(),
+		api_base_url: fixtureCatalog.slotString.s211(),
+		access_host: fixtureCatalog.slotString.s212(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
-		node_id: "01KFTEA58X1RXXVDRD6EPFB63Y",
-		node_name: "osaka-1",
-		api_base_url: "https://osaka.example.invalid",
-		access_host: "osaka.example.invalid",
+		node_id: fixtureCatalog.slotString.s274(),
+		node_name: fixtureCatalog.slotString.s37(),
+		api_base_url: fixtureCatalog.slotString.s277(),
+		access_host: fixtureCatalog.slotString.s278(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
@@ -127,7 +257,7 @@ export const ResponsiveNoScroll: Story = {
 		}
 
 		// Sanity-check key fields are rendered (CSS truncation doesn't change textContent).
-		const tags = await canvas.findAllByText(/edge-tokyo-with-a-very-long-tag/);
+		const tags = await canvas.findAllByText(fixtureCatalog.slotString.s272());
 		expect(tags).toHaveLength(2);
 
 		const vless = await canvas.findAllByText("VLESS");

@@ -2195,14 +2195,14 @@ mod tests {
         ComponentRuntimeStatus {
             component,
             status,
-            last_ok_at: None,
-            last_fail_at: None,
-            down_since: None,
+            last_ok_at: xp_test_fixtures::none(),
+            last_fail_at: xp_test_fixtures::none(),
+            down_since: xp_test_fixtures::none(),
             consecutive_failures: 0,
             recoveries_observed: 0,
             restart_attempts: 0,
-            last_restart_at: None,
-            last_restart_fail_at: None,
+            last_restart_at: xp_test_fixtures::none(),
+            last_restart_fail_at: xp_test_fixtures::none(),
             last_sync_at: None,
             current_ipv4: None,
             current_ipv6: None,
@@ -2213,10 +2213,10 @@ mod tests {
 
     fn runtime(events: Vec<NodeRuntimeEvent>) -> LocalNodeRuntimeSnapshot {
         LocalNodeRuntimeSnapshot {
-            node_id: "node-a".to_string(),
+            node_id: xp_test_fixtures::slot_s615().to_owned(),
             summary: NodeRuntimeSummary {
                 status: RuntimeSummaryStatus::Up,
-                updated_at: "2026-05-20T00:00:00Z".to_string(),
+                updated_at: xp_test_fixtures::slot_s617().to_owned(),
             },
             components: vec![
                 component(RuntimeComponent::Xp, RuntimeStatus::Up),
@@ -2263,18 +2263,18 @@ mod tests {
             timezone: "UTC".to_string(),
             summary: TrafficSummary {
                 mode: "rolling_30d".to_string(),
-                cycle_start_at: None,
-                cycle_end_at: None,
-                uplink_bytes: 0,
-                downlink_bytes: 0,
-                total_bytes: 0,
+                cycle_start_at: xp_test_fixtures::none(),
+                cycle_end_at: xp_test_fixtures::none(),
+                uplink_bytes: xp_test_fixtures::slot_n16(),
+                downlink_bytes: xp_test_fixtures::slot_n16(),
+                total_bytes: xp_test_fixtures::slot_n16(),
                 complete: true,
                 tracking_since: None,
             },
             current,
             reference: None,
             partial: false,
-            last_sample_at: Some(window_end_at.to_string()),
+            last_sample_at: Some(xp_test_fixtures::slot_s617().to_owned()),
             warnings: Vec::new(),
         }
     }
@@ -2579,8 +2579,8 @@ mod tests {
             mode: "monthly".to_string(),
             start_at: "2026-04-01T00:00:00Z".to_string(),
             end_at: "2026-05-01T00:00:00Z".to_string(),
-            uplink_bytes: 100,
-            downlink_bytes: 200,
+            uplink_bytes: xp_test_fixtures::slot_n30(),
+            downlink_bytes: xp_test_fixtures::slot_n31(),
             complete: true,
             tracking_since: "2026-04-01T00:05:00Z".to_string(),
             warnings: Vec::new(),
@@ -2724,8 +2724,8 @@ mod tests {
                 mode: "monthly".to_string(),
                 start_at: "2026-07-01T00:00:00Z".to_string(),
                 end_at: "2026-08-01T00:00:00Z".to_string(),
-                uplink_bytes: 10,
-                downlink_bytes: 20,
+                uplink_bytes: xp_test_fixtures::slot_n24(),
+                downlink_bytes: xp_test_fixtures::slot_n19(),
                 complete: true,
                 tracking_since: "2026-07-28T00:05:00Z".to_string(),
                 warnings: Vec::new(),
@@ -2746,8 +2746,8 @@ mod tests {
                 mode: "monthly".to_string(),
                 start_at: "2026-08-01T00:00:00Z".to_string(),
                 end_at: "2026-09-01T00:00:00Z".to_string(),
-                uplink_bytes: 30,
-                downlink_bytes: 40,
+                uplink_bytes: xp_test_fixtures::slot_n25(),
+                downlink_bytes: xp_test_fixtures::slot_n26(),
                 complete: true,
                 tracking_since: "2026-08-01T00:05:00Z".to_string(),
                 warnings: Vec::new(),
@@ -2845,8 +2845,8 @@ mod tests {
                 now,
                 "node-b",
                 NodeHistorySnapshot {
-                    node_id: "node-b".to_string(),
-                    last_synced_at: Some("2026-07-29T00:05:00Z".to_string()),
+                    node_id: xp_test_fixtures::slot_s616().to_owned(),
+                    last_synced_at: Some(xp_test_fixtures::slot_s618().to_owned()),
                     last_sync_error: None,
                     daily_traffic: Vec::new(),
                     daily_component_status: Vec::new(),
@@ -3101,13 +3101,13 @@ mod tests {
                     mode: "monthly".to_string(),
                     start_at: "2026-05-01T00:00:00Z".to_string(),
                     end_at: "2026-06-01T00:00:00Z".to_string(),
-                    uplink_bytes: 10,
-                    downlink_bytes: 20,
+                    uplink_bytes: xp_test_fixtures::slot_n24(),
+                    downlink_bytes: xp_test_fixtures::slot_n19(),
                     complete: true,
                     tracking_since: "2026-05-01T00:00:00Z".to_string(),
                     warnings: Vec::new(),
                 }),
-                last_sample_at: Some("2026-05-20T11:55:00Z".to_string()),
+                last_sample_at: Some(xp_test_fixtures::slot_s619().to_owned()),
                 ..NodeTrafficRollupSnapshot::default()
             },
             TrafficWindow::Days31,
@@ -3198,8 +3198,8 @@ mod tests {
                 now,
                 "node-a",
                 NodeHistorySnapshot {
-                    node_id: "node-a".to_string(),
-                    last_synced_at: None,
+                    node_id: xp_test_fixtures::slot_s615().to_owned(),
+                    last_synced_at: xp_test_fixtures::none(),
                     last_sync_error: None,
                     daily_traffic: Vec::new(),
                     daily_component_status: Vec::new(),
@@ -3432,19 +3432,19 @@ mod tests {
     fn merged_reports_do_not_sum_incompatible_quota_cycles() {
         let mut first = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         first.summary.mode = "cycle".to_string();
-        first.summary.cycle_start_at = Some("2026-05-01T00:00:00Z".to_string());
-        first.summary.cycle_end_at = Some("2026-06-01T00:00:00Z".to_string());
-        first.summary.uplink_bytes = 100;
-        first.summary.downlink_bytes = 200;
-        first.summary.total_bytes = 300;
+        first.summary.cycle_start_at = Some(xp_test_fixtures::slot_s624().to_owned());
+        first.summary.cycle_end_at = Some(xp_test_fixtures::slot_s625().to_owned());
+        first.summary.uplink_bytes = xp_test_fixtures::slot_n30();
+        first.summary.downlink_bytes = xp_test_fixtures::slot_n31();
+        first.summary.total_bytes = xp_test_fixtures::slot_n38();
 
         let mut second = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         second.summary.mode = "cycle".to_string();
-        second.summary.cycle_start_at = Some("2026-05-15T00:00:00Z".to_string());
-        second.summary.cycle_end_at = Some("2026-06-15T00:00:00Z".to_string());
-        second.summary.uplink_bytes = 400;
-        second.summary.downlink_bytes = 500;
-        second.summary.total_bytes = 900;
+        second.summary.cycle_start_at = Some(xp_test_fixtures::slot_s626().to_owned());
+        second.summary.cycle_end_at = Some(xp_test_fixtures::slot_s627().to_owned());
+        second.summary.uplink_bytes = xp_test_fixtures::slot_n26();
+        second.summary.downlink_bytes = xp_test_fixtures::slot_n28();
+        second.summary.total_bytes = xp_test_fixtures::slot_n39();
 
         let merged = merge_traffic_reports(
             &[first, second],
@@ -3550,7 +3550,7 @@ mod tests {
         let events = (0..80)
             .map(|i| NodeRuntimeEvent {
                 event_id: format!("evt-{i}"),
-                occurred_at: rfc3339(now - chrono::Duration::hours(i)),
+                occurred_at: xp_test_fixtures::slot_s617().to_owned(),
                 component: RuntimeComponent::Xray,
                 kind: NodeRuntimeEventKind::StatusChanged,
                 message: "xray status changed".to_string(),

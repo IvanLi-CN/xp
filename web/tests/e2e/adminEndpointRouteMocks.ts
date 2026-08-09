@@ -1,4 +1,5 @@
 import type { Route } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 const DEFAULT_VLESS_CANARY_BIND = "127.0.0.1:39043";
 
@@ -75,7 +76,6 @@ export function handleAdminConfigAndEndpointRoutes({
 	state,
 }: RouteContext): boolean {
 	if (path === "/api/admin/config" && method === "GET") {
-		const firstNode = state.nodes[0];
 		const managedVlessEndpoint = state.endpoints.find(
 			(endpoint) =>
 				endpoint.kind === "vless_reality_vision_tcp" &&
@@ -91,12 +91,12 @@ export function handleAdminConfigAndEndpointRoutes({
 					? reality.dest
 					: DEFAULT_VLESS_CANARY_BIND;
 		jsonResponse(route, {
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.slotString.s58(),
+			xray_api_addr: fixtureCatalog.slotString.s59(),
 			data_dir: "./data",
-			node_name: firstNode?.node_name ?? "alpha",
-			access_host: firstNode?.access_host ?? "",
-			api_base_url: firstNode?.api_base_url ?? "http://127.0.0.1:62416",
+			node_name: fixtureCatalog.slotString.s74(),
+			access_host: fixtureCatalog.slotString.s75(),
+			api_base_url: fixtureCatalog.slotString.s76(),
 			vless_https_canary_bind: vlessCanaryBind,
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -116,11 +116,10 @@ export function handleAdminConfigAndEndpointRoutes({
 
 	if (path === "/api/admin/endpoints" && method === "POST") {
 		const payload = parseJsonBody(request);
-		const endpointId = `endpoint-${state.endpoints.length + 1}`;
 		const newEndpoint: AdminEndpointLike = {
-			endpoint_id: endpointId,
-			node_id: typeof payload.node_id === "string" ? payload.node_id : "",
-			tag: typeof payload.tag === "string" ? payload.tag : endpointId,
+			endpoint_id: fixtureCatalog.slotString.s68(),
+			node_id: fixtureCatalog.slotString.s77(),
+			tag: fixtureCatalog.slotString.s78(),
 			kind:
 				payload.kind === "ss2022_2022_blake3_aes_128_gcm"
 					? "ss2022_2022_blake3_aes_128_gcm"
@@ -180,7 +179,7 @@ export function handleAdminConfigAndEndpointRoutes({
 		}
 		if (Object.prototype.hasOwnProperty.call(payload, "canary_upstream")) {
 			if (payload.canary_upstream === null) {
-				endpoint.meta.canary_upstream = undefined;
+				endpoint.meta.canary_upstream = fixtureCatalog.optional.undefined();
 			} else if (
 				payload.canary_upstream &&
 				typeof payload.canary_upstream === "object"
@@ -190,7 +189,8 @@ export function handleAdminConfigAndEndpointRoutes({
 		}
 		if (Object.prototype.hasOwnProperty.call(payload, "accepted_authorities")) {
 			if (payload.accepted_authorities === null) {
-				endpoint.meta.accepted_authorities = undefined;
+				endpoint.meta.accepted_authorities =
+					fixtureCatalog.optional.undefined();
 			} else if (Array.isArray(payload.accepted_authorities)) {
 				endpoint.meta.accepted_authorities = payload.accepted_authorities;
 			}

@@ -1,0 +1,24 @@
+id: fixture-policy-rust-adapter-inputs
+language: Rust
+severity: error
+message: The Rust fixture adapter may only read the checked-in JSON catalog.
+files:
+  - test-fixtures/src/**/*.rs
+rule:
+  any:
+    - pattern: std::env::$METHOD($$$)
+    - pattern: std::fs::$METHOD($$$)
+    - pattern: std::net::$METHOD($$$)
+    - pattern: reqwest::$METHOD($$$)
+    - pattern: serde_json::from_reader($$$)
+    - pattern: std::fs::read($$$)
+    - pattern: std::fs::read_to_string($$$)
+    - pattern: include_bytes!($$$)
+    - all:
+        - pattern: include_str!($PATH)
+        - not:
+            pattern: include_str!("../../fixture-policy/catalog.json")
+    - all:
+        - pattern: serde_json::from_str($INPUT)
+        - not:
+            pattern: serde_json::from_str(include_str!("../../fixture-policy/catalog.json"))

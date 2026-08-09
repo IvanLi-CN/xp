@@ -1,0 +1,59 @@
+id: fixture-policy-typescript-catalog-origin
+language: TypeScript
+severity: error
+message: fixtureCatalog must be imported from the approved fixture-policy adapter.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  any:
+    - pattern: const fixtureCatalog = $$$
+    - pattern: let fixtureCatalog = $$$
+    - pattern: var fixtureCatalog = $$$
+    - pattern: function fixtureCatalog($$$) { $$$ }
+    - pattern: class fixtureCatalog { $$$ }
+    - pattern: const { fixtureCatalog } = $$$
+    - pattern: let { fixtureCatalog } = $$$
+    - pattern: var { fixtureCatalog } = $$$
+    - pattern: 'const { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'let { $KEY: fixtureCatalog } = $$$'
+    - pattern: 'var { $KEY: fixtureCatalog } = $$$'
+    - all:
+        - kind: array_pattern
+        - has:
+            stopBy: end
+            pattern: fixtureCatalog
+    - pattern: 'const { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'let { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'var { $KEY: { fixtureCatalog } } = $$$'
+    - all:
+        - kind: required_parameter
+        - regex: '\bfixtureCatalog\b'
+    - all:
+        - kind: catch_clause
+        - regex: '\bfixtureCatalog\b'
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{\s*fixtureCatalog\s*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\*\s+as\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+fixtureCatalog\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog
+    - all:
+        - kind: import_statement
+        - regex: '^import\s+\{[^}]*\bas\s+fixtureCatalog\b[^}]*\}\s+from\s+["''][^"'']+["''];?$'
+        - not:
+            regex: fixture-policy/catalog

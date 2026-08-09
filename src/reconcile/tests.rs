@@ -232,7 +232,7 @@ fn test_store_init(
     xray_api_addr: SocketAddr,
 ) -> (Arc<Config>, Arc<Mutex<JsonSnapshotStore>>) {
     let config = Arc::new(Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::slot_s447().parse().unwrap(),
         xray_api_addr,
         xray_health_interval_secs: 5,
         xray_health_fails_before_down: 4,
@@ -251,9 +251,9 @@ fn test_store_init(
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir: tmp_dir.to_path_buf(),
         admin_token_hash: String::new(),
-        node_name: "node-1".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s448().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             crate::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -361,13 +361,13 @@ async fn remote_endpoints_are_skipped_for_apply_and_explicit_remove() {
     let (local_tag, remote_tag) = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        let remote_node_id = "node-remote".to_string();
+        let remote_node_id = xp_test_fixtures::slot_s450().to_owned();
         let _ = store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62417".to_string(),
+                node_id: xp_test_fixtures::slot_s450().to_owned(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s451().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -650,9 +650,9 @@ async fn ensure_existing_inbound_treats_existing_tag_found_as_ok() {
 #[test]
 fn desired_inbound_hash_ignores_mihomo_smux_policy() {
     let mut endpoint = Endpoint {
-        endpoint_id: "endpoint-1".to_string(),
-        node_id: "node-1".to_string(),
-        tag: "ss2022-endpoint-1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 443,
         meta: serde_json::json!({
@@ -856,10 +856,10 @@ async fn remove_requests_issue_calls_and_treat_not_found_as_ok() {
 
     let mut pending = PendingBatch::default();
     pending.add(ReconcileRequest::RemoveInbound {
-        tag: "missing-inbound".to_string(),
+        tag: xp_test_fixtures::missing_endpoint_tag().to_owned(),
     });
     pending.add(ReconcileRequest::RemoveUser {
-        tag: "missing-inbound".to_string(),
+        tag: xp_test_fixtures::missing_endpoint_tag().to_owned(),
         email: "m:missing::missing".to_string(),
     });
 
@@ -878,9 +878,9 @@ async fn remove_requests_issue_calls_and_treat_not_found_as_ok() {
     assert!(
         calls
             .iter()
-            .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == "missing-inbound"))
+            .any(|c| matches!(c, Call::RemoveInbound { tag } if tag == xp_test_fixtures::missing_endpoint_tag()))
     );
-    assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == "missing-inbound" && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "m:missing::missing")));
+    assert!(calls.iter().any(|c| matches!(c, Call::AlterInbound { tag, op_type, email } if tag == xp_test_fixtures::missing_endpoint_tag() && op_type == "xray.app.proxyman.command.RemoveUserOperation" && email == "m:missing::missing")));
 
     let _ = shutdown.send(());
 }

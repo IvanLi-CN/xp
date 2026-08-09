@@ -1,0 +1,8 @@
+id: fixture-policy-tsx-no-suppression
+valid:
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+invalid:
+  - |
+    // ast-grep-ignore: fixture-policy-tsx-data-source
+    const fixture = { host: fixtureCatalog.host.primary() };

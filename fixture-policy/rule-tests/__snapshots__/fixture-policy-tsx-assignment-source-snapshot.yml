@@ -1,0 +1,62 @@
+id: fixture-policy-tsx-assignment-source
+snapshots:
+  ? |
+    report.config_hash = "unapproved-config";
+  : labels:
+    - source: report.config_hash = "unapproved-config"
+      style: primary
+      start: 0
+      end: 40
+    - source: report.config_hash
+      style: secondary
+      start: 0
+      end: 18
+    - source: '"unapproved-config"'
+      style: secondary
+      start: 21
+      end: 40
+  ? |
+    report.hour = new Date().toISOString();
+  : labels:
+    - source: report.hour = new Date().toISOString()
+      style: primary
+      start: 0
+      end: 38
+    - source: report.hour
+      style: secondary
+      start: 0
+      end: 11
+    - source: new Date().toISOString()
+      style: secondary
+      start: 14
+      end: 38
+  ? |
+    report.last_synced_at = new Date().toISOString();
+  : labels:
+    - source: report.last_synced_at = new Date().toISOString()
+      style: primary
+      start: 0
+      end: 48
+    - source: report.last_synced_at
+      style: secondary
+      start: 0
+      end: 21
+    - source: new Date().toISOString()
+      style: secondary
+      start: 24
+      end: 48
+  ? |
+    report.start_at = "unapproved-timestamp";
+  : labels:
+    - source: report.start_at = "unapproved-timestamp"
+      style: primary
+      start: 0
+      end: 40
+    - source: report.start_at
+      style: secondary
+      start: 0
+      end: 15
+    - source: '"unapproved-timestamp"'
+      style: secondary
+      start: 18
+      end: 40

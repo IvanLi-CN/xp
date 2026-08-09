@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
 import {
@@ -7,27 +8,64 @@ import {
 	NodeInventoryList,
 } from "./NodeInventoryList";
 
-function buildRecentSlots(
-	startIso: string,
-	statuses: Array<"up" | "degraded" | "down" | "unknown">,
-) {
-	const start = Date.parse(startIso);
-	return statuses.map((status, index) => ({
-		slot_start: new Date(start + index * 30 * 60 * 1000).toISOString(),
-		status,
-	}));
+type RecentSlotStatus = "up" | "degraded" | "down" | "unknown";
+
+type RecentSlotStatuses = readonly [
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+];
+
+function buildRecentSlots(statuses: RecentSlotStatuses) {
+	const [
+		slot0,
+		slot1,
+		slot2,
+		slot3,
+		slot4,
+		slot5,
+		slot6,
+		slot7,
+		slot8,
+		slot9,
+		slot10,
+		slot11,
+	] = statuses;
+
+	return [
+		{ slot_start: fixtureCatalog.slotString.s4(), status: slot0 },
+		{ slot_start: fixtureCatalog.slotString.s5(), status: slot1 },
+		{ slot_start: fixtureCatalog.slotString.s6(), status: slot2 },
+		{ slot_start: fixtureCatalog.slotString.s7(), status: slot3 },
+		{ slot_start: fixtureCatalog.slotString.s8(), status: slot4 },
+		{ slot_start: fixtureCatalog.slotString.s9(), status: slot5 },
+		{ slot_start: fixtureCatalog.slotString.s10(), status: slot6 },
+		{ slot_start: fixtureCatalog.slotString.s11(), status: slot7 },
+		{ slot_start: fixtureCatalog.slotString.s12(), status: slot8 },
+		{ slot_start: fixtureCatalog.slotString.s13(), status: slot9 },
+		{ slot_start: fixtureCatalog.slotString.s14(), status: slot10 },
+		{ slot_start: fixtureCatalog.slotString.s15(), status: slot11 },
+	];
 }
 
 const sampleNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: "01J000000000000000000000001",
-		node_name: "tokyo-edge-a",
-		api_base_url:
-			"https://tokyo-edge-a.example.invalid/admin/runtime/super/long/path",
-		access_host: "tokyo-edge-a.example.invalid",
+		node_id: fixtureCatalog.slotString.s229(),
+		node_name: fixtureCatalog.slotString.s280(),
+		api_base_url: fixtureCatalog.slotString.s281(),
+		access_host: fixtureCatalog.slotString.s282(),
 		summary: {
 			status: "up",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.slotString.s283(),
 		},
 		components: [
 			{
@@ -45,7 +83,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 0,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"degraded",
@@ -61,13 +99,13 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 		]),
 	},
 	{
-		node_id: "01J000000000000000000000002",
-		node_name: "",
-		api_base_url: "https://node-b.example.invalid",
-		access_host: "very-long-hostname-node-b.example.invalid",
+		node_id: fixtureCatalog.slotString.s233(),
+		node_name: fixtureCatalog.slotString.s99(),
+		api_base_url: fixtureCatalog.slotString.s235(),
+		access_host: fixtureCatalog.slotString.s284(),
 		summary: {
 			status: "degraded",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.slotString.s283(),
 		},
 		components: [
 			{
@@ -92,7 +130,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 2,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"down",

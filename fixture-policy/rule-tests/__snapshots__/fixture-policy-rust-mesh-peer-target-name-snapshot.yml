@@ -1,0 +1,46 @@
+id: fixture-policy-rust-mesh-peer-target-name
+snapshots:
+  ? |
+    let target = MeshPeerTarget {
+      node_name: "live-peer".to_owned(),
+    };
+  : labels:
+    - source: 'node_name: "live-peer".to_owned()'
+      style: primary
+      start: 32
+      end: 65
+    - source: |-
+        MeshPeerTarget {
+          node_name: "live-peer".to_owned(),
+        }
+      style: secondary
+      start: 13
+      end: 68
+    - source: node_name
+      style: secondary
+      start: 32
+      end: 41
+    - source: '"live-peer".to_owned()'
+      style: secondary
+      start: 43
+      end: 65
+  ? |
+    let unsafe_name = std::env::var("TEST_NODE_NAME").unwrap();
+    let target = MeshPeerTarget { node_name: unsafe_name };
+  : labels:
+    - source: 'node_name: unsafe_name'
+      style: primary
+      start: 90
+      end: 112
+    - source: 'MeshPeerTarget { node_name: unsafe_name }'
+      style: secondary
+      start: 73
+      end: 114
+    - source: node_name
+      style: secondary
+      start: 90
+      end: 99
+    - source: unsafe_name
+      style: secondary
+      start: 101
+      end: 112

@@ -1,0 +1,315 @@
+id: fixture-policy-rust-data-source
+language: Rust
+severity: error
+message: Fixture operational data must be a direct xp_test_fixtures accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the Rust adapter.
+files:
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+rule:
+  all:
+    - kind: field_initializer
+    - has:
+        field: field
+        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at|hour)$'
+    - not:
+        has:
+          field: value
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()
+            - pattern: xp_test_fixtures::$ACCESSOR().into()
+            - pattern: Some(xp_test_fixtures::$ACCESSOR())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
+            - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              any:
+                - pattern: inbound.tag.clone()
+                - pattern: req.tag.clone()
+                - pattern: request.tag.clone()
+                - pattern: observed_tag.clone()
+                - pattern: tag.to_owned()
+          - inside:
+              stopBy: end
+              any:
+                - pattern: Call::AddInbound { $$$ }
+                - pattern: Call::RemoveInbound { $$$ }
+                - pattern: Call::AlterInbound { $$$ }
+                - pattern: ReconcileRequest::RemoveInbound { $$$ }
+                - pattern: AlterInboundRequest { $$$ }
+                - pattern: RemoveInboundRequest { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              any:
+                - pattern: remote_tag
+                - pattern: endpoint_tag_ss
+          - inside:
+              stopBy: end
+              any:
+                - pattern: ReconcileRequest::RemoveInbound { $$$ }
+                - pattern: RemoveInboundRequest { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^endpoint_id$'
+          - has:
+              field: value
+              pattern: endpoint_id.clone()
+          - inside:
+              stopBy: end
+              pattern: ReconcileRequest::RebuildInbound { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^(user_id|node_id|endpoint_id)$'
+          - has:
+              field: value
+              any:
+                - pattern: user.user_id.clone()
+                - pattern: endpoint.node_id.clone()
+                - pattern: endpoint.endpoint_id.clone()
+          - inside:
+              stopBy: end
+              pattern: NodeUserEndpointMembership { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              pattern: admin_base_url.clone()
+          - inside:
+              stopBy: end
+              pattern: NodeMeta { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bind$'
+          - has:
+              field: value
+              pattern: admin_addr
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^access_host$'
+          - has:
+              field: value
+              pattern: cluster.access_host.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              pattern: admin_base_url.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^cluster_id$'
+          - has:
+              field: value
+              pattern: '&cluster.cluster_id'
+          - inside:
+              stopBy: end
+              pattern: SignedPayload { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^leader_api_base_url$'
+          - has:
+              field: value
+              pattern: '&cluster.api_base_url'
+          - inside:
+              stopBy: end
+              pattern: SignedPayload { $$$ }
+    # These values are derived from the test's own ephemeral process, listeners, or state.
+    # The exceptions are deliberately constrained to one field/value/record combination.
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^cluster_id$'
+          - has:
+              field: value
+              regex: '^cluster[.]cluster_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: PeerServerState { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^requests$'
+          - has:
+              field: value
+              regex: '^requests[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: PeerServerState { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_id$'
+          - has:
+              field: value
+              regex: '^target[.]node_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^access_host$'
+          - has:
+              field: value
+              regex: '^target[.]access_host[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^api_base_url$'
+          - has:
+              field: value
+              regex: '^"http://127[.]0[.]0[.]1:9"[.]to_string\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Node { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^endpoint_id$'
+          - has:
+              field: value
+              regex: '^xp::id::new_ulid_string\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^node_id$'
+          - has:
+              field: value
+              regex: '^target[.]node_id[.]clone\(\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              regex: '^format!\("vless-mesh-resource-\{index:02\}"\)$'
+          - inside:
+              stopBy: end
+              pattern: Endpoint { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^dest$'
+          - has:
+              field: value
+              regex: '^format!\("host[.]docker[.]internal:\{\}", canary[.]addr[.]port\(\)\)$'
+          - inside:
+              stopBy: end
+              pattern: RealityConfig { $$$ }
+    # These URLs are derived from listeners created by the test itself.
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
+              pattern: Some(format!("https://{}:{}", xp_test_fixtures::loopback_address(), proxy.addr.port()))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
+              pattern: Some(format!("https://{addr}"))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^public_base_url$'
+          - has:
+              field: value
+              pattern: format!("http://{}", server.addr)
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^tag$'
+          - has:
+              field: value
+              regex: '^endpoint[.]tag$'
+          - inside:
+              stopBy: end
+              pattern: xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest { $$$ }
+    - not:
+        all:
+          - has:
+              field: value
+              pattern: node_id.to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: add_cluster_node

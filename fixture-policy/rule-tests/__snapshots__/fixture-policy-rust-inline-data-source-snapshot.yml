@@ -1,0 +1,154 @@
+id: fixture-policy-rust-inline-data-source
+snapshots:
+  ? |
+    mod tests {
+        fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+            };
+        }
+    }
+  : labels:
+    - source: 'mesh_base_url: Some("https://unapproved.invalid".to_owned())'
+      style: primary
+      start: 93
+      end: 153
+    - source: |-
+        mod tests {
+            fn builds_mesh_target() {
+                let fixture = MeshPeerTarget {
+                    mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 173
+    - source: mesh_base_url
+      style: secondary
+      start: 93
+      end: 106
+    - source: Some("https://unapproved.invalid".to_owned())
+      style: secondary
+      start: 108
+      end: 153
+  ? |
+    mod tests {
+        fn builds_node() {
+            let fixture = Node { node_id: "unapproved-node".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'node_id: "unapproved-node".to_owned()'
+      style: primary
+      start: 64
+      end: 101
+    - source: |-
+        mod tests {
+            fn builds_node() {
+                let fixture = Node { node_id: "unapproved-node".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 112
+    - source: node_id
+      style: secondary
+      start: 64
+      end: 71
+    - source: '"unapproved-node".to_owned()'
+      style: secondary
+      start: 73
+      end: 101
+  ? |
+    mod tests {
+        fn builds_probe() {
+            let fixture = Probe {
+                run_id: "unapproved-run".to_owned(),
+                hour: "2026-03-11T11:00:00Z".to_owned(),
+                config_hash: "unapproved-config".to_owned(),
+            };
+        }
+    }
+  : labels:
+    - source: 'run_id: "unapproved-run".to_owned()'
+      style: primary
+      start: 78
+      end: 113
+    - source: |-
+        mod tests {
+            fn builds_probe() {
+                let fixture = Probe {
+                    run_id: "unapproved-run".to_owned(),
+                    hour: "2026-03-11T11:00:00Z".to_owned(),
+                    config_hash: "unapproved-config".to_owned(),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 243
+    - source: run_id
+      style: secondary
+      start: 78
+      end: 84
+    - source: '"unapproved-run".to_owned()'
+      style: secondary
+      start: 86
+      end: 113
+  ? |
+    mod tests {
+        fn builds_probe() {
+            let fixture = Probe { run_id: "unapproved-run".to_owned(), hour: "2026-03-11T11:00:00Z".to_owned(), config_hash: "unapproved-config".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'run_id: "unapproved-run".to_owned()'
+      style: primary
+      start: 66
+      end: 101
+    - source: |-
+        mod tests {
+            fn builds_probe() {
+                let fixture = Probe { run_id: "unapproved-run".to_owned(), hour: "2026-03-11T11:00:00Z".to_owned(), config_hash: "unapproved-config".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 198
+    - source: run_id
+      style: secondary
+      start: 66
+      end: 72
+    - source: '"unapproved-run".to_owned()'
+      style: secondary
+      start: 74
+      end: 101
+  ? |
+    mod tests {
+        fn builds_token() {
+            let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }
+  : labels:
+    - source: 'one_time_secret: "unapproved-secret".to_owned()'
+      style: primary
+      start: 70
+      end: 117
+    - source: |-
+        mod tests {
+            fn builds_token() {
+                let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 128
+    - source: one_time_secret
+      style: secondary
+      start: 70
+      end: 85
+    - source: '"unapproved-secret".to_owned()'
+      style: secondary
+      start: 87
+      end: 117

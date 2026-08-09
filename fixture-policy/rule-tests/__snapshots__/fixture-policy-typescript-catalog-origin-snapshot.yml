@@ -1,0 +1,101 @@
+id: fixture-policy-typescript-catalog-origin
+snapshots:
+  ? |
+    class fixtureCatalog {}
+  : labels:
+    - source: class fixtureCatalog {}
+      style: primary
+      start: 0
+      end: 23
+  ? |
+    const [fixtureCatalog] = source;
+  : labels:
+    - source: '[fixtureCatalog]'
+      style: primary
+      start: 6
+      end: 22
+    - source: fixtureCatalog
+      style: secondary
+      start: 7
+      end: 21
+  ? |
+    const [other, fixtureCatalog] = source;
+  : labels:
+    - source: '[other, fixtureCatalog]'
+      style: primary
+      start: 6
+      end: 29
+    - source: fixtureCatalog
+      style: secondary
+      start: 14
+      end: 28
+  ? |
+    const build = (fixtureCatalog: unknown) => fixtureCatalog;
+  : labels:
+    - source: 'fixtureCatalog: unknown'
+      style: primary
+      start: 15
+      end: 38
+  ? |
+    const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
+  : labels:
+    - source: 'const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };'
+      style: primary
+      start: 0
+      end: 78
+  ? |
+    const { fixtureCatalog } = source;
+  : labels:
+    - source: const { fixtureCatalog } = source;
+      style: primary
+      start: 0
+      end: 34
+  ? |
+    const { nested: { fixtureCatalog } } = source;
+  : labels:
+    - source: 'const { nested: { fixtureCatalog } } = source;'
+      style: primary
+      start: 0
+      end: 46
+  ? |
+    const { source: fixtureCatalog } = source;
+  : labels:
+    - source: 'const { source: fixtureCatalog } = source;'
+      style: primary
+      start: 0
+      end: 42
+  ? |
+    import * as fixtureCatalog from "./fixture-input";
+  : labels:
+    - source: import * as fixtureCatalog from "./fixture-input";
+      style: primary
+      start: 0
+      end: 50
+  ? |
+    import fixtureCatalog from "./fixture-input";
+  : labels:
+    - source: import fixtureCatalog from "./fixture-input";
+      style: primary
+      start: 0
+      end: 45
+  ? |
+    import { fixtureCatalog } from "./fixture-input";
+  : labels:
+    - source: import { fixtureCatalog } from "./fixture-input";
+      style: primary
+      start: 0
+      end: 49
+  ? |
+    import { value as fixtureCatalog } from "./fixture-input";
+  : labels:
+    - source: import { value as fixtureCatalog } from "./fixture-input";
+      style: primary
+      start: 0
+      end: 58
+  ? |
+    try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }
+  : labels:
+    - source: catch (fixtureCatalog) { consume(fixtureCatalog); }
+      style: primary
+      start: 16
+      end: 67

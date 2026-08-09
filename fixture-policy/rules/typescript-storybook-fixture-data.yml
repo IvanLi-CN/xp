@@ -1,0 +1,79 @@
+id: fixture-policy-typescript-storybook-fixture-data
+language: TypeScript
+severity: error
+message: Storybook fixture operational literals must use the fixture catalog.
+note: Keep Storybook factories deterministic and source operational values from fixtureCatalog.
+files:
+  - web/src/fixture-policy/storybook.ts
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        regex: '^(access_host|api_base_url|host|hostname|node_id|node_name|endpoint_id|endpointId|endpoint_tag|endpointTag|user_id|token|last_seen_at|last_sample_at|last_transition_at|window_start|window_end|minute|start_minute|end_minute|observed_at|occurred_at|ip|mesh_url|mesh_base_url|public_base_url|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h)$'
+    - has:
+        field: value
+        not:
+          pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+    - not:
+        all:
+          - has:
+              field: key
+              regex: '^(endpoint_id|endpoint_tag)$'
+          - has:
+              field: value
+              any:
+                - pattern: seed.endpointId
+                - pattern: seed.endpointTag
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    regex: '^(buildSeries|report)$'
+    - not:
+        all:
+          - has:
+              field: key
+              regex: '^window_start$'
+          - has:
+              field: value
+              pattern: windowStart
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: report
+    - not:
+        all:
+          - has:
+              field: key
+              regex: '^window_end$'
+          - has:
+              field: value
+              pattern: minuteFromOffset(windowStart, totalMinutes - 1)
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: report
+    - not:
+        all:
+          - has:
+              field: key
+              regex: '^minute$'
+          - has:
+              field: value
+              pattern: minuteFromOffset(windowStart, minute)
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - has:
+                    field: name
+                    pattern: buildSeries

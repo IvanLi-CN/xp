@@ -1,0 +1,62 @@
+id: fixture-policy-catalog-value-types
+language: Json
+severity: error
+message: Fixture catalog keys must retain their fixed JSON value types.
+files:
+  - fixture-policy/catalog.json
+rule:
+  any:
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"slots"|"subscription")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"canaryHttpsListener"|"canaryHttpsAlternate"|"canaryHttpLoopback"|"publicFallback"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"probeRunPrimary"|"probeRunSecondary"|"probeConfigPrimary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"endpointTagMissing"|"earlier"|"baseline"|"recent"|"later"|"probeHour"|"probeLatest")$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("latencyLow"|"latencyHigh"|"trafficBytes"|"availabilityLow"|"availabilityHigh"|"availabilityFull")$'
+        - has:
+            field: value
+            not:
+              kind: number
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"loopbackServerNames"|"primaryAuthorities"|"tertiaryAuthorities"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443")$'
+        - has:
+            field: value
+            not:
+              kind: array
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("strings"|"numbers"|"stringLists")$'
+        - has:
+            field: value
+            not:
+              kind: array
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^"date"$'
+        - has:
+            field: value
+            not:
+              kind: string

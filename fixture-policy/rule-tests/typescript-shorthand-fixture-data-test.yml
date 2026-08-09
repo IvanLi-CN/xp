@@ -1,0 +1,20 @@
+id: fixture-policy-typescript-shorthand-data-source
+valid:
+  - |
+    const fixture = { tag: fixtureCatalog.identifier.endpointTagPrimary() };
+invalid:
+  - |
+    const tag = "unapproved";
+    const fixture = { tag };
+  - |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  - |
+    const cycle_end_at = new Date().toISOString();
+    const fixture = { cycle_end_at };
+  - |
+    const run_id = "unapproved-run";
+    const fixture = { run_id };
+  - |
+    const hour = "2026-03-11T11:00:00Z";
+    const fixture = { hour };

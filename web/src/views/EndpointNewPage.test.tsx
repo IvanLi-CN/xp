@@ -8,6 +8,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminConfig } from "../api/adminConfig";
 import { createAdminEndpoint } from "../api/adminEndpoints";
@@ -83,10 +84,10 @@ function setupNodeMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-alpha",
-				node_name: "alpha",
-				access_host: "node-xp.example.test",
-				api_base_url: "https://node-xp.example.test:443",
+				node_id: fixtureCatalog.slotString.s182(),
+				node_name: fixtureCatalog.slotString.s86(),
+				access_host: fixtureCatalog.slotString.s130(),
+				api_base_url: fixtureCatalog.slotString.s131(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -99,35 +100,32 @@ function setupNodeMocks() {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
-				endpoint_id: "endpoint-existing",
-				node_id: "node-alpha",
-				tag: "managed-alpha",
+				endpoint_id: fixtureCatalog.slotString.s132(),
+				node_id: fixtureCatalog.slotString.s182(),
+				tag: fixtureCatalog.slotString.s133(),
 				kind: "vless_reality_vision_tcp",
 				port: 443,
 				meta: {
 					reality: {
-						dest: "127.0.0.1:39043",
-						server_names: ["node-xp.example.test"],
+						dest: fixtureCatalog.address.loopback39043(),
+						server_names: fixtureCatalog.slotList.l8(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
 					managed_default: true,
-					canary_upstream: {
-						url: "http://127.0.0.1:8080",
-						mode: "auto",
-					},
+					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				},
 			},
 		],
 	});
 	vi.mocked(fetchAdminConfig).mockResolvedValue({
-		bind: "127.0.0.1:62416",
-		xray_api_addr: "127.0.0.1:10085",
+		bind: fixtureCatalog.slotString.s58(),
+		xray_api_addr: fixtureCatalog.slotString.s59(),
 		data_dir: "./data",
-		node_name: "alpha",
-		access_host: "node-xp.example.test",
-		api_base_url: "https://node-xp.example.test:443",
-		vless_https_canary_bind: "127.0.0.1:39043",
+		node_name: fixtureCatalog.slotString.s86(),
+		access_host: fixtureCatalog.slotString.s130(),
+		api_base_url: fixtureCatalog.slotString.s131(),
+		vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 		quota_poll_interval_secs: 10,
 		quota_auto_unban: true,
 		ip_geo_enabled: false,
@@ -153,9 +151,9 @@ describe("EndpointNewPage", () => {
 
 	it("submits managed VLESS create payload without legacy reality fields", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-managed",
-			node_id: "node-alpha",
-			tag: "ep-managed",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: {
@@ -169,7 +167,7 @@ describe("EndpointNewPage", () => {
 			target: { value: " http://127.0.0.1:8080 " },
 		});
 		fireEvent.change(await screen.findByPlaceholderText("edge.example.com"), {
-			target: { value: "Edge.Example.com." },
+			target: { value: fixtureCatalog.authority.edgeExamplePort443()[0] },
 		});
 		fireEvent.click(await screen.findByRole("button", { name: "Add" }));
 		fireEvent.click(
@@ -179,13 +177,10 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "vless_reality_vision_tcp",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
-				canary_upstream: {
-					url: "http://127.0.0.1:8080",
-					mode: "auto",
-				},
-				accepted_authorities: ["edge.example.com:443"],
+				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				mihomo_smux: {
 					enabled: true,
 					max_connections: 4,
@@ -203,16 +198,16 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(mockNavigate).toHaveBeenCalledWith({
 				to: "/endpoints/$endpointId",
-				params: { endpointId: "ep-managed" },
+				params: { endpointId: fixtureCatalog.slotString.s105() },
 			});
 		});
 	});
 
 	it("omits SMux controls and payload for a legacy endpoint API", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-legacy",
-			node_id: "node-alpha",
-			tag: "ep-legacy",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: { managed_default: true },
@@ -233,19 +228,19 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "vless_reality_vision_tcp",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
-				canary_upstream: undefined,
-				accepted_authorities: undefined,
+				canary_upstream: fixtureCatalog.optional.undefined(),
+				accepted_authorities: fixtureCatalog.optional.undefined(),
 			});
 		});
 	});
 
 	it("restores managed autocomplete suggestions without changing create payload shape", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-managed",
-			node_id: "node-alpha",
-			tag: "ep-managed",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: {
@@ -263,10 +258,10 @@ describe("EndpointNewPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
-			).findByText("https://127.0.0.1:39043"),
+			).findByText(fixtureCatalog.canaryUpstream.httpsListener().url),
 		);
 		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:39043",
+			fixtureCatalog.canaryUpstream.httpsListener().url,
 		);
 
 		fireEvent.click(
@@ -277,10 +272,10 @@ describe("EndpointNewPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("tag-input-suggestions"),
-			).findByText("node-xp.example.test"),
+			).findByText(fixtureCatalog.authority.host130()[0]),
 		);
 		expect(
-			await screen.findByText("node-xp.example.test:443"),
+			await screen.findByText(fixtureCatalog.authority.host130Port443()[0]),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -290,13 +285,10 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "vless_reality_vision_tcp",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
-				canary_upstream: {
-					url: "https://127.0.0.1:39043",
-					mode: "auto",
-				},
-				accepted_authorities: ["node-xp.example.test:443"],
+				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+				accepted_authorities: fixtureCatalog.authority.host130Port443(),
 				mihomo_smux: {
 					enabled: true,
 					max_connections: 4,
@@ -311,15 +303,15 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 			items: [
 				{
-					endpoint_id: "endpoint-existing",
-					node_id: "node-alpha",
-					tag: "managed-alpha",
+					endpoint_id: fixtureCatalog.slotString.s132(),
+					node_id: fixtureCatalog.slotString.s182(),
+					tag: fixtureCatalog.slotString.s133(),
 					kind: "vless_reality_vision_tcp",
 					port: 443,
 					meta: {
 						reality: {
-							dest: "127.0.0.1:49043",
-							server_names: ["node-xp.example.test"],
+							dest: fixtureCatalog.address.loopback49043(),
+							server_names: fixtureCatalog.slotList.l8(),
 							server_names_source: "manual",
 							fingerprint: "chrome",
 						},
@@ -329,13 +321,13 @@ describe("EndpointNewPage", () => {
 			],
 		});
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.slotString.s58(),
+			xray_api_addr: fixtureCatalog.slotString.s59(),
 			data_dir: "./data",
-			node_name: "alpha",
-			access_host: "node-xp.example.test",
-			api_base_url: "https://node-xp.example.test:443",
-			vless_https_canary_bind: "127.0.0.1:39043",
+			node_name: fixtureCatalog.slotString.s86(),
+			access_host: fixtureCatalog.slotString.s130(),
+			api_base_url: fixtureCatalog.slotString.s131(),
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
@@ -359,13 +351,18 @@ describe("EndpointNewPage", () => {
 			within(suggestionPanel)
 				.getAllByText(/^https:\/\/127\.0\.0\.1:/)
 				.map((element) => element.textContent),
-		).toEqual(["https://127.0.0.1:49043", "https://127.0.0.1:39043"]);
+		).toEqual([
+			fixtureCatalog.canaryUpstream.httpsAlternate().url,
+			fixtureCatalog.canaryUpstream.httpsListener().url,
+		]);
 
 		fireEvent.click(
-			within(suggestionPanel).getByText("https://127.0.0.1:49043"),
+			within(suggestionPanel).getByText(
+				fixtureCatalog.canaryUpstream.httpsAlternate().url,
+			),
 		);
 		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:49043",
+			fixtureCatalog.canaryUpstream.httpsAlternate().url,
 		);
 	});
 
@@ -374,9 +371,9 @@ describe("EndpointNewPage", () => {
 		{ timeout: 10_000 },
 		async () => {
 			vi.mocked(createAdminEndpoint).mockResolvedValue({
-				endpoint_id: "ep-managed-8443",
-				node_id: "node-alpha",
-				tag: "ep-managed-8443",
+				endpoint_id: fixtureCatalog.slotString.s185(),
+				node_id: fixtureCatalog.slotString.s182(),
+				tag: fixtureCatalog.slotString.s185(),
 				kind: "vless_reality_vision_tcp",
 				port: 8443,
 				meta: {
@@ -397,10 +394,10 @@ describe("EndpointNewPage", () => {
 			fireEvent.click(
 				await within(
 					await screen.findByTestId("tag-input-suggestions"),
-				).findByText("node-xp.example.test:8443"),
+				).findByText(fixtureCatalog.authority.host130Port8443()[0]),
 			);
 			expect(
-				await screen.findByText("node-xp.example.test:8443"),
+				await screen.findByText(fixtureCatalog.authority.host130Port8443()[0]),
 			).toBeInTheDocument();
 
 			fireEvent.click(
@@ -410,9 +407,9 @@ describe("EndpointNewPage", () => {
 			await waitFor(() => {
 				expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 					kind: "vless_reality_vision_tcp",
-					node_id: "node-alpha",
+					node_id: fixtureCatalog.slotString.s182(),
 					port: 8443,
-					accepted_authorities: ["node-xp.example.test:8443"],
+					accepted_authorities: fixtureCatalog.authority.host130Port8443(),
 					mihomo_smux: {
 						enabled: true,
 						max_connections: 4,
@@ -431,10 +428,10 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-hinet",
-					node_name: "hinet",
-					access_host: "hinet-ep.707979.xyz",
-					api_base_url: "https://hinet-xp.707979.xyz",
+					node_id: fixtureCatalog.slotString.s124(),
+					node_name: fixtureCatalog.slotString.s125(),
+					access_host: fixtureCatalog.slotString.s126(),
+					api_base_url: fixtureCatalog.slotString.s127(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -446,13 +443,13 @@ describe("EndpointNewPage", () => {
 		});
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.slotString.s58(),
+			xray_api_addr: fixtureCatalog.slotString.s59(),
 			data_dir: "./data",
-			node_name: "hinet",
-			access_host: "hinet-ep.707979.xyz",
-			api_base_url: "https://hinet-xp.707979.xyz",
-			vless_https_canary_bind: "127.0.0.1:39043",
+			node_name: fixtureCatalog.slotString.s125(),
+			access_host: fixtureCatalog.slotString.s126(),
+			api_base_url: fixtureCatalog.slotString.s127(),
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
@@ -462,9 +459,9 @@ describe("EndpointNewPage", () => {
 			admin_token_masked: "********",
 		});
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-hinet-managed",
-			node_id: "node-hinet",
-			tag: "ep-hinet-managed",
+			endpoint_id: fixtureCatalog.slotString.s186(),
+			node_id: fixtureCatalog.slotString.s124(),
+			tag: fixtureCatalog.slotString.s186(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: {
@@ -482,10 +479,10 @@ describe("EndpointNewPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("autocomplete-suggestions"),
-			).findByText("https://127.0.0.1:39043"),
+			).findByText(fixtureCatalog.canaryUpstream.httpsListener().url),
 		);
 		expect(await screen.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:39043",
+			fixtureCatalog.canaryUpstream.httpsListener().url,
 		);
 
 		fireEvent.click(
@@ -496,10 +493,10 @@ describe("EndpointNewPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("tag-input-suggestions"),
-			).findByText("hinet-ep.707979.xyz"),
+			).findByText(fixtureCatalog.authority.host126()[0]),
 		);
 		expect(
-			await screen.findByText("hinet-ep.707979.xyz:443"),
+			await screen.findByText(fixtureCatalog.authority.host126Port443()[0]),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -509,13 +506,10 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "vless_reality_vision_tcp",
-				node_id: "node-hinet",
+				node_id: fixtureCatalog.slotString.s124(),
 				port: 443,
-				canary_upstream: {
-					url: "https://127.0.0.1:39043",
-					mode: "auto",
-				},
-				accepted_authorities: ["hinet-ep.707979.xyz:443"],
+				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+				accepted_authorities: fixtureCatalog.authority.host126Port443(),
 				mihomo_smux: {
 					enabled: true,
 					max_connections: 4,
@@ -548,9 +542,9 @@ describe("EndpointNewPage", () => {
 
 	it("submits the editable Mihomo SMux policy for SS2022", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-smux",
-			node_id: "node-alpha",
-			tag: "ep-smux",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
 			kind: "ss2022_2022_blake3_aes_128_gcm",
 			port: 443,
 			meta: {},
@@ -578,7 +572,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: "ss2022_2022_blake3_aes_128_gcm",
-				node_id: "node-alpha",
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				mihomo_smux: {
 					enabled: false,
@@ -618,10 +612,10 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-alpha",
-					node_name: "alpha",
-					access_host: "",
-					api_base_url: "not-a-url",
+					node_id: fixtureCatalog.slotString.s182(),
+					node_name: fixtureCatalog.slotString.s86(),
+					access_host: fixtureCatalog.string.none(),
+					api_base_url: fixtureCatalog.slotString.s123(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -633,13 +627,13 @@ describe("EndpointNewPage", () => {
 		});
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.slotString.s58(),
+			xray_api_addr: fixtureCatalog.slotString.s59(),
 			data_dir: "./data",
-			node_name: "alpha",
-			access_host: "",
-			api_base_url: "not-a-url",
-			vless_https_canary_bind: "127.0.0.1:39043",
+			node_name: fixtureCatalog.slotString.s86(),
+			access_host: fixtureCatalog.string.none(),
+			api_base_url: fixtureCatalog.slotString.s123(),
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,

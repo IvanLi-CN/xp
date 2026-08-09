@@ -1,0 +1,20 @@
+id: fixture-policy-catalog-number-values
+snapshots:
+  '{ "metrics": { "latencyLow": 13 } }':
+    labels:
+    - source: '13'
+      style: primary
+      start: 29
+      end: 31
+  '{ "slots": { "numbers": [1000000] } }':
+    labels:
+    - source: '1000000'
+      style: primary
+      start: 25
+      end: 32
+  '{ "slots": { "numbers": [382] } }':
+    labels:
+    - source: '382'
+      style: primary
+      start: 25
+      end: 28

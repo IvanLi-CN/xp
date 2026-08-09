@@ -740,7 +740,7 @@ mod tests {
                 spec: xp::managed_default_endpoints::DefaultVlessEndpointSpec {
                     port: 53844,
                     reality_dest: "127.0.0.1:39043".to_string(),
-                    server_names: vec!["example.com".to_string()],
+                    server_names: xp_test_fixtures::primary_server_names(),
                     server_names_source: xp::protocol::RealityServerNamesSource::Manual,
                     fingerprint: "chrome".to_string(),
                 },

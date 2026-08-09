@@ -1,0 +1,88 @@
+id: fixture-policy-typescript-adapter-output-provenance
+language: TypeScript
+severity: error
+message: Fixture adapter accessors must derive values from the checked-in catalog.
+files:
+  - web/src/fixture-policy/catalog.ts
+rule:
+  any:
+    - all:
+        - kind: function_declaration
+        - not:
+            any:
+              - pattern: |
+                  function stringSlotEntry(_value: string, index: number) {
+                    return [`s${index}`, () => catalog.slots.strings[index]];
+                  }
+              - pattern: |
+                  function numberSlotEntry(_value: number, index: number) {
+                    return [`n${index}`, () => catalog.slots.numbers[index]];
+                  }
+              - pattern: |
+                  function listSlotEntry(_value: string[], index: number) {
+                    return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
+                  }
+              - pattern: |
+                  function createSubscriptionTokenFactory() {
+                    let subscriptionTokenIndex = 0;
+                    return () => {
+                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+                      if (!accessor) {
+                        throw new Error("synthetic subscription token sequence exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
+                      return accessor();
+                    };
+                  }
+              - pattern: |
+                  function nextMeshPeerNodeId() {
+                    const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+                    meshPeerNodeIdIndex += 1;
+                    return catalog.slots.strings[slotIndex];
+                  }
+    - kind: function_expression
+    - all:
+        - kind: arrow_function
+        - not:
+            all:
+              - inside:
+                  stopBy: end
+                  all:
+                    - kind: function_declaration
+                    - has:
+                        field: name
+                        pattern: createSubscriptionTokenFactory
+              - has:
+                  field: body
+                  pattern: |
+                    {
+                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+                      if (!accessor) {
+                        throw new Error("synthetic subscription token sequence exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
+                      return accessor();
+                    }
+        - not:
+            any:
+              - has:
+                  field: body
+                  regex: '^null$'
+              - has:
+                  field: body
+                  regex: '^undefined$'
+              - has:
+                  field: body
+                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+$'
+              - has:
+                  field: body
+                  regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+              - has:
+                  field: body
+                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
+              - has:
+                  field: body
+                  regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
+              - has:
+                  field: body
+                  regex: '^createSubscriptionTokenFactory\(\)$'

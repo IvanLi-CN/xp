@@ -1,0 +1,29 @@
+id: fixture-policy-tsx-data-source
+valid:
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+  - |
+    const fixture = { start_at: fixtureCatalog.timestamp.baseline() };
+invalid:
+  - |
+    const fixture = { host: "unapproved.fixture.test" };
+  - |
+    const fixture = { node_name: "unapproved-node" };
+  - |
+    const fixture = { end_at: new Date().toISOString() };
+  - |
+    const fixture = { total_bytes: 4096 };
+  - |
+    const fixture = { last_synced_at: new Date().toISOString() };
+  - |
+    const fixture = { window_end: process.env.TEST_WINDOW_END };
+  - |
+    const fixture = { run_id: "unapproved-run" };
+  - |
+    const fixture = { config_hash: "unapproved-config" };
+  - |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { last_success_at: new Date().toISOString() };

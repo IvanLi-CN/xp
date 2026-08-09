@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	AdminNodeRuntimeDetailResponseSchema,
 	AdminNodesRuntimeResponseSchema,
@@ -18,31 +19,31 @@ describe("admin node runtime schemas", () => {
 			unreachable_nodes: [],
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "node-1",
-					api_base_url: "https://node-1.example.com",
-					access_host: "node-1.example.com",
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+					api_base_url: fixtureCatalog.url.primaryApi(),
+					access_host: fixtureCatalog.host.primary(),
 					summary: {
 						status: "up",
-						updated_at: "2026-02-26T08:00:00Z",
+						updated_at: fixtureCatalog.timestamp.baseline(),
 					},
 					components: [
 						{
 							component: "xp",
 							status: "up",
-							last_ok_at: null,
-							last_fail_at: null,
-							down_since: null,
+							last_ok_at: fixtureCatalog.timestamp.none(),
+							last_fail_at: fixtureCatalog.timestamp.none(),
+							down_since: fixtureCatalog.timestamp.none(),
 							consecutive_failures: 0,
 							recoveries_observed: 0,
 							restart_attempts: 0,
-							last_restart_at: null,
-							last_restart_fail_at: null,
+							last_restart_at: fixtureCatalog.timestamp.none(),
+							last_restart_fail_at: fixtureCatalog.timestamp.none(),
 						},
 					],
 					recent_slots: [
 						{
-							slot_start: "2026-02-26T07:30:00Z",
+							slot_start: fixtureCatalog.timestamp.baseline(),
 							status: "up",
 						},
 					],
@@ -57,10 +58,10 @@ describe("admin node runtime schemas", () => {
 	it("accepts runtime detail payload", () => {
 		const parsed = AdminNodeRuntimeDetailResponseSchema.parse({
 			node: {
-				node_id: "node-1",
-				node_name: "node-1",
-				api_base_url: "https://node-1.example.com",
-				access_host: "node-1.example.com",
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
+				access_host: fixtureCatalog.host.primary(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -70,32 +71,32 @@ describe("admin node runtime schemas", () => {
 			},
 			summary: {
 				status: "degraded",
-				updated_at: "2026-02-26T08:00:00Z",
+				updated_at: fixtureCatalog.timestamp.baseline(),
 			},
 			components: [
 				{
 					component: "xray",
 					status: "down",
-					last_ok_at: null,
-					last_fail_at: "2026-02-26T07:59:50Z",
-					down_since: "2026-02-26T07:59:50Z",
+					last_ok_at: fixtureCatalog.timestamp.none(),
+					last_fail_at: fixtureCatalog.timestamp.baseline(),
+					down_since: fixtureCatalog.timestamp.baseline(),
 					consecutive_failures: 3,
 					recoveries_observed: 1,
 					restart_attempts: 2,
-					last_restart_at: "2026-02-26T07:59:55Z",
-					last_restart_fail_at: null,
+					last_restart_at: fixtureCatalog.timestamp.baseline(),
+					last_restart_fail_at: fixtureCatalog.timestamp.none(),
 				},
 			],
 			recent_slots: [
 				{
-					slot_start: "2026-02-26T07:30:00Z",
+					slot_start: fixtureCatalog.timestamp.baseline(),
 					status: "degraded",
 				},
 			],
 			events: [
 				{
 					event_id: "evt-1",
-					occurred_at: "2026-02-26T07:59:55Z",
+					occurred_at: fixtureCatalog.timestamp.baseline(),
 					component: "xray",
 					kind: "restart_requested",
 					message: "xray restart requested",

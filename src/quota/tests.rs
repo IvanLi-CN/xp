@@ -19,7 +19,10 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Call {
-    RemoveUser { tag: String, email: String },
+    RemoveUser {
+        observed_inbound_tag: String,
+        email: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -93,7 +96,7 @@ impl HandlerService for RecordingHandler {
         let decoded: crate::xray::proto::xray::app::proxyman::command::RemoveUserOperation =
             decode_typed(&op);
         self.state.lock().await.calls.push(Call::RemoveUser {
-            tag: req.tag,
+            observed_inbound_tag: req.tag,
             email: decoded.email,
         });
         Ok(tonic::Response::new(
@@ -315,7 +318,7 @@ fn test_store_init(
     quota_auto_unban: bool,
 ) -> (Config, Arc<Mutex<JsonSnapshotStore>>) {
     let config = Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::slot_s447().parse().unwrap(),
         xray_api_addr,
         xray_health_interval_secs: 5,
         xray_health_fails_before_down: 4,
@@ -334,9 +337,9 @@ fn test_store_init(
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir: tmp_dir.to_path_buf(),
         admin_token_hash: String::new(),
-        node_name: "node-1".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s448().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             crate::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -372,7 +375,7 @@ fn test_store_init(
 
     let store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: config.data_dir.clone(),
-        bootstrap_node_id: None,
+        bootstrap_node_id: Some(xp_test_fixtures::slot_s522().to_owned()),
         bootstrap_node_name: config.node_name.clone(),
         bootstrap_access_host: config.access_host.clone(),
         bootstrap_api_base_url: config.api_base_url.clone(),
@@ -468,10 +471,10 @@ async fn shared_quota_weight_change_updates_bank_immediately_same_day() {
         // Enable shared node quota with a deterministic (UTC) reset rule.
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -607,7 +610,7 @@ async fn shared_quota_weight_change_updates_bank_immediately_same_day() {
         let mut store = store.lock().await;
         DesiredStateCommand::SetUserNodeWeight {
             user_id: p1_id.clone(),
-            node_id: node_id.clone(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
             weight: 200,
         }
         .apply(store.state_mut())
@@ -676,10 +679,10 @@ async fn shared_quota_fixed_offset_day_index_starts_at_zero() {
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 31; // distributable=31 => credit=1/day
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -751,10 +754,10 @@ async fn shared_quota_enabled_user_set_change_updates_bank_immediately_same_day(
         // Deterministic (UTC) reset rule.
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -997,10 +1000,10 @@ async fn shared_quota_tier_change_p3_to_p2_unbans_and_allocates_immediately() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1184,10 +1187,10 @@ async fn shared_quota_quota_increase_unbans_immediately_same_day() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 256 * 1024 * 1024 + 1024, // distributable=1024
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1279,10 +1282,10 @@ async fn shared_quota_quota_increase_unbans_immediately_same_day() {
         let mut store = store.lock().await;
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 256 * 1024 * 1024 + 8192, // distributable=8192
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1330,10 +1333,10 @@ async fn shared_quota_weight_decrease_can_ban_without_new_traffic() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1360,14 +1363,14 @@ async fn shared_quota_weight_decrease_can_ban_without_new_traffic() {
         // Start with an asymmetric weight for u1.
         DesiredStateCommand::SetUserNodeWeight {
             user_id: u1.user_id.clone(),
-            node_id: node_id.clone(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
             weight: 200,
         }
         .apply(store.state_mut())
         .unwrap();
         DesiredStateCommand::SetUserNodeWeight {
             user_id: u2.user_id.clone(),
-            node_id: node_id.clone(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
             weight: 100,
         }
         .apply(store.state_mut())
@@ -1473,7 +1476,7 @@ async fn shared_quota_weight_decrease_can_ban_without_new_traffic() {
         let mut store = store.lock().await;
         DesiredStateCommand::SetUserNodeWeight {
             user_id: u1_id.clone(),
-            node_id: node_id.clone(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
             weight: 1,
         }
         .apply(store.state_mut())
@@ -1499,7 +1502,8 @@ async fn shared_quota_weight_decrease_can_ban_without_new_traffic() {
     assert!(
         st.calls.iter().any(|c| matches!(
             c,
-            Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email
+            Call::RemoveUser { observed_inbound_tag, email: e }
+                if observed_inbound_tag == &endpoint_tag && e == &email
         )),
         "expected xray remove_user to be issued on immediate ban"
     );
@@ -1522,10 +1526,10 @@ async fn shared_quota_tier_change_p2_to_p3_bans_immediately_without_new_traffic(
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1609,7 +1613,7 @@ async fn shared_quota_tier_change_p2_to_p3_bans_immediately_without_new_traffic(
     assert!(
             st.calls
                 .iter()
-                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)),
+                .any(|c| matches!(c, Call::RemoveUser { observed_inbound_tag, email: e } if observed_inbound_tag == &endpoint_tag && e == &email)),
             "expected xray remove_user to be issued on immediate ban"
         );
 
@@ -1630,10 +1634,10 @@ async fn shared_quota_remove_user_access_updates_bank_immediately_same_day() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1777,10 +1781,10 @@ async fn shared_quota_disable_policy_clears_bans_and_pacing_state() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 256 * 1024 * 1024 + 1024, // distributable=1024
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -1920,10 +1924,10 @@ async fn shared_quota_tier_promotion_p2_to_p1_unbans_immediately_without_new_tra
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2034,7 +2038,7 @@ async fn shared_quota_tier_promotion_p2_to_p1_unbans_immediately_without_new_tra
         assert!(
                 st.calls
                     .iter()
-                    .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)),
+                    .any(|c| matches!(c, Call::RemoveUser { observed_inbound_tag, email: e } if observed_inbound_tag == &endpoint_tag && e == &email)),
                 "expected xray remove_user on ban"
             );
     }
@@ -2089,10 +2093,10 @@ async fn shared_quota_tier_demotion_p1_to_p2_bans_immediately_without_new_traffi
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2209,7 +2213,7 @@ async fn shared_quota_tier_demotion_p1_to_p2_bans_immediately_without_new_traffi
     assert!(
             st.calls
                 .iter()
-                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)),
+                .any(|c| matches!(c, Call::RemoveUser { observed_inbound_tag, email: e } if observed_inbound_tag == &endpoint_tag && e == &email)),
             "expected xray remove_user on immediate ban"
         );
 
@@ -2231,10 +2235,10 @@ async fn shared_quota_enabling_new_user_can_ban_existing_user_immediately_same_d
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2379,7 +2383,7 @@ async fn shared_quota_enabling_new_user_can_ban_existing_user_immediately_same_d
     let st = state.lock().await;
     assert!(
         st.calls.iter().any(
-            |c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &u1_tag && e == &u1_email)
+            |c| matches!(c, Call::RemoveUser { observed_inbound_tag, email: e } if observed_inbound_tag == &u1_tag && e == &u1_email)
         ),
         "expected xray remove_user on immediate ban"
     );
@@ -2402,10 +2406,10 @@ async fn shared_quota_p2_overflow_reaches_p3_via_p1_when_p1_at_cap() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2581,10 +2585,10 @@ async fn shared_quota_p2_overflow_flows_to_p3_when_no_p1() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2741,16 +2745,16 @@ async fn shared_quota_quota_decrease_can_ban_without_new_traffic() {
     let tmp = tempfile::tempdir().unwrap();
     let (config, store) = test_store_init(tmp.path(), addr, true);
 
-    let (node_id, user_id, endpoint_id, membership, endpoint_tag) = {
+    let (_node_id, user_id, endpoint_id, membership, endpoint_tag) = {
         let mut store = store.lock().await;
         let node_id = store.list_nodes()[0].node_id.clone();
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 4 * 1024 * 1024 * 1024, // 4GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2827,10 +2831,10 @@ async fn shared_quota_quota_decrease_can_ban_without_new_traffic() {
         let mut store = store.lock().await;
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -2856,7 +2860,7 @@ async fn shared_quota_quota_decrease_can_ban_without_new_traffic() {
     assert!(
             st.calls
                 .iter()
-                .any(|c| matches!(c, Call::RemoveUser { tag, email: e } if tag == &endpoint_tag && e == &email)),
+                .any(|c| matches!(c, Call::RemoveUser { observed_inbound_tag, email: e } if observed_inbound_tag == &endpoint_tag && e == &email)),
             "expected xray remove_user to be issued on immediate ban"
         );
 
@@ -2878,10 +2882,10 @@ async fn shared_quota_cycle_rollover_resets_pacing_and_unbans() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -3017,10 +3021,10 @@ async fn shared_quota_quota_decrease_across_day_rollover_does_not_false_ban() {
 
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 4 * 1024 * 1024 * 1024, // 4GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -3076,10 +3080,10 @@ async fn shared_quota_quota_decrease_across_day_rollover_does_not_false_ban() {
         let mut store = store.lock().await;
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -3148,10 +3152,10 @@ async fn shared_quota_tick_gap_does_not_false_ban_when_cap_decreases() {
         let node_quota_limit_bytes = 256 * 1024 * 1024 + 311;
         let _ = store
             .upsert_node(Node {
-                node_id: node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: node_quota_limit_bytes,
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,
@@ -3287,10 +3291,10 @@ async fn remote_membership_does_not_call_xray_or_create_usage() {
         let remote_node_id = "node-remote".to_string();
         let _ = store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62417".to_string(),
+                node_id: xp_test_fixtures::slot_s450().to_owned(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s451().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -3359,10 +3363,10 @@ async fn remote_membership_is_ignored_when_local_membership_exists() {
         let remote_node_id = "node-remote".to_string();
         let _ = store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62417".to_string(),
+                node_id: xp_test_fixtures::slot_s450().to_owned(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s451().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -3468,10 +3472,10 @@ async fn rollover_does_not_auto_unban_when_disabled_in_config() {
         // Enable enforceable shared quota with a deterministic (UTC+8) reset rule.
         let _ = store
             .upsert_node(Node {
-                node_id: local_node_id.clone(),
-                node_name: "node-1".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:62416".to_string(),
+                node_id: xp_test_fixtures::slot_s522().to_owned(),
+                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                access_host: xp_test_fixtures::slot_s448().to_owned(),
+                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
                 quota_limit_bytes: 1024 * 1024 * 1024, // 1GiB
                 quota_reset: NodeQuotaReset::Monthly {
                     day_of_month: 1,

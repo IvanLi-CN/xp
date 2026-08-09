@@ -30,8 +30,8 @@ impl crate::inbound_ip_usage::GeoLookup for TestGeoLookup {
 fn test_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),
-        bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_id: Some(xp_test_fixtures::slot_s457().to_owned()),
+        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     }
@@ -41,40 +41,75 @@ fn test_user(user_id: &str) -> User {
     User {
         user_id: user_id.to_string(),
         display_name: user_id.to_string(),
-        subscription_token: format!("sub_{user_id}"),
+        subscription_token: xp_test_fixtures::slot_s512().to_owned(),
         credential_epoch: 0,
         priority_tier: UserPriorityTier::P2,
         quota_reset: UserQuotaReset::default(),
     }
 }
 
-fn test_node(node_id: &str) -> Node {
+fn test_node(_node_id: &str) -> Node {
     Node {
-        node_id: node_id.to_string(),
-        node_name: node_id.to_string(),
-        access_host: "localhost".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        node_name: xp_test_fixtures::slot_s477().to_owned(),
+        access_host: xp_test_fixtures::slot_s513().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     }
 }
 
-fn ss_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: node_id.to_string(),
-        tag: endpoint_id.to_string(),
-        kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-        port: 10_000,
-        meta: json!({}),
+fn ss_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
+    match endpoint_id {
+        "endpoint_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s454().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "endpoint_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s500().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "endpoint_3" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s502().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s503().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "ss_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s462().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "ss_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s527().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s532().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        _ => panic!("unknown test SS endpoint {endpoint_id}"),
     }
 }
 
-fn vless_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
+fn vless_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "example.com:443".to_string(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::slot_s514().to_owned(),
+            server_names: xp_test_fixtures::slot_l31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -84,19 +119,30 @@ fn vless_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: node_id.to_string(),
-        tag: endpoint_id.to_string(),
-        kind: EndpointKind::VlessRealityVisionTcp,
-        port: 443,
-        meta: serde_json::to_value(meta).unwrap(),
+    match endpoint_id {
+        "vless_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s467().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s469().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        },
+        "vless_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::slot_s536().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s537().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        },
+        _ => panic!("unknown test VLESS endpoint {endpoint_id}"),
     }
 }
 
@@ -105,10 +151,10 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
     state.nodes.insert(
         "node_keep".to_string(),
         Node {
-            node_id: "node_keep".to_string(),
-            node_name: "keep".to_string(),
-            access_host: "keep.example.com".to_string(),
-            api_base_url: "https://keep.example.com".to_string(),
+            node_id: xp_test_fixtures::slot_s515().to_owned(),
+            node_name: xp_test_fixtures::slot_s642().to_owned(),
+            access_host: xp_test_fixtures::slot_s516().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s517().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -116,9 +162,9 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_keep".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+            node_id: xp_test_fixtures::slot_s515().to_owned(),
+            tag: xp_test_fixtures::slot_s518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -140,12 +186,12 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
         EndpointProbeNodeSample {
             ok: true,
             skipped: false,
-            checked_at: "2026-03-11T11:05:00Z".to_string(),
-            latency_ms: Some(120),
+            checked_at: xp_test_fixtures::slot_s519().to_owned(),
+            latency_ms: xp_test_fixtures::slot_n21(),
             target_id: None,
             target_url: None,
             error: None,
-            config_hash: "cfg".to_string(),
+            config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
         },
     );
     bucket.by_node.insert(
@@ -153,12 +199,12 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
         EndpointProbeNodeSample {
             ok: true,
             skipped: false,
-            checked_at: "2026-03-11T11:06:00Z".to_string(),
-            latency_ms: Some(140),
+            checked_at: xp_test_fixtures::slot_s520().to_owned(),
+            latency_ms: xp_test_fixtures::slot_n22(),
             target_id: None,
             target_url: None,
             error: None,
-            config_hash: "cfg".to_string(),
+            config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
         },
     );
     state
@@ -216,7 +262,7 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
     let store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: data_dir.to_path_buf(),
         bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     })
@@ -270,12 +316,12 @@ fn load_or_init_persists_pruned_usage_memberships() {
         store.usage.memberships.insert(
             "stale_user::stale_endpoint".to_string(),
             MembershipUsage {
-                cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
-                cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                cycle_start_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                cycle_end_at: xp_test_fixtures::recent_timestamp().to_owned(),
                 used_bytes: 10,
                 last_uplink_total: 10,
                 last_downlink_total: 0,
-                last_seen_at: "2026-01-01T00:00:10Z".to_string(),
+                last_seen_at: xp_test_fixtures::slot_s521().to_owned(),
                 quota_banned: false,
                 quota_banned_at: None,
             },
@@ -314,10 +360,10 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
     state.nodes.insert(
         node_id.clone(),
         Node {
-            node_id: node_id.clone(),
-            node_name: "node-1".to_string(),
-            access_host: "".to_string(),
-            api_base_url: "https://127.0.0.1:62416".to_string(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
+            node_name: xp_test_fixtures::slot_s605().to_owned(),
+            access_host: xp_test_fixtures::slot_s448().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s449().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -325,9 +371,9 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
     state.endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
-            endpoint_id: endpoint_id.clone(),
-            node_id: node_id.clone(),
-            tag: "e1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
+            tag: xp_test_fixtures::slot_s499().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 31234,
             meta: json!({}),
@@ -338,7 +384,7 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
         User {
             user_id: user_id.clone(),
             display_name: "alice".to_string(),
-            subscription_token: "sub_1".to_string(),
+            subscription_token: xp_test_fixtures::slot_s481().to_owned(),
             credential_epoch: 0,
             priority_tier: UserPriorityTier::P2,
             quota_reset: UserQuotaReset::default(),
@@ -348,8 +394,8 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
         .node_user_endpoint_memberships
         .insert(NodeUserEndpointMembership {
             user_id: user_id.clone(),
-            node_id: node_id.clone(),
-            endpoint_id: endpoint_id.clone(),
+            node_id: xp_test_fixtures::slot_s522().to_owned(),
+            endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
         });
 
     let state_path = data_dir.join("state.json");
@@ -435,19 +481,19 @@ fn compat_noop_can_carry_node_egress_probe_state() {
     state.nodes.insert(
         "node-1".to_string(),
         Node {
-            node_id: "node-1".to_string(),
-            node_name: "Tokyo".to_string(),
-            access_host: "tokyo.example.com".to_string(),
-            api_base_url: "https://tokyo.example.com".to_string(),
+            node_id: xp_test_fixtures::slot_s523().to_owned(),
+            node_name: xp_test_fixtures::slot_s644().to_owned(),
+            access_host: xp_test_fixtures::slot_s524().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s525().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
     );
     let probe = NodeEgressProbeState {
-        selected_public_ip: Some("203.0.113.8".to_string()),
+        selected_public_ip: Some(xp_test_fixtures::slot_s526().to_owned()),
         subscription_region: NodeSubscriptionRegion::Taiwan,
-        checked_at: "2026-04-24T00:00:00Z".to_string(),
-        last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+        checked_at: xp_test_fixtures::slot_s488().to_owned(),
+        last_success_at: Some(xp_test_fixtures::slot_s117().to_owned()),
         ..NodeEgressProbeState::default()
     };
     let note = encode_node_egress_probe_compat_note("node-1", &probe).unwrap();
@@ -918,7 +964,7 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
     .unwrap();
 
     DesiredStateCommand::DeleteEndpoint {
-        endpoint_id: "ss_1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -947,17 +993,12 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
 fn upsert_vless_endpoint_manual_preserves_dest() {
     let mut state = PersistedState::empty();
 
-    let endpoint_id = "endpoint_1".to_string();
-    let node_id = "node_1".to_string();
+    let endpoint_id = xp_test_fixtures::slot_s453().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "ignored.example.com:443".to_string(),
-            server_names: vec![
-                " b.example.com ".to_string(),
-                "a.example.com".to_string(),
-                "B.example.com".to_string(),
-            ],
+            dest: xp_test_fixtures::slot_s528().to_owned(),
+            server_names: xp_test_fixtures::slot_l33(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -967,16 +1008,16 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id,
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -992,9 +1033,12 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
 
     assert_eq!(
         meta.reality.server_names,
-        vec!["b.example.com".to_string(), "a.example.com".to_string()]
+        vec![
+            "edge-b.fixture.test".to_string(),
+            "edge-a.fixture.test".to_string(),
+        ]
     );
-    assert_eq!(meta.reality.dest, "ignored.example.com:443");
+    assert_eq!(meta.reality.dest, xp_test_fixtures::slot_s528());
 }
 
 #[test]
@@ -1003,8 +1047,8 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: String::new(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::slot_s492().to_owned(),
+            server_names: xp_test_fixtures::slot_l31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -1014,16 +1058,16 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: "endpoint_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1058,12 +1102,12 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         },
     ];
 
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::slot_s453().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: String::new(),
-            server_names: vec![],
+            dest: xp_test_fixtures::slot_s492().to_owned(),
+            server_names: xp_test_fixtures::slot_l35(),
             server_names_source: RealityServerNamesSource::Global,
             fingerprint: "chrome".to_string(),
         },
@@ -1073,16 +1117,16 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1123,12 +1167,12 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         },
     ];
 
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::slot_s453().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "127.0.0.1:39043".to_string(),
-            server_names: vec![],
+            dest: xp_test_fixtures::slot_s531().to_owned(),
+            server_names: xp_test_fixtures::slot_l35(),
             server_names_source: RealityServerNamesSource::Global,
             fingerprint: "chrome".to_string(),
         },
@@ -1138,16 +1182,16 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: true,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s529().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1168,7 +1212,7 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
             "third.example.com".to_string()
         ]
     );
-    assert_eq!(meta.reality.dest, "127.0.0.1:39043");
+    assert_eq!(meta.reality.dest, xp_test_fixtures::slot_s531());
 }
 
 #[test]
@@ -1177,13 +1221,13 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
     let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
 
     let node_id = store.list_nodes()[0].node_id.clone();
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::slot_s453().to_owned();
     let kind = EndpointKind::VlessRealityVisionTcp;
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "example.com:443".to_string(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::slot_s514().to_owned(),
+            server_names: xp_test_fixtures::slot_l31(),
             server_names_source: Default::default(),
             fingerprint: "chrome".to_string(),
         },
@@ -1193,8 +1237,8 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
         },
         short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
         active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::slot_l32(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
@@ -1204,9 +1248,9 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
     store.state_mut().endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
-            endpoint_id: endpoint_id.clone(),
+            endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
             node_id,
-            tag: endpoint_tag(&kind, &endpoint_id),
+            tag: xp_test_fixtures::slot_s532().to_owned(),
             kind,
             port: 443,
             meta: endpoint_meta,
@@ -1446,8 +1490,8 @@ fn record_inbound_ip_usage_samples_persists_minute_and_warning_state() {
                     membership_key: membership_key.clone(),
                     user_id: user.user_id,
                     node_id,
-                    endpoint_id: endpoint.endpoint_id,
-                    endpoint_tag: endpoint.tag,
+                    endpoint_id: xp_test_fixtures::slot_s533().to_owned(),
+                    endpoint_tag: xp_test_fixtures::slot_s534().to_owned(),
                     ips: vec!["203.0.113.7".to_string()],
                 }],
                 &resolver,
@@ -1500,17 +1544,17 @@ fn prune_and_clear_inbound_ip_usage_remove_stale_memberships() {
                 crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: valid_membership_key.clone(),
                     user_id: user.user_id,
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id.clone(),
-                    endpoint_tag: endpoint.tag.clone(),
+                    node_id: xp_test_fixtures::slot_s522().to_owned(),
+                    endpoint_id: xp_test_fixtures::slot_s456().to_owned(),
+                    endpoint_tag: xp_test_fixtures::slot_s535().to_owned(),
                     ips: vec!["203.0.113.7".to_string()],
                 },
                 crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: "stale-user::stale-endpoint".to_string(),
                     user_id: "stale-user".to_string(),
                     node_id,
-                    endpoint_id: "stale-endpoint".to_string(),
-                    endpoint_tag: "stale-tag".to_string(),
+                    endpoint_id: xp_test_fixtures::slot_s536().to_owned(),
+                    endpoint_tag: xp_test_fixtures::slot_s537().to_owned(),
                     ips: vec!["198.51.100.9".to_string()],
                 },
             ],
@@ -1570,10 +1614,10 @@ fn prune_and_clear_inbound_ip_usage_remove_stale_memberships() {
 fn desired_state_apply_upsert_node_inserts_node() {
     let mut state = PersistedState::empty();
     let node = Node {
-        node_id: "node_1".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "example.com".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s465().to_owned(),
+        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1589,9 +1633,9 @@ fn desired_state_apply_upsert_node_inserts_node() {
 fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
     let mut state = PersistedState::empty();
     let endpoint = Endpoint {
-        endpoint_id: "ep_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "ss2022-ep_1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s538().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s539().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 443,
         meta: json!({"k":"v"}),
@@ -1605,7 +1649,7 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
     assert_eq!(state.endpoints.get(&endpoint.endpoint_id), Some(&endpoint));
 
     let out = DesiredStateCommand::DeleteEndpoint {
-        endpoint_id: endpoint.endpoint_id.clone(),
+        endpoint_id: xp_test_fixtures::slot_s538().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -1620,9 +1664,9 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
 fn desired_state_apply_rejects_invalid_port() {
     let mut state = PersistedState::empty();
     let endpoint = Endpoint {
-        endpoint_id: "ep_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "ss2022-ep_1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s538().to_owned(),
+        node_id: xp_test_fixtures::slot_s477().to_owned(),
+        tag: xp_test_fixtures::slot_s539().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 0,
         meta: json!({}),
@@ -1644,7 +1688,7 @@ fn desired_state_apply_user_create_reset_token_and_delete_are_deterministic() {
     let user = User {
         user_id: "user_1".to_string(),
         display_name: "alice".to_string(),
-        subscription_token: "sub_1".to_string(),
+        subscription_token: xp_test_fixtures::slot_s481().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::default(),
@@ -1657,7 +1701,7 @@ fn desired_state_apply_user_create_reset_token_and_delete_are_deterministic() {
 
     let out = DesiredStateCommand::ResetUserSubscriptionToken {
         user_id: user.user_id.clone(),
-        subscription_token: "sub_2".to_string(),
+        subscription_token: xp_test_fixtures::slot_s540().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -1699,13 +1743,13 @@ fn resolve_user_node_weight_uses_global_when_node_inherits() {
     .unwrap();
     DesiredStateCommand::SetUserNodeWeight {
         user_id: user.user_id.clone(),
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::slot_s522().to_owned(),
         weight: 999,
     }
     .apply(store.state_mut())
     .unwrap();
     DesiredStateCommand::SetNodeWeightPolicy {
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::slot_s522().to_owned(),
         inherit_global: true,
     }
     .apply(store.state_mut())
@@ -1728,7 +1772,7 @@ fn resolve_user_node_weight_uses_node_override_when_inherit_disabled() {
     .apply(store.state_mut())
     .unwrap();
     DesiredStateCommand::SetNodeWeightPolicy {
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::slot_s522().to_owned(),
         inherit_global: false,
     }
     .apply(store.state_mut())
@@ -1739,7 +1783,7 @@ fn resolve_user_node_weight_uses_node_override_when_inherit_disabled() {
 
     DesiredStateCommand::SetUserNodeWeight {
         user_id: user.user_id.clone(),
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::slot_s522().to_owned(),
         weight: 999,
     }
     .apply(store.state_mut())
@@ -1755,7 +1799,7 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
         User {
             user_id: "user_1".to_string(),
             display_name: "alice".to_string(),
-            subscription_token: "sub_1".to_string(),
+            subscription_token: xp_test_fixtures::slot_s481().to_owned(),
             credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset: UserQuotaReset::default(),
@@ -1764,9 +1808,9 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -1775,7 +1819,7 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
 
     let out = DesiredStateCommand::EnsureMembership {
         user_id: "user_1".to_string(),
-        endpoint_id: "endpoint_1".to_string(),
+        endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
     };
     assert_eq!(
         out.apply(&mut state).unwrap(),
@@ -1875,9 +1919,9 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -1885,7 +1929,7 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
     );
 
     DesiredStateCommand::AppendEndpointProbeSamples {
-        hour: "2026-03-11T11:00:00Z".to_string(),
+        hour: xp_test_fixtures::probe_hour().to_owned(),
         from_node_id: "node_2".to_string(),
         samples: Vec::new(),
     }
@@ -1905,58 +1949,179 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
 fn desired_state_apply_append_endpoint_probe_samples_prunes_participants_and_history() {
     let mut state = PersistedState::empty();
     state.endpoints.insert(
-        "endpoint_1".to_string(),
+        xp_test_fixtures::slot_s478().to_owned(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+            node_id: xp_test_fixtures::slot_s477().to_owned(),
+            tag: xp_test_fixtures::slot_s518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
         },
     );
 
-    for hour_idx in 0..25 {
-        let hour = format!("2026-03-{:02}T00:00:00Z", hour_idx + 1);
+    let sample = EndpointProbeAppendSample {
+        endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+        ok: true,
+        skipped: false,
+        checked_at: xp_test_fixtures::slot_s655().to_owned(),
+        latency_ms: Some(xp_test_fixtures::slot_n21()),
+        target_id: None,
+        target_url: None,
+        error: None,
+        config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
+    };
+    let commands = [
         DesiredStateCommand::AppendEndpointProbeSamples {
-            hour: hour.clone(),
-            from_node_id: format!("node_{}", hour_idx + 1),
-            samples: vec![EndpointProbeAppendSample {
-                endpoint_id: "endpoint_1".to_string(),
-                ok: true,
-                skipped: false,
-                checked_at: format!("2026-03-{:02}T00:30:00Z", hour_idx + 1),
-                latency_ms: Some(100 + hour_idx as u32),
-                target_id: None,
-                target_url: None,
-                error: None,
-                config_hash: "cfg".to_string(),
-            }],
-        }
-        .apply(&mut state)
-        .unwrap();
+            hour: xp_test_fixtures::slot_s4().to_owned(),
+            from_node_id: "node_1".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s5().to_owned(),
+            from_node_id: "node_2".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s6().to_owned(),
+            from_node_id: "node_3".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s7().to_owned(),
+            from_node_id: "node_4".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s8().to_owned(),
+            from_node_id: "node_5".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s9().to_owned(),
+            from_node_id: "node_6".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s10().to_owned(),
+            from_node_id: "node_7".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s11().to_owned(),
+            from_node_id: "node_8".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s12().to_owned(),
+            from_node_id: "node_9".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s13().to_owned(),
+            from_node_id: "node_10".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s14().to_owned(),
+            from_node_id: "node_11".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s15().to_owned(),
+            from_node_id: "node_12".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s16().to_owned(),
+            from_node_id: "node_13".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s21().to_owned(),
+            from_node_id: "node_14".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s22().to_owned(),
+            from_node_id: "node_15".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s23().to_owned(),
+            from_node_id: "node_16".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s24().to_owned(),
+            from_node_id: "node_17".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s25().to_owned(),
+            from_node_id: "node_18".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s26().to_owned(),
+            from_node_id: "node_19".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s47().to_owned(),
+            from_node_id: "node_20".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s48().to_owned(),
+            from_node_id: "node_21".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s52().to_owned(),
+            from_node_id: "node_22".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s54().to_owned(),
+            from_node_id: "node_23".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s81().to_owned(),
+            from_node_id: "node_24".to_string(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::slot_s91().to_owned(),
+            from_node_id: "node_25".to_string(),
+            samples: vec![sample],
+        },
+    ];
+    for command in commands {
+        command.apply(&mut state).unwrap();
     }
 
     let history = state
         .endpoint_probe_history
-        .get("endpoint_1")
+        .get(xp_test_fixtures::slot_s478())
         .expect("endpoint history");
     assert_eq!(history.hours.len(), ENDPOINT_PROBE_HOUR_BUCKET_LIMIT);
     assert_eq!(
         state.endpoint_probe_participants_by_hour.len(),
         ENDPOINT_PROBE_HOUR_BUCKET_LIMIT
     );
-    assert!(!history.hours.contains_key("2026-03-01T00:00:00Z"));
-    assert!(history.hours.contains_key("2026-03-25T00:00:00Z"));
+    assert!(!history.hours.contains_key(xp_test_fixtures::slot_s4()));
+    assert!(history.hours.contains_key(xp_test_fixtures::slot_s25()));
     assert!(
         !state
             .endpoint_probe_participants_by_hour
-            .contains_key("2026-03-01T00:00:00Z")
+            .contains_key(xp_test_fixtures::slot_s4())
     );
     assert!(
         state
             .endpoint_probe_participants_by_hour
-            .contains_key("2026-03-25T00:00:00Z")
+            .contains_key(xp_test_fixtures::slot_s25())
     );
 }
 
@@ -2001,12 +2166,12 @@ fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_sample
             EndpointProbeNodeSample {
                 ok: true,
                 skipped: false,
-                checked_at: "2026-03-11T11:10:00Z".to_string(),
-                latency_ms: Some(123),
+                checked_at: xp_test_fixtures::slot_s541().to_owned(),
+                latency_ms: xp_test_fixtures::slot_n23(),
                 target_id: None,
                 target_url: None,
                 error: None,
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
     store
@@ -2023,12 +2188,12 @@ fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_sample
             EndpointProbeNodeSample {
                 ok: false,
                 skipped: false,
-                checked_at: "2026-03-11T11:12:00Z".to_string(),
-                latency_ms: None,
+                checked_at: xp_test_fixtures::slot_s542().to_owned(),
+                latency_ms: xp_test_fixtures::none(),
                 target_id: None,
                 target_url: None,
                 error: Some("dial failed".to_string()),
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
 
@@ -2048,10 +2213,10 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.nodes.insert(
         "node_keep".to_string(),
         Node {
-            node_id: "node_keep".to_string(),
-            node_name: "keep".to_string(),
-            access_host: "keep.example.com".to_string(),
-            api_base_url: "https://keep.example.com".to_string(),
+            node_id: xp_test_fixtures::slot_s515().to_owned(),
+            node_name: xp_test_fixtures::slot_s642().to_owned(),
+            access_host: xp_test_fixtures::slot_s516().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s517().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2059,10 +2224,10 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "drop".to_string(),
-            access_host: "drop.example.com".to_string(),
-            api_base_url: "https://drop.example.com".to_string(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            node_name: xp_test_fixtures::slot_s643().to_owned(),
+            access_host: xp_test_fixtures::slot_s544().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s545().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2070,9 +2235,9 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_keep".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
+            node_id: xp_test_fixtures::slot_s515().to_owned(),
+            tag: xp_test_fixtures::slot_s518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -2095,17 +2260,17 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
             EndpointProbeNodeSample {
                 ok: true,
                 skipped: false,
-                checked_at: "2026-03-11T11:10:00Z".to_string(),
-                latency_ms: Some(123),
+                checked_at: xp_test_fixtures::slot_s541().to_owned(),
+                latency_ms: xp_test_fixtures::slot_n23(),
                 target_id: None,
                 target_url: None,
                 error: None,
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
 
     DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::slot_s543().to_owned(),
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
     }
@@ -2127,10 +2292,10 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
+            access_host: xp_test_fixtures::slot_s546().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2138,9 +2303,9 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
     state.endpoints.insert(
         "endpoint_drop".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_drop".to_string(),
-            node_id: "node_drop".to_string(),
-            tag: "endpoint-drop".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s548().to_owned(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            tag: xp_test_fixtures::slot_s549().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({}),
@@ -2152,7 +2317,7 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
         .or_default();
 
     let out = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::slot_s543().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_drop".to_string()],
     }
@@ -2177,10 +2342,10 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
+            access_host: xp_test_fixtures::slot_s546().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2188,9 +2353,9 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     state.endpoints.insert(
         "endpoint_new".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_new".to_string(),
-            node_id: "node_drop".to_string(),
-            tag: "endpoint-new".to_string(),
+            endpoint_id: xp_test_fixtures::slot_s550().to_owned(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            tag: xp_test_fixtures::slot_s551().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({}),
@@ -2198,7 +2363,7 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     );
 
     let err = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::slot_s543().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
     }
@@ -2221,17 +2386,17 @@ fn desired_state_apply_delete_node_rejects_removed_preview_endpoint_set() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::slot_s543().to_owned(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
+            access_host: xp_test_fixtures::slot_s546().to_owned(),
+            api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
     );
 
     let err = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::slot_s543().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
     }

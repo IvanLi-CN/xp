@@ -1,0 +1,28 @@
+id: fixture-policy-rust-adapter-origin
+snapshots:
+  ? |
+    mod xp_test_fixtures {
+      pub fn primary_node_id() -> &'static str { "live.example" }
+    }
+  : labels:
+    - source: |-
+        mod xp_test_fixtures {
+          pub fn primary_node_id() -> &'static str { "live.example" }
+        }
+      style: primary
+      start: 0
+      end: 86
+  ? |
+    mod xp_test_fixtures;
+  : labels:
+    - source: mod xp_test_fixtures;
+      style: primary
+      start: 0
+      end: 21
+  ? |
+    use external_fixture as xp_test_fixtures;
+  : labels:
+    - source: use external_fixture as xp_test_fixtures;
+      style: primary
+      start: 0
+      end: 41

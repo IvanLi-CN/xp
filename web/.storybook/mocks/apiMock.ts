@@ -49,6 +49,7 @@ import type {
 	AdminUserTokenResponse,
 } from "../../src/api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import {
 	DEFAULT_API_CAPABILITIES,
 	type MockStateSeed,
@@ -110,7 +111,6 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 		joinToken: number;
 		realityDomain: number;
 		shortId: number;
-		subscription: number;
 		user: number;
 	};
 };
@@ -293,20 +293,14 @@ function ensureEndpointRecord(
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
-	const now = new Date();
-	const base = new Date(now);
-	base.setSeconds(0, 0);
-	base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
-
 	const slots: NodeRuntimeHistorySlot[] = [];
 	for (let i = total - 1; i >= 0; i -= 1) {
-		const at = new Date(base.getTime() - i * 30 * 60 * 1000);
 		let status: NodeRuntimeHistorySlot["status"] = "up";
 		if (i % 37 === 0) status = "degraded";
 		if (i % 121 === 0) status = "down";
 		if (i % 79 === 0) status = "unknown";
 		slots.push({
-			slot_start: at.toISOString(),
+			slot_start: fixtureCatalog.slotString.s6(),
 			status,
 		});
 	}
@@ -319,48 +313,38 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 		{
 			component: "xp",
 			status: "up",
-			last_ok_at: new Date().toISOString(),
-			last_fail_at: null,
-			down_since: null,
+			last_ok_at: fixtureCatalog.slotString.s7(),
+			last_fail_at: fixtureCatalog.optional.none(),
+			down_since: fixtureCatalog.optional.none(),
 			consecutive_failures: 0,
 			recoveries_observed: 0,
 			restart_attempts: 0,
-			last_restart_at: null,
-			last_restart_fail_at: null,
+			last_restart_at: fixtureCatalog.optional.none(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 		{
 			component: "xray",
 			status: downNode ? "down" : "up",
-			last_ok_at: new Date(Date.now() - 60_000).toISOString(),
-			last_fail_at: downNode
-				? new Date(Date.now() - 30_000).toISOString()
-				: null,
-			down_since: downNode ? new Date(Date.now() - 30_000).toISOString() : null,
+			last_ok_at: fixtureCatalog.slotString.s8(),
+			last_fail_at: fixtureCatalog.slotString.s9(),
+			down_since: fixtureCatalog.slotString.s10(),
 			consecutive_failures: downNode ? 2 : 0,
 			recoveries_observed: 1,
 			restart_attempts: downNode ? 1 : 0,
-			last_restart_at: downNode
-				? new Date(Date.now() - 20_000).toISOString()
-				: null,
-			last_restart_fail_at: null,
+			last_restart_at: fixtureCatalog.slotString.s11(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 		{
 			component: "cloudflared",
 			status: downNode ? "down" : "disabled",
-			last_ok_at: downNode ? new Date(Date.now() - 90_000).toISOString() : null,
-			last_fail_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
-			down_since: downNode ? new Date(Date.now() - 10_000).toISOString() : null,
+			last_ok_at: fixtureCatalog.slotString.s12(),
+			last_fail_at: fixtureCatalog.slotString.s13(),
+			down_since: fixtureCatalog.slotString.s14(),
 			consecutive_failures: downNode ? 3 : 0,
 			recoveries_observed: 0,
 			restart_attempts: downNode ? 1 : 0,
-			last_restart_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
-			last_restart_fail_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
+			last_restart_at: fixtureCatalog.slotString.s13(),
+			last_restart_fail_at: fixtureCatalog.slotString.s13(),
 		},
 	];
 }
@@ -369,7 +353,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 	return [
 		{
 			event_id: `evt-${node.node_id}-1`,
-			occurred_at: new Date(Date.now() - 20_000).toISOString(),
+			occurred_at: fixtureCatalog.slotString.s15(),
 			component: "xray",
 			kind: "status_changed",
 			message: "xray status changed: up -> down",
@@ -378,7 +362,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 		},
 		{
 			event_id: `evt-${node.node_id}-2`,
-			occurred_at: new Date(Date.now() - 10_000).toISOString(),
+			occurred_at: fixtureCatalog.slotString.s16(),
 			component: "cloudflared",
 			kind: "restart_failed",
 			message: "cloudflared restart request failed",
@@ -402,7 +386,7 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 		access_host: node.access_host,
 		summary: {
 			status: summaryStatus,
-			updated_at: new Date().toISOString(),
+			updated_at: fixtureCatalog.slotString.s7(),
 		},
 		components,
 		recent_slots: slots,
@@ -423,40 +407,34 @@ function buildNodeRuntimeDetail(
 }
 
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
-	const now = new Date();
-	const date = now.toISOString().slice(0, 10);
 	const components = buildRuntimeComponents(node);
 	return {
 		node_id: node.node_id,
-		last_synced_at: now.toISOString(),
+		last_synced_at: fixtureCatalog.slotString.s21(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
 			: null,
 		daily_traffic: [
 			{
-				date,
-				uplink_bytes: node.node_id.endsWith("2")
-					? Math.round(1.4 * 2 ** 30)
-					: 768 * 2 ** 20,
-				downlink_bytes: node.node_id.endsWith("2")
-					? Math.round(4.8 * 2 ** 30)
-					: Math.round(2.2 * 2 ** 30),
-				updated_at: now.toISOString(),
+				date: fixtureCatalog.timestamp.date(),
+				uplink_bytes: fixtureCatalog.slotNumber.n0(),
+				downlink_bytes: fixtureCatalog.slotNumber.n1(),
+				updated_at: fixtureCatalog.slotString.s21(),
 			},
 		],
 		daily_component_status: [
 			{
-				date,
+				date: fixtureCatalog.timestamp.date(),
 				components: components.map((component) => ({
 					component: component.component,
 					status: component.status,
-					observed_at: now.toISOString(),
+					observed_at: fixtureCatalog.slotString.s21(),
 				})),
 			},
 		],
 		component_status_events: buildRuntimeEvents(node).map((event) => ({
 			event_id: event.event_id,
-			occurred_at: event.occurred_at,
+			occurred_at: fixtureCatalog.slotString.s22(),
 			component: event.component,
 			message: event.message,
 			from_status: event.from_status,
@@ -465,79 +443,95 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	};
 }
 
-function buildTrafficReport(window: TrafficWindow, factor = 1): TrafficReport {
-	const count = window === "24h" ? 288 : 31;
-	const end = new Date();
-	end.setUTCMinutes(Math.floor(end.getUTCMinutes() / 5) * 5, 0, 0);
-	const step = window === "24h" ? 5 * 60_000 : 24 * 60 * 60_000;
-	const start = new Date(end.getTime() - (count - 1) * step);
-	const current = Array.from({ length: count }, (_, index) => {
-		const at = new Date(start.getTime() + index * step);
-		const total = Math.round((120 + (index % 9) * 16) * 1024 * 1024 * factor);
-		const next = new Date(at.getTime() + step);
+function buildTrafficPoint(
+	isCurrentDay: boolean,
+	isGap = false,
+): NonNullable<TrafficReport["current"]>[number] {
+	if (isGap) {
 		return {
-			start_at: at.toISOString(),
-			end_at: next.toISOString(),
-			uplink_bytes: Math.round(total * 0.42),
-			downlink_bytes: Math.round(total * 0.58),
-			total_bytes: total,
-			complete: true,
-			is_current_day: window === "31d" && index === count - 1,
+			start_at: fixtureCatalog.timestamp.baseline(),
+			end_at: fixtureCatalog.timestamp.recent(),
+			uplink_bytes: null,
+			downlink_bytes: null,
+			total_bytes: null,
+			complete: false,
+			is_current_day: isCurrentDay,
 		};
-	});
-	const reference = current.map((point) => ({
-		...point,
-		start_at: new Date(
-			new Date(point.start_at).getTime() - count * step,
-		).toISOString(),
-		end_at: new Date(
-			new Date(point.end_at).getTime() - count * step,
-		).toISOString(),
-		uplink_bytes: Math.round((point.uplink_bytes ?? 0) * 0.8),
-		downlink_bytes: Math.round((point.downlink_bytes ?? 0) * 0.8),
-		total_bytes: Math.round((point.total_bytes ?? 0) * 0.8),
+	}
+
+	return {
+		start_at: fixtureCatalog.timestamp.baseline(),
+		end_at: fixtureCatalog.timestamp.recent(),
+		uplink_bytes: fixtureCatalog.slotNumber.n2(),
+		downlink_bytes: fixtureCatalog.slotNumber.n3(),
+		total_bytes: fixtureCatalog.slotNumber.n6(),
+		complete: true,
+		is_current_day: isCurrentDay,
+	};
+}
+
+function buildReferenceTrafficPoint(): NonNullable<
+	TrafficReport["reference"]
+>[number] {
+	return {
+		start_at: fixtureCatalog.timestamp.earlier(),
+		end_at: fixtureCatalog.timestamp.baseline(),
+		uplink_bytes: fixtureCatalog.slotNumber.n2(),
+		downlink_bytes: fixtureCatalog.slotNumber.n3(),
+		total_bytes: fixtureCatalog.slotNumber.n6(),
+		complete: true,
 		is_current_day: false,
-	}));
-	const uplink = current.reduce(
-		(sum, point) => sum + (point.uplink_bytes ?? 0),
-		0,
+	};
+}
+
+function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
+	const count = window === "24h" ? 288 : 31;
+	const current = Array.from({ length: count }, (_, index) =>
+		buildTrafficPoint(
+			window === "31d" && index === count - 1,
+			gap && index > 112 && index < 124,
+		),
 	);
-	const downlink = current.reduce(
-		(sum, point) => sum + (point.downlink_bytes ?? 0),
-		0,
+	const reference = Array.from({ length: count }, () =>
+		buildReferenceTrafficPoint(),
 	);
+	const summary =
+		window === "24h"
+			? {
+					uplink_bytes: fixtureCatalog.slotNumber.n32(),
+					downlink_bytes: fixtureCatalog.slotNumber.n33(),
+					total_bytes: fixtureCatalog.slotNumber.n34(),
+				}
+			: {
+					uplink_bytes: fixtureCatalog.slotNumber.n35(),
+					downlink_bytes: fixtureCatalog.slotNumber.n36(),
+					total_bytes: fixtureCatalog.slotNumber.n37(),
+				};
 	return {
 		window,
-		window_start_at: current[0]?.start_at ?? end.toISOString(),
-		window_end_at: current.at(-1)?.end_at ?? end.toISOString(),
+		window_start_at: fixtureCatalog.timestamp.baseline(),
+		window_end_at: fixtureCatalog.timestamp.recent(),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			cycle_start_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1),
-			).toISOString(),
-			cycle_end_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1),
-			).toISOString(),
-			uplink_bytes: uplink,
-			downlink_bytes: downlink,
-			total_bytes: uplink + downlink,
-			complete: true,
-			tracking_since: current[0]?.start_at ?? null,
+			cycle_start_at: fixtureCatalog.timestamp.earlier(),
+			cycle_end_at: fixtureCatalog.timestamp.later(),
+			...summary,
+			complete: !gap,
+			tracking_since: fixtureCatalog.timestamp.baseline(),
 		},
 		current,
 		reference,
 		partial: false,
-		last_sample_at: end.toISOString(),
+		last_sample_at: fixtureCatalog.slotString.s23(),
 		warnings: [],
 	};
 }
 
 function buildDefaultNodeTraffic(node: AdminNode): MockWindowedNodeTraffic {
-	const factor = node.node_id.endsWith("2") ? 0.75 : 1;
 	return {
-		"24h": { node, traffic: buildTrafficReport("24h", factor) },
-		"31d": { node, traffic: buildTrafficReport("31d", factor) },
+		"24h": { node, traffic: buildTrafficReport("24h") },
+		"31d": { node, traffic: buildTrafficReport("31d") },
 	};
 }
 
@@ -552,14 +546,14 @@ function buildDefaultUserTraffic(
 	return {
 		"24h": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("24h", 0.65),
+			traffic: buildTrafficReport("24h"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
 		},
 		"31d": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("31d", 0.65),
+			traffic: buildTrafficReport("31d"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
@@ -604,37 +598,37 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		node,
 		window: "24h",
 		geo_source: "country_is",
-		window_start: "2026-03-08T00:00:00Z",
-		window_end: "2026-03-08T00:02:00Z",
+		window_start: fixtureCatalog.slotString.s24(),
+		window_end: fixtureCatalog.slotString.s25(),
 		warnings: [],
 		unique_ip_series: [
-			{ minute: "2026-03-08T00:00:00Z", count: 1 },
-			{ minute: "2026-03-08T00:01:00Z", count: 2 },
-			{ minute: "2026-03-08T00:02:00Z", count: 1 },
+			{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+			{ minute: fixtureCatalog.slotString.s26(), count: 2 },
+			{ minute: fixtureCatalog.slotString.s25(), count: 1 },
 		],
 		timeline: [
 			{
 				lane_key: `${node.node_id}::203.0.113.7`,
-				endpoint_id: `${node.node_id}-endpoint-a`,
-				endpoint_tag: endpointTag,
-				ip: "203.0.113.7",
+				endpoint_id: fixtureCatalog.slotString.s27(),
+				endpoint_tag: fixtureCatalog.slotString.s28(),
+				ip: fixtureCatalog.slotString.s29(),
 				minutes: 2,
 				segments: [
 					{
-						start_minute: "2026-03-08T00:00:00Z",
-						end_minute: "2026-03-08T00:01:00Z",
+						start_minute: fixtureCatalog.slotString.s24(),
+						end_minute: fixtureCatalog.slotString.s26(),
 					},
 				],
 			},
 		],
 		ips: [
 			{
-				ip: "203.0.113.7",
+				ip: fixtureCatalog.slotString.s29(),
 				minutes: 2,
 				endpoint_tags: [endpointTag],
 				region: "Japan / Tokyo",
 				operator: "ExampleNet",
-				last_seen_at: "2026-03-08T00:01:00Z",
+				last_seen_at: fixtureCatalog.slotString.s26(),
 			},
 		],
 	};
@@ -651,36 +645,36 @@ function buildDefaultUserIpUsage(
 			return {
 				node,
 				geo_source: index === 0 ? "country_is" : "country_is",
-				window_start: "2026-03-08T00:00:00Z",
-				window_end: "2026-03-08T00:02:00Z",
+				window_start: fixtureCatalog.slotString.s24(),
+				window_end: fixtureCatalog.slotString.s25(),
 				warnings: [],
 				unique_ip_series: [
-					{ minute: "2026-03-08T00:00:00Z", count: 1 },
-					{ minute: "2026-03-08T00:01:00Z", count: 1 },
+					{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+					{ minute: fixtureCatalog.slotString.s26(), count: 1 },
 				],
 				timeline: [
 					{
 						lane_key: `${node.node_id}::${user.user_id}::203.0.113.${index + 7}`,
-						endpoint_id: `${node.node_id}-endpoint-${index + 1}`,
-						endpoint_tag: endpointTag,
-						ip: `203.0.113.${index + 7}`,
+						endpoint_id: fixtureCatalog.slotString.s30(),
+						endpoint_tag: fixtureCatalog.slotString.s28(),
+						ip: fixtureCatalog.slotString.s31(),
 						minutes: 2,
 						segments: [
 							{
-								start_minute: "2026-03-08T00:00:00Z",
-								end_minute: "2026-03-08T00:01:00Z",
+								start_minute: fixtureCatalog.slotString.s24(),
+								end_minute: fixtureCatalog.slotString.s26(),
 							},
 						],
 					},
 				],
 				ips: [
 					{
-						ip: `203.0.113.${index + 7}`,
+						ip: fixtureCatalog.slotString.s31(),
 						minutes: 2,
 						endpoint_tags: [endpointTag],
 						region: index === 0 ? "Japan / Tokyo" : "Japan / Osaka",
 						operator: index === 0 ? "ExampleNet" : "CarrierNet",
-						last_seen_at: "2026-03-08T00:01:00Z",
+						last_seen_at: fixtureCatalog.slotString.s26(),
 					},
 				],
 			};
@@ -714,18 +708,18 @@ function createDefaultSeed(): MockStateSeed {
 
 	const nodes: AdminNode[] = [
 		{
-			node_id: "node-1",
-			node_name: "tokyo-1",
-			api_base_url: "https://tokyo-1.example.com",
-			access_host: "tokyo-1.example.com",
+			node_id: fixtureCatalog.slotString.s32(),
+			node_name: fixtureCatalog.slotString.s33(),
+			api_base_url: fixtureCatalog.slotString.s34(),
+			access_host: fixtureCatalog.slotString.s35(),
 			quota_limit_bytes: 0,
 			quota_reset: defaultNodeQuotaReset(1),
 		},
 		{
-			node_id: "node-2",
-			node_name: "osaka-1",
-			api_base_url: "https://osaka-1.example.com",
-			access_host: "osaka-1.example.com",
+			node_id: fixtureCatalog.slotString.s36(),
+			node_name: fixtureCatalog.slotString.s37(),
+			api_base_url: fixtureCatalog.slotString.s38(),
+			access_host: fixtureCatalog.slotString.s39(),
 			quota_limit_bytes: 0,
 			quota_reset: defaultNodeQuotaReset(15),
 		},
@@ -733,16 +727,16 @@ function createDefaultSeed(): MockStateSeed {
 
 	const endpoints: MockEndpointSeed[] = [
 		{
-			endpoint_id: "endpoint-1",
-			node_id: "node-1",
-			tag: "edge-tokyo",
+			endpoint_id: fixtureCatalog.slotString.s40(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s41(),
 			kind: "vless_reality_vision_tcp",
 			port: 443,
 			meta: {
 				public_domain: "edge.tokyo.example.com",
 				reality: {
-					dest: "www.example.com:443",
-					server_names: ["example.com", "www.example.com"],
+					dest: fixtureCatalog.slotString.s42(),
+					server_names: fixtureCatalog.slotList.l3(),
 					server_names_source: "manual",
 					fingerprint: "chrome",
 				},
@@ -751,9 +745,9 @@ function createDefaultSeed(): MockStateSeed {
 			active_short_id: "2a3b4c",
 		},
 		{
-			endpoint_id: "endpoint-2",
-			node_id: "node-2",
-			tag: "shadow-osaka",
+			endpoint_id: fixtureCatalog.slotString.s43(),
+			node_id: fixtureCatalog.slotString.s36(),
+			tag: fixtureCatalog.slotString.s44(),
 			kind: "ss2022_2022_blake3_aes_128_gcm",
 			port: 8443,
 			meta: {
@@ -778,21 +772,20 @@ function createDefaultSeed(): MockStateSeed {
 		{
 			domain_id: "seed_oneclient_sfx_ms",
 			server_name: "origin.example.test",
-			disabled_node_ids: ["node-2"],
+			disabled_node_ids: [fixtureCatalog.slotString.s36()],
 		},
 	];
 
-	// Keep IDs close to prod behavior: user_id is a ULID, token is `sub_<ulid>`.
-	const userId1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-	const userId2 = "01HF7YAT01YVKWQ847J5T9EY84";
-	const subToken1 = `sub_${userId1}`;
-	const subToken2 = `sub_${userId2}`;
+	const userId1 = fixtureCatalog.identifier.userPrimary();
+	const userId2 = fixtureCatalog.identifier.userSecondary();
+	const subToken1 = fixtureCatalog.slotString.s45();
+	const subToken2 = fixtureCatalog.slotString.s46();
 
 	const users: AdminUser[] = [
 		{
 			user_id: userId1,
 			display_name: "Alice",
-			subscription_token: subToken1,
+			subscription_token: fixtureCatalog.slotString.s45(),
 			credential_epoch: 0,
 			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(1),
@@ -800,7 +793,7 @@ function createDefaultSeed(): MockStateSeed {
 		{
 			user_id: userId2,
 			display_name: "Bob",
-			subscription_token: subToken2,
+			subscription_token: fixtureCatalog.slotString.s46(),
 			credential_epoch: 0,
 			priority_tier: "p3",
 			quota_reset: defaultUserQuotaReset(15),
@@ -808,7 +801,7 @@ function createDefaultSeed(): MockStateSeed {
 	];
 
 	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> = {
-		[userId1]: [{ node_id: "node-1", weight: 120 }],
+		[userId1]: [{ node_id: fixtureCatalog.slotString.s32(), weight: 120 }],
 		[userId2]: [],
 	};
 	const userGlobalWeights: Record<string, number> = {
@@ -816,22 +809,28 @@ function createDefaultSeed(): MockStateSeed {
 		[userId2]: 80,
 	};
 	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
-		"node-1": { node_id: "node-1", inherit_global: true },
-		"node-2": { node_id: "node-2", inherit_global: true },
+		[fixtureCatalog.slotString.s32()]: {
+			node_id: fixtureCatalog.slotString.s32(),
+			inherit_global: true,
+		},
+		[fixtureCatalog.slotString.s36()]: {
+			node_id: fixtureCatalog.slotString.s36(),
+			inherit_global: true,
+		},
 	};
 	const userAccessByUserId: Record<string, AdminUserAccessItem[]> = {
 		[userId1]: [
 			{
 				user_id: userId1,
-				endpoint_id: "endpoint-1",
-				node_id: "node-1",
+				endpoint_id: fixtureCatalog.slotString.s40(),
+				node_id: fixtureCatalog.slotString.s32(),
 			},
 		],
 		[userId2]: [
 			{
 				user_id: userId2,
-				endpoint_id: "endpoint-2",
-				node_id: "node-2",
+				endpoint_id: fixtureCatalog.slotString.s43(),
+				node_id: fixtureCatalog.slotString.s36(),
 			},
 		],
 	};
@@ -850,7 +849,7 @@ function createDefaultSeed(): MockStateSeed {
 				type: "quota_banned_membership",
 				membership_key: `${userId1}::endpoint-1`,
 				user_id: userId1,
-				endpoint_id: "endpoint-1",
+				endpoint_id: fixtureCatalog.slotString.s40(),
 				owner_node_id: "node-1",
 				quota_banned: true,
 				quota_banned_at: null,
@@ -875,38 +874,38 @@ node-2`,
 			{
 				node,
 				window: "24h" as const,
-				window_start: "2026-03-07T01:00:00Z",
-				window_end: "2026-03-08T00:59:00Z",
+				window_start: fixtureCatalog.slotString.s47(),
+				window_end: fixtureCatalog.slotString.s48(),
 				warnings: [],
 				endpoints: [
 					{
-						endpoint_id: `${node.node_id}-endpoint-a`,
-						endpoint_tag: `${node.node_name}-edge-a`,
+						endpoint_id: fixtureCatalog.slotString.s27(),
+						endpoint_tag: fixtureCatalog.slotString.s49(),
 						port: 443,
 					},
 					{
-						endpoint_id: `${node.node_id}-endpoint-b`,
-						endpoint_tag: `${node.node_name}-edge-b`,
+						endpoint_id: fixtureCatalog.slotString.s50(),
+						endpoint_tag: fixtureCatalog.slotString.s51(),
 						port: 8388,
 					},
 				],
 				per_endpoint_series: [
 					{
-						endpoint_id: `${node.node_id}-endpoint-a`,
-						endpoint_tag: `${node.node_name}-edge-a`,
+						endpoint_id: fixtureCatalog.slotString.s27(),
+						endpoint_tag: fixtureCatalog.slotString.s49(),
 						port: 443,
 						series: [
-							{ minute: "2026-03-08T00:58:00Z", count: 2 },
-							{ minute: "2026-03-08T00:59:00Z", count: 3 },
+							{ minute: fixtureCatalog.slotString.s52(), count: 2 },
+							{ minute: fixtureCatalog.slotString.s48(), count: 3 },
 						],
 					},
 					{
-						endpoint_id: `${node.node_id}-endpoint-b`,
-						endpoint_tag: `${node.node_name}-edge-b`,
+						endpoint_id: fixtureCatalog.slotString.s50(),
+						endpoint_tag: fixtureCatalog.slotString.s51(),
 						port: 8388,
 						series: [
-							{ minute: "2026-03-08T00:58:00Z", count: 1 },
-							{ minute: "2026-03-08T00:59:00Z", count: 2 },
+							{ minute: fixtureCatalog.slotString.s52(), count: 1 },
+							{ minute: fixtureCatalog.slotString.s48(), count: 2 },
 						],
 					},
 				],
@@ -929,18 +928,21 @@ node-2`,
 	return {
 		health: { status: "ok" },
 		clusterInfo: {
-			cluster_id: "cluster-alpha",
-			node_id: "node-1",
+			cluster_id: fixtureCatalog.slotString.s53(),
+			node_id: fixtureCatalog.slotString.s32(),
 			role: "leader",
-			leader_api_base_url: "https://tokyo-1.example.com",
+			leader_api_base_url: fixtureCatalog.slotString.s34(),
 			term: 12,
 			xp_version: "0.0.0",
 		},
 		versionCheck: {
 			current: { package: "0.0.0", release_tag: "v0.0.0" },
-			latest: { release_tag: "v0.0.0", published_at: "2026-01-31T00:00:00Z" },
+			latest: {
+				release_tag: "v0.0.0",
+				published_at: fixtureCatalog.slotString.s54(),
+			},
 			has_update: false,
-			checked_at: "2026-01-31T00:00:00Z",
+			checked_at: fixtureCatalog.slotString.s54(),
 			compare_reason: "semver",
 			source: {
 				kind: "github-releases",
@@ -1034,7 +1036,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		joinToken: 1,
 		realityDomain: 1,
 		shortId: 1,
-		subscription: 1,
 		user: 1,
 	};
 
@@ -1198,7 +1199,7 @@ function buildAdminUpgradeStatus(
 			finished_at: null,
 			exit_code: null,
 			message: null,
-			updated_at: new Date().toISOString(),
+			updated_at: fixtureCatalog.slotString.s7(),
 			...overrides?.status,
 		},
 	};
@@ -1207,6 +1208,7 @@ function buildAdminUpgradeStatus(
 async function handleRequest(
 	state: MockState,
 	req: Request,
+	nextSubscriptionToken: () => string,
 ): Promise<Response> {
 	const method = req.method.toUpperCase();
 	const url = new URL(req.url, "http://localhost");
@@ -1246,8 +1248,8 @@ async function handleRequest(
 				status: {
 					state: "running",
 					target_tag: payload?.target_tag ?? "v0.0.0",
-					started_at: new Date().toISOString(),
-					updated_at: new Date().toISOString(),
+					started_at: fixtureCatalog.timestamp.recent(),
+					updated_at: fixtureCatalog.slotString.s7(),
 					message: "storybook mock upgrade started",
 				},
 			}),
@@ -1265,14 +1267,14 @@ async function handleRequest(
 			{
 				event: "hello",
 				data: {
-					node_id: state.clusterInfo.node_id,
-					connected_at: new Date().toISOString(),
+					node_id: fixtureCatalog.slotString.s57(),
+					connected_at: fixtureCatalog.slotString.s7(),
 				},
 			},
 			{
 				event: "snapshot",
 				data: {
-					emitted_at: new Date().toISOString(),
+					emitted_at: fixtureCatalog.timestamp.recent(),
 					health: clone(state.health),
 					cluster_info: clone(state.clusterInfo),
 					nodes_runtime: clone(nodesRuntime),
@@ -1311,14 +1313,13 @@ async function handleRequest(
 		if (state.failAdminConfig) {
 			return errorResponse(500, "internal", "mock admin config failure");
 		}
-		const node = state.nodes[0];
 		return jsonResponse({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.slotString.s58(),
+			xray_api_addr: fixtureCatalog.slotString.s59(),
 			data_dir: "./data",
-			node_name: node?.node_name ?? "node-1",
-			access_host: node?.access_host ?? "",
-			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
+			node_name: fixtureCatalog.slotString.s60(),
+			access_host: fixtureCatalog.slotString.s61(),
+			api_base_url: fixtureCatalog.slotString.s62(),
 			vless_https_canary_bind: "127.0.0.1:39043",
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -1450,14 +1451,14 @@ async function handleRequest(
 			{
 				event: "hello",
 				data: {
-					node_id: node.node_id,
-					connected_at: new Date().toISOString(),
+					node_id: fixtureCatalog.slotString.s17(),
+					connected_at: fixtureCatalog.slotString.s7(),
 				},
 			},
 			{
 				event: "snapshot",
 				data: {
-					node_id: node.node_id,
+					node_id: fixtureCatalog.slotString.s17(),
 					summary: detail.summary,
 					components: detail.components,
 					recent_slots: detail.recent_slots,
@@ -1688,7 +1689,7 @@ async function handleRequest(
 			return jsonResponse(
 				clone(
 					state.nodeWeightPolicies[nodeId] ?? {
-						node_id: nodeId,
+						node_id: fixtureCatalog.slotString.s32(),
 						inherit_global: true,
 					},
 				),
@@ -1704,7 +1705,7 @@ async function handleRequest(
 				);
 			}
 			const nextPolicy: AdminQuotaPolicyNodePolicy = {
-				node_id: nodeId,
+				node_id: fixtureCatalog.slotString.s32(),
 				inherit_global: payload.inherit_global,
 			};
 			state.nodeWeightPolicies[nodeId] = nextPolicy;
@@ -1990,7 +1991,7 @@ async function handleRequest(
 		const endpoint: AdminEndpoint = {
 			endpoint_id: endpointId,
 			node_id: payload.node_id,
-			tag,
+			tag: tag,
 			kind: payload.kind,
 			port: payload.port,
 			meta,
@@ -2055,13 +2056,13 @@ async function handleRequest(
 		return jsonResponse({
 			endpoint_id: endpoint.endpoint_id,
 			url: `https://${authority}/generate_204`,
-			nodes: state.nodes.map((item, index) => ({
+			nodes: state.nodes.map((item) => ({
 				node_id: item.node_id,
 				ok: true,
 				status: 204,
-				latency_ms: 27 + index * 8,
+				latency_ms: fixtureCatalog.slotNumber.n8(),
 				error: null,
-				checked_at: new Date().toISOString(),
+				checked_at: fixtureCatalog.slotString.s7(),
 			})),
 		});
 	}
@@ -2176,11 +2177,10 @@ async function handleRequest(
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
 		const userId = `user-mock-${state.counters.user++}`;
-		const token = `sub-mock-${state.counters.subscription++}`;
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: token,
+			subscription_token: nextSubscriptionToken(),
 			credential_epoch: 0,
 			priority_tier: "p2",
 			quota_reset:
@@ -2193,7 +2193,10 @@ async function handleRequest(
 		};
 		state.users = [...state.users, user];
 		state.userAccessByUserId[userId] = [];
-		state.subscriptions[token] = buildSubscriptionText(token, null);
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(
+			user.subscription_token,
+			null,
+		);
 		return jsonResponse(user);
 	}
 
@@ -2241,16 +2244,19 @@ async function handleRequest(
 		if (!user) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const token = `sub-mock-${state.counters.subscription++}`;
-		const updated: AdminUser = {
-			...user,
-			subscription_token: token,
-		};
+		const previousSubscriptionToken = user.subscription_token;
+		user.subscription_token = nextSubscriptionToken();
 		state.users = state.users.map((item) =>
-			item.user_id === userId ? updated : item,
+			item.user_id === userId ? user : item,
 		);
-		state.subscriptions[token] = buildSubscriptionText(token, null);
-		const response: AdminUserTokenResponse = { subscription_token: token };
+		delete state.subscriptions[previousSubscriptionToken];
+		state.subscriptions[user.subscription_token] = buildSubscriptionText(
+			user.subscription_token,
+			null,
+		);
+		const response: AdminUserTokenResponse = {
+			subscription_token: user.subscription_token,
+		};
 		return jsonResponse(response);
 	}
 
@@ -2294,7 +2300,7 @@ async function handleRequest(
 				return errorResponse(400, "invalid_request", "invalid access item");
 			}
 			if (!endpointById.has(item.endpoint_id)) {
-				return errorResponse(404, "not_found", "endpoint not found");
+				return errorResponse(400, "invalid_request", "invalid access item");
 			}
 			desiredEndpointIds.add(item.endpoint_id);
 		}
@@ -2315,10 +2321,11 @@ async function handleRequest(
 			.sort()
 			.map((endpointId) => {
 				const endpoint = endpointById.get(endpointId);
+				if (!endpoint) throw new Error("endpoint not found");
 				return {
 					user_id: userId,
-					endpoint_id: endpointId,
-					node_id: endpoint?.node_id ?? "",
+					endpoint_id: endpoint.endpoint_id,
+					node_id: endpoint.node_id,
 				};
 			});
 
@@ -2342,9 +2349,6 @@ async function handleRequest(
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const cycleEnd = new Date(
-			Date.now() + 10 * 24 * 60 * 60 * 1000,
-		).toISOString();
 		const items = state.nodeQuotas
 			.filter((q) => q.user_id === userId)
 			.map((q) => ({
@@ -2353,7 +2357,7 @@ async function handleRequest(
 				quota_limit_bytes: q.quota_limit_bytes,
 				used_bytes: 0,
 				remaining_bytes: q.quota_limit_bytes,
-				cycle_end_at: cycleEnd,
+				cycle_end_at: fixtureCatalog.timestamp.later(),
 				quota_reset_source: q.quota_reset_source,
 			}));
 
@@ -2403,14 +2407,19 @@ async function handleRequest(
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
 	let probe = config?.probe;
+	let nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
 			probe = nextConfig?.probe;
+			nextSubscriptionToken =
+				fixtureCatalog.identifier.createSubscriptionTokenFactory();
 		},
 		async handle(req: Request) {
 			return (
-				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
+				handleEndpointProbeRequest(req, probe) ??
+				handleRequest(state, req, nextSubscriptionToken)
 			);
 		},
 	};

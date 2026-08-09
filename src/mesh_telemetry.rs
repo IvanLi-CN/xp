@@ -566,7 +566,7 @@ mod tests {
         MeshTelemetrySample {
             path: TelemetryPath::Mesh,
             success: true,
-            latency_ms: Some(10),
+            latency_ms: Some(xp_test_fixtures::slot_n24()),
             fallback: false,
             updates_active_path: true,
             transport: Some(MeshTransportObservation {
@@ -594,7 +594,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: true,
-                    latency_ms: Some(42),
+                    latency_ms: Some(xp_test_fixtures::slot_n27()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -725,11 +725,13 @@ mod tests {
 
     #[test]
     fn quality_uses_end_to_end_result_and_latency() {
-        let now = Utc::now();
+        let now = xp_test_fixtures::baseline_timestamp()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
         let peer = MeshPeerTelemetry {
-            last_sample_at: Some(timestamp(now)),
+            last_sample_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
             buckets: VecDeque::from([MeshTelemetryBucket {
-                minute: timestamp(now),
+                minute: xp_test_fixtures::baseline_timestamp().to_owned(),
                 public_success: 1,
                 fallback_success: 1,
                 end_to_end_success: 1,
@@ -743,11 +745,13 @@ mod tests {
 
     #[test]
     fn fallback_is_one_successful_logical_request() {
-        let now = Utc::now();
+        let now = xp_test_fixtures::baseline_timestamp()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
         let peer = MeshPeerTelemetry {
-            last_sample_at: Some(timestamp(now)),
+            last_sample_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
             buckets: VecDeque::from([MeshTelemetryBucket {
-                minute: timestamp(now),
+                minute: xp_test_fixtures::baseline_timestamp().to_owned(),
                 mesh_failure: 1,
                 public_success: 1,
                 fallback_success: 1,
@@ -845,7 +849,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: true,
-                    latency_ms: Some(42),
+                    latency_ms: Some(xp_test_fixtures::slot_n27()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -862,7 +866,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(50),
+                    latency_ms: Some(xp_test_fixtures::slot_n28()),
                     fallback: false,
                     updates_active_path: false,
                     transport: None,
@@ -887,7 +891,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(50),
+                    latency_ms: Some(xp_test_fixtures::slot_n28()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -898,7 +902,7 @@ mod tests {
         {
             let mut state = telemetry.state.lock().await;
             state.peers.get_mut("peer-a").unwrap().last_transition_at =
-                Some("2000-01-01T00:00:00Z".to_string());
+                Some(xp_test_fixtures::baseline_timestamp().to_owned());
         }
 
         telemetry
@@ -908,7 +912,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: false,
-                    latency_ms: None,
+                    latency_ms: xp_test_fixtures::none(),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -923,7 +927,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(60),
+                    latency_ms: Some(xp_test_fixtures::slot_n29()),
                     fallback: true,
                     updates_active_path: true,
                     transport: None,
@@ -936,7 +940,7 @@ mod tests {
         assert_eq!(peer.last_path, Some(TelemetryPath::Public));
         assert_eq!(
             peer.last_transition_at.as_deref(),
-            Some("2000-01-01T00:00:00Z")
+            Some(xp_test_fixtures::baseline_timestamp())
         );
     }
 
@@ -951,7 +955,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: false,
-                    latency_ms: None,
+                    latency_ms: xp_test_fixtures::none(),
                     fallback: false,
                     updates_active_path: false,
                     transport: None,
@@ -970,10 +974,12 @@ mod tests {
 
     #[test]
     fn buckets_are_pruned_by_age_and_expand_unknown_minutes() {
-        let now = Utc::now();
+        let now = xp_test_fixtures::baseline_timestamp()
+            .parse::<DateTime<Utc>>()
+            .unwrap();
         let mut peer = MeshPeerTelemetry {
             buckets: VecDeque::from([MeshTelemetryBucket {
-                minute: timestamp(now - Duration::hours(25)),
+                minute: xp_test_fixtures::slot_s623().to_owned(),
                 mesh_success: 1,
                 ..MeshTelemetryBucket::default()
             }]),

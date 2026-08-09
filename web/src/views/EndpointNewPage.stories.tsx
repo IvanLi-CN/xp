@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
-
-const NODE_ID = "node-alpha";
+import { expect, fireEvent, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 const meta = {
 	title: "Pages/EndpointNewPage",
@@ -14,10 +13,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: NODE_ID,
-						node_name: "alpha",
-						access_host: "node-xp.example.test",
-						api_base_url: "https://node-xp.example.test:443",
+						node_id: fixtureCatalog.slotString.s118(),
+						node_name: fixtureCatalog.slotString.s86(),
+						access_host: fixtureCatalog.slotString.s130(),
+						api_base_url: fixtureCatalog.slotString.s131(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -87,10 +86,10 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: NODE_ID,
-						node_name: "alpha",
-						access_host: "node-xp.example.test",
-						api_base_url: "https://node-xp.example.test:443",
+						node_id: fixtureCatalog.slotString.s118(),
+						node_name: fixtureCatalog.slotString.s86(),
+						access_host: fixtureCatalog.slotString.s130(),
+						api_base_url: fixtureCatalog.slotString.s131(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -101,15 +100,15 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: "endpoint-existing",
-						node_id: NODE_ID,
-						tag: "managed-alpha",
+						endpoint_id: fixtureCatalog.slotString.s132(),
+						node_id: fixtureCatalog.slotString.s118(),
+						tag: fixtureCatalog.slotString.s133(),
 						kind: "vless_reality_vision_tcp",
 						port: 443,
 						meta: {
 							reality: {
-								dest: "127.0.0.1:49043",
-								server_names: ["node-xp.example.test"],
+								dest: fixtureCatalog.slotString.s111(),
+								server_names: fixtureCatalog.slotList.l8(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -137,12 +136,17 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 			within(suggestionPanel)
 				.getAllByText(/^https:\/\/127\.0\.0\.1:/)
 				.map((element) => element.textContent),
-		).toEqual(["https://127.0.0.1:49043", "https://127.0.0.1:39043"]);
+		).toEqual([
+			`https://${fixtureCatalog.slotString.s111()}`,
+			fixtureCatalog.canaryUpstream.httpsListener().url,
+		]);
 		await userEvent.click(
-			await within(suggestionPanel).findByText("https://127.0.0.1:49043"),
+			await within(suggestionPanel).findByText(
+				`https://${fixtureCatalog.slotString.s111()}`,
+			),
 		);
 		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:49043",
+			`https://${fixtureCatalog.slotString.s111()}`,
 		);
 
 		await userEvent.click(
@@ -153,10 +157,10 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("tag-input-suggestions"),
-			).findByText("node-xp.example.test:8443"),
+			).findByText(fixtureCatalog.authority.host130Port8443()[0]),
 		);
 		await expect(
-			await canvas.findByTitle("node-xp.example.test:8443"),
+			await canvas.findByTitle(fixtureCatalog.authority.host130Port8443()[0]),
 		).toBeInTheDocument();
 	},
 };
@@ -168,10 +172,10 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: "node-hinet",
-						node_name: "hinet",
-						access_host: "hinet-ep.707979.xyz",
-						api_base_url: "https://hinet-xp.707979.xyz",
+						node_id: fixtureCatalog.slotString.s124(),
+						node_name: fixtureCatalog.slotString.s125(),
+						access_host: fixtureCatalog.slotString.s126(),
+						api_base_url: fixtureCatalog.slotString.s127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -194,10 +198,10 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText("https://127.0.0.1:39043"),
+			).findByText(fixtureCatalog.canaryUpstream.httpsListener().url),
 		);
 		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			"https://127.0.0.1:39043",
+			fixtureCatalog.canaryUpstream.httpsListener().url,
 		);
 
 		await userEvent.click(
@@ -208,10 +212,10 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("tag-input-suggestions"),
-			).findByText("hinet-ep.707979.xyz"),
+			).findByText(fixtureCatalog.slotString.s126()),
 		);
 		await expect(
-			await canvas.findByTitle("hinet-ep.707979.xyz:443"),
+			await canvas.findByTitle(fixtureCatalog.authority.host126Port443()[0]),
 		).toBeInTheDocument();
 	},
 };
@@ -223,10 +227,10 @@ export const ManagedDefaultAcceptedHostDefaultsTo443: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: NODE_ID,
-						node_name: "alpha",
-						access_host: "",
-						api_base_url: "not-a-url",
+						node_id: fixtureCatalog.slotString.s118(),
+						node_name: fixtureCatalog.slotString.s86(),
+						access_host: fixtureCatalog.slotString.s99(),
+						api_base_url: fixtureCatalog.slotString.s123(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -246,12 +250,16 @@ export const ManagedDefaultAcceptedHostDefaultsTo443: Story = {
 		if (!(tagInputControl instanceof HTMLElement)) {
 			throw new Error("accepted host tag input control not found");
 		}
-		await userEvent.type(input, "edge.example.com");
+		fireEvent.change(input, {
+			target: { value: fixtureCatalog.host.primary() },
+		});
 		await userEvent.click(
 			await within(tagInputControl).findByRole("button", { name: "Add" }),
 		);
 		await expect(
-			await within(tagInputControl).findByTitle("edge.example.com:443"),
+			await within(tagInputControl).findByTitle(
+				`${fixtureCatalog.host.primary()}:443`,
+			),
 		).toBeInTheDocument();
 	},
 };

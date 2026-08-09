@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import { verifyAdminToken } from "../api/adminAuth";
@@ -76,10 +77,10 @@ describe("<HomePage />", () => {
 		vi.resetAllMocks();
 		vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 		vi.mocked(fetchClusterInfo).mockResolvedValue({
-			cluster_id: "cluster-1",
-			node_id: "node-1",
+			cluster_id: fixtureCatalog.slotString.s84(),
+			node_id: fixtureCatalog.slotString.s32(),
 			role: "leader",
-			leader_api_base_url: "https://node-1.example.com",
+			leader_api_base_url: fixtureCatalog.slotString.s178(),
 			term: 12,
 			xp_version: "1.0.0",
 		});
@@ -93,13 +94,13 @@ describe("<HomePage />", () => {
 			unreachable_nodes: [],
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "tokyo-1",
-					api_base_url: "https://node-1.example.com",
-					access_host: "node-1.example.com",
+					node_id: fixtureCatalog.slotString.s32(),
+					node_name: fixtureCatalog.slotString.s33(),
+					api_base_url: fixtureCatalog.slotString.s178(),
+					access_host: fixtureCatalog.slotString.s179(),
 					summary: {
 						status: "up",
-						updated_at: "2026-03-01T00:00:00Z",
+						updated_at: fixtureCatalog.slotString.s91(),
 					},
 					components: [
 						{
@@ -112,19 +113,19 @@ describe("<HomePage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: "2026-03-01T00:00:00Z",
+							slot_start: fixtureCatalog.slotString.s91(),
 							status: "up",
 						},
 					],
 				},
 				{
-					node_id: "node-2",
-					node_name: "osaka-1",
-					api_base_url: "https://node-2.example.com",
-					access_host: "node-2.example.com",
+					node_id: fixtureCatalog.slotString.s36(),
+					node_name: fixtureCatalog.slotString.s37(),
+					api_base_url: fixtureCatalog.slotString.s180(),
+					access_host: fixtureCatalog.slotString.s181(),
 					summary: {
 						status: "up",
-						updated_at: "2026-03-01T00:00:00Z",
+						updated_at: fixtureCatalog.slotString.s91(),
 					},
 					components: [
 						{
@@ -137,7 +138,7 @@ describe("<HomePage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: "2026-03-01T00:00:00Z",
+							slot_start: fixtureCatalog.slotString.s91(),
 							status: "up",
 						},
 					],
@@ -161,8 +162,8 @@ describe("<HomePage />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-1",
-			"/nodes/node-2",
+			`/nodes/${fixtureCatalog.slotString.s32()}`,
+			`/nodes/${fixtureCatalog.slotString.s36()}`,
 		]);
 		expect(screen.getAllByRole("link", { name: "Open on node" })).toHaveLength(
 			2,

@@ -1,0 +1,49 @@
+id: fixture-policy-typescript-adapter-output-provenance
+valid:
+  - |
+    function stringSlotEntry(_value: string, index: number) {
+      return [`s${index}`, () => catalog.slots.strings[index]];
+    }
+  - |
+    function createSubscriptionTokenFactory() {
+      let subscriptionTokenIndex = 0;
+      return () => {
+        const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+        if (!accessor) {
+          throw new Error("synthetic subscription token sequence exhausted");
+        }
+        subscriptionTokenIndex += 1;
+        return accessor();
+      };
+    }
+  - |
+    function nextMeshPeerNodeId() {
+      const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+      meshPeerNodeIdIndex += 1;
+      return catalog.slots.strings[slotIndex];
+    }
+  - |
+    const primary = () => catalog.hosts.primary;
+  - |
+    const absent = () => null;
+  - |
+    const createSubscriptionTokenFactoryAccessor = () => createSubscriptionTokenFactory();
+invalid:
+  - |
+    const primary = () => "live.example";
+  - |
+    const primary = () => `live.${suffix}`;
+  - |
+    const primary = () => (catalog.hosts.primary, "live.example");
+  - |
+    const slots = Object.fromEntries([
+      ["unsafe", () => "live.example"],
+    ]);
+  - |
+    function injectedHost() {
+      return "live.example";
+    }
+  - |
+    const injectedHost = function () {
+      return "live.example";
+    };

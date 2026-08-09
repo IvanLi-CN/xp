@@ -1,0 +1,18 @@
+id: fixture-policy-rust-adapter-origin
+language: Rust
+severity: error
+message: xp_test_fixtures must resolve to the approved path dev crate.
+files:
+  - src/**/*.rs
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+rule:
+  any:
+    - pattern: mod xp_test_fixtures { $$$ }
+    - pattern: mod xp_test_fixtures;
+    - pattern: use $SOURCE as xp_test_fixtures;
+    - pattern: use $SOURCE::xp_test_fixtures;
+    - pattern: extern crate $SOURCE as xp_test_fixtures;

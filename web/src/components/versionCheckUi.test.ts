@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	reduceVersionCheckUiState,
@@ -56,7 +57,7 @@ describe("reduceVersionCheckUiState", () => {
 					current: { package: "0.1.0", release_tag: "v0.1.0" },
 					latest: { release_tag: "v0.2.0" },
 					has_update: true,
-					checked_at: "2026-01-31T00:00:00Z",
+					checked_at: fixtureCatalog.slotString.s54(),
 					compare_reason: "semver",
 					source: {
 						kind: "github-releases",

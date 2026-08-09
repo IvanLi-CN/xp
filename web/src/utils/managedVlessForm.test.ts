@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	acceptedAuthoritySuggestionsFromAccessHost,
@@ -10,11 +11,13 @@ import {
 describe("canaryUpstreamSuggestionsFromAuthorities", () => {
 	it("returns normalized XP HTTPS listener origin suggestions", () => {
 		expect(
-			canaryUpstreamSuggestionsFromAuthorities(["127.0.0.1:39043"]),
+			canaryUpstreamSuggestionsFromAuthorities([
+				fixtureCatalog.address.loopback39043(),
+			]),
 		).toEqual([
 			{
-				value: "https://127.0.0.1:39043",
-				label: "https://127.0.0.1:39043",
+				value: fixtureCatalog.canaryUpstream.httpsListener().url,
+				label: fixtureCatalog.canaryUpstream.httpsListener().url,
 			},
 		]);
 		expect(
@@ -44,45 +47,45 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 			canaryUpstreamSuggestionsFromManagedEndpointDests(
 				[
 					{
-						endpoint_id: "ep-managed",
-						node_id: "node-a",
+						endpoint_id: fixtureCatalog.slotString.s105(),
+						node_id: fixtureCatalog.slotString.s106(),
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: true,
 							reality: {
-								dest: "127.0.0.1:39043",
+								dest: fixtureCatalog.address.loopback39043(),
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-manual",
-						node_id: "node-a",
+						endpoint_id: fixtureCatalog.slotString.s107(),
+						node_id: fixtureCatalog.slotString.s106(),
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: false,
 							reality: {
-								dest: "origin.example.com:443",
+								dest: fixtureCatalog.slotString.s108(),
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-other-node",
-						node_id: "node-b",
+						endpoint_id: fixtureCatalog.slotString.s109(),
+						node_id: fixtureCatalog.slotString.s110(),
 						kind: "vless_reality_vision_tcp",
 						meta: {
 							managed_default: true,
 							reality: {
-								dest: "127.0.0.1:49043",
+								dest: fixtureCatalog.address.loopback49043(),
 							},
 						},
 					},
 				],
-				"node-a",
+				fixtureCatalog.slotString.s106(),
 			),
 		).toEqual([
 			{
-				value: "https://127.0.0.1:39043",
-				label: "https://127.0.0.1:39043",
+				value: fixtureCatalog.canaryUpstream.httpsListener().url,
+				label: fixtureCatalog.canaryUpstream.httpsListener().url,
 			},
 		]);
 	});
@@ -93,22 +96,22 @@ describe("mergeManagedVlessAutocompleteSuggestions", () => {
 		expect(
 			mergeManagedVlessAutocompleteSuggestions([
 				{
-					value: "https://127.0.0.1:49043",
-					label: "https://127.0.0.1:49043",
+					value: fixtureCatalog.canaryUpstream.httpsAlternate().url,
+					label: fixtureCatalog.canaryUpstream.httpsAlternate().url,
 				},
 				...canaryUpstreamSuggestionsFromAuthorities([
-					"127.0.0.1:39043",
-					"127.0.0.1:49043",
+					fixtureCatalog.address.loopback39043(),
+					fixtureCatalog.address.loopback49043(),
 				]),
 			]),
 		).toEqual([
 			{
-				value: "https://127.0.0.1:49043",
-				label: "https://127.0.0.1:49043",
+				value: fixtureCatalog.canaryUpstream.httpsAlternate().url,
+				label: fixtureCatalog.canaryUpstream.httpsAlternate().url,
 			},
 			{
-				value: "https://127.0.0.1:39043",
-				label: "https://127.0.0.1:39043",
+				value: fixtureCatalog.canaryUpstream.httpsListener().url,
+				label: fixtureCatalog.canaryUpstream.httpsListener().url,
 			},
 		]);
 	});

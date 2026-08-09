@@ -1,0 +1,16 @@
+id: fixture-policy-catalog-keys
+language: Json
+severity: error
+message: Fixture catalog keys must match the fixed schema.
+files:
+  - fixture-policy/catalog.json
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        not:
+          any:
+            - regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"slots"|"subscription"|"strings"|"numbers"|"stringLists"|"nodeIds"|"endpointIds"|"tags"|"accessHosts"|"apiBases"|"primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"canaryHttpsListener"|"canaryHttpsAlternate"|"canaryHttpLoopback"|"publicFallback"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"probeRunPrimary"|"probeRunSecondary"|"probeConfigPrimary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"endpointTagMissing"|"earlier"|"baseline"|"recent"|"later"|"probeHour"|"probeLatest"|"latencyLow"|"latencyHigh"|"trafficBytes"|"availabilityLow"|"availabilityHigh"|"availabilityFull"|"primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"loopbackServerNames"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443")$'
+            - regex: '^("primaryAuthorities"|"tertiaryAuthorities")$'
+            - regex: '^"date"$'

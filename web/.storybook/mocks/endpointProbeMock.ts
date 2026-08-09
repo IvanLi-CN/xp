@@ -2,6 +2,7 @@ import type {
 	AdminEndpointProbeHistoryResponse,
 	AdminEndpointProbeRunStatusResponse,
 } from "../../src/api/adminEndpointProbes";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 export type StorybookEndpointProbeMock = {
 	historyByEndpointId?: Record<string, AdminEndpointProbeHistoryResponse>;
@@ -65,7 +66,7 @@ export function handleEndpointProbeRequest(
 				event: "hello",
 				data: {
 					run_id: run.run_id,
-					connected_at: "2026-07-29T08:00:00Z",
+					connected_at: fixtureCatalog.slotString.s0(),
 					nodes: run.nodes.map((node) => node.node_id),
 				},
 			},

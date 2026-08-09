@@ -356,8 +356,8 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
-        access_host: "node-1.example.net".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle {
             cloudflare: true,
             no_cloudflare: false,
@@ -368,7 +368,7 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
         },
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
-        hostname: Some("node-1.example.com".to_string()),
+        hostname: Some(xp_test_fixtures::slot_s553().to_owned()),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -384,7 +384,7 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: None,
+        api_base_url: xp_test_fixtures::none(),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
@@ -420,13 +420,13 @@ async fn build_plan_allows_default_vless_port_without_server_names() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
-        access_host: "node-1.example.net".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: xp_test_fixtures::none(),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -442,7 +442,7 @@ async fn build_plan_allows_default_vless_port_without_server_names() {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: Some("https://node-1.example.net".to_string()),
+        api_base_url: Some(xp_test_fixtures::slot_s564().to_owned()),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
@@ -474,13 +474,13 @@ async fn build_plan_rejects_zero_managed_default_ports() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
-        access_host: "node-1.example.net".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: xp_test_fixtures::none(),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -496,7 +496,7 @@ async fn build_plan_rejects_zero_managed_default_ports() {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: Some("https://node-1.example.net".to_string()),
+        api_base_url: Some(xp_test_fixtures::slot_s564().to_owned()),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
@@ -540,13 +540,13 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
-        access_host: "node-1.example.net".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: xp_test_fixtures::none(),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -562,7 +562,7 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: Some("https://node-1.example.net".to_string()),
+        api_base_url: Some(xp_test_fixtures::slot_s564().to_owned()),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
@@ -610,13 +610,13 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node-1".to_string(),
-        access_host: "node-1.example.net".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
+        access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: xp_test_fixtures::none(),
         tunnel_name: None,
         origin_url: None,
         migrate_existing_tunnel: false,
@@ -632,7 +632,7 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
         cloudflare_token: None,
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: Some("https://node-1.example.net".to_string()),
+        api_base_url: Some(xp_test_fixtures::slot_s564().to_owned()),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
