@@ -70,6 +70,68 @@ describe("storybook api mock", () => {
 		expect(listDataAfter.items.length).toBe(initialCount);
 	});
 
+	it("keeps created and reset subscription tokens backed by their text", async () => {
+		const mock = createMockApi();
+		const firstCreateRes = await mock.handle(
+			jsonRequest("/api/admin/users", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ display_name: "First fixture user" }),
+			}),
+		);
+		const secondCreateRes = await mock.handle(
+			jsonRequest("/api/admin/users", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ display_name: "Second fixture user" }),
+			}),
+		);
+		expect(firstCreateRes.ok).toBe(true);
+		expect(secondCreateRes.ok).toBe(true);
+
+		const firstUser = (await firstCreateRes.json()) as {
+			user_id: string;
+			subscription_token: string;
+		};
+		const secondUser = (await secondCreateRes.json()) as {
+			subscription_token: string;
+		};
+		expect(firstUser.subscription_token).not.toBe(
+			secondUser.subscription_token,
+		);
+
+		for (const token of [
+			firstUser.subscription_token,
+			secondUser.subscription_token,
+		]) {
+			const subscriptionRes = await mock.handle(
+				jsonRequest(`/api/sub/${encodeURIComponent(token)}`, { method: "GET" }),
+			);
+			expect(subscriptionRes.ok).toBe(true);
+			expect(await subscriptionRes.text()).toContain(token);
+		}
+
+		const resetRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${firstUser.user_id}/reset-token`, {
+				method: "POST",
+			}),
+		);
+		expect(resetRes.ok).toBe(true);
+		const reset = (await resetRes.json()) as { subscription_token: string };
+		expect(reset.subscription_token).not.toBe(firstUser.subscription_token);
+		expect(reset.subscription_token).not.toBe(secondUser.subscription_token);
+
+		const resetSubscriptionRes = await mock.handle(
+			jsonRequest(`/api/sub/${encodeURIComponent(reset.subscription_token)}`, {
+				method: "GET",
+			}),
+		);
+		expect(resetSubscriptionRes.ok).toBe(true);
+		expect(await resetSubscriptionRes.text()).toContain(
+			reset.subscription_token,
+		);
+	});
+
 	it("supports user access hard-cut replace", async () => {
 		const mock = createMockApi();
 

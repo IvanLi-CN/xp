@@ -113,6 +113,12 @@ struct Identifiers {
     token_quaternary: String,
     #[serde(rename = "tokenQuinary")]
     token_quinary: String,
+    #[serde(rename = "probeRunPrimary")]
+    probe_run_primary: String,
+    #[serde(rename = "probeRunSecondary")]
+    probe_run_secondary: String,
+    #[serde(rename = "probeConfigPrimary")]
+    probe_config_primary: String,
     #[serde(rename = "clusterPrimary")]
     cluster_primary: String,
     #[serde(rename = "endpointTagPrimary")]
@@ -133,6 +139,10 @@ struct Timestamps {
     baseline: String,
     recent: String,
     later: String,
+    #[serde(rename = "probeHour")]
+    probe_hour: String,
+    #[serde(rename = "probeLatest")]
+    probe_latest: String,
     date: String,
 }
 
@@ -347,6 +357,18 @@ pub fn tertiary_token() -> &'static str {
     &catalog().identifiers.token_tertiary
 }
 
+pub fn primary_probe_run_id() -> &'static str {
+    &catalog().identifiers.probe_run_primary
+}
+
+pub fn secondary_probe_run_id() -> &'static str {
+    &catalog().identifiers.probe_run_secondary
+}
+
+pub fn primary_probe_config_hash() -> &'static str {
+    &catalog().identifiers.probe_config_primary
+}
+
 pub fn primary_endpoint_tag() -> &'static str {
     &catalog().identifiers.endpoint_tag_primary
 }
@@ -377,6 +399,14 @@ pub fn earlier_timestamp() -> &'static str {
 
 pub fn later_timestamp() -> &'static str {
     &catalog().timestamps.later
+}
+
+pub fn probe_hour() -> &'static str {
+    &catalog().timestamps.probe_hour
+}
+
+pub fn probe_latest_timestamp() -> &'static str {
+    &catalog().timestamps.probe_latest
 }
 
 pub fn low_latency() -> u64 {

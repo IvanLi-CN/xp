@@ -45,6 +45,9 @@
     "tokenTertiary": "fixture-token-gamma",
     "tokenQuaternary": "fixture-token-delta",
     "tokenQuinary": "fixture-token-epsilon",
+    "probeRunPrimary": "run-fixture-a",
+    "probeRunSecondary": "run-fixture-b",
+    "probeConfigPrimary": "config-fixture-a",
     "clusterPrimary": "cluster-fixture-a",
     "endpointTagPrimary": "endpoint-tag-fixture-a",
     "endpointTagSecondary": "endpoint-tag-fixture-b",
@@ -56,6 +59,8 @@
     "baseline": "2024-01-01T00:00:00Z",
     "recent": "2024-01-02T00:00:00Z",
     "later": "2024-01-03T00:00:00Z",
+    "probeHour": "2026-03-11T11:00:00Z",
+    "probeLatest": "2026-02-19T23:00:10Z",
     "date": "2024-01-01"
   },
   "metrics": {

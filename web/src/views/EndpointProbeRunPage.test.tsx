@@ -40,7 +40,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			);
 		},
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ runId: "run-1" }),
+		useParams: () => ({
+			runId: fixtureCatalog.identifier.probeRunPrimary(),
+		}),
 	};
 });
 
@@ -86,18 +88,18 @@ describe("<EndpointProbeRunPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.mocked(fetchAdminEndpointProbeRunStatus).mockResolvedValue({
-			run_id: "run-1",
+			run_id: fixtureCatalog.identifier.probeRunPrimary(),
 			status: "finished",
-			hour: "2026-03-11T11:00:00Z",
-			config_hash: "cfg-hash",
+			hour: fixtureCatalog.timestamp.probeHour(),
+			config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 			nodes: [
 				{
 					node_id: fixtureCatalog.slotString.s106(),
 					status: "finished",
 					progress: {
-						run_id: "run-1",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunPrimary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "finished",
 						endpoints_total: 1,
 						endpoints_done: 1,
@@ -110,9 +112,9 @@ describe("<EndpointProbeRunPage />", () => {
 					node_id: fixtureCatalog.slotString.s110(),
 					status: "finished",
 					progress: {
-						run_id: "run-1",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunPrimary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "finished",
 						endpoints_total: 1,
 						endpoints_done: 1,
@@ -125,9 +127,9 @@ describe("<EndpointProbeRunPage />", () => {
 					node_id: fixtureCatalog.slotString.s224(),
 					status: "busy",
 					current: {
-						run_id: "run-elsewhere",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunSecondary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "running",
 						endpoints_total: 1,
 						endpoints_done: 0,
@@ -151,7 +153,7 @@ describe("<EndpointProbeRunPage />", () => {
 						latest_latency_ms_p50: 120,
 						slots: [
 							{
-								hour: "2026-03-11T11:00:00Z",
+								hour: fixtureCatalog.timestamp.probeHour(),
 								status: "missing",
 								checked_at: fixtureCatalog.slotString.s223(),
 								latency_ms_p50: 120,
@@ -195,14 +197,14 @@ describe("<EndpointProbeRunPage />", () => {
 				event: "sample",
 				data: JSON.stringify({
 					node_id: fixtureCatalog.slotString.s106(),
-					run_id: "run-1",
-					hour: "2026-03-11T11:00:00Z",
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
+					hour: fixtureCatalog.timestamp.probeHour(),
 					sample: {
 						endpoint_id: fixtureCatalog.slotString.s40(),
 						ok: true,
 						checked_at: fixtureCatalog.slotString.s222(),
 						latency_ms: fixtureCatalog.slotNumber.n12(),
-						config_hash: "cfg-hash",
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 					},
 				}),
 			});
@@ -210,14 +212,14 @@ describe("<EndpointProbeRunPage />", () => {
 				event: "sample",
 				data: JSON.stringify({
 					node_id: fixtureCatalog.slotString.s110(),
-					run_id: "run-1",
-					hour: "2026-03-11T11:00:00Z",
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
+					hour: fixtureCatalog.timestamp.probeHour(),
 					sample: {
 						endpoint_id: fixtureCatalog.slotString.s40(),
 						ok: true,
 						checked_at: fixtureCatalog.slotString.s223(),
 						latency_ms: fixtureCatalog.slotNumber.n13(),
-						config_hash: "cfg-hash",
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 					},
 				}),
 			});
@@ -231,7 +233,7 @@ describe("<EndpointProbeRunPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminEndpointProbeRunStatus).toHaveBeenCalledWith(
 				"admintoken",
-				"run-1",
+				fixtureCatalog.identifier.probeRunPrimary(),
 				expect.any(AbortSignal),
 			);
 		});

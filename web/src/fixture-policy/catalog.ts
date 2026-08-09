@@ -23,7 +23,7 @@ const slotNumber = Object.fromEntries(
 const slotList = Object.fromEntries(
 	catalog.slots.stringLists.map(listSlotEntry),
 ) as Record<`l${number}`, () => string[]>;
-const resetTokenAccessors = [
+const subscriptionTokenAccessors = [
 	() => catalog.identifiers.tokenPrimary,
 	() => catalog.identifiers.tokenSecondary,
 	() => catalog.identifiers.tokenTertiary,
@@ -31,12 +31,14 @@ const resetTokenAccessors = [
 	() => catalog.identifiers.tokenQuinary,
 ] as const;
 
-function createResetTokenFactory() {
-	let resetTokenIndex = 0;
+function createSubscriptionTokenFactory() {
+	let subscriptionTokenIndex = 0;
 	return () => {
-		const accessor =
-			resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-		resetTokenIndex += 1;
+		const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+		if (!accessor) {
+			throw new Error("synthetic subscription token sequence exhausted");
+		}
+		subscriptionTokenIndex += 1;
 		return accessor();
 	};
 }
@@ -135,13 +137,16 @@ export const fixtureCatalog = {
 		userTertiary: () => catalog.identifiers.userTertiary,
 		userQuaternary: () => catalog.identifiers.userQuaternary,
 		userQuinary: () => catalog.identifiers.userQuinary,
-		createResetTokenFactory: () => createResetTokenFactory(),
+		createSubscriptionTokenFactory: () => createSubscriptionTokenFactory(),
 		nextMeshPeerNodeId,
 		tokenPrimary: () => catalog.identifiers.tokenPrimary,
 		tokenSecondary: () => catalog.identifiers.tokenSecondary,
 		tokenTertiary: () => catalog.identifiers.tokenTertiary,
 		tokenQuaternary: () => catalog.identifiers.tokenQuaternary,
 		tokenQuinary: () => catalog.identifiers.tokenQuinary,
+		probeRunPrimary: () => catalog.identifiers.probeRunPrimary,
+		probeRunSecondary: () => catalog.identifiers.probeRunSecondary,
+		probeConfigPrimary: () => catalog.identifiers.probeConfigPrimary,
 		clusterPrimary: () => catalog.identifiers.clusterPrimary,
 		endpointTagPrimary: () => catalog.identifiers.endpointTagPrimary,
 		endpointTagSecondary: () => catalog.identifiers.endpointTagSecondary,
@@ -153,6 +158,8 @@ export const fixtureCatalog = {
 		baseline: () => catalog.timestamps.baseline,
 		recent: () => catalog.timestamps.recent,
 		later: () => catalog.timestamps.later,
+		probeHour: () => catalog.timestamps.probeHour,
+		probeLatest: () => catalog.timestamps.probeLatest,
 		date: () => catalog.timestamps.date,
 		none: () => null,
 	},

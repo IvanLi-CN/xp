@@ -8,11 +8,11 @@ valid:
     }
   - |
     mod tests {
-        fn builds_mesh_target() {
+      fn builds_mesh_target() {
             let fixture = MeshPeerTarget {
                 public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
             };
-        }
+      }
     }
   - |
     fn production_value() {
@@ -36,6 +36,16 @@ invalid:
         fn builds_mesh_target() {
             let fixture = MeshPeerTarget {
                 mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+            };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_probe() {
+            let fixture = Probe {
+                run_id: "unapproved-run".to_owned(),
+                hour: "2026-03-11T11:00:00Z".to_owned(),
+                config_hash: "unapproved-config".to_owned(),
             };
         }
     }

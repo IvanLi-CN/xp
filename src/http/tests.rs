@@ -710,8 +710,6 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
         }
     };
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-
     NodeEgressProbeState {
         public_ipv4: Some(xp_test_fixtures::slot_s463().to_owned()),
         public_ipv6: None,
@@ -724,7 +722,7 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
         },
         subscription_region: region,
         checked_at: xp_test_fixtures::slot_s565().to_owned(),
-        last_success_at: Some(now),
+        last_success_at: Some(xp_test_fixtures::slot_s464().to_owned()),
         classification_invalidated_at: None,
         error_summary: None,
     }
@@ -785,7 +783,7 @@ fn endpoint_probe_sample(
         } else {
             Some("probe failed".to_string())
         },
-        config_hash: "cfg".to_string(),
+        config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
     }
 }
 

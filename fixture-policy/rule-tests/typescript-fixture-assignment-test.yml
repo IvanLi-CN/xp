@@ -4,6 +4,11 @@ valid:
     report.start_at = fixtureCatalog.timestamp.baseline();
   - |
     report.total_bytes = null;
+  - |
+    async function setupApiMocks() {
+      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+      user.subscription_token = nextSubscriptionToken();
+    }
 invalid:
   - |
     report.start_at = "unapproved-timestamp";

@@ -11,17 +11,152 @@ import type { AdminNode } from "../api/adminNodes";
 import { EndpointsTable } from "./EndpointsTable";
 
 function makeSlots(): AdminEndpointProbeSlot[] {
-	const slots: AdminEndpointProbeSlot[] = [];
-	for (let hour = 0; hour < 24; hour++) {
-		const hh = String(hour).padStart(2, "0");
-		slots.push({
-			hour: `2026-02-19T${hh}:00:00Z`,
-			status: hour % 11 === 0 ? "down" : hour % 7 === 0 ? "degraded" : "up",
-			latency_ms_p50: 200 + hour,
+	return [
+		{
+			hour: fixtureCatalog.slotString.s4(),
+			status: "down",
+			latency_ms_p50: 200,
 			checked_at: fixtureCatalog.slotString.s269(),
-		});
-	}
-	return slots;
+		},
+		{
+			hour: fixtureCatalog.slotString.s5(),
+			status: "up",
+			latency_ms_p50: 201,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s6(),
+			status: "up",
+			latency_ms_p50: 202,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s7(),
+			status: "up",
+			latency_ms_p50: 203,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s8(),
+			status: "up",
+			latency_ms_p50: 204,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s9(),
+			status: "up",
+			latency_ms_p50: 205,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s10(),
+			status: "up",
+			latency_ms_p50: 206,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s11(),
+			status: "degraded",
+			latency_ms_p50: 207,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s12(),
+			status: "up",
+			latency_ms_p50: 208,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s13(),
+			status: "up",
+			latency_ms_p50: 209,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s14(),
+			status: "up",
+			latency_ms_p50: 210,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s15(),
+			status: "down",
+			latency_ms_p50: 211,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s16(),
+			status: "up",
+			latency_ms_p50: 212,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s21(),
+			status: "up",
+			latency_ms_p50: 213,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s22(),
+			status: "degraded",
+			latency_ms_p50: 214,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s23(),
+			status: "up",
+			latency_ms_p50: 215,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s24(),
+			status: "up",
+			latency_ms_p50: 216,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s25(),
+			status: "up",
+			latency_ms_p50: 217,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s26(),
+			status: "up",
+			latency_ms_p50: 218,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s47(),
+			status: "up",
+			latency_ms_p50: 219,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s48(),
+			status: "up",
+			latency_ms_p50: 220,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s52(),
+			status: "degraded",
+			latency_ms_p50: 221,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s54(),
+			status: "down",
+			latency_ms_p50: 222,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+		{
+			hour: fixtureCatalog.slotString.s81(),
+			status: "up",
+			latency_ms_p50: 223,
+			checked_at: fixtureCatalog.slotString.s269(),
+		},
+	];
 }
 
 const LONG_NODE_NAME = fixtureCatalog.slotString.s276();
@@ -35,7 +170,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		port: 53842,
 		meta: { public_domain: fixtureCatalog.slotString.s212() },
 		probe: {
-			latest_checked_at: "2026-02-19T23:00:10Z",
+			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 293,
 			slots: makeSlots(),
 		},
@@ -48,7 +183,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		port: 53843,
 		meta: { public_domain: fixtureCatalog.slotString.s278() },
 		probe: {
-			latest_checked_at: "2026-02-19T23:00:10Z",
+			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 223,
 			slots: makeSlots(),
 		},

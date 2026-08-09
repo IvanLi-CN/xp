@@ -23,11 +23,14 @@ rule:
                     return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
                   }
               - pattern: |
-                  function createResetTokenFactory() {
-                    let resetTokenIndex = 0;
+                  function createSubscriptionTokenFactory() {
+                    let subscriptionTokenIndex = 0;
                     return () => {
-                      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-                      resetTokenIndex += 1;
+                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+                      if (!accessor) {
+                        throw new Error("synthetic subscription token sequence exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
                       return accessor();
                     };
                   }
@@ -48,13 +51,16 @@ rule:
                     - kind: function_declaration
                     - has:
                         field: name
-                        pattern: createResetTokenFactory
+                        pattern: createSubscriptionTokenFactory
               - has:
                   field: body
                   pattern: |
                     {
-                      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-                      resetTokenIndex += 1;
+                      const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+                      if (!accessor) {
+                        throw new Error("synthetic subscription token sequence exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
                       return accessor();
                     }
         - not:
@@ -79,4 +85,4 @@ rule:
                   regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
               - has:
                   field: body
-                  regex: '^createResetTokenFactory\(\)$'
+                  regex: '^createSubscriptionTokenFactory\(\)$'

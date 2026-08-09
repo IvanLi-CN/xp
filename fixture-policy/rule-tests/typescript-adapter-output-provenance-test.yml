@@ -5,11 +5,14 @@ valid:
       return [`s${index}`, () => catalog.slots.strings[index]];
     }
   - |
-    function createResetTokenFactory() {
-      let resetTokenIndex = 0;
+    function createSubscriptionTokenFactory() {
+      let subscriptionTokenIndex = 0;
       return () => {
-        const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-        resetTokenIndex += 1;
+        const accessor = subscriptionTokenAccessors[subscriptionTokenIndex];
+        if (!accessor) {
+          throw new Error("synthetic subscription token sequence exhausted");
+        }
+        subscriptionTokenIndex += 1;
         return accessor();
       };
     }
@@ -24,7 +27,7 @@ valid:
   - |
     const absent = () => null;
   - |
-    const createResetTokenFactoryAccessor = () => createResetTokenFactory();
+    const createSubscriptionTokenFactoryAccessor = () => createSubscriptionTokenFactory();
 invalid:
   - |
     const primary = () => "live.example";

@@ -7,6 +7,11 @@ valid:
   - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
   - '{ "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }'
   - '{ "timestamps": { "date": "2024-01-01" } }'
+  - |
+    {
+      "identifiers": { "probeRunSecondary": "run-fixture-b" },
+      "timestamps": { "probeHour": "2026-03-11T11:00:00Z" }
+    }
 invalid:
   - '{ "metrics": true }'
   - '{ "latencyLow": "12" }'

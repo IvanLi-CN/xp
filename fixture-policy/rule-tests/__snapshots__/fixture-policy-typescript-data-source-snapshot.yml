@@ -1,6 +1,21 @@
 id: fixture-policy-typescript-data-source
 snapshots:
   ? |
+    const fixture = { config_hash: "unapproved-config" };
+  : labels:
+    - source: 'config_hash: "unapproved-config"'
+      style: primary
+      start: 18
+      end: 50
+    - source: config_hash
+      style: secondary
+      start: 18
+      end: 29
+    - source: '"unapproved-config"'
+      style: secondary
+      start: 31
+      end: 50
+  ? |
     const fixture = { cycle_end_at: new Date().toISOString() };
   : labels:
     - source: 'cycle_end_at: new Date().toISOString()'
@@ -61,6 +76,21 @@ snapshots:
       start: 24
       end: 49
   ? |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'hour: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 46
+    - source: hour
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 24
+      end: 46
+  ? |
     const fixture = { ip: await fetch("https://input.fixture.test") };
   : labels:
     - source: 'ip: await fetch("https://input.fixture.test")'
@@ -76,6 +106,36 @@ snapshots:
       start: 22
       end: 63
   ? |
+    const fixture = { last_success_at: new Date().toISOString() };
+  : labels:
+    - source: 'last_success_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 59
+    - source: last_success_at
+      style: secondary
+      start: 18
+      end: 33
+    - source: new Date().toISOString()
+      style: secondary
+      start: 35
+      end: 59
+  ? |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'latest_checked_at: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 59
+    - source: latest_checked_at
+      style: secondary
+      start: 18
+      end: 35
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 37
+      end: 59
+  ? |
     const fixture = { node_id: payload.node_id };
   : labels:
     - source: 'node_id: payload.node_id'
@@ -89,6 +149,21 @@ snapshots:
     - source: payload.node_id
       style: secondary
       start: 27
+      end: 42
+  ? |
+    const fixture = { run_id: "unapproved-run" };
+  : labels:
+    - source: 'run_id: "unapproved-run"'
+      style: primary
+      start: 18
+      end: 42
+    - source: run_id
+      style: secondary
+      start: 18
+      end: 24
+    - source: '"unapproved-run"'
+      style: secondary
+      start: 26
       end: 42
   ? |
     const fixture = { subscription_token: user.subscription_token };

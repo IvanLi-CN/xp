@@ -9,6 +9,22 @@ snapshots:
       start: 65
       end: 77
   ? |
+    const hour = "2026-03-11T11:00:00Z";
+    const fixture = { hour };
+  : labels:
+    - source: hour
+      style: primary
+      start: 55
+      end: 59
+  ? |
+    const run_id = "unapproved-run";
+    const fixture = { run_id };
+  : labels:
+    - source: run_id
+      style: primary
+      start: 51
+      end: 57
+  ? |
     const tag = "unapproved";
     const fixture = { tag };
   : labels:

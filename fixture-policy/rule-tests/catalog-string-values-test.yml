@@ -5,6 +5,11 @@ valid:
   - '{ "lists": { "loopbackServerNames": ["127.0.0.1"] } }'
   - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
   - '{ "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }'
+  - |
+    {
+      "identifiers": { "probeConfigPrimary": "config-fixture-a" },
+      "timestamps": { "probeLatest": "2026-02-19T23:00:10Z" }
+    }
   - '{ "slots": { "strings": ["2024-01-01T00:00:00.000Z"] } }'
   - '{ "slots": { "strings": ["hinet", "extra-node", "node-unreachable"] } }'
 invalid:

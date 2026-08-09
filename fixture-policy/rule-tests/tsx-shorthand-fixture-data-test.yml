@@ -12,3 +12,9 @@ invalid:
   - |
     const total_bytes = 4096;
     const fixture = { total_bytes };
+  - |
+    const config_hash = "unapproved-config";
+    const fixture = { config_hash };
+  - |
+    const latest_checked_at = "2026-03-11T11:00:00Z";
+    const fixture = { latest_checked_at };

@@ -41,7 +41,7 @@ valid:
       return { endpoint_id: endpoint.endpoint_id, node_id: endpoint.node_id };
     }
   - |
-    async function handleRequest() {
+    async function handleRequest(nextSubscriptionToken: () => string) {
       return {
         node_name: payload.node_name ?? node.node_name,
         endpoint_id: endpointId,
@@ -52,6 +52,15 @@ valid:
         node_id: q.node_id,
         subscription_token: user.subscription_token,
       };
+    }
+  - |
+    async function setupApiMocks() {
+      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+      return { subscription_token: nextSubscriptionToken() };
+    }
+  - |
+    function handleEndpointProbeRequest() {
+      return { run_id: run.run_id };
     }
 invalid:
   - |
@@ -80,3 +89,13 @@ invalid:
     }
   - |
     const fixture = { subscription_token: user.subscription_token };
+  - |
+    const fixture = { run_id: "unapproved-run" };
+  - |
+    const fixture = { config_hash: "unapproved-config" };
+  - |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { last_success_at: new Date().toISOString() };

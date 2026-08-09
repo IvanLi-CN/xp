@@ -108,3 +108,25 @@ snapshots:
       style: secondary
       start: 30
       end: 40
+  ? |
+    let sample = EndpointProbeSample { config_hash: std::env::var("TEST_CONFIG_HASH").unwrap() };
+  : labels:
+    - source: 'config_hash: std::env::var("TEST_CONFIG_HASH").unwrap()'
+      style: primary
+      start: 35
+      end: 90
+    - source: config_hash
+      style: secondary
+      start: 35
+      end: 46
+  ? |
+    let sample = EndpointProbeSample { hour: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'hour: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 35
+      end: 74
+    - source: hour
+      style: secondary
+      start: 35
+      end: 39
