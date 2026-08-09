@@ -30,3 +30,15 @@ snapshots:
       style: primary
       start: 48
       end: 68
+  ? |
+    function injectedHost() {
+      return "live.example";
+    }
+  : labels:
+    - source: |-
+        function injectedHost() {
+          return "live.example";
+        }
+      style: primary
+      start: 0
+      end: 52

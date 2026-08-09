@@ -1,6 +1,28 @@
 id: fixture-policy-rust-data-source
 snapshots:
   ? |
+    let fixture = Config { api_base_url: "http://127.0.0.2:9".to_string() };
+  : labels:
+    - source: 'api_base_url: "http://127.0.0.2:9".to_string()'
+      style: primary
+      start: 23
+      end: 69
+    - source: api_base_url
+      style: secondary
+      start: 23
+      end: 35
+  ? |
+    let fixture = Config { dest: format!("host.docker.internal:443") };
+  : labels:
+    - source: 'dest: format!("host.docker.internal:443")'
+      style: primary
+      start: 23
+      end: 64
+    - source: dest
+      style: secondary
+      start: 23
+      end: 27
+  ? |
     let fixture = Config { node_id: "node-unapproved" };
   : labels:
     - source: 'node_id: "node-unapproved"'

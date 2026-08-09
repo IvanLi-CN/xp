@@ -17,9 +17,6 @@ use std::sync::{
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle};
 use tokio::{sync::broadcast, time::sleep};
 
-const CLUSTER_ID: &str = "01JTESTCLUSTERID00000000000000";
-const SENDER_ID: &str = "01JTESTSENDER0000000000000000";
-const TARGET_ID: &str = "01JTESTTARGET0000000000000000";
 const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 
 #[derive(Clone)]
@@ -83,8 +80,8 @@ async fn signed_health(
         &uri,
         &headers,
         &body,
-        CLUSTER_ID,
-        TARGET_ID,
+        xp_test_fixtures::primary_cluster_id(),
+        xp_test_fixtures::primary_node_id(),
     )
     .expect("valid signed request");
     let ack = if uri.query() == Some("invalid-ack") {
@@ -94,7 +91,7 @@ async fn signed_health(
             &state.ca_key_pem,
             &state.ca_cert_pem,
             &verified,
-            TARGET_ID,
+            xp_test_fixtures::primary_node_id(),
             StatusCode::OK.as_u16(),
         )
         .expect("sign acknowledgement")
@@ -220,15 +217,15 @@ fn mesh_request(index: usize) -> MeshRequest {
         allow_ambiguous_fallback: true,
         request_id: format!("request-{index}"),
         route: InternalRoute::HealthV2,
-        cluster_id: CLUSTER_ID.to_string(),
-        sender_id: SENDER_ID.to_string(),
+        cluster_id: xp_test_fixtures::primary_cluster_id().to_owned(),
+        sender_id: xp_test_fixtures::secondary_node_id().to_owned(),
         updates_active_path: true,
     }
 }
 
 fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
     MeshPeerTarget {
-        node_id: TARGET_ID.to_string(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: "target".to_string(),
         mesh_base_url: Some(format!("https://{addr}")),
         mesh_reason: crate::mesh_telemetry::MeshPeerReason::MeshAvailable,
@@ -239,10 +236,18 @@ fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
 #[tokio::test]
 async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
@@ -304,10 +309,18 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
 #[tokio::test]
 async fn mesh_request_reconnects_once_after_the_active_connection_is_cut() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
@@ -341,10 +354,18 @@ async fn mesh_request_reconnects_once_after_the_active_connection_is_cut() {
 #[tokio::test]
 async fn mesh_pool_discards_idle_connections_after_the_policy_timeout() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let client = crate::control_plane_mesh::build_mesh_http_client_with_policy(
         &ca.cert_pem,
@@ -377,10 +398,18 @@ async fn mesh_pool_discards_idle_connections_after_the_policy_timeout() {
 #[tokio::test]
 async fn h2_transport_failure_uses_the_compatible_public_client() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_http1_server(&ca.key_pem, &ca.cert_pem).await;
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
@@ -411,10 +440,18 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
 #[tokio::test]
 async fn invalid_h2_ack_never_downgrades_to_public_transport() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
         .expect("network factory")
@@ -436,10 +473,18 @@ async fn invalid_h2_ack_never_downgrades_to_public_transport() {
 #[tokio::test]
 async fn long_lived_stream_and_large_request_share_one_h2_connection() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ca = crate::cluster_identity::generate_cluster_ca(CLUSTER_ID).expect("cluster CA");
-    let csr = crate::cluster_identity::generate_node_keypair_and_csr(SENDER_ID).expect("node CSR");
-    let node_cert = crate::cluster_identity::sign_node_csr(CLUSTER_ID, &ca.key_pem, &csr.csr_pem)
-        .expect("node certificate");
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::primary_cluster_id())
+        .expect("cluster CA");
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(
+        xp_test_fixtures::secondary_node_id(),
+    )
+    .expect("node CSR");
+    let node_cert = crate::cluster_identity::sign_node_csr(
+        xp_test_fixtures::primary_cluster_id(),
+        &ca.key_pem,
+        &csr.csr_pem,
+    )
+    .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())

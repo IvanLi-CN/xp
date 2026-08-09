@@ -1,12 +1,33 @@
 id: fixture-policy-tsx-catalog-origin
 snapshots:
   ? |
+    class fixtureCatalog {}
+  : labels:
+    - source: class fixtureCatalog {}
+      style: primary
+      start: 0
+      end: 23
+  ? |
     const build = (fixtureCatalog: unknown) => fixtureCatalog;
   : labels:
     - source: 'fixtureCatalog: unknown'
       style: primary
       start: 15
       end: 38
+  ? |
+    const { fixtureCatalog } = source;
+  : labels:
+    - source: const { fixtureCatalog } = source;
+      style: primary
+      start: 0
+      end: 34
+  ? |
+    const { source: fixtureCatalog } = source;
+  : labels:
+    - source: 'const { source: fixtureCatalog } = source;'
+      style: primary
+      start: 0
+      end: 42
   ? |
     function fixtureCatalog() { return {}; }
   : labels:

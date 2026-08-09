@@ -5,3 +5,5 @@ valid:
 invalid:
   - |
     const item = { access_host: "live.example" };
+  - |
+    const item = { node_name: "unapproved-node" };

@@ -1,6 +1,10 @@
 id: fixture-policy-typescript-adapter-output-provenance
 valid:
   - |
+    function stringSlotEntry(_value: string, index: number) {
+      return [`s${index}`, () => catalog.slots.strings[index]];
+    }
+  - |
     const primary = () => catalog.hosts.primary;
   - |
     const absent = () => null;
@@ -15,3 +19,7 @@ invalid:
     const slots = Object.fromEntries([
       ["unsafe", () => "live.example"],
     ]);
+  - |
+    function injectedHost() {
+      return "live.example";
+    }

@@ -31,6 +31,21 @@ snapshots:
       start: 23
       end: 47
   ? |
+    const item = { node_name: "unapproved-node" };
+  : labels:
+    - source: 'node_name: "unapproved-node"'
+      style: primary
+      start: 15
+      end: 43
+    - source: node_name
+      style: secondary
+      start: 15
+      end: 24
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 26
+      end: 43
+  ? |
     const item = { token: process.env.LIVE_TOKEN };
   : labels:
     - source: 'token: process.env.LIVE_TOKEN'

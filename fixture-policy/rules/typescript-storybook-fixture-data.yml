@@ -10,7 +10,7 @@ rule:
     - kind: pair
     - has:
         field: key
-        regex: '^(access_host|api_base_url|host|hostname|node_id|endpoint_id|endpoint_tag|token|last_seen_at|last_sample_at|last_transition_at|window_start|window_end|minute|start_minute|end_minute|observed_at|occurred_at|ip|mesh_url|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h)$'
+        regex: '^(access_host|api_base_url|host|hostname|node_id|node_name|endpoint_id|endpoint_tag|token|last_seen_at|last_sample_at|last_transition_at|window_start|window_end|minute|start_minute|end_minute|observed_at|occurred_at|ip|mesh_url|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h)$'
     - has:
         field: value
         kind: string

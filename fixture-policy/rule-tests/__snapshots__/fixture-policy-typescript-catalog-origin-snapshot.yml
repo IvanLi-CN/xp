@@ -1,6 +1,13 @@
 id: fixture-policy-typescript-catalog-origin
 snapshots:
   ? |
+    class fixtureCatalog {}
+  : labels:
+    - source: class fixtureCatalog {}
+      style: primary
+      start: 0
+      end: 23
+  ? |
     const build = (fixtureCatalog: unknown) => fixtureCatalog;
   : labels:
     - source: 'fixtureCatalog: unknown'
@@ -14,6 +21,20 @@ snapshots:
       style: primary
       start: 0
       end: 78
+  ? |
+    const { fixtureCatalog } = source;
+  : labels:
+    - source: const { fixtureCatalog } = source;
+      style: primary
+      start: 0
+      end: 34
+  ? |
+    const { source: fixtureCatalog } = source;
+  : labels:
+    - source: 'const { source: fixtureCatalog } = source;'
+      style: primary
+      start: 0
+      end: 42
   ? |
     import * as fixtureCatalog from "./fixture-input";
   : labels:
