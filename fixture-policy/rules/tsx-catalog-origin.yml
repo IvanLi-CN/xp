@@ -27,6 +27,9 @@ rule:
         - has:
             stopBy: end
             pattern: fixtureCatalog
+    - pattern: 'const { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'let { $KEY: { fixtureCatalog } } = $$$'
+    - pattern: 'var { $KEY: { fixtureCatalog } } = $$$'
     - all:
         - kind: required_parameter
         - regex: '\bfixtureCatalog\b'

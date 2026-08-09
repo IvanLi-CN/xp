@@ -44,6 +44,13 @@ snapshots:
       start: 0
       end: 34
   ? |
+    const { nested: { fixtureCatalog } } = source;
+  : labels:
+    - source: 'const { nested: { fixtureCatalog } } = source;'
+      style: primary
+      start: 0
+      end: 46
+  ? |
     const { source: fixtureCatalog } = source;
   : labels:
     - source: 'const { source: fixtureCatalog } = source;'

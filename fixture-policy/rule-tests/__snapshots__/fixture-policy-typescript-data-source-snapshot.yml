@@ -1,6 +1,21 @@
 id: fixture-policy-typescript-data-source
 snapshots:
   ? |
+    const fixture = { cycle_end_at: new Date().toISOString() };
+  : labels:
+    - source: 'cycle_end_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 56
+    - source: cycle_end_at
+      style: secondary
+      start: 18
+      end: 30
+    - source: new Date().toISOString()
+      style: secondary
+      start: 32
+      end: 56
+  ? |
     const fixture = { emitted_at: new Date().toISOString() };
   : labels:
     - source: 'emitted_at: new Date().toISOString()'
@@ -142,6 +157,21 @@ snapshots:
       style: secondary
       start: 30
       end: 45
+  ? |
+    const fixture = { user_id: process.env.TEST_USER_ID };
+  : labels:
+    - source: 'user_id: process.env.TEST_USER_ID'
+      style: primary
+      start: 18
+      end: 51
+    - source: user_id
+      style: secondary
+      start: 18
+      end: 25
+    - source: process.env.TEST_USER_ID
+      style: secondary
+      start: 27
+      end: 51
   ? |
     const fixture = { xray_api_addr: "127.0.0.1:10085" };
   : labels:

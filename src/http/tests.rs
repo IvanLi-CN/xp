@@ -131,7 +131,7 @@ fn test_config(data_dir: PathBuf) -> Config {
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: hash,
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         vless_canary_bind: SocketAddr::from((
@@ -749,11 +749,11 @@ async fn record_inbound_ip_usage_samples(
         .unwrap();
 }
 
-fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: &str) {
+fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: fn() -> &'static str) {
     DesiredStateCommand::UpsertNode {
         node: Node {
             node_id: node_id.to_owned(),
-            node_name: node_name.to_string(),
+            node_name: node_name().to_owned(),
             access_host: xp_test_fixtures::slot_s566().to_owned(),
             api_base_url: xp_test_fixtures::slot_s567().to_owned(),
             quota_limit_bytes: 0,
@@ -1255,7 +1255,7 @@ async fn delete_node_removes_from_inventory() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1296,7 +1296,7 @@ async fn delete_node_rejects_if_endpoints_exist() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1343,7 +1343,7 @@ async fn get_node_delete_preview_lists_referenced_endpoints() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1388,7 +1388,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1464,7 +1464,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1549,7 +1549,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_removed_preview_end
 
     let node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -1936,7 +1936,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
 
     let extra_node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s572().to_owned(),
         quota_limit_bytes: 0,
@@ -2024,7 +2024,7 @@ async fn delete_node_times_out_when_change_membership_hangs() {
 
     let extra_node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "extra-node".to_string(),
+        node_name: xp_test_fixtures::slot_s645().to_owned(),
         access_host: xp_test_fixtures::slot_s448().to_owned(),
         api_base_url: xp_test_fixtures::slot_s572().to_owned(),
         quota_limit_bytes: 0,
@@ -2228,7 +2228,7 @@ async fn nodes_runtime_list_marks_unreachable_remote_nodes_as_partial() {
         store
             .upsert_node(Node {
                 node_id: xp_test_fixtures::slot_s574().to_owned(),
-                node_name: "remote-a".to_string(),
+                node_name: xp_test_fixtures::slot_s646().to_owned(),
                 access_host: xp_test_fixtures::slot_s575().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s576().to_owned(),
                 quota_limit_bytes: 0,
@@ -3998,7 +3998,7 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
             dst_node_id.clone(),
             Node {
                 node_id: xp_test_fixtures::slot_s579().to_owned(),
-                node_name: "node-2".to_string(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
                 access_host: xp_test_fixtures::slot_s580().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s581().to_owned(),
                 quota_limit_bytes: 0,
@@ -4073,7 +4073,7 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
             dst_node_id.clone(),
             Node {
                 node_id: xp_test_fixtures::slot_s579().to_owned(),
-                node_name: "node-2".to_string(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
                 access_host: xp_test_fixtures::slot_s580().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s581().to_owned(),
                 quota_limit_bytes: 0,
@@ -4211,7 +4211,7 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
             dst_node_id.clone(),
             Node {
                 node_id: xp_test_fixtures::slot_s579().to_owned(),
-                node_name: "node-2".to_string(),
+                node_name: xp_test_fixtures::slot_s606().to_owned(),
                 access_host: xp_test_fixtures::slot_s580().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s581().to_owned(),
                 quota_limit_bytes: 0,
@@ -5776,7 +5776,7 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
 
     let extra_node = Node {
         node_id: xp_test_fixtures::slot_s570().to_owned(),
-        node_name: "nodebeta".to_string(),
+        node_name: xp_test_fixtures::slot_s647().to_owned(),
         access_host: xp_test_fixtures::slot_s582().to_owned(),
         api_base_url: xp_test_fixtures::slot_s583().to_owned(),
         quota_limit_bytes: 0,
@@ -7526,7 +7526,7 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
         store
             .upsert_node(Node {
                 node_id: xp_test_fixtures::slot_s450().to_owned(),
-                node_name: "node-unreachable".to_string(),
+                node_name: xp_test_fixtures::slot_s648().to_owned(),
                 access_host: xp_test_fixtures::slot_s448().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s576().to_owned(),
                 quota_limit_bytes: 0,
@@ -7944,7 +7944,7 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
         store
             .upsert_node(Node {
                 node_id: xp_test_fixtures::slot_s450().to_owned(),
-                node_name: "node-remote".to_string(),
+                node_name: xp_test_fixtures::slot_s649().to_owned(),
                 access_host: xp_test_fixtures::slot_s448().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s576().to_owned(),
                 quota_limit_bytes: 0,
@@ -8101,7 +8101,7 @@ async fn user_traffic_returns_partial_report_when_all_membership_nodes_are_unrea
         store
             .upsert_node(Node {
                 node_id: xp_test_fixtures::slot_s450().to_owned(),
-                node_name: "node-unreachable".to_string(),
+                node_name: xp_test_fixtures::slot_s648().to_owned(),
                 access_host: xp_test_fixtures::slot_s492().to_owned(),
                 api_base_url: xp_test_fixtures::slot_s576().to_owned(),
                 quota_limit_bytes: 0,
@@ -8150,7 +8150,7 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
         let mut store = store.lock().await;
         let node = Node {
             node_id: xp_test_fixtures::slot_s522().to_owned(),
-            node_name: "tcp-node".to_string(),
+            node_name: xp_test_fixtures::slot_s650().to_owned(),
             access_host: xp_test_fixtures::slot_s448().to_owned(),
             api_base_url: xp_test_fixtures::slot_s449().to_owned(),
             quota_limit_bytes: 0,
@@ -9075,12 +9075,12 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
         add_cluster_node(
             &mut store,
             xp_test_fixtures::secondary_node_id(),
-            xp_test_fixtures::secondary_node_name(),
+            xp_test_fixtures::secondary_node_name,
         );
         add_cluster_node(
             &mut store,
             xp_test_fixtures::tertiary_node_id(),
-            xp_test_fixtures::tertiary_node_name(),
+            xp_test_fixtures::tertiary_node_name,
         );
         let endpoint = store
             .create_endpoint(
@@ -9150,12 +9150,12 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
         add_cluster_node(
             &mut store,
             xp_test_fixtures::secondary_node_id(),
-            xp_test_fixtures::secondary_node_name(),
+            xp_test_fixtures::secondary_node_name,
         );
         add_cluster_node(
             &mut store,
             xp_test_fixtures::tertiary_node_id(),
-            xp_test_fixtures::tertiary_node_name(),
+            xp_test_fixtures::tertiary_node_name,
         );
         let endpoint = store
             .create_endpoint(
@@ -9224,12 +9224,12 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
         add_cluster_node(
             &mut store,
             xp_test_fixtures::secondary_node_id(),
-            xp_test_fixtures::secondary_node_name(),
+            xp_test_fixtures::secondary_node_name,
         );
         add_cluster_node(
             &mut store,
             xp_test_fixtures::tertiary_node_id(),
-            xp_test_fixtures::tertiary_node_name(),
+            xp_test_fixtures::tertiary_node_name,
         );
         let endpoint = store
             .create_endpoint(
@@ -9319,7 +9319,7 @@ fn test_vless_meta(managed_default: bool) -> Value {
 async fn endpoint_canary_probe_url_omits_default_port() {
     let node = Node {
         node_id: xp_test_fixtures::slot_s468().to_owned(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s591().to_owned(),
         api_base_url: xp_test_fixtures::slot_s592().to_owned(),
         quota_limit_bytes: 0,
@@ -9346,7 +9346,7 @@ async fn endpoint_canary_probe_url_omits_default_port() {
 async fn endpoint_canary_probe_url_includes_non_default_port() {
     let node = Node {
         node_id: xp_test_fixtures::slot_s468().to_owned(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s594().to_owned(),
         api_base_url: xp_test_fixtures::slot_s592().to_owned(),
         quota_limit_bytes: 0,
@@ -9373,7 +9373,7 @@ async fn endpoint_canary_probe_url_includes_non_default_port() {
 async fn endpoint_canary_probe_url_rejects_loopback_access_host() {
     let node = Node {
         node_id: xp_test_fixtures::slot_s468().to_owned(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s595().to_owned(),
         api_base_url: xp_test_fixtures::slot_s592().to_owned(),
         quota_limit_bytes: 0,

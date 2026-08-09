@@ -5,10 +5,13 @@ valid:
       return [`s${index}`, () => catalog.slots.strings[index]];
     }
   - |
-    function nextResetToken() {
-      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-      resetTokenIndex += 1;
-      return accessor();
+    function createResetTokenFactory() {
+      let resetTokenIndex = 0;
+      return () => {
+        const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+        resetTokenIndex += 1;
+        return accessor();
+      };
     }
   - |
     function nextMeshPeerNodeId() {
@@ -20,6 +23,8 @@ valid:
     const primary = () => catalog.hosts.primary;
   - |
     const absent = () => null;
+  - |
+    const createResetTokenFactoryAccessor = () => createResetTokenFactory();
 invalid:
   - |
     const primary = () => "live.example";

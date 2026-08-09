@@ -30,13 +30,15 @@ const resetTokenAccessors = [
 	() => catalog.identifiers.tokenQuaternary,
 	() => catalog.identifiers.tokenQuinary,
 ] as const;
-let resetTokenIndex = 0;
 
-function nextResetToken() {
-	const accessor =
-		resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-	resetTokenIndex += 1;
-	return accessor();
+function createResetTokenFactory() {
+	let resetTokenIndex = 0;
+	return () => {
+		const accessor =
+			resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+		resetTokenIndex += 1;
+		return accessor();
+	};
 }
 
 const meshPeerNodeIdIndexes = [
@@ -133,7 +135,7 @@ export const fixtureCatalog = {
 		userTertiary: () => catalog.identifiers.userTertiary,
 		userQuaternary: () => catalog.identifiers.userQuaternary,
 		userQuinary: () => catalog.identifiers.userQuinary,
-		tokenAfterReset: nextResetToken,
+		createResetTokenFactory: () => createResetTokenFactory(),
 		nextMeshPeerNodeId,
 		tokenPrimary: () => catalog.identifiers.tokenPrimary,
 		tokenSecondary: () => catalog.identifiers.tokenSecondary,
@@ -144,6 +146,7 @@ export const fixtureCatalog = {
 		endpointTagPrimary: () => catalog.identifiers.endpointTagPrimary,
 		endpointTagSecondary: () => catalog.identifiers.endpointTagSecondary,
 		endpointTagTertiary: () => catalog.identifiers.endpointTagTertiary,
+		endpointTagMissing: () => catalog.identifiers.endpointTagMissing,
 	},
 	timestamp: {
 		earlier: () => catalog.timestamps.earlier,

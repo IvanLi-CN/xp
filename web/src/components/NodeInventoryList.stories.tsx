@@ -9,12 +9,10 @@ import {
 } from "./NodeInventoryList";
 
 function buildRecentSlots(
-	startIso: string,
 	statuses: Array<"up" | "degraded" | "down" | "unknown">,
 ) {
-	const start = Date.parse(startIso);
-	return statuses.map((status, index) => ({
-		slot_start: new Date(start + index * 30 * 60 * 1000).toISOString(),
+	return statuses.map((status) => ({
+		slot_start: fixtureCatalog.timestamp.baseline(),
 		status,
 	}));
 }
@@ -45,7 +43,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 0,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"degraded",
@@ -92,7 +90,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 2,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"down",

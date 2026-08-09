@@ -103,9 +103,9 @@ rule-providers:
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successful_probe() {
     let nodes = vec![
-        node("n1", "tokyo-a", "tokyo-a.example.com"),
-        node("n2", "hkl", "hkl.example.com"),
-        node("n3", "mystery", "mystery.example.com"),
+        node("n1", xp_test_fixtures::slot_s678, "tokyo-a.example.com"),
+        node("n2", xp_test_fixtures::slot_s673, "hkl.example.com"),
+        node("n3", xp_test_fixtures::slot_s674, "mystery.example.com"),
     ];
     let mut probes = BTreeMap::new();
     probes.insert(
@@ -134,7 +134,11 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successfu
 
 #[test]
 fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe() {
-    let nodes = vec![node("n1", "singapore-a", "singapore-a.example.com")];
+    let nodes = vec![node(
+        "n1",
+        xp_test_fixtures::slot_s677,
+        "singapore-a.example.com",
+    )];
 
     let region_map = build_mihomo_base_region_map(&nodes, &BTreeMap::new());
 
@@ -146,7 +150,11 @@ fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe
 
 #[test]
 fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        "n1",
+        xp_test_fixtures::slot_s678,
+        "tokyo-a.example.com",
+    )];
     let probes = probe_map(&[("n1", NodeSubscriptionRegion::Taiwan)]);
 
     let region_map = build_mihomo_base_region_map(&nodes, &probes);
@@ -159,7 +167,11 @@ fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
 
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_probe() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        "n1",
+        xp_test_fixtures::slot_s678,
+        "tokyo-a.example.com",
+    )];
     let mut probes = BTreeMap::new();
     probes.insert(
         "n1".to_string(),
@@ -182,7 +194,11 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_pro
 
 #[test]
 fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        "n1",
+        xp_test_fixtures::slot_s678,
+        "tokyo-a.example.com",
+    )];
     let mut stale_probe = egress_probe(NodeSubscriptionRegion::Taiwan, "TW", "203.0.113.30");
     stale_probe.last_success_at = Some("2026-04-24T00:00:00Z".to_string());
 
@@ -199,7 +215,11 @@ fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() 
 
 #[test]
 fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slug_fallback() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        "n1",
+        xp_test_fixtures::slot_s678,
+        "tokyo-a.example.com",
+    )];
     let probe = NodeEgressProbeState {
         subscription_region: NodeSubscriptionRegion::Other,
         checked_at: xp_test_fixtures::slot_s489().to_owned(),
@@ -229,7 +249,7 @@ fn app_proxy_group_shape_only_matches_hidden_wrapper_name() {
 #[test]
 fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
 
     // A valid base64 string that includes '+' and '/' to exercise percent encoding.
     let server_psk_b64 = "+/v7+/v7+/v7+/v7+/v7+w==";
@@ -252,7 +272,7 @@ fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
 #[test]
 fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
     let u = user("u1", "hello world");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
     let m = membership("u1", "n1", "e1");
 
@@ -267,7 +287,7 @@ fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
 #[test]
 fn empty_node_access_host_is_error() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "");
+    let n = node("n1", xp_test_fixtures::slot_s675, "");
     let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
     let m = membership("u1", "n1", "e1");
 
@@ -284,7 +304,7 @@ fn empty_node_access_host_is_error() {
 #[test]
 fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "   ");
+    let n = node("n1", xp_test_fixtures::slot_s675, "   ");
     let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
     let m = membership("u1", "n1", "e1");
     let profile = UserMihomoProfile {
@@ -306,7 +326,7 @@ fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
 #[test]
 fn vless_server_names_empty_is_error() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let meta = serde_json::json!({
       "reality": {"dest": "example.com:443", "server_names": [], "fingerprint": "chrome"},
       "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},
@@ -328,7 +348,7 @@ fn vless_server_names_empty_is_error() {
 #[test]
 fn empty_membership_list_produces_empty_output() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
     let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
 
     let out = build_raw_lines(SEED, &u, &[], &[ep], &[n]).unwrap();
@@ -344,7 +364,7 @@ fn empty_membership_list_produces_empty_output() {
 #[test]
 fn order_is_deterministic() {
     let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
 
     let ep1 = endpoint_ss("e1", "n1", "tag-2", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
     let ep2 = endpoint_ss("e2", "n1", "tag-1", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
@@ -368,7 +388,7 @@ fn order_is_deterministic() {
 #[test]
 fn build_mihomo_yaml_preserves_mixin_defined_proxies_and_outer_group() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -538,7 +558,7 @@ providerB:
 #[test]
 fn build_mihomo_provider_yaml_moves_generated_system_proxies_to_provider_payload() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -753,19 +773,19 @@ fn build_mihomo_provider_yaml_groups_relay_by_access_host() {
     let u = user("u1", "alice");
     let n1 = node_with_api_base(
         "n1",
-        "Tokyo A",
+        xp_test_fixtures::slot_s670,
         "shared.example.com",
         "https://tokyo-a.example.com",
     );
     let n2 = node_with_api_base(
         "n2",
-        "Tokyo B",
+        xp_test_fixtures::slot_s671,
         "shared.example.com",
         "https://tokyo-b.example.com",
     );
     let n3 = node_with_api_base(
         "n3",
-        "Seoul A",
+        xp_test_fixtures::slot_s668,
         "seoul.example.com",
         "https://seoul-a.example.com",
     );
@@ -839,19 +859,19 @@ providerA:
         &[
             node_with_api_base(
                 "n1",
-                "Tokyo A",
+                xp_test_fixtures::slot_s670,
                 "shared.example.com",
                 "https://tokyo-a.example.com",
             ),
             node_with_api_base(
                 "n2",
-                "Tokyo B",
+                xp_test_fixtures::slot_s671,
                 "shared.example.com",
                 "https://tokyo-b.example.com",
             ),
             node_with_api_base(
                 "n3",
-                "Seoul A",
+                xp_test_fixtures::slot_s668,
                 "seoul.example.com",
                 "https://seoul-a.example.com",
             ),
@@ -892,7 +912,7 @@ fn build_mihomo_provider_yaml_uses_default_health_when_api_base_is_loopback() {
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Tokyo A",
+        xp_test_fixtures::slot_s670,
         "relay.example.com",
         "https://127.0.0.1:62416",
     );
@@ -948,13 +968,13 @@ fn build_mihomo_provider_yaml_uses_api_health_when_shared_access_host_has_one_ap
     let u = user("u1", "alice");
     let n1 = node_with_api_base(
         "n1",
-        "Tokyo A",
+        xp_test_fixtures::slot_s670,
         "shared.example.com",
         "https://shared-api.example.com",
     );
     let n2 = node_with_api_base(
         "n2",
-        "Tokyo B",
+        xp_test_fixtures::slot_s671,
         "shared.example.com",
         "https://shared-api.example.com",
     );
@@ -1006,7 +1026,7 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Node Beta",
+        xp_test_fixtures::slot_s664,
         "endpoint-node.example.com",
         "https://xp-node.example.com",
     );
@@ -1056,7 +1076,7 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Node Beta",
+        xp_test_fixtures::slot_s664,
         "endpoint-node.example.com",
         "https://xp-node.example.com",
     );
@@ -1109,7 +1129,7 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
     let u = user("u1", "alice");
     let n = node_with_api_base(
         "n1",
-        "Node Beta",
+        xp_test_fixtures::slot_s664,
         "endpoint-node.example.com",
         "https://xp-node.example.com",
     );
@@ -1159,13 +1179,13 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host
     let u = user("u1", "alice");
     let n1 = node_with_api_base(
         "n1",
-        "Tokyo B",
+        xp_test_fixtures::slot_s671,
         "shared.example.com",
         "https://tokyo-b.example.com",
     );
     let n2 = node_with_api_base(
         "n2",
-        "Aardvark",
+        xp_test_fixtures::slot_s658,
         "shared.example.com",
         "https://aardvark.example.com",
     );
@@ -1221,13 +1241,13 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
     let u = user("u1", "alice");
     let n1 = node_with_api_base(
         "n1",
-        "Dot Host",
+        xp_test_fixtures::slot_s662,
         "a.b.example.com",
         "https://dot.example.com",
     );
     let n2 = node_with_api_base(
         "n2",
-        "Dash Host",
+        xp_test_fixtures::slot_s661,
         "a-b.example.com",
         "https://dash.example.com",
     );
@@ -1288,7 +1308,7 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
 #[test]
 fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "relay.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1333,7 +1353,7 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
 #[test]
 fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_ref_in_main_config() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "relay.example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -1384,7 +1404,7 @@ fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_re
 #[test]
 fn build_mihomo_yaml_generated_relay_group_wins_custom_name_collision() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "relay.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1440,7 +1460,7 @@ rules: []
 #[test]
 fn build_mihomo_provider_yaml_rejects_reserved_proxy_name_collision() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "relay.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1503,13 +1523,13 @@ fn build_mihomo_provider_yaml_limits_relay_groups_to_subscribed_nodes() {
     let u = user("u1", "alice");
     let n1 = node_with_api_base(
         "n1",
-        "Aardvark",
+        xp_test_fixtures::slot_s658,
         "shared.example.com",
         "https://unsubscribed.example.com",
     );
     let n2 = node_with_api_base(
         "n2",
-        "Tokyo B",
+        xp_test_fixtures::slot_s671,
         "shared.example.com",
         "https://subscribed.example.com",
     );
@@ -1579,7 +1599,7 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_avoids_legacy_region_relay_alias_names() {
     let u = user("u1", "alice");
-    let n = node("n1", "Japan", "jp.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s663, "jp.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1644,8 +1664,8 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_deduplicates_disambiguated_relay_group_names() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Japan", "jp.example.com");
-    let n2 = node("n2", "relay-Japan", "relay-jp.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s663, "jp.example.com");
+    let n2 = node("n2", xp_test_fixtures::slot_s676, "relay-jp.example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
@@ -1722,7 +1742,7 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_injects_default_aggregate_groups() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1811,7 +1831,7 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_places_visible_region_block_after_quality_groups() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -1928,7 +1948,7 @@ rules: []
 #[test]
 fn build_mihomo_provider_yaml_moves_hidden_relay_groups_after_system_visible_groups() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "relay.example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -1991,8 +2011,8 @@ providerA:
 fn build_mihomo_provider_yaml_locks_system_proxy_group_sequence() {
     let u = user("u1", "alice");
     let nodes = vec![
-        node("n1", "Tokyo A", "relay-a.example.com"),
-        node("n2", "Osaka B", "relay-b.example.com"),
+        node("n1", xp_test_fixtures::slot_s670, "relay-a.example.com"),
+        node("n2", xp_test_fixtures::slot_s667, "relay-b.example.com"),
     ];
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
@@ -2124,7 +2144,7 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_keeps_unprobed_singapore_nodes_in_other_group() {
     let u = user("u1", "alice");
-    let n = node("n1", "Singapore A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s669, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -2265,7 +2285,7 @@ fn known_non_other_region_filter_avoids_matching_embedded_us_fragments() {
 #[test]
 fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -2307,7 +2327,7 @@ fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
 #[test]
 fn build_mihomo_provider_yaml_preserves_direct_refs_via_system_provider() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -2397,7 +2417,7 @@ fn build_mihomo_yaml_rejects_non_mapping_template() {
 #[test]
 fn build_mihomo_yaml_adds_missing_outer_group() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2503,7 +2523,7 @@ providerA:
 #[test]
 fn build_mihomo_yaml_injects_relay_filter() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2566,7 +2586,7 @@ providerA:
 #[test]
 fn build_mihomo_yaml_prunes_missing_proxy_and_provider_refs_when_extras_cleared() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2672,7 +2692,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_reorders_user_groups_using_helper_template_order() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -3017,7 +3037,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_legacy_landing_refs_before_replaying_helper_order() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -3120,7 +3140,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_landing_only_legacy_refs_before_helper_replay() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -3205,8 +3225,8 @@ rules: []
 fn build_mihomo_yaml_remaps_multiple_landing_only_legacy_refs_using_final_landing_order() {
     let u = user("u1", "alice");
     let nodes = vec![
-        node("n1", "Tokyo B", "example.com"),
-        node("n2", "Osaka A", "example.com"),
+        node("n1", xp_test_fixtures::slot_s671, "example.com"),
+        node("n2", xp_test_fixtures::slot_s666, "example.com"),
     ];
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
@@ -3299,7 +3319,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_injects_default_high_quality_candidates() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -3549,7 +3569,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_does_not_treat_extra_suffix_proxies_as_relay_groups() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4040,7 +4060,7 @@ rules:
 #[test]
 fn build_mihomo_yaml_preserves_unknown_relay_prefixed_rule_targets() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "new-host.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s672, "new-host.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4082,7 +4102,7 @@ rules:
 #[test]
 fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s672, "tokyo-a.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4137,7 +4157,7 @@ fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy
 #[test]
 fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s672, "tokyo-a.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4192,7 +4212,7 @@ fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy
 #[test]
 fn build_mihomo_yaml_removes_custom_shared_outer_dialer_proxy() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s672, "tokyo-a.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4288,7 +4308,7 @@ fn build_mihomo_yaml_maps_legacy_dialer_to_direct_without_relay_groups() {
 #[test]
 fn build_mihomo_yaml_removes_custom_region_relay_dialer_proxy() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s672, "tokyo-a.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4642,7 +4662,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_keeps_include_all_proxies_groups_without_direct_fallback() {
     let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let n = node("n1", xp_test_fixtures::slot_s670, "example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4699,7 +4719,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_injects_direct_when_relay_group_has_no_provider_candidates() {
     let u = user("u1", "alice");
-    let n = node("n1", "Only US", "us.example.com");
+    let n = node("n1", xp_test_fixtures::slot_s665, "us.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4788,8 +4808,8 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_supported_legacy_proxy_refs_and_prunes_old_region_refs() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
-    let n2 = node("n2", "Beta", "beta.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
+    let n2 = node("n2", xp_test_fixtures::slot_s660, "beta.example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -4899,7 +4919,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_prunes_legacy_chain_refs_even_when_generated_count_is_smaller() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
         endpoint_vless(
@@ -4981,7 +5001,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_chain_suffixes() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -5045,7 +5065,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_reality_suffixes() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -5124,7 +5144,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_dedupes_all_proxy_refs_in_groups() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -5193,7 +5213,7 @@ mod mihomo_smux;
 #[test]
 fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {
     let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let n1 = node("n1", xp_test_fixtures::slot_s659, "alpha.example.com");
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",

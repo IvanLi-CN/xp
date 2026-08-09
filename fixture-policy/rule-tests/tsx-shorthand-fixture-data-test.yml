@@ -6,3 +6,9 @@ invalid:
   - |
     const tag = "unapproved";
     const fixture = { tag };
+  - |
+    const last_synced_at = new Date().toISOString();
+    const fixture = { last_synced_at };
+  - |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };

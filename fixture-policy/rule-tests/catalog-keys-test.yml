@@ -10,6 +10,8 @@ valid:
     { "lists": { "loopbackServerNames": ["127.0.0.1"] } }
   - |
     { "urls": { "publicFallback": "http://127.0.0.1:9" } }
+  - |
+    { "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }
 invalid:
   - |
     { "hosts": { "unapproved": "node-z.fixture.test" } }

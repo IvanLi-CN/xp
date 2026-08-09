@@ -1,6 +1,21 @@
 id: fixture-policy-typescript-assignment-source
 snapshots:
   ? |
+    report.cycle_end_at = new Date().toISOString();
+  : labels:
+    - source: report.cycle_end_at = new Date().toISOString()
+      style: primary
+      start: 0
+      end: 46
+    - source: report.cycle_end_at
+      style: secondary
+      start: 0
+      end: 19
+    - source: new Date().toISOString()
+      style: secondary
+      start: 22
+      end: 46
+  ? |
     report.start_at = "unapproved-timestamp";
   : labels:
     - source: report.start_at = "unapproved-timestamp"

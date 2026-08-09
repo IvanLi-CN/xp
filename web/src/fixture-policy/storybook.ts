@@ -133,37 +133,37 @@ const seeds7d: EndpointSeed[] = [
 ];
 
 function ipReport(_window: AdminIpUsageWindow) {
-	const start = fixtureCatalog.timestamp.baseline();
-	const end = fixtureCatalog.timestamp.recent();
-	const ip = fixtureCatalog.address.secondaryIpv4();
-	const endpointId = fixtureCatalog.identifier.endpointPrimary();
-	const endpointTag = fixtureCatalog.identifier.endpointTagPrimary();
 	return {
-		window_start: start,
-		window_end: end,
+		window_start: fixtureCatalog.timestamp.baseline(),
+		window_end: fixtureCatalog.timestamp.recent(),
 		warnings: [],
 		unique_ip_series: [
-			{ minute: start, count: 1 },
-			{ minute: end, count: 1 },
+			{ minute: fixtureCatalog.timestamp.baseline(), count: 1 },
+			{ minute: fixtureCatalog.timestamp.recent(), count: 1 },
 		],
 		timeline: [
 			{
-				lane_key: `${endpointTag}::${ip}`,
-				endpoint_id: endpointId,
-				endpoint_tag: endpointTag,
-				ip,
+				lane_key: `${fixtureCatalog.identifier.endpointTagPrimary()}::${fixtureCatalog.address.secondaryIpv4()}`,
+				endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+				endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
+				ip: fixtureCatalog.address.secondaryIpv4(),
 				minutes: 12,
-				segments: [{ start_minute: start, end_minute: end }],
+				segments: [
+					{
+						start_minute: fixtureCatalog.timestamp.baseline(),
+						end_minute: fixtureCatalog.timestamp.recent(),
+					},
+				],
 			},
 		],
 		ips: [
 			{
-				ip,
+				ip: fixtureCatalog.address.secondaryIpv4(),
 				minutes: 12,
-				endpoint_tags: [endpointTag],
+				endpoint_tags: [fixtureCatalog.identifier.endpointTagPrimary()],
 				region: "Fixture region",
 				operator: "Fixture operator",
-				last_seen_at: end,
+				last_seen_at: fixtureCatalog.timestamp.recent(),
 			},
 		],
 	};

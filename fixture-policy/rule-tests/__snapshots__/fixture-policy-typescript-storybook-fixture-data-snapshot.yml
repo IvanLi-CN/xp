@@ -62,6 +62,22 @@ snapshots:
       end: 44
   ? |
     const unsafe = "live.example";
+    const item = { access_host: unsafe };
+  : labels:
+    - source: 'access_host: unsafe'
+      style: primary
+      start: 46
+      end: 65
+    - source: access_host
+      style: secondary
+      start: 46
+      end: 57
+    - source: unsafe
+      style: secondary
+      start: 59
+      end: 65
+  ? |
+    const unsafe = "live.example";
     const item = { node_id: unsafe };
   : labels:
     - source: 'node_id: unsafe'
@@ -76,3 +92,35 @@ snapshots:
       style: secondary
       start: 55
       end: 61
+  ? |
+    const unsafe = "unapproved-endpoint";
+    const seed = { endpointId: unsafe };
+  : labels:
+    - source: 'endpointId: unsafe'
+      style: primary
+      start: 53
+      end: 71
+    - source: endpointId
+      style: secondary
+      start: 53
+      end: 63
+    - source: unsafe
+      style: secondary
+      start: 65
+      end: 71
+  ? |
+    const unsafe = new Date().toISOString();
+    const item = { window_end: unsafe };
+  : labels:
+    - source: 'window_end: unsafe'
+      style: primary
+      start: 56
+      end: 74
+    - source: window_end
+      style: secondary
+      start: 56
+      end: 66
+    - source: unsafe
+      style: secondary
+      start: 68
+      end: 74

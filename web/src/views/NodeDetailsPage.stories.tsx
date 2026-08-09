@@ -253,17 +253,17 @@ export const RuntimeHistoryFallback: Story = {
 									{
 										component: "xp",
 										status: "up",
-										observed_at: "2026-05-20T08:00:00Z",
+										observed_at: fixtureCatalog.slotString.s653(),
 									},
 									{
 										component: "xray",
 										status: "down",
-										observed_at: "2026-05-20T08:00:00Z",
+										observed_at: fixtureCatalog.slotString.s653(),
 									},
 									{
 										component: "cloudflared",
 										status: "up",
-										observed_at: "2026-05-20T08:00:00Z",
+										observed_at: fixtureCatalog.slotString.s653(),
 									},
 								],
 							},
@@ -271,7 +271,7 @@ export const RuntimeHistoryFallback: Story = {
 						component_status_events: [
 							{
 								event_id: "fallback-event-1",
-								occurred_at: "2026-05-20T07:42:00Z",
+								occurred_at: fixtureCatalog.slotString.s654(),
 								component: "xray",
 								message: "xray status changed: up -> down",
 								from_status: "up",

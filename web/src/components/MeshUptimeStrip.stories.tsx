@@ -1,10 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { MeshUptimeStrip } from "./MeshUptimeStrip";
 
 function buckets(values: Array<"good" | "fallback" | "slow" | "down">) {
-	return values.map((value, index) => ({
-		minute: `2026-08-03T00:${String(index).padStart(2, "0")}:00Z`,
+	return values.map((value) => ({
+		minute: fixtureCatalog.slotString.s294(),
 		mesh_success: value === "good" || value === "slow" ? 1 : 0,
 		mesh_failure: value === "down" || value === "fallback" ? 1 : 0,
 		public_success: value === "fallback" ? 1 : 0,

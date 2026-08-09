@@ -17,8 +17,8 @@ const baseReport: Pick<
 	| "endpoints"
 	| "per_endpoint_series"
 > = {
-	window_start: "2026-03-07T01:00:00Z",
-	window_end: "2026-03-08T00:59:00Z",
+	window_start: fixtureCatalog.slotString.s47(),
+	window_end: fixtureCatalog.slotString.s48(),
 	warnings: [],
 	endpoints: [
 		{
@@ -38,8 +38,8 @@ const baseReport: Pick<
 			endpoint_tag: fixtureCatalog.slotString.s280(),
 			port: 443,
 			series: [
-				{ minute: "2026-03-08T00:58:00Z", count: 2 },
-				{ minute: "2026-03-08T00:59:00Z", count: 4 },
+				{ minute: fixtureCatalog.slotString.s52(), count: 2 },
+				{ minute: fixtureCatalog.slotString.s48(), count: 4 },
 			],
 		},
 		{
@@ -47,8 +47,8 @@ const baseReport: Pick<
 			endpoint_tag: fixtureCatalog.slotString.s289(),
 			port: 8443,
 			series: [
-				{ minute: "2026-03-08T00:58:00Z", count: 1 },
-				{ minute: "2026-03-08T00:59:00Z", count: 3 },
+				{ minute: fixtureCatalog.slotString.s52(), count: 1 },
+				{ minute: fixtureCatalog.slotString.s48(), count: 3 },
 			],
 		},
 	],

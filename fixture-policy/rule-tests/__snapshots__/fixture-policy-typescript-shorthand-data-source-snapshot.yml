@@ -1,6 +1,14 @@
 id: fixture-policy-typescript-shorthand-data-source
 snapshots:
   ? |
+    const cycle_end_at = new Date().toISOString();
+    const fixture = { cycle_end_at };
+  : labels:
+    - source: cycle_end_at
+      style: primary
+      start: 65
+      end: 77
+  ? |
     const tag = "unapproved";
     const fixture = { tag };
   : labels:
@@ -8,3 +16,11 @@ snapshots:
       style: primary
       start: 44
       end: 47
+  ? |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  : labels:
+    - source: total_bytes
+      style: primary
+      start: 44
+      end: 55

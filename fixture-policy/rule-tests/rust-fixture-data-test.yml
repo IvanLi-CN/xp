@@ -67,3 +67,7 @@ invalid:
         std::env::var("TEST_HOST").unwrap(),
       )),
     };
+  - |
+    let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
+  - |
+    let payload = SignedPayload { cluster_id: "unapproved-cluster" };

@@ -5,6 +5,7 @@ valid:
   - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
   - '{ "lists": { "loopbackServerNames": ["127.0.0.1"] } }'
   - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
+  - '{ "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }'
   - '{ "timestamps": { "date": "2024-01-01" } }'
 invalid:
   - '{ "metrics": true }'

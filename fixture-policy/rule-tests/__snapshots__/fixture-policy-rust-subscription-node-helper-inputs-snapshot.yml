@@ -1,0 +1,27 @@
+id: fixture-policy-rust-subscription-node-helper-inputs
+snapshots:
+  ? |
+    let fixture = node("n1", unsafe_name, "host.fixture.test");
+  : labels:
+    - source: node("n1", unsafe_name, "host.fixture.test")
+      style: primary
+      start: 14
+      end: 58
+  ? |
+    let fixture = node_with_api_base(
+        "n1",
+        || "unapproved-node",
+        "host.fixture.test",
+        "https://api.fixture.test",
+    );
+  : labels:
+    - source: |-
+        node_with_api_base(
+            "n1",
+            || "unapproved-node",
+            "host.fixture.test",
+            "https://api.fixture.test",
+        )
+      style: primary
+      start: 14
+      end: 128

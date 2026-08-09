@@ -9,3 +9,5 @@ invalid:
     report.start_at = "unapproved-timestamp";
   - |
     report.total_bytes = Number.parseInt(raw, 10);
+  - |
+    report.cycle_end_at = new Date().toISOString();

@@ -1,7 +1,10 @@
 id: fixture-policy-typescript-storybook-fixture-data
 valid:
   - 'const item = { access_host: fixtureCatalog.host.primary() };'
-  - 'const item = { minute: minuteFromOffset(start, 1) };'
+  - |
+    function buildSeries() {
+      return { minute: minuteFromOffset(windowStart, minute) };
+    }
 invalid:
   - |
     const item = { access_host: "live.example" };
@@ -10,3 +13,12 @@ invalid:
   - |
     const unsafe = "live.example";
     const item = { node_id: unsafe };
+  - |
+    const unsafe = "live.example";
+    const item = { access_host: unsafe };
+  - |
+    const unsafe = new Date().toISOString();
+    const item = { window_end: unsafe };
+  - |
+    const unsafe = "unapproved-endpoint";
+    const seed = { endpointId: unsafe };

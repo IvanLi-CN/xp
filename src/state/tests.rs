@@ -31,7 +31,7 @@ fn test_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),
         bootstrap_node_id: Some(xp_test_fixtures::slot_s457().to_owned()),
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     }
@@ -48,10 +48,10 @@ fn test_user(user_id: &str) -> User {
     }
 }
 
-fn test_node(node_id: &str) -> Node {
+fn test_node(_node_id: &str) -> Node {
     Node {
         node_id: xp_test_fixtures::slot_s477().to_owned(),
-        node_name: node_id.to_string(),
+        node_name: xp_test_fixtures::slot_s477().to_owned(),
         access_host: xp_test_fixtures::slot_s513().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -152,7 +152,7 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
         "node_keep".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s515().to_owned(),
-            node_name: "keep".to_string(),
+            node_name: xp_test_fixtures::slot_s642().to_owned(),
             access_host: xp_test_fixtures::slot_s516().to_owned(),
             api_base_url: xp_test_fixtures::slot_s517().to_owned(),
             quota_limit_bytes: 0,
@@ -262,7 +262,7 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
     let store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: data_dir.to_path_buf(),
         bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
     })
@@ -361,7 +361,7 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
         node_id.clone(),
         Node {
             node_id: xp_test_fixtures::slot_s522().to_owned(),
-            node_name: "node-1".to_string(),
+            node_name: xp_test_fixtures::slot_s605().to_owned(),
             access_host: xp_test_fixtures::slot_s448().to_owned(),
             api_base_url: xp_test_fixtures::slot_s449().to_owned(),
             quota_limit_bytes: 0,
@@ -482,7 +482,7 @@ fn compat_noop_can_carry_node_egress_probe_state() {
         "node-1".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s523().to_owned(),
-            node_name: "Tokyo".to_string(),
+            node_name: xp_test_fixtures::slot_s644().to_owned(),
             access_host: xp_test_fixtures::slot_s524().to_owned(),
             api_base_url: xp_test_fixtures::slot_s525().to_owned(),
             quota_limit_bytes: 0,
@@ -1615,7 +1615,7 @@ fn desired_state_apply_upsert_node_inserts_node() {
     let mut state = PersistedState::empty();
     let node = Node {
         node_id: xp_test_fixtures::slot_s477().to_owned(),
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s465().to_owned(),
         api_base_url: xp_test_fixtures::slot_s449().to_owned(),
         quota_limit_bytes: 0,
@@ -2093,7 +2093,7 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
         "node_keep".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s515().to_owned(),
-            node_name: "keep".to_string(),
+            node_name: xp_test_fixtures::slot_s642().to_owned(),
             access_host: xp_test_fixtures::slot_s516().to_owned(),
             api_base_url: xp_test_fixtures::slot_s517().to_owned(),
             quota_limit_bytes: 0,
@@ -2104,7 +2104,7 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
         "node_drop".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s543().to_owned(),
-            node_name: "drop".to_string(),
+            node_name: xp_test_fixtures::slot_s643().to_owned(),
             access_host: xp_test_fixtures::slot_s544().to_owned(),
             api_base_url: xp_test_fixtures::slot_s545().to_owned(),
             quota_limit_bytes: 0,
@@ -2172,7 +2172,7 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
         "node_drop".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s543().to_owned(),
-            node_name: "node_drop".to_string(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
             access_host: xp_test_fixtures::slot_s546().to_owned(),
             api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,
@@ -2222,7 +2222,7 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
         "node_drop".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s543().to_owned(),
-            node_name: "node_drop".to_string(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
             access_host: xp_test_fixtures::slot_s546().to_owned(),
             api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,
@@ -2266,7 +2266,7 @@ fn desired_state_apply_delete_node_rejects_removed_preview_endpoint_set() {
         "node_drop".to_string(),
         Node {
             node_id: xp_test_fixtures::slot_s543().to_owned(),
-            node_name: "node_drop".to_string(),
+            node_name: xp_test_fixtures::slot_s543().to_owned(),
             access_host: xp_test_fixtures::slot_s546().to_owned(),
             api_base_url: xp_test_fixtures::slot_s547().to_owned(),
             quota_limit_bytes: 0,

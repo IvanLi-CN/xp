@@ -67,7 +67,7 @@ fn plain_q_does_not_quit() {
 fn save_tui_config_omits_legacy_save_token_field() {
     let (tmp, paths) = test_paths();
     let values = AppValues {
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
@@ -126,7 +126,7 @@ fn tui_ip_geo_toggle_is_persisted_and_passed_to_deploy_values() {
 fn save_tui_config_persists_managed_default_fields() {
     let (tmp, paths) = test_paths();
     let values = AppValues {
-        node_name: "node-1".to_string(),
+        node_name: xp_test_fixtures::slot_s605().to_owned(),
         access_host: xp_test_fixtures::slot_s552().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: true,
@@ -188,7 +188,7 @@ fn save_token_empty_keeps_existing_token_unchanged() {
     fs::write(&token_path, "oldtoken").unwrap();
 
     let values = AppValues {
-        node_name: String::new(),
+        node_name: xp_test_fixtures::slot_s492().to_owned(),
         access_host: xp_test_fixtures::slot_s492().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
@@ -223,7 +223,7 @@ fn save_token_non_empty_writes_trimmed_value() {
     fs::write(&token_path, "oldtoken").unwrap();
 
     let values = AppValues {
-        node_name: String::new(),
+        node_name: xp_test_fixtures::slot_s492().to_owned(),
         access_host: xp_test_fixtures::slot_s492().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
@@ -258,7 +258,7 @@ fn save_tui_config_error_includes_deploy_dir() {
     fs::write(&deploy_dir, "not a dir").unwrap();
 
     let values = AppValues {
-        node_name: String::new(),
+        node_name: xp_test_fixtures::slot_s492().to_owned(),
         access_host: xp_test_fixtures::slot_s492().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
@@ -293,7 +293,7 @@ fn save_token_error_includes_token_dir() {
     fs::write(&token_dir, "not a dir").unwrap();
 
     let values = AppValues {
-        node_name: String::new(),
+        node_name: xp_test_fixtures::slot_s492().to_owned(),
         access_host: xp_test_fixtures::slot_s492().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,

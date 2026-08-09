@@ -67,6 +67,8 @@ invalid:
   - |
     const fixture = { total_bytes: 4096 };
   - |
+    const fixture = { cycle_end_at: new Date().toISOString() };
+  - |
     const fixture = { ip: await fetch("https://input.fixture.test") };
   - |
     const fixture = { xray_api_addr: "127.0.0.1:10085" };

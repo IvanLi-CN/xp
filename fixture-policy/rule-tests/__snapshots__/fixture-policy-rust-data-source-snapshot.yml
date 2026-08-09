@@ -1,6 +1,17 @@
 id: fixture-policy-rust-data-source
 snapshots:
   ? |
+    let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
+  : labels:
+    - source: 'tag: "unapproved-tag".to_owned()'
+      style: primary
+      start: 30
+      end: 62
+    - source: tag
+      style: secondary
+      start: 30
+      end: 33
+  ? |
     let fixture = Config {
       mesh_base_url: Some(format!(
         "https://{}",
@@ -86,3 +97,14 @@ snapshots:
       style: secondary
       start: 23
       end: 32
+  ? |
+    let payload = SignedPayload { cluster_id: "unapproved-cluster" };
+  : labels:
+    - source: 'cluster_id: "unapproved-cluster"'
+      style: primary
+      start: 30
+      end: 62
+    - source: cluster_id
+      style: secondary
+      start: 30
+      end: 40

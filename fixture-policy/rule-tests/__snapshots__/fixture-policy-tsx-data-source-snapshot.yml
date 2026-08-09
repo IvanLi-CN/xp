@@ -46,6 +46,21 @@ snapshots:
       start: 34
       end: 56
   ? |
+    const fixture = { last_synced_at: new Date().toISOString() };
+  : labels:
+    - source: 'last_synced_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 58
+    - source: last_synced_at
+      style: secondary
+      start: 18
+      end: 32
+    - source: new Date().toISOString()
+      style: secondary
+      start: 34
+      end: 58
+  ? |
     const fixture = { node_name: "unapproved-node" };
   : labels:
     - source: 'node_name: "unapproved-node"'
@@ -75,3 +90,18 @@ snapshots:
       style: secondary
       start: 31
       end: 35
+  ? |
+    const fixture = { window_end: process.env.TEST_WINDOW_END };
+  : labels:
+    - source: 'window_end: process.env.TEST_WINDOW_END'
+      style: primary
+      start: 18
+      end: 57
+    - source: window_end
+      style: secondary
+      start: 18
+      end: 28
+    - source: process.env.TEST_WINDOW_END
+      style: secondary
+      start: 30
+      end: 57

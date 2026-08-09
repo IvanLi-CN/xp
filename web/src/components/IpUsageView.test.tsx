@@ -145,11 +145,11 @@ const baseReport: Pick<
 	| "timeline"
 	| "ips"
 > = {
-	window_start: "2026-03-08T00:00:00Z",
+	window_start: fixtureCatalog.slotString.s24(),
 	window_end: fixtureCatalog.slotString.s25(),
 	warnings: [],
 	unique_ip_series: [
-		{ minute: "2026-03-08T00:00:00Z", count: 1 },
+		{ minute: fixtureCatalog.slotString.s24(), count: 1 },
 		{ minute: fixtureCatalog.slotString.s26(), count: 2 },
 		{ minute: fixtureCatalog.slotString.s25(), count: 1 },
 	],
@@ -162,7 +162,7 @@ const baseReport: Pick<
 			minutes: 2,
 			segments: [
 				{
-					start_minute: "2026-03-08T00:00:00Z",
+					start_minute: fixtureCatalog.slotString.s24(),
 					end_minute: fixtureCatalog.slotString.s26(),
 				},
 			],

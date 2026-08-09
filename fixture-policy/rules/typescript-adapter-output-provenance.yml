@@ -23,10 +23,13 @@ rule:
                     return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
                   }
               - pattern: |
-                  function nextResetToken() {
-                    const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
-                    resetTokenIndex += 1;
-                    return accessor();
+                  function createResetTokenFactory() {
+                    let resetTokenIndex = 0;
+                    return () => {
+                      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+                      resetTokenIndex += 1;
+                      return accessor();
+                    };
                   }
               - pattern: |
                   function nextMeshPeerNodeId() {
@@ -37,6 +40,23 @@ rule:
     - kind: function_expression
     - all:
         - kind: arrow_function
+        - not:
+            all:
+              - inside:
+                  stopBy: end
+                  all:
+                    - kind: function_declaration
+                    - has:
+                        field: name
+                        pattern: createResetTokenFactory
+              - has:
+                  field: body
+                  pattern: |
+                    {
+                      const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+                      resetTokenIndex += 1;
+                      return accessor();
+                    }
         - not:
             any:
               - has:
@@ -57,3 +77,6 @@ rule:
               - has:
                   field: body
                   regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
+              - has:
+                  field: body
+                  regex: '^createResetTokenFactory\(\)$'

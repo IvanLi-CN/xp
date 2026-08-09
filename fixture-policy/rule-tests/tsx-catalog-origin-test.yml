@@ -23,3 +23,5 @@ invalid:
     const [fixtureCatalog] = source;
   - |
     const [other, fixtureCatalog] = source;
+  - |
+    const { nested: { fixtureCatalog } } = source;

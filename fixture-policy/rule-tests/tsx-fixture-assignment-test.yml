@@ -5,3 +5,5 @@ valid:
 invalid:
   - |
     report.start_at = "unapproved-timestamp";
+  - |
+    report.last_synced_at = new Date().toISOString();
