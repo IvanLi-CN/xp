@@ -76,6 +76,21 @@ snapshots:
       start: 27
       end: 42
   ? |
+    const fixture = { subscription_token: user.subscription_token };
+  : labels:
+    - source: 'subscription_token: user.subscription_token'
+      style: primary
+      start: 18
+      end: 61
+    - source: subscription_token
+      style: secondary
+      start: 18
+      end: 36
+    - source: user.subscription_token
+      style: secondary
+      start: 38
+      end: 61
+  ? |
     const fixture = { timestamp: JSON.parse(raw) };
   : labels:
     - source: 'timestamp: JSON.parse(raw)'

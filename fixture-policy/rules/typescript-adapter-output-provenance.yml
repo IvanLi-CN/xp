@@ -22,6 +22,19 @@ rule:
                   function listSlotEntry(_value: string[], index: number) {
                     return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
                   }
+              - pattern: |
+                  function nextResetToken() {
+                    const accessor = resetTokenAccessors[resetTokenIndex % resetTokenAccessors.length];
+                    resetTokenIndex += 1;
+                    return accessor();
+                  }
+              - pattern: |
+                  function nextMeshPeerNodeId() {
+                    const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+                    meshPeerNodeIdIndex += 1;
+                    return catalog.slots.strings[slotIndex];
+                  }
+    - kind: function_expression
     - all:
         - kind: arrow_function
         - not:

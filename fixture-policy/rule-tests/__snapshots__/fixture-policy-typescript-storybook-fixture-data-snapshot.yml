@@ -60,3 +60,19 @@ snapshots:
       style: secondary
       start: 22
       end: 44
+  ? |
+    const unsafe = "live.example";
+    const item = { node_id: unsafe };
+  : labels:
+    - source: 'node_id: unsafe'
+      style: primary
+      start: 46
+      end: 61
+    - source: node_id
+      style: secondary
+      start: 46
+      end: 53
+    - source: unsafe
+      style: secondary
+      start: 55
+      end: 61

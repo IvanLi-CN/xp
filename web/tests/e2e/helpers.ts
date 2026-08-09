@@ -900,9 +900,9 @@ export async function setupApiMocks(
 					errorResponse(route, `User not found: ${userId}`, 404);
 					return;
 				}
-				user.subscription_token = fixtureCatalog.slotString.s94();
+				user.subscription_token = fixtureCatalog.identifier.tokenAfterReset();
 				jsonResponse(route, {
-					subscription_token: fixtureCatalog.slotString.s94(),
+					subscription_token: user.subscription_token,
 				});
 				return;
 			}

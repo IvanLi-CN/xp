@@ -226,10 +226,10 @@ fn mesh_request(index: usize) -> MeshRequest {
 fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
     MeshPeerTarget {
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
-        node_name: "target".to_string(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url: Some(format!("https://{addr}")),
         mesh_reason: crate::mesh_telemetry::MeshPeerReason::MeshAvailable,
-        public_base_url: "http://127.0.0.1:9".to_string(),
+        public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }
 }
 

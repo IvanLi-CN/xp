@@ -7,6 +7,14 @@ valid:
         }
     }
   - |
+    mod tests {
+        fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+            };
+        }
+    }
+  - |
     fn production_value() {
         let fixture = Node { node_id: "runtime-node".to_owned() };
     }
@@ -21,5 +29,13 @@ invalid:
     mod tests {
         fn builds_token() {
             let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+            };
         }
     }

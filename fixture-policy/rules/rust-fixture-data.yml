@@ -14,7 +14,7 @@ rule:
     - kind: field_initializer
     - has:
         field: field
-        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin)$'
+        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|endpoint_id|endpoint_tag|subscription_token|token|secret|password|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin)$'
     # These transport records only observe values produced by the system under test.
     # They are not fixture sources and must retain the observed value for assertions.
     - not:
@@ -145,6 +145,40 @@ rule:
           - inside:
               stopBy: end
               pattern: RealityConfig { $$$ }
+    # These URLs are derived from listeners created by the test itself.
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
+              pattern: Some(format!("https://{}:{}", xp_test_fixtures::loopback_address(), proxy.addr.port()))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^mesh_base_url$'
+          - has:
+              field: value
+              pattern: Some(format!("https://{addr}"))
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^public_base_url$'
+          - has:
+              field: value
+              pattern: format!("http://{}", server.addr)
+          - inside:
+              stopBy: end
+              pattern: MeshPeerTarget { $$$ }
     - not:
         all:
           - has:

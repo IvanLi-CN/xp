@@ -6,6 +6,10 @@ valid:
     { "metrics": { "latencyLow": 12 } }
   - |
     { "timestamps": { "date": "2024-01-01" } }
+  - |
+    { "lists": { "loopbackServerNames": ["127.0.0.1"] } }
+  - |
+    { "urls": { "publicFallback": "http://127.0.0.1:9" } }
 invalid:
   - |
     { "hosts": { "unapproved": "node-z.fixture.test" } }

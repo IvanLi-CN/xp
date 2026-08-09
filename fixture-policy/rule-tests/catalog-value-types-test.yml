@@ -3,6 +3,8 @@ valid:
   - '{ "metrics": { "latencyLow": 12 } }'
   - '{ "hosts": { "primary": "node-a.fixture.test" } }'
   - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
+  - '{ "lists": { "loopbackServerNames": ["127.0.0.1"] } }'
+  - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
   - '{ "timestamps": { "date": "2024-01-01" } }'
 invalid:
   - '{ "metrics": true }'

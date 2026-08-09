@@ -124,7 +124,7 @@ async fn spawn_signed_tls_server(ca_key_pem: &str, ca_cert_pem: &str) -> TestSer
     let ca_key = KeyPair::from_pem(ca_key_pem).expect("CA key");
     let ca_cert = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key).expect("CA certificate");
     let cert_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("server key");
-    let cert = CertificateParams::new(xp_test_fixtures::primary_server_names())
+    let cert = CertificateParams::new(xp_test_fixtures::loopback_server_names())
         .expect("certificate params")
         .signed_by(&cert_key, &ca_cert)
         .expect("server certificate");
@@ -219,10 +219,14 @@ fn mesh_request(index: usize) -> MeshRequest {
 fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
     MeshPeerTarget {
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
-        node_name: "xray-target".to_string(),
-        mesh_base_url: Some(format!("https://localhost:{}", proxy.addr.port())),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        mesh_base_url: Some(format!(
+            "https://{}:{}",
+            xp_test_fixtures::loopback_address(),
+            proxy.addr.port()
+        )),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "http://127.0.0.1:9".to_string(),
+        public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }
 }
 
@@ -279,7 +283,7 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
         meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
             reality: RealityConfig {
                 dest: format!("host.docker.internal:{}", canary.addr.port()),
-                server_names: xp_test_fixtures::primary_server_names(),
+                server_names: xp_test_fixtures::loopback_server_names(),
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             },

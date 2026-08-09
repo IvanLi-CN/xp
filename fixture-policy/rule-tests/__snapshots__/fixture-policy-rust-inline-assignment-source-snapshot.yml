@@ -30,6 +30,34 @@ snapshots:
       end: 106
   ? |
     mod tests {
+        fn updates_mesh_target() {
+            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+        }
+    }
+  : labels:
+    - source: fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: primary
+      start: 51
+      end: 120
+    - source: |-
+        mod tests {
+            fn updates_mesh_target() {
+                fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+            }
+        }
+      style: secondary
+      start: 0
+      end: 129
+    - source: fixture.mesh_base_url
+      style: secondary
+      start: 51
+      end: 72
+    - source: Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: secondary
+      start: 75
+      end: 120
+  ? |
+    mod tests {
         fn updates_node() {
             fixture.node_id = "unapproved-node".to_owned();
         }

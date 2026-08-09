@@ -2,6 +2,38 @@ id: fixture-policy-rust-inline-data-source
 snapshots:
   ? |
     mod tests {
+        fn builds_mesh_target() {
+            let fixture = MeshPeerTarget {
+                mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+            };
+        }
+    }
+  : labels:
+    - source: 'mesh_base_url: Some("https://unapproved.invalid".to_owned())'
+      style: primary
+      start: 93
+      end: 153
+    - source: |-
+        mod tests {
+            fn builds_mesh_target() {
+                let fixture = MeshPeerTarget {
+                    mesh_base_url: Some("https://unapproved.invalid".to_owned()),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 173
+    - source: mesh_base_url
+      style: secondary
+      start: 93
+      end: 106
+    - source: Some("https://unapproved.invalid".to_owned())
+      style: secondary
+      start: 108
+      end: 153
+  ? |
+    mod tests {
         fn builds_node() {
             let fixture = Node { node_id: "unapproved-node".to_owned() };
         }

@@ -23,3 +23,7 @@ invalid:
     const { fixtureCatalog } = source;
   - |
     const { source: fixtureCatalog } = source;
+  - |
+    const [fixtureCatalog] = source;
+  - |
+    const [other, fixtureCatalog] = source;

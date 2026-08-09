@@ -2,6 +2,8 @@ id: fixture-policy-catalog-string-values
 valid:
   - '{ "hosts": { "primary": "node-a.fixture.test" } }'
   - '{ "urls": { "primary": "tcp://origin.fixture.test:443" } }'
+  - '{ "lists": { "loopbackServerNames": ["127.0.0.1"] } }'
+  - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
   - '{ "slots": { "strings": ["2024-01-01T00:00:00.000Z"] } }'
 invalid:
   - '{ "hosts": { "primary": "unapproved.invalid" } }'
