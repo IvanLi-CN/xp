@@ -362,10 +362,12 @@ describe("storybook api mock", () => {
 			items: Array<{ endpoint_id: string }>;
 			auto_assign_endpoint_kinds: string[];
 		};
-		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual([
-			fixtureCatalog.endpointId.fixture40(),
-			createdEndpoint.endpoint_id,
-		]);
+		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual(
+			[
+				fixtureCatalog.endpointId.fixture40(),
+				createdEndpoint.endpoint_id,
+			].sort(),
+		);
 		expect(vlessAccess.auto_assign_endpoint_kinds).toEqual([
 			"vless_reality_vision_tcp",
 		]);
@@ -596,9 +598,7 @@ describe("storybook api mock", () => {
 		const listDataAfter = (await listResAfter.json()) as typeof listData;
 		expect(
 			listDataAfter.items.some(
-				(item) =>
-					item.node_id === nodeId &&
-					item.weight === fixtureCatalog.number.value120(),
+				(item) => item.node_id === nodeId && item.weight === 123,
 			),
 		).toBe(true);
 	});
@@ -652,11 +652,9 @@ describe("storybook api mock", () => {
 		);
 		expect(rowsAfterRes.ok).toBe(true);
 		const rowsAfter = (await rowsAfterRes.json()) as typeof rowsData;
-		expect(
-			rowsAfter.items.some(
-				(item) => item.editor_weight === fixtureCatalog.number.value120(),
-			),
-		).toBe(true);
+		expect(rowsAfter.items.some((item) => item.editor_weight === 321)).toBe(
+			true,
+		);
 	});
 
 	it("supports node and user ip usage endpoints", async () => {
@@ -923,9 +921,7 @@ describe("storybook api mock", () => {
 			(await globalRowsAfterRes.json()) as typeof globalRows;
 		expect(
 			globalRowsAfter.items.some(
-				(item) =>
-					item.user_id === firstUserId &&
-					item.editor_weight === fixtureCatalog.number.value120(),
+				(item) => item.user_id === firstUserId && item.editor_weight === 777,
 			),
 		).toBe(true);
 

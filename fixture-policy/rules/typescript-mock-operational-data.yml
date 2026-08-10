@@ -19,12 +19,16 @@ rule:
           - regex: '^(port|public_domain|server_name|domain_id)$'
           - regex: '^(short_ids|active_short_id|membership_key)$'
           - regex: '^(method|fingerprint|vless_https_canary_bind)$'
-          - regex: '^(ip_geo_origin|admin_token_masked|lane_key|weight)$'
+          - regex: '^(ip_geo_origin|admin_token_masked|lane_key)$'
     - has:
         field: value
         not:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: state.nextEndpointId()
+            - pattern: state.nextEndpointTag()
+            - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextUserId()
             - pattern: >-
                 $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
                 fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()

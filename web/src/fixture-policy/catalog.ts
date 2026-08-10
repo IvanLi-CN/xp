@@ -71,15 +71,47 @@ function createSubscriptionTokenFactory() {
 	};
 }
 
-let nextSubscriptionTokenIndex = 0;
+function createEndpointIdFactory() {
+	let endpointIdIndex = 0;
+	const endpointIds = Object.values(catalog.fixtures.strings.endpointId);
+	return () => {
+		const endpointId = endpointIds[endpointIdIndex];
+		if (!endpointId) {
+			throw new Error("synthetic endpoint ID catalog exhausted");
+		}
+		endpointIdIndex += 1;
+		return endpointId;
+	};
+}
 
-function nextSubscriptionToken() {
-	const token = catalog.subscription.tokens[nextSubscriptionTokenIndex];
-	if (!token) {
-		throw new Error("synthetic subscription token catalog exhausted");
-	}
-	nextSubscriptionTokenIndex += 1;
-	return token;
+function createEndpointTagFactory() {
+	let endpointTagIndex = 0;
+	const endpointTags = Object.values(catalog.fixtures.strings.endpointTag);
+	return () => {
+		const endpointTag = endpointTags[endpointTagIndex];
+		if (!endpointTag) {
+			throw new Error("synthetic endpoint tag catalog exhausted");
+		}
+		endpointTagIndex += 1;
+		return endpointTag;
+	};
+}
+
+function createUserIdFactory() {
+	let userIdIndex = 0;
+	const userIds = [
+		catalog.identifiers.userTertiary,
+		catalog.identifiers.userQuaternary,
+		catalog.identifiers.userQuinary,
+	];
+	return () => {
+		const userId = userIds[userIdIndex];
+		if (!userId) {
+			throw new Error("synthetic user ID catalog exhausted");
+		}
+		userIdIndex += 1;
+		return userId;
+	};
 }
 
 const meshPeerNodeIds = [
@@ -231,8 +263,10 @@ export const fixtureCatalog = {
 		userTertiary: () => catalog.identifiers.userTertiary,
 		userQuaternary: () => catalog.identifiers.userQuaternary,
 		userQuinary: () => catalog.identifiers.userQuinary,
+		createEndpointIdFactory: () => createEndpointIdFactory(),
+		createEndpointTagFactory: () => createEndpointTagFactory(),
 		createSubscriptionTokenFactory: () => createSubscriptionTokenFactory(),
-		nextSubscriptionToken,
+		createUserIdFactory: () => createUserIdFactory(),
 		nextMeshPeerNodeId,
 		tokenPrimary: () => catalog.identifiers.tokenPrimary,
 		tokenSecondary: () => catalog.identifiers.tokenSecondary,
@@ -247,6 +281,20 @@ export const fixtureCatalog = {
 		endpointTagSecondary: () => catalog.identifiers.endpointTagSecondary,
 		endpointTagTertiary: () => catalog.identifiers.endpointTagTertiary,
 		endpointTagMissing: () => catalog.identifiers.endpointTagMissing,
+	},
+	story: {
+		nodesPagePrimaryNodeId: () => catalog.fixtures.strings.nodeId.fixture229,
+		nodesPagePrimaryNodeName: () => catalog.fixtures.strings.nodeId.fixture106,
+		nodesPagePrimaryAccessHost: () => catalog.fixtures.strings.host.fixture231,
+		nodesPagePrimaryApiBaseUrl: () =>
+			catalog.fixtures.strings.service.fixture230,
+		nodesPageSecondaryNodeId: () => catalog.fixtures.strings.nodeId.fixture233,
+		nodesPageSecondaryNodeName: () =>
+			catalog.fixtures.strings.nodeId.fixture110,
+		nodesPageSecondaryAccessHost: () =>
+			catalog.fixtures.strings.host.fixture234,
+		nodesPageSecondaryApiBaseUrl: () =>
+			catalog.fixtures.strings.service.fixture235,
 	},
 	timestamp: {
 		...fixtureStrings.timestamp,

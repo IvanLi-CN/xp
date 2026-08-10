@@ -393,6 +393,8 @@ export async function setupApiMocks(
 	page: Page,
 	options: MockApiOptions = {},
 ): Promise<MockState> {
+	const nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	const users = (options.users ?? defaultUsers).map(normalizeFixtureUser);
 	const nodes = (options.nodes ?? defaultNodes).map(normalizeFixtureNode);
 	const endpoints = (options.endpoints ?? defaultEndpoints).map(
@@ -629,7 +631,7 @@ export async function setupApiMocks(
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
-				subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
+				subscription_token: nextSubscriptionToken(),
 				credential_epoch: fixtureCatalog.user.credentialEpoch(),
 				priority_tier: fixtureCatalog.user.priorityTierDefault(),
 				quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,

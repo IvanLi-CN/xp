@@ -14,9 +14,26 @@ valid:
       return { node_id: node.node_id };
     }
   - |
+    function buildFixtureEndpointIdentifierResponse(endpoint) {
+      return { endpoint_id: endpoint.endpoint_id };
+    }
+  - |
+    function buildFixtureUserNodeWeightItem(node, weight) {
+      return { node_id: node.node_id, weight };
+    }
+  - |
     const fixture = { host: fixtureCatalog.host.primary() };
   - |
     const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
+  - |
+    const fixture = { endpoint_id: state.nextEndpointId() };
+  - |
+    const fixture = { subscription_token: state.nextSubscriptionToken() };
+  - |
+    function setupApiMocks() {
+      const fixture = { subscription_token: nextSubscriptionToken() };
+      return fixture;
+    }
   - |
     const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
   - |

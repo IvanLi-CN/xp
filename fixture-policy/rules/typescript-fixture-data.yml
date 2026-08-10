@@ -32,6 +32,19 @@ rule:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: state.nextEndpointId()
+            - pattern: state.nextEndpointTag()
+            - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextUserId()
+            - all:
+                - pattern: nextSubscriptionToken()
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
             - pattern: >-
                 $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
                 fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()
@@ -89,6 +102,24 @@ rule:
                           any:
                             - pattern: buildNodeDeletePreviewResponse
                             - pattern: buildNodeEgressProbeRefreshResponse
+            - all:
+                - pattern: endpoint.endpoint_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureEndpointIdentifierResponse
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserNodeWeightItem
             - all:
                 - pattern: clusterInfo.node_id
                 - inside:

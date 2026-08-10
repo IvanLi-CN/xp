@@ -63,6 +63,18 @@ import {
 } from "./apiMockFixtureBuilders";
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
+import {
+	buildFixtureDisabledNodeIds,
+	buildFixtureEndpointIdentifierResponse,
+	buildFixtureSubscriptionText,
+	buildFixtureUserNodeWeightItem,
+	isFixtureEndpointCreateRequest,
+	isFixtureNodeId,
+	isFixtureRealityServerName,
+	normalizeFixtureEndpointPatch,
+	normalizeFixtureNodePatch,
+	normalizeFixtureRealityDomainPatch,
+} from "./fixtureMutationPolicy";
 import { buildUserNodeQuotaStatusItem } from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
@@ -111,13 +123,10 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failAdminConfig: boolean;
 	failNodeRuntimeNodeIds: string[];
 	failVersionCheck: boolean;
-	counters: {
-		endpoint: number;
-		joinToken: number;
-		realityDomain: number;
-		shortId: number;
-		user: number;
-	};
+	nextEndpointId: () => string;
+	nextEndpointTag: () => string;
+	nextSubscriptionToken: () => string;
+	nextUserId: () => string;
 };
 
 type MockApi = {
@@ -282,10 +291,7 @@ function sseResponse(
 	});
 }
 
-function ensureEndpointRecord(
-	seed: MockEndpointSeed,
-	_counters: MockState["counters"],
-): MockEndpointRecord {
+function ensureEndpointRecord(seed: MockEndpointSeed): MockEndpointRecord {
 	return {
 		endpoint_id: seed.endpoint_id,
 		node_id: seed.node_id,
@@ -1094,17 +1100,12 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...(overrides?.subscriptions ?? {}),
 		},
 	};
-	const counters = {
-		endpoint: 1,
-		joinToken: 1,
-		realityDomain: 1,
-		shortId: 1,
-		subscription: 1,
-		user: 1,
-	};
-	const endpoints = merged.endpoints.map((endpoint) =>
-		ensureEndpointRecord(endpoint, counters),
-	);
+	const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+	const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
+	const nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
+	const nextUserId = fixtureCatalog.identifier.createUserIdFactory();
+	const endpoints = merged.endpoints.map(ensureEndpointRecord);
 
 	const state: MockState = {
 		...clone(merged),
@@ -1112,27 +1113,14 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
-		counters,
+		nextEndpointId,
+		nextEndpointTag,
+		nextSubscriptionToken,
+		nextUserId,
 	};
 
 	refreshGlobalEndpointReality(state);
 	return state;
-}
-
-function buildSubscriptionText(format: string | null): string {
-	if (format === "clash") {
-		return fixtureCatalog.subscription.clash();
-	}
-	if (format === "mihomo_provider") {
-		return fixtureCatalog.subscription.rawUri();
-	}
-	if (format === "mihomo_provider_system") {
-		return fixtureCatalog.subscription.clash();
-	}
-	if (format === "mihomo") {
-		return fixtureCatalog.subscription.clash();
-	}
-	return fixtureCatalog.subscription.rawUri();
 }
 
 async function readJson<T>(req: Request): Promise<T | undefined> {
@@ -1611,8 +1599,8 @@ async function handleRequest(
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const nodeExists = state.nodes.some((n) => n.node_id === nodeId);
-		if (!nodeExists) {
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
 
@@ -1620,23 +1608,19 @@ async function handleRequest(
 		if (!payload || typeof payload.weight !== "number") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
+		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
+			return errorResponse(400, "invalid_request", "weight must be an integer");
+		}
+		if (payload.weight < 0 || payload.weight > 65535) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"weight must be between 0 and 65535",
+			);
+		}
 
 		const items = state.userNodeWeights[userId] ?? [];
-		const next: AdminUserNodeWeightItem =
-			nodeId === fixtureCatalog.nodeId.fixture63()
-				? {
-						node_id: fixtureCatalog.nodeId.fixture63(),
-						weight: fixtureCatalog.number.value120(),
-					}
-				: nodeId === fixtureCatalog.nodeId.fixture32()
-					? {
-							node_id: fixtureCatalog.nodeId.fixture32(),
-							weight: fixtureCatalog.number.value120(),
-						}
-					: {
-							node_id: fixtureCatalog.nodeId.fixture36(),
-							weight: fixtureCatalog.number.value120(),
-						};
+		const next = buildFixtureUserNodeWeightItem(node, payload.weight);
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
 			next,
@@ -1684,11 +1668,21 @@ async function handleRequest(
 		if (!payload || typeof payload.weight !== "number") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
+		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
+			return errorResponse(400, "invalid_request", "weight must be an integer");
+		}
+		if (payload.weight < 0 || payload.weight > 65535) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"weight must be between 0 and 65535",
+			);
+		}
 
-		state.userGlobalWeights[userId] = fixtureCatalog.number.value120();
+		state.userGlobalWeights[userId] = payload.weight;
 		return jsonResponse({
 			user_id: userId,
-			weight: fixtureCatalog.number.value120(),
+			weight: payload.weight,
 		});
 	}
 
@@ -1815,14 +1809,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const updated: AdminNode = {
-				...node,
-				node_name: fixtureCatalog.nodeName.fixture33(),
-				access_host: fixtureCatalog.host.fixture35(),
-				api_base_url: fixtureCatalog.service.fixture34(),
-				quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
-				quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
-			};
+			const updated = normalizeFixtureNodePatch(node, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"node patch values must be approved synthetic fixture values",
+				);
+			}
 			state.nodes = state.nodes.map((item) =>
 				item.node_id === nodeId ? updated : item,
 			);
@@ -1889,15 +1883,30 @@ async function handleRequest(
 		if (!payload || typeof payload.server_name !== "string") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
+		if (!isFixtureRealityServerName(payload.server_name)) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"server_name must be an approved synthetic fixture value",
+			);
+		}
+		const disabledNodeIds = payload.disabled_node_ids ?? [];
+		if (!disabledNodeIds.every(isFixtureNodeId)) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"disabled_node_ids must be approved synthetic fixture values",
+			);
+		}
 		const domain: AdminRealityDomain = {
-			domain_id: fixtureCatalog.identifier.endpointTertiary(),
+			domain_id: state.nextEndpointId(),
 			server_name:
 				payload.server_name === fixtureCatalog.host.serverPrimary()
 					? fixtureCatalog.host.serverPrimary()
 					: payload.server_name === fixtureCatalog.host.serverSecondary()
 						? fixtureCatalog.host.serverSecondary()
 						: fixtureCatalog.host.tertiary(),
-			disabled_node_ids: [],
+			disabled_node_ids: buildFixtureDisabledNodeIds(disabledNodeIds),
 		};
 		state.realityDomains = [...state.realityDomains, domain];
 		refreshGlobalEndpointReality(state);
@@ -1950,20 +1959,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const updated: AdminRealityDomain = {
-				...existing,
-				server_name:
-					payload.server_name === fixtureCatalog.host.serverPrimary()
-						? fixtureCatalog.host.serverPrimary()
-						: payload.server_name === fixtureCatalog.host.serverSecondary()
-							? fixtureCatalog.host.serverSecondary()
-							: fixtureCatalog.host.tertiary(),
-				disabled_node_ids: payload.disabled_node_ids?.includes(
-					fixtureCatalog.identifier.nodeSecondary(),
-				)
-					? [fixtureCatalog.identifier.nodeSecondary()]
-					: [],
-			};
+			const updated = normalizeFixtureRealityDomainPatch(existing, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"reality domain values must be approved synthetic fixture values",
+				);
+			}
 			state.realityDomains = state.realityDomains.map((d) =>
 				d.domain_id === domainId ? updated : d,
 			);
@@ -1999,6 +2002,13 @@ async function handleRequest(
 				"missing required endpoint fields",
 			);
 		}
+		if (!isFixtureEndpointCreateRequest(payload, state.nodes)) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"endpoint fields must be approved synthetic fixture values",
+			);
+		}
 		let meta: Record<string, unknown> = {};
 		try {
 			meta = buildEndpointCreateMeta(payload, state.nodes);
@@ -2010,17 +2020,14 @@ async function handleRequest(
 			);
 		}
 		const endpoint: AdminEndpoint = {
-			endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
+			endpoint_id: state.nextEndpointId(),
 			node_id:
 				payload.node_id === fixtureCatalog.nodeId.fixture63()
 					? fixtureCatalog.nodeId.fixture63()
 					: payload.node_id === fixtureCatalog.nodeId.fixture36()
 						? fixtureCatalog.nodeId.fixture36()
 						: fixtureCatalog.nodeId.fixture32(),
-			tag:
-				payload.kind === fixtureCatalog.endpoint.ssKind()
-					? fixtureCatalog.endpointTag.fixture44()
-					: fixtureCatalog.endpointTag.fixture41(),
+			tag: state.nextEndpointTag(),
 			kind:
 				payload.kind === fixtureCatalog.endpoint.ssKind()
 					? fixtureCatalog.endpoint.ssKind()
@@ -2057,12 +2064,7 @@ async function handleRequest(
 		endpoint.active_short_id = fixtureCatalog.endpoint.activeShortId();
 		endpoint.short_ids = fixtureCatalog.endpoint.shortIds();
 		return jsonResponse({
-			endpoint_id:
-				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
-					? fixtureCatalog.identifier.endpointTertiary()
-					: endpoint.endpoint_id === fixtureCatalog.endpointId.fixture43()
-						? fixtureCatalog.endpointId.fixture43()
-						: fixtureCatalog.endpointId.fixture40(),
+			...buildFixtureEndpointIdentifierResponse(endpoint),
 			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
@@ -2090,16 +2092,11 @@ async function handleRequest(
 			);
 		}
 		const node = state.nodes.find((item) => item.node_id === endpoint.node_id);
-		const host = node?.access_host ?? "example.test";
+		const host = node?.access_host ?? fixtureCatalog.host.primary();
 		const authority =
 			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
 		return jsonResponse({
-			endpoint_id:
-				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
-					? fixtureCatalog.identifier.endpointTertiary()
-					: endpoint.endpoint_id === fixtureCatalog.endpointId.fixture43()
-						? fixtureCatalog.endpointId.fixture43()
-						: fixtureCatalog.endpointId.fixture40(),
+			...buildFixtureEndpointIdentifierResponse(endpoint),
 			url: `https://${authority}/generate_204`,
 			nodes: state.nodes.map((item) => ({
 				node_id:
@@ -2135,20 +2132,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const nextMeta = {
-				...endpoint.meta,
-				reality: fixtureCatalog.endpoint.reality(),
-			} as Record<string, unknown>;
-			const updated: MockEndpointRecord = {
-				...endpoint,
-				port:
-					payload.port === fixtureCatalog.endpoint.port8443()
-						? fixtureCatalog.endpoint.port8443()
-						: payload.port === fixtureCatalog.endpoint.port9443()
-							? fixtureCatalog.endpoint.port9443()
-							: fixtureCatalog.endpoint.port443(),
-				meta: nextMeta,
-			};
+			const updated = normalizeFixtureEndpointPatch(endpoint, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"endpoint patch values must be approved synthetic fixture values",
+				);
+			}
 			state.endpoints = state.endpoints.map((item) =>
 				item.endpoint_id === endpointId ? updated : item,
 			);
@@ -2218,18 +2209,19 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const userId = fixtureCatalog.identifier.userTertiary();
+		const userId = state.nextUserId();
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
+			subscription_token: state.nextSubscriptionToken(),
 			credential_epoch: fixtureCatalog.user.credentialEpoch(),
 			priority_tier: fixtureCatalog.user.priorityTierCreated(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		};
 		state.users = [...state.users, user];
 		state.userAccessByUserId[userId] = [];
-		state.subscriptions[user.subscription_token] = buildSubscriptionText(null);
+		state.subscriptions[user.subscription_token] =
+			buildFixtureSubscriptionText(null);
 		return jsonResponse(user);
 	}
 
@@ -2278,12 +2270,13 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 		const previousSubscriptionToken = user.subscription_token;
-		user.subscription_token = fixtureCatalog.identifier.nextSubscriptionToken();
+		user.subscription_token = state.nextSubscriptionToken();
 		state.users = state.users.map((item) =>
 			item.user_id === userId ? user : item,
 		);
 		delete state.subscriptions[previousSubscriptionToken];
-		state.subscriptions[user.subscription_token] = buildSubscriptionText(null);
+		state.subscriptions[user.subscription_token] =
+			buildFixtureSubscriptionText(null);
 		return jsonResponse(
 			buildSubscriptionTokenResponse(user.subscription_token),
 		);
@@ -2398,7 +2391,7 @@ async function handleRequest(
 		if (!(token in state.subscriptions)) {
 			return errorResponse(404, "not_found", "subscription token not found");
 		}
-		return textResponse(buildSubscriptionText("mihomo_provider_system"));
+		return textResponse(buildFixtureSubscriptionText("mihomo_provider_system"));
 	}
 
 	const subscriptionProviderMatch = path.match(
@@ -2409,7 +2402,7 @@ async function handleRequest(
 		if (!(token in state.subscriptions)) {
 			return errorResponse(404, "not_found", "subscription token not found");
 		}
-		return textResponse(buildSubscriptionText("mihomo_provider"));
+		return textResponse(buildFixtureSubscriptionText("mihomo_provider"));
 	}
 
 	const subscriptionMatch = path.match(/^\/api\/sub\/([^/]+)$/);
@@ -2424,7 +2417,7 @@ async function handleRequest(
 		const content =
 			effectiveFormat === null || effectiveFormat === "raw"
 				? storedContent
-				: buildSubscriptionText(effectiveFormat);
+				: buildFixtureSubscriptionText(effectiveFormat);
 		return textResponse(content);
 	}
 

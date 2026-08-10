@@ -14,6 +14,18 @@ describe("fixtureCatalog subscription token factory", () => {
 		);
 	});
 
+	it("keeps endpoint and user identifier sequences scoped to each factory", () => {
+		const firstEndpointFactory =
+			fixtureCatalog.identifier.createEndpointIdFactory();
+		const secondEndpointFactory =
+			fixtureCatalog.identifier.createEndpointIdFactory();
+		expect(secondEndpointFactory()).toBe(firstEndpointFactory());
+
+		const firstUserFactory = fixtureCatalog.identifier.createUserIdFactory();
+		const secondUserFactory = fixtureCatalog.identifier.createUserIdFactory();
+		expect(secondUserFactory()).toBe(firstUserFactory());
+	});
+
 	it("exposes named fixture values without positional slot access", () => {
 		expect(fixtureCatalog.nodeId.fixture229()).toBe("node-fixture-229");
 		expect(fixtureCatalog.nodeName.fixture18()).toBe("fixture-node-18");
@@ -22,5 +34,14 @@ describe("fixtureCatalog subscription token factory", () => {
 			"https://service-230.fixture.test",
 		);
 		expect("slotString" in fixtureCatalog).toBe(false);
+	});
+
+	it("uses page-role names for the NodesPage story fixture", () => {
+		expect(fixtureCatalog.story.nodesPagePrimaryNodeId()).toBe(
+			"node-fixture-229",
+		);
+		expect(fixtureCatalog.story.nodesPagePrimaryNodeName()).toBe(
+			"node-fixture-106",
+		);
 	});
 });

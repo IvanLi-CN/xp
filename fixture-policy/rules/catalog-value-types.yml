@@ -10,7 +10,7 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"fixtures"|"subscription")$'
+            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"operations"|"lists"|"fixtures"|"subscription")$'
         - has:
             field: value
             not:
@@ -73,3 +73,64 @@ rule:
             field: value
             not:
               kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("endpoint"|"quota"|"user")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("vlessKind"|"ssKind"|"activeShortId")$'
+              - regex: '^("serverPskB64"|"serverPskB64Alternate")$'
+              - regex: '^("serverPskB64Escaped"|"userPskB64"|"authority53844")$'
+              - regex: '^("authorityAlias"|"canaryH2c")$'
+              - regex: '^("resetSource"|"priorityTierDefault"|"priorityTierCreated")$'
+              - regex: '^("rawUri"|"providerSystemUrl")$'
+              - regex: '^("mihomoMirrorBase"|"healthSeoulA"|"healthShared")$'
+              - regex: '^("healthEndpointNode"|"healthXpNode")$'
+              - regex: '^("healthSubscribed"|"providerHost"|"providerPassword")$'
+              - regex: '^("dest"|"server_names_source")$'
+              - regex: '^("fingerprint"|"private_key"|"public_key"|"method")$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("port443"|"port8443"|"port9443"|"port53843"|"port53844")$'
+              - regex: '^("limitBytes"|"usedBytes"|"remainingBytes"|"fiveGiB"|"tenGiB")$'
+              - regex: '^("elevenGiB"|"fifteenGiB"|"fourGiB"|"oneGiB"|"credentialEpoch")$'
+        - has:
+            field: value
+            not:
+              kind: number
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("reality"|"realityAlternate"|"realityKeys"|"vlessMeta")$'
+              - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped"|"reset")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("server_names"|"shortIds"|"short_ids"|"clashLines")$'
+        - has:
+            field: value
+            not:
+              kind: array

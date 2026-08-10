@@ -55,7 +55,7 @@ fn endpoint_ss(endpoint_id: &str, port: u16, managed_default: Option<bool>) -> E
             meta,
         },
         "s2" => Endpoint {
-            endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
+            endpoint_id: xp_test_fixtures::label_ss2().to_owned(),
             node_id: xp_test_fixtures::label_n1().to_owned(),
             tag: xp_test_fixtures::endpoint_tag_fixture510().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,

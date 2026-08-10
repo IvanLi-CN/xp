@@ -6,6 +6,8 @@ valid:
     report.total_bytes = null;
   - |
     report.bootstrap_access_host = fixtureCatalog.host.primary();
+  - |
+    user.subscription_token = state.nextSubscriptionToken();
 invalid:
   - |
     report.start_at = "unapproved-timestamp";

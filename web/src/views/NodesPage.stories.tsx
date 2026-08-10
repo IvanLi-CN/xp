@@ -16,10 +16,10 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 	unreachable_nodes: [],
 	items: [
 		{
-			node_id: fixtureCatalog.nodeId.fixture229(),
-			node_name: fixtureCatalog.nodeId.fixture106(),
-			api_base_url: fixtureCatalog.service.fixture230(),
-			access_host: fixtureCatalog.host.fixture231(),
+			node_id: fixtureCatalog.story.nodesPagePrimaryNodeId(),
+			node_name: fixtureCatalog.story.nodesPagePrimaryNodeName(),
+			api_base_url: fixtureCatalog.story.nodesPagePrimaryApiBaseUrl(),
+			access_host: fixtureCatalog.story.nodesPagePrimaryAccessHost(),
 			summary: {
 				status: "up",
 				updated_at: fixtureCatalog.timestamp.t20240101T035200(),
@@ -120,10 +120,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.nodeId.fixture229(),
-						node_name: fixtureCatalog.nodeId.fixture106(),
-						access_host: fixtureCatalog.host.fixture231(),
-						api_base_url: fixtureCatalog.service.fixture230(),
+						node_id: fixtureCatalog.story.nodesPagePrimaryNodeId(),
+						node_name: fixtureCatalog.story.nodesPagePrimaryNodeName(),
+						access_host: fixtureCatalog.story.nodesPagePrimaryAccessHost(),
+						api_base_url: fixtureCatalog.story.nodesPagePrimaryApiBaseUrl(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -132,10 +132,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: fixtureCatalog.nodeId.fixture233(),
-						node_name: fixtureCatalog.nodeId.fixture110(),
-						access_host: fixtureCatalog.host.fixture234(),
-						api_base_url: fixtureCatalog.service.fixture235(),
+						node_id: fixtureCatalog.story.nodesPageSecondaryNodeId(),
+						node_name: fixtureCatalog.story.nodesPageSecondaryNodeName(),
+						access_host: fixtureCatalog.story.nodesPageSecondaryAccessHost(),
+						api_base_url: fixtureCatalog.story.nodesPageSecondaryApiBaseUrl(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -250,7 +250,7 @@ export const CachedUnauthorizedInventory: Story = {
 			expect.stringContaining("/login?redirect="),
 		);
 		await expect(
-			canvas.getByText(fixtureCatalog.nodeId.fixture106()),
+			canvas.getByText(fixtureCatalog.story.nodesPagePrimaryNodeName()),
 		).toBeInTheDocument();
 	},
 };
