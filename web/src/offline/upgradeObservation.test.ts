@@ -219,7 +219,7 @@ describe("upgrade observation", () => {
 				{
 					state: "succeeded",
 					target_tag: "v3.20.0",
-					updated_at: new Date(NOW - 1_000).toISOString(),
+					updated_at: fixtureCatalog.timestamp.t20231230T230000(),
 				},
 				NOW + 100,
 			),

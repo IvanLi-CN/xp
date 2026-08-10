@@ -911,7 +911,7 @@ mod tests {
             finished_at: None,
             exit_code: None,
             message: None,
-            updated_at: "2026-07-04T00:00:00Z".to_string(),
+            updated_at: xp_test_fixtures::timestamp_at20260704_t000000_z().to_owned(),
         };
         let now = chrono::DateTime::parse_from_rfc3339("2026-07-04T00:00:20Z")
             .unwrap()

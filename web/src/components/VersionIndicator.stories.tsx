@@ -401,7 +401,7 @@ export const StaleUpgradeConflict: Story = {
 					versionCheck={{
 						kind: "update_available",
 						latest_tag: "v0.2.0",
-						checked_at: "2026-07-04T00:00:00Z",
+						checked_at: fixtureCatalog.timestamp.t20260704T000000(),
 						repo: "IvanLi-CN/xp",
 					}}
 					upgradeStatus={baseUpgradeStatus}
