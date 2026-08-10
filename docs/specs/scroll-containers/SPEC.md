@@ -131,6 +131,28 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 
 - `bunx --no-install dprint check docs/specs/scroll-containers docs/specs/README.md`
 
+## Visual Evidence
+
+Evidence target: `ui_demo`.
+
+PR: include
+Desktop navigation with the active capsule contained inside the vertical viewport and the hosting
+node identified by its cyan server-bolt icon.
+![Desktop resource navigation](./assets/resource-navigation-desktop-motion.png)
+
+PR: include
+Reduced-motion fallback with the overflowing name stationary and the project Tooltip shown on the
+right.
+![Reduced-motion resource name tooltip](./assets/resource-navigation-reduced-motion-tooltip.png)
+
+PR: include
+Mobile Sheet with the active capsule fully visible inside the same bounded vertical ScrollArea.
+![Mobile resource navigation sheet](./assets/resource-navigation-mobile-sheet.png)
+
+PR: include
+Light-theme check for the selected capsule, node identity icons, and long-name fade treatment.
+![Light-theme resource navigation](./assets/resource-navigation-light.png)
+
 ## Related PRs
 
 - None
