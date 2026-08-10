@@ -136,13 +136,11 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 Evidence target: `ui_demo`.
 
 PR: include
-Desktop navigation with the active capsule contained inside the vertical viewport and the hosting
-node identified by its cyan server-bolt icon.
+The active capsule stays inside the viewport; cyan server-bolt identifies the hosting node.
 ![Desktop resource navigation](./assets/resource-navigation-desktop-motion.png)
 
 PR: include
-Reduced-motion fallback with the overflowing name stationary and the project Tooltip shown on the
-right.
+Reduced motion keeps the name stationary and shows the project Tooltip on the right.
 ![Reduced-motion resource name tooltip](./assets/resource-navigation-reduced-motion-tooltip.png)
 
 PR: include
@@ -155,7 +153,7 @@ Light-theme check for the selected capsule, node identity icons, and long-name f
 
 ## Related PRs
 
-- None
+- [#244](https://github.com/IvanLi-CN/xp/pull/244)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
