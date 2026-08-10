@@ -169,6 +169,21 @@
 
 ## Visual Evidence
 
+Web upgrade stale-conflict state:
+
+- Source: Storybook canvas `Components/VersionIndicator/StaleUpgradeConflict`.
+- Bound implementation commit: `fa1c0db7e91e6d52694476f481785187887d41d1`.
+- Capture metadata: `source_type=storybook_canvas`, `target_program=mock-only`,
+  `capture_scope=element`, `requested_viewport=none`,
+  `viewport_strategy=storybook-viewport`, `margin_policy=require_margin`,
+  `evidence_surface=component`, `sensitive_exclusion=N/A`,
+  `submission_gate=approved`.
+- The immediate conflict message is visible and the Upgrade action is enabled.
+- Whitespace normalization: already satisfied the required 16 px outer margin.
+
+PR: include
+![Version indicator stale upgrade conflict](./assets/version-indicator-stale-upgrade-conflict.png)
+
 - Source: mock-only, login-free `/ui-demo/system-status`.
 - Bound implementation commit: `721c0a6a1d4e1cd2c6f4ff20e6a067802766058a`.
 - Capture metadata: `source_type=ui_demo`, `target_program=mock-only`,
