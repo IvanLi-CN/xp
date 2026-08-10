@@ -7,6 +7,8 @@ use super::catalog;
 pub(super) struct Operations {
     endpoint: EndpointOperations,
     quota: QuotaOperations,
+    #[allow(dead_code)]
+    user: UserOperations,
     subscription: SubscriptionOperations,
 }
 
@@ -62,6 +64,7 @@ struct EndpointOperations {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 #[serde(deny_unknown_fields)]
 struct QuotaOperations {
     #[serde(rename = "limitBytes")]
@@ -70,9 +73,33 @@ struct QuotaOperations {
     used_bytes: u64,
     #[serde(rename = "remainingBytes")]
     remaining_bytes: u64,
+    #[serde(rename = "fiveGiB")]
+    five_gib: u64,
+    #[serde(rename = "tenGiB")]
+    ten_gib: u64,
+    #[serde(rename = "elevenGiB")]
+    eleven_gib: u64,
+    #[serde(rename = "fifteenGiB")]
+    fifteen_gib: u64,
+    #[serde(rename = "fourGiB")]
+    four_gib: u64,
+    #[serde(rename = "oneGiB")]
+    one_gib: u64,
     reset: serde_json::Value,
     #[serde(rename = "resetSource")]
     reset_source: String,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+#[serde(deny_unknown_fields)]
+struct UserOperations {
+    #[serde(rename = "credentialEpoch")]
+    credential_epoch: u64,
+    #[serde(rename = "priorityTierDefault")]
+    priority_tier_default: String,
+    #[serde(rename = "priorityTierCreated")]
+    priority_tier_created: String,
 }
 
 #[derive(Deserialize)]

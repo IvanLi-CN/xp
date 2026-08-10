@@ -30,3 +30,18 @@ snapshots:
       style: secondary
       start: 25
       end: 37
+  ? |
+    const weight = { weight: payload.weight };
+  : labels:
+    - source: 'weight: payload.weight'
+      style: primary
+      start: 17
+      end: 39
+    - source: weight
+      style: secondary
+      start: 17
+      end: 23
+    - source: payload.weight
+      style: secondary
+      start: 25
+      end: 39

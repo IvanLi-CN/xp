@@ -35,3 +35,7 @@ invalid:
     const item = { bootstrap_access_host: "live.example" };
   - |
     const item = { first_seen_at: new Date().toISOString() };
+  - |
+    const endpoint = { port: 8443 };
+  - |
+    const node = { quota_limit_bytes: 4096 };

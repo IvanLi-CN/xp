@@ -28,19 +28,19 @@ export function sanitizeFixtureNode(node: AdminNode, index: number): AdminNode {
 			}
 		: undefined;
 	const normalized: AdminNode = {
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s33(),
-		access_host: fixtureCatalog.slotString.s35(),
-		api_base_url: fixtureCatalog.slotString.s34(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		access_host: fixtureCatalog.host.primary(),
+		api_base_url: fixtureCatalog.url.primaryApi(),
 		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		...(egressProbe ? { egress_probe: egressProbe } : {}),
 	};
 	if (index > 0) {
-		normalized.node_id = fixtureCatalog.slotString.s36();
-		normalized.node_name = fixtureCatalog.slotString.s37();
-		normalized.access_host = fixtureCatalog.slotString.s39();
-		normalized.api_base_url = fixtureCatalog.slotString.s38();
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+		normalized.node_name = fixtureCatalog.identifier.nodeNameSecondary();
+		normalized.access_host = fixtureCatalog.host.secondary();
+		normalized.api_base_url = fixtureCatalog.url.secondaryApi();
 	}
 	return normalized;
 }
@@ -50,9 +50,9 @@ export function sanitizeFixtureEndpoint(
 	index: number,
 ): FixtureEndpoint {
 	const normalized: FixtureEndpoint = {
-		endpoint_id: fixtureCatalog.slotString.s40(),
-		node_id: fixtureCatalog.slotString.s32(),
-		tag: fixtureCatalog.slotString.s41(),
+		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		tag: fixtureCatalog.identifier.endpointTagPrimary(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: fixtureCatalog.endpoint.port443(),
 		meta: {
@@ -65,9 +65,9 @@ export function sanitizeFixtureEndpoint(
 		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	};
 	if (index > 0) {
-		normalized.endpoint_id = fixtureCatalog.slotString.s43();
-		normalized.node_id = fixtureCatalog.slotString.s36();
-		normalized.tag = fixtureCatalog.slotString.s44();
+		normalized.endpoint_id = fixtureCatalog.identifier.endpointSecondary();
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+		normalized.tag = fixtureCatalog.identifier.endpointTagSecondary();
 	}
 	if (endpoint.kind === fixtureCatalog.endpoint.ssKind()) {
 		normalized.kind = fixtureCatalog.endpoint.ssKind();
@@ -84,8 +84,8 @@ export function sanitizeFixtureUser(user: AdminUser, index: number): AdminUser {
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: user.display_name,
 		subscription_token: fixtureCatalog.slotString.s45(),
-		credential_epoch: user.credential_epoch,
-		priority_tier: user.priority_tier,
+		credential_epoch: fixtureCatalog.user.credentialEpoch(),
+		priority_tier: fixtureCatalog.user.priorityTierDefault(),
 		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	};
 	if (index > 0) {

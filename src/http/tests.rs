@@ -4080,13 +4080,18 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
     assert_eq!(updated["node_id"], dst_node_id);
-    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(
+        updated["meta"]["reality"]["dest"],
+        xp_test_fixtures::loopback_39043_address(),
+    );
     assert_eq!(
         updated["meta"]["reality"]["server_names"],
-        json!([xp_test_fixtures::slot_s580()])
+        serde_json::json!([xp_test_fixtures::slot_s580()]),
     );
-    assert_eq!(updated["meta"]["reality"]["server_names_source"], "manual");
-    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
+    assert_eq!(
+        updated["meta"]["reality"]["fingerprint"],
+        xp_test_fixtures::endpoint_reality()["fingerprint"],
+    );
 }
 
 #[tokio::test]

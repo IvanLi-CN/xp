@@ -14,7 +14,10 @@ rule:
     - kind: field_initializer
     - has:
         field: field
-        regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|node_name|owner_node_id|bootstrap_node_id|bootstrap_node_name|bootstrap_access_host|bootstrap_api_base_url|endpoint_id|endpoint_tag|subscription_token|token|secret|password|first_seen_at|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|start_at|end_at|window_start_at|window_end_at|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at|hour)$'
+        any:
+          - regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|node_name|owner_node_id|bootstrap_node_id|bootstrap_node_name|bootstrap_access_host|bootstrap_api_base_url|endpoint_id|endpoint_tag|subscription_token|token|secret|password|first_seen_at|last_seen_at|last_probe_at|created_at|updated_at|checked_at|connected_at|timestamp|start_at|end_at|window_start_at|window_end_at|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at)$'
+          - regex: '^hour$'
+          - regex: '^from_node_id$'
     - not:
         has:
           field: value

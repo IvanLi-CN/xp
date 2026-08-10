@@ -30,15 +30,9 @@ export function buildUserNodeQuotaStatusItem(
 				? fixtureCatalog.identifier.userPrimary()
 				: fixtureCatalog.identifier.userSecondary(),
 		node_id: fixtureCatalog.slotString.s36(),
-		quota_limit_bytes:
-			quota.quota_limit_bytes === fixtureCatalog.slotNumber.n16()
-				? fixtureCatalog.slotNumber.n16()
-				: fixtureCatalog.quota.limitBytes(),
+		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		used_bytes: fixtureCatalog.quota.usedBytes(),
-		remaining_bytes:
-			quota.quota_limit_bytes === fixtureCatalog.slotNumber.n16()
-				? fixtureCatalog.slotNumber.n16()
-				: fixtureCatalog.quota.remainingBytes(),
+		remaining_bytes: fixtureCatalog.quota.remainingBytes(),
 		cycle_end_at: fixtureCatalog.timestamp.later(),
 		quota_reset_source: fixtureCatalog.quota.resetSource(),
 	};

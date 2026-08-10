@@ -11,3 +11,5 @@ invalid:
     const endpoint = { port: 8443, public_domain: "live.example" };
   - |
     const endpoint = { port: payload.port, short_ids: request.short_ids };
+  - |
+    const weight = { weight: payload.weight };

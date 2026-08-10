@@ -28,12 +28,8 @@ const storyNode: AdminNode = {
 	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 	access_host: fixtureCatalog.host.primary(),
 	api_base_url: fixtureCatalog.url.primaryApi(),
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly",
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.reset() as AdminNode["quota_reset"],
 };
 
 function minuteFromOffset(
@@ -94,19 +90,19 @@ const seeds24h: EndpointSeed[] = [
 	{
 		endpointId: fixtureCatalog.identifier.endpointPrimary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagPrimary(),
-		port: 443,
+		port: fixtureCatalog.endpoint.port443(),
 		ranges: [[30, 120, 3]],
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointSecondary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
-		port: 8443,
+		port: fixtureCatalog.endpoint.port8443(),
 		ranges: [[410, 580, 6]],
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointTertiary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
-		port: 9443,
+		port: fixtureCatalog.endpoint.port9443(),
 		ranges: [[1180, 1300, 4]],
 	},
 ];
@@ -115,19 +111,19 @@ const seeds7d: EndpointSeed[] = [
 	{
 		endpointId: fixtureCatalog.identifier.endpointPrimary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagPrimary(),
-		port: 443,
+		port: fixtureCatalog.endpoint.port443(),
 		ranges: [[120, 420, 4]],
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointSecondary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
-		port: 8443,
+		port: fixtureCatalog.endpoint.port8443(),
 		ranges: [[2200, 2460, 7]],
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointTertiary(),
 		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
-		port: 9443,
+		port: fixtureCatalog.endpoint.port9443(),
 		ranges: [[6200, 6500, 5]],
 	},
 ];

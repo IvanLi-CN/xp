@@ -147,12 +147,23 @@
       "limitBytes": 1024,
       "usedBytes": 0,
       "remainingBytes": 1024,
+      "fiveGiB": 5368709120,
+      "tenGiB": 10737418240,
+      "elevenGiB": 11811160064,
+      "fifteenGiB": 16106127360,
+      "fourGiB": 4294967296,
+      "oneGiB": 1073741824,
       "reset": {
         "policy": "monthly",
         "day_of_month": 1,
         "tz_offset_minutes": 480
       },
       "resetSource": "user"
+    },
+    "user": {
+      "credentialEpoch": 0,
+      "priorityTierDefault": "p3",
+      "priorityTierCreated": "p2"
     },
     "subscription": {
       "rawUri": "vless://node-a.fixture.test?encryption=none",

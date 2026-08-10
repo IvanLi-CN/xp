@@ -56,6 +56,8 @@ valid:
     };
 invalid:
   - |
+    let sample = Probe { from_node_id: "unapproved-node".to_owned() };
+  - |
     let fixture = Config { node_id: "node-unapproved" };
   - |
     let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };

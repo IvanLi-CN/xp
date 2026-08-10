@@ -12,5 +12,7 @@ files:
   - test-fixtures/src/**/*.rs
 rule:
   all:
-    - kind: line_comment
+    - any:
+        - kind: line_comment
+        - kind: block_comment
     - regex: ast-grep-ignore

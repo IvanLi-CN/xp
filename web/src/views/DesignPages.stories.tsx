@@ -100,7 +100,7 @@ const DESIGN_ENDPOINTS: Array<
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
-			canary_upstream: fixtureCatalog.slotString.s173(),
+			canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 			accepted_authorities: fixtureCatalog.slotList.l21(),
 			managed_default: true,
 		},

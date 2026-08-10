@@ -148,9 +148,10 @@ fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_stand
         .find(|proxy| proxy["name"].as_str() == Some("node-1-reality-chain"))
         .expect("system provider must retain the chained VLESS entry");
     assert_eq!(chained_vless["type"].as_str(), Some("vless"));
+    let expected_relay_name = format!("🛣️ {}", fixture_host_example().replace('.', "-"));
     assert_eq!(
         chained_vless["dialer-proxy"].as_str(),
-        Some("🛣️ example-com")
+        Some(expected_relay_name.as_str())
     );
     assert!(chained_vless.get("smux").is_none());
 

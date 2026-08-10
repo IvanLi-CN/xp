@@ -1,6 +1,21 @@
 id: fixture-policy-typescript-storybook-fixture-data
 snapshots:
   ? |
+    const endpoint = { port: 8443 };
+  : labels:
+    - source: 'port: 8443'
+      style: primary
+      start: 19
+      end: 29
+    - source: port
+      style: secondary
+      start: 19
+      end: 23
+    - source: '8443'
+      style: secondary
+      start: 25
+      end: 29
+  ? |
     const item = { access_host: "live.example" };
   : labels:
     - source: 'access_host: "live.example"'
@@ -105,6 +120,21 @@ snapshots:
       style: secondary
       start: 22
       end: 44
+  ? |
+    const node = { quota_limit_bytes: 4096 };
+  : labels:
+    - source: 'quota_limit_bytes: 4096'
+      style: primary
+      start: 15
+      end: 38
+    - source: quota_limit_bytes
+      style: secondary
+      start: 15
+      end: 32
+    - source: '4096'
+      style: secondary
+      start: 34
+      end: 38
   ? |
     const unsafe = "live.example";
     const item = { access_host: unsafe };

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
 import type { AdminNodeTcpConnectionsResponse } from "../api/adminTcpConnections";
 import type { AdminNodeTrafficResponse } from "../api/adminTraffic";
+import type { NodeQuotaReset } from "../api/quotaReset";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	alignNodeIpUsageResponse,
@@ -16,12 +17,8 @@ const node = {
 	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 	access_host: fixtureCatalog.host.primary(),
 	api_base_url: fixtureCatalog.url.primaryApi(),
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly" as const,
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 };
 
 const trafficResponse: AdminNodeTrafficResponse = {
@@ -102,14 +99,14 @@ describe("time window report alignment", () => {
 				{
 					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
 					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
-					port: 443,
+					port: fixtureCatalog.endpoint.port443(),
 				},
 			],
 			per_endpoint_series: [
 				{
 					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
 					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
-					port: 443,
+					port: fixtureCatalog.endpoint.port443(),
 					series: [
 						{ minute: fixtureCatalog.slotString.s629(), count: 3 },
 						{ minute: fixtureCatalog.slotString.s634(), count: 9 },

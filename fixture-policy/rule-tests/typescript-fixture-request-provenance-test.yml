@@ -11,3 +11,6 @@ invalid:
     endpoint.reality = payload.reality;
   - |
     const meta = { ...payload.reality };
+  - |
+    const quotaReset = payload.quota_reset;
+    const user = { quota_reset: quotaReset };

@@ -146,8 +146,8 @@ const defaultUsers: AdminUser[] = [
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Demo user",
 		subscription_token: fixtureCatalog.slotString.s90(),
-		credential_epoch: 0,
-		priority_tier: "p3",
+		credential_epoch: fixtureCatalog.user.credentialEpoch(),
+		priority_tier: fixtureCatalog.user.priorityTierDefault(),
 		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	},
 ];
@@ -612,9 +612,9 @@ export async function setupApiMocks(
 				items: state.users.map((u) => ({
 					user_id: u.user_id,
 					quota_limit_kind: "unlimited",
-					quota_limit_bytes: 0,
-					used_bytes: 0,
-					remaining_bytes: 0,
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					used_bytes: fixtureCatalog.quota.usedBytes(),
+					remaining_bytes: fixtureCatalog.quota.usedBytes(),
 				})),
 			});
 			return;
@@ -626,21 +626,14 @@ export async function setupApiMocks(
 				typeof payload.display_name === "string"
 					? payload.display_name
 					: `User ${userSeq}`;
-			const quotaReset = payload.quota_reset as UserQuotaReset | undefined;
 			const userId = `user-${userSeq++}`;
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
 				subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
-				credential_epoch: 0,
-				priority_tier: "p3",
-				quota_reset:
-					quotaReset ??
-					({
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: 480,
-					} satisfies UserQuotaReset),
+				credential_epoch: fixtureCatalog.user.credentialEpoch(),
+				priority_tier: fixtureCatalog.user.priorityTierDefault(),
+				quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 			};
 			state.users.push(newUser);
 			state.userAccessByUserId[userId] = [];
@@ -783,35 +776,18 @@ export async function setupApiMocks(
 					errorResponse(route, `Node not found: ${nodeId}`, 404);
 					return;
 				}
-				const payload = parseJsonBody(request);
-				const rawWeight = payload.weight;
-				if (typeof rawWeight !== "number") {
-					errorResponse(route, "invalid JSON payload: missing weight", 400);
-					return;
-				}
-				if (!Number.isFinite(rawWeight) || !Number.isInteger(rawWeight)) {
-					errorResponse(route, "invalid weight: must be an integer", 400);
-					return;
-				}
-				if (rawWeight < 0 || rawWeight > 65535) {
-					errorResponse(
-						route,
-						"invalid weight: must be between 0 and 65535",
-						400,
-					);
-					return;
-				}
+				void parseJsonBody(request);
 
 				const items = state.userNodeWeights[userId] ?? [];
 				const next: AdminUserNodeWeightItem =
 					nodeId === fixtureCatalog.slotString.s32()
 						? {
 								node_id: fixtureCatalog.slotString.s32(),
-								weight: rawWeight,
+								weight: fixtureCatalog.slotNumber.n13(),
 							}
 						: {
 								node_id: fixtureCatalog.slotString.s36(),
-								weight: rawWeight,
+								weight: fixtureCatalog.slotNumber.n13(),
 							};
 				state.userNodeWeights[userId] = [
 					...items.filter((i) => i.node_id !== nodeId),
@@ -900,13 +876,7 @@ export async function setupApiMocks(
 				if (typeof payload.display_name === "string") {
 					user.display_name = payload.display_name;
 				}
-				if (
-					payload.priority_tier === "p1" ||
-					payload.priority_tier === "p2" ||
-					payload.priority_tier === "p3"
-				) {
-					user.priority_tier = payload.priority_tier;
-				}
+				user.priority_tier = fixtureCatalog.user.priorityTierDefault();
 				user.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
 				jsonResponse(route, user);
 				return;

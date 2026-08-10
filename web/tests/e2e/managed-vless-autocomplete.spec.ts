@@ -15,12 +15,8 @@ test.describe("managed VLESS autocomplete", () => {
 					node_name: fixtureCatalog.identifier.nodePrimary(),
 					api_base_url: fixtureCatalog.url.primaryApi(),
 					access_host: fixtureCatalog.host.primary(),
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.reset(),
 				},
 			],
 			endpoints: [
@@ -29,7 +25,7 @@ test.describe("managed VLESS autocomplete", () => {
 					node_id: fixtureCatalog.identifier.nodePrimary(),
 					tag: fixtureCatalog.identifier.endpointTagPrimary(),
 					kind: "vless_reality_vision_tcp",
-					port: 443,
+					port: fixtureCatalog.endpoint.port443(),
 					meta: {
 						managed_default: true,
 						reality: {
@@ -92,12 +88,8 @@ test.describe("managed VLESS autocomplete", () => {
 					node_name: fixtureCatalog.identifier.nodeSecondary(),
 					api_base_url: fixtureCatalog.url.secondaryApi(),
 					access_host: fixtureCatalog.host.secondary(),
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.reset(),
 				},
 			],
 			endpoints: [
@@ -106,7 +98,7 @@ test.describe("managed VLESS autocomplete", () => {
 					node_id: fixtureCatalog.identifier.nodeSecondary(),
 					tag: fixtureCatalog.identifier.endpointTagSecondary(),
 					kind: "vless_reality_vision_tcp",
-					port: 53844,
+					port: fixtureCatalog.endpoint.port53844(),
 					meta: {
 						managed_default: true,
 						reality: {

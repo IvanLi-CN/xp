@@ -19,7 +19,7 @@ rule:
           - regex: '^(port|public_domain|server_name|domain_id)$'
           - regex: '^(short_ids|active_short_id|membership_key)$'
           - regex: '^(method|fingerprint|vless_https_canary_bind)$'
-          - regex: '^(ip_geo_origin|admin_token_masked|lane_key)$'
+          - regex: '^(ip_geo_origin|admin_token_masked|lane_key|weight)$'
     - has:
         field: value
         not:

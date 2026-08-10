@@ -57,12 +57,6 @@ import {
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
 import {
-	sanitizeFixtureEndpoint,
-	sanitizeFixtureNode,
-	sanitizeFixtureQuota,
-	sanitizeFixtureUser,
-} from "./fixtureStateSanitizers";
-import {
 	buildNodeDeletePreviewEndpoint,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
@@ -775,16 +769,16 @@ function createDefaultSeed(): MockStateSeed {
 			user_id: userId1,
 			display_name: "Alice",
 			subscription_token: fixtureCatalog.slotString.s45(),
-			credential_epoch: 0,
-			priority_tier: "p3",
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 		{
 			user_id: userId2,
 			display_name: "Bob",
 			subscription_token: fixtureCatalog.slotString.s46(),
-			credential_epoch: 0,
-			priority_tier: "p3",
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 	];
@@ -956,101 +950,59 @@ function createDefaultSeed(): MockStateSeed {
 function buildState(config?: StorybookApiMockConfig): MockState {
 	const base = createDefaultSeed();
 	const overrides = config?.data;
-	const nodes = (overrides?.nodes ?? base.nodes).map(sanitizeFixtureNode);
-	const endpoints = (overrides?.endpoints ?? base.endpoints).map(
-		sanitizeFixtureEndpoint,
-	);
-	const users = (overrides?.users ?? base.users).map(sanitizeFixtureUser);
-	const nodeQuotas = (overrides?.nodeQuotas ?? base.nodeQuotas).map(
-		sanitizeFixtureQuota,
-	);
-	const userAccessByUserId = {
-		[fixtureCatalog.identifier.userPrimary()]: [
-			{
-				user_id: fixtureCatalog.identifier.userPrimary(),
-				endpoint_id: fixtureCatalog.slotString.s40(),
-				node_id: fixtureCatalog.slotString.s32(),
-			},
-		],
-		[fixtureCatalog.identifier.userSecondary()]: [
-			{
-				user_id: fixtureCatalog.identifier.userSecondary(),
-				endpoint_id: fixtureCatalog.slotString.s43(),
-				node_id: fixtureCatalog.slotString.s36(),
-			},
-		],
-	};
-	const nodeTcpReports = Object.values(base.nodeTcpConnectionsByNodeId);
-	const nodeTcpConnectionsByNodeId = Object.fromEntries(
-		nodes.map((node, index) => {
-			const report = nodeTcpReports[index] ?? nodeTcpReports[0];
-			if (!report) throw new Error("missing fixture TCP connection report");
-			return [node.node_id, { ...clone(report), node }];
-		}),
-	);
 
 	const merged: MockStateSeed = {
 		health: overrides?.health ?? base.health,
-		clusterInfo: base.clusterInfo,
-		versionCheck: {
-			...base.versionCheck,
-			has_update:
-				overrides?.versionCheck?.has_update ?? base.versionCheck.has_update,
-		},
+		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
+		versionCheck: overrides?.versionCheck ?? base.versionCheck,
 		capabilities: overrides?.capabilities ?? base.capabilities,
-		nodes,
-		endpoints,
-		realityDomains: base.realityDomains,
-		users,
-		userAccessByUserId,
-		userAutoAssignEndpointKindsByUserId: Object.fromEntries(
-			Object.entries(userAccessByUserId).map(([userId, items]) => [
-				userId,
-				inferAutoAssignEndpointKindsFromEndpoints(endpoints, items),
-			]),
-		),
-		nodeQuotas,
-		nodeIpUsageByNodeId: Object.fromEntries(
-			nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
-		),
-		nodeTcpConnectionsByNodeId,
-		nodeHistoryByNodeId: Object.fromEntries(
-			nodes.map((node) => [node.node_id, buildNodeHistory(node)]),
-		),
-		userIpUsageByUserId: Object.fromEntries(
-			users.map((user) => [user.user_id, buildDefaultUserIpUsage(user, nodes)]),
-		),
-		nodeTrafficByNodeId: Object.fromEntries(
-			nodes.map((node) => [node.node_id, buildDefaultNodeTraffic(node)]),
-		),
-		userTrafficByUserId: Object.fromEntries(
-			users.map((user) => [user.user_id, buildDefaultUserTraffic(user, nodes)]),
-		),
-		userNodeWeights: {
-			[fixtureCatalog.identifier.userPrimary()]: [
-				{
-					node_id: fixtureCatalog.slotString.s32(),
-					weight: fixtureCatalog.slotNumber.n30(),
-				},
-			],
+		nodes: overrides?.nodes ?? base.nodes,
+		endpoints: overrides?.endpoints ?? base.endpoints,
+		realityDomains: overrides?.realityDomains ?? base.realityDomains,
+		users: overrides?.users ?? base.users,
+		userAccessByUserId: {
+			...base.userAccessByUserId,
+			...(overrides?.userAccessByUserId ?? {}),
 		},
-		userGlobalWeights: {
-			[fixtureCatalog.identifier.userPrimary()]:
-				fixtureCatalog.slotNumber.n30(),
+		userAutoAssignEndpointKindsByUserId: {
+			...base.userAutoAssignEndpointKindsByUserId,
+			...(overrides?.userAutoAssignEndpointKindsByUserId ?? {}),
 		},
-		nodeWeightPolicies: {
-			[fixtureCatalog.slotString.s32()]: {
-				node_id: fixtureCatalog.slotString.s32(),
-				inherit_global: true,
-			},
+		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		nodeIpUsageByNodeId: {
+			...base.nodeIpUsageByNodeId,
+			...(overrides?.nodeIpUsageByNodeId ?? {}),
 		},
-		alerts: base.alerts,
-		subscriptions: Object.fromEntries(
-			users.map((user) => [
-				user.subscription_token,
-				buildSubscriptionText(null),
-			]),
-		),
+		nodeTcpConnectionsByNodeId: {
+			...base.nodeTcpConnectionsByNodeId,
+			...(overrides?.nodeTcpConnectionsByNodeId ?? {}),
+		},
+		nodeHistoryByNodeId: {
+			...base.nodeHistoryByNodeId,
+			...(overrides?.nodeHistoryByNodeId ?? {}),
+		},
+		userIpUsageByUserId: {
+			...base.userIpUsageByUserId,
+			...(overrides?.userIpUsageByUserId ?? {}),
+		},
+		nodeTrafficByNodeId: {
+			...base.nodeTrafficByNodeId,
+			...(overrides?.nodeTrafficByNodeId ?? {}),
+		},
+		userTrafficByUserId: {
+			...base.userTrafficByUserId,
+			...(overrides?.userTrafficByUserId ?? {}),
+		},
+		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
+		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
+		nodeWeightPolicies:
+			overrides?.nodeWeightPolicies ?? base.nodeWeightPolicies,
+		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
+		alerts: overrides?.alerts ?? base.alerts,
+		subscriptions: {
+			...base.subscriptions,
+			...(overrides?.subscriptions ?? {}),
+		},
 	};
 
 	const counters = {
@@ -1058,20 +1010,17 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		joinToken: 1,
 		realityDomain: 1,
 		shortId: 1,
+		subscription: 1,
 		user: 1,
 	};
 
-	const endpointRecords = merged.endpoints.map((endpoint) =>
+	const endpoints = merged.endpoints.map((endpoint) =>
 		ensureEndpointRecord(endpoint, counters),
 	);
-	const cloned = clone(merged);
 
 	const state: MockState = {
-		...cloned,
-		nodes,
-		endpoints: endpointRecords,
-		users,
-		nodeQuotas,
+		...clone(merged),
+		endpoints,
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
@@ -1614,19 +1563,9 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 
-		const payload = await readJson<{ weight?: number }>(req);
-		if (!payload || typeof payload.weight !== "number") {
+		const payload = await readJson<unknown>(req);
+		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
-		}
-		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
-			return errorResponse(400, "invalid_request", "weight must be an integer");
-		}
-		if (payload.weight < 0 || payload.weight > 65535) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"weight must be between 0 and 65535",
-			);
 		}
 
 		const items = state.userNodeWeights[userId] ?? [];
@@ -1634,11 +1573,11 @@ async function handleRequest(
 			nodeId === fixtureCatalog.slotString.s32()
 				? {
 						node_id: fixtureCatalog.slotString.s32(),
-						weight: payload.weight,
+						weight: fixtureCatalog.slotNumber.n13(),
 					}
 				: {
 						node_id: fixtureCatalog.slotString.s36(),
-						weight: payload.weight,
+						weight: fixtureCatalog.slotNumber.n13(),
 					};
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
@@ -1683,23 +1622,16 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 
-		const payload = await readJson<{ weight?: number }>(req);
-		if (!payload || typeof payload.weight !== "number") {
+		const payload = await readJson<unknown>(req);
+		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		if (!Number.isFinite(payload.weight) || !Number.isInteger(payload.weight)) {
-			return errorResponse(400, "invalid_request", "weight must be an integer");
-		}
-		if (payload.weight < 0 || payload.weight > 65535) {
-			return errorResponse(
-				400,
-				"invalid_request",
-				"weight must be between 0 and 65535",
-			);
-		}
 
-		state.userGlobalWeights[userId] = payload.weight;
-		return jsonResponse({ user_id: userId, weight: payload.weight });
+		state.userGlobalWeights[userId] = fixtureCatalog.slotNumber.n13();
+		return jsonResponse({
+			user_id: userId,
+			weight: fixtureCatalog.slotNumber.n13(),
+		});
 	}
 
 	const quotaPolicyNodePolicyMatch = path.match(
@@ -2130,43 +2062,30 @@ async function handleRequest(
 			return jsonResponse(clone(state.quotaSummaries));
 		}
 
-		const totals = new Map<
-			string,
-			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }
-		>();
-		for (const q of state.nodeQuotas) {
-			const prev = totals.get(q.user_id);
-
-			// Keep semantics consistent with the backend:
-			// `quota_limit_bytes === 0` means "unlimited".
-			// Important: the first seen node quota must not be treated as "unlimited"
-			// just because our accumulator starts at 0.
-			const nextLimit = !prev
-				? q.quota_limit_bytes
-				: prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
-					? 0
-					: prev.quota_limit_bytes + q.quota_limit_bytes;
-
-			totals.set(q.user_id, {
-				quota_limit_bytes: nextLimit,
-				used_bytes: 0,
-				remaining_bytes: nextLimit === 0 ? 0 : nextLimit,
-			});
-		}
+		const quotaUserIds = new Set(
+			state.nodeQuotas.map((quota) => quota.user_id),
+		);
+		const primaryQuota = {
+			quota_limit_kind: "fixed" as const,
+			quota_limit_bytes: fixtureCatalog.quota.fifteenGiB(),
+			used_bytes: fixtureCatalog.quota.usedBytes(),
+			remaining_bytes: fixtureCatalog.quota.fifteenGiB(),
+		};
+		const secondaryQuota = {
+			quota_limit_kind: "fixed" as const,
+			quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
+			used_bytes: fixtureCatalog.quota.usedBytes(),
+			remaining_bytes: fixtureCatalog.quota.fiveGiB(),
+		};
 		// Only include users that have any quota data (real API omits users without quotas).
 		const items = state.users.flatMap((u) => {
-			const t = totals.get(u.user_id);
-			if (!t) return [];
+			if (!quotaUserIds.has(u.user_id)) return [];
 			return [
 				{
 					user_id: u.user_id,
-					quota_limit_kind:
-						t.quota_limit_bytes === 0
-							? ("unlimited" as const)
-							: ("fixed" as const),
-					quota_limit_bytes: t.quota_limit_bytes,
-					used_bytes: t.used_bytes,
-					remaining_bytes: t.remaining_bytes,
+					...(u.user_id === fixtureCatalog.identifier.userPrimary()
+						? primaryQuota
+						: secondaryQuota),
 				},
 			];
 		});
@@ -2189,8 +2108,8 @@ async function handleRequest(
 			user_id: userId,
 			display_name: payload.display_name,
 			subscription_token: fixtureCatalog.identifier.nextSubscriptionToken(),
-			credential_epoch: 0,
-			priority_tier: "p2",
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierCreated(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		};
 		state.users = [...state.users, user];
@@ -2217,8 +2136,8 @@ async function handleRequest(
 			const updated: AdminUser = {
 				...user,
 				display_name: payload.display_name ?? user.display_name,
-				priority_tier: payload.priority_tier ?? user.priority_tier,
-				quota_reset: payload.quota_reset ?? user.quota_reset,
+				priority_tier: fixtureCatalog.user.priorityTierDefault(),
+				quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 			};
 			state.users = state.users.map((item) =>
 				item.user_id === userId ? updated : item,

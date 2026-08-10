@@ -11,12 +11,8 @@ describe("admin node history schemas", () => {
 				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 				api_base_url: fixtureCatalog.url.primaryApi(),
 				access_host: fixtureCatalog.host.primary(),
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.reset(),
 			},
 			history: {
 				node_id: fixtureCatalog.identifier.nodePrimary(),

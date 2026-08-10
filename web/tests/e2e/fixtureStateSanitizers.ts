@@ -142,8 +142,8 @@ export function normalizeFixtureUser(
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: user.display_name,
 		subscription_token: fixtureCatalog.identifier.tokenPrimary(),
-		credential_epoch: user.credential_epoch,
-		priority_tier: user.priority_tier,
+		credential_epoch: fixtureCatalog.user.credentialEpoch(),
+		priority_tier: fixtureCatalog.user.priorityTierDefault(),
 		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	};
 	if (user.user_id === fixtureCatalog.identifier.userSecondary() || index > 0) {

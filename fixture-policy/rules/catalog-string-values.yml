@@ -10,7 +10,7 @@ rule:
     - not:
         any:
           - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations)"$'
-          - regex: '^"(lists|slots|subscription|endpoint|quota|reality|realityAlternate)"$'
+          - regex: '^"(lists|slots|subscription|endpoint|quota|user|reality|realityAlternate)"$'
           - regex: '^"(realityKeys|vlessMeta|ssMeta|ssMetaAlternate|ssMetaEscaped)"$'
           - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists)"$'
           - regex: '^"(nodeIds|endpointIds|userIds|tags|tokens|accessHosts|apiBases)"$'
@@ -34,7 +34,9 @@ rule:
           - regex: '^"(serverPskB64Escaped|userPskB64)"$'
           - regex: '^"(authority53844|authorityAlias|canaryH2c|limitBytes)"$'
           - regex: '^"(usedBytes|remainingBytes)"$'
-          - regex: '^"(resetSource|rawUri|providerSystemUrl|mihomoMirrorBase|healthSeoulA)"$'
+          - regex: '^"(fiveGiB|tenGiB|elevenGiB|fifteenGiB|fourGiB|oneGiB)"$'
+          - regex: '^"(resetSource|credentialEpoch|priorityTierDefault|priorityTierCreated)"$'
+          - regex: '^"(rawUri|providerSystemUrl|mihomoMirrorBase|healthSeoulA)"$'
           - regex: '^"(healthShared|healthEndpointNode|healthXpNode|healthSubscribed)"$'
           - regex: '^"(clashLines|providerHost|providerPassword)"$'
           - regex: '^"(dest|server_names|server_names_source|fingerprint|reality_keys)"$'
@@ -62,7 +64,7 @@ rule:
           - regex: '^"(?:sub_[a-z0-9_]+|01K0000000000000000000000[A-E])"$'
           - regex: '^"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.]0{3})?Z"$'
           - regex: '^"[0-9]{4}-[0-9]{2}-[0-9]{2}"$'
-          - regex: '^"(manual|chrome|monthly|user|h2c|hinet|keep|drop|hkl|mystery)"$'
+          - regex: '^"(manual|chrome|monthly|user|p2|p3|h2c|hinet|keep|drop|hkl|mystery)"$'
           - regex: '^"(peer-a|extra-node|remote-a|nodebeta|node-unreachable|node-remote)"$'
           - regex: '^"(tcp-node|target|sender|relay-Japan|singapore-a|tokyo-a)"$'
           - regex: '^"(Aardvark|Alpha|Beta|Dash Host|Dot Host|Japan|Node Beta)"$'

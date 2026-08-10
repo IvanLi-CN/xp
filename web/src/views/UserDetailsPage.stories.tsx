@@ -351,7 +351,7 @@ export const MihomoProviderPreview: Story = {
 			await screen.findByText("Subscription preview"),
 		).toBeInTheDocument();
 		await expect(
-			await screen.findByText(/xp-system-generated/i),
+			await screen.findByText(fixtureCatalog.subscription.rawUri()),
 		).toBeInTheDocument();
 	},
 };

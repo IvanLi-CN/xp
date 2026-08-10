@@ -192,6 +192,7 @@ export const fixtureCatalog = {
 		port443: () => catalog.operations.endpoint.port443,
 		port8443: () => catalog.operations.endpoint.port8443,
 		port9443: () => catalog.operations.endpoint.port9443,
+		port53844: () => catalog.operations.endpoint.port53844,
 		reality: () => catalog.operations.endpoint.reality,
 		realityAlternate: () => catalog.operations.endpoint.realityAlternate,
 		realityKeys: () => catalog.operations.endpoint.realityKeys,
@@ -210,8 +211,21 @@ export const fixtureCatalog = {
 		limitBytes: () => catalog.operations.quota.limitBytes,
 		usedBytes: () => catalog.operations.quota.usedBytes,
 		remainingBytes: () => catalog.operations.quota.remainingBytes,
+		fiveGiB: () => catalog.operations.quota.fiveGiB,
+		tenGiB: () => catalog.operations.quota.tenGiB,
+		elevenGiB: () => catalog.operations.quota.elevenGiB,
+		fifteenGiB: () => catalog.operations.quota.fifteenGiB,
+		fourGiB: () => catalog.operations.quota.fourGiB,
+		oneGiB: () => catalog.operations.quota.oneGiB,
 		reset: () => catalog.operations.quota.reset,
 		resetSource: () => catalog.operations.quota.resetSource as "user",
+	},
+	user: {
+		credentialEpoch: () => catalog.operations.user.credentialEpoch,
+		priorityTierDefault: () =>
+			catalog.operations.user.priorityTierDefault as "p3",
+		priorityTierCreated: () =>
+			catalog.operations.user.priorityTierCreated as "p2",
 	},
 	subscription: {
 		rawUri: () => catalog.operations.subscription.rawUri,

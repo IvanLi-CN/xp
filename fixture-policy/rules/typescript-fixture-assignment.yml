@@ -22,6 +22,7 @@ rule:
         not:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
             - pattern: 'null'
 constraints:
   FIELD:

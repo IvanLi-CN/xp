@@ -23,6 +23,14 @@ snapshots:
       start: 15
       end: 33
   ? |
+    const quotaReset = payload.quota_reset;
+    const user = { quota_reset: quotaReset };
+  : labels:
+    - source: const quotaReset = payload.quota_reset;
+      style: primary
+      start: 0
+      end: 39
+  ? |
     endpoint.reality = payload.reality;
   : labels:
     - source: endpoint.reality = payload.reality

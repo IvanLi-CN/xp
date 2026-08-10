@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { NodeQuotaReset } from "../api/quotaReset";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { createMockApi } from "../../.storybook/mocks/apiMock";
@@ -28,11 +29,7 @@ describe("storybook api mock", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					display_name: "New User",
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 7,
-						tz_offset_minutes: 480,
-					},
+					quota_reset: fixtureCatalog.quota.reset(),
 				}),
 			}),
 		);
@@ -328,7 +325,7 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					node_id: fixtureCatalog.slotString.s32(),
 					kind: "vless_reality_vision_tcp",
-					port: 9443,
+					port: fixtureCatalog.endpoint.port9443(),
 					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				}),
@@ -596,7 +593,9 @@ describe("storybook api mock", () => {
 		const listDataAfter = (await listResAfter.json()) as typeof listData;
 		expect(
 			listDataAfter.items.some(
-				(item) => item.node_id === nodeId && item.weight === 123,
+				(item) =>
+					item.node_id === nodeId &&
+					item.weight === fixtureCatalog.slotNumber.n13(),
 			),
 		).toBe(true);
 	});
@@ -650,9 +649,11 @@ describe("storybook api mock", () => {
 		);
 		expect(rowsAfterRes.ok).toBe(true);
 		const rowsAfter = (await rowsAfterRes.json()) as typeof rowsData;
-		expect(rowsAfter.items.some((item) => item.editor_weight === 321)).toBe(
-			true,
-		);
+		expect(
+			rowsAfter.items.some(
+				(item) => item.editor_weight === fixtureCatalog.slotNumber.n13(),
+			),
+		).toBe(true);
 	});
 
 	it("supports node and user ip usage endpoints", async () => {
@@ -711,12 +712,8 @@ describe("storybook api mock", () => {
 						node_name: fixtureCatalog.slotString.s63(),
 						access_host: fixtureCatalog.slotString.s114(),
 						api_base_url: fixtureCatalog.slotString.s115(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 0,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 						egress_probe: {
 							public_ipv4: fixtureCatalog.slotString.s116(),
 							public_ipv6: "2001:db8::8",
@@ -759,7 +756,7 @@ describe("storybook api mock", () => {
 			accepted: boolean;
 			egress_probe?: { subscription_region: string };
 		};
-		expect(payload.node_id).toBe(nodeId);
+		expect(payload.node_id).toBe(fixtureCatalog.slotString.s32());
 		expect(payload.accepted).toBe(true);
 		expect(payload.egress_probe?.subscription_region).toBeTruthy();
 	});
@@ -801,7 +798,9 @@ describe("storybook api mock", () => {
 			(await globalRowsAfterRes.json()) as typeof globalRows;
 		expect(
 			globalRowsAfter.items.some(
-				(item) => item.user_id === firstUserId && item.editor_weight === 777,
+				(item) =>
+					item.user_id === firstUserId &&
+					item.editor_weight === fixtureCatalog.slotNumber.n13(),
 			),
 		).toBe(true);
 

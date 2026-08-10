@@ -12,7 +12,7 @@ rule:
         not:
           any:
             - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations)"$'
-            - regex: '^"(lists|slots|subscription|endpoint|quota|reality|realityAlternate)"$'
+            - regex: '^"(lists|slots|subscription|endpoint|quota|user|reality|realityAlternate)"$'
             - regex: '^"(realityKeys|vlessMeta|ssMeta|ssMetaAlternate|ssMetaEscaped)"$'
             - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists)"$'
             - regex: '^"(nodeIds|endpointIds|userIds|tags|tokens|accessHosts|apiBases)"$'
@@ -36,7 +36,9 @@ rule:
             - regex: '^"(serverPskB64Escaped|userPskB64)"$'
             - regex: '^"(authority53844|authorityAlias|canaryH2c|limitBytes)"$'
             - regex: '^"(usedBytes|remainingBytes)"$'
-            - regex: '^"(resetSource|rawUri|providerSystemUrl|mihomoMirrorBase|healthSeoulA)"$'
+            - regex: '^"(fiveGiB|tenGiB|elevenGiB|fifteenGiB|fourGiB|oneGiB)"$'
+            - regex: '^"(resetSource|credentialEpoch|priorityTierDefault|priorityTierCreated)"$'
+            - regex: '^"(rawUri|providerSystemUrl|mihomoMirrorBase|healthSeoulA)"$'
             - regex: '^"(healthShared|healthEndpointNode|healthXpNode|healthSubscribed)"$'
             - regex: '^"(clashLines|providerHost|providerPassword)"$'
             - regex: '^"(dest|server_names|server_names_source|fingerprint|reality_keys)"$'

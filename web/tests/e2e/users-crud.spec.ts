@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { setAdminToken, setupApiMocks } from "./helpers";
 
 test("creates and deletes a user, fetches subscription", async ({ page }) => {

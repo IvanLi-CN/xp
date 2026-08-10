@@ -78,7 +78,7 @@ function sseResponse(
 
 export function handleEndpointProbeRequest(
 	req: Request,
-	_probe?: StorybookEndpointProbeMock,
+	probe?: StorybookEndpointProbeMock,
 ): Response | undefined {
 	const method = req.method.toUpperCase();
 	const path = new URL(req.url, "http://localhost").pathname;
@@ -86,7 +86,10 @@ export function handleEndpointProbeRequest(
 		/^\/api\/admin\/endpoints\/([^/]+)\/probe-history$/,
 	);
 	if (historyMatch && method === "GET") {
-		return jsonResponse(fixtureProbeHistory());
+		const endpointId = decodeURIComponent(historyMatch[1]);
+		return jsonResponse(
+			probe?.historyByEndpointId?.[endpointId] ?? fixtureProbeHistory(),
+		);
 	}
 
 	const eventsMatch = path.match(
@@ -109,7 +112,8 @@ export function handleEndpointProbeRequest(
 		/^\/api\/admin\/endpoints\/probe\/runs\/([^/]+)$/,
 	);
 	if (runMatch && method === "GET") {
-		return jsonResponse(fixtureProbeRun());
+		const runId = decodeURIComponent(runMatch[1]);
+		return jsonResponse(probe?.runsByRunId?.[runId] ?? fixtureProbeRun());
 	}
 
 	return undefined;

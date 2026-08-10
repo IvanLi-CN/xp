@@ -267,16 +267,16 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
         bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     })
     .unwrap();
-
     assert_eq!(store.state().schema_version, SCHEMA_VERSION);
-    let node = store.state().nodes.get("node_1").unwrap();
-    assert_eq!(node.access_host, "example.com");
-
+    let nodes = &store.state().nodes;
+    let node = nodes.get(xp_test_fixtures::primary_node_id()).unwrap();
+    assert_eq!(node.access_host, xp_test_fixtures::primary_host());
     let bytes = fs::read(&state_path).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved["schema_version"], SCHEMA_VERSION);
-    assert!(saved["nodes"]["node_1"].get("access_host").is_some());
-    assert!(saved["nodes"]["node_1"].get("public_domain").is_none());
+    let saved_node = &saved["nodes"][xp_test_fixtures::primary_node_id()];
+    assert!(saved_node.get("access_host").is_some());
+    assert!(saved_node.get("public_domain").is_none());
 }
 
 #[test]
@@ -1930,7 +1930,7 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
 
     DesiredStateCommand::AppendEndpointProbeSamples {
         hour: xp_test_fixtures::probe_hour().to_owned(),
-        from_node_id: "node_2".to_string(),
+        from_node_id: xp_test_fixtures::slot_s32().to_owned(),
         samples: Vec::new(),
     }
     .apply(&mut state)
@@ -1940,7 +1940,7 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
         state
             .endpoint_probe_participants_by_hour
             .get("2026-03-11T11:00:00Z"),
-        Some(&BTreeSet::from(["node_2".to_string()])),
+        Some(&BTreeSet::from([xp_test_fixtures::slot_s32().to_owned()])),
     );
     assert!(state.endpoint_probe_history.is_empty());
 }
@@ -1974,127 +1974,127 @@ fn desired_state_apply_append_endpoint_probe_samples_prunes_participants_and_his
     let commands = [
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s4().to_owned(),
-            from_node_id: "node_1".to_string(),
+            from_node_id: xp_test_fixtures::slot_s17().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s5().to_owned(),
-            from_node_id: "node_2".to_string(),
+            from_node_id: xp_test_fixtures::slot_s32().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s6().to_owned(),
-            from_node_id: "node_3".to_string(),
+            from_node_id: xp_test_fixtures::slot_s36().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s7().to_owned(),
-            from_node_id: "node_4".to_string(),
+            from_node_id: xp_test_fixtures::slot_s56().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s8().to_owned(),
-            from_node_id: "node_5".to_string(),
+            from_node_id: xp_test_fixtures::slot_s57().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s9().to_owned(),
-            from_node_id: "node_6".to_string(),
+            from_node_id: xp_test_fixtures::slot_s63().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s10().to_owned(),
-            from_node_id: "node_7".to_string(),
+            from_node_id: xp_test_fixtures::slot_s69().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s11().to_owned(),
-            from_node_id: "node_8".to_string(),
+            from_node_id: xp_test_fixtures::slot_s70().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s12().to_owned(),
-            from_node_id: "node_9".to_string(),
+            from_node_id: xp_test_fixtures::slot_s72().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s13().to_owned(),
-            from_node_id: "node_10".to_string(),
+            from_node_id: xp_test_fixtures::slot_s73().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s14().to_owned(),
-            from_node_id: "node_11".to_string(),
+            from_node_id: xp_test_fixtures::slot_s77().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s15().to_owned(),
-            from_node_id: "node_12".to_string(),
+            from_node_id: xp_test_fixtures::slot_s93().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s16().to_owned(),
-            from_node_id: "node_13".to_string(),
+            from_node_id: xp_test_fixtures::slot_s98().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s21().to_owned(),
-            from_node_id: "node_14".to_string(),
+            from_node_id: xp_test_fixtures::slot_s106().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s22().to_owned(),
-            from_node_id: "node_15".to_string(),
+            from_node_id: xp_test_fixtures::slot_s110().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s23().to_owned(),
-            from_node_id: "node_16".to_string(),
+            from_node_id: xp_test_fixtures::slot_s113().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s24().to_owned(),
-            from_node_id: "node_17".to_string(),
+            from_node_id: xp_test_fixtures::slot_s118().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s25().to_owned(),
-            from_node_id: "node_18".to_string(),
+            from_node_id: xp_test_fixtures::slot_s124().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s26().to_owned(),
-            from_node_id: "node_19".to_string(),
+            from_node_id: xp_test_fixtures::slot_s134().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s47().to_owned(),
-            from_node_id: "node_20".to_string(),
+            from_node_id: xp_test_fixtures::slot_s145().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s48().to_owned(),
-            from_node_id: "node_21".to_string(),
+            from_node_id: xp_test_fixtures::slot_s149().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s52().to_owned(),
-            from_node_id: "node_22".to_string(),
+            from_node_id: xp_test_fixtures::slot_s153().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s54().to_owned(),
-            from_node_id: "node_23".to_string(),
+            from_node_id: xp_test_fixtures::slot_s182().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s81().to_owned(),
-            from_node_id: "node_24".to_string(),
+            from_node_id: xp_test_fixtures::slot_s187().to_owned(),
             samples: vec![sample.clone()],
         },
         DesiredStateCommand::AppendEndpointProbeSamples {
             hour: xp_test_fixtures::slot_s91().to_owned(),
-            from_node_id: "node_25".to_string(),
+            from_node_id: xp_test_fixtures::slot_s188().to_owned(),
             samples: vec![sample],
         },
     ];
