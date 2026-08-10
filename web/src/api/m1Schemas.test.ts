@@ -152,13 +152,13 @@ describe("AdminEndpointRotateResponseSchema", () => {
 		expect(
 			AdminEndpointRotateResponseSchema.parse({
 				endpoint_id: fixtureCatalog.endpointId.fixture100(),
-				active_short_id: "0123456789abcdef",
-				short_ids: ["0123456789abcdef", "0123456789abcdff"],
+				active_short_id: fixtureCatalog.endpoint.activeShortId(),
+				short_ids: fixtureCatalog.endpoint.shortIds(),
 			}),
 		).toEqual({
 			endpoint_id: fixtureCatalog.endpointId.fixture100(),
-			active_short_id: "0123456789abcdef",
-			short_ids: ["0123456789abcdef", "0123456789abcdff"],
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
 	});
 });

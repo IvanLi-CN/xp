@@ -18,6 +18,24 @@ snapshots:
       start: 99
       end: 122
   ? |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
+  : labels:
+    - source: 'short_ids: ["unapproved-short-id"]'
+      style: primary
+      start: 20
+      end: 54
+    - source: short_ids
+      style: secondary
+      start: 20
+      end: 29
+    - source: '["unapproved-short-id"]'
+      style: secondary
+      start: 31
+      end: 54
+  ? |
     const fixture = { bootstrap_access_host: "unapproved.fixture.test" };
   : labels:
     - source: 'bootstrap_access_host: "unapproved.fixture.test"'

@@ -92,8 +92,8 @@ const DESIGN_ENDPOINTS: Array<
 			accepted_authorities: fixtureCatalog.hostList.edge21(),
 			managed_default: true,
 		},
-		short_ids: ["2a3b4c", "5d6e7f"],
-		active_short_id: "2a3b4c",
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	},
 	{
 		endpoint_id: fixtureCatalog.endpointId.fixture250(),
@@ -104,8 +104,8 @@ const DESIGN_ENDPOINTS: Array<
 		meta: {
 			method: "2022-blake3-aes-128-gcm",
 		},
-		short_ids: ["aa11bb"],
-		active_short_id: "aa11bb",
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	},
 ];
 

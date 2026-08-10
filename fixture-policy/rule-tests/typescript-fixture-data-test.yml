@@ -37,6 +37,11 @@ valid:
   - |
     const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
   - |
+    const fixture = {
+      short_ids: fixtureCatalog.endpoint.shortIds(),
+      active_short_id: fixtureCatalog.endpoint.activeShortId(),
+    };
+  - |
     const fixture = { started_at: fixtureCatalog.timestamp.baseline() };
   - |
     const fixture = {
@@ -97,6 +102,11 @@ invalid:
     const fixture = { first_seen_at: new Date().toISOString() };
   - |
     const fixture = { subscription_token: user.subscription_token };
+  - |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
   - |
     const fixture = { run_id: "unapproved-run" };
   - |

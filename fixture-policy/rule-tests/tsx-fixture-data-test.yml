@@ -22,6 +22,11 @@ valid:
       bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
       first_seen_at: fixtureCatalog.timestamp.recent(),
     };
+  - |
+    const fixture = {
+      short_ids: fixtureCatalog.endpoint.shortIds(),
+      active_short_id: fixtureCatalog.endpoint.activeShortId(),
+    };
 invalid:
   - |
     const fixture = { host: "unapproved.fixture.test" };
@@ -57,3 +62,8 @@ invalid:
     const fixture = { quota_limit_bytes: 4096 };
   - |
     const fixture = { quota_reset: { policy: "unlimited" } };
+  - |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
