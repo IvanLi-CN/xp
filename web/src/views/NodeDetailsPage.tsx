@@ -679,7 +679,6 @@ export function NodeDetailsPage() {
 		}
 		setIsSaving(true);
 		setSaveError(null);
-
 		const payload: AdminNodePatchRequest = {
 			quota_reset: desiredQuotaReset,
 		};
@@ -1773,6 +1772,7 @@ export function NodeDetailsPage() {
 											queryClient,
 											adminToken,
 											nodeId,
+											deletePreviewEndpoints,
 										);
 										pushToast({
 											variant: "success",

@@ -74,12 +74,12 @@ describe("admin endpoint cache", () => {
 			...endpoint,
 			endpoint_id: "endpoint-2",
 		});
-		resourceListCache.nodeDeleted(queryClient, "token", "node-1");
+		resourceListCache.nodeDeleted(queryClient, "token", "node-1", [endpoint]);
 		expect(
 			queryClient.getQueryData(["adminNode", "token", "node-1"]),
 		).toBeUndefined();
 		expect(
 			queryClient.getQueryData(["adminEndpoint", "token", "endpoint-2"]),
-		).toBeUndefined();
+		).toEqual({ ...endpoint, endpoint_id: "endpoint-2" });
 	});
 });

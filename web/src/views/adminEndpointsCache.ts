@@ -106,7 +106,12 @@ export const resourceListCache = {
 			queryKey: ["adminEndpoint", adminToken, endpointId],
 		});
 	},
-	nodeDeleted(queryClient: QueryClient, adminToken: string, nodeId: string) {
+	nodeDeleted(
+		queryClient: QueryClient,
+		adminToken: string,
+		nodeId: string,
+		endpoints: ReadonlyArray<{ endpoint_id: string }>,
+	) {
 		queryClient.setQueryData<AdminNodesResponse>(
 			["adminNodes", adminToken],
 			(previous) =>
@@ -130,8 +135,10 @@ export const resourceListCache = {
 		queryClient.removeQueries({
 			queryKey: ["adminNode", adminToken, nodeId],
 		});
-		queryClient.removeQueries({
-			queryKey: ["adminEndpoint", adminToken],
-		});
+		for (const endpoint of endpoints) {
+			queryClient.removeQueries({
+				queryKey: ["adminEndpoint", adminToken, endpoint.endpoint_id],
+			});
+		}
 	},
 };
