@@ -113,3 +113,4 @@
 | ------------------ | --------- | --------------- | -------------------------------- | ---------- |
 | Web运行时韧性      | active    | 部分完成（1/2） | `web-runtime-resilience/SPEC.md` | #227 child |
 | SS2022 Mihomo SMux | active    | complete        | `endpoint-mihomo-smux/SPEC.md`   | -          |
+| Web 滚动容器       | active    | 组件基线已明确  | `scroll-containers/SPEC.md`      | -          |
