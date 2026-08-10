@@ -63,12 +63,6 @@ import {
 } from "./apiMockFixtureBuilders";
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
-import {
-	sanitizeFixtureEndpoint,
-	sanitizeFixtureNode,
-	sanitizeFixtureQuota,
-	sanitizeFixtureUser,
-} from "./fixtureStateSanitizers";
 import { buildUserNodeQuotaStatusItem } from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
@@ -77,6 +71,7 @@ export type StorybookApiMockConfig = {
 	failAdminConfig?: boolean;
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
+	probe?: import("./endpointProbeMock").StorybookEndpointProbeMock;
 };
 
 export type MockEndpointSeed = AdminEndpoint & {
@@ -1040,38 +1035,53 @@ function createDefaultSeed(): MockStateSeed {
 function buildState(config?: StorybookApiMockConfig): MockState {
 	const base = createDefaultSeed();
 	const overrides = config?.data;
-
 	const merged: MockStateSeed = {
-		health: base.health,
-		clusterInfo: base.clusterInfo,
-		versionCheck: base.versionCheck,
-		capabilities: base.capabilities,
-		nodes: (overrides?.nodes ?? base.nodes).map(sanitizeFixtureNode),
-		endpoints: (overrides?.endpoints ?? base.endpoints).map(
-			sanitizeFixtureEndpoint,
-		),
-		realityDomains: base.realityDomains,
-		users: (overrides?.users ?? base.users).map(sanitizeFixtureUser),
-		userAccessByUserId: base.userAccessByUserId,
-		userAutoAssignEndpointKindsByUserId:
-			base.userAutoAssignEndpointKindsByUserId,
-		nodeQuotas: (overrides?.nodeQuotas ?? base.nodeQuotas).map(
-			sanitizeFixtureQuota,
-		),
-		nodeIpUsageByNodeId: base.nodeIpUsageByNodeId,
-		nodeTcpConnectionsByNodeId: base.nodeTcpConnectionsByNodeId,
-		nodeHistoryByNodeId: base.nodeHistoryByNodeId,
-		userIpUsageByUserId: base.userIpUsageByUserId,
-		nodeTrafficByNodeId: base.nodeTrafficByNodeId,
-		userTrafficByUserId: base.userTrafficByUserId,
-		userNodeWeights: base.userNodeWeights,
-		userGlobalWeights: base.userGlobalWeights,
-		nodeWeightPolicies: base.nodeWeightPolicies,
-		quotaSummaries: base.quotaSummaries,
-		alerts: base.alerts,
-		subscriptions: base.subscriptions,
+		...base,
+		...overrides,
+		userAccessByUserId: {
+			...base.userAccessByUserId,
+			...(overrides?.userAccessByUserId ?? {}),
+		},
+		userAutoAssignEndpointKindsByUserId: {
+			...base.userAutoAssignEndpointKindsByUserId,
+			...(overrides?.userAutoAssignEndpointKindsByUserId ?? {}),
+		},
+		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
+		nodeIpUsageByNodeId: {
+			...base.nodeIpUsageByNodeId,
+			...(overrides?.nodeIpUsageByNodeId ?? {}),
+		},
+		nodeTcpConnectionsByNodeId: {
+			...base.nodeTcpConnectionsByNodeId,
+			...(overrides?.nodeTcpConnectionsByNodeId ?? {}),
+		},
+		nodeHistoryByNodeId: {
+			...base.nodeHistoryByNodeId,
+			...(overrides?.nodeHistoryByNodeId ?? {}),
+		},
+		userIpUsageByUserId: {
+			...base.userIpUsageByUserId,
+			...(overrides?.userIpUsageByUserId ?? {}),
+		},
+		nodeTrafficByNodeId: {
+			...base.nodeTrafficByNodeId,
+			...(overrides?.nodeTrafficByNodeId ?? {}),
+		},
+		userTrafficByUserId: {
+			...base.userTrafficByUserId,
+			...(overrides?.userTrafficByUserId ?? {}),
+		},
+		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
+		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
+		nodeWeightPolicies:
+			overrides?.nodeWeightPolicies ?? base.nodeWeightPolicies,
+		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
+		alerts: overrides?.alerts ?? base.alerts,
+		subscriptions: {
+			...base.subscriptions,
+			...(overrides?.subscriptions ?? {}),
+		},
 	};
-
 	const counters = {
 		endpoint: 1,
 		joinToken: 1,
@@ -1080,7 +1090,6 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		subscription: 1,
 		user: 1,
 	};
-
 	const endpoints = merged.endpoints.map((endpoint) =>
 		ensureEndpointRecord(endpoint, counters),
 	);
@@ -2412,12 +2421,16 @@ async function handleRequest(
 
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
+	let probe = config?.probe;
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
+			probe = nextConfig?.probe;
 		},
 		async handle(req: Request) {
-			return handleEndpointProbeRequest(req) ?? handleRequest(state, req);
+			return (
+				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
+			);
 		},
 	};
 }
