@@ -391,10 +391,18 @@ export const fixtureCatalog = {
 				day_of_month: number;
 				tz_offset_minutes: number;
 			},
+		resetUserUnlimited: () =>
+			catalog.operations.quota.resetUserUnlimited as {
+				policy: "unlimited";
+				tz_offset_minutes: number;
+			},
 		resetSource: () => catalog.operations.quota.resetSource as "user",
+		resetSourceNode: () => catalog.operations.quota.resetSourceNode as "node",
 	},
 	user: {
 		credentialEpoch: () => catalog.operations.user.credentialEpoch,
+		priorityTierPrimary: () =>
+			catalog.operations.user.priorityTierPrimary as "p1",
 		priorityTierDefault: () =>
 			catalog.operations.user.priorityTierDefault as "p3",
 		priorityTierCreated: () =>

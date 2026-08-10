@@ -101,7 +101,7 @@ const seeds24h: EndpointSeed[] = [
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointTertiary(),
-		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
+		endpointTag: fixtureCatalog.identifier.endpointTagTertiary(),
 		port: fixtureCatalog.endpoint.port9443(),
 		ranges: [[1180, 1300, 4]],
 	},
@@ -122,7 +122,7 @@ const seeds7d: EndpointSeed[] = [
 	},
 	{
 		endpointId: fixtureCatalog.identifier.endpointTertiary(),
-		endpointTag: fixtureCatalog.identifier.endpointTagSecondary(),
+		endpointTag: fixtureCatalog.identifier.endpointTagTertiary(),
 		port: fixtureCatalog.endpoint.port9443(),
 		ranges: [[6200, 6500, 5]],
 	},

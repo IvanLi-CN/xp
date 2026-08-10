@@ -87,6 +87,8 @@ type MockState = {
 	subscriptionContentRaw: string;
 	subscriptionContentClash: string;
 	userMihomoProfiles: Record<string, MockMihomoProfile>;
+	nextEndpointId: () => string;
+	nextEndpointTag: () => string;
 };
 
 function catalogMihomoProfile(): MockMihomoProfile {
@@ -399,6 +401,8 @@ export async function setupApiMocks(
 ): Promise<MockState> {
 	const nextSubscriptionToken =
 		fixtureCatalog.identifier.createSubscriptionTokenFactory();
+	const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+	const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
 	const users = (options.users ?? defaultUsers).map(normalizeFixtureUser);
 	const nodes = (options.nodes ?? defaultNodes).map(normalizeFixtureNode);
 	const endpoints = (options.endpoints ?? defaultEndpoints).map(
@@ -435,6 +439,8 @@ export async function setupApiMocks(
 		userMihomoProfiles: {
 			[fixtureCatalog.identifier.userPrimary()]: catalogMihomoProfile(),
 		},
+		nextEndpointId,
+		nextEndpointTag,
 	};
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();

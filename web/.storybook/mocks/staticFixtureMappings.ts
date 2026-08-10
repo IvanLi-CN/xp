@@ -24,7 +24,7 @@ export function buildUserNodeQuotaStatusItem(
 	quota: AdminUserNodeQuota,
 	index: number,
 ): AdminUserNodeQuotaStatusItem {
-	const item = {
+	const item: AdminUserNodeQuotaStatusItem = {
 		user_id:
 			quota.user_id === fixtureCatalog.identifier.userPrimary()
 				? fixtureCatalog.identifier.userPrimary()
@@ -42,6 +42,19 @@ export function buildUserNodeQuotaStatusItem(
 		item.node_id = fixtureCatalog.identifier.nodeSecondary();
 	} else if (index === 0) {
 		item.node_id = fixtureCatalog.nodeId.fixture32();
+	}
+	if (quota.quota_limit_bytes === fixtureCatalog.quota.fiveGiB()) {
+		item.quota_limit_bytes = fixtureCatalog.quota.fiveGiB();
+		item.remaining_bytes = fixtureCatalog.quota.fiveGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.tenGiB()) {
+		item.quota_limit_bytes = fixtureCatalog.quota.tenGiB();
+		item.remaining_bytes = fixtureCatalog.quota.tenGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.oneGiB()) {
+		item.quota_limit_bytes = fixtureCatalog.quota.oneGiB();
+		item.remaining_bytes = fixtureCatalog.quota.oneGiB();
+	}
+	if (quota.quota_reset_source === fixtureCatalog.quota.resetSourceNode()) {
+		item.quota_reset_source = fixtureCatalog.quota.resetSourceNode();
 	}
 	return item;
 }

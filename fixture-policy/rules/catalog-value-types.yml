@@ -91,7 +91,8 @@ rule:
               - regex: '^("serverPskB64"|"serverPskB64Alternate")$'
               - regex: '^("serverPskB64Escaped"|"userPskB64"|"authority53844")$'
               - regex: '^("authorityAlias"|"canaryH2c")$'
-              - regex: '^("resetSource"|"priorityTierDefault"|"priorityTierCreated")$'
+              - regex: '^("resetSource"|"resetSourceNode"|"priorityTierPrimary")$'
+              - regex: '^("priorityTierDefault"|"priorityTierCreated")$'
               - regex: '^("rawUri"|"providerSystemUrl")$'
               - regex: '^("mihomoMirrorBase"|"healthSeoulA"|"healthShared")$'
               - regex: '^("healthEndpointNode"|"healthXpNode")$'
@@ -123,6 +124,8 @@ rule:
               - regex: '^("reality"|"realityAlternate"|"realityKeys"|"vlessMeta")$'
               - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped")$'
               - regex: '^("reset"|"resetNode"|"resetNodeMidMonth")$'
+              - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'
+              - regex: '^("resetUserMidMonth"|"resetUserUnlimited")$'
               - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'
               - regex: '^"resetUserMidMonth"$'
         - has:

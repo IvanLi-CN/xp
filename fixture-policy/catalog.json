@@ -188,10 +188,16 @@
 				"day_of_month": 15,
 				"tz_offset_minutes": 480
 			},
-			"resetSource": "user"
+			"resetUserUnlimited": {
+				"policy": "unlimited",
+				"tz_offset_minutes": 480
+			},
+			"resetSource": "user",
+			"resetSourceNode": "node"
 		},
 		"user": {
 			"credentialEpoch": 0,
+			"priorityTierPrimary": "p1",
 			"priorityTierDefault": "p3",
 			"priorityTierCreated": "p2"
 		},

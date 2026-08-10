@@ -154,14 +154,37 @@ export function normalizeFixtureUser(
 }
 
 export function normalizeFixtureQuota(
-	_quota: AdminUserNodeQuota,
+	quota: AdminUserNodeQuota,
 ): AdminUserNodeQuota {
-	return {
+	const normalized: AdminUserNodeQuota = {
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		quota_reset_source: fixtureCatalog.quota.resetSource(),
 	};
+	if (quota.user_id === fixtureCatalog.identifier.userSecondary()) {
+		normalized.user_id = fixtureCatalog.identifier.userSecondary();
+	}
+	if (quota.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+	} else if (quota.node_id === fixtureCatalog.nodeId.fixture36()) {
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+	} else if (quota.node_id === fixtureCatalog.nodeId.fixture63()) {
+		normalized.node_id = fixtureCatalog.nodeId.fixture63();
+	}
+	if (quota.quota_limit_bytes === fixtureCatalog.quota.fiveGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.fiveGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.tenGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.tenGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.oneGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.oneGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.usedBytes()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.usedBytes();
+	}
+	if (quota.quota_reset_source === fixtureCatalog.quota.resetSourceNode()) {
+		normalized.quota_reset_source = fixtureCatalog.quota.resetSourceNode();
+	}
+	return normalized;
 }
 
 export function normalizeFixtureQuotaLimit(value: unknown): number | undefined {

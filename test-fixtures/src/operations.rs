@@ -104,8 +104,12 @@ struct QuotaOperations {
     reset_unlimited_request: serde_json::Value,
     #[serde(rename = "resetUserMidMonth")]
     reset_user_mid_month: serde_json::Value,
+    #[serde(rename = "resetUserUnlimited")]
+    reset_user_unlimited: serde_json::Value,
     #[serde(rename = "resetSource")]
     reset_source: String,
+    #[serde(rename = "resetSourceNode")]
+    reset_source_node: String,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +118,8 @@ struct QuotaOperations {
 struct UserOperations {
     #[serde(rename = "credentialEpoch")]
     credential_epoch: u64,
+    #[serde(rename = "priorityTierPrimary")]
+    priority_tier_primary: String,
     #[serde(rename = "priorityTierDefault")]
     priority_tier_default: String,
     #[serde(rename = "priorityTierCreated")]
@@ -296,8 +302,20 @@ pub fn quota_reset_user_mid_month() -> &'static serde_json::Value {
     &catalog().operations.quota.reset_user_mid_month
 }
 
+pub fn quota_reset_user_unlimited() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_user_unlimited
+}
+
 pub fn quota_reset_source() -> &'static str {
     &catalog().operations.quota.reset_source
+}
+
+pub fn quota_reset_source_node() -> &'static str {
+    &catalog().operations.quota.reset_source_node
+}
+
+pub fn user_priority_tier_primary() -> &'static str {
+    &catalog().operations.user.priority_tier_primary
 }
 
 pub fn subscription_raw_uri() -> &'static str {

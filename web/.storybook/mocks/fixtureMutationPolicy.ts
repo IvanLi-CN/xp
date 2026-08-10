@@ -6,7 +6,11 @@ import type {
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
-import type { NodeQuotaReset } from "../../src/api/quotaReset";
+import type {
+	AdminUser,
+	AdminUserPatchRequest,
+} from "../../src/api/adminUsers";
+import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 type NodePatchPayload = {
@@ -126,6 +130,68 @@ export function normalizeFixtureNodePatch(
 			...updated,
 			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		};
+	}
+	return updated;
+}
+
+export function normalizeFixtureUserPatch(
+	user: AdminUser,
+	payload: AdminUserPatchRequest,
+): AdminUser | undefined {
+	let updated = user;
+	if (payload.priority_tier !== undefined) {
+		if (payload.priority_tier === fixtureCatalog.user.priorityTierPrimary()) {
+			updated = {
+				...updated,
+				priority_tier: fixtureCatalog.user.priorityTierPrimary(),
+			};
+		} else if (
+			payload.priority_tier === fixtureCatalog.user.priorityTierCreated()
+		) {
+			updated = {
+				...updated,
+				priority_tier: fixtureCatalog.user.priorityTierCreated(),
+			};
+		} else if (
+			payload.priority_tier === fixtureCatalog.user.priorityTierDefault()
+		) {
+			updated = {
+				...updated,
+				priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			};
+		} else {
+			return undefined;
+		}
+	}
+	if (payload.quota_reset !== undefined) {
+		if (
+			JSON.stringify(payload.quota_reset) ===
+			JSON.stringify(fixtureCatalog.quota.reset())
+		) {
+			updated = {
+				...updated,
+				quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+			};
+		} else if (
+			JSON.stringify(payload.quota_reset) ===
+			JSON.stringify(fixtureCatalog.quota.resetUserMidMonth())
+		) {
+			updated = {
+				...updated,
+				quota_reset: fixtureCatalog.quota.resetUserMidMonth() as UserQuotaReset,
+			};
+		} else if (
+			JSON.stringify(payload.quota_reset) ===
+			JSON.stringify(fixtureCatalog.quota.resetUserUnlimited())
+		) {
+			updated = {
+				...updated,
+				quota_reset:
+					fixtureCatalog.quota.resetUserUnlimited() as UserQuotaReset,
+			};
+		} else {
+			return undefined;
+		}
 	}
 	return updated;
 }

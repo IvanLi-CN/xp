@@ -74,6 +74,7 @@ import {
 	normalizeFixtureEndpointPatch,
 	normalizeFixtureNodePatch,
 	normalizeFixtureRealityDomainPatch,
+	normalizeFixtureUserPatch,
 } from "./fixtureMutationPolicy";
 import { buildUserNodeQuotaStatusItem } from "./staticFixtureMappings";
 
@@ -2240,11 +2241,17 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
+			const normalized = normalizeFixtureUserPatch(user, payload);
+			if (!normalized) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"user patch values must be approved synthetic fixture values",
+				);
+			}
 			const updated: AdminUser = {
-				...user,
+				...normalized,
 				display_name: payload.display_name ?? user.display_name,
-				priority_tier: fixtureCatalog.user.priorityTierDefault(),
-				quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 			};
 			state.users = state.users.map((item) =>
 				item.user_id === userId ? updated : item,
