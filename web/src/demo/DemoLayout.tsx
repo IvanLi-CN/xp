@@ -249,12 +249,21 @@ function DemoShell({ children }: { children: ReactNode }) {
 									: null;
 					const children =
 						resourceId === "nodes"
-							? state.nodes.map((node) => ({
-									id: node.id,
-									label: node.name || "Unnamed node",
-									href: `/demo/nodes/${encodeURIComponent(node.id)}`,
-									ariaLabel: `Node ${node.name || "unnamed"} (${node.id})`,
-								}))
+							? state.nodes.map((node) => {
+									const isLocalNode = node.id === state.localNodeId;
+									return {
+										id: node.id,
+										label: node.name || "Unnamed node",
+										href: `/demo/nodes/${encodeURIComponent(node.id)}`,
+										ariaLabel: `${isLocalNode ? "Current hosting node" : "Node"} ${node.name || "unnamed"} (${node.id})`,
+										leadingIcon: {
+											name: isLocalNode
+												? "tabler:server-bolt"
+												: "tabler:server",
+											tone: isLocalNode ? "primary" : "muted",
+										} as const,
+									};
+								})
 							: resourceId === "endpoints"
 								? state.endpoints.map((endpoint) => ({
 										id: endpoint.id,
@@ -279,7 +288,7 @@ function DemoShell({ children }: { children: ReactNode }) {
 					};
 				}),
 			})),
-		[state.endpoints, state.nodes, state.users],
+		[state.endpoints, state.localNodeId, state.nodes, state.users],
 	);
 
 	const nav = (

@@ -209,6 +209,7 @@ function normalizeState(value: DemoState): DemoState {
 	return {
 		...value,
 		session: isDemoSession(value.session) ? value.session : null,
+		localNodeId: value.localNodeId ?? defaults.localNodeId,
 		users: value.users.map((user) => ({
 			...user,
 			mihomoMixinYaml: user.mihomoMixinYaml ?? "",

@@ -242,6 +242,15 @@ xp 使用细边框、色调分层和极轻阴影的混合策略。深度用于�
 - **Style:** App shell 使用稳定 sidebar 加顶部状态区。导航分组需要标签，图标来自 `tabler:`，当前路由必须清楚选中。
 - **Typography:** 标签保持紧凑可读；route label 应匹配产品名词。
 - **States:** hover 使用 accent surface，active 使用 primary 或 accent 并保证对比度，mobile 使用 Sheet 风格 drawer，而不是自定义导航模式。
+- **Long labels:** 有界导航中的长名称应在静止时用边缘渐隐表达后续内容；允许动效时可在 hover 或
+  focus 后于名称自身 viewport 内平移展示，且不能扩大外层纵向滚动容器。
+  `prefers-reduced-motion` 下保持文字静止，并仅在真实溢出时使用项目 Tooltip 展示全文。
+
+### Tooltips
+
+- **Primitive:** 可见的悬浮或键盘 focus 补充说明统一使用 `@/components/ui/tooltip`，以共享 Portal、碰撞处理、主题、Escape 和无障碍行为。
+- **Full values:** 名称、ID 或机器值需要展示全文时，Tooltip 内容应可换行且靠近触发对象；仅在可见值确实不足时出现。
+- **Native UI:** 不得把 HTML `title` 作为可见全文提示或项目 Tooltip 的替代品。完整身份应通过可访问名称表达，而不是依赖浏览器原生气泡。
 
 ### Tables
 
@@ -265,6 +274,7 @@ xp 使用细边框、色调分层和极轻阴影的混合策略。深度用于�
 - **Do** 保持 primary cyan 稀缺：只用于动作、当前导航、链接、选中和焦点。
 - **Do** 通过 `Icon` 组件渲染所有图标，并使用 `tabler:` 名称。
 - **Do** 让机器值可检查：使用等宽文本、复制入口和安全换行。
+- **Do** 使用项目 Tooltip 提供可见的悬浮或 focus 全文提示，并保留可访问名称。
 - **Do** 为可复用组件覆盖 loading、empty、error、disabled、focus 和 destructive 状态。
 
 ### Don't:
@@ -275,3 +285,4 @@ xp 使用细边框、色调分层和极轻阴影的混合策略。深度用于�
 - **Don't** 使用渐变文字、UI 标签里的展示字体、bounce/elastic motion 或 page-load choreography。
 - **Don't** 在现有兼容 token 之外引入新的纯黑或纯白中性色；新增 neutral 应向产品色相轻微着色。
 - **Don't** 混用图标库，或绕过 Tabler/Iconify wrapper。
+- **Don't** 使用浏览器原生 `title` 气泡承担用户可见的名称或机器值披露。

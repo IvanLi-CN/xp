@@ -25,6 +25,7 @@ type AppResourceNavigationProps = {
 	compatibilityError: string | null;
 	compatibilityPending: boolean;
 	groups: AppNavigationGroup[];
+	localNodeId: string | null;
 	pathname: string;
 	onNavigate: (href: string) => void;
 	onResourceNavigate: (href: string) => void;
@@ -53,6 +54,7 @@ export function AppResourceNavigation({
 	compatibilityError,
 	compatibilityPending,
 	groups,
+	localNodeId,
 	pathname,
 	onNavigate,
 	onResourceNavigate,
@@ -97,12 +99,21 @@ export function AppResourceNavigation({
 	const resourceGroups = useMemo<ResourceNavigationGroup[]>(() => {
 		const resourceItems = {
 			nodes: {
-				children: (adminNodes.data?.items ?? []).map((node) => ({
-					id: node.node_id,
-					label: node.node_name || "Unnamed node",
-					href: `/nodes/${encodeURIComponent(node.node_id)}`,
-					ariaLabel: `Node ${node.node_name || "unnamed"} (${node.node_id})`,
-				})),
+				children: (adminNodes.data?.items ?? []).map((node) => {
+					const isLocalNode = node.node_id === localNodeId;
+					const nodeName = node.node_name || "Unnamed node";
+					const identityLabel = isLocalNode ? "Current hosting node" : "Node";
+					return {
+						id: node.node_id,
+						label: nodeName,
+						href: `/nodes/${encodeURIComponent(node.node_id)}`,
+						ariaLabel: `${identityLabel} ${nodeName} (${node.node_id})`,
+						leadingIcon: {
+							name: isLocalNode ? "tabler:server-bolt" : "tabler:server",
+							tone: isLocalNode ? "primary" : "muted",
+						} as const,
+					};
+				}),
 				isLoading:
 					adminNodes.isLoading || (nodesRequested && compatibilityPending),
 				error: adminNodes.isError
@@ -190,6 +201,7 @@ export function AppResourceNavigation({
 		endpointsCapability,
 		endpointsRequested,
 		groups,
+		localNodeId,
 		nodesCapability,
 		nodesRequested,
 		onRetryCompatibility,

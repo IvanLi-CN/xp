@@ -42,6 +42,8 @@
 - 新建或实质改造的有界纵向滚动面板必须使用 `@/components/ui/scroll-area`，除非其所属规格明确要求横向滚动、虚拟化或其他专用交互。
 - 调用方必须提供有限的高度或最大高度；`ScrollArea` 不负责决定行数、面板高度或业务数据的截断规则。
 - 采用 `ScrollArea` 时必须保留当前组件的真实 Radix viewport 与 scrollbar，不得用静态、伪造或不可拖拽的滚动条替代。
+- 仅纵向滚动的调用方必须约束连续内容列的宽度，使其不被不可换行的后代撑过 viewport；
+  Radix viewport 内部布局不得因此产生未声明的横向溢出。
 - 当前基线只渲染一个纵向 `ScrollBar`：轨道宽度为 `w-2.5`（10px），带透明左边框和
   `p-[1px]` 内边距；拇指为圆角 `bg-border`。调用方不得以局部 CSS 覆盖这些尺寸、颜色或圆角。
 - 必须保留 `ScrollArea` 当前的轨道可见性生命周期；调用方不得强制滚动条常显或常隐。
@@ -69,8 +71,12 @@
 ### 有界纵向面板
 
 - `ScrollArea` root 保持相对定位和 `overflow-hidden`，viewport 充满可用空间并继承面板圆角。
+- 连续内容列必须将可用宽度作为上限；遇到 Radix viewport 内部的 table 布局时，可使用
+  `w-0 min-w-full` 等等价约束，保证 `scrollWidth <= clientWidth`，而不是依赖裁切掩盖横向溢出。
 - 滚动条尺寸与拇指长度由真实内容和 Radix 原语计算；鼠标滚轮、触控滚动与拖拽拇指必须作用于同一个 viewport。
 - 内容量未溢出时，不应以占位轨道、伪拇指或额外留白暗示可滚动。
+- 名称在自身 `overflow-hidden` viewport 内通过 transform 展示被隐藏内容，不构成 `ScrollArea`
+  的横向滚动能力；该位移不得改变连续内容列宽度、外层 `scrollWidth` 或纵向 scrollbar 行为。
 
 ### 边界与例外
 
@@ -95,10 +101,16 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
   When 其内容超出宽度，
   Then 它遵循该表面的专用规格，而不假设当前 `ScrollArea` 提供横向轨道。
 
+- Given 一个仅纵向滚动且包含不可换行长名称的 `ScrollArea`，
+  When 名称发生截断或在自身 viewport 内位移，
+  Then 外层 viewport 仍满足 `scrollWidth <= clientWidth`，活动项边界完整处于 viewport 内，
+  且不出现横向轨道。
+
 ## 验收清单（Acceptance checklist）
 
 - [x] 有界纵向滚动的组件基线已明确。
 - [x] 页面级、横向和历史实现的边界已明确。
+- [x] 纵向消费者的内容宽度约束与名称内部位移边界已明确。
 - [x] 接口影响已明确为 `None`。
 - [x] 相关验收条件可用于实现与 review 对齐。
 
@@ -106,13 +118,14 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 
 ### Testing
 
-- Unit tests: 组件行为或调用模式改变时，覆盖有界内容和溢出内容。
+- Unit tests: 组件行为或调用模式改变时，覆盖有界内容、溢出内容和连续内容列宽度约束。
 - E2E tests: 关键工作流需要滚动定位活动项时，覆盖活动项可见性。
 
 ### UI / Storybook
 
 - Stories: `UI/ScrollArea` 保持一个溢出的长列表状态。
-- Visual review: 在 light/dark 主题检查轨道和拇指，在桌面及移动视口检查触控滚动不被外层容器阻断。
+- Visual review: 在 light/dark 主题检查轨道、拇指和活动项完整边界，在桌面及移动视口检查长名称
+  不会扩展横向 overflow，且触控滚动不被外层容器阻断。
 
 ### Quality checks
 

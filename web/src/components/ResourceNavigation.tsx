@@ -1,15 +1,27 @@
 import type { MouseEvent } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+	useEffect,
+	useId,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { Icon } from "./Icon";
+import {
+	ResourceNavigationChildLink,
+	type ResourceNavigationLeadingIcon,
+} from "./ResourceNavigationChildLink";
 
 export type ResourceNavigationChild = {
 	id: string;
 	label: string;
 	href: string;
 	ariaLabel: string;
+	leadingIcon?: ResourceNavigationLeadingIcon;
 };
 
 export type ResourceNavigationItem = {
@@ -35,7 +47,10 @@ type ResourceNavigationProps = {
 	onNavigate: (href: string) => void;
 	onResourceNavigate?: (href: string) => void;
 	onResourceRequested?: (resourceId: string) => void;
+	reducedMotionOverride?: boolean;
 };
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 const primaryLinkClass = [
 	"flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-transparent px-3 py-2",
@@ -55,11 +70,6 @@ const retryButtonClass = [
 	"focus-visible:ring-[3px] focus-visible:ring-ring/20",
 ].join(" ");
 
-const childLinkClass = [
-	"flex h-8 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground",
-	"transition-colors hover:bg-muted hover:text-foreground",
-].join(" ");
-
 function isRouteMatch(pathname: string, href: string) {
 	return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -74,6 +84,34 @@ function defaultExpanded(groups: ResourceNavigationGroup[], pathname: string) {
 	) as Record<string, boolean>;
 }
 
+function subscribeToReducedMotion(onChange: () => void) {
+	if (
+		typeof window === "undefined" ||
+		typeof window.matchMedia !== "function"
+	) {
+		return () => undefined;
+	}
+	const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
+	mediaQuery.addEventListener("change", onChange);
+	return () => mediaQuery.removeEventListener("change", onChange);
+}
+
+function getReducedMotionSnapshot() {
+	return (
+		typeof window !== "undefined" &&
+		typeof window.matchMedia === "function" &&
+		window.matchMedia(REDUCED_MOTION_QUERY).matches
+	);
+}
+
+function usePrefersReducedMotion() {
+	return useSyncExternalStore(
+		subscribeToReducedMotion,
+		getReducedMotionSnapshot,
+		() => false,
+	);
+}
+
 export function ResourceNavigation({
 	ariaLabel,
 	groups,
@@ -81,7 +119,11 @@ export function ResourceNavigation({
 	onNavigate,
 	onResourceNavigate,
 	onResourceRequested,
+	reducedMotionOverride,
 }: ResourceNavigationProps) {
+	const systemPrefersReducedMotion = usePrefersReducedMotion();
+	const prefersReducedMotion =
+		reducedMotionOverride ?? systemPrefersReducedMotion;
 	const [expanded, setExpanded] = useState(() =>
 		defaultExpanded(groups, pathname),
 	);
@@ -140,154 +182,159 @@ export function ResourceNavigation({
 	}
 
 	return (
-		<nav aria-label={ariaLabel} className="xp-panel p-4">
-			<div className="space-y-6">
-				{groups.map((group) => (
-					<div key={group.title} className="space-y-2">
-						<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-							{group.title}
-						</p>
-						<ul className="space-y-1.5">
-							{group.items.map((item) => {
-								const isResource = item.children !== undefined;
-								const isExpanded = expanded[item.id] ?? false;
-								const isActive = isRouteMatch(pathname, item.href);
-								const panelId = `${disclosureIdPrefix}-${item.id}-children`;
-								return (
-									<li key={item.id} className="space-y-1">
-										<div className="flex items-center gap-1">
-											<a
-												href={item.href}
-												aria-current={
-													pathname === item.href ? "page" : undefined
-												}
-												className={[
-													primaryLinkClass,
-													isActive
-														? "border-primary/25 bg-primary/10 text-foreground shadow-sm"
-														: "",
-												]
-													.filter(Boolean)
-													.join(" ")}
-												onClick={(event) =>
-													followLink(event, item.href, onNavigate)
-												}
-											>
-												<Icon
-													name={item.icon}
-													className="size-5 shrink-0 opacity-80"
-												/>
-												<span className="truncate">{item.label}</span>
-											</a>
-											{isResource ? (
-												<button
-													type="button"
-													aria-label={`${isExpanded ? "Collapse" : "Expand"} ${item.label}`}
-													aria-controls={panelId}
-													aria-expanded={isExpanded}
-													className={toggleButtonClass}
-													onClick={() => toggleItem(item)}
+		<TooltipProvider delayDuration={500} skipDelayDuration={300}>
+			<nav aria-label={ariaLabel} className="xp-panel p-4">
+				<div className="space-y-6">
+					{groups.map((group) => (
+						<div key={group.title} className="space-y-2">
+							<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+								{group.title}
+							</p>
+							<ul className="space-y-1.5">
+								{group.items.map((item) => {
+									const isResource = item.children !== undefined;
+									const childrenHaveLeadingIcons =
+										(item.children?.length ?? 0) > 0 &&
+										item.children?.every(
+											(child) => child.leadingIcon !== undefined,
+										);
+									const isExpanded = expanded[item.id] ?? false;
+									const isActive = isRouteMatch(pathname, item.href);
+									const panelId = `${disclosureIdPrefix}-${item.id}-children`;
+									return (
+										<li key={item.id} className="space-y-1">
+											<div className="flex items-center gap-1">
+												<a
+													href={item.href}
+													aria-current={
+														pathname === item.href ? "page" : undefined
+													}
+													className={[
+														primaryLinkClass,
+														isActive
+															? "border-primary/25 bg-primary/10 text-foreground shadow-sm"
+															: "",
+													]
+														.filter(Boolean)
+														.join(" ")}
+													onClick={(event) =>
+														followLink(event, item.href, onNavigate)
+													}
 												>
 													<Icon
-														name={
-															isExpanded
-																? "tabler:chevron-down"
-																: "tabler:chevron-right"
-														}
-														ariaLabel={`${isExpanded ? "Collapse" : "Expand"} ${item.label}`}
-														className="size-4"
+														name={item.icon}
+														className="size-5 shrink-0 opacity-80"
 													/>
-												</button>
-											) : null}
-										</div>
-										{isResource && isExpanded ? (
-											<div id={panelId} className="pl-5">
-												{item.isLoading ? (
-													<p className="px-3 py-2 text-xs text-muted-foreground">
-														Loading {item.label.toLowerCase()}...
-													</p>
-												) : item.error ? (
-													<div className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
-														<span className="min-w-0 truncate">
-															Unable to load
-														</span>
-														{item.onRetry ? (
-															<button
-																type="button"
-																aria-label={`Retry ${item.label}`}
-																className={retryButtonClass}
-																onClick={item.onRetry}
-															>
-																<Icon
-																	name="tabler:refresh"
-																	ariaLabel={`Retry ${item.label}`}
-																	className="size-4"
-																/>
-															</button>
-														) : null}
-													</div>
-												) : (item.children ?? []).length === 0 ? (
-													<p className="px-3 py-2 text-xs text-muted-foreground">
-														No {item.label.toLowerCase()} yet
-													</p>
-												) : (
-													<ScrollArea
-														data-testid={`resource-list-${item.id}`}
-														className="h-[20rem]"
+													<span className="truncate">{item.label}</span>
+												</a>
+												{isResource ? (
+													<button
+														type="button"
+														aria-label={`${isExpanded ? "Collapse" : "Expand"} ${item.label}`}
+														aria-controls={panelId}
+														aria-expanded={isExpanded}
+														className={toggleButtonClass}
+														onClick={() => toggleItem(item)}
 													>
-														<ul className="pr-1">
-															{item.children?.map((child) => {
-																const isChildActive = isRouteMatch(
-																	pathname,
-																	child.href,
-																);
-																return (
-																	<li key={child.id}>
-																		<a
-																			ref={
-																				isChildActive ? activeChildRef : null
-																			}
-																			href={child.href}
-																			title={child.ariaLabel}
-																			aria-label={child.ariaLabel}
-																			aria-current={
-																				isChildActive ? "page" : undefined
-																			}
-																			className={[
-																				childLinkClass,
-																				isChildActive
-																					? "bg-primary/10 text-foreground"
-																					: "",
-																			]
-																				.filter(Boolean)
-																				.join(" ")}
-																			onClick={(event) =>
-																				followLink(
-																					event,
-																					child.href,
-																					onResourceNavigate ?? onNavigate,
-																				)
-																			}
-																		>
-																			<span className="truncate">
-																				{child.label}
-																			</span>
-																		</a>
-																	</li>
-																);
-															})}
-														</ul>
-													</ScrollArea>
-												)}
+														<Icon
+															name={
+																isExpanded
+																	? "tabler:chevron-down"
+																	: "tabler:chevron-right"
+															}
+															ariaLabel={`${isExpanded ? "Collapse" : "Expand"} ${item.label}`}
+															className="size-4"
+														/>
+													</button>
+												) : null}
 											</div>
-										) : null}
-									</li>
-								);
-							})}
-						</ul>
-					</div>
-				))}
-			</div>
-		</nav>
+											{isResource && isExpanded ? (
+												<div
+													id={panelId}
+													className={
+														childrenHaveLeadingIcons ? undefined : "pl-5"
+													}
+												>
+													{item.isLoading ? (
+														<p className="px-3 py-2 text-xs text-muted-foreground">
+															Loading {item.label.toLowerCase()}...
+														</p>
+													) : item.error ? (
+														<div className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
+															<span className="min-w-0 truncate">
+																Unable to load
+															</span>
+															{item.onRetry ? (
+																<button
+																	type="button"
+																	aria-label={`Retry ${item.label}`}
+																	className={retryButtonClass}
+																	onClick={item.onRetry}
+																>
+																	<Icon
+																		name="tabler:refresh"
+																		ariaLabel={`Retry ${item.label}`}
+																		className="size-4"
+																	/>
+																</button>
+															) : null}
+														</div>
+													) : (item.children ?? []).length === 0 ? (
+														<p className="px-3 py-2 text-xs text-muted-foreground">
+															No {item.label.toLowerCase()} yet
+														</p>
+													) : (
+														<ScrollArea
+															data-testid={`resource-list-${item.id}`}
+															className="h-[20rem]"
+														>
+															<ul className="w-0 min-w-full pr-1">
+																{item.children?.map((child) => {
+																	const isChildActive = isRouteMatch(
+																		pathname,
+																		child.href,
+																	);
+																	return (
+																		<li key={child.id} className="min-w-0">
+																			<ResourceNavigationChildLink
+																				ref={
+																					isChildActive ? activeChildRef : null
+																				}
+																				href={child.href}
+																				label={child.label}
+																				leadingIcon={child.leadingIcon}
+																				isActive={isChildActive}
+																				prefersReducedMotion={
+																					prefersReducedMotion
+																				}
+																				aria-label={child.ariaLabel}
+																				aria-current={
+																					isChildActive ? "page" : undefined
+																				}
+																				onClick={(event) =>
+																					followLink(
+																						event,
+																						child.href,
+																						onResourceNavigate ?? onNavigate,
+																					)
+																				}
+																			/>
+																		</li>
+																	);
+																})}
+															</ul>
+														</ScrollArea>
+													)}
+												</div>
+											) : null}
+										</li>
+									);
+								})}
+							</ul>
+						</div>
+					))}
+				</div>
+			</nav>
+		</TooltipProvider>
 	);
 }

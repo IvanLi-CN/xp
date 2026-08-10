@@ -90,6 +90,8 @@ const baseNodes: DemoNode[] = [
 	},
 ];
 
+const DEMO_LOCAL_NODE_ID = "node-tokyo-1";
+
 const baseEndpoints: DemoEndpoint[] = [
 	{
 		id: "endpoint-tokyo-reality",
@@ -452,6 +454,7 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 		return {
 			scenarioId,
 			session: null,
+			localNodeId: DEMO_LOCAL_NODE_ID,
 			nodes: [nodes[0] as DemoNode],
 			endpoints: [],
 			users: [],
@@ -485,7 +488,15 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 		return {
 			scenarioId,
 			session: null,
-			nodes,
+			localNodeId: DEMO_LOCAL_NODE_ID,
+			nodes: nodes.map((node) =>
+				node.id === "node-sgp-1"
+					? {
+							...node,
+							name: "singapore-edge-with-an-intentionally-long-hostname",
+						}
+					: node,
+			),
 			endpoints: endpoints.map((endpoint) => ({
 				...endpoint,
 				assignedUserIds: manyUsers
@@ -511,6 +522,7 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 	return {
 		scenarioId,
 		session: null,
+		localNodeId: DEMO_LOCAL_NODE_ID,
 		nodes,
 		endpoints,
 		users,
