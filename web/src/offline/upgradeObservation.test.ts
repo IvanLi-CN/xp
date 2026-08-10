@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
 	beginUpgradeObservation,
 	classifyUpgradeStartError,
+	observeExistingUpgradeStatus,
 	observeUpgradeStatus,
 	refreshTimedOutObservation,
 	restoreUpgradeObservation,
@@ -198,5 +199,29 @@ describe("upgrade observation", () => {
 				}),
 			),
 		).toBe("failed");
+	});
+
+	it("keeps observing when an already-running rejection resolves to an active job", () => {
+		expect(
+			observeExistingUpgradeStatus(
+				beginUpgradeObservation("v3.21.10", NOW),
+				{ state: "running", target_tag: "v3.21.10" },
+				NOW + 100,
+			),
+		).toMatchObject({ phase: "observing", hasSeenActive: true });
+	});
+
+	it("unlocks immediately when an already-running rejection has only stale terminal status", () => {
+		expect(
+			observeExistingUpgradeStatus(
+				beginUpgradeObservation("v3.21.10", NOW),
+				{
+					state: "succeeded",
+					target_tag: "v3.20.0",
+					updated_at: new Date(NOW - 1_000).toISOString(),
+				},
+				NOW + 100,
+			),
+		).toMatchObject({ phase: "conflict" });
 	});
 });

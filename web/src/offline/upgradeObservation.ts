@@ -15,7 +15,7 @@ export type UpgradeObservation = {
 	deadlineAtMs: number;
 	startedAtMs?: number;
 	hasSeenActive?: boolean;
-	phase: "observing" | "timed_out" | "terminal";
+	phase: "observing" | "timed_out" | "terminal" | "conflict";
 };
 
 export type UpgradeStartErrorDisposition =
@@ -65,6 +65,21 @@ export function observeUpgradeStatus(
 		return { ...observation, hasSeenActive: true, targetTag };
 	}
 	return observation;
+}
+
+export function observeExistingUpgradeStatus(
+	observation: UpgradeObservation | null,
+	status: UpgradeJobSnapshot | null,
+	nowMs: number,
+): UpgradeObservation | null {
+	if (!observation || observation.phase !== "observing") return observation;
+	if (isActive(status?.state)) {
+		return observeUpgradeStatus(observation, status, nowMs);
+	}
+	if (isStaleOrIdle(status, observation.startedAtMs)) {
+		return { ...observation, phase: "conflict" };
+	}
+	return observeUpgradeStatus(observation, status, nowMs);
 }
 
 export function refreshTimedOutObservation(
@@ -147,6 +162,20 @@ function isCurrentAttemptTerminal(
 	return Number.isFinite(updatedAtMs) && updatedAtMs >= observation.startedAtMs;
 }
 
+function isStaleOrIdle(
+	status: UpgradeJobSnapshot | null,
+	startedAtMs: number | undefined,
+): boolean {
+	const state = status?.state;
+	const updatedAt = status?.updated_at;
+	if (state === "idle") return true;
+	if (!isTerminal(state) || startedAtMs === undefined || !updatedAt) {
+		return false;
+	}
+	const updatedAtMs = Date.parse(updatedAt);
+	return Number.isFinite(updatedAtMs) && updatedAtMs < startedAtMs;
+}
+
 function isStoredObservation(value: unknown): value is UpgradeObservation {
 	if (!value || typeof value !== "object") return false;
 	const candidate = value as Partial<UpgradeObservation>;
@@ -156,6 +185,7 @@ function isStoredObservation(value: unknown): value is UpgradeObservation {
 		Number.isFinite(candidate.deadlineAtMs) &&
 		(candidate.phase === "observing" ||
 			candidate.phase === "timed_out" ||
-			candidate.phase === "terminal")
+			candidate.phase === "terminal" ||
+			candidate.phase === "conflict")
 	);
 }

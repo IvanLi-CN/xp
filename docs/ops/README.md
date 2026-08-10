@@ -718,7 +718,9 @@ Web-triggered local upgrade contract:
 - `xp` writes the restricted request to `${XP_DATA_DIR}/upgrade/request.json` and records durable
   status at `${XP_DATA_DIR}/upgrade/status.json`.
 - Only one active job is allowed. A second start request while a job is `running` or `restarting`
-  returns `409 upgrade_already_running`.
+  returns `409 upgrade_already_running`. The short start critical section is protected by an
+  advisory lock on `${XP_DATA_DIR}/upgrade/start.lock`; the file may persist, but only a live lock
+  holder blocks a request. The lock is released before the host trigger runs.
 - The Web UI starts a same-tab observation before it sends start and polls status every 2.5 seconds.
   If the restart boundary returns an unstructured 5xx or drops the connection, that response is
   treated as unknown rather than failed; the client keeps observing the durable status for up to 60
@@ -728,9 +730,14 @@ Web-triggered local upgrade contract:
   observation. A terminal status (`succeeded`, `failed`, or `unsupported`) ends it; a 60-second
   timeout stops automatic polling and keeps Upgrade locked until a manual Status query finds an
   active job (new window) or an idle/terminal state (unlock).
+- After `409 upgrade_already_running`, the Web client refreshes status immediately. A current
+  `running` / `restarting` job continues through the normal observation window. If the node reports
+  only an older terminal status or idle, the client shows a stale-conflict error and unlocks
+  Upgrade immediately.
 - If a host one-shot runner fails before it can write a terminal status, the status endpoint
   reconciles the stale active status to `failed` instead of reporting `running` forever. On systemd
-  nodes this reconciliation uses `xp-upgrade.service` failure state as the durable local fact.
+  nodes this reconciliation uses `xp-upgrade.service` failure state as the durable local fact; on
+  OpenRC nodes it uses the `xp-upgrade` crashed state.
 
 Host-managed root delegation:
 
@@ -747,14 +754,20 @@ Host-managed root delegation:
   upgrade support must not depend on the polkit rule alone.
 - OpenRC nodes use `xp-upgrade` as a root one-shot service. `xp-ops init` writes the root-owned
   fixed `/usr/local/libexec/xp-openrc-upgrade-trigger` helper and appends two narrow doas rules:
-  `xp` may run only `xp-openrc-upgrade-trigger --check` to verify the installed delegate, and may
-  start only `/sbin/rc-service xp-upgrade start`. The helper accepts only `--check`, verifies the
-  executable runner and exact start rule as root, and never starts the service. This lets the
-  service detect a root-owned `0600` `/etc/doas.conf` without granting it read access.
+  `xp` may run only the helper's `--check` and `start` actions. The helper verifies the executable
+  runner and exact rules as root; `start` zaps only a crashed fixed service before starting it.
+  The service backgrounds the runner, records its PID, and zaps its OpenRC state after every exit.
+  This lets the service verify a root-owned `0600` `/etc/doas.conf` without granting it read access
+  and prevents completed one-shots from remaining started or crashed.
   On an existing node that predates this helper, run `sudo xp-ops init` once after the ordinary
   `sudo xp-ops upgrade --version latest` has completed. The old running `xp-ops` cannot execute
   release code that it has not installed yet, so this root-approved reinitialization is required;
   readiness checks must not start the one-shot service as an implicit migration.
+- When recovering a node created by the older direct-`rc-service` contract, first prove the durable
+  status is terminal and no `_upgrade-runner` or transaction lock is live. Then remove only the
+  exact stale `start.lock`, run `rc-service xp-upgrade zap`, perform one normal Web upgrade as a
+  canary, and run the upgraded `xp-ops init` to backfill the helper and doas policy. Require the full
+  node audit to pass before applying the recovery to any additional node.
 - Reference samples live at:
   - `docs/ops/systemd/xp-upgrade.service`
   - `docs/ops/systemd/xp-upgrade-trigger`

@@ -60,7 +60,12 @@ fn openrc_delegate_probe_accepts_root_only_doas_policy() {
     fs::write(openrc_helper, "helper").unwrap();
     fs::write(
         &doas_conf,
-        "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start\n",
+        concat!(
+            "permit nopass xp as root cmd /usr/local/libexec/",
+            "xp-openrc-upgrade-trigger args --check\n",
+            "permit nopass xp as root cmd /usr/local/libexec/",
+            "xp-openrc-upgrade-trigger args start\n",
+        ),
     )
     .unwrap();
     fs::set_permissions(&doas_conf, fs::Permissions::from_mode(0o000)).unwrap();
@@ -121,6 +126,10 @@ fn openrc_trigger_matches_installed_doas_policy() {
     );
     assert_eq!(
         openrc_trigger_args(),
-        ["-n", "/sbin/rc-service", "xp-upgrade", "start"]
+        [
+            "-n",
+            "/usr/local/libexec/xp-openrc-upgrade-trigger",
+            "start"
+        ]
     );
 }

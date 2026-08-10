@@ -19,6 +19,9 @@ const UPGRADE_TIMEOUT_MESSAGE = [
 	"Upgrade status could not be confirmed after one minute. Use Status to check again; ",
 	"Upgrade remains locked until the node reports an idle or terminal state.",
 ].join("");
+const UPGRADE_CONFLICT_MESSAGE =
+	"The node rejected the upgrade as already running, but no active job was reported. " +
+	"The stale state was cleared in this tab; use Status to verify before retrying.";
 
 type VersionIndicatorProps = {
 	xpVersion: string | null | undefined;
@@ -150,7 +153,11 @@ export function VersionIndicator({
 
 	function handleOpenChange(nextOpen: boolean) {
 		setOpen(nextOpen);
-		if (!nextOpen && upgradeObservation?.phase === "terminal") {
+		if (
+			!nextOpen &&
+			(upgradeObservation?.phase === "terminal" ||
+				upgradeObservation?.phase === "conflict")
+		) {
 			onDismissUpgradeResult?.();
 		}
 	}
@@ -237,10 +244,12 @@ export function VersionIndicator({
 							</div>
 
 							{upgradeObservation?.phase === "observing" ||
-							upgradeObservation?.phase === "timed_out" ? (
+							upgradeObservation?.phase === "timed_out" ||
+							upgradeObservation?.phase === "conflict" ? (
 								<p
 									className={
-										upgradeObservation.phase === "timed_out"
+										upgradeObservation.phase === "timed_out" ||
+										upgradeObservation.phase === "conflict"
 											? "xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs"
 											: "xp-alert xp-alert-warning rounded-lg px-2.5 py-2 text-xs"
 									}
@@ -248,7 +257,9 @@ export function VersionIndicator({
 								>
 									{upgradeObservation.phase === "timed_out"
 										? UPGRADE_TIMEOUT_MESSAGE
-										: "Waiting for the node to reconnect and report the upgrade status."}
+										: upgradeObservation.phase === "conflict"
+											? UPGRADE_CONFLICT_MESSAGE
+											: "Waiting for the node to reconnect and report the upgrade status."}
 								</p>
 							) : upgradeStatusError ? (
 								<p className="xp-alert xp-alert-error rounded-lg px-2.5 py-2 text-xs">
@@ -394,6 +405,9 @@ function describeStatus(
 	if (upgradeObservation?.phase === "timed_out") {
 		return "Upgrade status could not be confirmed after one minute.";
 	}
+	if (upgradeObservation?.phase === "conflict") {
+		return "Upgrade start conflicted with stale node status.";
+	}
 	const job = upgradeStatus?.status;
 	if (job?.state === "running" || job?.state === "restarting") {
 		return `Upgrade to ${job.target_tag ?? "target release"} is running.`;
@@ -428,6 +442,9 @@ function describeUpgrade(
 	}
 	if (upgradeObservation?.phase === "timed_out") {
 		return <span className="text-destructive">status timeout</span>;
+	}
+	if (upgradeObservation?.phase === "conflict") {
+		return <span className="text-destructive">stale conflict</span>;
 	}
 	if (job?.state === "running" || job?.state === "restarting") {
 		return <span className="text-warning">running</span>;

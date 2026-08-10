@@ -209,11 +209,20 @@ export function AppShell({
 			void runVersionCheck({ force: true });
 		},
 		onError: (error) => {
-			if (classifyUpgradeStartError(error) === "failed") {
+			const disposition = classifyUpgradeStartError(error);
+			if (disposition === "failed") {
 				upgradeObservation.clear();
 				return;
 			}
-			void adminUpgradeStatus.refetch();
+			void adminUpgradeStatus.refetch().then((result) => {
+				if (
+					disposition === "observe_existing" &&
+					result.isSuccess &&
+					result.data
+				) {
+					upgradeObservation.observeExistingStatus(result.data.status);
+				}
+			});
 		},
 	});
 	const upgradeStatusData = adminUpgradeStatus.data;
