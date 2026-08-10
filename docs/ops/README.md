@@ -96,6 +96,12 @@ Notes:
 - `xp-ops deploy` supports passing the Cloudflare API token via `--cloudflare-token` (riskier) or `--cloudflare-token-stdin` (preferred over the flag).
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 - `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
+- For a host-managed join, deploy provisions Tunnel/DNS without starting `cloudflared`, runs
+  `xp join`, writes `/etc/xp/xp.env`, then starts and confirms `xray`, `xp`, and optional
+  `cloudflared` in that order. With `--enable-services`, final `https://<api-base-url>/health`
+  must return HTTP `200`. A `post_join_health_failed` result retains the joined member and its
+  metadata; rerun deploy after repairing the service or public routing without issuing a new join
+  token.
 
 ## Optional: managed VLESS HTTPS canary
 
@@ -240,6 +246,8 @@ Deployment note:
 - `xp-ops deploy` writes managed-default bootstrap inputs into `/etc/xp/xp.env` when you pass
   `--default-vless-port` + `--default-vless-server-names` and/or `--default-ss-port`; redeploying
   does not override an existing endpoint's Raft-owned port.
+- `--ip-geo` explicitly writes `XP_IP_GEO_ENABLED=true`. Omitting it preserves an existing value
+  and leaves a new node on XP's disabled default; deploy does not backfill existing nodes.
 - `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
 - The host-managed deploy path is therefore no longer container-only; the same one-shot flow now covers host-managed service nodes as well as official single-image container nodes.
 
@@ -252,6 +260,7 @@ sudo -E xp-ops deploy \
   --account-id <cloudflare-account-id> \
   --hostname admin-node-1.example.com \
   --ddns \
+  --ip-geo \
   --default-vless-port 443 \
   --default-vless-server-names 'cdn-a.example.test,cdn-b.example.test' \
   --default-vless-fingerprint chrome \
@@ -371,7 +380,11 @@ xp-ops mihomo redact "https://example.com/sub?token=..." --timeout-secs 30
 Note:
 
 - The TUI assumes `xp` is already installed at `/usr/local/bin/xp` (e.g., via `scripts/install-from-github.sh`).
-- The TUI covers the same host-managed managed-default inputs as `xp-ops deploy`, including `XP_DEFAULT_VLESS_*`, `XP_DEFAULT_SS_PORT`, and `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`.
+- The TUI covers the same host-managed managed-default inputs as `xp-ops deploy`, including
+  `XP_DEFAULT_VLESS_*`, `XP_DEFAULT_SS_PORT`, `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`, and the
+  explicit `ip_geo_enabled` switch.
+- Turning on `ip_geo_enabled` writes `XP_IP_GEO_ENABLED=true`; leaving it off preserves any
+  existing env value and leaves a new node on XP's default-disabled behavior.
 
 Persistence:
 
@@ -491,6 +504,9 @@ Optional inbound IP geo knobs:
 - `XP_IP_GEO_ENABLED` (default: `false`)
   - When enabled, `xp` resolves newly-seen inbound public IPs via the free `country.is` hosted API.
   - Note: this sends observed client IPs to a third-party service.
+  - On host-managed nodes, set it during deployment with `xp-ops deploy --ip-geo` or the TUI
+    switch. Omitting either preserves an existing value and does not add the key to a new node
+    env file.
 - `XP_IP_GEO_ORIGIN` (default: `https://api.country.is`)
   - Override the hosted API origin (e.g. self-hosting the same interface or special network environments).
 
@@ -808,6 +824,7 @@ Ideal post-release path:
    - `--account-id`
    - `--hostname` when Tunnel is enabled
    - `--ddns` when `XP_ACCESS_HOST` should be maintained by Cloudflare
+   - optional `--ip-geo` when inbound client IPs may be sent to `https://api.country.is`
    - `--default-vless-port`
    - `--default-vless-server-names`
    - optional `--default-vless-fingerprint`
@@ -817,6 +834,8 @@ Ideal post-release path:
 3. Confirm `/etc/xp/xp.env` contains the intended bootstrap endpoint keys and the canary/DDNS keys.
    Existing endpoint ports may intentionally differ from stale bootstrap values.
 4. Restart validation:
+   - `curl -fsS https://<api-base-url>/health` returns HTTP `200` for a joined node with public
+     access
    - `curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https_canary_status`
    - `curl -Ik https://<access_host[:vless_port]>/generate_204`
    - render a Mihomo provider subscription and confirm the relay URL points at the managed VLESS ingress

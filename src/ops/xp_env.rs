@@ -107,6 +107,7 @@ pub struct XpEnvWriteValues<'a> {
     pub default_vless_server_names: Option<&'a str>,
     pub default_vless_fingerprint: Option<&'a str>,
     pub default_ss_port: Option<&'a str>,
+    pub ip_geo_enabled: Option<bool>,
     pub cloudflare_ddns_enabled: bool,
     pub cloudflare_ddns_token_file: &'a str,
     pub cloudflare_ddns_zone_id: &'a str,
@@ -692,6 +693,13 @@ pub fn write_xp_env(
             )
         })?;
         lines.push(format!("XP_DEFAULT_SS_PORT={default_ss_port}"));
+    }
+    if let Some(ip_geo_enabled) = values.ip_geo_enabled {
+        lines.retain(|line| !line.starts_with("XP_IP_GEO_ENABLED="));
+        lines.push(format!(
+            "XP_IP_GEO_ENABLED={}",
+            if ip_geo_enabled { "true" } else { "false" }
+        ));
     }
     lines.push(format!(
         "XP_CLOUDFLARE_DDNS_ENABLED={}",

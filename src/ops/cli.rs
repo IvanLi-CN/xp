@@ -316,6 +316,13 @@ pub struct DeployArgs {
     #[command(flatten)]
     pub ddns_toggle: DdnsToggle,
 
+    /// Enable inbound IP Geo enrichment through the default country.is origin.
+    ///
+    /// When omitted, deploy preserves an existing XP_IP_GEO_ENABLED value and
+    /// leaves a new node on XP's default (disabled) behavior.
+    #[arg(long = "ip-geo")]
+    pub ip_geo_enabled: bool,
+
     #[arg(long, value_name = "ID")]
     pub account_id: Option<String>,
 

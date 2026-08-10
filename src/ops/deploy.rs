@@ -70,6 +70,7 @@ struct DeployPlan {
     enable_services: bool,
     cloudflare_enabled: bool,
     ddns_enabled: bool,
+    ip_geo_enabled: bool,
     ddns_zone_id: Option<String>,
     vless_canary_acme_contact_email: Option<String>,
     default_vless_port: Option<u16>,
@@ -289,13 +290,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             eprintln!("  - write xp-readable cloudflare ddns token file");
         }
         if plan.cloudflare_enabled {
-            eprintln!("  - cloudflare provision");
-            if plan.join_token_present && plan.enable_services {
-                eprintln!("  - wait for cloudflared service");
-                eprintln!("  - preflight public api_base_url before xp join");
-            }
+            eprintln!("  - cloudflare provision (without starting cloudflared)");
         }
-        if plan.join_token_present {
+        if plan.join_token_present || cluster_metadata_exists(&paths) {
             eprintln!("  - xp join (cluster join token)");
             eprintln!("  - write /etc/xp/xp.env (XP_ADMIN_TOKEN_HASH)");
         } else {
@@ -303,7 +300,10 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             eprintln!("  - xp bootstrap (xp init)");
         }
         if plan.enable_services {
-            eprintln!("  - enable and start services");
+            eprintln!("  - enable and start services: xray, xp, cloudflared (when configured)");
+            if plan.join_token_present || cluster_metadata_exists(&paths) {
+                eprintln!("  - verify public api_base_url/health returns HTTP 200 after join");
+            }
         }
     }
 
@@ -348,6 +348,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     let existing_env = fs::read_to_string(paths.etc_xp_env()).ok();
     let parsed_env = crate::ops::xp_env::parse_xp_env(existing_env);
     let vless_canary = resolve_vless_canary_write_values(&parsed_env, &managed_defaults);
+    let join_or_existing_metadata = plan.join_token_present || cluster_metadata_exists(&paths);
 
     let managed_vless_canary_enabled =
         plan.default_vless_port.is_some() || parsed_env.default_vless_port.is_some();
@@ -385,7 +386,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     }
 
     // After `xp-ops init`, we know the `xp` group exists (so `chown root:xp` is reliable).
-    let bootstrap_admin_token = if plan.join_token_present {
+    let bootstrap_admin_token = if join_or_existing_metadata {
         None
     } else {
         ensure_xp_env_admin_token_hash_bootstrap(
@@ -396,6 +397,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             plan.api_base_url.as_str(),
             plan.ddns_enabled,
             plan.ddns_zone_id.as_deref().unwrap_or_default(),
+            plan.ip_geo_enabled,
             &managed_defaults,
             force_overwrite,
         )?
@@ -450,8 +452,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 dns_record_id_override: cf.dns_override.map(|r| r.id),
                 tunnel_id_override: cf.tunnel_override.map(|t| t.id),
                 migrate_existing_tunnel: args.migrate_existing_tunnel,
-                enable: plan.enable_services,
-                no_enable: !plan.enable_services,
+                // Join must finish and write xp.env before cloudflared exposes this node.
+                enable: false,
+                no_enable: true,
                 dry_run: mode == Mode::DryRun,
             },
             token,
@@ -459,36 +462,30 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         .await?;
     }
 
-    if plan.join_token_present {
-        if plan.cloudflare_enabled && plan.enable_services {
-            if mode == Mode::Real && !is_test_root(paths.root()) {
-                let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
-                let init_system = detect_init_system(distro, None);
-                wait_for_service(init_system, "cloudflared").await?;
-            }
-            if mode == Mode::DryRun {
-                eprintln!("would probe {} before xp join", plan.api_base_url);
-            } else {
-                wait_for_public_api_base_url(&plan.api_base_url).await?;
-            }
+    if join_or_existing_metadata {
+        if plan.join_token_present {
+            let join_token = args
+                .join_token
+                .clone()
+                .or(args.join_token_stdin_value.clone())
+                .ok_or_else(|| ExitError::new(2, "invalid_args: join token is missing"))?;
+
+            xp::cmd_xp_join(
+                paths.clone(),
+                "/var/lib/xp/data".into(),
+                plan.node_name.clone(),
+                plan.access_host.clone(),
+                plan.api_base_url.clone(),
+                join_token,
+                mode == Mode::DryRun,
+            )
+            .await?;
+        } else if mode == Mode::Real {
+            eprintln!(
+                "existing cluster metadata found; skipping xp join and continuing \
+                 post-join recovery"
+            );
         }
-
-        let join_token = args
-            .join_token
-            .clone()
-            .or(args.join_token_stdin_value.clone())
-            .ok_or_else(|| ExitError::new(2, "invalid_args: join token is missing"))?;
-
-        xp::cmd_xp_join(
-            paths.clone(),
-            "/var/lib/xp/data".into(),
-            plan.node_name.clone(),
-            plan.access_host.clone(),
-            plan.api_base_url.clone(),
-            join_token,
-            mode == Mode::DryRun,
-        )
-        .await?;
 
         if mode == Mode::DryRun {
             // `xp join` dry-run does not materialize cluster metadata/hash files.
@@ -504,6 +501,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 plan.api_base_url.as_str(),
                 plan.ddns_enabled,
                 plan.ddns_zone_id.as_deref().unwrap_or_default(),
+                plan.ip_geo_enabled,
                 &managed_defaults,
                 force_overwrite,
             )?;
@@ -537,54 +535,11 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
         if !is_test_root(paths.root()) {
             let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
             let init_system = detect_init_system(distro, None);
+            enable_and_start_services(init_system, plan.cloudflare_enabled).await?;
+        }
 
-            match init_system {
-                InitSystem::Systemd => {
-                    let _ = std::process::Command::new("systemctl")
-                        .args(["daemon-reload"])
-                        .status();
-                    let _ = std::process::Command::new("systemctl")
-                        .args(["enable", "--now", "xray.service"])
-                        .status();
-                    let _ = std::process::Command::new("systemctl")
-                        .args(["enable", "--now", "xp.service"])
-                        .status();
-                    if plan.cloudflare_enabled {
-                        let _ = std::process::Command::new("systemctl")
-                            .args(["enable", "--now", "cloudflared.service"])
-                            .status();
-                    }
-                }
-                InitSystem::OpenRc => {
-                    let _ = std::process::Command::new("rc-update")
-                        .args(["add", "xray", "default"])
-                        .status();
-                    let _ = std::process::Command::new("rc-update")
-                        .args(["add", "xp", "default"])
-                        .status();
-                    let _ = std::process::Command::new("rc-service")
-                        .args(["xray", "start"])
-                        .status();
-                    let _ = std::process::Command::new("rc-service")
-                        .args(["xp", "start"])
-                        .status();
-                    if plan.cloudflare_enabled {
-                        let _ = std::process::Command::new("rc-update")
-                            .args(["add", "cloudflared", "default"])
-                            .status();
-                        let _ = std::process::Command::new("rc-service")
-                            .args(["cloudflared", "start"])
-                            .status();
-                    }
-                }
-                InitSystem::None => {}
-            }
-
-            wait_for_service(init_system, "xray").await?;
-            wait_for_service(init_system, "xp").await?;
-            if plan.cloudflare_enabled {
-                wait_for_service(init_system, "cloudflared").await?;
-            }
+        if join_or_existing_metadata && !is_test_root(paths.root()) {
+            wait_for_post_join_public_api_health(&plan.api_base_url).await?;
         }
     }
 
@@ -934,6 +889,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         enable_services: args.enable_services_toggle.enabled(),
         cloudflare_enabled,
         ddns_enabled,
+        ip_geo_enabled: args.ip_geo_enabled,
         ddns_zone_id,
         vless_canary_acme_contact_email: args.vless_canary_acme_contact_email.clone(),
         default_vless_port: args.default_vless_port,
@@ -1515,6 +1471,15 @@ fn render_plan(plan: &DeployPlan) {
         }
         .to_string(),
     );
+    line(
+        "ip_geo",
+        if plan.ip_geo_enabled {
+            "enabled"
+        } else {
+            "preserve existing / XP default"
+        }
+        .to_string(),
+    );
     if plan.cloudflare_enabled || plan.ddns_enabled {
         let value = match plan.cloudflare_token_source {
             Some(src) => format!("provided via {}", src.display()),
@@ -1645,11 +1610,79 @@ async fn wait_for_service(init_system: InitSystem, name: &str) -> Result<(), Exi
     ))
 }
 
-fn public_api_probe_status_is_ready(status: reqwest::StatusCode) -> bool {
-    status.as_u16() != 530
+fn managed_service_names(cloudflare_enabled: bool) -> &'static [&'static str] {
+    if cloudflare_enabled {
+        &["xray", "xp", "cloudflared"]
+    } else {
+        &["xray", "xp"]
+    }
 }
 
-async fn wait_for_public_api_base_url(
+#[derive(Debug, PartialEq, Eq)]
+enum ManagedServiceActivationStep {
+    EnableAndStart(&'static str),
+    WaitReady(&'static str),
+}
+
+fn managed_service_activation_steps(cloudflare_enabled: bool) -> Vec<ManagedServiceActivationStep> {
+    managed_service_names(cloudflare_enabled)
+        .iter()
+        .flat_map(|service| {
+            [
+                ManagedServiceActivationStep::EnableAndStart(service),
+                ManagedServiceActivationStep::WaitReady(service),
+            ]
+        })
+        .collect()
+}
+
+async fn enable_and_start_services(
+    init_system: InitSystem,
+    cloudflare_enabled: bool,
+) -> Result<(), ExitError> {
+    if init_system == InitSystem::None {
+        return Ok(());
+    }
+
+    if init_system == InitSystem::Systemd {
+        let _ = std::process::Command::new("systemctl")
+            .args(["daemon-reload"])
+            .status();
+    }
+
+    for step in managed_service_activation_steps(cloudflare_enabled) {
+        match step {
+            ManagedServiceActivationStep::EnableAndStart(service) => match init_system {
+                InitSystem::Systemd => {
+                    let unit = format!("{service}.service");
+                    let _ = std::process::Command::new("systemctl")
+                        .args(["enable", "--now", unit.as_str()])
+                        .status();
+                }
+                InitSystem::OpenRc => {
+                    let _ = std::process::Command::new("rc-update")
+                        .args(["add", service, "default"])
+                        .status();
+                    let _ = std::process::Command::new("rc-service")
+                        .args([service, "start"])
+                        .status();
+                }
+                InitSystem::None => {}
+            },
+            ManagedServiceActivationStep::WaitReady(service) => {
+                wait_for_service(init_system, service).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn public_api_probe_status_is_healthy(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::OK
+}
+
+async fn wait_for_post_join_public_api_health(
     api_base_url: &str,
 ) -> Result<reqwest::StatusCode, ExitError> {
     validate_https_origin_no_port(api_base_url)?;
@@ -1659,7 +1692,7 @@ async fn wait_for_public_api_base_url(
         .build()
         .map_err(|e| ExitError::new(5, format!("http_error: build client: {e}")))?;
     let health_url = format!("{}/health", api_base_url.trim_end_matches('/'));
-    wait_for_public_api_health_with_client(
+    wait_for_post_join_public_api_health_with_client(
         &client,
         &health_url,
         PUBLIC_API_PROBE_ATTEMPTS,
@@ -1668,7 +1701,7 @@ async fn wait_for_public_api_base_url(
     .await
 }
 
-async fn wait_for_public_api_health_with_client(
+async fn wait_for_post_join_public_api_health_with_client(
     client: &reqwest::Client,
     health_url: &str,
     attempts: usize,
@@ -1680,7 +1713,7 @@ async fn wait_for_public_api_health_with_client(
         match client.get(health_url).send().await {
             Ok(resp) => {
                 let status = resp.status();
-                if public_api_probe_status_is_ready(status) {
+                if public_api_probe_status_is_healthy(status) {
                     return Ok(status);
                 }
                 last_observation = format!("http {}", status.as_u16());
@@ -1696,9 +1729,11 @@ async fn wait_for_public_api_health_with_client(
     }
 
     Err(ExitError::new(
-        3,
+        6,
         format!(
-            "preflight_failed: public api-base-url is not ready before xp join: {last_observation}"
+            "post_join_health_failed: public api-base-url /health did not return HTTP 200 \
+             after join: {last_observation}; cluster membership was kept, retry xp-ops deploy \
+             after fixing service or public routing"
         ),
     ))
 }
@@ -1830,6 +1865,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
     api_base_url: &str,
     ddns_enabled: bool,
     ddns_zone_id: &str,
+    ip_geo_enabled: bool,
     managed_defaults: &ManagedDefaultsWriteValues<'_>,
     force_overwrite: bool,
 ) -> Result<Option<String>, ExitError> {
@@ -1898,6 +1934,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                     .default_vless_fingerprint
                     .as_deref(),
                 default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+                ip_geo_enabled: ip_geo_enabled.then_some(true),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1932,6 +1969,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                     .default_vless_fingerprint
                     .as_deref(),
                 default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+                ip_geo_enabled: ip_geo_enabled.then_some(true),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1966,6 +2004,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
                 .default_vless_fingerprint
                 .as_deref(),
             default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+            ip_geo_enabled: ip_geo_enabled.then_some(true),
             cloudflare_ddns_enabled: ddns_enabled,
             cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
             cloudflare_ddns_zone_id: ddns_zone_id,
@@ -1984,6 +2023,7 @@ fn ensure_xp_env_admin_token_hash_join(
     api_base_url: &str,
     ddns_enabled: bool,
     ddns_zone_id: &str,
+    ip_geo_enabled: bool,
     managed_defaults: &ManagedDefaultsWriteValues<'_>,
     force_overwrite: bool,
 ) -> Result<(), ExitError> {
@@ -2062,6 +2102,7 @@ fn ensure_xp_env_admin_token_hash_join(
                     .default_vless_fingerprint
                     .as_deref(),
                 default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+                ip_geo_enabled: ip_geo_enabled.then_some(true),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -2103,6 +2144,7 @@ fn ensure_xp_env_admin_token_hash_join(
                     .default_vless_fingerprint
                     .as_deref(),
                 default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+                ip_geo_enabled: ip_geo_enabled.then_some(true),
                 cloudflare_ddns_enabled: ddns_enabled,
                 cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
                 cloudflare_ddns_zone_id: ddns_zone_id,
@@ -2134,12 +2176,19 @@ fn ensure_xp_env_admin_token_hash_join(
                 .default_vless_fingerprint
                 .as_deref(),
             default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
+            ip_geo_enabled: ip_geo_enabled.then_some(true),
             cloudflare_ddns_enabled: ddns_enabled,
             cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
             cloudflare_ddns_zone_id: ddns_zone_id,
         },
     )?;
     Ok(())
+}
+
+fn cluster_metadata_exists(paths: &Paths) -> bool {
+    paths
+        .map_abs(Path::new("/var/lib/xp/data/cluster/metadata.json"))
+        .exists()
 }
 
 fn read_cluster_admin_token_hash(paths: &Paths, data_dir: &Path) -> Result<String, ExitError> {

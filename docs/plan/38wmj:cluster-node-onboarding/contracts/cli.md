@@ -40,12 +40,17 @@ xp-ops deploy \
   1. 安装依赖（`xray`；`cloudflared` 取决于 `--cloudflare`）
   2. 初始化目录/用户/服务文件（同 `xp-ops init`）
   3. 安装 `xp`（来源/策略沿用现有）
-  4. 若启用 `--cloudflare`：先 provision tunnel/DNS；当本次 deploy 同时启用服务并负责启动 `cloudflared` 时，MUST 在 `xp join` 之前确认公共 `api_base_url` 已经“对外存在且可探测”（例如返回 200/404/502；Cloudflare `530` 视为未就绪）
+  4. 若启用 `--cloudflare`：先 provision tunnel/DNS，但 MUST 不在此阶段启动
+     `cloudflared`
   5. 执行 join（不得执行 `xp init`）并获取集群 `XP_ADMIN_TOKEN_HASH`（见 `contracts/http-apis.md`）
   6. 写入 `/etc/xp/xp.env`（必须包含从 leader 同步到的 `XP_ADMIN_TOKEN_HASH`；不得写入明文 token）
-  7. （可选）启用并启动剩余服务（同 `--enable-services`）
+  7. （可选）按 `xray`、`xp`、`cloudflared` 顺序启用并启动服务，且每个服务 MUST ready
+     后才能继续
+  8. join 服务启用后，MUST 仅在最终公共 `api_base_url/health` 返回 HTTP `200` 时报告成功
 - join 模式不得要求用户额外输入 admin token；token 获取必须在“只提供 join token”的条件下完成。
-- 若 Cloudflare 预检失败，MUST 在执行 `xp join` 之前失败；不得消耗 join token，也不得写入新的 cluster metadata / membership。未启服务的 staged deploy 可跳过该预检，由后续启服务阶段承担入口可达性责任。
+- 公共健康的 `502`、`530`、超时或连接失败 MUST 以 `post_join_health_failed` 退出；不得
+  自动删除成员、撤销 metadata、轮换管理员凭据或停止已经启动的服务。已有 metadata 的重试
+  MUST 跳过重复 join，并继续 env 写入和健康验证。
 - 当 `/etc/xp/xp.env` 已存在且 `XP_ADMIN_TOKEN_HASH` 与 leader 下发值不一致：
   - 默认 MUST 失败
   - 仅当 `--overwrite-existing` 才允许覆写
@@ -62,7 +67,7 @@ xp-ops deploy \
 - `3`: preflight_failed / unsupported_platform
 - `4`: filesystem_error / permission_denied
 - `5`: join_failed（`xp join` 失败或返回非 0）
-- `6`: token_mismatch（检测到现有 token 与输入不一致且未允许覆写）
+- `6`: token_mismatch、service_failed 或 post_join_health_failed
 
 ### 兼容性与迁移（Compatibility / migration）
 

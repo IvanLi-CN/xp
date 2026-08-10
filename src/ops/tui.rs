@@ -64,6 +64,7 @@ async fn run_deploy(paths: Paths, values: AppValues) -> Result<(), crate::ops::c
             ddns: values.ddns_enabled,
             no_ddns: !values.ddns_enabled,
         },
+        ip_geo_enabled: values.ip_geo_enabled,
         account_id: values.account_id,
         zone_id: values.zone_id,
         hostname: values.hostname,
@@ -216,6 +217,7 @@ struct AppValues {
     access_host: String,
     cloudflare_enabled: bool,
     ddns_enabled: bool,
+    ip_geo_enabled: bool,
     ddns_zone_id: Option<String>,
     account_id: Option<String>,
     zone_id: Option<String>,
@@ -250,6 +252,7 @@ struct AppSnapshot {
     access_host: String,
     cloudflare_enabled: bool,
     ddns_enabled: bool,
+    ip_geo_enabled: bool,
     ddns_zone_id: String,
     account_id: String,
     zone_id: String,
@@ -287,6 +290,7 @@ struct App {
 
     cloudflare_enabled: bool,
     ddns_enabled: bool,
+    ip_geo_enabled: bool,
     ddns_zone_id: String,
     account_id: String,
     zone_id: String,
@@ -317,6 +321,7 @@ impl App {
                 access_host: String::new(),
                 cloudflare_enabled: true,
                 ddns_enabled: false,
+                ip_geo_enabled: false,
                 ddns_zone_id: String::new(),
                 account_id: String::new(),
                 zone_id: String::new(),
@@ -339,6 +344,7 @@ impl App {
             access_host: String::new(),
             cloudflare_enabled: true,
             ddns_enabled: false,
+            ip_geo_enabled: false,
             ddns_zone_id: String::new(),
             account_id: String::new(),
             zone_id: String::new(),
@@ -364,7 +370,7 @@ impl App {
     }
 
     fn items_len(&self) -> usize {
-        18
+        19
     }
 
     fn render_items(&self) -> Vec<ListItem<'static>> {
@@ -383,6 +389,10 @@ impl App {
         v.push(item(
             "ddns_enabled",
             if self.ddns_enabled { "true" } else { "false" },
+        ));
+        v.push(item(
+            "ip_geo_enabled",
+            if self.ip_geo_enabled { "true" } else { "false" },
         ));
         v.push(item(
             if self.ddns_enabled {
@@ -580,8 +590,9 @@ impl App {
         match self.focus {
             2 => self.cloudflare_enabled = !self.cloudflare_enabled,
             3 => self.ddns_enabled = !self.ddns_enabled,
-            16 => self.enable_services = !self.enable_services,
-            17 => self.dry_run = !self.dry_run,
+            4 => self.ip_geo_enabled = !self.ip_geo_enabled,
+            17 => self.enable_services = !self.enable_services,
+            18 => self.dry_run = !self.dry_run,
             _ => {}
         }
     }
@@ -589,10 +600,10 @@ impl App {
     fn is_editable_field(&self) -> bool {
         match self.focus {
             0..=1 => true,
-            4 => self.ddns_enabled,
-            5 => !self.cloudflare_enabled,
-            6..=9 => self.cloudflare_enabled,
-            10..=15 => true,
+            5 => self.ddns_enabled,
+            6 => !self.cloudflare_enabled,
+            7..=10 => self.cloudflare_enabled,
+            11..=16 => true,
             _ => false,
         }
     }
@@ -601,18 +612,18 @@ impl App {
         match self.focus {
             0 => self.node_name.push(c),
             1 => self.access_host.push(c),
-            4 if self.ddns_enabled => self.ddns_zone_id.push(c),
-            5 if !self.cloudflare_enabled => self.api_base_url.push(c),
-            6 if self.cloudflare_enabled => self.account_id.push(c),
-            7 if self.cloudflare_enabled => self.zone_id.push(c),
-            8 if self.cloudflare_enabled => self.hostname.push(c),
-            9 if self.cloudflare_enabled => self.origin_url.push(c),
-            10 => self.vless_canary_acme_contact_email.push(c),
-            11 => self.default_vless_port.push(c),
-            12 => self.default_vless_server_names.push(c),
-            13 => self.default_vless_fingerprint.push(c),
-            14 => self.default_ss_port.push(c),
-            15 => self.cloudflare_token.push(c),
+            5 if self.ddns_enabled => self.ddns_zone_id.push(c),
+            6 if !self.cloudflare_enabled => self.api_base_url.push(c),
+            7 if self.cloudflare_enabled => self.account_id.push(c),
+            8 if self.cloudflare_enabled => self.zone_id.push(c),
+            9 if self.cloudflare_enabled => self.hostname.push(c),
+            10 if self.cloudflare_enabled => self.origin_url.push(c),
+            11 => self.vless_canary_acme_contact_email.push(c),
+            12 => self.default_vless_port.push(c),
+            13 => self.default_vless_server_names.push(c),
+            14 => self.default_vless_fingerprint.push(c),
+            15 => self.default_ss_port.push(c),
+            16 => self.cloudflare_token.push(c),
             _ => {}
         }
     }
@@ -644,40 +655,40 @@ impl App {
             1 => {
                 self.access_host.pop();
             }
-            4 if self.ddns_enabled => {
+            5 if self.ddns_enabled => {
                 self.ddns_zone_id.pop();
             }
-            5 if !self.cloudflare_enabled => {
+            6 if !self.cloudflare_enabled => {
                 self.api_base_url.pop();
             }
-            6 if self.cloudflare_enabled => {
+            7 if self.cloudflare_enabled => {
                 self.account_id.pop();
             }
-            7 if self.cloudflare_enabled => {
+            8 if self.cloudflare_enabled => {
                 self.zone_id.pop();
             }
-            8 if self.cloudflare_enabled => {
+            9 if self.cloudflare_enabled => {
                 self.hostname.pop();
             }
-            9 if self.cloudflare_enabled => {
+            10 if self.cloudflare_enabled => {
                 self.origin_url.pop();
             }
-            10 => {
+            11 => {
                 self.vless_canary_acme_contact_email.pop();
             }
-            11 => {
+            12 => {
                 self.default_vless_port.pop();
             }
-            12 => {
+            13 => {
                 self.default_vless_server_names.pop();
             }
-            13 => {
+            14 => {
                 self.default_vless_fingerprint.pop();
             }
-            14 => {
+            15 => {
                 self.default_ss_port.pop();
             }
-            15 => {
+            16 => {
                 self.cloudflare_token.pop();
             }
             _ => {}
@@ -690,6 +701,7 @@ impl App {
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
             ddns_enabled: self.ddns_enabled,
+            ip_geo_enabled: self.ip_geo_enabled,
             ddns_zone_id: if self.ddns_enabled {
                 Some(self.ddns_zone_id.clone()).filter(|s| !s.trim().is_empty())
             } else {
@@ -744,6 +756,7 @@ impl App {
             access_host: self.access_host.clone(),
             cloudflare_enabled: self.cloudflare_enabled,
             ddns_enabled: self.ddns_enabled,
+            ip_geo_enabled: self.ip_geo_enabled,
             ddns_zone_id: self.ddns_zone_id.clone(),
             account_id: self.account_id.clone(),
             zone_id: self.zone_id.clone(),
@@ -778,6 +791,9 @@ impl App {
         }
         if let Some(v) = cfg.ddns_enabled {
             self.ddns_enabled = v;
+        }
+        if let Some(v) = cfg.ip_geo_enabled {
+            self.ip_geo_enabled = v;
         }
         if let Some(v) = cfg.ddns_zone_id {
             self.ddns_zone_id = v;
@@ -911,6 +927,7 @@ struct TuiConfig {
     access_host: Option<String>,
     cloudflare_enabled: Option<bool>,
     ddns_enabled: Option<bool>,
+    ip_geo_enabled: Option<bool>,
     ddns_zone_id: Option<String>,
     account_id: Option<String>,
     zone_id: Option<String>,
@@ -946,6 +963,7 @@ fn save_tui_config(paths: &Paths, values: &AppValues) -> Result<(), crate::ops::
         access_host: Some(values.access_host.clone()),
         cloudflare_enabled: Some(values.cloudflare_enabled),
         ddns_enabled: Some(values.ddns_enabled),
+        ip_geo_enabled: Some(values.ip_geo_enabled),
         ddns_zone_id: values.ddns_zone_id.clone(),
         account_id: values.account_id.clone(),
         zone_id: values.zone_id.clone(),
