@@ -23,3 +23,9 @@ invalid:
     user.priority_tier = payload.priority_tier;
   - |
     user.quota_reset = payload.quota_reset;
+  - |
+    report["priority_tier"] = "live-tier";
+  - |
+    report.requests_1h = payload.requests_1h;
+  - |
+    report.connection_starts_1h = payload.connection_starts_1h;

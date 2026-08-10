@@ -31,6 +31,21 @@ snapshots:
       start: 32
       end: 65
   ? |
+    report.connection_starts_1h = payload.connection_starts_1h;
+  : labels:
+    - source: report.connection_starts_1h = payload.connection_starts_1h
+      style: primary
+      start: 0
+      end: 58
+    - source: report.connection_starts_1h
+      style: secondary
+      start: 0
+      end: 27
+    - source: payload.connection_starts_1h
+      style: secondary
+      start: 30
+      end: 58
+  ? |
     report.cycle_end_at = new Date().toISOString();
   : labels:
     - source: report.cycle_end_at = new Date().toISOString()
@@ -45,6 +60,21 @@ snapshots:
       style: secondary
       start: 22
       end: 46
+  ? |
+    report.requests_1h = payload.requests_1h;
+  : labels:
+    - source: report.requests_1h = payload.requests_1h
+      style: primary
+      start: 0
+      end: 40
+    - source: report.requests_1h
+      style: secondary
+      start: 0
+      end: 18
+    - source: payload.requests_1h
+      style: secondary
+      start: 21
+      end: 40
   ? |
     report.start_at = "unapproved-timestamp";
   : labels:
@@ -75,6 +105,21 @@ snapshots:
       style: secondary
       start: 21
       end: 45
+  ? |
+    report["priority_tier"] = "live-tier";
+  : labels:
+    - source: report["priority_tier"] = "live-tier"
+      style: primary
+      start: 0
+      end: 37
+    - source: report["priority_tier"]
+      style: secondary
+      start: 0
+      end: 23
+    - source: '"live-tier"'
+      style: secondary
+      start: 26
+      end: 37
   ? |
     user.priority_tier = payload.priority_tier;
   : labels:

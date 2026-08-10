@@ -81,3 +81,27 @@ snapshots:
       style: primary
       start: 0
       end: 44
+  ? |
+    pub(crate) fn injected() -> &'static str {
+        "live.example"
+    }
+  : labels:
+    - source: |-
+        pub(crate) fn injected() -> &'static str {
+            "live.example"
+        }
+      style: primary
+      start: 0
+      end: 63
+  ? |
+    pub(super) fn injected() -> &'static str {
+        "live.example"
+    }
+  : labels:
+    - source: |-
+        pub(super) fn injected() -> &'static str {
+            "live.example"
+        }
+      style: primary
+      start: 0
+      end: 63

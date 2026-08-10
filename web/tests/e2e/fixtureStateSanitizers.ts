@@ -55,20 +55,23 @@ export type AdminUserNodeQuota = {
 export function applyFixtureUserPatch(
 	user: AdminUser,
 	payload: Record<string, unknown>,
-): void {
+): boolean {
+	const updated = { ...user };
 	if (typeof payload.display_name === "string") {
-		user.display_name = payload.display_name;
+		updated.display_name = payload.display_name;
 	}
 	if (payload.priority_tier === fixtureCatalog.user.priorityTierPrimary()) {
-		user.priority_tier = fixtureCatalog.user.priorityTierPrimary();
+		updated.priority_tier = fixtureCatalog.user.priorityTierPrimary();
 	} else if (
 		payload.priority_tier === fixtureCatalog.user.priorityTierCreated()
 	) {
-		user.priority_tier = fixtureCatalog.user.priorityTierCreated();
+		updated.priority_tier = fixtureCatalog.user.priorityTierCreated();
 	} else if (
 		payload.priority_tier === fixtureCatalog.user.priorityTierDefault()
 	) {
-		user.priority_tier = fixtureCatalog.user.priorityTierDefault();
+		updated.priority_tier = fixtureCatalog.user.priorityTierDefault();
+	} else if (payload.priority_tier !== undefined) {
+		return false;
 	}
 	if (
 		matchesFixtureUserQuotaReset(
@@ -76,14 +79,14 @@ export function applyFixtureUserPatch(
 			fixtureCatalog.quota.reset(),
 		)
 	) {
-		user.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
+		updated.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
 	} else if (
 		matchesFixtureUserQuotaReset(
 			payload.quota_reset,
 			fixtureCatalog.quota.resetUserMidMonth(),
 		)
 	) {
-		user.quota_reset =
+		updated.quota_reset =
 			fixtureCatalog.quota.resetUserMidMonth() as UserQuotaReset;
 	} else if (
 		matchesFixtureUserQuotaReset(
@@ -91,9 +94,13 @@ export function applyFixtureUserPatch(
 			fixtureCatalog.quota.resetUserUnlimited(),
 		)
 	) {
-		user.quota_reset =
+		updated.quota_reset =
 			fixtureCatalog.quota.resetUserUnlimited() as UserQuotaReset;
+	} else if (payload.quota_reset !== undefined) {
+		return false;
 	}
+	Object.assign(user, updated);
+	return true;
 }
 
 function matchesFixtureUserQuotaReset(
@@ -230,9 +237,20 @@ export function normalizeFixtureUser(
 		priority_tier: fixtureCatalog.user.priorityTierDefault(),
 		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	};
-	if (user.user_id === fixtureCatalog.identifier.userSecondary() || index > 0) {
+	if (index === 1) {
 		normalized.user_id = fixtureCatalog.identifier.userSecondary();
 		normalized.subscription_token = fixtureCatalog.identifier.tokenSecondary();
+	} else if (index === 2) {
+		normalized.user_id = fixtureCatalog.identifier.userTertiary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenTertiary();
+	} else if (index === 3) {
+		normalized.user_id = fixtureCatalog.identifier.userQuaternary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenQuaternary();
+	} else if (index === 4) {
+		normalized.user_id = fixtureCatalog.identifier.userQuinary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenQuinary();
+	} else if (index > 4) {
+		throw new Error("synthetic user catalog exhausted");
 	}
 	return normalized;
 }

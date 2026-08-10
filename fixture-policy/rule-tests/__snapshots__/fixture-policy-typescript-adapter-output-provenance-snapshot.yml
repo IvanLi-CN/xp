@@ -42,6 +42,14 @@ snapshots:
       start: 21
       end: 61
   ? |
+    const make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });
+  : labels:
+    - source: const make = createStringAccessors;
+      style: primary
+      start: 0
+      end: 35
+  ? |
     const primary = () => "live.example";
   : labels:
     - source: () => "live.example"
@@ -72,6 +80,13 @@ snapshots:
       start: 48
       end: 68
   ? |
+    const unsafe = (createStringAccessors)({ unsafe: "live.example" });
+  : labels:
+    - source: '(createStringAccessors)({ unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 66
+  ? |
     const unsafe = createListAccessors({ unsafe: ["live.example"] });
   : labels:
     - source: 'createListAccessors({ unsafe: ["live.example"] })'
@@ -92,6 +107,13 @@ snapshots:
       style: primary
       start: 15
       end: 64
+  ? |
+    const unsafe = createStringAccessors.call(null, { unsafe: "live.example" });
+  : labels:
+    - source: 'createStringAccessors.call(null, { unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 75
   ? |
     function createStringAccessors(_value: string, index: number) {
       return [`s${index}`, () => "live.example"];
@@ -128,3 +150,12 @@ snapshots:
       style: primary
       start: 0
       end: 105
+  ? |
+    let make;
+    make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });
+  : labels:
+    - source: make = createStringAccessors
+      style: primary
+      start: 10
+      end: 38

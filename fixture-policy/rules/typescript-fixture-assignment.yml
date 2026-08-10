@@ -16,7 +16,10 @@ rule:
     - kind: assignment_expression
     - has:
         field: left
-        pattern: $OBJECT.$FIELD
+        any:
+          - pattern: $OBJECT.$FIELD
+          - pattern: '$OBJECT["$FIELD"]'
+          - pattern: "$OBJECT['$FIELD']"
     - has:
         field: right
         not:
@@ -74,6 +77,6 @@ constraints:
       - regex: '^(latencyMs|latency_ms|probeLatencyMs|probe_latency_ms)$'
       - regex: '^(latency_p50_ms|latency_p95_ms|availability_1h|availability_24h)$'
       - regex: '^(mesh_availability_24h|connection_generation|current_connection_requests)$'
-      - regex: '^(requests_5m|connection_starts_5m)$'
+      - regex: '^(requests_5m|connection_starts_5m|requests_1h|connection_starts_1h)$'
       - regex: '^(trafficBytes|traffic_bytes|uplink_bytes|downlink_bytes)$'
       - regex: '^(totalBytes|total_bytes|requests|connections|throughput)$'

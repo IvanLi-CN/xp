@@ -49,3 +49,11 @@ invalid:
     pub fn indexed_host(index: usize) -> &'static str {
         &catalog().subscription.tags[index]
     }
+  - |
+    pub(crate) fn injected() -> &'static str {
+        "live.example"
+    }
+  - |
+    pub(super) fn injected() -> &'static str {
+        "live.example"
+    }

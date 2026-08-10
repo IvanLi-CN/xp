@@ -8,6 +8,7 @@ import {
 	type UserQuotaReset,
 	applyFixtureUserPatch,
 	normalizeFixtureEndpoint,
+	normalizeFixtureUser,
 } from "../../tests/e2e/fixtureStateSanitizers";
 
 const baseUrl = "http://localhost";
@@ -27,17 +28,63 @@ describe("storybook fixture semantics", () => {
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		};
 
-		applyFixtureUserPatch(user, {
-			display_name: "Renamed fixture user",
-			priority_tier: fixtureCatalog.user.priorityTierCreated(),
-			quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
-		});
+		expect(
+			applyFixtureUserPatch(user, {
+				display_name: "Renamed fixture user",
+				priority_tier: fixtureCatalog.user.priorityTierCreated(),
+				quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
+			}),
+		).toBe(true);
 
 		expect(user).toMatchObject({
 			display_name: "Renamed fixture user",
 			priority_tier: fixtureCatalog.user.priorityTierCreated(),
 			quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
 		});
+	});
+
+	it("rejects an E2E user patch atomically", () => {
+		const user: AdminUser = {
+			user_id: fixtureCatalog.identifier.userPrimary(),
+			display_name: "Fixture user",
+			subscription_token: fixtureCatalog.identifier.tokenPrimary(),
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+		};
+
+		expect(
+			applyFixtureUserPatch(user, {
+				priority_tier: fixtureCatalog.user.priorityTierPrimary(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
+			}),
+		).toBe(false);
+		expect(user).toMatchObject({
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			quota_reset: fixtureCatalog.quota.reset(),
+		});
+	});
+
+	it("assigns distinct catalog identities to seeded E2E users", () => {
+		const users = Array.from({ length: 3 }, (_, index) =>
+			normalizeFixtureUser(
+				{
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					display_name: "Fixture user",
+					subscription_token: fixtureCatalog.identifier.tokenPrimary(),
+					credential_epoch: fixtureCatalog.user.credentialEpoch(),
+					priority_tier: fixtureCatalog.user.priorityTierDefault(),
+					quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+				},
+				index,
+			),
+		);
+
+		expect(users.map((user) => user.user_id)).toEqual([
+			fixtureCatalog.identifier.userPrimary(),
+			fixtureCatalog.identifier.userSecondary(),
+			fixtureCatalog.identifier.userTertiary(),
+		]);
 	});
 
 	it("preserves approved user patch settings", async () => {

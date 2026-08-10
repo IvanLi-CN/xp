@@ -25,7 +25,7 @@ rule:
             regex: '^fn catalog\('
     - all:
         - kind: function_item
-        - regex: '^pub fn [A-Za-z_][A-Za-z0-9_]*(?:<[^>{}]*>)?\([^)]*[^ )][^)]*\)'
+        - regex: '^pub(?:\([^)]*\))?\s+fn [A-Za-z_][A-Za-z0-9_]*(?:<[^>{}]*>)?\([^)]*[^ )][^)]*\)'
     - kind: const_item
     - all:
         - kind: static_item
@@ -33,7 +33,7 @@ rule:
             regex: '^static CATALOG: OnceLock<Catalog>'
     - all:
         - kind: function_item
-        - regex: '^pub fn '
+        - regex: '^pub(?:\([^)]*\))?\s+fn '
         - not:
             any:
               - pattern: |
@@ -51,7 +51,7 @@ rule:
             stopBy: end
             all:
               - kind: function_item
-              - regex: '^pub fn '
+              - regex: '^pub(?:\([^)]*\))?\s+fn '
         - not:
             inside:
               stopBy: end
@@ -66,7 +66,7 @@ rule:
             stopBy: end
             all:
               - kind: function_item
-              - regex: '^pub fn '
+              - regex: '^pub(?:\([^)]*\))?\s+fn '
         - not:
             inside:
               stopBy: end

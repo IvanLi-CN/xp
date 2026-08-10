@@ -95,3 +95,14 @@ invalid:
     const unsafe = createNumberAccessors({ unsafe: 4096 });
   - |
     const unsafe = createListAccessors({ unsafe: ["live.example"] });
+  - |
+    const make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });
+  - |
+    const unsafe = (createStringAccessors)({ unsafe: "live.example" });
+  - |
+    const unsafe = createStringAccessors.call(null, { unsafe: "live.example" });
+  - |
+    let make;
+    make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });

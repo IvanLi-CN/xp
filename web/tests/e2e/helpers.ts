@@ -914,7 +914,10 @@ export async function setupApiMocks(
 					return;
 				}
 				const payload = parseJsonBody(request);
-				applyFixtureUserPatch(user, payload);
+				if (!applyFixtureUserPatch(user, payload)) {
+					errorResponse(route, "Invalid fixture user patch", 400);
+					return;
+				}
 				jsonResponse(route, user);
 				return;
 			}

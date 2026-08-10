@@ -180,8 +180,42 @@ rule:
             - pattern: createStringAccessors($VALUE)
             - pattern: createNumberAccessors($VALUE)
             - pattern: createListAccessors($VALUE)
+            - pattern: (createStringAccessors)($VALUE)
+            - pattern: (createNumberAccessors)($VALUE)
+            - pattern: (createListAccessors)($VALUE)
+            - pattern: createStringAccessors.call($RECEIVER, $VALUE)
+            - pattern: createNumberAccessors.call($RECEIVER, $VALUE)
+            - pattern: createListAccessors.call($RECEIVER, $VALUE)
         - not:
             any:
               - pattern: createStringAccessors(catalog.fixtures.strings.$GROUP)
               - pattern: createNumberAccessors(catalog.fixtures.numbers.value)
               - pattern: createListAccessors(catalog.fixtures.stringLists.hostList)
+    - any:
+        - pattern: const $NAME = createStringAccessors
+        - pattern: const $NAME = createNumberAccessors
+        - pattern: const $NAME = createListAccessors
+        - pattern: const $NAME = (createStringAccessors)
+        - pattern: const $NAME = (createNumberAccessors)
+        - pattern: const $NAME = (createListAccessors)
+        - pattern: let $NAME = createStringAccessors
+        - pattern: let $NAME = createNumberAccessors
+        - pattern: let $NAME = createListAccessors
+        - pattern: let $NAME = (createStringAccessors)
+        - pattern: let $NAME = (createNumberAccessors)
+        - pattern: let $NAME = (createListAccessors)
+        - pattern: var $NAME = createStringAccessors
+        - pattern: var $NAME = createNumberAccessors
+        - pattern: var $NAME = createListAccessors
+        - pattern: var $NAME = (createStringAccessors)
+        - pattern: var $NAME = (createNumberAccessors)
+        - pattern: var $NAME = (createListAccessors)
+    - all:
+        - kind: assignment_expression
+        - any:
+            - pattern: $NAME = createStringAccessors
+            - pattern: $NAME = createNumberAccessors
+            - pattern: $NAME = createListAccessors
+            - pattern: $NAME = (createStringAccessors)
+            - pattern: $NAME = (createNumberAccessors)
+            - pattern: $NAME = (createListAccessors)
