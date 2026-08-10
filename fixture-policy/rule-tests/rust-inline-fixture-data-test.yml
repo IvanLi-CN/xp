@@ -8,6 +8,15 @@ valid:
     }
   - |
     mod tests {
+        fn builds_endpoint() {
+            let fixture = EndpointMeta {
+                short_ids: xp_test_fixtures::endpoint_short_ids(),
+                active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+            };
+        }
+    }
+  - |
+    mod tests {
       fn builds_mesh_target() {
             let fixture = MeshPeerTarget {
                 public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
@@ -35,6 +44,15 @@ invalid:
     mod tests {
         fn builds_token() {
             let fixture = JoinToken { one_time_secret: "unapproved-secret".to_owned() };
+        }
+    }
+  - |
+    mod tests {
+        fn builds_endpoint() {
+            let fixture = EndpointMeta {
+                short_ids: vec!["unapproved-short-id".to_owned()],
+                active_short_id: "unapproved-short-id".to_owned(),
+            };
         }
     }
   - |

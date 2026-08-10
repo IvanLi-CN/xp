@@ -26,7 +26,7 @@ use xp::{
     internal_auth,
     protocol::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
-        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
+        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
@@ -286,7 +286,6 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     .expect("load resource state");
     let mut rng = rand::rngs::OsRng;
     let reality_keypair = generate_reality_keypair(&mut rng);
-    let short_id = generate_short_id_16hex(&mut rng);
     let meta = serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
             dest: xp_test_fixtures::primary_authority().to_owned(),
@@ -298,8 +297,8 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
             private_key: reality_keypair.private_key,
             public_key: reality_keypair.public_key,
         },
-        short_ids: vec![short_id.clone()],
-        active_short_id: short_id,
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::secondary_server_names(),
         mihomo_smux: MihomoSmuxConfig::default(),

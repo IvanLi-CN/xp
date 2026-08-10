@@ -182,6 +182,40 @@ snapshots:
       end: 128
   ? |
     mod tests {
+        fn builds_endpoint() {
+            let fixture = EndpointMeta {
+                short_ids: vec!["unapproved-short-id".to_owned()],
+                active_short_id: "unapproved-short-id".to_owned(),
+            };
+        }
+    }
+  : labels:
+    - source: 'short_ids: vec!["unapproved-short-id".to_owned()]'
+      style: primary
+      start: 88
+      end: 137
+    - source: |-
+        mod tests {
+            fn builds_endpoint() {
+                let fixture = EndpointMeta {
+                    short_ids: vec!["unapproved-short-id".to_owned()],
+                    active_short_id: "unapproved-short-id".to_owned(),
+                };
+            }
+        }
+      style: secondary
+      start: 0
+      end: 220
+    - source: short_ids
+      style: secondary
+      start: 88
+      end: 97
+    - source: vec!["unapproved-short-id".to_owned()]
+      style: secondary
+      start: 99
+      end: 137
+  ? |
+    mod tests {
         fn builds_mesh_target() {
             let fixture = MeshPeerTarget {
                 mesh_base_url: Some("https://unapproved.invalid".to_owned()),

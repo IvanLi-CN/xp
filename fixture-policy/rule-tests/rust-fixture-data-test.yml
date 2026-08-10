@@ -3,6 +3,11 @@ valid:
   - |
     let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };
   - |
+    let fixture = EndpointMeta {
+      short_ids: xp_test_fixtures::endpoint_short_ids(),
+      active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+    };
+  - |
     let call = Call::AddInbound { tag: request.tag.clone() };
   - |
     let request = ReconcileRequest::RemoveInbound { tag: observed_tag.clone() };
@@ -59,6 +64,11 @@ invalid:
     let sample = Probe { from_node_id: "unapproved-node".to_owned() };
   - |
     let fixture = Config { node_id: "node-unapproved" };
+  - |
+    let fixture = EndpointMeta {
+      short_ids: vec!["unapproved-short-id".to_owned()],
+      active_short_id: "unapproved-short-id".to_owned(),
+    };
   - |
     let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };
   - |

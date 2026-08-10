@@ -98,6 +98,20 @@ snapshots:
       start: 23
       end: 32
   ? |
+    let fixture = EndpointMeta {
+      short_ids: vec!["unapproved-short-id".to_owned()],
+      active_short_id: "unapproved-short-id".to_owned(),
+    };
+  : labels:
+    - source: 'short_ids: vec!["unapproved-short-id".to_owned()]'
+      style: primary
+      start: 31
+      end: 80
+    - source: short_ids
+      style: secondary
+      start: 31
+      end: 40
+  ? |
     let init = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
   : labels:
     - source: 'bootstrap_node_name: "unapproved-node".to_owned()'

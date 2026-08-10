@@ -54,7 +54,7 @@ struct EndpointOperations {
     #[serde(rename = "ssMetaEscaped")]
     ss_meta_escaped: serde_json::Value,
     #[serde(rename = "shortIds")]
-    short_ids: serde_json::Value,
+    short_ids: Vec<String>,
     #[serde(rename = "activeShortId")]
     active_short_id: String,
     #[serde(rename = "serverPskB64")]
@@ -228,8 +228,8 @@ pub fn endpoint_ss_meta_escaped() -> &'static serde_json::Value {
     &catalog().operations.endpoint.ss_meta_escaped
 }
 
-pub fn endpoint_short_ids() -> &'static serde_json::Value {
-    &catalog().operations.endpoint.short_ids
+pub fn endpoint_short_ids() -> Vec<String> {
+    catalog().operations.endpoint.short_ids.clone()
 }
 
 pub fn endpoint_active_short_id() -> &'static str {

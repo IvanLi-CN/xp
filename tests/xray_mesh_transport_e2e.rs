@@ -35,7 +35,7 @@ use xp::{
     mesh_telemetry::MeshPeerReason,
     protocol::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
-        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
+        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
     xray,
 };
@@ -273,7 +273,6 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
     .expect("node certificate");
     let canary = spawn_signed_tls_server(&ca.key_pem, &ca.cert_pem).await;
     let keypair = generate_reality_keypair(&mut OsRng);
-    let short_id = generate_short_id_16hex(&mut OsRng);
     let endpoint = Endpoint {
         endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
@@ -291,8 +290,8 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
                 private_key: keypair.private_key,
                 public_key: keypair.public_key,
             },
-            short_ids: vec![short_id.clone()],
-            active_short_id: short_id,
+            short_ids: xp_test_fixtures::endpoint_short_ids(),
+            active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
             canary_upstream: xp_test_fixtures::none(),
             accepted_authorities: xp_test_fixtures::secondary_server_names(),
             mihomo_smux: MihomoSmuxConfig::default(),
