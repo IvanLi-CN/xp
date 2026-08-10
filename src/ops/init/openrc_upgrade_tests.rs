@@ -81,6 +81,13 @@ fn openrc_upgrade_trigger_helper_only_checks_fixed_assets() {
         helper,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
+            "/src/ops/init/xp-openrc-upgrade-trigger"
+        ))
+    );
+    assert_eq!(
+        helper,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
             "/docs/ops/openrc/xp-upgrade-trigger"
         ))
     );

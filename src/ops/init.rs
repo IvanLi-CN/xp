@@ -566,7 +566,7 @@ fn write_openrc_upgrade_trigger_delegate(paths: &Paths, mode: Mode) -> Result<()
 fn openrc_upgrade_trigger_helper_script() -> String {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/docs/ops/openrc/xp-upgrade-trigger"
+        "/src/ops/init/xp-openrc-upgrade-trigger"
     ))
     .to_string()
 }
