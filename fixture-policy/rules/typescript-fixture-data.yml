@@ -92,6 +92,15 @@ rule:
                           field: name
                           pattern: buildUserAccessItem
             - all:
+                - pattern: endpoint.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildNodeDeletePreviewEndpoint
+            - all:
                 - pattern: node.node_id
                 - inside:
                     stopBy: end

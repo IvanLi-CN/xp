@@ -254,6 +254,30 @@ describe("storybook fixture semantics", () => {
 		});
 	});
 
+	it("keeps delete previews aligned with normalized endpoint state", async () => {
+		const mock = createMockApi();
+		const previewResponse = await mock.handle(
+			jsonRequest(
+				`/api/admin/nodes/${fixtureCatalog.nodeId.fixture32()}/delete-preview`,
+				{
+					method: "GET",
+				},
+			),
+		);
+		expect(previewResponse.ok).toBe(true);
+		expect(await previewResponse.json()).toEqual({
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			endpoints: [
+				{
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					tag: fixtureCatalog.endpointTag.fixture41(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port443(),
+				},
+			],
+		});
+	});
+
 	it("retains approved endpoint seed ports and reality configuration", () => {
 		const endpoint = normalizeFixtureEndpoint(
 			{

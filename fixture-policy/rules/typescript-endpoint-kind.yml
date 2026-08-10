@@ -47,5 +47,14 @@ rule:
                       - has:
                           field: name
                           pattern: ensureEndpointRecord
+            - all:
+                - pattern: endpoint.kind
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildNodeDeletePreviewEndpoint
             - pattern: >-
                 $CONDITION ? fixtureCatalog.endpoint.ssKind() : fixtureCatalog.endpoint.vlessKind()

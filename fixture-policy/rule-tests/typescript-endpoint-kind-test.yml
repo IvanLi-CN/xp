@@ -9,6 +9,14 @@ valid:
   - |
     const source = { kind: "github-releases" };
   - |
+    function buildNodeDeletePreviewEndpoint(endpoint) {
+      return {
+        endpoint_id: endpoint.endpoint_id,
+        port: endpoint.port,
+        kind: endpoint.kind,
+      };
+    }
+  - |
     const endpoint = {
       port: fixtureCatalog.endpoint.port8443(),
       kind: payload.kind === fixtureCatalog.endpoint.ssKind()

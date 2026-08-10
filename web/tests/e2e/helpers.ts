@@ -99,12 +99,12 @@ function catalogMihomoProfile(): MockMihomoProfile {
 	};
 }
 
-function buildNodeRuntimeListItem() {
+function buildNodeRuntimeListItem(node: AdminNode) {
 	return {
-		node_id: fixtureCatalog.nodeId.fixture32(),
-		node_name: fixtureCatalog.nodeName.fixture33(),
-		api_base_url: fixtureCatalog.service.fixture34(),
-		access_host: fixtureCatalog.host.fixture35(),
+		node_id: node.node_id,
+		node_name: node.node_name,
+		api_base_url: node.api_base_url,
+		access_host: node.access_host,
 		summary: {
 			status: "up",
 			updated_at: fixtureCatalog.timestamp.t20260301T000000(),
@@ -124,6 +124,13 @@ function buildNodeRuntimeListItem() {
 				status: "up",
 			},
 		],
+	};
+}
+
+function buildStatusHelloResponse(clusterInfo: ClusterInfo) {
+	return {
+		node_id: clusterInfo.node_id,
+		connected_at: fixtureCatalog.timestamp.t20260301T000000(),
 	};
 }
 
@@ -545,10 +552,7 @@ export async function setupApiMocks(
 		) {
 			const items = state.nodes.map(buildNodeRuntimeListItem);
 			const payload = [
-				`event: hello\ndata: ${JSON.stringify({
-					node_id: fixtureCatalog.nodeId.fixture57(),
-					connected_at: fixtureCatalog.timestamp.t20260301T000000(),
-				})}\n`,
+				`event: hello\ndata: ${JSON.stringify(buildStatusHelloResponse(state.clusterInfo))}\n`,
 				`event: snapshot\ndata: ${JSON.stringify({
 					emitted_at: fixtureCatalog.timestamp.t20260301T000000(),
 					health: { status: "ok" },

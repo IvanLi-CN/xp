@@ -9,6 +9,10 @@ valid:
   - |
     const endpoint = { domain_id: state.nextEndpointId() };
   - |
+    function buildNodeDeletePreviewEndpoint(endpoint) {
+      return { port: endpoint.port };
+    }
+  - |
     const weight = { weight: payload.weight };
 invalid:
   - |

@@ -18,6 +18,15 @@ valid:
       return { endpoint_id: endpoint.endpoint_id };
     }
   - |
+    function buildNodeDeletePreviewEndpoint(endpoint) {
+      return {
+        endpoint_id: endpoint.endpoint_id,
+        tag: endpoint.tag,
+        kind: endpoint.kind,
+        port: endpoint.port,
+      };
+    }
+  - |
     function buildFixtureUserNodeWeightItem(node, weight) {
       return { node_id: node.node_id, weight };
     }

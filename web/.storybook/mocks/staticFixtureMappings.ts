@@ -5,20 +5,14 @@ import type { AdminUserQuotaSummaryItem } from "../../src/api/adminUserQuotaSumm
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 export function buildNodeDeletePreviewEndpoint(
-	_endpoint: AdminEndpoint,
-	index: number,
+	endpoint: AdminEndpoint,
 ): Pick<AdminEndpoint, "endpoint_id" | "tag" | "kind" | "port"> {
-	const preview = {
-		endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
-		tag: fixtureCatalog.identifier.endpointTagSecondary(),
-		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: fixtureCatalog.endpoint.port443(),
+	return {
+		endpoint_id: endpoint.endpoint_id,
+		tag: endpoint.tag,
+		kind: endpoint.kind,
+		port: endpoint.port,
 	};
-	if (index === 0) {
-		preview.endpoint_id = fixtureCatalog.identifier.endpointPrimary();
-		preview.tag = fixtureCatalog.identifier.endpointTagPrimary();
-	}
-	return preview;
 }
 
 export function buildUserNodeQuotaStatusItem(
