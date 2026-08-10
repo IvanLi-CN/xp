@@ -27,10 +27,13 @@ import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
 import { NodeDetailsPage } from "./NodeDetailsPage";
 
-const { mockNavigate, mockReadAdminToken } = vi.hoisted(() => ({
-	mockNavigate: vi.fn(),
-	mockReadAdminToken: vi.fn(() => "admintoken"),
-}));
+const { mockNavigate, mockReadAdminToken, mockRouteParams } = vi.hoisted(
+	() => ({
+		mockNavigate: vi.fn(),
+		mockReadAdminToken: vi.fn(() => "admintoken"),
+		mockRouteParams: { nodeId: "node-tokyo" },
+	}),
+);
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual =
@@ -50,7 +53,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => mockNavigate,
-		useParams: () => ({ nodeId: "node-tokyo" }),
+		useParams: () => mockRouteParams,
 	};
 });
 
@@ -70,15 +73,21 @@ vi.mock("../components/auth", async (importOriginal) => {
 
 function renderPage() {
 	const queryClient = createQueryClient();
-	return render(
+	const page = () => (
 		<QueryClientProvider client={queryClient}>
 			<UiPrefsProvider>
 				<ToastProvider>
 					<NodeDetailsPage />
 				</ToastProvider>
 			</UiPrefsProvider>
-		</QueryClientProvider>,
+		</QueryClientProvider>
 	);
+	const result = render(page());
+	return {
+		...result,
+		queryClient,
+		rerenderPage: () => result.rerender(page()),
+	};
 }
 
 function setupMocks(args?: {
@@ -328,6 +337,7 @@ describe("<NodeDetailsPage />", () => {
 		vi.resetAllMocks();
 		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
+		mockRouteParams.nodeId = "node-tokyo";
 	});
 
 	afterEach(() => {
@@ -398,6 +408,46 @@ describe("<NodeDetailsPage />", () => {
 			expect(fetchAdminNodeTcpConnections).toHaveBeenLastCalledWith(
 				"admintoken",
 				"node-tokyo",
+				"7d",
+				expect.any(AbortSignal),
+			);
+		});
+	});
+
+	it("keeps the selected tab and time window when the node route changes", async () => {
+		setupMocks();
+		const page = renderPage();
+
+		fireEvent.click(await screenByRole("tab", "IP usage"));
+		await waitFor(() => {
+			expect(fetchAdminNodeIpUsage).toHaveBeenCalledWith(
+				"admintoken",
+				"node-tokyo",
+				"24h",
+				expect.any(AbortSignal),
+			);
+		});
+		fireEvent.click(await screenByRole("button", "7d"));
+		await waitFor(() => {
+			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
+				"admintoken",
+				"node-tokyo",
+				"7d",
+				expect.any(AbortSignal),
+			);
+		});
+
+		mockRouteParams.nodeId = "node-osaka";
+		page.rerenderPage();
+
+		expect(await screenByRole("tab", "IP usage")).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await waitFor(() => {
+			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
+				"admintoken",
+				"node-osaka",
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -541,7 +591,13 @@ describe("<NodeDetailsPage />", () => {
 				},
 			],
 		});
-		renderPage();
+		const { queryClient } = renderPage();
+		queryClient.setQueryData(["adminNodes", "admintoken"], {
+			items: [{ node_id: "node-tokyo" }],
+		});
+		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
+			items: [{ endpoint_id: "endpoint-ss", node_id: "node-tokyo" }],
+		});
 
 		fireEvent.click(await screenByRole("tab", "Danger zone"));
 		fireEvent.click(await screenByRole("button", "Delete node"));
@@ -553,6 +609,18 @@ describe("<NodeDetailsPage />", () => {
 				expectedEndpointIds: ["endpoint-ss"],
 			});
 		});
+		expect(
+			queryClient.getQueryData<{ items: Array<{ node_id: string }> }>([
+				"adminNodes",
+				"admintoken",
+			])?.items,
+		).toEqual([]);
+		expect(
+			queryClient.getQueryData<{ items: Array<{ endpoint_id: string }> }>([
+				"adminEndpoints",
+				"admintoken",
+			])?.items,
+		).toEqual([]);
 		expect(mockNavigate).toHaveBeenCalledWith({ to: "/nodes" });
 	});
 

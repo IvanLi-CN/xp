@@ -1,10 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { createAdminUser } from "../api/adminUsers";
+import { type AdminUsersResponse, createAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
 import { useApiCapability } from "../api/useApiCompatibility";
@@ -29,6 +30,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { appendAdminUser } from "./adminUsersCache";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -69,6 +71,7 @@ type CreateUserValues = z.output<typeof createUserSchema>;
 export function UserNewPage() {
 	const adminToken = readAdminToken();
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const usersCapability = useApiCapability("admin.users");
 	const [serverError, setServerError] = useState<string | null>(null);
@@ -132,6 +135,13 @@ export function UserNewPage() {
 									const created = await createAdminUser(adminToken, {
 										display_name: values.displayName.trim(),
 										quota_reset: quotaReset,
+									});
+									queryClient.setQueryData<AdminUsersResponse>(
+										["adminUsers", adminToken],
+										(previous) => appendAdminUser(previous, created),
+									);
+									void queryClient.invalidateQueries({
+										queryKey: ["adminUsers", adminToken],
 									});
 									pushToast({ variant: "success", message: "User created." });
 									navigate({
@@ -279,6 +289,7 @@ export function UserNewPage() {
 		isSubmitting,
 		navigate,
 		pushToast,
+		queryClient,
 		resetPolicy,
 		serverError,
 		usersCapability,
