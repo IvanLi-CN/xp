@@ -372,7 +372,7 @@ async fn cloudflare_provision_uses_mock_api_and_writes_files() {
           "errors": [],
           "result": {
             "config": {
-              "ingress": [{ "service": "http_status:404" }]
+              "ingress": [{ "service": xp_test_fixtures::public_fallback_url() }]
             }
           }
         })))

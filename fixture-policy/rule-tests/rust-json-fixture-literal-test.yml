@@ -9,6 +9,11 @@ valid:
       "dest": xp_test_fixtures::endpoint_authority_53844(),
     });
   - |
+    let ingress = json!({
+      "hostname": xp_test_fixtures::slot_s554(),
+      "service": xp_test_fixtures::primary_api_url(),
+    });
+  - |
     let release = json!({
       "published_at": xp_test_fixtures::release_current_timestamp(),
     });
@@ -30,6 +35,11 @@ invalid:
   - |
     let meta = json!({
       "reality": { "dest": request.destination }
+    });
+  - |
+    let ingress = json!({
+      "hostname": "live.example",
+      "service": "https://live.example",
     });
   - |
     let release = json!({

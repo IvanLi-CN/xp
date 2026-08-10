@@ -134,22 +134,28 @@ const meta = {
 						},
 					},
 				],
-				userNodeWeights: {
-					[userIdA]: [
-						{ node_id: fixtureCatalog.slotString.s145(), weight: 6500 },
-						{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
-						{ node_id: fixtureCatalog.slotString.s153(), weight: 2000 },
+				userNodeWeights: Object.fromEntries([
+					[
+						userIdA,
+						[
+							{ node_id: fixtureCatalog.slotString.s145(), weight: 6500 },
+							{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
+							{ node_id: fixtureCatalog.slotString.s153(), weight: 2000 },
+						],
 					],
-					[userIdB]: [
-						{ node_id: fixtureCatalog.slotString.s145(), weight: 3500 },
-						{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
-						{ node_id: fixtureCatalog.slotString.s153(), weight: 8000 },
+					[
+						userIdB,
+						[
+							{ node_id: fixtureCatalog.slotString.s145(), weight: 3500 },
+							{ node_id: fixtureCatalog.slotString.s149(), weight: 5000 },
+							{ node_id: fixtureCatalog.slotString.s153(), weight: 8000 },
+						],
 					],
-				},
-				userGlobalWeights: {
-					[userIdA]: 6500,
-					[userIdB]: 3500,
-				},
+				]),
+				userGlobalWeights: Object.fromEntries([
+					[userIdA, 6500],
+					[userIdB, 3500],
+				]),
 				nodeWeightPolicies: {
 					[fixtureCatalog.slotString.s145()]: {
 						node_id: fixtureCatalog.slotString.s145(),

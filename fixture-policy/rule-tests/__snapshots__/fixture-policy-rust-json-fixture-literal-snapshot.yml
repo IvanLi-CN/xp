@@ -1,6 +1,20 @@
 id: fixture-policy-rust-json-fixture-literal
 snapshots:
   ? |
+    let ingress = json!({
+      "hostname": "live.example",
+      "service": "https://live.example",
+    });
+  : labels:
+    - source: |-
+        json!({
+          "hostname": "live.example",
+          "service": "https://live.example",
+        })
+      style: primary
+      start: 14
+      end: 91
+  ? |
     let meta = json!({
       "dest": Some(request.destination)
     });

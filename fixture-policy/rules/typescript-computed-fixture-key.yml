@@ -2,7 +2,7 @@ id: fixture-policy-typescript-computed-fixture-key
 language: TypeScript
 severity: error
 message: Fixture endpoint kinds and user IDs must not use computed keys.
-note: Use a direct kind or user_id key with a fixtureCatalog accessor.
+note: Use a direct fixtureCatalog accessor or Object.fromEntries for map data.
 files:
   - web/src/**/*.test.ts
   - web/src/**/*.spec.ts
@@ -14,17 +14,5 @@ files:
 rule:
   all:
     - kind: computed_property_name
-    - any:
-        - regex: "^\\[\\s*(?:['\\\"](?:kind|user_id)['\\\"]|`(?:kind|user_id)`)\\s*\\]$"
-        - regex: >-
-            (?x) ^ \[ \s*
-            (?:
-              (?: ['\"] k ['\"] | ` k ` ) \s* \+ \s* (?: ['\"] ind ['\"] | ` ind ` )
-              |
-              (?: ['\"] user_ ['\"] | ` user_ ` ) \s* \+ \s* (?: ['\"] id ['\"] | ` id ` )
-            )
-            \s* \] $
-        - has:
-            all:
-              - kind: identifier
-              - regex: "^(kind|user_id|key|field|property)$"
+    - not:
+        regex: "^\\[\\s*fixtureCatalog\\.[A-Za-z0-9_.$()]+\\s*\\]$"

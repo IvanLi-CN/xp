@@ -5,6 +5,10 @@ valid:
       kind: fixtureCatalog.endpoint.vlessKind(),
       user_id: fixtureCatalog.identifier.userPrimary(),
     };
+  - |
+    const users = {
+      [fixtureCatalog.identifier.userPrimary()]: [],
+    };
 invalid:
   - |
     const endpoint = {
@@ -38,4 +42,8 @@ invalid:
   - |
     const endpoint = {
       ["k" + "ind"]: payload.kind,
+    };
+  - |
+    const endpoint = {
+      [name]: payload.kind,
     };

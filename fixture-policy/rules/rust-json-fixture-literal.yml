@@ -5,14 +5,17 @@ message: Rust JSON fixture macros must not embed operational literals.
 note: Use a direct xp_test_fixtures accessor instead.
 files:
   - tests/**/*.rs
-  - src/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
 rule:
   all:
     - kind: macro_invocation
     - any:
         - regex: >-
             (?xs) ^.*json\s*!\s*\(.*
-            "(dest|server_names|public_domain|server_name)"\s*:
+            "(dest|server_names|public_domain|server_name|hostname|service|origin_url)"\s*:
             \s*(\[?\s*)?"
         - regex: >-
             (?xs) ^.*json\s*!\s*\(.*
@@ -24,7 +27,7 @@ rule:
             \s*(\[?\s*)?"
         - regex: >-
             (?xs) ^.*json\s*!\s*\(.*
-            "(dest|server_names|public_domain|server_name)"\s*:
+            "(dest|server_names|public_domain|server_name|hostname|service|origin_url)"\s*:
             \s*(?:(?:[\[{]\s*)|
             (?:[A-Za-z_][A-Za-z0-9_:]*!?\s*(?:\([^)]*?|\[)))*
             (?:std::|serde_json::from_|request|payload|body)

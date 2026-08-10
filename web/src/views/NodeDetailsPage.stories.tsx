@@ -71,12 +71,12 @@ const meta = {
 		mockApi: {
 			data: {
 				nodes: [node],
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
 			},
 		},
 	},
@@ -185,12 +185,12 @@ export const DeleteWithEndpointCleanup: Story = {
 			data: {
 				nodes: [node],
 				endpoints: nodeEndpoints,
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
 			},
 		},
 	},
@@ -227,59 +227,62 @@ export const RuntimeHistoryFallback: Story = {
 		mockApi: {
 			data: {
 				nodes: [node],
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
-				nodeHistoryByNodeId: {
-					[node.node_id]: {
-						node_id: fixtureCatalog.identifier.nodePrimary(),
-						last_synced_at: fixtureCatalog.timestamp.baseline(),
-						last_sync_error: "request timeout while syncing node history",
-						daily_traffic: [
-							{
-								date: "2026-05-20",
-								uplink_bytes: fixtureCatalog.slotNumber.n2(),
-								downlink_bytes: fixtureCatalog.slotNumber.n3(),
-								updated_at: fixtureCatalog.timestamp.baseline(),
-							},
-						],
-						daily_component_status: [
-							{
-								date: "2026-05-20",
-								components: [
-									{
-										component: "xp",
-										status: "up",
-										observed_at: fixtureCatalog.slotString.s653(),
-									},
-									{
-										component: "xray",
-										status: "down",
-										observed_at: fixtureCatalog.slotString.s653(),
-									},
-									{
-										component: "cloudflared",
-										status: "up",
-										observed_at: fixtureCatalog.slotString.s653(),
-									},
-								],
-							},
-						],
-						component_status_events: [
-							{
-								event_id: "fallback-event-1",
-								occurred_at: fixtureCatalog.slotString.s654(),
-								component: "xray",
-								message: "xray status changed: up -> down",
-								from_status: "up",
-								to_status: "down",
-							},
-						],
-					},
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
+				nodeHistoryByNodeId: Object.fromEntries([
+					[
+						node.node_id,
+						{
+							node_id: fixtureCatalog.identifier.nodePrimary(),
+							last_synced_at: fixtureCatalog.timestamp.baseline(),
+							last_sync_error: "request timeout while syncing node history",
+							daily_traffic: [
+								{
+									date: "2026-05-20",
+									uplink_bytes: fixtureCatalog.slotNumber.n2(),
+									downlink_bytes: fixtureCatalog.slotNumber.n3(),
+									updated_at: fixtureCatalog.timestamp.baseline(),
+								},
+							],
+							daily_component_status: [
+								{
+									date: "2026-05-20",
+									components: [
+										{
+											component: "xp",
+											status: "up",
+											observed_at: fixtureCatalog.slotString.s653(),
+										},
+										{
+											component: "xray",
+											status: "down",
+											observed_at: fixtureCatalog.slotString.s653(),
+										},
+										{
+											component: "cloudflared",
+											status: "up",
+											observed_at: fixtureCatalog.slotString.s653(),
+										},
+									],
+								},
+							],
+							component_status_events: [
+								{
+									event_id: "fallback-event-1",
+									occurred_at: fixtureCatalog.slotString.s654(),
+									component: "xray",
+									message: "xray status changed: up -> down",
+									from_status: "up",
+									to_status: "down",
+								},
+							],
+						},
+					],
+				]),
 			},
 			failNodeRuntimeNodeIds: [node.node_id],
 		},

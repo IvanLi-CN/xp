@@ -812,19 +812,23 @@ function createDefaultSeed(): MockStateSeed {
 		},
 	];
 
-	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> = {
-		[userId1]: [
-			{
-				node_id: fixtureCatalog.slotString.s32(),
-				weight: fixtureCatalog.slotNumber.n30(),
-			},
-		],
-		[userId2]: [],
-	};
-	const userGlobalWeights: Record<string, number> = {
-		[userId1]: fixtureCatalog.slotNumber.n30(),
-		[userId2]: fixtureCatalog.slotNumber.n30(),
-	};
+	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> =
+		Object.fromEntries([
+			[
+				userId1,
+				[
+					{
+						node_id: fixtureCatalog.slotString.s32(),
+						weight: fixtureCatalog.slotNumber.n30(),
+					},
+				],
+			],
+			[userId2, []],
+		]);
+	const userGlobalWeights: Record<string, number> = Object.fromEntries([
+		[userId1, fixtureCatalog.slotNumber.n30()],
+		[userId2, fixtureCatalog.slotNumber.n30()],
+	]);
 	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
 		[fixtureCatalog.slotString.s32()]: {
 			node_id: fixtureCatalog.slotString.s32(),
@@ -835,22 +839,29 @@ function createDefaultSeed(): MockStateSeed {
 			inherit_global: true,
 		},
 	};
-	const userAccessByUserId: Record<string, AdminUserAccessItem[]> = {
-		[userId1]: [
-			{
-				user_id: userId1,
-				endpoint_id: fixtureCatalog.slotString.s40(),
-				node_id: fixtureCatalog.slotString.s32(),
-			},
-		],
-		[userId2]: [
-			{
-				user_id: userId2,
-				endpoint_id: fixtureCatalog.slotString.s43(),
-				node_id: fixtureCatalog.slotString.s36(),
-			},
-		],
-	};
+	const userAccessByUserId: Record<string, AdminUserAccessItem[]> =
+		Object.fromEntries([
+			[
+				userId1,
+				[
+					{
+						user_id: userId1,
+						endpoint_id: fixtureCatalog.slotString.s40(),
+						node_id: fixtureCatalog.slotString.s32(),
+					},
+				],
+			],
+			[
+				userId2,
+				[
+					{
+						user_id: userId2,
+						endpoint_id: fixtureCatalog.slotString.s43(),
+						node_id: fixtureCatalog.slotString.s36(),
+					},
+				],
+			],
+		]);
 	const userAutoAssignEndpointKindsByUserId = Object.fromEntries(
 		Object.entries(userAccessByUserId).map(([userId, items]) => [
 			userId,
@@ -864,10 +875,10 @@ function createDefaultSeed(): MockStateSeed {
 		items: [],
 	};
 
-	const subscriptions: Record<string, string> = {
-		[subToken1]: fixtureCatalog.subscription.rawUri(),
-		[subToken2]: fixtureCatalog.subscription.rawUri(),
-	};
+	const subscriptions: Record<string, string> = Object.fromEntries([
+		[subToken1, fixtureCatalog.subscription.rawUri()],
+		[subToken2, fixtureCatalog.subscription.rawUri()],
+	]);
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;

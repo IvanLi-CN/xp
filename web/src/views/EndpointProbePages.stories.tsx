@@ -172,9 +172,7 @@ const meta = {
 				endpoints,
 			},
 			probe: {
-				historyByEndpointId: {
-					[ENDPOINT_ID]: history,
-				},
+				historyByEndpointId: Object.fromEntries([[ENDPOINT_ID, history]]),
 				runsByRunId: {
 					[fixtureCatalog.identifier.probeRunPrimary()]: run,
 				},

@@ -78,20 +78,23 @@ const meta = {
 			data: {
 				endpoints,
 				nodes,
-				userAccessByUserId: {
-					[USER_ID_1]: [
-						{
-							user_id: fixtureCatalog.identifier.userPrimary(),
-							endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
-							node_id: fixtureCatalog.identifier.nodePrimary(),
-						},
-						{
-							user_id: fixtureCatalog.identifier.userPrimary(),
-							endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
-							node_id: fixtureCatalog.identifier.nodeSecondary(),
-						},
+				userAccessByUserId: Object.fromEntries([
+					[
+						USER_ID_1,
+						[
+							{
+								user_id: fixtureCatalog.identifier.userPrimary(),
+								endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+								node_id: fixtureCatalog.identifier.nodePrimary(),
+							},
+							{
+								user_id: fixtureCatalog.identifier.userPrimary(),
+								endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+								node_id: fixtureCatalog.identifier.nodeSecondary(),
+							},
+						],
 					],
-				},
+				]),
 				nodeQuotas: [
 					{
 						user_id: fixtureCatalog.identifier.userPrimary(),
@@ -106,9 +109,9 @@ const meta = {
 						quota_reset_source: "node",
 					},
 				],
-				userIpUsageByUserId: {
-					[USER_ID_1]: userUsageReports,
-				},
+				userIpUsageByUserId: Object.fromEntries([
+					[USER_ID_1, userUsageReports],
+				]),
 			},
 		},
 	},
@@ -287,11 +290,14 @@ export const UsageDetailsDuplicateNames: Story = {
 						},
 					},
 				],
-				userIpUsageByUserId: {
-					[USER_ID_1]: {
-						...buildDuplicateNameUserIpUsageStories(),
-					},
-				},
+				userIpUsageByUserId: Object.fromEntries([
+					[
+						USER_ID_1,
+						{
+							...buildDuplicateNameUserIpUsageStories(),
+						},
+					],
+				]),
 			},
 		},
 	},
