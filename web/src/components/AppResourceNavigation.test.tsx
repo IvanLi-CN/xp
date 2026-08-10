@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveApiCompatibility } from "../api/apiCompatibility";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { createQueryClient } from "../queryClient";
 import { AppResourceNavigation } from "./AppResourceNavigation";
 
@@ -19,6 +20,10 @@ const nodeGroups = [
 		items: [{ label: "Nodes", to: "/nodes", icon: "tabler:server" }],
 	},
 ];
+
+function formatNodeLabel(nodeName: string, nodeId: string) {
+	return `${nodeName} (${nodeId})`;
+}
 
 describe("<AppResourceNavigation />", () => {
 	it("shows a retryable compatibility error instead of permanent loading", () => {
@@ -53,18 +58,18 @@ describe("<AppResourceNavigation />", () => {
 		queryClient.setQueryData(["adminNodes", "admintoken"], {
 			items: [
 				{
-					node_id: "node-tokyo-1",
-					node_name: "Tokyo edge",
-					api_base_url: "https://tokyo.example.test",
-					access_host: "tokyo.example.test",
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+					api_base_url: fixtureCatalog.url.primaryApi(),
+					access_host: fixtureCatalog.host.primary(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
 				{
-					node_id: "node-osaka-1",
-					node_name: "Osaka edge",
-					api_base_url: "https://osaka.example.test",
-					access_host: "osaka.example.test",
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+					api_base_url: fixtureCatalog.url.secondaryApi(),
+					access_host: fixtureCatalog.host.secondary(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
@@ -82,8 +87,8 @@ describe("<AppResourceNavigation />", () => {
 					compatibilityError={null}
 					compatibilityPending={false}
 					groups={nodeGroups}
-					localNodeId="node-tokyo-1"
-					pathname="/nodes/node-osaka-1"
+					localNodeId={fixtureCatalog.identifier.nodePrimary()}
+					pathname={`/nodes/${fixtureCatalog.identifier.nodeSecondary()}`}
 					onNavigate={vi.fn()}
 					onResourceNavigate={vi.fn()}
 					onRetryCompatibility={vi.fn()}
@@ -91,11 +96,19 @@ describe("<AppResourceNavigation />", () => {
 			</QueryClientProvider>,
 		);
 
+		const primaryNodeLabel = formatNodeLabel(
+			fixtureCatalog.identifier.nodeNamePrimary(),
+			fixtureCatalog.identifier.nodePrimary(),
+		);
+		const secondaryNodeLabel = formatNodeLabel(
+			fixtureCatalog.identifier.nodeNameSecondary(),
+			fixtureCatalog.identifier.nodeSecondary(),
+		);
 		const currentNode = screen.getByRole("link", {
-			name: "Current hosting node Tokyo edge (node-tokyo-1)",
+			name: `Current hosting node ${primaryNodeLabel}`,
 		});
 		const ordinaryNode = screen.getByRole("link", {
-			name: "Node Osaka edge (node-osaka-1)",
+			name: `Node ${secondaryNodeLabel}`,
 		});
 		expect(currentNode).toHaveAttribute(
 			"data-leading-icon-name",
