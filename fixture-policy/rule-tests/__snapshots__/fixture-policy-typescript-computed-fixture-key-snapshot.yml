@@ -2,6 +2,15 @@ id: fixture-policy-typescript-computed-fixture-key
 snapshots:
   ? |
     const endpoint = {
+      ["k" + "ind"]: payload.kind,
+    };
+  : labels:
+    - source: '["k" + "ind"]'
+      style: primary
+      start: 21
+      end: 34
+  ? |
+    const endpoint = {
       ["kind"]: "vless_reality_vision_tcp",
     };
   : labels:
@@ -31,6 +40,20 @@ snapshots:
       style: secondary
       start: 22
       end: 26
+  ? |
+    const key = "kind";
+    const endpoint = {
+      [key]: payload.kind,
+    };
+  : labels:
+    - source: '[key]'
+      style: primary
+      start: 41
+      end: 46
+    - source: key
+      style: secondary
+      start: 42
+      end: 45
   ? |
     const user = {
       ['user_id']: payload.user_id,

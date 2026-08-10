@@ -2,6 +2,30 @@ id: fixture-policy-rust-json-fixture-literal
 snapshots:
   ? |
     let meta = json!({
+      "dest": Some(request.destination)
+    });
+  : labels:
+    - source: |-
+        json!({
+          "dest": Some(request.destination)
+        })
+      style: primary
+      start: 11
+      end: 57
+  ? |
+    let meta = json!({
+      "dest": format!("{}", request.destination)
+    });
+  : labels:
+    - source: |-
+        json!({
+          "dest": format!("{}", request.destination)
+        })
+      style: primary
+      start: 11
+      end: 66
+  ? |
+    let meta = json!({
       "reality": { "dest": "live.example:443" }
     });
   : labels:
@@ -36,6 +60,18 @@ snapshots:
       style: primary
       start: 11
       end: 62
+  ? |
+    let meta = json!({
+      "server_names": vec![request.server_names]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "server_names": vec![request.server_names]
+        })
+      style: primary
+      start: 11
+      end: 66
   ? |
     let meta = json!({
       "short_ids": [payload.short_id]

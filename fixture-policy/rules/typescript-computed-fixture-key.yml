@@ -16,7 +16,15 @@ rule:
     - kind: computed_property_name
     - any:
         - regex: "^\\[\\s*(?:['\\\"](?:kind|user_id)['\\\"]|`(?:kind|user_id)`)\\s*\\]$"
+        - regex: >-
+            (?x) ^ \[ \s*
+            (?:
+              (?: ['\"] k ['\"] | ` k ` ) \s* \+ \s* (?: ['\"] ind ['\"] | ` ind ` )
+              |
+              (?: ['\"] user_ ['\"] | ` user_ ` ) \s* \+ \s* (?: ['\"] id ['\"] | ` id ` )
+            )
+            \s* \] $
         - has:
             all:
               - kind: identifier
-              - regex: "^(kind|user_id)$"
+              - regex: "^(kind|user_id|key|field|property)$"

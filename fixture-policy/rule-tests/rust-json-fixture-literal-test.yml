@@ -57,6 +57,18 @@ invalid:
       "short_ids": [payload.short_id]
     });
   - |
+    let meta = json!({
+      "dest": Some(request.destination)
+    });
+  - |
+    let meta = json!({
+      "server_names": vec![request.server_names]
+    });
+  - |
+    let meta = json!({
+      "dest": format!("{}", request.destination)
+    });
+  - |
     let release = json!({
       "published_at": release_secret()
     });

@@ -30,3 +30,12 @@ invalid:
     const user = {
       [user_id]: fixtureCatalog.identifier.userPrimary(),
     };
+  - |
+    const key = "kind";
+    const endpoint = {
+      [key]: payload.kind,
+    };
+  - |
+    const endpoint = {
+      ["k" + "ind"]: payload.kind,
+    };

@@ -25,15 +25,21 @@ rule:
         - regex: >-
             (?xs) ^.*json\s*!\s*\(.*
             "(dest|server_names|public_domain|server_name)"\s*:
-            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:(?:[\[{]\s*)|
+            (?:[A-Za-z_][A-Za-z0-9_:]*!?\s*(?:\([^)]*?|\[)))*
+            (?:std::|serde_json::from_|request|payload|body)
         - regex: >-
             (?xs) ^.*json\s*!\(.*
             "(private_key|public_key|short_ids|active_short_id)"\s*:
-            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:(?:[\[{]\s*)|
+            (?:[A-Za-z_][A-Za-z0-9_:]*!?\s*(?:\([^)]*?|\[)))*
+            (?:std::|serde_json::from_|request|payload|body)
         - regex: >-
             (?xs) ^.*json\s*!\(.*
             "(server_psk_b64|user_psk_b64|password)"\s*:
-            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:(?:[\[{]\s*)|
+            (?:[A-Za-z_][A-Za-z0-9_:]*!?\s*(?:\([^)]*?|\[)))*
+            (?:std::|serde_json::from_|request|payload|body)
         - all:
             - regex: >-
                 (?xs) ^.*json\s*!\s*\(.*
