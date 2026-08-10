@@ -104,6 +104,12 @@ pub async fn cmd_cloudflare_provision_container(
     .await
 }
 
+/// Marks the persisted host-managed Tunnel declaration enabled after the deploy
+/// flow has enabled and started the complete service stack.
+pub(super) fn set_managed_tunnel_enabled(paths: &Paths, enabled: bool) -> Result<(), ExitError> {
+    cloudflare_provision::set_persisted_tunnel_enabled(paths, enabled)
+}
+
 fn read_token_input(args: &CloudflareTokenSetArgs) -> Result<String, ExitError> {
     if args.from_stdin == args.from_env.is_some() {
         return Err(ExitError::new(

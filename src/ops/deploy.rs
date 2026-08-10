@@ -536,6 +536,9 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             let distro = detect_distro(&paths).map_err(|e| ExitError::new(2, e))?;
             let init_system = detect_init_system(distro, None);
             enable_and_start_services(init_system, plan.cloudflare_enabled).await?;
+            if plan.cloudflare_enabled {
+                cloudflare::set_managed_tunnel_enabled(&paths, true)?;
+            }
         }
 
         if join_or_existing_metadata && !is_test_root(paths.root()) {
@@ -1620,7 +1623,8 @@ fn managed_service_names(cloudflare_enabled: bool) -> &'static [&'static str] {
 
 #[derive(Debug, PartialEq, Eq)]
 enum ManagedServiceActivationStep {
-    EnableAndStart(&'static str),
+    Enable(&'static str),
+    StartOrRestart(&'static str),
     WaitReady(&'static str),
 }
 
@@ -1629,7 +1633,8 @@ fn managed_service_activation_steps(cloudflare_enabled: bool) -> Vec<ManagedServ
         .iter()
         .flat_map(|service| {
             [
-                ManagedServiceActivationStep::EnableAndStart(service),
+                ManagedServiceActivationStep::Enable(service),
+                ManagedServiceActivationStep::StartOrRestart(service),
                 ManagedServiceActivationStep::WaitReady(service),
             ]
         })
@@ -1645,27 +1650,63 @@ async fn enable_and_start_services(
     }
 
     if init_system == InitSystem::Systemd {
-        let _ = std::process::Command::new("systemctl")
-            .args(["daemon-reload"])
-            .status();
+        ensure_service_command_succeeded(
+            "systemd",
+            "daemon-reload",
+            std::process::Command::new("systemctl")
+                .args(["daemon-reload"])
+                .status()
+                .map(|status| status.success()),
+        )?;
     }
 
     for step in managed_service_activation_steps(cloudflare_enabled) {
         match step {
-            ManagedServiceActivationStep::EnableAndStart(service) => match init_system {
+            ManagedServiceActivationStep::Enable(service) => match init_system {
                 InitSystem::Systemd => {
                     let unit = format!("{service}.service");
-                    let _ = std::process::Command::new("systemctl")
-                        .args(["enable", "--now", unit.as_str()])
-                        .status();
+                    ensure_service_command_succeeded(
+                        service,
+                        "enable",
+                        std::process::Command::new("systemctl")
+                            .args(["enable", unit.as_str()])
+                            .status()
+                            .map(|status| status.success()),
+                    )?;
                 }
                 InitSystem::OpenRc => {
-                    let _ = std::process::Command::new("rc-update")
-                        .args(["add", service, "default"])
-                        .status();
-                    let _ = std::process::Command::new("rc-service")
-                        .args([service, "start"])
-                        .status();
+                    ensure_service_command_succeeded(
+                        service,
+                        "enable",
+                        std::process::Command::new("rc-update")
+                            .args(["add", service, "default"])
+                            .status()
+                            .map(|status| status.success()),
+                    )?;
+                }
+                InitSystem::None => {}
+            },
+            ManagedServiceActivationStep::StartOrRestart(service) => match init_system {
+                InitSystem::Systemd => {
+                    let unit = format!("{service}.service");
+                    ensure_service_command_succeeded(
+                        service,
+                        "start/restart",
+                        std::process::Command::new("systemctl")
+                            .args(["restart", unit.as_str()])
+                            .status()
+                            .map(|status| status.success()),
+                    )?;
+                }
+                InitSystem::OpenRc => {
+                    ensure_service_command_succeeded(
+                        service,
+                        "start/restart",
+                        std::process::Command::new("rc-service")
+                            .args([service, "restart"])
+                            .status()
+                            .map(|status| status.success()),
+                    )?;
                 }
                 InitSystem::None => {}
             },
@@ -1676,6 +1717,24 @@ async fn enable_and_start_services(
     }
 
     Ok(())
+}
+
+fn ensure_service_command_succeeded(
+    service: &str,
+    action: &str,
+    result: io::Result<bool>,
+) -> Result<(), ExitError> {
+    let succeeded = result.map_err(|error| {
+        ExitError::new(6, format!("service_failed: {service} {action}: {error}"))
+    })?;
+    if succeeded {
+        Ok(())
+    } else {
+        Err(ExitError::new(
+            6,
+            format!("service_failed: {service} {action} failed"),
+        ))
+    }
 }
 
 fn public_api_probe_status_is_healthy(status: reqwest::StatusCode) -> bool {

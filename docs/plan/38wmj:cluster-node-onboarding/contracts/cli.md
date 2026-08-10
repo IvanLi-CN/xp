@@ -44,7 +44,7 @@ xp-ops deploy \
      `cloudflared`
   5. 执行 join（不得执行 `xp init`）并获取集群 `XP_ADMIN_TOKEN_HASH`（见 `contracts/http-apis.md`）
   6. 写入 `/etc/xp/xp.env`（必须包含从 leader 同步到的 `XP_ADMIN_TOKEN_HASH`；不得写入明文 token）
-  7. （可选）按 `xray`、`xp`、`cloudflared` 顺序启用并启动服务，且每个服务 MUST ready
+  7. （可选）按 `xray`、`xp`、`cloudflared` 顺序启用并启动或重启服务，且每个服务 MUST ready
      后才能继续
   8. join 服务启用后，MUST 仅在最终公共 `api_base_url/health` 返回 HTTP `200` 时报告成功
 - join 模式不得要求用户额外输入 admin token；token 获取必须在“只提供 join token”的条件下完成。

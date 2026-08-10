@@ -97,7 +97,7 @@ Notes:
 - Token resolution priority for deploy is: `flag/stdin` → `CLOUDFLARE_API_TOKEN` → `/etc/xp-ops/cloudflare_tunnel/api_token`.
 - `xp-ops deploy --ddns` reuses that token source, then writes an `xp`-readable runtime copy to `/etc/xp/cloudflare_ddns_api_token`.
 - For a host-managed join, deploy provisions Tunnel/DNS without starting `cloudflared`, runs
-  `xp join`, writes `/etc/xp/xp.env`, then starts and confirms `xray`, `xp`, and optional
+  `xp join`, writes `/etc/xp/xp.env`, then enables, starts or restarts, and confirms `xray`, `xp`, and optional
   `cloudflared` in that order. With `--enable-services`, final `https://<api-base-url>/health`
   must return HTTP `200`. A `post_join_health_failed` result retains the joined member and its
   metadata; rerun deploy after repairing the service or public routing without issuing a new join

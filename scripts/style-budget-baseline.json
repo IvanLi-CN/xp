@@ -631,7 +631,7 @@
   "src/ops/cloudflare.rs": {
     "long_line_count": 3,
     "max_line_length": 504,
-    "source_lines": 1087
+    "source_lines": 1093
   },
   "src/ops/container.rs": {
     "long_line_count": 10,
@@ -641,7 +641,7 @@
   "src/ops/deploy.rs": {
     "long_line_count": 21,
     "max_line_length": 187,
-    "source_lines": 2358
+    "source_lines": 2416
   },
   "src/ops/deploy/tests.rs": {
     "long_line_count": 4,

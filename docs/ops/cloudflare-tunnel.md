@@ -150,7 +150,7 @@ Notes:
   default `https://api.country.is` origin. Omitting it preserves an existing value and keeps new
   nodes on the program default.
 - For host-managed join deployments, Tunnel/DNS provisioning stages the configuration only.
-  Deploy joins and writes `/etc/xp/xp.env` before starting `xray`, `xp`, and `cloudflared`;
+  Deploy joins and writes `/etc/xp/xp.env` before enabling then starting or restarting `xray`, `xp`, and `cloudflared`;
   public `api_base_url/health` must then return HTTP `200`. A `post_join_health_failed` result
   keeps the member and local metadata for a retry after repairing the service or public route.
 

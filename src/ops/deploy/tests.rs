@@ -767,13 +767,43 @@ fn post_join_service_activation_orders_and_waits_each_service() {
     assert_eq!(
         managed_service_activation_steps(true),
         vec![
-            ManagedServiceActivationStep::EnableAndStart("xray"),
+            ManagedServiceActivationStep::Enable("xray"),
+            ManagedServiceActivationStep::StartOrRestart("xray"),
             ManagedServiceActivationStep::WaitReady("xray"),
-            ManagedServiceActivationStep::EnableAndStart("xp"),
+            ManagedServiceActivationStep::Enable("xp"),
+            ManagedServiceActivationStep::StartOrRestart("xp"),
             ManagedServiceActivationStep::WaitReady("xp"),
-            ManagedServiceActivationStep::EnableAndStart("cloudflared"),
+            ManagedServiceActivationStep::Enable("cloudflared"),
+            ManagedServiceActivationStep::StartOrRestart("cloudflared"),
             ManagedServiceActivationStep::WaitReady("cloudflared"),
         ]
+    );
+}
+
+#[test]
+fn service_activation_rejects_command_failures() {
+    assert!(ensure_service_command_succeeded("xp", "enable", Ok(true)).is_ok());
+
+    let status_error = ensure_service_command_succeeded("xp", "enable", Ok(false))
+        .expect_err("non-zero service command must fail deploy");
+    assert_eq!(status_error.code, 6);
+    assert!(
+        status_error
+            .message
+            .contains("service_failed: xp enable failed")
+    );
+
+    let execution_error = ensure_service_command_succeeded(
+        "xp",
+        "start/restart",
+        Err(io::Error::other("systemctl unavailable")),
+    )
+    .expect_err("unavailable service command must fail deploy");
+    assert_eq!(execution_error.code, 6);
+    assert!(
+        execution_error
+            .message
+            .contains("service_failed: xp start/restart: systemctl unavailable")
     );
 }
 

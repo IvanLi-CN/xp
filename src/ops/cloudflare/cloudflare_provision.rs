@@ -849,6 +849,18 @@ async fn cleanup_created_tunnel_after_preflight(
     }
 }
 
+pub(super) fn set_persisted_tunnel_enabled(paths: &Paths, enabled: bool) -> Result<(), ExitError> {
+    let mut settings = load_settings_or_default(paths)?;
+    if settings.tunnel_id.is_none() {
+        return Err(ExitError::new(
+            6,
+            "cloudflare_settings_missing: provisioned Tunnel settings were not found",
+        ));
+    }
+    settings.enabled = enabled;
+    save_settings(paths, &settings)
+}
+
 fn load_settings_or_default(paths: &Paths) -> Result<Settings, ExitError> {
     let p = paths.etc_xp_ops_cloudflare_settings();
     let Ok(raw) = fs::read_to_string(&p) else {
