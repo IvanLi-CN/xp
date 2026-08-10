@@ -37,7 +37,9 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"loopbackServerNames"|"primaryAuthorities"|"tertiaryAuthorities"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443"|"tokens"|"userIds")$'
+            any:
+              - regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"loopbackServerNames"|"primaryAuthorities"|"tertiaryAuthorities"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443"|"tokens"|"userIds")$'
+              - regex: '^"emptyAuthorities"$'
         - has:
             field: value
             not:
@@ -122,6 +124,7 @@ rule:
             field: key
             any:
               - regex: '^("reality"|"realityAlternate"|"realityKeys"|"vlessMeta")$'
+              - regex: '^"realitySecondary"$'
               - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped")$'
               - regex: '^("reset"|"resetNode"|"resetNodeMidMonth")$'
               - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'

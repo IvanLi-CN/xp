@@ -2,7 +2,9 @@ import type {
 	AdminEndpoint,
 	AdminEndpointCreateRequest,
 	AdminEndpointPatchRequest,
+	MihomoSmuxConfig,
 } from "../../src/api/adminEndpoints";
+import { MihomoSmuxConfigSchema } from "../../src/api/adminEndpoints";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
@@ -238,44 +240,189 @@ export function isFixtureEndpointCreateRequest(
 	);
 }
 
+function normalizeFixtureEndpointPort(value: number): number | undefined {
+	if (value === fixtureCatalog.endpoint.port443()) {
+		return fixtureCatalog.endpoint.port443();
+	}
+	if (value === fixtureCatalog.endpoint.port444()) {
+		return fixtureCatalog.endpoint.port444();
+	}
+	if (value === fixtureCatalog.endpoint.port445()) {
+		return fixtureCatalog.endpoint.port445();
+	}
+	if (value === fixtureCatalog.endpoint.port8443()) {
+		return fixtureCatalog.endpoint.port8443();
+	}
+	if (value === fixtureCatalog.endpoint.port8388()) {
+		return fixtureCatalog.endpoint.port8388();
+	}
+	if (value === fixtureCatalog.endpoint.port9443()) {
+		return fixtureCatalog.endpoint.port9443();
+	}
+	if (value === fixtureCatalog.endpoint.port53842()) {
+		return fixtureCatalog.endpoint.port53842();
+	}
+	if (value === fixtureCatalog.endpoint.port53843()) {
+		return fixtureCatalog.endpoint.port53843();
+	}
+	if (value === fixtureCatalog.endpoint.port53844()) {
+		return fixtureCatalog.endpoint.port53844();
+	}
+	return undefined;
+}
+
+function matchesFixtureValue(value: unknown, fixture: unknown): boolean {
+	return JSON.stringify(value) === JSON.stringify(fixture);
+}
+
+function normalizeFixtureMihomoSmux(
+	value: unknown,
+): MihomoSmuxConfig | undefined {
+	const parsed = MihomoSmuxConfigSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
+}
+
 export function normalizeFixtureEndpointPatch<T extends AdminEndpoint>(
 	endpoint: T,
 	payload: AdminEndpointPatchRequest,
 ): T | undefined {
-	if (
-		payload.canary_upstream !== undefined ||
-		payload.accepted_authorities !== undefined ||
-		payload.mihomo_smux !== undefined
-	) {
-		return undefined;
-	}
-
 	let updated = endpoint;
 	if (payload.port !== undefined) {
+		const port = normalizeFixtureEndpointPort(payload.port);
+		if (port === undefined) return undefined;
+		updated = {
+			...updated,
+			port,
+		};
+	}
+	if (payload.reality !== undefined) {
 		if (
-			payload.port !== fixtureCatalog.endpoint.port443() &&
-			payload.port !== fixtureCatalog.endpoint.port8443() &&
-			payload.port !== fixtureCatalog.endpoint.port9443()
+			!matchesFixtureValue(
+				payload.reality,
+				fixtureCatalog.endpoint.reality(),
+			) &&
+			!matchesFixtureValue(
+				payload.reality,
+				fixtureCatalog.endpoint.realityAlternate(),
+			)
 		) {
 			return undefined;
 		}
 		updated = {
 			...updated,
-			port:
-				payload.port === fixtureCatalog.endpoint.port8443()
-					? fixtureCatalog.endpoint.port8443()
-					: payload.port === fixtureCatalog.endpoint.port9443()
-						? fixtureCatalog.endpoint.port9443()
-						: fixtureCatalog.endpoint.port443(),
-		};
-	}
-	if (payload.reality !== undefined) {
-		updated = {
-			...updated,
 			meta: {
 				...updated.meta,
-				reality: fixtureCatalog.endpoint.reality(),
+				reality: matchesFixtureValue(
+					payload.reality,
+					fixtureCatalog.endpoint.realityAlternate(),
+				)
+					? fixtureCatalog.endpoint.realityAlternate()
+					: fixtureCatalog.endpoint.reality(),
 			},
+		};
+	}
+	if (payload.canary_upstream !== undefined) {
+		if (payload.canary_upstream === null) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					canary_upstream: fixtureCatalog.optional.undefined(),
+				},
+			};
+		} else if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpsListener(),
+			)
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+				},
+			};
+		} else if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpsAlternate(),
+			)
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsAlternate(),
+				},
+			};
+		} else if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpLoopback(),
+			)
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+				},
+			};
+		} else {
+			return undefined;
+		}
+	}
+	if (payload.accepted_authorities !== undefined) {
+		if (
+			payload.accepted_authorities === null ||
+			(payload.accepted_authorities.length === 0 &&
+				Array.isArray(payload.accepted_authorities))
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					accepted_authorities: fixtureCatalog.optional.undefined(),
+				},
+			};
+		} else if (
+			matchesFixtureValue(
+				payload.accepted_authorities,
+				fixtureCatalog.authority.edgeExamplePort443(),
+			)
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
+				},
+			};
+		} else if (
+			matchesFixtureValue(
+				payload.accepted_authorities,
+				fixtureCatalog.authority.existingAuthoritiesPort443(),
+			)
+		) {
+			updated = {
+				...updated,
+				meta: {
+					...updated.meta,
+					accepted_authorities:
+						fixtureCatalog.authority.existingAuthoritiesPort443(),
+				},
+			};
+		} else {
+			return undefined;
+		}
+	}
+	if (payload.mihomo_smux !== undefined) {
+		const mihomoSmux = normalizeFixtureMihomoSmux(payload.mihomo_smux);
+		if (!mihomoSmux) return undefined;
+		updated = {
+			...updated,
+			meta: { ...updated.meta, mihomo_smux: mihomoSmux },
 		};
 	}
 	return updated;

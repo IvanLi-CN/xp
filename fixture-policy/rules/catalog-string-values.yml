@@ -12,6 +12,7 @@ rule:
           - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations|fixtures)"$'
           - regex: '^"(lists|subscription|endpoint|quota|user|reality|realityAlternate)"$'
           - regex: '^"(realityKeys|vlessMeta|ssMeta|ssMetaAlternate|ssMetaEscaped)"$'
+          - regex: '^"(emptyAuthorities|realitySecondary)"$'
           - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists|value|hostList)"$'
           - regex: '^"(resetNode|resetNodeMidMonth|resetUnlimited)"$'
           - regex: '^"(resetUnlimitedRequest|resetUserMidMonth)"$'

@@ -192,6 +192,8 @@ struct Lists {
     loopback_server_names: Vec<String>,
     #[serde(rename = "primaryAuthorities")]
     primary_authorities: Vec<String>,
+    #[serde(rename = "emptyAuthorities")]
+    empty_authorities: Vec<String>,
     #[serde(rename = "tertiaryAuthorities")]
     tertiary_authorities: Vec<String>,
     #[serde(rename = "existingAuthoritiesPort443")]

@@ -40,6 +40,7 @@ import type {
 import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
+import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
@@ -76,7 +77,10 @@ import {
 	normalizeFixtureRealityDomainPatch,
 	normalizeFixtureUserPatch,
 } from "./fixtureMutationPolicy";
-import { buildUserNodeQuotaStatusItem } from "./staticFixtureMappings";
+import {
+	buildFixtureUserQuotaSummaryItem,
+	buildUserNodeQuotaStatusItem,
+} from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
@@ -2169,32 +2173,18 @@ async function handleRequest(
 			return jsonResponse(clone(state.quotaSummaries));
 		}
 
-		const quotaUserIds = new Set(
-			state.nodeQuotas.map((quota) => quota.user_id),
-		);
-		const primaryQuota = {
-			quota_limit_kind: "fixed" as const,
-			quota_limit_bytes: fixtureCatalog.quota.fifteenGiB(),
-			used_bytes: fixtureCatalog.quota.usedBytes(),
-			remaining_bytes: fixtureCatalog.quota.fifteenGiB(),
-		};
-		const secondaryQuota = {
-			quota_limit_kind: "fixed" as const,
-			quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
-			used_bytes: fixtureCatalog.quota.usedBytes(),
-			remaining_bytes: fixtureCatalog.quota.fiveGiB(),
-		};
+		const quotasByUserId = new Map<string, AdminUserNodeQuota[]>();
+		for (const quota of state.nodeQuotas) {
+			const quotas = quotasByUserId.get(quota.user_id) ?? [];
+			quotas.push(quota);
+			quotasByUserId.set(quota.user_id, quotas);
+		}
 		// Only include users that have any quota data (real API omits users without quotas).
-		const items = state.users.flatMap((u) => {
-			if (!quotaUserIds.has(u.user_id)) return [];
-			return [
-				{
-					user_id: u.user_id,
-					...(u.user_id === fixtureCatalog.identifier.userPrimary()
-						? primaryQuota
-						: secondaryQuota),
-				},
-			];
+		const items = state.users.flatMap((user) => {
+			const quotas = quotasByUserId.get(user.user_id);
+			return quotas
+				? [buildFixtureUserQuotaSummaryItem(user.user_id, quotas)]
+				: [];
 		});
 
 		const response: AdminUserQuotaSummariesResponse = {

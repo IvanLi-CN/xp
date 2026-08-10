@@ -232,6 +232,7 @@ export const fixtureCatalog = {
 		}),
 	},
 	authority: {
+		empty: () => [...catalog.lists.emptyAuthorities],
 		edgeExamplePort443: () => [...catalog.lists.primaryAuthorities],
 		existingAuthoritiesPort443: () => [
 			...catalog.lists.existingAuthoritiesPort443,
@@ -336,6 +337,7 @@ export const fixtureCatalog = {
 		port53844: () => catalog.operations.endpoint.port53844,
 		reality: () => catalog.operations.endpoint.reality,
 		realityAlternate: () => catalog.operations.endpoint.realityAlternate,
+		realitySecondary: () => catalog.operations.endpoint.realitySecondary,
 		realityKeys: () => catalog.operations.endpoint.realityKeys,
 		shortIds: () => catalog.operations.endpoint.shortIds,
 		activeShortId: () => catalog.operations.endpoint.activeShortId,

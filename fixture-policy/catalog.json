@@ -105,6 +105,12 @@
 				"server_names_source": "manual",
 				"fingerprint": "chrome"
 			},
+			"realitySecondary": {
+				"dest": "127.0.0.1:39043",
+				"server_names": [],
+				"server_names_source": "manual",
+				"fingerprint": "chrome"
+			},
 			"realityKeys": {
 				"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 				"public_key": ""
@@ -238,6 +244,7 @@
 		"primaryAuthorities": [
 			"node-a.fixture.test:443"
 		],
+		"emptyAuthorities": [],
 		"tertiaryAuthorities": [
 			"node-c.fixture.test:443"
 		],

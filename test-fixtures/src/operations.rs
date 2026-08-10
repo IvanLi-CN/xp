@@ -41,6 +41,8 @@ struct EndpointOperations {
     reality: serde_json::Value,
     #[serde(rename = "realityAlternate")]
     reality_alternate: serde_json::Value,
+    #[serde(rename = "realitySecondary")]
+    reality_secondary: serde_json::Value,
     #[serde(rename = "realityKeys")]
     reality_keys: serde_json::Value,
     #[serde(rename = "vlessMeta")]

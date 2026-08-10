@@ -119,6 +119,14 @@ export function normalizeFixtureEndpoint(
 		normalized.endpoint_id = fixtureCatalog.identifier.endpointSecondary();
 		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
 		normalized.tag = fixtureCatalog.identifier.endpointTagSecondary();
+		normalized.port = fixtureCatalog.endpoint.port53844();
+		normalized.meta = {
+			reality: fixtureCatalog.endpoint.realitySecondary(),
+			reality_keys: fixtureCatalog.endpoint.realityKeys(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			managed_default: true,
+		};
 	} else if (index > 0) {
 		normalized.endpoint_id = fixtureCatalog.endpointId.fixture43();
 		normalized.node_id = fixtureCatalog.nodeId.fixture36();
@@ -130,6 +138,24 @@ export function normalizeFixtureEndpoint(
 		normalized.meta = {
 			server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
 		};
+	} else if (endpoint.port === fixtureCatalog.endpoint.port443()) {
+		normalized.port = fixtureCatalog.endpoint.port443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port444()) {
+		normalized.port = fixtureCatalog.endpoint.port444();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port445()) {
+		normalized.port = fixtureCatalog.endpoint.port445();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port8443()) {
+		normalized.port = fixtureCatalog.endpoint.port8443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port8388()) {
+		normalized.port = fixtureCatalog.endpoint.port8388();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port9443()) {
+		normalized.port = fixtureCatalog.endpoint.port9443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53842()) {
+		normalized.port = fixtureCatalog.endpoint.port53842();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53843()) {
+		normalized.port = fixtureCatalog.endpoint.port53843();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53844()) {
+		normalized.port = fixtureCatalog.endpoint.port53844();
 	}
 	return normalized;
 }

@@ -161,7 +161,9 @@ function applyFixtureEndpointMetadata(
 		return false;
 	}
 	if (Array.isArray(payload.accepted_authorities)) {
-		if (
+		if (payload.accepted_authorities.length === 0) {
+			endpoint.meta.accepted_authorities = fixtureCatalog.optional.undefined();
+		} else if (
 			matchesFixtureValue(
 				payload.accepted_authorities,
 				fixtureCatalog.authority.edgeExamplePort443(),
