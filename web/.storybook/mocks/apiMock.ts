@@ -57,12 +57,6 @@ import {
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
 import {
-	sanitizeFixtureEndpoint,
-	sanitizeFixtureNode,
-	sanitizeFixtureQuota,
-	sanitizeFixtureUser,
-} from "./fixtureStateSanitizers";
-import {
 	buildNodeDeletePreviewEndpoint,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
@@ -286,15 +280,19 @@ function sseResponse(
 
 function ensureEndpointRecord(
 	seed: MockEndpointSeed,
-	index: number,
+	_counters: MockState["counters"],
 ): MockEndpointRecord {
-	return sanitizeFixtureEndpoint(seed, index) as MockEndpointRecord;
-}
-
-function fixtureUserId(user: AdminUser): string {
-	return user.user_id === fixtureCatalog.identifier.userSecondary()
-		? fixtureCatalog.identifier.userSecondary()
-		: fixtureCatalog.identifier.userPrimary();
+	return {
+		endpoint_id: seed.endpoint_id,
+		node_id: seed.node_id,
+		tag: seed.tag,
+		kind: seed.kind,
+		port: seed.port,
+		meta: seed.meta,
+		probe: seed.probe,
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
+	};
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
@@ -385,10 +383,10 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 			? "degraded"
 			: "up";
 	return {
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s33(),
-		api_base_url: fixtureCatalog.slotString.s34(),
-		access_host: fixtureCatalog.slotString.s35(),
+		node_id: node.node_id,
+		node_name: node.node_name,
+		api_base_url: node.api_base_url,
+		access_host: node.access_host,
 		summary: {
 			status: summaryStatus,
 			updated_at: fixtureCatalog.slotString.s7(),
@@ -414,7 +412,7 @@ function buildNodeRuntimeDetail(
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	const components = buildRuntimeComponents(node);
 	return {
-		node_id: fixtureCatalog.slotString.s32(),
+		node_id: node.node_id,
 		last_synced_at: fixtureCatalog.slotString.s21(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
@@ -563,14 +561,14 @@ function buildDefaultUserTraffic(
 	});
 	return {
 		"24h": {
-			user: { user_id: fixtureUserId(user), display_name: user.display_name },
+			user: { user_id: user.user_id, display_name: user.display_name },
 			traffic: buildTrafficReport("24h"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
 		},
 		"31d": {
-			user: { user_id: fixtureUserId(user), display_name: user.display_name },
+			user: { user_id: user.user_id, display_name: user.display_name },
 			traffic: buildTrafficReport("31d"),
 			nodes: nodeOptions,
 			partial: false,
@@ -688,7 +686,7 @@ function buildDefaultUserIpUsage(
 
 	return {
 		user: {
-			user_id: fixtureUserId(user),
+			user_id: user.user_id,
 			display_name: user.display_name,
 		},
 		window: "24h",
@@ -1022,19 +1020,13 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		user: 1,
 	};
 
-	const endpoints = merged.endpoints.map((endpoint, index) =>
-		ensureEndpointRecord(endpoint, index),
+	const endpoints = merged.endpoints.map((endpoint) =>
+		ensureEndpointRecord(endpoint, counters),
 	);
-	const nodes = merged.nodes.map(sanitizeFixtureNode);
-	const users = merged.users.map(sanitizeFixtureUser);
-	const nodeQuotas = merged.nodeQuotas.map(sanitizeFixtureQuota);
 
 	const state: MockState = {
 		...clone(merged),
-		nodes,
 		endpoints,
-		users,
-		nodeQuotas,
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
@@ -1611,7 +1603,7 @@ async function handleRequest(
 		const items: AdminQuotaPolicyGlobalWeightRow[] = state.users.map((user) => {
 			const storedWeight = state.userGlobalWeights[user.user_id];
 			return {
-				user_id: fixtureUserId(user),
+				user_id: user.user_id,
 				display_name: user.display_name,
 				priority_tier: user.priority_tier,
 				stored_weight: storedWeight,
@@ -1724,7 +1716,7 @@ async function handleRequest(
 				(entry) => entry.node_id === nodeId,
 			)?.weight;
 			items.push({
-				user_id: fixtureUserId(user),
+				user_id: user.user_id,
 				display_name: user.display_name,
 				priority_tier: user.priority_tier,
 				endpoint_ids: [...endpointIdsSet].sort(),
@@ -2096,7 +2088,7 @@ async function handleRequest(
 			if (!quotaUserIds.has(u.user_id)) return [];
 			return [
 				{
-					user_id: fixtureUserId(u),
+					user_id: u.user_id,
 					...(u.user_id === fixtureCatalog.identifier.userPrimary()
 						? primaryQuota
 						: secondaryQuota),

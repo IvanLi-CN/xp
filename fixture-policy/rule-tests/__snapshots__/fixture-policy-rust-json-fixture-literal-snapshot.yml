@@ -69,6 +69,43 @@ snapshots:
       start: 11
       end: 109
   ? |
+    let published_at = "2026-01-20T00:00:00Z";
+    let release = json!({
+      "published_at": published_at
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": published_at
+        })
+      style: primary
+      start: 57
+      end: 98
+  ? |
+    let release = json ! ({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  : labels:
+    - source: |-
+        json ! ({
+          "published_at": "2026-01-20T00:00:00Z"
+        })
+      style: primary
+      start: 14
+      end: 67
+  ? |
+    let release = json!({
+      "browser_download_url": "https://github.com/live/download"
+    });
+  : labels:
+    - source: |-
+        json!({
+          "browser_download_url": "https://github.com/live/download"
+        })
+      style: primary
+      start: 14
+      end: 85
+  ? |
     let release = json!({
       "browser_download_url": std::env::var("LIVE_URL")
     });
@@ -92,3 +129,15 @@ snapshots:
       style: primary
       start: 14
       end: 65
+  ? |
+    let release = json!({
+      "published_at": format!("{}", "2026-01-20T00:00:00Z")
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": format!("{}", "2026-01-20T00:00:00Z")
+        })
+      style: primary
+      start: 14
+      end: 80

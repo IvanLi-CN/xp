@@ -6,12 +6,34 @@ note: Construct endpoint records through the catalog-backed sanitizer.
 files:
   - web/.storybook/mocks/apiMock.ts
 rule:
-  all:
-    - kind: spread_element
-    - inside:
-        stopBy: end
-        all:
-          - kind: function_declaration
-          - has:
-              field: name
-              pattern: ensureEndpointRecord
+  any:
+    - all:
+        - kind: spread_element
+        - inside:
+            stopBy: end
+            any:
+              - all:
+                  - kind: function_declaration
+                  - has:
+                      field: name
+                      pattern: ensureEndpointRecord
+              - all:
+                  - kind: variable_declarator
+                  - has:
+                      field: name
+                      pattern: ensureEndpointRecord
+    - all:
+        - pattern: Object.assign($TARGET, $SOURCE)
+        - inside:
+            stopBy: end
+            any:
+              - all:
+                  - kind: function_declaration
+                  - has:
+                      field: name
+                      pattern: ensureEndpointRecord
+              - all:
+                  - kind: variable_declarator
+                  - has:
+                      field: name
+                      pattern: ensureEndpointRecord

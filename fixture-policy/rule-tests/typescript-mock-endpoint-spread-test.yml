@@ -9,3 +9,9 @@ invalid:
     function ensureEndpointRecord(seed) {
       return { ...seed, port: fixtureCatalog.endpoint.port443() };
     }
+  - |
+    const ensureEndpointRecord = (seed) => ({ ...seed });
+  - |
+    function ensureEndpointRecord(seed) {
+      return Object.assign({}, seed);
+    }

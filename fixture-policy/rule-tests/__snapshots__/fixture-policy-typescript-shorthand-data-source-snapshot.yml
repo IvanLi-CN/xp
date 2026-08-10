@@ -25,6 +25,14 @@ snapshots:
       start: 55
       end: 59
   ? |
+    const kind = payload.kind;
+    const fixture = { kind };
+  : labels:
+    - source: kind
+      style: primary
+      start: 45
+      end: 49
+  ? |
     const run_id = "unapproved-run";
     const fixture = { run_id };
   : labels:
@@ -48,3 +56,11 @@ snapshots:
       style: primary
       start: 44
       end: 55
+  ? |
+    const user_id = payload.user_id;
+    const fixture = { user_id };
+  : labels:
+    - source: user_id
+      style: primary
+      start: 51
+      end: 58

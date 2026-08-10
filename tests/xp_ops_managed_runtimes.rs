@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use xp_test_fixtures::recent_timestamp;
+use xp_test_fixtures::release_current_timestamp;
 
 fn asset(prefix: &str) -> String {
     let suffix = if env::consts::ARCH == "aarch64" {
@@ -64,7 +64,7 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     let body = serde_json::json!({
         "tag_name": "v0.1.999",
         "prerelease": false,
-        "published_at": recent_timestamp(),
+        "published_at": release_current_timestamp(),
         "assets": release_assets
     });
     for release_path in [
@@ -193,7 +193,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let release = serde_json::json!({
         "tag_name": "v0.1.999",
         "prerelease": false,
-        "published_at": recent_timestamp(),
+        "published_at": release_current_timestamp(),
         "assets": release_assets,
     });
     for release_path in [

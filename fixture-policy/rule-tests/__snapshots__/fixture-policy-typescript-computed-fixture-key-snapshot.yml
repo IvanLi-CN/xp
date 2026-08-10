@@ -1,0 +1,20 @@
+id: fixture-policy-typescript-computed-fixture-key
+snapshots:
+  ? |
+    const endpoint = {
+      ["kind"]: "vless_reality_vision_tcp",
+    };
+  : labels:
+    - source: '["kind"]'
+      style: primary
+      start: 21
+      end: 29
+  ? |
+    const user = {
+      ['user_id']: payload.user_id,
+    };
+  : labels:
+    - source: '[''user_id'']'
+      style: primary
+      start: 17
+      end: 28

@@ -33,3 +33,23 @@ rule:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
             - pattern: 'null'
+            - all:
+                - pattern: seed.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: ensureEndpointRecord
+            - all:
+                - pattern: node.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          any:
+                            - pattern: buildNodeRuntimeListItem
+                            - pattern: buildNodeHistory

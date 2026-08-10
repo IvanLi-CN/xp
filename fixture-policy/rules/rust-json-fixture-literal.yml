@@ -11,38 +11,42 @@ rule:
     - kind: macro_invocation
     - any:
         - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\s*\(.*
             "(dest|server_names|public_domain|server_name)"\s*:
             \s*(\[?\s*)?"
         - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\s*\(.*
             "(private_key|public_key|short_ids|active_short_id)"\s*:
             \s*(\[?\s*)?"
         - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\s*\(.*
             "(server_psk_b64|user_psk_b64|password)"\s*:
             \s*(\[?\s*)?"
         - regex: >-
-            (?xs) ^.*json!\(.*
-            "(published_at)"\s*:
-            \s*(\[?\s*)?"
-        - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\s*\(.*
             "(dest|server_names|public_domain|server_name)"\s*:
             \s*(?:std::|serde_json::from_|request|payload|body)
         - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\(.*
             "(private_key|public_key|short_ids|active_short_id)"\s*:
             \s*(?:std::|serde_json::from_|request|payload|body)
         - regex: >-
-            (?xs) ^.*json!\(.*
+            (?xs) ^.*json\s*!\(.*
             "(server_psk_b64|user_psk_b64|password)"\s*:
             \s*(?:std::|serde_json::from_|request|payload|body)
-        - regex: >-
-            (?xs) ^.*json!\(.*
-            "(published_at)"\s*:
-            \s*(?:std::|serde_json::from_|request|payload|body)
-        - regex: >-
-            (?xs) ^.*json!\(.*
-            "(browser_download_url)"\s*:
-            \s*(?:std::|serde_json::from_|request|payload|body|fs::)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*
+                "published_at"\s*:
+            - not:
+                regex: >-
+                  (?xs) "published_at"\s*:
+                  \s*(?:xp_test_fixtures::)?release_[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*
+                "browser_download_url"\s*:
+            - not:
+                regex: >-
+                  (?xs) "browser_download_url"\s*:
+                  \s*(?:format!\(.*?server\.uri\(\).*?\)|xp_url|xp_ops_url|checksums_url)

@@ -1,6 +1,15 @@
 id: fixture-policy-typescript-data-source
 valid:
   - |
+    function buildNodeRuntimeListItem(node) {
+      return {
+        node_id: node.node_id,
+        node_name: node.node_name,
+        api_base_url: node.api_base_url,
+        access_host: node.access_host,
+      };
+    }
+  - |
     const fixture = { host: fixtureCatalog.host.primary() };
   - |
     const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };

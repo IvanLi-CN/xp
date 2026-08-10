@@ -16,7 +16,9 @@ rule:
     - kind: pair
     - has:
         field: key
-        regex: '^user_id$'
+        any:
+          - regex: '^user_id$'
+          - pattern: '["user_id"]'
     - has:
         field: value
         any:

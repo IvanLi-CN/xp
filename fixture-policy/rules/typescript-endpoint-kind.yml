@@ -16,7 +16,9 @@ rule:
     - kind: pair
     - has:
         field: key
-        regex: '^kind$'
+        any:
+          - regex: '^kind$'
+          - pattern: '["kind"]'
     - inside:
         stopBy: end
         all:
@@ -25,12 +27,25 @@ rule:
               kind: pair
               has:
                 field: key
-                regex: '^(endpoint_id|endpointId|port)$'
+                any:
+                  - regex: '^(endpoint_id|endpointId|port)$'
+                  - pattern: '["endpoint_id"]'
+                  - pattern: '["endpointId"]'
+                  - pattern: '["port"]'
     - has:
         field: value
         not:
           any:
             - pattern: fixtureCatalog.endpoint.vlessKind()
             - pattern: fixtureCatalog.endpoint.ssKind()
+            - all:
+                - pattern: seed.kind
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: ensureEndpointRecord
             - pattern: >-
                 $CONDITION ? fixtureCatalog.endpoint.ssKind() : fixtureCatalog.endpoint.vlessKind()

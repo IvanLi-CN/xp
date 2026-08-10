@@ -1,0 +1,16 @@
+id: fixture-policy-tsx-computed-fixture-key
+valid:
+  - |
+    const endpoint = {
+      kind: fixtureCatalog.endpoint.vlessKind(),
+      user_id: fixtureCatalog.identifier.userPrimary(),
+    };
+invalid:
+  - |
+    const endpoint = {
+      ["kind"]: "vless_reality_vision_tcp",
+    };
+  - |
+    const user = {
+      ['user_id']: payload.user_id,
+    };

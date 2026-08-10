@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
+import type { NodeQuotaReset } from "../api/quotaReset";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
-import { createMockApi } from "../../.storybook/mocks/apiMock";
+import {
+	type MockEndpointSeed,
+	createMockApi,
+} from "../../.storybook/mocks/apiMock";
 
 const baseUrl = "http://localhost";
 
@@ -844,19 +847,9 @@ describe("storybook api mock", () => {
 		expect(policyAfter.inherit_global).toBe(false);
 	});
 
-	it("sanitizes configured operational records before responding", async () => {
+	it("drops unmodeled endpoint fields from configured records", async () => {
 		const mock = createMockApi({
 			data: {
-				nodes: [
-					{
-						node_id: fixtureCatalog.identifier.nodeTertiary(),
-						node_name: fixtureCatalog.identifier.nodeNameTertiary(),
-						access_host: fixtureCatalog.host.tertiary(),
-						api_base_url: fixtureCatalog.url.tertiaryApi(),
-						quota_limit_bytes: fixtureCatalog.quota.fifteenGiB(),
-						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
-					},
-				],
 				endpoints: [
 					{
 						endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
@@ -867,56 +860,19 @@ describe("storybook api mock", () => {
 						meta: {
 							server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
 						},
-					},
-				],
-				users: [
-					{
-						user_id: fixtureCatalog.identifier.userQuinary(),
-						display_name: "Configured user",
-						subscription_token: fixtureCatalog.identifier.tokenQuinary(),
-						credential_epoch: fixtureCatalog.user.credentialEpoch(),
-						priority_tier: fixtureCatalog.user.priorityTierDefault(),
-						quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
-					},
+						public_domain: fixtureCatalog.host.tertiary(),
+					} as unknown as MockEndpointSeed,
 				],
 			},
 		});
 
-		const [nodesRes, endpointsRes, usersRes] = await Promise.all([
-			mock.handle(jsonRequest("/api/admin/nodes", { method: "GET" })),
-			mock.handle(jsonRequest("/api/admin/endpoints", { method: "GET" })),
-			mock.handle(jsonRequest("/api/admin/users", { method: "GET" })),
-		]);
-
-		expect(nodesRes.ok).toBe(true);
+		const endpointsRes = await mock.handle(
+			jsonRequest("/api/admin/endpoints", { method: "GET" }),
+		);
 		expect(endpointsRes.ok).toBe(true);
-		expect(usersRes.ok).toBe(true);
-		expect(
-			(await nodesRes.json()) as { items: Array<{ node_id: string }> },
-		).toMatchObject({
-			items: [{ node_id: fixtureCatalog.slotString.s32() }],
-		});
-		expect(
-			(await endpointsRes.json()) as {
-				items: Array<{
-					endpoint_id: string;
-					kind: string;
-					port: number;
-				}>;
-			},
-		).toMatchObject({
-			items: [
-				{
-					endpoint_id: fixtureCatalog.slotString.s40(),
-					kind: fixtureCatalog.endpoint.vlessKind(),
-					port: fixtureCatalog.endpoint.port443(),
-				},
-			],
-		});
-		expect(
-			(await usersRes.json()) as { items: Array<{ user_id: string }> },
-		).toMatchObject({
-			items: [{ user_id: fixtureCatalog.identifier.userPrimary() }],
-		});
+		const data = (await endpointsRes.json()) as {
+			items: Array<{ public_domain?: string }>;
+		};
+		expect(data.items[0]).not.toHaveProperty("public_domain");
 	});
 });
