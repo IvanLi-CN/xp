@@ -72,9 +72,10 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     let updated = body_json(res).await;
     assert_eq!(updated["endpoint_id"], endpoint_id);
     assert_eq!(updated["port"], 8443);
-    assert_eq!(updated["meta"]["reality"]["dest"], "example.com:443");
-    assert_eq!(updated["meta"]["reality"]["server_names"][0], "example.com");
-    assert_eq!(updated["meta"]["reality"]["fingerprint"], "chrome");
+    assert_eq!(
+        &updated["meta"]["reality"],
+        xp_test_fixtures::endpoint_reality()
+    );
     assert_eq!(updated["meta"].get("mihomo_smux"), None);
     assert_eq!(updated["meta"]["reality_keys"], reality_keys);
     assert_eq!(updated["meta"]["short_ids"], short_ids);
@@ -96,12 +97,10 @@ async fn patch_admin_endpoint_vless_updates_meta_and_port() {
     let updated = body_json(res).await;
     assert_eq!(updated["endpoint_id"], endpoint_id);
     assert_eq!(updated["port"], 8443);
-    assert_eq!(updated["meta"]["reality"]["dest"], "edge.example.com:443");
     assert_eq!(
-        updated["meta"]["reality"]["server_names"][0],
-        "edge.example.com"
+        &updated["meta"]["reality"],
+        xp_test_fixtures::endpoint_reality_alternate()
     );
-    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
     assert_eq!(updated["meta"]["reality_keys"], reality_keys);
     assert_eq!(updated["meta"]["short_ids"], short_ids);
     assert_eq!(updated["meta"]["active_short_id"], active_short_id);
