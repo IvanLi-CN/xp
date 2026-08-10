@@ -181,12 +181,6 @@ describe("EndpointNewPage", () => {
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 		expect(createAdminEndpoint).not.toHaveBeenCalledWith(
@@ -289,12 +283,6 @@ describe("EndpointNewPage", () => {
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host130Port443(),
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 	});
@@ -410,12 +398,6 @@ describe("EndpointNewPage", () => {
 					node_id: fixtureCatalog.nodeId.fixture182(),
 					port: 8443,
 					accepted_authorities: fixtureCatalog.authority.host130Port8443(),
-					mihomo_smux: {
-						enabled: true,
-						max_connections: 4,
-						min_streams: 4,
-						only_tcp: true,
-					},
 				});
 			});
 		},
@@ -510,12 +492,6 @@ describe("EndpointNewPage", () => {
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host126Port443(),
-				mihomo_smux: {
-					enabled: true,
-					max_connections: 4,
-					min_streams: 4,
-					only_tcp: true,
-				},
 			});
 		});
 	});

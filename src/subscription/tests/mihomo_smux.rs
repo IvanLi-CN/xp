@@ -118,7 +118,7 @@ fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_stand
         "min_streams": 4,
         "only_tcp": true
     });
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let raw_before =
         build_raw_text(SEED, &u, &memberships, &endpoints, std::slice::from_ref(&n)).unwrap();
     let base64_before =

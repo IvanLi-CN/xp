@@ -93,6 +93,7 @@ rule:
           - regex: '^"(Aardvark|Alpha|Beta|Dash Host|Dot Host|Japan|Node Beta)"$'
           - regex: '^"(Only US|Osaka A|Osaka B|Seoul A|Singapore A|Tokyo|Tokyo A)"$'
           - regex: '^"(Tokyo B|Tokyo-A|vless_reality_vision_tcp|ss2022_2022_blake3_aes_128_gcm)"$'
+          - regex: '^"2022-blake3-aes-128-gcm"$'
           - regex: '^"(AAAAAAAAAAAAAAAAAAAAAA==|BBBBBBBBBBBBBBBBBBBBBB==)"$'
           - regex: '^"AQEBAQEBAQEBAQEBAQEBAQ=="$'
           - regex: '^"[+]/v7[+]/v7[+]/v7[+]/v7[+]/v7[+]w=="$'
