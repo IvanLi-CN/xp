@@ -1,28 +1,35 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
 
 const options = [
-	{ node_id: "node-a", node_name: "Node A" },
-	{ node_id: "node-b", node_name: "Node B" },
+	{
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+	},
+	{
+		node_id: fixtureCatalog.identifier.nodeSecondary(),
+		node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+	},
 ];
 
 describe("resolveUserTrafficNodeFilter", () => {
 	it("retains a filter only when it belongs to the current user's options", () => {
 		expect(
 			resolveUserTrafficNodeFilter({
-				activeNodeId: "node-a",
+				activeNodeId: fixtureCatalog.identifier.nodePrimary(),
 				options,
-				optionsUserId: "user-a",
-				userId: "user-a",
+				optionsUserId: fixtureCatalog.identifier.userPrimary(),
+				userId: fixtureCatalog.identifier.userPrimary(),
 			}),
-		).toBe("node-a");
+		).toBe(fixtureCatalog.identifier.nodePrimary());
 		expect(
 			resolveUserTrafficNodeFilter({
-				activeNodeId: "node-a",
-				options: [{ node_id: "node-b", node_name: "Node B" }],
-				optionsUserId: "user-b",
-				userId: "user-b",
+				activeNodeId: fixtureCatalog.identifier.nodePrimary(),
+				options: [options[1]],
+				optionsUserId: fixtureCatalog.identifier.userSecondary(),
+				userId: fixtureCatalog.identifier.userSecondary(),
 			}),
 		).toBeNull();
 	});
@@ -30,10 +37,10 @@ describe("resolveUserTrafficNodeFilter", () => {
 	it("uses all nodes until the new user's options have loaded", () => {
 		expect(
 			resolveUserTrafficNodeFilter({
-				activeNodeId: "node-a",
+				activeNodeId: fixtureCatalog.identifier.nodePrimary(),
 				options,
-				optionsUserId: "user-a",
-				userId: "user-b",
+				optionsUserId: fixtureCatalog.identifier.userPrimary(),
+				userId: fixtureCatalog.identifier.userSecondary(),
 			}),
 		).toBeNull();
 	});

@@ -32,7 +32,7 @@ const { mockNavigate, mockReadAdminToken, mockRouteParams } = vi.hoisted(
 	() => ({
 		mockNavigate: vi.fn(),
 		mockReadAdminToken: vi.fn(() => "admintoken"),
-		mockRouteParams: { nodeId: "node-tokyo" },
+		mockRouteParams: {} as { nodeId: string },
 	}),
 );
 
@@ -342,7 +342,7 @@ describe("<NodeDetailsPage />", () => {
 		vi.resetAllMocks();
 		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
-		mockRouteParams.nodeId = "node-tokyo";
+		mockRouteParams.nodeId = fixtureCatalog.slotString.s134();
 	});
 
 	afterEach(() => {
@@ -433,7 +433,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.slotString.s134(),
 				"24h",
 				expect.any(AbortSignal),
 			);
@@ -442,13 +442,13 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.slotString.s134(),
 				"7d",
 				expect.any(AbortSignal),
 			);
 		});
 
-		mockRouteParams.nodeId = "node-osaka";
+		mockRouteParams.nodeId = fixtureCatalog.slotString.s145();
 		page.rerenderPage();
 
 		expect(await screenByRole("tab", "IP usage")).toHaveAttribute(
@@ -458,7 +458,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-osaka",
+				fixtureCatalog.slotString.s145(),
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -612,10 +612,15 @@ describe("<NodeDetailsPage />", () => {
 		});
 		const { queryClient } = renderPage();
 		queryClient.setQueryData(["adminNodes", "admintoken"], {
-			items: [{ node_id: "node-tokyo" }],
+			items: [{ node_id: fixtureCatalog.slotString.s134() }],
 		});
 		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
-			items: [{ endpoint_id: "endpoint-ss", node_id: "node-tokyo" }],
+			items: [
+				{
+					endpoint_id: fixtureCatalog.slotString.s144(),
+					node_id: fixtureCatalog.slotString.s134(),
+				},
+			],
 		});
 
 		fireEvent.click(await screenByRole("tab", "Danger zone"));
