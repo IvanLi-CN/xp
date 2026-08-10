@@ -40,7 +40,7 @@ describe("<ResourceNavigation />", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("starts collapsed at the exact index route and exposes a ten-row scroll window", () => {
+	it("starts collapsed at the exact index route and uses the shared scroll area", () => {
 		const onNavigate = vi.fn();
 		render(
 			<ResourceNavigation
@@ -60,12 +60,13 @@ describe("<ResourceNavigation />", () => {
 
 		expect(screen.getByText("User 01")).toBeInTheDocument();
 		expect(screen.getByText("User 12")).toBeInTheDocument();
-		expect(screen.getByTestId("resource-list-users")).toHaveClass(
-			"max-h-[20rem]",
-		);
-		expect(screen.getByTestId("resource-list-users")).toHaveClass(
-			"overflow-y-auto",
-		);
+		const resourceList = screen.getByTestId("resource-list-users");
+		expect(resourceList).toHaveClass("h-[20rem]");
+		expect(resourceList).toHaveClass("overflow-hidden");
+		expect(resourceList).not.toHaveClass("overflow-y-auto");
+		expect(
+			resourceList.querySelector("[data-radix-scroll-area-viewport]"),
+		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
 		expect(onNavigate).toHaveBeenCalledWith("/");

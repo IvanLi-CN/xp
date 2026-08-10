@@ -63,9 +63,11 @@ export const IndexCollapsed: Story = {
 		await expect(canvas.queryByText("User 01")).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Expand Users" }));
 		await expect(canvas.getByText("User 12")).toBeInTheDocument();
-		await expect(canvas.getByTestId("resource-list-users")).toHaveClass(
-			"max-h-[20rem]",
-		);
+		const resourceList = canvas.getByTestId("resource-list-users");
+		await expect(resourceList).toHaveClass("h-[20rem]");
+		await expect(
+			resourceList.querySelector("[data-radix-scroll-area-viewport]"),
+		).toBeInTheDocument();
 	},
 };
 

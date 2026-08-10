@@ -1,6 +1,8 @@
 import type { MouseEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Icon } from "./Icon";
 
 export type ResourceNavigationChild = {
@@ -229,49 +231,53 @@ export function ResourceNavigation({
 														No {item.label.toLowerCase()} yet
 													</p>
 												) : (
-													<ul
+													<ScrollArea
 														data-testid={`resource-list-${item.id}`}
-														className="max-h-[20rem] overflow-y-auto pr-1"
+														className="h-[20rem]"
 													>
-														{item.children?.map((child) => {
-															const isChildActive = isRouteMatch(
-																pathname,
-																child.href,
-															);
-															return (
-																<li key={child.id}>
-																	<a
-																		ref={isChildActive ? activeChildRef : null}
-																		href={child.href}
-																		title={child.ariaLabel}
-																		aria-label={child.ariaLabel}
-																		aria-current={
-																			isChildActive ? "page" : undefined
-																		}
-																		className={[
-																			childLinkClass,
-																			isChildActive
-																				? "bg-primary/10 text-foreground"
-																				: "",
-																		]
-																			.filter(Boolean)
-																			.join(" ")}
-																		onClick={(event) =>
-																			followLink(
-																				event,
-																				child.href,
-																				onResourceNavigate ?? onNavigate,
-																			)
-																		}
-																	>
-																		<span className="truncate">
-																			{child.label}
-																		</span>
-																	</a>
-																</li>
-															);
-														})}
-													</ul>
+														<ul className="pr-1">
+															{item.children?.map((child) => {
+																const isChildActive = isRouteMatch(
+																	pathname,
+																	child.href,
+																);
+																return (
+																	<li key={child.id}>
+																		<a
+																			ref={
+																				isChildActive ? activeChildRef : null
+																			}
+																			href={child.href}
+																			title={child.ariaLabel}
+																			aria-label={child.ariaLabel}
+																			aria-current={
+																				isChildActive ? "page" : undefined
+																			}
+																			className={[
+																				childLinkClass,
+																				isChildActive
+																					? "bg-primary/10 text-foreground"
+																					: "",
+																			]
+																				.filter(Boolean)
+																				.join(" ")}
+																			onClick={(event) =>
+																				followLink(
+																					event,
+																					child.href,
+																					onResourceNavigate ?? onNavigate,
+																				)
+																			}
+																		>
+																			<span className="truncate">
+																				{child.label}
+																			</span>
+																		</a>
+																	</li>
+																);
+															})}
+														</ul>
+													</ScrollArea>
 												)}
 											</div>
 										) : null}
