@@ -12,6 +12,7 @@ valid:
       "identifiers": { "probeRunSecondary": "run-fixture-b" },
       "timestamps": { "probeHour": "2026-03-11T11:00:00Z" }
     }
+  - '{ "fixtures": { "strings": { "nodeId": { "fixture229": "node-fixture-229" } } } }'
 invalid:
   - '{ "metrics": true }'
   - '{ "latencyLow": "12" }'

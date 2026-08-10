@@ -566,7 +566,7 @@ mod tests {
         MeshTelemetrySample {
             path: TelemetryPath::Mesh,
             success: true,
-            latency_ms: Some(xp_test_fixtures::slot_n24()),
+            latency_ms: Some(xp_test_fixtures::number_value10()),
             fallback: false,
             updates_active_path: true,
             transport: Some(MeshTransportObservation {
@@ -594,7 +594,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: true,
-                    latency_ms: Some(xp_test_fixtures::slot_n27()),
+                    latency_ms: Some(xp_test_fixtures::number_value42()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -849,7 +849,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Mesh,
                     success: true,
-                    latency_ms: Some(xp_test_fixtures::slot_n27()),
+                    latency_ms: Some(xp_test_fixtures::number_value42()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -866,7 +866,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(xp_test_fixtures::slot_n28()),
+                    latency_ms: Some(xp_test_fixtures::number_value50()),
                     fallback: false,
                     updates_active_path: false,
                     transport: None,
@@ -891,7 +891,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(xp_test_fixtures::slot_n28()),
+                    latency_ms: Some(xp_test_fixtures::number_value50()),
                     fallback: false,
                     updates_active_path: true,
                     transport: None,
@@ -927,7 +927,7 @@ mod tests {
                 MeshTelemetrySample {
                     path: TelemetryPath::Public,
                     success: true,
-                    latency_ms: Some(xp_test_fixtures::slot_n29()),
+                    latency_ms: Some(xp_test_fixtures::number_value60()),
                     fallback: true,
                     updates_active_path: true,
                     transport: None,
@@ -979,7 +979,7 @@ mod tests {
             .unwrap();
         let mut peer = MeshPeerTelemetry {
             buckets: VecDeque::from([MeshTelemetryBucket {
-                minute: xp_test_fixtures::slot_s623().to_owned(),
+                minute: xp_test_fixtures::timestamp_at20231230_t230000_z().to_owned(),
                 mesh_success: 1,
                 ..MeshTelemetryBucket::default()
             }]),

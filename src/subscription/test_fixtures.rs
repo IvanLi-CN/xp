@@ -40,7 +40,7 @@ pub(super) fn user(display_name: &str) -> User {
     User {
         user_id: xp_test_fixtures::subscription_user_u1().to_owned(),
         display_name: display_name.to_string(),
-        subscription_token: xp_test_fixtures::slot_s460().to_owned(),
+        subscription_token: xp_test_fixtures::token_fixture460().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: crate::domain::UserQuotaReset::default(),
@@ -243,9 +243,9 @@ pub(super) fn egress_probe(
     _ip: &str,
 ) -> NodeEgressProbeState {
     NodeEgressProbeState {
-        public_ipv4: Some(xp_test_fixtures::slot_s463().to_owned()),
+        public_ipv4: Some(xp_test_fixtures::address_documentation203_0_113_30().to_owned()),
         public_ipv6: None,
-        selected_public_ip: Some(xp_test_fixtures::slot_s463().to_owned()),
+        selected_public_ip: Some(xp_test_fixtures::address_documentation203_0_113_30().to_owned()),
         geo: crate::inbound_ip_usage::PersistedInboundIpGeo {
             country: country.to_string(),
             region: region.label().to_string(),
@@ -253,8 +253,8 @@ pub(super) fn egress_probe(
             operator: String::new(),
         },
         subscription_region: region,
-        checked_at: xp_test_fixtures::slot_s464().to_owned(),
-        last_success_at: Some(xp_test_fixtures::slot_s464().to_owned()),
+        checked_at: xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned(),
+        last_success_at: Some(xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned()),
         classification_invalidated_at: None,
         error_summary: None,
     }

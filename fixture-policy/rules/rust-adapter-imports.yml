@@ -11,6 +11,7 @@ rule:
         any:
           - regex: '^use super::catalog;$'
           - regex: '^use std::sync::OnceLock;$'
+          - regex: '^use std::collections::BTreeMap;$'
           - regex: '^use serde::de::DeserializeOwned;$'
           - regex: '^use serde::Deserialize;$'
           - regex: '^pub use network::\*;$'

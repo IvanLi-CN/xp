@@ -10,7 +10,7 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"slots"|"subscription")$'
+            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"lists"|"fixtures"|"subscription")$'
         - has:
             field: value
             not:
@@ -46,11 +46,24 @@ rule:
         - kind: pair
         - has:
             field: key
-            regex: '^("strings"|"numbers"|"stringLists")$'
+            regex: '^("strings"|"numbers"|"stringLists"|"value"|"hostList")$'
         - has:
             field: value
             not:
-              kind: array
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: |-
+              (?x)^"(
+                node|nodeId|nodeName|endpoint|endpointId|endpointTag|token|cluster|
+                service|host|timestamp|address|url|identifier|label
+              )"$
+        - has:
+            field: value
+            not:
+              kind: object
     - all:
         - kind: pair
         - has:

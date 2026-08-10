@@ -181,10 +181,10 @@ describe("api compatibility", () => {
 			.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
-						cluster_id: fixtureCatalog.slotString.s103(),
-						node_id: fixtureCatalog.slotString.s103(),
+						cluster_id: fixtureCatalog.cluster.fixture103(),
+						node_id: fixtureCatalog.cluster.fixture103(),
 						role: "leader",
-						leader_api_base_url: fixtureCatalog.slotString.s99(),
+						leader_api_base_url: fixtureCatalog.host.fixture99(),
 						term: 0,
 					}),
 					{ status: 200 },
@@ -218,7 +218,7 @@ describe("api compatibility", () => {
 						current: { package: "3.21.11", release_tag: "v3.21.11" },
 						latest: { release_tag: "v3.22.5" },
 						has_update: true,
-						checked_at: fixtureCatalog.slotString.s104(),
+						checked_at: fixtureCatalog.timestamp.t20260805T000000(),
 						compare_reason: "semver",
 						source: {
 							kind: "github-releases",

@@ -29,7 +29,7 @@ export function buildUserNodeQuotaStatusItem(
 			quota.user_id === fixtureCatalog.identifier.userPrimary()
 				? fixtureCatalog.identifier.userPrimary()
 				: fixtureCatalog.identifier.userSecondary(),
-		node_id: fixtureCatalog.slotString.s36(),
+		node_id: fixtureCatalog.nodeId.fixture36(),
 		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		used_bytes: fixtureCatalog.quota.usedBytes(),
 		remaining_bytes: fixtureCatalog.quota.remainingBytes(),
@@ -41,7 +41,7 @@ export function buildUserNodeQuotaStatusItem(
 	} else if (quota.node_id === fixtureCatalog.identifier.nodeSecondary()) {
 		item.node_id = fixtureCatalog.identifier.nodeSecondary();
 	} else if (index === 0) {
-		item.node_id = fixtureCatalog.slotString.s32();
+		item.node_id = fixtureCatalog.nodeId.fixture32();
 	}
 	return item;
 }

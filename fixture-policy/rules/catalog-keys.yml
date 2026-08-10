@@ -11,10 +11,31 @@ rule:
         field: key
         not:
           any:
-            - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations)"$'
-            - regex: '^"(lists|slots|subscription|endpoint|quota|user|reality|realityAlternate)"$'
+            - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations|fixtures)"$'
+            - regex: '^"(lists|subscription|endpoint|quota|user|reality|realityAlternate)"$'
             - regex: '^"(realityKeys|vlessMeta|ssMeta|ssMetaAlternate|ssMetaEscaped)"$'
-            - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists)"$'
+            - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists|value|hostList)"$'
+            - regex: '^"(node|nodeId|nodeName|endpointId|endpointTag|token|cluster)"$'
+            - regex: '^"(service|host|timestamp|address|url|identifier|label)"$'
+            - regex: '^"fixture[A-Za-z0-9]+"$'
+            - regex: '^"t[0-9]{8}T[0-9]{6}"$'
+            - regex: '^"(loopback|loopback[0-9]+|loopbackPort[0-9]+)"$'
+            - regex: '^"documentation(?:192_0_2|198_51_100|203_0_113)_[0-9]+"$'
+            - regex: '^"(ulid[0-9A-Z]+|value[0-9]+(?:Point[0-9]+)?|edge[0-9]+|edgeBFixtureTest)"$'
+            - regex: '^"(?:https|tcp)[A-Za-z0-9]+"$'
+            - regex: '^"(publicPeerA|origin443)"$'
+            - regex: |-
+                (?x)^"(
+                  aardvark|alpha|beta|dashHost|dotHost|drop|e[1-4]|edgeAFixtureTest|
+                  empty|endpoint[1-3]|endpointDrop(?:Variant2)?|endpointMissing|
+                  endpointNew(?:Variant2)?|extraNode|fixtureDuplicate|hinet|hkl|japan|keep|
+                  mystery|n1|node[12]|node1Variant2|nodeA|nodeAFixtureTest(?:Variant2)?|
+                  nodeB|nodeBeta|nodeDrop|nodeKeep|nodeRemote|nodeUnreachable|nodebeta|
+                  onlyUs|osakaA|osakaB|peerA|peerAFixtureTest(?:Variant2)?|relayJapan|
+                  remoteA|sender|seoulA|singaporeA(?:Variant[23])?|ss[12]|ssE[24]|sub[12]|
+                  subTestToken|subUser1|target|tcpNode|tokyo|tokyoA(?:Variant[23])?|tokyoB|
+                  vless[12]|vlessE[13]|vlessTest|xpFixtureTest
+                )"$
             - regex: '^"(nodeIds|endpointIds|userIds|tags|tokens|accessHosts|apiBases)"$'
             - regex: '^"(primary|secondary|tertiary|serverPrimary|serverSecondary)"$'
             - regex: '^"(primaryIpv4|secondaryIpv4|tertiaryIpv4|loopback)"$'

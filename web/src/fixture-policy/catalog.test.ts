@@ -14,8 +14,13 @@ describe("fixtureCatalog subscription token factory", () => {
 		);
 	});
 
-	it("does not expose slots beyond the checked-in catalog", () => {
-		// @ts-expect-error catalog has slots s0 through s684
-		expect(fixtureCatalog.slotString.s685).toBeUndefined();
+	it("exposes named fixture values without positional slot access", () => {
+		expect(fixtureCatalog.nodeId.fixture229()).toBe("node-fixture-229");
+		expect(fixtureCatalog.nodeName.fixture18()).toBe("fixture-node-18");
+		expect(fixtureCatalog.host.fixture231()).toBe("host-231.fixture.test");
+		expect(fixtureCatalog.service.fixture230()).toBe(
+			"https://service-230.fixture.test",
+		);
+		expect("slotString" in fixtureCatalog).toBe(false);
 	});
 });

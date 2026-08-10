@@ -87,7 +87,7 @@ function renderPage() {
 describe("<NodesPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
-		window.history.pushState({}, fixtureCatalog.slotString.s99(), "/");
+		window.history.pushState({}, fixtureCatalog.host.fixture99(), "/");
 		globalThis.ResizeObserver = class {
 			observe() {
 				// no-op for jsdom layout tests
@@ -101,10 +101,10 @@ describe("<NodesPage />", () => {
 		} as typeof ResizeObserver;
 
 		vi.mocked(fetchClusterInfo).mockResolvedValue({
-			cluster_id: fixtureCatalog.slotString.s84(),
-			node_id: fixtureCatalog.slotString.s32(),
+			cluster_id: fixtureCatalog.cluster.fixture84(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			role: "leader",
-			leader_api_base_url: fixtureCatalog.slotString.s178(),
+			leader_api_base_url: fixtureCatalog.service.fixture178(),
 			term: 12,
 			xp_version: "1.0.0",
 		});
@@ -116,13 +116,13 @@ describe("<NodesPage />", () => {
 			unreachable_nodes: [],
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s32(),
-					node_name: fixtureCatalog.slotString.s33(),
-					api_base_url: fixtureCatalog.slotString.s178(),
-					access_host: fixtureCatalog.slotString.s179(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					node_name: fixtureCatalog.nodeName.fixture33(),
+					api_base_url: fixtureCatalog.service.fixture178(),
+					access_host: fixtureCatalog.host.fixture179(),
 					summary: {
 						status: "up",
-						updated_at: fixtureCatalog.slotString.s91(),
+						updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 					},
 					components: [
 						{
@@ -135,19 +135,19 @@ describe("<NodesPage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: fixtureCatalog.slotString.s91(),
+							slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 							status: "up",
 						},
 					],
 				},
 				{
-					node_id: fixtureCatalog.slotString.s36(),
-					node_name: fixtureCatalog.slotString.s99(),
-					api_base_url: fixtureCatalog.slotString.s180(),
-					access_host: fixtureCatalog.slotString.s181(),
+					node_id: fixtureCatalog.nodeId.fixture36(),
+					node_name: fixtureCatalog.host.fixture99(),
+					api_base_url: fixtureCatalog.service.fixture180(),
+					access_host: fixtureCatalog.host.fixture181(),
 					summary: {
 						status: "degraded",
-						updated_at: fixtureCatalog.slotString.s91(),
+						updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 					},
 					components: [
 						{
@@ -160,7 +160,7 @@ describe("<NodesPage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: fixtureCatalog.slotString.s91(),
+							slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 							status: "degraded",
 						},
 					],
@@ -183,22 +183,22 @@ describe("<NodesPage />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			`/nodes/${fixtureCatalog.slotString.s32()}`,
-			`/nodes/${fixtureCatalog.slotString.s36()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture32()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture36()}`,
 		]);
 		const openOnNodeLinks = screen.getAllByRole("link", {
 			name: "Open on node",
 		});
 		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
-			`${fixtureCatalog.slotString.s178()}/?login_token=admintoken`,
-			`${fixtureCatalog.slotString.s180()}/?login_token=admintoken`,
+			`${fixtureCatalog.service.fixture178()}/?login_token=admintoken`,
+			`${fixtureCatalog.service.fixture180()}/?login_token=admintoken`,
 		]);
 	});
 
 	it("offers sign-in recovery for an unauthorized nodes request", async () => {
 		window.history.pushState(
 			{},
-			fixtureCatalog.slotString.s99(),
+			fixtureCatalog.host.fixture99(),
 			"/nodes?view=table#history",
 		);
 		vi.mocked(fetchAdminNodesRuntime).mockRejectedValue(
@@ -227,7 +227,7 @@ describe("<NodesPage />", () => {
 	it("keeps cached inventory visible after a refresh returns 401", async () => {
 		renderPage();
 
-		await screen.findByText(fixtureCatalog.slotString.s33());
+		await screen.findByText(fixtureCatalog.nodeName.fixture33());
 		vi.mocked(fetchAdminNodesRuntime).mockRejectedValueOnce(
 			new BackendApiError({
 				status: 401,
@@ -238,7 +238,7 @@ describe("<NodesPage />", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
 		await screen.findByText("Showing cached node inventory");
-		expect(screen.getByText(fixtureCatalog.slotString.s33())).toBeVisible();
+		expect(screen.getByText(fixtureCatalog.nodeName.fixture33())).toBeVisible();
 		expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
 			"href",
 			"/login?redirect=%2F",

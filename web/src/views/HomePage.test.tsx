@@ -77,10 +77,10 @@ describe("<HomePage />", () => {
 		vi.resetAllMocks();
 		vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 		vi.mocked(fetchClusterInfo).mockResolvedValue({
-			cluster_id: fixtureCatalog.slotString.s84(),
-			node_id: fixtureCatalog.slotString.s32(),
+			cluster_id: fixtureCatalog.cluster.fixture84(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			role: "leader",
-			leader_api_base_url: fixtureCatalog.slotString.s178(),
+			leader_api_base_url: fixtureCatalog.service.fixture178(),
 			term: 12,
 			xp_version: "1.0.0",
 		});
@@ -94,13 +94,13 @@ describe("<HomePage />", () => {
 			unreachable_nodes: [],
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s32(),
-					node_name: fixtureCatalog.slotString.s33(),
-					api_base_url: fixtureCatalog.slotString.s178(),
-					access_host: fixtureCatalog.slotString.s179(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					node_name: fixtureCatalog.nodeName.fixture33(),
+					api_base_url: fixtureCatalog.service.fixture178(),
+					access_host: fixtureCatalog.host.fixture179(),
 					summary: {
 						status: "up",
-						updated_at: fixtureCatalog.slotString.s91(),
+						updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 					},
 					components: [
 						{
@@ -113,19 +113,19 @@ describe("<HomePage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: fixtureCatalog.slotString.s91(),
+							slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 							status: "up",
 						},
 					],
 				},
 				{
-					node_id: fixtureCatalog.slotString.s36(),
-					node_name: fixtureCatalog.slotString.s37(),
-					api_base_url: fixtureCatalog.slotString.s180(),
-					access_host: fixtureCatalog.slotString.s181(),
+					node_id: fixtureCatalog.nodeId.fixture36(),
+					node_name: fixtureCatalog.nodeName.fixture37(),
+					api_base_url: fixtureCatalog.service.fixture180(),
+					access_host: fixtureCatalog.host.fixture181(),
 					summary: {
 						status: "up",
-						updated_at: fixtureCatalog.slotString.s91(),
+						updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 					},
 					components: [
 						{
@@ -138,7 +138,7 @@ describe("<HomePage />", () => {
 					],
 					recent_slots: [
 						{
-							slot_start: fixtureCatalog.slotString.s91(),
+							slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 							status: "up",
 						},
 					],
@@ -162,8 +162,8 @@ describe("<HomePage />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			`/nodes/${fixtureCatalog.slotString.s32()}`,
-			`/nodes/${fixtureCatalog.slotString.s36()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture32()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture36()}`,
 		]);
 		expect(screen.getAllByRole("link", { name: "Open on node" })).toHaveLength(
 			2,

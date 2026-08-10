@@ -13,10 +13,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s118(),
-						node_name: fixtureCatalog.slotString.s86(),
-						access_host: fixtureCatalog.slotString.s130(),
-						api_base_url: fixtureCatalog.slotString.s131(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						node_name: fixtureCatalog.nodeName.fixture86(),
+						access_host: fixtureCatalog.host.fixture130(),
+						api_base_url: fixtureCatalog.service.fixture131(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -94,10 +94,10 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s118(),
-						node_name: fixtureCatalog.slotString.s86(),
-						access_host: fixtureCatalog.slotString.s130(),
-						api_base_url: fixtureCatalog.slotString.s131(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						node_name: fixtureCatalog.nodeName.fixture86(),
+						access_host: fixtureCatalog.host.fixture130(),
+						api_base_url: fixtureCatalog.service.fixture131(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -108,15 +108,15 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s132(),
-						node_id: fixtureCatalog.slotString.s118(),
-						tag: fixtureCatalog.slotString.s133(),
+						endpoint_id: fixtureCatalog.endpointId.fixture132(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						tag: fixtureCatalog.endpointTag.fixture133(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 443,
 						meta: {
 							reality: {
-								dest: fixtureCatalog.slotString.s111(),
-								server_names: fixtureCatalog.slotList.l8(),
+								dest: fixtureCatalog.address.loopbackPort39111(),
+								server_names: fixtureCatalog.hostList.edge8(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -145,16 +145,16 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 				.getAllByText(/^https:\/\/127\.0\.0\.1:/)
 				.map((element) => element.textContent),
 		).toEqual([
-			`https://${fixtureCatalog.slotString.s111()}`,
+			`https://${fixtureCatalog.address.loopbackPort39111()}`,
 			fixtureCatalog.canaryUpstream.httpsListener().url,
 		]);
 		await userEvent.click(
 			await within(suggestionPanel).findByText(
-				`https://${fixtureCatalog.slotString.s111()}`,
+				`https://${fixtureCatalog.address.loopbackPort39111()}`,
 			),
 		);
 		await expect(await canvas.findByLabelText("canaryUpstreamUrl")).toHaveValue(
-			`https://${fixtureCatalog.slotString.s111()}`,
+			`https://${fixtureCatalog.address.loopbackPort39111()}`,
 		);
 
 		await userEvent.click(
@@ -180,10 +180,10 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s124(),
-						node_name: fixtureCatalog.slotString.s125(),
-						access_host: fixtureCatalog.slotString.s126(),
-						api_base_url: fixtureCatalog.slotString.s127(),
+						node_id: fixtureCatalog.nodeId.fixture124(),
+						node_name: fixtureCatalog.nodeName.fixture125(),
+						access_host: fixtureCatalog.host.fixture126(),
+						api_base_url: fixtureCatalog.service.fixture127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -220,7 +220,7 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("tag-input-suggestions"),
-			).findByText(fixtureCatalog.slotString.s126()),
+			).findByText(fixtureCatalog.host.fixture126()),
 		);
 		await expect(
 			await canvas.findByTitle(fixtureCatalog.authority.host126Port443()[0]),
@@ -235,10 +235,10 @@ export const ManagedDefaultAcceptedHostDefaultsTo443: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s118(),
-						node_name: fixtureCatalog.slotString.s86(),
-						access_host: fixtureCatalog.slotString.s99(),
-						api_base_url: fixtureCatalog.slotString.s123(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						node_name: fixtureCatalog.nodeName.fixture86(),
+						access_host: fixtureCatalog.host.fixture99(),
+						api_base_url: fixtureCatalog.service.fixture123(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",

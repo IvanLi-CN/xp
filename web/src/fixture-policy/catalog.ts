@@ -2,34 +2,62 @@ import catalog from "../../../fixture-policy/catalog.json" with {
 	type: "json",
 };
 
-function stringSlotEntry(_value: string, index: number) {
-	return [`s${index}`, () => catalog.slots.strings[index]];
+type StringAccessors<Values extends Record<string, string>> = {
+	readonly [Key in keyof Values]: () => Values[Key];
+};
+
+type NumberAccessors<Values extends Record<string, number>> = {
+	readonly [Key in keyof Values]: () => Values[Key];
+};
+
+type ListAccessors<Values extends Record<string, string[]>> = {
+	readonly [Key in keyof Values]: () => string[];
+};
+
+function createStringAccessors<Values extends Record<string, string>>(
+	values: Values,
+) {
+	return Object.fromEntries(
+		Object.entries(values).map(([name, value]) => [name, () => value]),
+	) as StringAccessors<Values>;
 }
 
-function numberSlotEntry(_value: number, index: number) {
-	return [`n${index}`, () => catalog.slots.numbers[index]];
+function createNumberAccessors<Values extends Record<string, number>>(
+	values: Values,
+) {
+	return Object.fromEntries(
+		Object.entries(values).map(([name, value]) => [name, () => value]),
+	) as NumberAccessors<Values>;
 }
 
-function listSlotEntry(_value: string[], index: number) {
-	return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
+function createListAccessors<Values extends Record<string, string[]>>(
+	values: Values,
+) {
+	return Object.fromEntries(
+		Object.entries(values).map(([name, value]) => [name, () => [...value]]),
+	) as ListAccessors<Values>;
 }
 
-type SlotIndex<
-	Limit extends number,
-	Indexes extends number[] = [],
-> = Indexes["length"] extends Limit
-	? Indexes[number]
-	: SlotIndex<Limit, [...Indexes, Indexes["length"]]>;
+const fixtureStrings = {
+	nodeId: createStringAccessors(catalog.fixtures.strings.nodeId),
+	nodeName: createStringAccessors(catalog.fixtures.strings.nodeName),
+	endpointId: createStringAccessors(catalog.fixtures.strings.endpointId),
+	endpointTag: createStringAccessors(catalog.fixtures.strings.endpointTag),
+	token: createStringAccessors(catalog.fixtures.strings.token),
+	cluster: createStringAccessors(catalog.fixtures.strings.cluster),
+	service: createStringAccessors(catalog.fixtures.strings.service),
+	host: createStringAccessors(catalog.fixtures.strings.host),
+	timestamp: createStringAccessors(catalog.fixtures.strings.timestamp),
+	address: createStringAccessors(catalog.fixtures.strings.address),
+	url: createStringAccessors(catalog.fixtures.strings.url),
+	identifier: createStringAccessors(catalog.fixtures.strings.identifier),
+	label: createStringAccessors(catalog.fixtures.strings.label),
+};
 
-const slotString = Object.fromEntries(
-	catalog.slots.strings.map(stringSlotEntry),
-) as Record<`s${SlotIndex<685>}`, () => string>;
-const slotNumber = Object.fromEntries(
-	catalog.slots.numbers.map(numberSlotEntry),
-) as Record<`n${SlotIndex<42>}`, () => number>;
-const slotList = Object.fromEntries(
-	catalog.slots.stringLists.map(listSlotEntry),
-) as Record<`l${SlotIndex<38>}`, () => string[]>;
+const fixtureNumbers = createNumberAccessors(catalog.fixtures.numbers.value);
+const fixtureHostLists = createListAccessors(
+	catalog.fixtures.stringLists.hostList,
+);
 
 function createSubscriptionTokenFactory() {
 	let subscriptionTokenIndex = 0;
@@ -54,25 +82,76 @@ function nextSubscriptionToken() {
 	return token;
 }
 
-const meshPeerNodeIdIndexes = [
-	17, 32, 36, 56, 57, 63, 69, 70, 72, 73, 77, 93, 98, 106, 110, 113, 118, 124,
-	134, 145, 149, 153, 182, 187, 188, 189, 190, 206, 213, 220, 224, 229, 233,
-	238, 241, 243, 246, 258, 263, 271, 274, 290, 301, 312, 317, 325, 329, 332,
-	335, 338,
-] as const;
+const meshPeerNodeIds = [
+	catalog.fixtures.strings.nodeId.fixture17,
+	catalog.fixtures.strings.nodeId.fixture32,
+	catalog.fixtures.strings.nodeId.fixture36,
+	catalog.fixtures.strings.nodeId.fixture56,
+	catalog.fixtures.strings.nodeId.fixture57,
+	catalog.fixtures.strings.nodeId.fixture63,
+	catalog.fixtures.strings.nodeId.fixture69,
+	catalog.fixtures.strings.nodeId.fixture70,
+	catalog.fixtures.strings.nodeId.fixture72,
+	catalog.fixtures.strings.nodeId.fixture73,
+	catalog.fixtures.strings.nodeId.fixture77,
+	catalog.fixtures.strings.nodeId.fixture93,
+	catalog.fixtures.strings.nodeId.fixture98,
+	catalog.fixtures.strings.nodeId.fixture106,
+	catalog.fixtures.strings.nodeId.fixture110,
+	catalog.fixtures.strings.nodeId.fixture113,
+	catalog.fixtures.strings.nodeId.fixture118,
+	catalog.fixtures.strings.nodeId.fixture124,
+	catalog.fixtures.strings.nodeId.fixture134,
+	catalog.fixtures.strings.nodeId.fixture145,
+	catalog.fixtures.strings.nodeId.fixture149,
+	catalog.fixtures.strings.nodeId.fixture153,
+	catalog.fixtures.strings.nodeId.fixture182,
+	catalog.fixtures.strings.nodeId.fixture187,
+	catalog.fixtures.strings.nodeId.fixture188,
+	catalog.fixtures.strings.nodeId.fixture189,
+	catalog.fixtures.strings.nodeId.fixture190,
+	catalog.fixtures.strings.nodeId.fixture206,
+	catalog.fixtures.strings.nodeId.fixture213,
+	catalog.fixtures.strings.nodeId.fixture220,
+	catalog.fixtures.strings.nodeId.fixture224,
+	catalog.fixtures.strings.nodeId.fixture229,
+	catalog.fixtures.strings.nodeId.fixture233,
+	catalog.fixtures.strings.nodeId.fixture238,
+	catalog.fixtures.strings.nodeId.fixture241,
+	catalog.fixtures.strings.nodeId.fixture243,
+	catalog.fixtures.strings.nodeId.fixture246,
+	catalog.fixtures.strings.nodeId.fixture258,
+	catalog.fixtures.strings.nodeId.fixture263,
+	catalog.fixtures.strings.nodeId.fixture271,
+	catalog.fixtures.strings.nodeId.fixture274,
+	catalog.fixtures.strings.nodeId.fixture290,
+	catalog.fixtures.strings.nodeId.fixture301,
+	catalog.fixtures.strings.nodeId.fixture312,
+	catalog.fixtures.strings.nodeId.fixture317,
+	catalog.fixtures.strings.nodeId.fixture325,
+	catalog.fixtures.strings.nodeId.fixture329,
+	catalog.fixtures.strings.nodeId.fixture332,
+	catalog.fixtures.strings.nodeId.fixture335,
+	catalog.fixtures.strings.nodeId.fixture338,
+];
 let meshPeerNodeIdIndex = 0;
 
 function nextMeshPeerNodeId() {
-	const slotIndex =
-		meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+	const nodeId = meshPeerNodeIds[meshPeerNodeIdIndex % meshPeerNodeIds.length];
 	meshPeerNodeIdIndex += 1;
-	return catalog.slots.strings[slotIndex];
+	return nodeId;
 }
 
 export const fixtureCatalog = {
-	slotString,
-	slotNumber,
-	slotList,
+	nodeId: fixtureStrings.nodeId,
+	nodeName: fixtureStrings.nodeName,
+	endpointTag: fixtureStrings.endpointTag,
+	token: fixtureStrings.token,
+	cluster: fixtureStrings.cluster,
+	service: fixtureStrings.service,
+	label: fixtureStrings.label,
+	number: fixtureNumbers,
+	hostList: fixtureHostLists,
 	optional: {
 		none: () => null,
 		undefined: () => undefined,
@@ -81,6 +160,7 @@ export const fixtureCatalog = {
 		none: () => catalog.subscription.accessHosts[18],
 	},
 	host: {
+		...fixtureStrings.host,
 		primary: () => catalog.hosts.primary,
 		secondary: () => catalog.hosts.secondary,
 		tertiary: () => catalog.hosts.tertiary,
@@ -88,6 +168,7 @@ export const fixtureCatalog = {
 		serverSecondary: () => catalog.hosts.serverSecondary,
 	},
 	address: {
+		...fixtureStrings.address,
 		primaryIpv4: () => catalog.addresses.primaryIpv4,
 		secondaryIpv4: () => catalog.addresses.secondaryIpv4,
 		tertiaryIpv4: () => catalog.addresses.tertiaryIpv4,
@@ -96,6 +177,7 @@ export const fixtureCatalog = {
 		loopback49043: () => catalog.addresses.loopback49043,
 	},
 	url: {
+		...fixtureStrings.url,
 		primaryApi: () => catalog.urls.primaryApi,
 		secondaryApi: () => catalog.urls.secondaryApi,
 		tertiaryApi: () => catalog.urls.tertiaryApi,
@@ -134,6 +216,7 @@ export const fixtureCatalog = {
 		host130Port8443: () => [...catalog.lists.host130Port8443],
 	},
 	identifier: {
+		...fixtureStrings.identifier,
 		nodePrimary: () => catalog.identifiers.nodePrimary,
 		nodeSecondary: () => catalog.identifiers.nodeSecondary,
 		nodeTertiary: () => catalog.identifiers.nodeTertiary,
@@ -166,6 +249,7 @@ export const fixtureCatalog = {
 		endpointTagMissing: () => catalog.identifiers.endpointTagMissing,
 	},
 	timestamp: {
+		...fixtureStrings.timestamp,
 		earlier: () => catalog.timestamps.earlier,
 		baseline: () => catalog.timestamps.baseline,
 		recent: () => catalog.timestamps.recent,
@@ -187,6 +271,7 @@ export const fixtureCatalog = {
 		availabilityFull: () => catalog.metrics.availabilityFull,
 		none: () => null,
 	},
+	endpointId: fixtureStrings.endpointId,
 	endpoint: {
 		vlessKind: () =>
 			catalog.operations.endpoint.vlessKind as "vless_reality_vision_tcp",
@@ -237,7 +322,7 @@ export const fixtureCatalog = {
 		providerPassword: () => catalog.operations.subscription.providerPassword,
 	},
 	list: {
-		serverName35: () => [catalog.slots.strings[35]],
+		serverName35: () => [catalog.fixtures.strings.host.fixture35],
 		primaryServerNames: () => [...catalog.lists.primaryServerNames],
 		secondaryServerNames: () => [...catalog.lists.secondaryServerNames],
 		tertiaryServerNames: () => [...catalog.lists.tertiaryServerNames],

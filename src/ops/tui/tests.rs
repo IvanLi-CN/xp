@@ -67,15 +67,15 @@ fn plain_q_does_not_quit() {
 fn save_tui_config_omits_legacy_save_token_field() {
     let (tmp, paths) = test_paths();
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s552().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture552().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
         ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
-        hostname: Some(xp_test_fixtures::slot_s553().to_owned()),
+        hostname: Some(xp_test_fixtures::host_fixture553().to_owned()),
         origin_url: Some("http://127.0.0.1:62416".to_string()),
         api_base_url: xp_test_fixtures::none(),
         vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
@@ -126,15 +126,15 @@ fn tui_ip_geo_toggle_is_persisted_and_passed_to_deploy_values() {
 fn save_tui_config_persists_managed_default_fields() {
     let (tmp, paths) = test_paths();
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s552().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture552().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: true,
         ip_geo_enabled: false,
         ddns_zone_id: Some("zone-ddns".to_string()),
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
-        hostname: Some(xp_test_fixtures::slot_s553().to_owned()),
+        hostname: Some(xp_test_fixtures::host_fixture553().to_owned()),
         origin_url: Some("http://127.0.0.1:62416".to_string()),
         api_base_url: xp_test_fixtures::none(),
         vless_canary_acme_contact_email: Some("ops@example.com".to_string()),
@@ -188,8 +188,8 @@ fn save_token_empty_keeps_existing_token_unchanged() {
     fs::write(&token_path, "oldtoken").unwrap();
 
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s492().to_owned(),
-        access_host: xp_test_fixtures::slot_s492().to_owned(),
+        node_name: xp_test_fixtures::label_empty().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
         ip_geo_enabled: false,
@@ -223,8 +223,8 @@ fn save_token_non_empty_writes_trimmed_value() {
     fs::write(&token_path, "oldtoken").unwrap();
 
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s492().to_owned(),
-        access_host: xp_test_fixtures::slot_s492().to_owned(),
+        node_name: xp_test_fixtures::label_empty().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
         ip_geo_enabled: false,
@@ -258,8 +258,8 @@ fn save_tui_config_error_includes_deploy_dir() {
     fs::write(&deploy_dir, "not a dir").unwrap();
 
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s492().to_owned(),
-        access_host: xp_test_fixtures::slot_s492().to_owned(),
+        node_name: xp_test_fixtures::label_empty().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
         ip_geo_enabled: false,
@@ -293,8 +293,8 @@ fn save_token_error_includes_token_dir() {
     fs::write(&token_dir, "not a dir").unwrap();
 
     let values = AppValues {
-        node_name: xp_test_fixtures::slot_s492().to_owned(),
-        access_host: xp_test_fixtures::slot_s492().to_owned(),
+        node_name: xp_test_fixtures::label_empty().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
         cloudflare_enabled: true,
         ddns_enabled: false,
         ip_geo_enabled: false,

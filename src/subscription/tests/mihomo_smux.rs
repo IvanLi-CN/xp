@@ -3,8 +3,8 @@ use super::*;
 use pretty_assertions::assert_eq;
 use serde_yaml::Value;
 use xp_test_fixtures::{
-    slot_s675 as fixture_slot_s675, subscription_host_example as fixture_host_example,
-    subscription_node_n1 as fixture_node_n1,
+    label_node1_variant2 as fixture_label_node1_variant2,
+    subscription_host_example as fixture_host_example, subscription_node_n1 as fixture_node_n1,
 };
 
 fn assert_default_smux(proxy: &Value) {
@@ -27,7 +27,11 @@ fn assert_default_smux(proxy: &Value) {
 #[test]
 fn build_clash_yaml_has_proxies_and_derived_secrets() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss(
             "e1",
@@ -86,8 +90,12 @@ fn build_clash_yaml_has_proxies_and_derived_secrets() {
 
 #[test]
 fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_standard() {
-    let u = user("u1", "alice");
-    let n = node("n1", xp_test_fixtures::slot_s675, "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
     let mut endpoints = vec![
         endpoint_ss(
             "e1",

@@ -17,45 +17,45 @@ const baseReport: Pick<
 	| "endpoints"
 	| "per_endpoint_series"
 > = {
-	window_start: fixtureCatalog.slotString.s47(),
-	window_end: fixtureCatalog.slotString.s48(),
+	window_start: fixtureCatalog.timestamp.t20260307T010000(),
+	window_end: fixtureCatalog.timestamp.t20260308T005900(),
 	warnings: [],
 	endpoints: [
 		{
-			endpoint_id: fixtureCatalog.slotString.s287(),
-			endpoint_tag: fixtureCatalog.slotString.s280(),
+			endpoint_id: fixtureCatalog.endpointId.fixture287(),
+			endpoint_tag: fixtureCatalog.nodeName.fixture280(),
 			port: 443,
 		},
 		{
-			endpoint_id: fixtureCatalog.slotString.s288(),
-			endpoint_tag: fixtureCatalog.slotString.s289(),
+			endpoint_id: fixtureCatalog.endpointId.fixture288(),
+			endpoint_tag: fixtureCatalog.endpointTag.fixture289(),
 			port: 8443,
 		},
 	],
 	per_endpoint_series: [
 		{
-			endpoint_id: fixtureCatalog.slotString.s287(),
-			endpoint_tag: fixtureCatalog.slotString.s280(),
+			endpoint_id: fixtureCatalog.endpointId.fixture287(),
+			endpoint_tag: fixtureCatalog.nodeName.fixture280(),
 			port: 443,
 			series: [
-				{ minute: fixtureCatalog.slotString.s52(), count: 2 },
-				{ minute: fixtureCatalog.slotString.s48(), count: 4 },
+				{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 2 },
+				{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 4 },
 			],
 		},
 		{
-			endpoint_id: fixtureCatalog.slotString.s288(),
-			endpoint_tag: fixtureCatalog.slotString.s289(),
+			endpoint_id: fixtureCatalog.endpointId.fixture288(),
+			endpoint_tag: fixtureCatalog.endpointTag.fixture289(),
 			port: 8443,
 			series: [
-				{ minute: fixtureCatalog.slotString.s52(), count: 1 },
-				{ minute: fixtureCatalog.slotString.s48(), count: 3 },
+				{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 1 },
+				{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 3 },
 			],
 		},
 	],
 };
 
-const endpointALabel = `${fixtureCatalog.slotString.s280()} :443`;
-const endpointBLabel = `${fixtureCatalog.slotString.s289()} :8443`;
+const endpointALabel = `${fixtureCatalog.nodeName.fixture280()} :443`;
+const endpointBLabel = `${fixtureCatalog.endpointTag.fixture289()} :8443`;
 
 describe("<TcpConnectionUsageView />", () => {
 	it("builds tooltip content with total and per-endpoint counts", () => {

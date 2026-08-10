@@ -155,8 +155,8 @@ export const Down: Story = {
 							...peer,
 							current_path: "public" as const,
 							quality: "down" as const,
-							availability_1h: fixtureCatalog.slotNumber.n16(),
-							availability_24h: fixtureCatalog.slotNumber.n17(),
+							availability_1h: fixtureCatalog.number.value0(),
+							availability_24h: fixtureCatalog.number.value0Point72(),
 						}
 					: peer,
 			),

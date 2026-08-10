@@ -1,9 +1,9 @@
 id: fixture-policy-catalog-number-values
 valid:
   - '{ "metrics": { "latencyLow": 12 } }'
-  - '{ "slots": { "numbers": [0.72] } }'
-  - '{ "slots": { "numbers": [2016] } }'
+  - '{ "fixtures": { "numbers": { "value": { "value0Point72": 0.72 } } } }'
+  - '{ "fixtures": { "numbers": { "value": { "value2016": 2016 } } } }'
 invalid:
   - '{ "metrics": { "latencyLow": 13 } }'
-  - '{ "slots": { "numbers": [382] } }'
-  - '{ "slots": { "numbers": [1000000] } }'
+  - '{ "fixtures": { "numbers": { "value": { "value382": 382 } } } }'
+  - '{ "fixtures": { "numbers": { "value": { "value1000000": 1000000 } } } }'

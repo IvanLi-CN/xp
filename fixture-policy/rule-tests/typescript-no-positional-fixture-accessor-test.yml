@@ -1,0 +1,7 @@
+id: fixture-policy-typescript-no-positional-fixture-accessor
+valid:
+  - 'fixtureCatalog.nodeId.fixture229()'
+invalid:
+  - 'fixtureCatalog.slotString.s229()'
+  - 'fixtureCatalog.slotNumber.n4()'
+  - 'fixtureCatalog.slotList.l5()'

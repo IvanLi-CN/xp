@@ -699,7 +699,7 @@ mod tests {
             finished_at: None,
             exit_code: None,
             message: Some("running".to_string()),
-            updated_at: xp_test_fixtures::slot_s611().to_owned(),
+            updated_at: xp_test_fixtures::timestamp_at20260704_t000000_z().to_owned(),
         };
 
         write_status(tmp.path(), &status).unwrap();
@@ -727,7 +727,7 @@ mod tests {
             finished_at: None,
             exit_code: None,
             message: Some("upgrade trigger accepted".to_string()),
-            updated_at: xp_test_fixtures::slot_s611().to_owned(),
+            updated_at: xp_test_fixtures::timestamp_at20260704_t000000_z().to_owned(),
         };
         write_status(tmp.path(), &status).unwrap();
 
@@ -768,7 +768,7 @@ mod tests {
             finished_at: None,
             exit_code: None,
             message: Some("upgrade trigger accepted".to_string()),
-            updated_at: xp_test_fixtures::slot_s611().to_owned(),
+            updated_at: xp_test_fixtures::timestamp_at20260704_t000000_z().to_owned(),
         };
         write_status(tmp.path(), &status).unwrap();
 

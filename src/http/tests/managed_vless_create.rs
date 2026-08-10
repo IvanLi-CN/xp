@@ -160,7 +160,7 @@ async fn patch_managed_vless_port_survives_stale_bootstrap_reconcile() {
         vless: Some(DefaultVlessEndpointSpec {
             port: 30443,
             reality_dest: "127.0.0.1:39043".to_string(),
-            server_names: xp_test_fixtures::slot_l30(),
+            server_names: xp_test_fixtures::host_list_edge30(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         }),
@@ -181,7 +181,7 @@ async fn patch_managed_vless_port_survives_stale_bootstrap_reconcile() {
         &node_endpoints,
         HostManagedDefaultEndpointsOptions {
             explicit: &stale_bootstrap,
-            access_host: xp_test_fixtures::slot_s491(),
+            access_host: xp_test_fixtures::label_node_afixture_test(),
             vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
         },
         &mut writer,

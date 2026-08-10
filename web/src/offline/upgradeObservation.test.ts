@@ -11,7 +11,7 @@ import {
 	restoreUpgradeObservation,
 } from "./upgradeObservation";
 
-const NOW = Date.parse(fixtureCatalog.slotString.s4());
+const NOW = Date.parse(fixtureCatalog.timestamp.t20240101T000400());
 const TIMEOUT_DESCRIPTION =
 	"times out after one minute and remains locked until a manual status result resolves it";
 
@@ -47,7 +47,7 @@ describe("upgrade observation", () => {
 			{
 				state: "failed",
 				target_tag: "v3.21.10",
-				updated_at: fixtureCatalog.slotString.s4(),
+				updated_at: fixtureCatalog.timestamp.t20240101T000400(),
 			},
 			NOW + 2_500,
 		);
@@ -59,7 +59,7 @@ describe("upgrade observation", () => {
 				{
 					state: "succeeded",
 					target_tag: "v3.21.10",
-					updated_at: fixtureCatalog.slotString.s5(),
+					updated_at: fixtureCatalog.timestamp.t20240101T000500(),
 				},
 				NOW + 2_500,
 			),
@@ -73,7 +73,7 @@ describe("upgrade observation", () => {
 			{
 				state: "running",
 				target_tag: "v3.21.10",
-				updated_at: fixtureCatalog.slotString.s4(),
+				updated_at: fixtureCatalog.timestamp.t20240101T000400(),
 			},
 			NOW + 2_500,
 		);
@@ -85,7 +85,7 @@ describe("upgrade observation", () => {
 				{
 					state: "succeeded",
 					target_tag: "v3.21.10",
-					updated_at: fixtureCatalog.slotString.s4(),
+					updated_at: fixtureCatalog.timestamp.t20240101T000400(),
 				},
 				NOW + 2_500,
 			),

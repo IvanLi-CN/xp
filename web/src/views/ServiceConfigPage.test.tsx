@@ -41,20 +41,20 @@ function renderPage() {
 function setupMocks() {
 	vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 	vi.mocked(fetchClusterInfo).mockResolvedValue({
-		cluster_id: fixtureCatalog.slotString.s53(),
-		node_id: fixtureCatalog.slotString.s32(),
+		cluster_id: fixtureCatalog.cluster.fixture53(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		role: "leader",
-		leader_api_base_url: fixtureCatalog.slotString.s178(),
+		leader_api_base_url: fixtureCatalog.service.fixture178(),
 		term: 7,
 		xp_version: "0.2.0",
 	});
 	vi.mocked(fetchAdminConfig).mockResolvedValue({
-		bind: fixtureCatalog.slotString.s58(),
-		xray_api_addr: fixtureCatalog.slotString.s59(),
+		bind: fixtureCatalog.address.loopbackPort39058(),
+		xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 		data_dir: "./data",
-		node_name: fixtureCatalog.slotString.s32(),
-		access_host: fixtureCatalog.slotString.s266(),
-		api_base_url: fixtureCatalog.slotString.s267(),
+		node_name: fixtureCatalog.nodeId.fixture32(),
+		access_host: fixtureCatalog.host.fixture266(),
+		api_base_url: fixtureCatalog.service.fixture267(),
 		vless_https_canary_bind: "127.0.0.1:39043",
 		quota_poll_interval_secs: 10,
 		quota_auto_unban: true,

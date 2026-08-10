@@ -36,8 +36,8 @@ const DESIGN_ALERTS: AlertsResponse = {
 			type: "quota_banned_membership",
 			membership_key: "u_01HUSERAAAAAA::ep_01HENDPTAAAAAA",
 			user_id: fixtureCatalog.identifier.userPrimary(),
-			endpoint_id: fixtureCatalog.slotString.s240(),
-			owner_node_id: fixtureCatalog.slotString.s241(),
+			endpoint_id: fixtureCatalog.endpointId.fixture240(),
+			owner_node_id: fixtureCatalog.nodeId.fixture241(),
 			quota_banned: true,
 			quota_banned_at: "2026-03-01T00:00:00Z",
 			message: "Quota enforced on owner node (membership is blocked).",
@@ -48,10 +48,10 @@ const DESIGN_ALERTS: AlertsResponse = {
 
 const DESIGN_NODES: AdminNode[] = [
 	{
-		node_id: fixtureCatalog.slotString.s241(),
-		node_name: fixtureCatalog.slotString.s33(),
-		access_host: fixtureCatalog.slotString.s137(),
-		api_base_url: fixtureCatalog.slotString.s242(),
+		node_id: fixtureCatalog.nodeId.fixture241(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		access_host: fixtureCatalog.host.fixture137(),
+		api_base_url: fixtureCatalog.service.fixture242(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -60,10 +60,10 @@ const DESIGN_NODES: AdminNode[] = [
 		} satisfies NodeQuotaReset,
 	},
 	{
-		node_id: fixtureCatalog.slotString.s243(),
-		node_name: fixtureCatalog.slotString.s37(),
-		access_host: fixtureCatalog.slotString.s244(),
-		api_base_url: fixtureCatalog.slotString.s245(),
+		node_id: fixtureCatalog.nodeId.fixture243(),
+		node_name: fixtureCatalog.nodeName.fixture37(),
+		access_host: fixtureCatalog.host.fixture244(),
+		api_base_url: fixtureCatalog.service.fixture245(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -72,10 +72,10 @@ const DESIGN_NODES: AdminNode[] = [
 		} satisfies NodeQuotaReset,
 	},
 	{
-		node_id: fixtureCatalog.slotString.s246(),
-		node_name: fixtureCatalog.slotString.s247(),
-		access_host: fixtureCatalog.slotString.s248(),
-		api_base_url: fixtureCatalog.slotString.s249(),
+		node_id: fixtureCatalog.nodeId.fixture246(),
+		node_name: fixtureCatalog.nodeName.fixture247(),
+		access_host: fixtureCatalog.host.fixture248(),
+		api_base_url: fixtureCatalog.service.fixture249(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "unlimited",
@@ -88,29 +88,29 @@ const DESIGN_ENDPOINTS: Array<
 	AdminEndpoint & { short_ids?: string[]; active_short_id?: string }
 > = [
 	{
-		endpoint_id: fixtureCatalog.slotString.s240(),
-		node_id: fixtureCatalog.slotString.s241(),
-		tag: fixtureCatalog.slotString.s139(),
+		endpoint_id: fixtureCatalog.endpointId.fixture240(),
+		node_id: fixtureCatalog.nodeId.fixture241(),
+		tag: fixtureCatalog.endpointTag.fixture139(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 443,
 		meta: {
 			reality: {
-				dest: fixtureCatalog.slotString.s2(),
-				server_names: fixtureCatalog.slotList.l20(),
+				dest: fixtureCatalog.address.loopbackPort39002(),
+				server_names: fixtureCatalog.hostList.edge20(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
 			canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
-			accepted_authorities: fixtureCatalog.slotList.l21(),
+			accepted_authorities: fixtureCatalog.hostList.edge21(),
 			managed_default: true,
 		},
 		short_ids: ["2a3b4c", "5d6e7f"],
 		active_short_id: "2a3b4c",
 	},
 	{
-		endpoint_id: fixtureCatalog.slotString.s250(),
-		node_id: fixtureCatalog.slotString.s243(),
-		tag: fixtureCatalog.slotString.s251(),
+		endpoint_id: fixtureCatalog.endpointId.fixture250(),
+		node_id: fixtureCatalog.nodeId.fixture243(),
+		tag: fixtureCatalog.endpointTag.fixture251(),
 		kind: fixtureCatalog.endpoint.ssKind(),
 		port: 8443,
 		meta: {
@@ -125,7 +125,7 @@ const DESIGN_USERS: AdminUser[] = [
 	{
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Customer A",
-		subscription_token: fixtureCatalog.slotString.s252(),
+		subscription_token: fixtureCatalog.token.fixture252(),
 		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
@@ -137,7 +137,7 @@ const DESIGN_USERS: AdminUser[] = [
 	{
 		user_id: fixtureCatalog.identifier.userSecondary(),
 		display_name: "Customer B",
-		subscription_token: fixtureCatalog.slotString.s253(),
+		subscription_token: fixtureCatalog.token.fixture253(),
 		credential_epoch: 0,
 		priority_tier: "p3",
 		quota_reset: {
@@ -152,15 +152,15 @@ const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
 	[fixtureCatalog.identifier.userPrimary()]: [
 		{
 			user_id: fixtureCatalog.identifier.userPrimary(),
-			endpoint_id: fixtureCatalog.slotString.s240(),
-			node_id: fixtureCatalog.slotString.s241(),
+			endpoint_id: fixtureCatalog.endpointId.fixture240(),
+			node_id: fixtureCatalog.nodeId.fixture241(),
 		},
 	],
 	[fixtureCatalog.identifier.userSecondary()]: [
 		{
 			user_id: fixtureCatalog.identifier.userSecondary(),
-			endpoint_id: fixtureCatalog.slotString.s250(),
-			node_id: fixtureCatalog.slotString.s243(),
+			endpoint_id: fixtureCatalog.endpointId.fixture250(),
+			node_id: fixtureCatalog.nodeId.fixture243(),
 		},
 	],
 };
@@ -168,7 +168,7 @@ const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
 		user_id: fixtureCatalog.identifier.userPrimary(),
-		node_id: fixtureCatalog.slotString.s241(),
+		node_id: fixtureCatalog.nodeId.fixture241(),
 		quota_limit_bytes: 10 * 2 ** 30,
 		quota_reset_source: "user",
 	},
@@ -183,10 +183,10 @@ const DESIGN_MOCK_API = {
 	data: {
 		health: { status: "ok" as const },
 		clusterInfo: {
-			cluster_id: fixtureCatalog.slotString.s53(),
-			node_id: fixtureCatalog.slotString.s241(),
+			cluster_id: fixtureCatalog.cluster.fixture53(),
+			node_id: fixtureCatalog.nodeId.fixture241(),
 			role: "leader" as const,
-			leader_api_base_url: fixtureCatalog.slotString.s242(),
+			leader_api_base_url: fixtureCatalog.service.fixture242(),
 			term: 42,
 			xp_version: "0.0.0",
 		},
@@ -234,10 +234,10 @@ export const DashboardUpdateAvailable: Story = {
 					current: { package: "0.1.0", release_tag: "v0.1.0" },
 					latest: {
 						release_tag: "v0.2.0",
-						published_at: fixtureCatalog.slotString.s54(),
+						published_at: fixtureCatalog.timestamp.t20260131T000000(),
 					},
 					has_update: true,
-					checked_at: fixtureCatalog.slotString.s54(),
+					checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 					compare_reason: "semver",
 					source: {
 						kind: "github-releases",

@@ -39,7 +39,9 @@ rule:
                   }
               - has:
                   field: body
-                  regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\s+as\s+u32)?\)|serde_json::from_value\(catalog\(\)\.slots\.numbers\[[0-9]+\]\.clone\(\)\)\s*\.expect\("fixture numeric slot is valid"\))\s*\}$'
+                  any:
+                    - regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\s+as\s+u32)?\))\s*\}$'
+                    - regex: '^\{\s*serde_json::from_value\(catalog\(\)\.fixtures\.numbers\["value"\]\["[A-Za-z0-9]+"\]\.clone\(\)\)\s*\.expect\("fixture numeric value is valid"\)\s*\}$'
     - all:
         - kind: string_literal
         - inside:
@@ -51,6 +53,10 @@ rule:
             inside:
               stopBy: end
               pattern: serde_json::from_value($VALUE).expect($MESSAGE)
+        - not:
+            inside:
+              stopBy: end
+              pattern: catalog().fixtures.$GROUP[$CATEGORY][$KEY]
     - all:
         - kind: integer_literal
         - inside:

@@ -6,13 +6,18 @@ use serde_yaml::Value;
 use std::collections::BTreeMap;
 use xp_test_fixtures::{
     endpoint_server_psk_b64, endpoint_server_psk_b64_alternate, endpoint_server_psk_b64_escaped,
-    slot_s658 as fixture_slot_s658, slot_s659 as fixture_slot_s659, slot_s660 as fixture_slot_s660,
-    slot_s661 as fixture_slot_s661, slot_s662 as fixture_slot_s662, slot_s663 as fixture_slot_s663,
-    slot_s664 as fixture_slot_s664, slot_s665 as fixture_slot_s665, slot_s666 as fixture_slot_s666,
-    slot_s667 as fixture_slot_s667, slot_s668 as fixture_slot_s668, slot_s669 as fixture_slot_s669,
-    slot_s670 as fixture_slot_s670, slot_s671 as fixture_slot_s671, slot_s672 as fixture_slot_s672,
-    slot_s673 as fixture_slot_s673, slot_s674 as fixture_slot_s674, slot_s675 as fixture_slot_s675,
-    slot_s676 as fixture_slot_s676, slot_s677 as fixture_slot_s677, slot_s678 as fixture_slot_s678,
+    label_aardvark as fixture_label_aardvark, label_alpha as fixture_label_alpha,
+    label_beta as fixture_label_beta, label_dash_host as fixture_label_dash_host,
+    label_dot_host as fixture_label_dot_host, label_hkl as fixture_label_hkl,
+    label_japan as fixture_label_japan, label_mystery as fixture_label_mystery,
+    label_node_beta as fixture_label_node_beta,
+    label_node1_variant2 as fixture_label_node1_variant2, label_only_us as fixture_label_only_us,
+    label_osaka_a as fixture_label_osaka_a, label_osaka_b as fixture_label_osaka_b,
+    label_relay_japan as fixture_label_relay_japan, label_seoul_a as fixture_label_seoul_a,
+    label_singapore_a as fixture_label_singapore_a,
+    label_singapore_avariant2 as fixture_label_singapore_avariant2,
+    label_tokyo_a as fixture_label_tokyo_a, label_tokyo_avariant2 as fixture_label_tokyo_avariant2,
+    label_tokyo_avariant3 as fixture_label_tokyo_avariant3, label_tokyo_b as fixture_label_tokyo_b,
     subscription_api_aardvark as fixture_api_aardvark, subscription_api_dash as fixture_api_dash,
     subscription_api_dot as fixture_api_dot,
     subscription_api_loopback_https as fixture_api_loopback_https,
@@ -134,15 +139,23 @@ rule-providers:
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successful_probe() {
     let nodes = vec![
-        node(fixture_node_n1(), fixture_slot_s678, fixture_host_tokyo_a()),
-        node(fixture_node_n2(), fixture_slot_s673, fixture_host_hkl()),
-        node(fixture_node_n3(), fixture_slot_s674, fixture_host_mystery()),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_avariant3,
+            fixture_host_tokyo_a(),
+        ),
+        node(fixture_node_n2(), fixture_label_hkl, fixture_host_hkl()),
+        node(
+            fixture_node_n3(),
+            fixture_label_mystery,
+            fixture_host_mystery(),
+        ),
     ];
     let mut probes = BTreeMap::new();
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: xp_test_fixtures::slot_s488().to_owned(),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t080800_z().to_owned(),
             ..NodeEgressProbeState::default()
         },
     );
@@ -167,7 +180,7 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successfu
 fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe() {
     let nodes = vec![node(
         fixture_node_n1(),
-        fixture_slot_s677,
+        fixture_label_singapore_avariant2,
         fixture_host_singapore(),
     )];
 
@@ -183,7 +196,7 @@ fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe
 fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
     let nodes = vec![node(
         fixture_node_n1(),
-        fixture_slot_s678,
+        fixture_label_tokyo_avariant3,
         fixture_host_tokyo_a(),
     )];
     let probes = probe_map(&[("n1", NodeSubscriptionRegion::Taiwan)]);
@@ -200,15 +213,17 @@ fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_probe() {
     let nodes = vec![node(
         fixture_node_n1(),
-        fixture_slot_s678,
+        fixture_label_tokyo_avariant3,
         fixture_host_tokyo_a(),
     )];
     let mut probes = BTreeMap::new();
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: xp_test_fixtures::slot_s489().to_owned(),
-            selected_public_ip: Some(xp_test_fixtures::slot_s490().to_owned()),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t080900_z().to_owned(),
+            selected_public_ip: Some(
+                xp_test_fixtures::address_documentation192_0_2_91().to_owned(),
+            ),
             subscription_region: NodeSubscriptionRegion::Other,
             error_summary: Some("country.is lookup failed".to_string()),
             ..NodeEgressProbeState::default()
@@ -227,7 +242,7 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_pro
 fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() {
     let nodes = vec![node(
         fixture_node_n1(),
-        fixture_slot_s678,
+        fixture_label_tokyo_avariant3,
         fixture_host_tokyo_a(),
     )];
     let mut stale_probe = egress_probe(NodeSubscriptionRegion::Taiwan, "TW", "203.0.113.30");
@@ -248,13 +263,13 @@ fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() 
 fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slug_fallback() {
     let nodes = vec![node(
         fixture_node_n1(),
-        fixture_slot_s678,
+        fixture_label_tokyo_avariant3,
         fixture_host_tokyo_a(),
     )];
     let probe = NodeEgressProbeState {
         subscription_region: NodeSubscriptionRegion::Other,
-        checked_at: xp_test_fixtures::slot_s489().to_owned(),
-        selected_public_ip: Some(xp_test_fixtures::slot_s490().to_owned()),
+        checked_at: xp_test_fixtures::timestamp_at20240101_t080900_z().to_owned(),
+        selected_public_ip: Some(xp_test_fixtures::address_documentation192_0_2_91().to_owned()),
         classification_invalidated_at: Some("2026-04-24T01:00:00Z".to_string()),
         error_summary: Some("country.is lookup failed".to_string()),
         ..NodeEgressProbeState::default()
@@ -280,7 +295,11 @@ fn app_proxy_group_shape_only_matches_hidden_wrapper_name() {
 #[test]
 fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
 
     let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64_escaped());
     let m = membership("n1", "e1");
@@ -300,7 +319,11 @@ fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
 #[test]
 fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
     let u = user("hello world");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
     let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
     let m = membership("n1", "e1");
 
@@ -315,7 +338,11 @@ fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
 #[test]
 fn empty_node_access_host_is_error() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_empty());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_empty(),
+    );
     let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
     let m = membership("n1", "e1");
 
@@ -332,7 +359,11 @@ fn empty_node_access_host_is_error() {
 #[test]
 fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_empty());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_empty(),
+    );
     let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
     let m = membership("n1", "e1");
     let profile = UserMihomoProfile {
@@ -354,7 +385,11 @@ fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
 #[test]
 fn vless_server_names_empty_is_error() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
     let ep = endpoint_vless_without_server_names("e1", "n1", "vless", 443);
     let m = membership("n1", "e1");
 
@@ -370,7 +405,11 @@ fn vless_server_names_empty_is_error() {
 #[test]
 fn empty_membership_list_produces_empty_output() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
     let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
 
     let out = build_raw_lines(SEED, &u, &[], &[ep], &[n]).unwrap();
@@ -386,7 +425,11 @@ fn empty_membership_list_produces_empty_output() {
 #[test]
 fn order_is_deterministic() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s675, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
 
     let ep1 = endpoint_ss("e1", "n1", "tag-2", 443, endpoint_server_psk_b64());
     let ep2 = endpoint_ss("e2", "n1", "tag-1", 443, endpoint_server_psk_b64());
@@ -410,7 +453,11 @@ fn order_is_deterministic() {
 #[test]
 fn build_mihomo_yaml_preserves_mixin_defined_proxies_and_outer_group() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -569,7 +616,11 @@ providerB:
 #[test]
 fn build_mihomo_provider_yaml_moves_generated_system_proxies_to_provider_payload() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -773,19 +824,19 @@ fn build_mihomo_provider_yaml_groups_relay_by_access_host() {
     let u = user("alice");
     let n1 = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s670,
+        fixture_label_tokyo_a,
         fixture_host_shared(),
         fixture_api_tokyo_a(),
     );
     let n2 = node_with_api_base(
         fixture_node_n2(),
-        fixture_slot_s671,
+        fixture_label_tokyo_b,
         fixture_host_shared(),
         fixture_api_tokyo_b(),
     );
     let n3 = node_with_api_base(
         fixture_node_n3(),
-        fixture_slot_s668,
+        fixture_label_seoul_a,
         fixture_host_seoul(),
         fixture_api_seoul_a(),
     );
@@ -859,19 +910,19 @@ providerA:
         &[
             node_with_api_base(
                 fixture_node_n1(),
-                fixture_slot_s670,
+                fixture_label_tokyo_a,
                 fixture_host_shared(),
                 fixture_api_tokyo_a(),
             ),
             node_with_api_base(
                 fixture_node_n2(),
-                fixture_slot_s671,
+                fixture_label_tokyo_b,
                 fixture_host_shared(),
                 fixture_api_tokyo_b(),
             ),
             node_with_api_base(
                 fixture_node_n3(),
-                fixture_slot_s668,
+                fixture_label_seoul_a,
                 fixture_host_seoul(),
                 fixture_api_seoul_a(),
             ),
@@ -912,7 +963,7 @@ fn build_mihomo_provider_yaml_uses_default_health_when_api_base_is_loopback() {
     let u = user("alice");
     let n = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s670,
+        fixture_label_tokyo_a,
         fixture_host_relay(),
         fixture_api_loopback_https(),
     );
@@ -968,13 +1019,13 @@ fn build_mihomo_provider_yaml_uses_api_health_when_shared_access_host_has_one_ap
     let u = user("alice");
     let n1 = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s670,
+        fixture_label_tokyo_a,
         fixture_host_shared(),
         fixture_api_shared(),
     );
     let n2 = node_with_api_base(
         fixture_node_n2(),
-        fixture_slot_s671,
+        fixture_label_tokyo_b,
         fixture_host_shared(),
         fixture_api_shared(),
     );
@@ -1026,7 +1077,7 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
     let u = user("alice");
     let n = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s664,
+        fixture_label_node_beta,
         fixture_host_endpoint_node(),
         fixture_api_xp_node(),
     );
@@ -1076,7 +1127,7 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
     let u = user("alice");
     let n = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s664,
+        fixture_label_node_beta,
         fixture_host_endpoint_node(),
         fixture_api_xp_node(),
     );
@@ -1129,7 +1180,7 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
     let u = user("alice");
     let n = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s664,
+        fixture_label_node_beta,
         fixture_host_endpoint_node(),
         fixture_api_xp_node(),
     );
@@ -1179,13 +1230,13 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host
     let u = user("alice");
     let n1 = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s671,
+        fixture_label_tokyo_b,
         fixture_host_shared(),
         fixture_api_tokyo_b(),
     );
     let n2 = node_with_api_base(
         fixture_node_n2(),
-        fixture_slot_s658,
+        fixture_label_aardvark,
         fixture_host_shared(),
         fixture_api_aardvark(),
     );
@@ -1238,13 +1289,13 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
     let u = user("alice");
     let n1 = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s662,
+        fixture_label_dot_host,
         fixture_host_dot(),
         fixture_api_dot(),
     );
     let n2 = node_with_api_base(
         fixture_node_n2(),
-        fixture_slot_s661,
+        fixture_label_dash_host,
         fixture_host_dash(),
         fixture_api_dash(),
     );
@@ -1302,7 +1353,11 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
 #[test]
 fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1347,7 +1402,11 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
 #[test]
 fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_ref_in_main_config() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -1393,7 +1452,11 @@ fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_re
 #[test]
 fn build_mihomo_yaml_generated_relay_group_wins_custom_name_collision() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1449,7 +1512,11 @@ rules: []
 #[test]
 fn build_mihomo_provider_yaml_rejects_reserved_proxy_name_collision() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1512,13 +1579,13 @@ fn build_mihomo_provider_yaml_limits_relay_groups_to_subscribed_nodes() {
     let u = user("alice");
     let n1 = node_with_api_base(
         fixture_node_n1(),
-        fixture_slot_s658,
+        fixture_label_aardvark,
         fixture_host_shared(),
         fixture_api_unsubscribed(),
     );
     let n2 = node_with_api_base(
         fixture_node_n2(),
-        fixture_slot_s671,
+        fixture_label_tokyo_b,
         fixture_host_shared(),
         fixture_api_subscribed(),
     );
@@ -1588,7 +1655,7 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_avoids_legacy_region_relay_alias_names() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s663, fixture_host_jp());
+    let n = node(fixture_node_n1(), fixture_label_japan, fixture_host_jp());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1653,10 +1720,10 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_deduplicates_disambiguated_relay_group_names() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s663, fixture_host_jp());
+    let n1 = node(fixture_node_n1(), fixture_label_japan, fixture_host_jp());
     let n2 = node(
         fixture_node_n2(),
-        fixture_slot_s676,
+        fixture_label_relay_japan,
         fixture_host_relay_jp(),
     );
     let endpoints = vec![
@@ -1735,7 +1802,11 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_injects_default_aggregate_groups() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -1824,7 +1895,11 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_places_visible_region_block_after_quality_groups() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -1930,7 +2005,11 @@ rules: []
 #[test]
 fn build_mihomo_provider_yaml_moves_hidden_relay_groups_after_system_visible_groups() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -1982,8 +2061,16 @@ providerA:
 fn build_mihomo_provider_yaml_locks_system_proxy_group_sequence() {
     let u = user("alice");
     let nodes = vec![
-        node(fixture_node_n1(), fixture_slot_s670, fixture_host_relay_a()),
-        node(fixture_node_n2(), fixture_slot_s667, fixture_host_relay_b()),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_a,
+            fixture_host_relay_a(),
+        ),
+        node(
+            fixture_node_n2(),
+            fixture_label_osaka_b,
+            fixture_host_relay_b(),
+        ),
     ];
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
@@ -2093,7 +2180,11 @@ providerA:
 #[test]
 fn build_mihomo_provider_yaml_keeps_unprobed_singapore_nodes_in_other_group() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s669, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_singapore_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -2223,7 +2314,11 @@ fn known_non_other_region_filter_avoids_matching_embedded_us_fragments() {
 #[test]
 fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -2254,7 +2349,11 @@ fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
 #[test]
 fn build_mihomo_provider_yaml_preserves_direct_refs_via_system_provider() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -2333,7 +2432,11 @@ fn build_mihomo_yaml_rejects_non_mapping_template() {
 #[test]
 fn build_mihomo_yaml_adds_missing_outer_group() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2439,7 +2542,11 @@ providerA:
 #[test]
 fn build_mihomo_yaml_injects_relay_filter() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2502,7 +2609,11 @@ providerA:
 #[test]
 fn build_mihomo_yaml_prunes_missing_proxy_and_provider_refs_when_extras_cleared() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -2608,7 +2719,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_reorders_user_groups_using_helper_template_order() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -2942,7 +3057,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_legacy_landing_refs_before_replaying_helper_order() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -3034,7 +3153,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_landing_only_legacy_refs_before_helper_replay() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -3119,8 +3242,16 @@ rules: []
 fn build_mihomo_yaml_remaps_multiple_landing_only_legacy_refs_using_final_landing_order() {
     let u = user("alice");
     let nodes = vec![
-        node(fixture_node_n1(), fixture_slot_s671, fixture_host_example()),
-        node(fixture_node_n2(), fixture_slot_s666, fixture_host_example()),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_b,
+            fixture_host_example(),
+        ),
+        node(
+            fixture_node_n2(),
+            fixture_label_osaka_a,
+            fixture_host_example(),
+        ),
     ];
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
@@ -3213,7 +3344,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_injects_default_high_quality_candidates() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -3452,7 +3587,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_does_not_treat_extra_suffix_proxies_as_relay_groups() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -3943,7 +4082,11 @@ rules:
 #[test]
 fn build_mihomo_yaml_preserves_unknown_relay_prefixed_rule_targets() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s672, fixture_host_new());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_new(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -3985,7 +4128,11 @@ rules:
 #[test]
 fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s672, fixture_host_tokyo_a());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4040,7 +4187,11 @@ fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy
 #[test]
 fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s672, fixture_host_tokyo_a());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4095,7 +4246,11 @@ fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy
 #[test]
 fn build_mihomo_yaml_removes_custom_shared_outer_dialer_proxy() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s672, fixture_host_tokyo_a());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4191,7 +4346,11 @@ fn build_mihomo_yaml_maps_legacy_dialer_to_direct_without_relay_groups() {
 #[test]
 fn build_mihomo_yaml_removes_custom_region_relay_dialer_proxy() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s672, fixture_host_tokyo_a());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4545,7 +4704,11 @@ rules: []
 #[test]
 fn build_mihomo_yaml_keeps_include_all_proxies_groups_without_direct_fallback() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4602,7 +4765,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_injects_direct_when_relay_group_has_no_provider_candidates() {
     let u = user("alice");
-    let n = node(fixture_node_n1(), fixture_slot_s665, fixture_host_us());
+    let n = node(fixture_node_n1(), fixture_label_only_us, fixture_host_us());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4691,8 +4854,8 @@ rules: []
 #[test]
 fn build_mihomo_yaml_remaps_supported_legacy_proxy_refs_and_prunes_old_region_refs() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
-    let n2 = node(fixture_node_n2(), fixture_slot_s660, fixture_host_beta());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
+    let n2 = node(fixture_node_n2(), fixture_label_beta, fixture_host_beta());
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -4780,7 +4943,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_prunes_legacy_chain_refs_even_when_generated_count_is_smaller() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![
         endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
         endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
@@ -4851,7 +5014,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_chain_suffixes() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
@@ -4915,7 +5078,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_reality_suffixes() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -4989,7 +5152,7 @@ rules: []
 #[test]
 fn build_mihomo_yaml_dedupes_all_proxy_refs_in_groups() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -5053,7 +5216,7 @@ mod mihomo_smux;
 #[test]
 fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {
     let u = user("alice");
-    let n1 = node(fixture_node_n1(), fixture_slot_s659, fixture_host_alpha());
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",

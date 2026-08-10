@@ -95,13 +95,13 @@ function catalogMihomoProfile(): MockMihomoProfile {
 
 function buildNodeRuntimeListItem() {
 	return {
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s33(),
-		api_base_url: fixtureCatalog.slotString.s34(),
-		access_host: fixtureCatalog.slotString.s35(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		api_base_url: fixtureCatalog.service.fixture34(),
+		access_host: fixtureCatalog.host.fixture35(),
 		summary: {
 			status: "up",
-			updated_at: fixtureCatalog.slotString.s91(),
+			updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 		},
 		components: [
 			{
@@ -114,7 +114,7 @@ function buildNodeRuntimeListItem() {
 		],
 		recent_slots: [
 			{
-				slot_start: fixtureCatalog.slotString.s91(),
+				slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 				status: "up",
 			},
 		],
@@ -123,19 +123,19 @@ function buildNodeRuntimeListItem() {
 
 const defaultNodes: AdminNode[] = [
 	{
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s86(),
-		api_base_url: fixtureCatalog.slotString.s87(),
-		access_host: fixtureCatalog.slotString.s88(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture86(),
+		api_base_url: fixtureCatalog.service.fixture87(),
+		access_host: fixtureCatalog.host.fixture88(),
 		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 	},
 ];
 const defaultEndpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: fixtureCatalog.slotString.s40(),
-		node_id: fixtureCatalog.slotString.s32(),
-		tag: fixtureCatalog.slotString.s89(),
+		endpoint_id: fixtureCatalog.endpointId.fixture40(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		tag: fixtureCatalog.endpointTag.fixture89(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: fixtureCatalog.endpoint.port443(),
 		meta: {},
@@ -145,17 +145,17 @@ const defaultUsers: AdminUser[] = [
 	{
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Demo user",
-		subscription_token: fixtureCatalog.slotString.s90(),
+		subscription_token: fixtureCatalog.token.fixture90(),
 		credential_epoch: fixtureCatalog.user.credentialEpoch(),
 		priority_tier: fixtureCatalog.user.priorityTierDefault(),
 		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 	},
 ];
 const defaultClusterInfo: ClusterInfo = {
-	cluster_id: fixtureCatalog.slotString.s84(),
-	node_id: fixtureCatalog.slotString.s32(),
+	cluster_id: fixtureCatalog.cluster.fixture84(),
+	node_id: fixtureCatalog.nodeId.fixture32(),
 	role: "leader",
-	leader_api_base_url: fixtureCatalog.slotString.s87(),
+	leader_api_base_url: fixtureCatalog.service.fixture87(),
 	term: 1,
 	xp_version: "v0.1.0",
 };
@@ -408,7 +408,7 @@ export async function setupApiMocks(
 			[fixtureCatalog.identifier.userPrimary()]: [
 				{
 					node_id: fixtureCatalog.identifier.nodePrimary(),
-					weight: fixtureCatalog.slotNumber.n30(),
+					weight: fixtureCatalog.number.value100(),
 				},
 			],
 		},
@@ -458,10 +458,10 @@ export async function setupApiMocks(
 				},
 				latest: {
 					release_tag: "v0.1.0",
-					published_at: fixtureCatalog.slotString.s91(),
+					published_at: fixtureCatalog.timestamp.t20260301T000000(),
 				},
 				has_update: false,
-				checked_at: fixtureCatalog.slotString.s91(),
+				checked_at: fixtureCatalog.timestamp.t20260301T000000(),
 				compare_reason: "up_to_date",
 				source: {
 					kind: "github_release",
@@ -505,7 +505,7 @@ export async function setupApiMocks(
 					finished_at: null,
 					exit_code: null,
 					message: null,
-					updated_at: fixtureCatalog.slotString.s91(),
+					updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 				},
 			});
 			return;
@@ -534,11 +534,11 @@ export async function setupApiMocks(
 			const items = state.nodes.map(buildNodeRuntimeListItem);
 			const payload = [
 				`event: hello\ndata: ${JSON.stringify({
-					node_id: fixtureCatalog.slotString.s57(),
-					connected_at: fixtureCatalog.slotString.s91(),
+					node_id: fixtureCatalog.nodeId.fixture57(),
+					connected_at: fixtureCatalog.timestamp.t20260301T000000(),
 				})}\n`,
 				`event: snapshot\ndata: ${JSON.stringify({
-					emitted_at: fixtureCatalog.slotString.s91(),
+					emitted_at: fixtureCatalog.timestamp.t20260301T000000(),
 					health: { status: "ok" },
 					cluster_info: state.clusterInfo,
 					nodes_runtime: {
@@ -561,7 +561,7 @@ export async function setupApiMocks(
 							finished_at: null,
 							exit_code: null,
 							message: null,
-							updated_at: fixtureCatalog.slotString.s91(),
+							updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 						},
 					},
 				})}\n`,
@@ -710,8 +710,8 @@ export async function setupApiMocks(
 					if (!endpoint) throw new Error(`missing endpoint: ${endpointId}`);
 					return {
 						user_id: userId,
-						endpoint_id: fixtureCatalog.slotString.s40(),
-						node_id: fixtureCatalog.slotString.s32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					};
 				});
 			state.userAccessByUserId[userId] = nextItems;
@@ -779,14 +779,14 @@ export async function setupApiMocks(
 
 				const items = state.userNodeWeights[userId] ?? [];
 				const next: AdminUserNodeWeightItem =
-					nodeId === fixtureCatalog.slotString.s32()
+					nodeId === fixtureCatalog.nodeId.fixture32()
 						? {
-								node_id: fixtureCatalog.slotString.s32(),
-								weight: fixtureCatalog.slotNumber.n13(),
+								node_id: fixtureCatalog.nodeId.fixture32(),
+								weight: fixtureCatalog.number.value120(),
 							}
 						: {
-								node_id: fixtureCatalog.slotString.s36(),
-								weight: fixtureCatalog.slotNumber.n13(),
+								node_id: fixtureCatalog.nodeId.fixture36(),
+								weight: fixtureCatalog.number.value120(),
 							};
 				state.userNodeWeights[userId] = [
 					...items.filter((i) => i.node_id !== nodeId),

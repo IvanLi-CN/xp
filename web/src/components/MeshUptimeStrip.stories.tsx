@@ -5,7 +5,7 @@ import { MeshUptimeStrip } from "./MeshUptimeStrip";
 
 function buckets(values: Array<"good" | "fallback" | "slow" | "down">) {
 	return values.map((value) => ({
-		minute: fixtureCatalog.slotString.s294(),
+		minute: fixtureCatalog.timestamp.t20260803T000000(),
 		mesh_success: value === "good" || value === "slow" ? 1 : 0,
 		mesh_failure: value === "down" || value === "fallback" ? 1 : 0,
 		public_success: value === "fallback" ? 1 : 0,

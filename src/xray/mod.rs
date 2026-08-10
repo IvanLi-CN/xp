@@ -389,7 +389,7 @@ mod tests {
         let mut client = connect(addr).await.unwrap();
         let req = AddInboundRequest {
             inbound: Some(InboundHandlerConfig {
-                tag: xp_test_fixtures::slot_s612().to_owned(),
+                tag: xp_test_fixtures::endpoint_tag_fixtureinline().to_owned(),
                 receiver_settings: None,
                 proxy_settings: None,
             }),

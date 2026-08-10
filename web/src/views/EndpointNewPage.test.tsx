@@ -84,10 +84,10 @@ function setupNodeMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: fixtureCatalog.slotString.s182(),
-				node_name: fixtureCatalog.slotString.s86(),
-				access_host: fixtureCatalog.slotString.s130(),
-				api_base_url: fixtureCatalog.slotString.s131(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
+				node_name: fixtureCatalog.nodeName.fixture86(),
+				access_host: fixtureCatalog.host.fixture130(),
+				api_base_url: fixtureCatalog.service.fixture131(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -100,15 +100,15 @@ function setupNodeMocks() {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
-				endpoint_id: fixtureCatalog.slotString.s132(),
-				node_id: fixtureCatalog.slotString.s182(),
-				tag: fixtureCatalog.slotString.s133(),
+				endpoint_id: fixtureCatalog.endpointId.fixture132(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
+				tag: fixtureCatalog.endpointTag.fixture133(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 443,
 				meta: {
 					reality: {
 						dest: fixtureCatalog.address.loopback39043(),
-						server_names: fixtureCatalog.slotList.l8(),
+						server_names: fixtureCatalog.hostList.edge8(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
@@ -119,12 +119,12 @@ function setupNodeMocks() {
 		],
 	});
 	vi.mocked(fetchAdminConfig).mockResolvedValue({
-		bind: fixtureCatalog.slotString.s58(),
-		xray_api_addr: fixtureCatalog.slotString.s59(),
+		bind: fixtureCatalog.address.loopbackPort39058(),
+		xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 		data_dir: "./data",
-		node_name: fixtureCatalog.slotString.s86(),
-		access_host: fixtureCatalog.slotString.s130(),
-		api_base_url: fixtureCatalog.slotString.s131(),
+		node_name: fixtureCatalog.nodeName.fixture86(),
+		access_host: fixtureCatalog.host.fixture130(),
+		api_base_url: fixtureCatalog.service.fixture131(),
 		vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 		quota_poll_interval_secs: 10,
 		quota_auto_unban: true,
@@ -151,9 +151,9 @@ describe("EndpointNewPage", () => {
 
 	it("submits managed VLESS create payload without legacy reality fields", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s105(),
-			node_id: fixtureCatalog.slotString.s182(),
-			tag: fixtureCatalog.slotString.s105(),
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
@@ -177,7 +177,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				node_id: fixtureCatalog.slotString.s182(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
@@ -198,16 +198,16 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(mockNavigate).toHaveBeenCalledWith({
 				to: "/endpoints/$endpointId",
-				params: { endpointId: fixtureCatalog.slotString.s105() },
+				params: { endpointId: fixtureCatalog.endpointId.fixture105() },
 			});
 		});
 	});
 
 	it("omits SMux controls and payload for VLESS endpoints", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s105(),
-			node_id: fixtureCatalog.slotString.s182(),
-			tag: fixtureCatalog.slotString.s105(),
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: { managed_default: true },
@@ -228,7 +228,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				node_id: fixtureCatalog.slotString.s182(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.optional.undefined(),
 				accepted_authorities: fixtureCatalog.optional.undefined(),
@@ -238,9 +238,9 @@ describe("EndpointNewPage", () => {
 
 	it("restores managed autocomplete suggestions without changing create payload shape", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s105(),
-			node_id: fixtureCatalog.slotString.s182(),
-			tag: fixtureCatalog.slotString.s105(),
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
@@ -285,7 +285,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				node_id: fixtureCatalog.slotString.s182(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host130Port443(),
@@ -303,15 +303,15 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 			items: [
 				{
-					endpoint_id: fixtureCatalog.slotString.s132(),
-					node_id: fixtureCatalog.slotString.s182(),
-					tag: fixtureCatalog.slotString.s133(),
+					endpoint_id: fixtureCatalog.endpointId.fixture132(),
+					node_id: fixtureCatalog.nodeId.fixture182(),
+					tag: fixtureCatalog.endpointTag.fixture133(),
 					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: 443,
 					meta: {
 						reality: {
 							dest: fixtureCatalog.address.loopback49043(),
-							server_names: fixtureCatalog.slotList.l8(),
+							server_names: fixtureCatalog.hostList.edge8(),
 							server_names_source: "manual",
 							fingerprint: "chrome",
 						},
@@ -321,12 +321,12 @@ describe("EndpointNewPage", () => {
 			],
 		});
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: fixtureCatalog.slotString.s58(),
-			xray_api_addr: fixtureCatalog.slotString.s59(),
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: fixtureCatalog.slotString.s86(),
-			access_host: fixtureCatalog.slotString.s130(),
-			api_base_url: fixtureCatalog.slotString.s131(),
+			node_name: fixtureCatalog.nodeName.fixture86(),
+			access_host: fixtureCatalog.host.fixture130(),
+			api_base_url: fixtureCatalog.service.fixture131(),
 			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -371,9 +371,9 @@ describe("EndpointNewPage", () => {
 		{ timeout: 10_000 },
 		async () => {
 			vi.mocked(createAdminEndpoint).mockResolvedValue({
-				endpoint_id: fixtureCatalog.slotString.s185(),
-				node_id: fixtureCatalog.slotString.s182(),
-				tag: fixtureCatalog.slotString.s185(),
+				endpoint_id: fixtureCatalog.endpointId.fixture185(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
+				tag: fixtureCatalog.endpointId.fixture185(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 8443,
 				meta: {
@@ -407,7 +407,7 @@ describe("EndpointNewPage", () => {
 			await waitFor(() => {
 				expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 					kind: fixtureCatalog.endpoint.vlessKind(),
-					node_id: fixtureCatalog.slotString.s182(),
+					node_id: fixtureCatalog.nodeId.fixture182(),
 					port: 8443,
 					accepted_authorities: fixtureCatalog.authority.host130Port8443(),
 					mihomo_smux: {
@@ -428,10 +428,10 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s124(),
-					node_name: fixtureCatalog.slotString.s125(),
-					access_host: fixtureCatalog.slotString.s126(),
-					api_base_url: fixtureCatalog.slotString.s127(),
+					node_id: fixtureCatalog.nodeId.fixture124(),
+					node_name: fixtureCatalog.nodeName.fixture125(),
+					access_host: fixtureCatalog.host.fixture126(),
+					api_base_url: fixtureCatalog.service.fixture127(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -443,12 +443,12 @@ describe("EndpointNewPage", () => {
 		});
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: fixtureCatalog.slotString.s58(),
-			xray_api_addr: fixtureCatalog.slotString.s59(),
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: fixtureCatalog.slotString.s125(),
-			access_host: fixtureCatalog.slotString.s126(),
-			api_base_url: fixtureCatalog.slotString.s127(),
+			node_name: fixtureCatalog.nodeName.fixture125(),
+			access_host: fixtureCatalog.host.fixture126(),
+			api_base_url: fixtureCatalog.service.fixture127(),
 			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -459,9 +459,9 @@ describe("EndpointNewPage", () => {
 			admin_token_masked: "********",
 		});
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s186(),
-			node_id: fixtureCatalog.slotString.s124(),
-			tag: fixtureCatalog.slotString.s186(),
+			endpoint_id: fixtureCatalog.endpointId.fixture186(),
+			node_id: fixtureCatalog.nodeId.fixture124(),
+			tag: fixtureCatalog.endpointId.fixture186(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
@@ -506,7 +506,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				node_id: fixtureCatalog.slotString.s124(),
+				node_id: fixtureCatalog.nodeId.fixture124(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host126Port443(),
@@ -542,9 +542,9 @@ describe("EndpointNewPage", () => {
 
 	it("submits the editable Mihomo SMux policy for SS2022", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s105(),
-			node_id: fixtureCatalog.slotString.s182(),
-			tag: fixtureCatalog.slotString.s105(),
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
 			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 443,
 			meta: {},
@@ -572,7 +572,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.ssKind(),
-				node_id: fixtureCatalog.slotString.s182(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: 443,
 				mihomo_smux: {
 					enabled: false,
@@ -586,9 +586,9 @@ describe("EndpointNewPage", () => {
 
 	it("does not validate hidden SS2022 SMux values after switching to VLESS", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s105(),
-			node_id: fixtureCatalog.slotString.s182(),
-			tag: fixtureCatalog.slotString.s105(),
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {},
@@ -613,7 +613,7 @@ describe("EndpointNewPage", () => {
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				node_id: fixtureCatalog.slotString.s182(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.optional.undefined(),
 				accepted_authorities: fixtureCatalog.optional.undefined(),
@@ -649,10 +649,10 @@ describe("EndpointNewPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s182(),
-					node_name: fixtureCatalog.slotString.s86(),
+					node_id: fixtureCatalog.nodeId.fixture182(),
+					node_name: fixtureCatalog.nodeName.fixture86(),
 					access_host: fixtureCatalog.string.none(),
-					api_base_url: fixtureCatalog.slotString.s123(),
+					api_base_url: fixtureCatalog.service.fixture123(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",
@@ -664,12 +664,12 @@ describe("EndpointNewPage", () => {
 		});
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({ items: [] });
 		vi.mocked(fetchAdminConfig).mockResolvedValue({
-			bind: fixtureCatalog.slotString.s58(),
-			xray_api_addr: fixtureCatalog.slotString.s59(),
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: fixtureCatalog.slotString.s86(),
+			node_name: fixtureCatalog.nodeName.fixture86(),
 			access_host: fixtureCatalog.string.none(),
-			api_base_url: fixtureCatalog.slotString.s123(),
+			api_base_url: fixtureCatalog.service.fixture123(),
 			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,

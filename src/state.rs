@@ -1397,7 +1397,7 @@ mod migrate_tests {
         User {
             user_id: user_id.to_string(),
             display_name: user_id.to_string(),
-            subscription_token: xp_test_fixtures::slot_s622().to_owned(),
+            subscription_token: xp_test_fixtures::label_sub_user1().to_owned(),
             credential_epoch: 0,
             priority_tier: UserPriorityTier::P2,
             quota_reset: UserQuotaReset::default(),
@@ -1406,10 +1406,10 @@ mod migrate_tests {
 
     fn migrate_test_node(_node_id: &str) -> Node {
         Node {
-            node_id: xp_test_fixtures::slot_s477().to_owned(),
-            node_name: xp_test_fixtures::slot_s477().to_owned(),
-            access_host: xp_test_fixtures::slot_s595().to_owned(),
-            api_base_url: xp_test_fixtures::slot_s449().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            node_name: xp_test_fixtures::label_node1().to_owned(),
+            access_host: xp_test_fixtures::address_loopback().to_owned(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         }
@@ -1417,9 +1417,9 @@ mod migrate_tests {
 
     fn migrate_test_ss_endpoint_one() -> Endpoint {
         Endpoint {
-            endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
-            node_id: xp_test_fixtures::slot_s477().to_owned(),
-            tag: xp_test_fixtures::slot_s461().to_owned(),
+            endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_ss1().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 10_000,
             meta: serde_json::json!({}),
@@ -1428,9 +1428,9 @@ mod migrate_tests {
 
     fn migrate_test_ss_endpoint_two() -> Endpoint {
         Endpoint {
-            endpoint_id: xp_test_fixtures::slot_s527().to_owned(),
-            node_id: xp_test_fixtures::slot_s477().to_owned(),
-            tag: xp_test_fixtures::slot_s527().to_owned(),
+            endpoint_id: xp_test_fixtures::label_ss2().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_ss2().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 10_000,
             meta: serde_json::json!({}),
@@ -1447,10 +1447,10 @@ mod migrate_tests {
         nodes.insert(
             node_id.clone(),
             Node {
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                node_name: xp_test_fixtures::slot_s605().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
                 access_host: xp_test_fixtures::subscription_host_empty().to_owned(),
-                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -1460,9 +1460,9 @@ mod migrate_tests {
         endpoints.insert(
             endpoint_id.clone(),
             Endpoint {
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                tag: xp_test_fixtures::slot_s621().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                tag: xp_test_fixtures::endpoint_tag_fixturetest().to_owned(),
                 kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                 port: 12345,
                 meta: serde_json::json!({}),
@@ -1487,7 +1487,7 @@ mod migrate_tests {
             GrantV2 {
                 grant_id: "grant_1".to_string(),
                 user_id: user_id.clone(),
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
                 group_name: None,
                 enabled: true,
                 quota_limit_bytes: 123,
@@ -1558,7 +1558,7 @@ mod migrate_tests {
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
-                subscription_token: xp_test_fixtures::slot_s614().to_owned(),
+                subscription_token: xp_test_fixtures::label_sub1().to_owned(),
                 credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
@@ -1567,10 +1567,10 @@ mod migrate_tests {
         v6.nodes.insert(
             "node_1".to_string(),
             Node {
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                node_name: xp_test_fixtures::slot_s605().to_owned(),
-                access_host: xp_test_fixtures::slot_s595().to_owned(),
-                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+                access_host: xp_test_fixtures::address_loopback().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -1578,8 +1578,8 @@ mod migrate_tests {
         v6.endpoints.insert(
             "endpoint_1".to_string(),
             Endpoint {
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
                 tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
                 kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                 port: 12345,
@@ -1591,7 +1591,7 @@ mod migrate_tests {
             LegacyGrantCompat {
                 grant_id: "grant_1".to_string(),
                 user_id: "user_1".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
                 enabled: true,
             },
         );
@@ -1616,7 +1616,7 @@ mod migrate_tests {
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
-                subscription_token: xp_test_fixtures::slot_s614().to_owned(),
+                subscription_token: xp_test_fixtures::label_sub1().to_owned(),
                 credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
@@ -1642,7 +1642,7 @@ mod migrate_tests {
             User {
                 user_id: "user_1".to_string(),
                 display_name: "alice".to_string(),
-                subscription_token: xp_test_fixtures::slot_s614().to_owned(),
+                subscription_token: xp_test_fixtures::label_sub1().to_owned(),
                 credential_epoch: 0,
                 priority_tier: UserPriorityTier::P2,
                 quota_reset: UserQuotaReset::default(),
@@ -1651,10 +1651,10 @@ mod migrate_tests {
         v9.nodes.insert(
             "node_1".to_string(),
             Node {
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                node_name: xp_test_fixtures::slot_s605().to_owned(),
-                access_host: xp_test_fixtures::slot_s595().to_owned(),
-                api_base_url: xp_test_fixtures::slot_s449().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+                access_host: xp_test_fixtures::address_loopback().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -1662,8 +1662,8 @@ mod migrate_tests {
         v9.endpoints.insert(
             "endpoint_1".to_string(),
             Endpoint {
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
                 tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
                 kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
                 port: 12345,
@@ -1676,7 +1676,7 @@ mod migrate_tests {
             LegacyGrantCompat {
                 grant_id: "grant_0".to_string(),
                 user_id: "user_1".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
                 enabled: true,
             },
         );
@@ -1685,7 +1685,7 @@ mod migrate_tests {
             LegacyGrantCompat {
                 grant_id: "grant_1".to_string(),
                 user_id: "user_1".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
                 enabled: false,
             },
         );
@@ -1694,7 +1694,7 @@ mod migrate_tests {
             LegacyGrantCompat {
                 grant_id: "grant_orphan_user".to_string(),
                 user_id: "user_missing".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s453().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
                 enabled: true,
             },
         );
@@ -1703,7 +1703,7 @@ mod migrate_tests {
             LegacyGrantCompat {
                 grant_id: "grant_orphan_endpoint".to_string(),
                 user_id: "user_1".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s620().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint_missing().to_owned(),
                 enabled: true,
             },
         );
@@ -1767,18 +1767,18 @@ mod migrate_tests {
         v11.node_user_endpoint_memberships = BTreeSet::from([
             NodeUserEndpointMembership {
                 user_id: "user_all".to_string(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
             },
             NodeUserEndpointMembership {
                 user_id: "user_all".to_string(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s527().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                endpoint_id: xp_test_fixtures::label_ss2().to_owned(),
             },
             NodeUserEndpointMembership {
                 user_id: "user_subset".to_string(),
-                node_id: xp_test_fixtures::slot_s477().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s461().to_owned(),
+                node_id: xp_test_fixtures::label_node1().to_owned(),
+                endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
             },
         ]);
 

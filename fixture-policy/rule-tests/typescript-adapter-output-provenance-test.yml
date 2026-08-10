@@ -1,8 +1,12 @@
 id: fixture-policy-typescript-adapter-output-provenance
 valid:
   - |
-    function stringSlotEntry(_value: string, index: number) {
-      return [`s${index}`, () => catalog.slots.strings[index]];
+    function createStringAccessors<Values extends Record<string, string>>(
+      values: Values,
+    ) {
+      return Object.fromEntries(
+        Object.entries(values).map(([name, value]) => [name, () => value]),
+      ) as StringAccessors<Values>;
     }
   - |
     function createSubscriptionTokenFactory() {
@@ -18,9 +22,9 @@ valid:
     }
   - |
     function nextMeshPeerNodeId() {
-      const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+      const nodeId = meshPeerNodeIds[meshPeerNodeIdIndex % meshPeerNodeIds.length];
       meshPeerNodeIdIndex += 1;
-      return catalog.slots.strings[slotIndex];
+      return nodeId;
     }
   - |
     const primary = () => catalog.hosts.primary;
@@ -55,7 +59,7 @@ invalid:
       return "live.example";
     }
   - |
-    function stringSlotEntry(_value: string, index: number) {
+    function createStringAccessors(_value: string, index: number) {
       return [`s${index}`, () => "live.example"];
     }
   - |

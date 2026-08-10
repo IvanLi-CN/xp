@@ -212,7 +212,7 @@ function duplicateNameUserIpUsage(
 				node: {
 					...structuredClone(storyNode),
 					node_id: fixtureCatalog.identifier.endpointPrimary(),
-					node_name: fixtureCatalog.slotString.s640(),
+					node_name: fixtureCatalog.label.fixtureDuplicate(),
 					access_host: fixtureCatalog.host.primary(),
 					api_base_url: fixtureCatalog.url.primaryApi(),
 				},
@@ -223,7 +223,7 @@ function duplicateNameUserIpUsage(
 				node: {
 					...structuredClone(storyNode),
 					node_id: fixtureCatalog.identifier.endpointSecondary(),
-					node_name: fixtureCatalog.slotString.s640(),
+					node_name: fixtureCatalog.label.fixtureDuplicate(),
 					access_host: fixtureCatalog.host.secondary(),
 					api_base_url: fixtureCatalog.url.secondaryApi(),
 				},
@@ -237,7 +237,7 @@ function duplicateNameUserIpUsage(
 function fiftyMeshPeers(): AdminMeshPeer[] {
 	return Array.from({ length: 50 }, () => ({
 		node_id: fixtureCatalog.identifier.nextMeshPeerNodeId(),
-		node_name: fixtureCatalog.slotString.s291(),
+		node_name: fixtureCatalog.nodeName.fixture291(),
 		api_base_url: fixtureCatalog.url.primaryApi(),
 		mesh_url: fixtureCatalog.url.primaryApi(),
 		mesh_capability: "enabled",

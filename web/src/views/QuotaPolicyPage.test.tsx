@@ -72,7 +72,7 @@ function renderPage() {
 }
 
 async function openNodeTab(container: HTMLElement, nodeName?: string) {
-	const resolvedNodeName = nodeName ?? fixtureCatalog.slotString.s33();
+	const resolvedNodeName = nodeName ?? fixtureCatalog.nodeName.fixture33();
 	const tablist = await within(container).findByRole("tablist", {
 		name: "Weight configuration tabs",
 	});
@@ -115,10 +115,10 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: fixtureCatalog.slotString.s32(),
-				node_name: fixtureCatalog.slotString.s33(),
-				api_base_url: fixtureCatalog.slotString.s34(),
-				access_host: fixtureCatalog.slotString.s35(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				api_base_url: fixtureCatalog.service.fixture34(),
+				access_host: fixtureCatalog.host.fixture35(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -134,7 +134,7 @@ function setupDefaultMocks() {
 			{
 				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
-				subscription_token: fixtureCatalog.slotString.s204(),
+				subscription_token: fixtureCatalog.token.fixture204(),
 				credential_epoch: 0,
 				priority_tier: "p1",
 				quota_reset: {
@@ -146,7 +146,7 @@ function setupDefaultMocks() {
 			{
 				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
-				subscription_token: fixtureCatalog.slotString.s205(),
+				subscription_token: fixtureCatalog.token.fixture205(),
 				credential_epoch: 0,
 				priority_tier: "p2",
 				quota_reset: {
@@ -201,23 +201,23 @@ function setupDefaultMocks() {
 		],
 	});
 	vi.mocked(fetchAdminQuotaPolicyNodePolicy).mockResolvedValue({
-		node_id: fixtureCatalog.slotString.s32(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		inherit_global: false,
 	});
 
 	vi.mocked(putAdminUserNodeWeight).mockResolvedValue({
-		node_id: fixtureCatalog.slotString.s32(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		weight: 0,
 	});
 	vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
-		node_id: fixtureCatalog.slotString.s32(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		inherit_global: false,
 	});
 	vi.mocked(patchAdminNode).mockResolvedValue({
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s33(),
-		api_base_url: fixtureCatalog.slotString.s34(),
-		access_host: fixtureCatalog.slotString.s35(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		api_base_url: fixtureCatalog.service.fixture34(),
+		access_host: fixtureCatalog.host.fixture35(),
 		quota_limit_bytes: 0,
 		quota_reset: {
 			policy: "monthly",
@@ -228,7 +228,7 @@ function setupDefaultMocks() {
 	vi.mocked(patchAdminUser).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Alice",
-		subscription_token: fixtureCatalog.slotString.s204(),
+		subscription_token: fixtureCatalog.token.fixture204(),
 		credential_epoch: 0,
 		priority_tier: "p1",
 		quota_reset: {
@@ -282,12 +282,12 @@ describe("<QuotaPolicyPage />", () => {
 	it("keeps local draft on partial save failure and retries only failed rows", async () => {
 		vi.mocked(putAdminUserNodeWeight)
 			.mockResolvedValueOnce({
-				node_id: fixtureCatalog.slotString.s32(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				weight: 6000,
 			})
 			.mockRejectedValueOnce(new Error("boom"))
 			.mockResolvedValueOnce({
-				node_id: fixtureCatalog.slotString.s32(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				weight: 4000,
 			});
 
@@ -346,15 +346,15 @@ describe("<QuotaPolicyPage />", () => {
 	it("disables node editor in inherit mode and enables after turning inherit off", async () => {
 		vi.mocked(fetchAdminQuotaPolicyNodePolicy)
 			.mockResolvedValueOnce({
-				node_id: fixtureCatalog.slotString.s32(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: true,
 			})
 			.mockResolvedValue({
-				node_id: fixtureCatalog.slotString.s32(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: false,
 			});
 		vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
-			node_id: fixtureCatalog.slotString.s32(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			inherit_global: false,
 		});
 
@@ -381,7 +381,7 @@ describe("<QuotaPolicyPage />", () => {
 			await waitFor(() => {
 				expect(vi.mocked(putAdminQuotaPolicyNodePolicy)).toHaveBeenCalledWith(
 					"admintoken",
-					fixtureCatalog.slotString.s32(),
+					fixtureCatalog.nodeId.fixture32(),
 					false,
 				);
 			});

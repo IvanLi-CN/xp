@@ -26,9 +26,9 @@ function makePoint(currentDay: boolean, gap = false): TrafficSeriesPoint {
 	return {
 		start_at: fixtureCatalog.timestamp.baseline(),
 		end_at: fixtureCatalog.timestamp.recent(),
-		uplink_bytes: fixtureCatalog.slotNumber.n2(),
-		downlink_bytes: fixtureCatalog.slotNumber.n3(),
-		total_bytes: fixtureCatalog.slotNumber.n6(),
+		uplink_bytes: fixtureCatalog.number.value3(),
+		downlink_bytes: fixtureCatalog.number.value4(),
+		total_bytes: fixtureCatalog.number.value7(),
 		complete: true,
 		is_current_day: currentDay,
 	};
@@ -39,14 +39,14 @@ function makeReport(window: TrafficWindow, gap = false): TrafficReport {
 	const summary =
 		window === "24h"
 			? {
-					uplink_bytes: fixtureCatalog.slotNumber.n32(),
-					downlink_bytes: fixtureCatalog.slotNumber.n33(),
-					total_bytes: fixtureCatalog.slotNumber.n34(),
+					uplink_bytes: fixtureCatalog.number.value864(),
+					downlink_bytes: fixtureCatalog.number.value1152(),
+					total_bytes: fixtureCatalog.number.value2016(),
 				}
 			: {
-					uplink_bytes: fixtureCatalog.slotNumber.n35(),
-					downlink_bytes: fixtureCatalog.slotNumber.n36(),
-					total_bytes: fixtureCatalog.slotNumber.n37(),
+					uplink_bytes: fixtureCatalog.number.value93(),
+					downlink_bytes: fixtureCatalog.number.value124(),
+					total_bytes: fixtureCatalog.number.value217(),
 				};
 	const current = Array.from({ length: count }, (_, index) =>
 		makePoint(
@@ -71,7 +71,7 @@ function makeReport(window: TrafficWindow, gap = false): TrafficReport {
 		current,
 		reference,
 		partial: gap,
-		last_sample_at: fixtureCatalog.slotString.s177(),
+		last_sample_at: fixtureCatalog.timestamp.t20260728T120000(),
 		warnings: gap ? ["sampling gap in current window"] : [],
 	};
 }

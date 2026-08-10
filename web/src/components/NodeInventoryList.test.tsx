@@ -55,13 +55,13 @@ vi.mock("./auth", async (importOriginal) => {
 
 const baseNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s33(),
-		api_base_url: fixtureCatalog.slotString.s178(),
-		access_host: fixtureCatalog.slotString.s179(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		api_base_url: fixtureCatalog.service.fixture178(),
+		access_host: fixtureCatalog.host.fixture179(),
 		summary: {
 			status: "up",
-			updated_at: fixtureCatalog.slotString.s91(),
+			updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 		},
 		components: [
 			{
@@ -74,19 +74,19 @@ const baseNodes: AdminNodeRuntimeListItem[] = [
 		],
 		recent_slots: [
 			{
-				slot_start: fixtureCatalog.slotString.s91(),
+				slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 				status: "up",
 			},
 		],
 	},
 	{
-		node_id: fixtureCatalog.slotString.s36(),
-		node_name: fixtureCatalog.slotString.s99(),
-		api_base_url: fixtureCatalog.slotString.s180(),
-		access_host: fixtureCatalog.slotString.s181(),
+		node_id: fixtureCatalog.nodeId.fixture36(),
+		node_name: fixtureCatalog.host.fixture99(),
+		api_base_url: fixtureCatalog.service.fixture180(),
+		access_host: fixtureCatalog.host.fixture181(),
 		summary: {
 			status: "degraded",
-			updated_at: fixtureCatalog.slotString.s91(),
+			updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 		},
 		components: [
 			{
@@ -99,7 +99,7 @@ const baseNodes: AdminNodeRuntimeListItem[] = [
 		],
 		recent_slots: [
 			{
-				slot_start: fixtureCatalog.slotString.s91(),
+				slot_start: fixtureCatalog.timestamp.t20260301T000000(),
 				status: "down",
 			},
 		],
@@ -110,7 +110,7 @@ describe("<NodeInventoryList />", () => {
 	beforeEach(() => {
 		window.history.replaceState(
 			{},
-			fixtureCatalog.slotString.s99(),
+			fixtureCatalog.host.fixture99(),
 			"/nodes?view=table&login_token=old-token#history",
 		);
 	});
@@ -134,18 +134,18 @@ describe("<NodeInventoryList />", () => {
 			name: "Details",
 		});
 		expect(detailsLinks.map((link) => link.getAttribute("href"))).toEqual([
-			`/nodes/${fixtureCatalog.slotString.s32()}`,
-			`/nodes/${fixtureCatalog.slotString.s36()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture32()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture36()}`,
 		]);
 		const openOnNodeLinks = screen.getAllByRole("link", {
 			name: "Open on node",
 		});
 		expect(openOnNodeLinks.map((link) => link.getAttribute("href"))).toEqual([
-			`${fixtureCatalog.slotString.s178()}/nodes?view=table&login_token=xp_admin_token#history`,
-			`${fixtureCatalog.slotString.s180()}/nodes?view=table&login_token=xp_admin_token#history`,
+			`${fixtureCatalog.service.fixture178()}/nodes?view=table&login_token=xp_admin_token#history`,
+			`${fixtureCatalog.service.fixture180()}/nodes?view=table&login_token=xp_admin_token#history`,
 		]);
 		expect(
-			screen.getAllByText(fixtureCatalog.slotString.s99()).length,
+			screen.getAllByText(fixtureCatalog.host.fixture99()).length,
 		).toBeGreaterThan(0);
 		expect(screen.queryByText("API base URL")).toBeNull();
 		expect(screen.queryByText("Access host")).toBeNull();
@@ -187,7 +187,7 @@ describe("<NodeInventoryList />", () => {
 								...baseNodes[0],
 								summary: {
 									status: "degraded",
-									updated_at: fixtureCatalog.slotString.s91(),
+									updated_at: fixtureCatalog.timestamp.t20260301T000000(),
 								},
 								components: [
 									{

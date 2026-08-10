@@ -16,13 +16,13 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 	unreachable_nodes: [],
 	items: [
 		{
-			node_id: fixtureCatalog.slotString.s229(),
-			node_name: fixtureCatalog.slotString.s106(),
-			api_base_url: fixtureCatalog.slotString.s230(),
-			access_host: fixtureCatalog.slotString.s231(),
+			node_id: fixtureCatalog.nodeId.fixture229(),
+			node_name: fixtureCatalog.nodeId.fixture106(),
+			api_base_url: fixtureCatalog.service.fixture230(),
+			access_host: fixtureCatalog.host.fixture231(),
 			summary: {
 				status: "up",
-				updated_at: fixtureCatalog.slotString.s232(),
+				updated_at: fixtureCatalog.timestamp.t20240101T035200(),
 			},
 			components: [
 				{
@@ -35,7 +35,7 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 			],
 			recent_slots: [
 				{
-					slot_start: fixtureCatalog.slotString.s232(),
+					slot_start: fixtureCatalog.timestamp.t20240101T035200(),
 					status: "up",
 				},
 			],
@@ -120,10 +120,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s229(),
-						node_name: fixtureCatalog.slotString.s106(),
-						access_host: fixtureCatalog.slotString.s231(),
-						api_base_url: fixtureCatalog.slotString.s230(),
+						node_id: fixtureCatalog.nodeId.fixture229(),
+						node_name: fixtureCatalog.nodeId.fixture106(),
+						access_host: fixtureCatalog.host.fixture231(),
+						api_base_url: fixtureCatalog.service.fixture230(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -132,10 +132,10 @@ const meta = {
 						},
 					},
 					{
-						node_id: fixtureCatalog.slotString.s233(),
-						node_name: fixtureCatalog.slotString.s110(),
-						access_host: fixtureCatalog.slotString.s234(),
-						api_base_url: fixtureCatalog.slotString.s235(),
+						node_id: fixtureCatalog.nodeId.fixture233(),
+						node_name: fixtureCatalog.nodeId.fixture110(),
+						access_host: fixtureCatalog.host.fixture234(),
+						api_base_url: fixtureCatalog.service.fixture235(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -250,7 +250,7 @@ export const CachedUnauthorizedInventory: Story = {
 			expect.stringContaining("/login?redirect="),
 		);
 		await expect(
-			canvas.getByText(fixtureCatalog.slotString.s106()),
+			canvas.getByText(fixtureCatalog.nodeId.fixture106()),
 		).toBeInTheDocument();
 	},
 };

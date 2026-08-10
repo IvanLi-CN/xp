@@ -6,7 +6,7 @@ import { AdminEndpointProbeHistoryResponseSchema } from "./adminEndpointProbes";
 describe("AdminEndpointProbeHistoryResponseSchema", () => {
 	it("accepts legacy probe history payloads without participating_nodes", () => {
 		const parsed = AdminEndpointProbeHistoryResponseSchema.parse({
-			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
 			expected_nodes: 2,
 			slots: [
 				{

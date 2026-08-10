@@ -14,7 +14,7 @@ fn migration_args(dry_run: bool) -> CloudflareProvisionArgs {
         tunnel_name: Some("xp-next".to_string()),
         account_id: "account".to_string(),
         zone_id: "zone".to_string(),
-        hostname: xp_test_fixtures::slot_s554().to_owned(),
+        hostname: xp_test_fixtures::label_xp_fixture_test().to_owned(),
         origin_url: xp_test_fixtures::primary_api_url().to_string(),
         dns_record_id_override: None,
         tunnel_id_override: None,
@@ -48,7 +48,7 @@ fn write_migration_files(paths: &Paths) {
             "origin_url": xp_test_fixtures::primary_api_url(),
             "account_id": "account",
             "zone_id": "zone",
-            "hostname": xp_test_fixtures::slot_s554(),
+            "hostname": xp_test_fixtures::label_xp_fixture_test(),
             "tunnel_id": "old",
             "dns_record_id": "record"
         })
@@ -106,7 +106,7 @@ async fn mount_old_tunnel_preflight(server: &MockServer, ingress: serde_json::Va
             ResponseTemplate::new(200).set_body_json(response(serde_json::json!([{
                 "id": "record",
                 "type": "CNAME",
-                "name": xp_test_fixtures::slot_s554(),
+                "name": xp_test_fixtures::label_xp_fixture_test(),
                 "content": "old.cfargotunnel.com",
                 "proxied": true,
                 "ttl": 1
@@ -155,7 +155,7 @@ async fn shared_legacy_tunnel_fails_before_any_cloudflare_write() {
         &server,
         serde_json::json!([
             {
-                "hostname": xp_test_fixtures::slot_s554(),
+                "hostname": xp_test_fixtures::label_xp_fixture_test(),
                 "service": xp_test_fixtures::primary_api_url()
             },
             {
@@ -206,7 +206,7 @@ async fn existing_target_migration_dry_run_uses_only_get_requests() {
         &server,
         serde_json::json!([
             {
-                "hostname": xp_test_fixtures::slot_s554(),
+                "hostname": xp_test_fixtures::label_xp_fixture_test(),
                 "service": xp_test_fixtures::primary_api_url()
             },
             { "service": xp_test_fixtures::catch_all_service() }
@@ -280,12 +280,12 @@ async fn single_hostname_legacy_tunnel_migrates_automatically() {
         &server,
         serde_json::json!([
             {
-                "hostname": xp_test_fixtures::slot_s554(),
+                "hostname": xp_test_fixtures::label_xp_fixture_test(),
                 "path": "/old",
                 "service": xp_test_fixtures::primary_api_url()
             },
             {
-                "hostname": xp_test_fixtures::slot_s554(),
+                "hostname": xp_test_fixtures::label_xp_fixture_test(),
                 "service": xp_test_fixtures::secondary_api_url()
             },
             { "service": xp_test_fixtures::catch_all_service() }
@@ -361,7 +361,7 @@ async fn existing_target_migration_runs_without_compatibility_flag() {
         &server,
         serde_json::json!([
             {
-                "hostname": xp_test_fixtures::slot_s554(),
+                "hostname": xp_test_fixtures::label_xp_fixture_test(),
                 "service": xp_test_fixtures::primary_api_url()
             },
             { "service": xp_test_fixtures::catch_all_service() }

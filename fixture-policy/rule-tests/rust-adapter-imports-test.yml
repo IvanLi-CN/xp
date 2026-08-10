@@ -3,6 +3,8 @@ valid:
   - |
     use std::sync::OnceLock;
   - |
+    use std::collections::BTreeMap;
+  - |
     use serde::Deserialize;
   - |
     use super::catalog;

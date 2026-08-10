@@ -6,7 +6,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 use serde_yaml::Value;
 use xp_test_fixtures::{
-    slot_s670 as fixture_slot_s670, subscription_host_example as fixture_host_example,
+    label_tokyo_a as fixture_label_tokyo_a, subscription_host_example as fixture_host_example,
     subscription_node_n1 as fixture_node_n1,
 };
 
@@ -33,7 +33,11 @@ fn group_proxies(group: &Value) -> Vec<&str> {
 #[test]
 fn reality_direct_candidates_are_exposed_in_both_mihomo_routes() {
     let user = user("alice");
-    let node = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let node = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
@@ -167,7 +171,11 @@ fn provider_reality_direct_names_follow_base_order() {
 #[test]
 fn user_reality_named_proxy_is_not_injected_into_system_node_selector() {
     let user = user("alice");
-    let node = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+    let node = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",

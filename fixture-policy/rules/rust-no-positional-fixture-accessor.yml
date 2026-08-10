@@ -1,0 +1,12 @@
+id: fixture-policy-rust-no-positional-fixture-accessor
+language: Rust
+severity: error
+message: Positional fixture accessors are forbidden; use a named xp_test_fixtures accessor.
+files:
+  - src/**/*.rs
+  - tests/**/*.rs
+  - test-fixtures/src/**/*.rs
+rule:
+  all:
+    - kind: identifier
+    - regex: '^(slot_[snl][0-9]+|fixture_slot_[snl][0-9]+)$'

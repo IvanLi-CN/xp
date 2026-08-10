@@ -283,7 +283,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
     };
     let follower_meta = NodeMeta {
         name: "follower-1".to_string(),
-        api_base_url: xp_test_fixtures::slot_s448().to_owned(),
+        api_base_url: xp_test_fixtures::label_empty().to_owned(),
         raft_endpoint: follower_rpc.base_url.clone(),
     };
 
@@ -426,7 +426,7 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
     let user = User {
         user_id: "user-forward".to_string(),
         display_name: "forwarded-write".to_string(),
-        subscription_token: xp_test_fixtures::slot_s485().to_owned(),
+        subscription_token: xp_test_fixtures::label_sub_test_token().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Monthly {

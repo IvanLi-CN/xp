@@ -20,14 +20,17 @@ function renderMatrix(args?: {
 }) {
 	return render(
 		<AccessMatrix
-			nodes={[{ nodeId: fixtureCatalog.slotString.s106(), label: "Node A" }]}
+			nodes={[{ nodeId: fixtureCatalog.nodeId.fixture106(), label: "Node A" }]}
 			protocols={[{ protocolId: "vless", label: "VLESS" }]}
 			cells={
 				args?.cells ?? {
-					[fixtureCatalog.slotString.s106()]: {
+					[fixtureCatalog.nodeId.fixture106()]: {
 						vless: {
 							value: "off",
-							meta: { port: 443, endpointId: fixtureCatalog.slotString.s138() },
+							meta: {
+								port: 443,
+								endpointId: fixtureCatalog.endpointId.fixture138(),
+							},
 						},
 					},
 				}
@@ -47,7 +50,7 @@ describe("<AccessMatrix />", () => {
 
 		expect(onToggleCell).toHaveBeenCalledTimes(1);
 		expect(onToggleCell).toHaveBeenCalledWith(
-			fixtureCatalog.slotString.s106(),
+			fixtureCatalog.nodeId.fixture106(),
 			"vless",
 		);
 	});
@@ -66,19 +69,19 @@ describe("<AccessMatrix />", () => {
 		renderMatrix({
 			onToggleCellEndpoint,
 			cells: {
-				[fixtureCatalog.slotString.s106()]: {
+				[fixtureCatalog.nodeId.fixture106()]: {
 					vless: {
 						value: "off",
 						meta: {
 							options: [
 								{
-									endpointId: fixtureCatalog.slotString.s285(),
-									tag: fixtureCatalog.slotString.s141(),
+									endpointId: fixtureCatalog.endpointId.fixture285(),
+									tag: fixtureCatalog.endpointTag.fixture141(),
 									port: 443,
 								},
 								{
-									endpointId: fixtureCatalog.slotString.s286(),
-									tag: fixtureCatalog.slotString.s256(),
+									endpointId: fixtureCatalog.endpointId.fixture286(),
+									tag: fixtureCatalog.endpointTag.fixture256(),
 									port: 8443,
 								},
 							],
@@ -88,13 +91,13 @@ describe("<AccessMatrix />", () => {
 			},
 		});
 
-		fireEvent.click(screen.getByText(fixtureCatalog.slotString.s141()));
+		fireEvent.click(screen.getByText(fixtureCatalog.endpointTag.fixture141()));
 
 		expect(onToggleCellEndpoint).toHaveBeenCalledTimes(1);
 		expect(onToggleCellEndpoint).toHaveBeenCalledWith(
-			fixtureCatalog.slotString.s106(),
+			fixtureCatalog.nodeId.fixture106(),
 			"vless",
-			fixtureCatalog.slotString.s285(),
+			fixtureCatalog.endpointId.fixture285(),
 			true,
 		);
 	});

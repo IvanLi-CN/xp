@@ -320,7 +320,7 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 		{
 			component: "xp",
 			status: "up",
-			last_ok_at: fixtureCatalog.slotString.s7(),
+			last_ok_at: fixtureCatalog.timestamp.t20240101T000700(),
 			last_fail_at: fixtureCatalog.optional.none(),
 			down_since: fixtureCatalog.optional.none(),
 			consecutive_failures: 0,
@@ -332,18 +332,18 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 		{
 			component: "xray",
 			status: downNode ? "down" : "up",
-			last_ok_at: fixtureCatalog.slotString.s8(),
+			last_ok_at: fixtureCatalog.timestamp.t20240101T000800(),
 			last_fail_at: downNode
-				? fixtureCatalog.slotString.s9()
+				? fixtureCatalog.timestamp.t20240101T000900()
 				: fixtureCatalog.optional.none(),
 			down_since: downNode
-				? fixtureCatalog.slotString.s10()
+				? fixtureCatalog.timestamp.t20240101T001000()
 				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 2 : 0,
 			recoveries_observed: 1,
 			restart_attempts: downNode ? 1 : 0,
 			last_restart_at: downNode
-				? fixtureCatalog.slotString.s11()
+				? fixtureCatalog.timestamp.t20240101T001100()
 				: fixtureCatalog.optional.none(),
 			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
@@ -351,19 +351,19 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 			component: "cloudflared",
 			status: downNode ? "down" : "disabled",
 			last_ok_at: downNode
-				? fixtureCatalog.slotString.s12()
+				? fixtureCatalog.timestamp.t20240101T001200()
 				: fixtureCatalog.optional.none(),
 			last_fail_at: downNode
-				? fixtureCatalog.slotString.s13()
+				? fixtureCatalog.timestamp.t20240101T001300()
 				: fixtureCatalog.optional.none(),
 			down_since: downNode
-				? fixtureCatalog.slotString.s14()
+				? fixtureCatalog.timestamp.t20240101T001400()
 				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 3 : 0,
 			recoveries_observed: 0,
 			restart_attempts: downNode ? 1 : 0,
 			last_restart_at: downNode
-				? fixtureCatalog.slotString.s13()
+				? fixtureCatalog.timestamp.t20240101T001300()
 				: fixtureCatalog.optional.none(),
 			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
@@ -374,7 +374,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 	return [
 		{
 			event_id: `evt-${node.node_id}-1`,
-			occurred_at: fixtureCatalog.slotString.s15(),
+			occurred_at: fixtureCatalog.timestamp.t20240101T001500(),
 			component: "xray",
 			kind: "status_changed",
 			message: "xray status changed: up -> down",
@@ -383,7 +383,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 		},
 		{
 			event_id: `evt-${node.node_id}-2`,
-			occurred_at: fixtureCatalog.slotString.s16(),
+			occurred_at: fixtureCatalog.timestamp.t20240101T001600(),
 			component: "cloudflared",
 			kind: "restart_failed",
 			message: "cloudflared restart request failed",
@@ -407,7 +407,7 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 		access_host: node.access_host,
 		summary: {
 			status: summaryStatus,
-			updated_at: fixtureCatalog.slotString.s7(),
+			updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 		},
 		components,
 		recent_slots: slots,
@@ -434,7 +434,7 @@ function buildNodeRuntimeEventStream(node: AdminNode): Response {
 			event: "hello",
 			data: {
 				node_id: node.node_id,
-				connected_at: fixtureCatalog.slotString.s7(),
+				connected_at: fixtureCatalog.timestamp.t20240101T000700(),
 			},
 		},
 		{
@@ -454,16 +454,16 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	const components = buildRuntimeComponents(node);
 	return {
 		node_id: node.node_id,
-		last_synced_at: fixtureCatalog.slotString.s21(),
+		last_synced_at: fixtureCatalog.timestamp.t20240101T002100(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
 			: null,
 		daily_traffic: [
 			{
 				date: fixtureCatalog.timestamp.date(),
-				uplink_bytes: fixtureCatalog.slotNumber.n0(),
-				downlink_bytes: fixtureCatalog.slotNumber.n1(),
-				updated_at: fixtureCatalog.slotString.s21(),
+				uplink_bytes: fixtureCatalog.number.value1(),
+				downlink_bytes: fixtureCatalog.number.value2(),
+				updated_at: fixtureCatalog.timestamp.t20240101T002100(),
 			},
 		],
 		daily_component_status: [
@@ -472,13 +472,13 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 				components: components.map((component) => ({
 					component: component.component,
 					status: component.status,
-					observed_at: fixtureCatalog.slotString.s21(),
+					observed_at: fixtureCatalog.timestamp.t20240101T002100(),
 				})),
 			},
 		],
 		component_status_events: buildRuntimeEvents(node).map((event) => ({
 			event_id: event.event_id,
-			occurred_at: fixtureCatalog.slotString.s22(),
+			occurred_at: fixtureCatalog.timestamp.t20240101T002200(),
 			component: event.component,
 			message: event.message,
 			from_status: event.from_status,
@@ -511,16 +511,16 @@ function buildTrafficPoint(
 		end_at: catalogTimestampOffset((index + 1) * step),
 		uplink_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n2()
-				: fixtureCatalog.slotNumber.n3(),
+				? fixtureCatalog.number.value3()
+				: fixtureCatalog.number.value4(),
 		downlink_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n4()
-				: fixtureCatalog.slotNumber.n5(),
+				? fixtureCatalog.number.value5()
+				: fixtureCatalog.number.value6(),
 		total_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n7()
-				: fixtureCatalog.slotNumber.n24(),
+				? fixtureCatalog.number.value8()
+				: fixtureCatalog.number.value10(),
 		complete: true,
 		is_current_day: isCurrentDay,
 	};
@@ -537,16 +537,16 @@ function buildReferenceTrafficPoint(
 		end_at: catalogTimestampOffset((index + 1 - count) * step),
 		uplink_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n1()
-				: fixtureCatalog.slotNumber.n2(),
+				? fixtureCatalog.number.value2()
+				: fixtureCatalog.number.value3(),
 		downlink_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n2()
-				: fixtureCatalog.slotNumber.n3(),
+				? fixtureCatalog.number.value3()
+				: fixtureCatalog.number.value4(),
 		total_bytes:
 			index % 2 === 0
-				? fixtureCatalog.slotNumber.n4()
-				: fixtureCatalog.slotNumber.n6(),
+				? fixtureCatalog.number.value5()
+				: fixtureCatalog.number.value7(),
 		complete: true,
 		is_current_day: false,
 	};
@@ -568,14 +568,14 @@ function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
 	const summary =
 		window === "24h"
 			? {
-					uplink_bytes: fixtureCatalog.slotNumber.n32(),
-					downlink_bytes: fixtureCatalog.slotNumber.n33(),
-					total_bytes: fixtureCatalog.slotNumber.n34(),
+					uplink_bytes: fixtureCatalog.number.value864(),
+					downlink_bytes: fixtureCatalog.number.value1152(),
+					total_bytes: fixtureCatalog.number.value2016(),
 				}
 			: {
-					uplink_bytes: fixtureCatalog.slotNumber.n35(),
-					downlink_bytes: fixtureCatalog.slotNumber.n36(),
-					total_bytes: fixtureCatalog.slotNumber.n37(),
+					uplink_bytes: fixtureCatalog.number.value93(),
+					downlink_bytes: fixtureCatalog.number.value124(),
+					total_bytes: fixtureCatalog.number.value217(),
 				};
 	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
 	return {
@@ -612,8 +612,8 @@ function buildDefaultUserTraffic(
 ): MockWindowedUserTraffic {
 	const nodeOptions = nodes.map((node, index) => {
 		const option = {
-			node_id: fixtureCatalog.slotString.s36(),
-			node_name: fixtureCatalog.slotString.s37(),
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			node_name: fixtureCatalog.nodeName.fixture37(),
 		};
 		if (node.node_id === fixtureCatalog.identifier.nodePrimary()) {
 			option.node_id = fixtureCatalog.identifier.nodePrimary();
@@ -622,8 +622,8 @@ function buildDefaultUserTraffic(
 			option.node_id = fixtureCatalog.identifier.nodeSecondary();
 			option.node_name = fixtureCatalog.identifier.nodeNamePrimary();
 		} else if (index === 0) {
-			option.node_id = fixtureCatalog.slotString.s32();
-			option.node_name = fixtureCatalog.slotString.s33();
+			option.node_id = fixtureCatalog.nodeId.fixture32();
+			option.node_name = fixtureCatalog.nodeName.fixture33();
 		}
 		return option;
 	});
@@ -670,37 +670,37 @@ function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
 		node,
 		window: "24h",
 		geo_source: "country_is",
-		window_start: fixtureCatalog.slotString.s24(),
-		window_end: fixtureCatalog.slotString.s25(),
+		window_start: fixtureCatalog.timestamp.t20260308T000000(),
+		window_end: fixtureCatalog.timestamp.t20260308T000200(),
 		warnings: [],
 		unique_ip_series: [
-			{ minute: fixtureCatalog.slotString.s24(), count: 1 },
-			{ minute: fixtureCatalog.slotString.s26(), count: 2 },
-			{ minute: fixtureCatalog.slotString.s25(), count: 1 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 2 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 1 },
 		],
 		timeline: [
 			{
-				lane_key: fixtureCatalog.slotString.s29(),
-				endpoint_id: fixtureCatalog.slotString.s27(),
-				endpoint_tag: fixtureCatalog.slotString.s28(),
-				ip: fixtureCatalog.slotString.s29(),
+				lane_key: fixtureCatalog.address.documentation192_0_2_30(),
+				endpoint_id: fixtureCatalog.endpointId.fixture27(),
+				endpoint_tag: fixtureCatalog.endpointTag.fixture28(),
+				ip: fixtureCatalog.address.documentation192_0_2_30(),
 				minutes: 2,
 				segments: [
 					{
-						start_minute: fixtureCatalog.slotString.s24(),
-						end_minute: fixtureCatalog.slotString.s26(),
+						start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+						end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 					},
 				],
 			},
 		],
 		ips: [
 			{
-				ip: fixtureCatalog.slotString.s29(),
+				ip: fixtureCatalog.address.documentation192_0_2_30(),
 				minutes: 2,
-				endpoint_tags: [fixtureCatalog.slotString.s28()],
+				endpoint_tags: [fixtureCatalog.endpointTag.fixture28()],
 				region: "Japan / Tokyo",
 				operator: "ExampleNet",
-				last_seen_at: fixtureCatalog.slotString.s26(),
+				last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 			},
 		],
 	};
@@ -713,40 +713,40 @@ function buildDefaultUserIpUsage(
 	const groups: AdminUserIpUsageResponse["groups"] = nodes
 		.slice(0, 2)
 		.map((node, index) => {
-			const endpointTag = fixtureCatalog.slotString.s28();
+			const endpointTag = fixtureCatalog.endpointTag.fixture28();
 			return {
 				node,
 				geo_source: index === 0 ? "country_is" : "country_is",
-				window_start: fixtureCatalog.slotString.s24(),
-				window_end: fixtureCatalog.slotString.s25(),
+				window_start: fixtureCatalog.timestamp.t20260308T000000(),
+				window_end: fixtureCatalog.timestamp.t20260308T000200(),
 				warnings: [],
 				unique_ip_series: [
-					{ minute: fixtureCatalog.slotString.s24(), count: 1 },
-					{ minute: fixtureCatalog.slotString.s26(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 1 },
 				],
 				timeline: [
 					{
-						lane_key: fixtureCatalog.slotString.s31(),
-						endpoint_id: fixtureCatalog.slotString.s30(),
-						endpoint_tag: fixtureCatalog.slotString.s28(),
-						ip: fixtureCatalog.slotString.s31(),
+						lane_key: fixtureCatalog.address.documentation192_0_2_32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture30(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture28(),
+						ip: fixtureCatalog.address.documentation192_0_2_32(),
 						minutes: 2,
 						segments: [
 							{
-								start_minute: fixtureCatalog.slotString.s24(),
-								end_minute: fixtureCatalog.slotString.s26(),
+								start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+								end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 							},
 						],
 					},
 				],
 				ips: [
 					{
-						ip: fixtureCatalog.slotString.s31(),
+						ip: fixtureCatalog.address.documentation192_0_2_32(),
 						minutes: 2,
 						endpoint_tags: [endpointTag],
 						region: index === 0 ? "Japan / Tokyo" : "Japan / Osaka",
 						operator: index === 0 ? "ExampleNet" : "CarrierNet",
-						last_seen_at: fixtureCatalog.slotString.s26(),
+						last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 					},
 				],
 			};
@@ -768,18 +768,18 @@ function buildDefaultUserIpUsage(
 function createDefaultSeed(): MockStateSeed {
 	const nodes: AdminNode[] = [
 		{
-			node_id: fixtureCatalog.slotString.s32(),
-			node_name: fixtureCatalog.slotString.s33(),
-			api_base_url: fixtureCatalog.slotString.s34(),
-			access_host: fixtureCatalog.slotString.s35(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			node_name: fixtureCatalog.nodeName.fixture33(),
+			api_base_url: fixtureCatalog.service.fixture34(),
+			access_host: fixtureCatalog.host.fixture35(),
 			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
 		{
-			node_id: fixtureCatalog.slotString.s36(),
-			node_name: fixtureCatalog.slotString.s37(),
-			api_base_url: fixtureCatalog.slotString.s38(),
-			access_host: fixtureCatalog.slotString.s39(),
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			node_name: fixtureCatalog.nodeName.fixture37(),
+			api_base_url: fixtureCatalog.service.fixture38(),
+			access_host: fixtureCatalog.host.fixture39(),
 			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
@@ -787,9 +787,9 @@ function createDefaultSeed(): MockStateSeed {
 
 	const endpoints: MockEndpointSeed[] = [
 		{
-			endpoint_id: fixtureCatalog.slotString.s40(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s41(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture41(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: fixtureCatalog.endpoint.port443(),
 			meta: {
@@ -802,9 +802,9 @@ function createDefaultSeed(): MockStateSeed {
 			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		},
 		{
-			endpoint_id: fixtureCatalog.slotString.s43(),
-			node_id: fixtureCatalog.slotString.s36(),
-			tag: fixtureCatalog.slotString.s44(),
+			endpoint_id: fixtureCatalog.endpointId.fixture43(),
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			tag: fixtureCatalog.endpointTag.fixture44(),
 			kind: fixtureCatalog.endpoint.ssKind(),
 			port: fixtureCatalog.endpoint.port8443(),
 			meta: {
@@ -829,20 +829,20 @@ function createDefaultSeed(): MockStateSeed {
 		{
 			domain_id: fixtureCatalog.identifier.endpointTertiary(),
 			server_name: fixtureCatalog.host.tertiary(),
-			disabled_node_ids: [fixtureCatalog.slotString.s36()],
+			disabled_node_ids: [fixtureCatalog.nodeId.fixture36()],
 		},
 	];
 
 	const userId1 = fixtureCatalog.identifier.userPrimary();
 	const userId2 = fixtureCatalog.identifier.userSecondary();
-	const subToken1 = fixtureCatalog.slotString.s45();
-	const subToken2 = fixtureCatalog.slotString.s46();
+	const subToken1 = fixtureCatalog.token.fixture45();
+	const subToken2 = fixtureCatalog.token.fixture46();
 
 	const users: AdminUser[] = [
 		{
 			user_id: userId1,
 			display_name: "Alice",
-			subscription_token: fixtureCatalog.slotString.s45(),
+			subscription_token: fixtureCatalog.token.fixture45(),
 			credential_epoch: fixtureCatalog.user.credentialEpoch(),
 			priority_tier: fixtureCatalog.user.priorityTierDefault(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
@@ -850,7 +850,7 @@ function createDefaultSeed(): MockStateSeed {
 		{
 			user_id: userId2,
 			display_name: "Bob",
-			subscription_token: fixtureCatalog.slotString.s46(),
+			subscription_token: fixtureCatalog.token.fixture46(),
 			credential_epoch: fixtureCatalog.user.credentialEpoch(),
 			priority_tier: fixtureCatalog.user.priorityTierDefault(),
 			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
@@ -863,24 +863,24 @@ function createDefaultSeed(): MockStateSeed {
 				userId1,
 				[
 					{
-						node_id: fixtureCatalog.slotString.s32(),
-						weight: fixtureCatalog.slotNumber.n30(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
+						weight: fixtureCatalog.number.value100(),
 					},
 				],
 			],
 			[userId2, []],
 		]);
 	const userGlobalWeights: Record<string, number> = Object.fromEntries([
-		[userId1, fixtureCatalog.slotNumber.n30()],
-		[userId2, fixtureCatalog.slotNumber.n30()],
+		[userId1, fixtureCatalog.number.value100()],
+		[userId2, fixtureCatalog.number.value100()],
 	]);
 	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
-		[fixtureCatalog.slotString.s32()]: {
-			node_id: fixtureCatalog.slotString.s32(),
+		[fixtureCatalog.nodeId.fixture32()]: {
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			inherit_global: true,
 		},
-		[fixtureCatalog.slotString.s36()]: {
-			node_id: fixtureCatalog.slotString.s36(),
+		[fixtureCatalog.nodeId.fixture36()]: {
+			node_id: fixtureCatalog.nodeId.fixture36(),
 			inherit_global: true,
 		},
 	};
@@ -891,8 +891,8 @@ function createDefaultSeed(): MockStateSeed {
 				[
 					{
 						user_id: userId1,
-						endpoint_id: fixtureCatalog.slotString.s40(),
-						node_id: fixtureCatalog.slotString.s32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					},
 				],
 			],
@@ -901,8 +901,8 @@ function createDefaultSeed(): MockStateSeed {
 				[
 					{
 						user_id: userId2,
-						endpoint_id: fixtureCatalog.slotString.s43(),
-						node_id: fixtureCatalog.slotString.s36(),
+						endpoint_id: fixtureCatalog.endpointId.fixture43(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
 					},
 				],
 			],
@@ -933,38 +933,50 @@ function createDefaultSeed(): MockStateSeed {
 			{
 				node,
 				window: "24h" as const,
-				window_start: fixtureCatalog.slotString.s47(),
-				window_end: fixtureCatalog.slotString.s48(),
+				window_start: fixtureCatalog.timestamp.t20260307T010000(),
+				window_end: fixtureCatalog.timestamp.t20260308T005900(),
 				warnings: [],
 				endpoints: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s27(),
-						endpoint_tag: fixtureCatalog.slotString.s49(),
+						endpoint_id: fixtureCatalog.endpointId.fixture27(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
 						port: fixtureCatalog.endpoint.port443(),
 					},
 					{
-						endpoint_id: fixtureCatalog.slotString.s50(),
-						endpoint_tag: fixtureCatalog.slotString.s51(),
+						endpoint_id: fixtureCatalog.endpointId.fixture50(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
 						port: fixtureCatalog.endpoint.port8443(),
 					},
 				],
 				per_endpoint_series: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s27(),
-						endpoint_tag: fixtureCatalog.slotString.s49(),
+						endpoint_id: fixtureCatalog.endpointId.fixture27(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
 						port: fixtureCatalog.endpoint.port443(),
 						series: [
-							{ minute: fixtureCatalog.slotString.s52(), count: 2 },
-							{ minute: fixtureCatalog.slotString.s48(), count: 3 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
+								count: 2,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
+								count: 3,
+							},
 						],
 					},
 					{
-						endpoint_id: fixtureCatalog.slotString.s50(),
-						endpoint_tag: fixtureCatalog.slotString.s51(),
+						endpoint_id: fixtureCatalog.endpointId.fixture50(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
 						port: fixtureCatalog.endpoint.port8443(),
 						series: [
-							{ minute: fixtureCatalog.slotString.s52(), count: 1 },
-							{ minute: fixtureCatalog.slotString.s48(), count: 2 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
+								count: 1,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
+								count: 2,
+							},
 						],
 					},
 				],
@@ -987,10 +999,10 @@ function createDefaultSeed(): MockStateSeed {
 	return {
 		health: { status: "ok" },
 		clusterInfo: {
-			cluster_id: fixtureCatalog.slotString.s53(),
-			node_id: fixtureCatalog.slotString.s32(),
+			cluster_id: fixtureCatalog.cluster.fixture53(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			role: "leader",
-			leader_api_base_url: fixtureCatalog.slotString.s34(),
+			leader_api_base_url: fixtureCatalog.service.fixture34(),
 			term: 12,
 			xp_version: "0.0.0",
 		},
@@ -998,10 +1010,10 @@ function createDefaultSeed(): MockStateSeed {
 			current: { package: "0.0.0", release_tag: "v0.0.0" },
 			latest: {
 				release_tag: "v0.0.0",
-				published_at: fixtureCatalog.slotString.s54(),
+				published_at: fixtureCatalog.timestamp.t20260131T000000(),
 			},
 			has_update: false,
-			checked_at: fixtureCatalog.slotString.s54(),
+			checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 			compare_reason: "semver",
 			source: {
 				kind: "github-releases",
@@ -1246,7 +1258,7 @@ function buildAdminUpgradeStatus(
 			finished_at: null,
 			exit_code: null,
 			message: null,
-			updated_at: fixtureCatalog.slotString.s7(),
+			updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 			...overrides?.status,
 		},
 	};
@@ -1295,7 +1307,7 @@ async function handleRequest(
 					state: "running",
 					target_tag: payload?.target_tag ?? "v0.0.0",
 					started_at: fixtureCatalog.timestamp.recent(),
-					updated_at: fixtureCatalog.slotString.s7(),
+					updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 					message: "storybook mock upgrade started",
 				},
 			}),
@@ -1357,12 +1369,12 @@ async function handleRequest(
 			return errorResponse(500, "internal", "mock admin config failure");
 		}
 		return jsonResponse({
-			bind: fixtureCatalog.slotString.s58(),
-			xray_api_addr: fixtureCatalog.slotString.s59(),
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: fixtureCatalog.slotString.s60(),
-			access_host: fixtureCatalog.slotString.s61(),
-			api_base_url: fixtureCatalog.slotString.s62(),
+			node_name: fixtureCatalog.nodeName.fixture60(),
+			access_host: fixtureCatalog.host.fixture61(),
+			api_base_url: fixtureCatalog.service.fixture62(),
 			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -1611,19 +1623,19 @@ async function handleRequest(
 
 		const items = state.userNodeWeights[userId] ?? [];
 		const next: AdminUserNodeWeightItem =
-			nodeId === fixtureCatalog.slotString.s63()
+			nodeId === fixtureCatalog.nodeId.fixture63()
 				? {
-						node_id: fixtureCatalog.slotString.s63(),
-						weight: fixtureCatalog.slotNumber.n13(),
+						node_id: fixtureCatalog.nodeId.fixture63(),
+						weight: fixtureCatalog.number.value120(),
 					}
-				: nodeId === fixtureCatalog.slotString.s32()
+				: nodeId === fixtureCatalog.nodeId.fixture32()
 					? {
-							node_id: fixtureCatalog.slotString.s32(),
-							weight: fixtureCatalog.slotNumber.n13(),
+							node_id: fixtureCatalog.nodeId.fixture32(),
+							weight: fixtureCatalog.number.value120(),
 						}
 					: {
-							node_id: fixtureCatalog.slotString.s36(),
-							weight: fixtureCatalog.slotNumber.n13(),
+							node_id: fixtureCatalog.nodeId.fixture36(),
+							weight: fixtureCatalog.number.value120(),
 						};
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
@@ -1673,10 +1685,10 @@ async function handleRequest(
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
 
-		state.userGlobalWeights[userId] = fixtureCatalog.slotNumber.n13();
+		state.userGlobalWeights[userId] = fixtureCatalog.number.value120();
 		return jsonResponse({
 			user_id: userId,
-			weight: fixtureCatalog.slotNumber.n13(),
+			weight: fixtureCatalog.number.value120(),
 		});
 	}
 
@@ -1694,11 +1706,11 @@ async function handleRequest(
 				clone(
 					state.nodeWeightPolicies[nodeId] ?? {
 						node_id:
-							nodeId === fixtureCatalog.slotString.s63()
-								? fixtureCatalog.slotString.s63()
-								: nodeId === fixtureCatalog.slotString.s36()
-									? fixtureCatalog.slotString.s36()
-									: fixtureCatalog.slotString.s32(),
+							nodeId === fixtureCatalog.nodeId.fixture63()
+								? fixtureCatalog.nodeId.fixture63()
+								: nodeId === fixtureCatalog.nodeId.fixture36()
+									? fixtureCatalog.nodeId.fixture36()
+									: fixtureCatalog.nodeId.fixture32(),
 						inherit_global: true,
 					},
 				),
@@ -1715,11 +1727,11 @@ async function handleRequest(
 			}
 			const nextPolicy: AdminQuotaPolicyNodePolicy = {
 				node_id:
-					nodeId === fixtureCatalog.slotString.s63()
-						? fixtureCatalog.slotString.s63()
-						: nodeId === fixtureCatalog.slotString.s36()
-							? fixtureCatalog.slotString.s36()
-							: fixtureCatalog.slotString.s32(),
+					nodeId === fixtureCatalog.nodeId.fixture63()
+						? fixtureCatalog.nodeId.fixture63()
+						: nodeId === fixtureCatalog.nodeId.fixture36()
+							? fixtureCatalog.nodeId.fixture36()
+							: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: payload.inherit_global,
 			};
 			state.nodeWeightPolicies[nodeId] = nextPolicy;
@@ -1805,9 +1817,9 @@ async function handleRequest(
 			}
 			const updated: AdminNode = {
 				...node,
-				node_name: fixtureCatalog.slotString.s33(),
-				access_host: fixtureCatalog.slotString.s35(),
-				api_base_url: fixtureCatalog.slotString.s34(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				access_host: fixtureCatalog.host.fixture35(),
+				api_base_url: fixtureCatalog.service.fixture34(),
 				quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 				quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 			};
@@ -2000,15 +2012,15 @@ async function handleRequest(
 		const endpoint: AdminEndpoint = {
 			endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
 			node_id:
-				payload.node_id === fixtureCatalog.slotString.s63()
-					? fixtureCatalog.slotString.s63()
-					: payload.node_id === fixtureCatalog.slotString.s36()
-						? fixtureCatalog.slotString.s36()
-						: fixtureCatalog.slotString.s32(),
+				payload.node_id === fixtureCatalog.nodeId.fixture63()
+					? fixtureCatalog.nodeId.fixture63()
+					: payload.node_id === fixtureCatalog.nodeId.fixture36()
+						? fixtureCatalog.nodeId.fixture36()
+						: fixtureCatalog.nodeId.fixture32(),
 			tag:
 				payload.kind === fixtureCatalog.endpoint.ssKind()
-					? fixtureCatalog.slotString.s44()
-					: fixtureCatalog.slotString.s41(),
+					? fixtureCatalog.endpointTag.fixture44()
+					: fixtureCatalog.endpointTag.fixture41(),
 			kind:
 				payload.kind === fixtureCatalog.endpoint.ssKind()
 					? fixtureCatalog.endpoint.ssKind()
@@ -2048,9 +2060,9 @@ async function handleRequest(
 			endpoint_id:
 				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
 					? fixtureCatalog.identifier.endpointTertiary()
-					: endpoint.endpoint_id === fixtureCatalog.slotString.s43()
-						? fixtureCatalog.slotString.s43()
-						: fixtureCatalog.slotString.s40(),
+					: endpoint.endpoint_id === fixtureCatalog.endpointId.fixture43()
+						? fixtureCatalog.endpointId.fixture43()
+						: fixtureCatalog.endpointId.fixture40(),
 			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
@@ -2085,22 +2097,22 @@ async function handleRequest(
 			endpoint_id:
 				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
 					? fixtureCatalog.identifier.endpointTertiary()
-					: endpoint.endpoint_id === fixtureCatalog.slotString.s43()
-						? fixtureCatalog.slotString.s43()
-						: fixtureCatalog.slotString.s40(),
+					: endpoint.endpoint_id === fixtureCatalog.endpointId.fixture43()
+						? fixtureCatalog.endpointId.fixture43()
+						: fixtureCatalog.endpointId.fixture40(),
 			url: `https://${authority}/generate_204`,
 			nodes: state.nodes.map((item) => ({
 				node_id:
-					item.node_id === fixtureCatalog.slotString.s63()
-						? fixtureCatalog.slotString.s63()
-						: item.node_id === fixtureCatalog.slotString.s36()
-							? fixtureCatalog.slotString.s36()
-							: fixtureCatalog.slotString.s32(),
+					item.node_id === fixtureCatalog.nodeId.fixture63()
+						? fixtureCatalog.nodeId.fixture63()
+						: item.node_id === fixtureCatalog.nodeId.fixture36()
+							? fixtureCatalog.nodeId.fixture36()
+							: fixtureCatalog.nodeId.fixture32(),
 				ok: true,
 				status: 204,
-				latency_ms: fixtureCatalog.slotNumber.n8(),
+				latency_ms: fixtureCatalog.number.value9(),
 				error: null,
-				checked_at: fixtureCatalog.slotString.s7(),
+				checked_at: fixtureCatalog.timestamp.t20240101T000700(),
 			})),
 		});
 	}

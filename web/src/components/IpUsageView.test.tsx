@@ -145,58 +145,58 @@ const baseReport: Pick<
 	| "timeline"
 	| "ips"
 > = {
-	window_start: fixtureCatalog.slotString.s24(),
-	window_end: fixtureCatalog.slotString.s25(),
+	window_start: fixtureCatalog.timestamp.t20260308T000000(),
+	window_end: fixtureCatalog.timestamp.t20260308T000200(),
 	warnings: [],
 	unique_ip_series: [
-		{ minute: fixtureCatalog.slotString.s24(), count: 1 },
-		{ minute: fixtureCatalog.slotString.s26(), count: 2 },
-		{ minute: fixtureCatalog.slotString.s25(), count: 1 },
+		{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
+		{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 2 },
+		{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 1 },
 	],
 	timeline: [
 		{
 			lane_key: "edge-tokyo|203.0.113.7",
-			endpoint_id: fixtureCatalog.slotString.s40(),
-			endpoint_tag: fixtureCatalog.slotString.s41(),
-			ip: fixtureCatalog.slotString.s29(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
+			endpoint_tag: fixtureCatalog.endpointTag.fixture41(),
+			ip: fixtureCatalog.address.documentation192_0_2_30(),
 			minutes: 2,
 			segments: [
 				{
-					start_minute: fixtureCatalog.slotString.s24(),
-					end_minute: fixtureCatalog.slotString.s26(),
+					start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+					end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 				},
 			],
 		},
 		{
 			lane_key: "edge-osaka|198.51.100.4",
-			endpoint_id: fixtureCatalog.slotString.s43(),
-			endpoint_tag: fixtureCatalog.slotString.s201(),
-			ip: fixtureCatalog.slotString.s202(),
+			endpoint_id: fixtureCatalog.endpointId.fixture43(),
+			endpoint_tag: fixtureCatalog.endpointTag.fixture201(),
+			ip: fixtureCatalog.address.documentation192_0_2_3(),
 			minutes: 1,
 			segments: [
 				{
-					start_minute: fixtureCatalog.slotString.s25(),
-					end_minute: fixtureCatalog.slotString.s25(),
+					start_minute: fixtureCatalog.timestamp.t20260308T000200(),
+					end_minute: fixtureCatalog.timestamp.t20260308T000200(),
 				},
 			],
 		},
 	],
 	ips: [
 		{
-			ip: fixtureCatalog.slotString.s29(),
+			ip: fixtureCatalog.address.documentation192_0_2_30(),
 			minutes: 2,
-			endpoint_tags: [fixtureCatalog.slotString.s41()],
+			endpoint_tags: [fixtureCatalog.endpointTag.fixture41()],
 			region: "Japan / Tokyo",
 			operator: "ExampleNet",
-			last_seen_at: fixtureCatalog.slotString.s26(),
+			last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 		},
 		{
-			ip: fixtureCatalog.slotString.s202(),
+			ip: fixtureCatalog.address.documentation192_0_2_3(),
 			minutes: 1,
-			endpoint_tags: [fixtureCatalog.slotString.s201()],
+			endpoint_tags: [fixtureCatalog.endpointTag.fixture201()],
 			region: "Singapore",
 			operator: "LionLink",
-			last_seen_at: fixtureCatalog.slotString.s25(),
+			last_seen_at: fixtureCatalog.timestamp.t20260308T000200(),
 		},
 	],
 };
@@ -234,18 +234,21 @@ describe("<IpUsageView />", () => {
 		);
 
 		const ipButton = screen.getAllByRole("button", {
-			name: fixtureCatalog.slotString.s29(),
+			name: fixtureCatalog.address.documentation192_0_2_30(),
 		})[0];
 		const tokyoRow = ipButton?.closest("tr");
 		const osakaRow = screen
-			.getAllByRole("button", { name: fixtureCatalog.slotString.s202() })[0]
+			.getAllByRole("button", {
+				name: fixtureCatalog.address.documentation192_0_2_3(),
+			})[0]
 			?.closest("tr");
 		expect(tokyoRow).not.toBeNull();
 		expect(osakaRow).not.toBeNull();
 
 		fireEvent.mouseEnter(ipButton);
 		expect(
-			screen.getAllByText(fixtureCatalog.slotString.s29()).length,
+			screen.getAllByText(fixtureCatalog.address.documentation192_0_2_30())
+				.length,
 		).toBeGreaterThan(1);
 		expect(tokyoRow).toHaveClass("bg-info/8");
 		expect(osakaRow).toHaveClass("opacity-45");
@@ -256,7 +259,7 @@ describe("<IpUsageView />", () => {
 			screen.getByRole("button", { name: "Clear pinned highlight" }),
 		).toBeInTheDocument();
 		const ipBadge = screen
-			.getAllByText(fixtureCatalog.slotString.s29())
+			.getAllByText(fixtureCatalog.address.documentation192_0_2_30())
 			.map((node) => node.closest(".xp-badge"))
 			.find((node): node is HTMLElement => node !== null);
 		expect(ipBadge).toBeTruthy();

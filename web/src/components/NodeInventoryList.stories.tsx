@@ -42,30 +42,66 @@ function buildRecentSlots(statuses: RecentSlotStatuses) {
 	] = statuses;
 
 	return [
-		{ slot_start: fixtureCatalog.slotString.s4(), status: slot0 },
-		{ slot_start: fixtureCatalog.slotString.s5(), status: slot1 },
-		{ slot_start: fixtureCatalog.slotString.s6(), status: slot2 },
-		{ slot_start: fixtureCatalog.slotString.s7(), status: slot3 },
-		{ slot_start: fixtureCatalog.slotString.s8(), status: slot4 },
-		{ slot_start: fixtureCatalog.slotString.s9(), status: slot5 },
-		{ slot_start: fixtureCatalog.slotString.s10(), status: slot6 },
-		{ slot_start: fixtureCatalog.slotString.s11(), status: slot7 },
-		{ slot_start: fixtureCatalog.slotString.s12(), status: slot8 },
-		{ slot_start: fixtureCatalog.slotString.s13(), status: slot9 },
-		{ slot_start: fixtureCatalog.slotString.s14(), status: slot10 },
-		{ slot_start: fixtureCatalog.slotString.s15(), status: slot11 },
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000400(),
+			status: slot0,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000500(),
+			status: slot1,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000600(),
+			status: slot2,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000700(),
+			status: slot3,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000800(),
+			status: slot4,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000900(),
+			status: slot5,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001000(),
+			status: slot6,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001100(),
+			status: slot7,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001200(),
+			status: slot8,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001300(),
+			status: slot9,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001400(),
+			status: slot10,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001500(),
+			status: slot11,
+		},
 	];
 }
 
 const sampleNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: fixtureCatalog.slotString.s229(),
-		node_name: fixtureCatalog.slotString.s280(),
-		api_base_url: fixtureCatalog.slotString.s281(),
-		access_host: fixtureCatalog.slotString.s282(),
+		node_id: fixtureCatalog.nodeId.fixture229(),
+		node_name: fixtureCatalog.nodeName.fixture280(),
+		api_base_url: fixtureCatalog.service.fixture281(),
+		access_host: fixtureCatalog.host.fixture282(),
 		summary: {
 			status: "up",
-			updated_at: fixtureCatalog.slotString.s283(),
+			updated_at: fixtureCatalog.timestamp.t20260303T120000(),
 		},
 		components: [
 			{
@@ -99,13 +135,13 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 		]),
 	},
 	{
-		node_id: fixtureCatalog.slotString.s233(),
-		node_name: fixtureCatalog.slotString.s99(),
-		api_base_url: fixtureCatalog.slotString.s235(),
-		access_host: fixtureCatalog.slotString.s284(),
+		node_id: fixtureCatalog.nodeId.fixture233(),
+		node_name: fixtureCatalog.host.fixture99(),
+		api_base_url: fixtureCatalog.service.fixture235(),
+		access_host: fixtureCatalog.host.fixture284(),
 		summary: {
 			status: "degraded",
-			updated_at: fixtureCatalog.slotString.s283(),
+			updated_at: fixtureCatalog.timestamp.t20260303T120000(),
 		},
 		components: [
 			{

@@ -37,7 +37,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 				</a>
 			);
 		},
-		useParams: () => ({ endpointId: fixtureCatalog.slotString.s40() }),
+		useParams: () => ({ endpointId: fixtureCatalog.endpointId.fixture40() }),
 	};
 });
 
@@ -68,15 +68,15 @@ describe("<EndpointProbeStatsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s40(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s139(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture139(),
 			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 443,
 			meta: {},
 		});
 		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
 			participating_nodes: 2,
 			expected_nodes: 2,
 			slots: [
@@ -92,19 +92,19 @@ describe("<EndpointProbeStatsPage />", () => {
 					latency_ms_p95: 123,
 					by_node: [
 						{
-							node_id: fixtureCatalog.slotString.s32(),
+							node_id: fixtureCatalog.nodeId.fixture32(),
 							ok: true,
 							skipped: false,
-							checked_at: fixtureCatalog.slotString.s236(),
-							latency_ms: fixtureCatalog.slotNumber.n14(),
+							checked_at: fixtureCatalog.timestamp.t20260311T110500(),
+							latency_ms: fixtureCatalog.number.value111(),
 							config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						},
 						{
-							node_id: fixtureCatalog.slotString.s36(),
+							node_id: fixtureCatalog.nodeId.fixture36(),
 							ok: true,
 							skipped: false,
-							checked_at: fixtureCatalog.slotString.s237(),
-							latency_ms: fixtureCatalog.slotNumber.n15(),
+							checked_at: fixtureCatalog.timestamp.t20260311T110501(),
+							latency_ms: fixtureCatalog.number.value123(),
 							config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						},
 					],
@@ -114,18 +114,18 @@ describe("<EndpointProbeStatsPage />", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s32(),
-					node_name: fixtureCatalog.slotString.s210(),
-					api_base_url: fixtureCatalog.slotString.s211(),
-					access_host: fixtureCatalog.slotString.s212(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					node_name: fixtureCatalog.nodeName.fixture210(),
+					api_base_url: fixtureCatalog.service.fixture211(),
+					access_host: fixtureCatalog.host.fixture212(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
 				{
-					node_id: fixtureCatalog.slotString.s36(),
-					node_name: fixtureCatalog.slotString.s207(),
-					api_base_url: fixtureCatalog.slotString.s208(),
-					access_host: fixtureCatalog.slotString.s209(),
+					node_id: fixtureCatalog.nodeId.fixture36(),
+					node_name: fixtureCatalog.nodeName.fixture207(),
+					api_base_url: fixtureCatalog.service.fixture208(),
+					access_host: fixtureCatalog.host.fixture209(),
 					quota_limit_bytes: 0,
 					quota_reset: { policy: "unlimited" },
 				},
@@ -139,7 +139,7 @@ describe("<EndpointProbeStatsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminEndpointProbeHistory).toHaveBeenCalledWith(
 				"admintoken",
-				fixtureCatalog.slotString.s40(),
+				fixtureCatalog.endpointId.fixture40(),
 				24,
 				expect.any(AbortSignal),
 			);
@@ -154,7 +154,7 @@ describe("<EndpointProbeStatsPage />", () => {
 
 	it("falls back to expected_nodes for legacy probe-history payloads", async () => {
 		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValueOnce({
-			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
 			expected_nodes: 2,
 			slots: [
 				{
@@ -168,19 +168,19 @@ describe("<EndpointProbeStatsPage />", () => {
 					latency_ms_p95: 123,
 					by_node: [
 						{
-							node_id: fixtureCatalog.slotString.s32(),
+							node_id: fixtureCatalog.nodeId.fixture32(),
 							ok: true,
 							skipped: false,
-							checked_at: fixtureCatalog.slotString.s236(),
-							latency_ms: fixtureCatalog.slotNumber.n14(),
+							checked_at: fixtureCatalog.timestamp.t20260311T110500(),
+							latency_ms: fixtureCatalog.number.value111(),
 							config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						},
 						{
-							node_id: fixtureCatalog.slotString.s36(),
+							node_id: fixtureCatalog.nodeId.fixture36(),
 							ok: true,
 							skipped: false,
-							checked_at: fixtureCatalog.slotString.s237(),
-							latency_ms: fixtureCatalog.slotNumber.n15(),
+							checked_at: fixtureCatalog.timestamp.t20260311T110501(),
+							latency_ms: fixtureCatalog.number.value123(),
 							config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						},
 					],
@@ -203,14 +203,17 @@ describe("<EndpointProbeStatsPage />", () => {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			fixtureCatalog.slotString.s207(),
-			fixtureCatalog.slotString.s210(),
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
 		]);
 		expect(links.map((link) => link.getAttribute("href"))).toEqual([
-			`/nodes/${fixtureCatalog.slotString.s36()}`,
-			`/nodes/${fixtureCatalog.slotString.s32()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture36()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture32()}`,
 		]);
-		expect(links[0]).toHaveAttribute("title", fixtureCatalog.slotString.s36());
+		expect(links[0]).toHaveAttribute(
+			"title",
+			fixtureCatalog.nodeId.fixture36(),
+		);
 	});
 
 	it("keeps probe stats available when the node-name lookup fails", async () => {
@@ -220,7 +223,7 @@ describe("<EndpointProbeStatsPage />", () => {
 		renderPage();
 
 		expect(
-			await screen.findByText(fixtureCatalog.slotString.s32()),
+			await screen.findByText(fixtureCatalog.nodeId.fixture32()),
 		).toBeInTheDocument();
 		expect(screen.queryByText("Failed to load probe stats")).toBeNull();
 	});

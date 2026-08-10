@@ -13,6 +13,11 @@ valid:
         &catalog().hosts.primary
     }
   - |
+    pub fn number_value1<T: DeserializeOwned>() -> T {
+        serde_json::from_value(catalog().fixtures.numbers["value"]["value1"].clone())
+            .expect("fixture numeric value is valid")
+    }
+  - |
     pub fn none<T>() -> Option<T> {
         None
     }

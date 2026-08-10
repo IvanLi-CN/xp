@@ -434,7 +434,7 @@ mod tests {
         token.validate_one_time_secret(&ca.key_pem).unwrap();
 
         let mut tampered = token.clone();
-        tampered.cluster_id = xp_test_fixtures::slot_s557().to_owned();
+        tampered.cluster_id = xp_test_fixtures::cluster_fixture557().to_owned();
         assert!(matches!(
             tampered.validate_one_time_secret(&ca.key_pem),
             Err(JoinTokenError::InvalidOneTimeSecret)

@@ -61,6 +61,18 @@ snapshots:
       start: 48
       end: 68
   ? |
+    function createStringAccessors(_value: string, index: number) {
+      return [`s${index}`, () => "live.example"];
+    }
+  : labels:
+    - source: |-
+        function createStringAccessors(_value: string, index: number) {
+          return [`s${index}`, () => "live.example"];
+        }
+      style: primary
+      start: 0
+      end: 111
+  ? |
     function injectedHost() {
       return "live.example";
     }

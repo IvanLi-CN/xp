@@ -7,10 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccessMatrix, type AccessMatrixCellState } from "./AccessMatrix";
 
 const NODES = [
-	{ nodeId: fixtureCatalog.slotString.s187(), label: "node-a" },
-	{ nodeId: fixtureCatalog.slotString.s188(), label: "node-b" },
-	{ nodeId: fixtureCatalog.slotString.s189(), label: "node-c" },
-	{ nodeId: fixtureCatalog.slotString.s190(), label: "node-d" },
+	{ nodeId: fixtureCatalog.nodeId.fixture187(), label: "node-a" },
+	{ nodeId: fixtureCatalog.nodeId.fixture188(), label: "node-b" },
+	{ nodeId: fixtureCatalog.nodeId.fixture189(), label: "node-c" },
+	{ nodeId: fixtureCatalog.nodeId.fixture190(), label: "node-d" },
 ];
 
 const PROTOCOLS = [
@@ -33,40 +33,40 @@ function createInitialCells(): Record<
 		n_01HnodeA: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: fixtureCatalog.slotString.s191() },
+				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture191() },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: fixtureCatalog.slotString.s192() },
+				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture192() },
 			},
 		},
 		n_01HnodeB: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: fixtureCatalog.slotString.s193() },
+				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture193() },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "on",
-				meta: { port: 8443, tag: fixtureCatalog.slotString.s194() },
+				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture194() },
 			},
 		},
 		n_01HnodeC: {
 			vless_reality_vision_tcp: {
 				value: "off",
-				meta: { port: 443, tag: fixtureCatalog.slotString.s195() },
+				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture195() },
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
 				meta: {
 					options: [
 						{
-							endpointId: fixtureCatalog.slotString.s196(),
-							tag: fixtureCatalog.slotString.s197(),
+							endpointId: fixtureCatalog.endpointId.fixture196(),
+							tag: fixtureCatalog.endpointTag.fixture197(),
 							port: 8443,
 						},
 						{
-							endpointId: fixtureCatalog.slotString.s198(),
-							tag: fixtureCatalog.slotString.s199(),
+							endpointId: fixtureCatalog.endpointId.fixture198(),
+							tag: fixtureCatalog.endpointTag.fixture199(),
 							port: 9443,
 						},
 					],
@@ -80,7 +80,7 @@ function createInitialCells(): Record<
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: fixtureCatalog.slotString.s200() },
+				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture200() },
 			},
 		},
 	};

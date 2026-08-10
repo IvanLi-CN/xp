@@ -16,7 +16,7 @@ fn test_store_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),
         bootstrap_node_id: None,
-        bootstrap_node_name: xp_test_fixtures::slot_s605().to_owned(),
+        bootstrap_node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
         bootstrap_access_host: "".to_string(),
         bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
@@ -104,17 +104,17 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
         .unwrap();
 
     let node = Node {
-        node_id: xp_test_fixtures::slot_s477().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s465().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s449().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture465().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     let endpoint = Endpoint {
-        endpoint_id: xp_test_fixtures::slot_s478().to_owned(),
-        node_id: xp_test_fixtures::slot_s477().to_owned(),
-        tag: xp_test_fixtures::slot_s480().to_owned(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture480().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 8388,
         meta: json!({}),
@@ -122,7 +122,7 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
     let user = User {
         user_id: "user_1".to_string(),
         display_name: "alice".to_string(),
-        subscription_token: xp_test_fixtures::slot_s481().to_owned(),
+        subscription_token: xp_test_fixtures::label_sub1().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::default(),

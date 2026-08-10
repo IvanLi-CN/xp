@@ -43,7 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => mockNavigate,
-		useParams: () => ({ endpointId: fixtureCatalog.slotString.s172() }),
+		useParams: () => ({ endpointId: fixtureCatalog.endpointId.fixture172() }),
 	};
 });
 
@@ -92,10 +92,10 @@ function setupMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: fixtureCatalog.slotString.s32(),
-				node_name: fixtureCatalog.slotString.s33(),
-				access_host: fixtureCatalog.slotString.s119(),
-				api_base_url: fixtureCatalog.slotString.s34(),
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				access_host: fixtureCatalog.host.fixture119(),
+				api_base_url: fixtureCatalog.service.fixture34(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -106,21 +106,21 @@ function setupMocks() {
 		],
 	});
 	vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-		endpoint_id: fixtureCatalog.slotString.s172(),
-		node_id: fixtureCatalog.slotString.s32(),
-		tag: fixtureCatalog.slotString.s121(),
+		endpoint_id: fixtureCatalog.endpointId.fixture172(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		tag: fixtureCatalog.endpointTag.fixture121(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 53844,
 		meta: {
 			reality: {
 				dest: fixtureCatalog.address.loopback39043(),
-				server_names: fixtureCatalog.slotList.l5(),
+				server_names: fixtureCatalog.hostList.edge5(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
 			managed_default: true,
 			canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
-			accepted_authorities: fixtureCatalog.slotList.l12(),
+			accepted_authorities: fixtureCatalog.hostList.edge12(),
 		},
 	});
 }
@@ -140,21 +140,21 @@ describe("EndpointDetailsPage", () => {
 
 	it("restores managed suggestions and keeps the managed patch payload stable", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s172(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s121(),
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 53844,
 			meta: {
 				reality: {
 					dest: fixtureCatalog.address.loopback39043(),
-					server_names: fixtureCatalog.slotList.l5(),
+					server_names: fixtureCatalog.hostList.edge5(),
 					server_names_source: "manual",
 					fingerprint: "chrome",
 				},
 				managed_default: true,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
-				accepted_authorities: fixtureCatalog.slotList.l13(),
+				accepted_authorities: fixtureCatalog.hostList.edge13(),
 			},
 		});
 
@@ -195,7 +195,7 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				fixtureCatalog.slotString.s172(),
+				fixtureCatalog.endpointId.fixture172(),
 				{
 					port: 53844,
 					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
@@ -208,9 +208,9 @@ describe("EndpointDetailsPage", () => {
 
 	it("does not render or submit SMux settings for VLESS endpoints", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s172(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s121(),
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 53844,
 			meta: {},
@@ -226,25 +226,29 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
-				{ port: 53844 },
+				fixtureCatalog.endpointId.fixture172(),
+				{
+					port: 53844,
+					accepted_authorities:
+						fixtureCatalog.authority.existingAuthoritiesPort443(),
+				},
 			);
 		});
 	});
 
 	it("does not render or submit SMux settings to a legacy endpoint API", async () => {
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s172(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s121(),
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 53844,
 			meta: {},
 		});
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: fixtureCatalog.slotString.s172(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s121(),
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 53844,
 			meta: {},
@@ -265,12 +269,8 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				fixtureCatalog.slotString.s172(),
-				{
-					port: 53844,
-					accepted_authorities:
-						fixtureCatalog.authority.existingAuthoritiesPort443(),
-				},
+				fixtureCatalog.endpointId.fixture172(),
+				{ port: 53844 },
 			);
 		});
 	});
@@ -285,10 +285,10 @@ describe("EndpointDetailsPage", () => {
 			vi.mocked(fetchAdminNodes).mockResolvedValue({
 				items: [
 					{
-						node_id: fixtureCatalog.slotString.s124(),
-						node_name: fixtureCatalog.slotString.s125(),
-						access_host: fixtureCatalog.slotString.s126(),
-						api_base_url: fixtureCatalog.slotString.s127(),
+						node_id: fixtureCatalog.nodeId.fixture124(),
+						node_name: fixtureCatalog.nodeName.fixture125(),
+						access_host: fixtureCatalog.host.fixture126(),
+						api_base_url: fixtureCatalog.service.fixture127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -299,15 +299,15 @@ describe("EndpointDetailsPage", () => {
 				],
 			});
 			vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-				endpoint_id: fixtureCatalog.slotString.s172(),
-				node_id: fixtureCatalog.slotString.s124(),
-				tag: fixtureCatalog.slotString.s129(),
+				endpoint_id: fixtureCatalog.endpointId.fixture172(),
+				node_id: fixtureCatalog.nodeId.fixture124(),
+				tag: fixtureCatalog.endpointTag.fixture129(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 53844,
 				meta: {
 					reality: {
 						dest: fixtureCatalog.address.loopback39043(),
-						server_names: fixtureCatalog.slotList.l7(),
+						server_names: fixtureCatalog.hostList.edge7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
@@ -315,21 +315,21 @@ describe("EndpointDetailsPage", () => {
 				},
 			});
 			vi.mocked(patchAdminEndpoint).mockResolvedValue({
-				endpoint_id: fixtureCatalog.slotString.s172(),
-				node_id: fixtureCatalog.slotString.s124(),
-				tag: fixtureCatalog.slotString.s129(),
+				endpoint_id: fixtureCatalog.endpointId.fixture172(),
+				node_id: fixtureCatalog.nodeId.fixture124(),
+				tag: fixtureCatalog.endpointTag.fixture129(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 53844,
 				meta: {
 					reality: {
 						dest: fixtureCatalog.address.loopback39043(),
-						server_names: fixtureCatalog.slotList.l7(),
+						server_names: fixtureCatalog.hostList.edge7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
 					managed_default: true,
 					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
-					accepted_authorities: fixtureCatalog.slotList.l15(),
+					accepted_authorities: fixtureCatalog.hostList.edge15(),
 				},
 			});
 
@@ -372,7 +372,7 @@ describe("EndpointDetailsPage", () => {
 			await waitFor(() => {
 				expect(patchAdminEndpoint).toHaveBeenCalledWith(
 					"admintoken",
-					fixtureCatalog.slotString.s172(),
+					fixtureCatalog.endpointId.fixture172(),
 					{
 						port: 53844,
 						canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
@@ -390,10 +390,10 @@ describe("EndpointDetailsPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s32(),
-					node_name: fixtureCatalog.slotString.s33(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					node_name: fixtureCatalog.nodeName.fixture33(),
 					access_host: fixtureCatalog.string.none(),
-					api_base_url: fixtureCatalog.slotString.s123(),
+					api_base_url: fixtureCatalog.service.fixture123(),
 					quota_limit_bytes: 0,
 					quota_reset: {
 						policy: "monthly",

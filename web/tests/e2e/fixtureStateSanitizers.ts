@@ -57,10 +57,10 @@ export function normalizeFixtureNode(
 	index: number,
 ): AdminNode {
 	const normalized: AdminNode = {
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s86(),
-		api_base_url: fixtureCatalog.slotString.s87(),
-		access_host: fixtureCatalog.slotString.s88(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture86(),
+		api_base_url: fixtureCatalog.service.fixture87(),
+		access_host: fixtureCatalog.host.fixture88(),
 		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 		quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 	};
@@ -75,10 +75,10 @@ export function normalizeFixtureNode(
 		normalized.api_base_url = fixtureCatalog.url.secondaryApi();
 		normalized.access_host = fixtureCatalog.host.secondary();
 	} else if (index > 0) {
-		normalized.node_id = fixtureCatalog.slotString.s36();
-		normalized.node_name = fixtureCatalog.slotString.s37();
-		normalized.api_base_url = fixtureCatalog.slotString.s38();
-		normalized.access_host = fixtureCatalog.slotString.s39();
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+		normalized.node_name = fixtureCatalog.nodeName.fixture37();
+		normalized.api_base_url = fixtureCatalog.service.fixture38();
+		normalized.access_host = fixtureCatalog.host.fixture39();
 	}
 	return normalized;
 }
@@ -89,9 +89,9 @@ export function normalizeFixtureEndpoint(
 ): AdminEndpoint {
 	const isShadowsocks = endpoint.kind === fixtureCatalog.endpoint.ssKind();
 	const normalized: AdminEndpoint = {
-		endpoint_id: fixtureCatalog.slotString.s40(),
-		node_id: fixtureCatalog.slotString.s32(),
-		tag: fixtureCatalog.slotString.s89(),
+		endpoint_id: fixtureCatalog.endpointId.fixture40(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		tag: fixtureCatalog.endpointTag.fixture89(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: fixtureCatalog.endpoint.port443(),
 		meta: {
@@ -120,9 +120,9 @@ export function normalizeFixtureEndpoint(
 		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
 		normalized.tag = fixtureCatalog.identifier.endpointTagSecondary();
 	} else if (index > 0) {
-		normalized.endpoint_id = fixtureCatalog.slotString.s43();
-		normalized.node_id = fixtureCatalog.slotString.s36();
-		normalized.tag = fixtureCatalog.slotString.s44();
+		normalized.endpoint_id = fixtureCatalog.endpointId.fixture43();
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+		normalized.tag = fixtureCatalog.endpointTag.fixture44();
 	}
 	if (isShadowsocks) {
 		normalized.kind = fixtureCatalog.endpoint.ssKind();

@@ -581,18 +581,18 @@ mod tests {
 
     fn endpoint_view_a() -> TcpConnectionEndpointView {
         TcpConnectionEndpointView {
-            node_id: xp_test_fixtures::slot_s605().to_owned(),
-            endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-            endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+            node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+            endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+            endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
             port: 443,
         }
     }
 
     fn endpoint_view_b() -> TcpConnectionEndpointView {
         TcpConnectionEndpointView {
-            node_id: xp_test_fixtures::slot_s606().to_owned(),
-            endpoint_id: xp_test_fixtures::slot_s608().to_owned(),
-            endpoint_tag: xp_test_fixtures::slot_s610().to_owned(),
+            node_id: xp_test_fixtures::label_node2().to_owned(),
+            endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+            endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
             port: 8443,
         }
     }
@@ -607,16 +607,16 @@ mod tests {
             None,
             &[
                 TcpConnectionMinuteSample {
-                    node_id: xp_test_fixtures::slot_s605().to_owned(),
-                    endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-                    endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+                    node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                     port: 443,
                     count: 3,
                 },
                 TcpConnectionMinuteSample {
-                    node_id: xp_test_fixtures::slot_s606().to_owned(),
-                    endpoint_id: xp_test_fixtures::slot_s608().to_owned(),
-                    endpoint_tag: xp_test_fixtures::slot_s610().to_owned(),
+                    node_id: xp_test_fixtures::label_node2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
                     port: 8443,
                     count: 1,
                 },
@@ -657,9 +657,9 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: xp_test_fixtures::slot_s605().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 2,
             }],
@@ -669,14 +669,14 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: xp_test_fixtures::slot_s605().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 0,
             }],
         );
-        let counts = &usage.endpoints[xp_test_fixtures::slot_s607()].counts;
+        let counts = &usage.endpoints[xp_test_fixtures::endpoint_fixtureinline_a()].counts;
         assert_eq!(counts[MINUTES_WINDOW - 2], 2);
         assert_eq!(counts[MINUTES_WINDOW - 1], 0);
     }
@@ -690,9 +690,9 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: xp_test_fixtures::slot_s605().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 2,
             }],
@@ -712,24 +712,28 @@ mod tests {
             None,
             &[
                 TcpConnectionMinuteSample {
-                    node_id: xp_test_fixtures::slot_s605().to_owned(),
-                    endpoint_id: xp_test_fixtures::slot_s607().to_owned(),
-                    endpoint_tag: xp_test_fixtures::slot_s609().to_owned(),
+                    node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                     port: 443,
                     count: 2,
                 },
                 TcpConnectionMinuteSample {
-                    node_id: xp_test_fixtures::slot_s606().to_owned(),
-                    endpoint_id: xp_test_fixtures::slot_s608().to_owned(),
-                    endpoint_tag: xp_test_fixtures::slot_s610().to_owned(),
+                    node_id: xp_test_fixtures::label_node2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
                     port: 8443,
                     count: 1,
                 },
             ],
         );
-        assert!(usage.clear_endpoint(xp_test_fixtures::slot_s607()));
-        assert!(usage.endpoints.contains_key(xp_test_fixtures::slot_s608()));
-        assert!(usage.clear_node(xp_test_fixtures::slot_s606()));
+        assert!(usage.clear_endpoint(xp_test_fixtures::endpoint_fixtureinline_a()));
+        assert!(
+            usage
+                .endpoints
+                .contains_key(xp_test_fixtures::endpoint_fixtureinline_b())
+        );
+        assert!(usage.clear_node(xp_test_fixtures::label_node2()));
         assert!(usage.endpoints.is_empty());
     }
 

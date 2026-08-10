@@ -35,7 +35,7 @@ export function buildNodeEgressProbeRefreshResponse(node: AdminNode) {
 export function buildStatusHelloResponse(clusterInfo: ClusterInfoResponse) {
 	return {
 		node_id: clusterInfo.node_id,
-		connected_at: fixtureCatalog.slotString.s7(),
+		connected_at: fixtureCatalog.timestamp.t20240101T000700(),
 	};
 }
 

@@ -12,15 +12,15 @@ export type StorybookEndpointProbeMock = {
 function fixtureProbeHistory(): AdminEndpointProbeHistoryResponse {
 	return {
 		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
-		participating_nodes: fixtureCatalog.slotNumber.n1(),
-		expected_nodes: fixtureCatalog.slotNumber.n1(),
+		participating_nodes: fixtureCatalog.number.value2(),
+		expected_nodes: fixtureCatalog.number.value2(),
 		slots: [
 			{
 				hour: fixtureCatalog.timestamp.probeHour(),
 				status: "up",
-				participating_nodes: fixtureCatalog.slotNumber.n1(),
-				ok_count: fixtureCatalog.slotNumber.n1(),
-				sample_count: fixtureCatalog.slotNumber.n1(),
+				participating_nodes: fixtureCatalog.number.value2(),
+				ok_count: fixtureCatalog.number.value2(),
+				sample_count: fixtureCatalog.number.value2(),
 				latency_ms_p50: fixtureCatalog.metric.latencyLow(),
 				latency_ms_p95: fixtureCatalog.metric.latencyHigh(),
 				by_node: [
@@ -101,7 +101,7 @@ export function handleEndpointProbeRequest(
 				event: "hello",
 				data: {
 					run_id: fixtureCatalog.identifier.probeRunPrimary(),
-					connected_at: fixtureCatalog.slotString.s0(),
+					connected_at: fixtureCatalog.timestamp.t20260729T080000(),
 					nodes: [fixtureCatalog.identifier.nodePrimary()],
 				},
 			},

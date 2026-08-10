@@ -392,7 +392,9 @@ mod tests {
     #[test]
     fn ip_change_invalidates_previous_region_when_geo_refresh_fails() {
         let previous = NodeEgressProbeState {
-            selected_public_ip: Some(xp_test_fixtures::slot_s613().to_owned()),
+            selected_public_ip: Some(
+                xp_test_fixtures::address_documentation203_0_113_8().to_owned(),
+            ),
             subscription_region: NodeSubscriptionRegion::Japan,
             last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
             geo: crate::inbound_ip_usage::PersistedInboundIpGeo {
@@ -431,7 +433,7 @@ mod tests {
         let store = JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: tmp.path().to_path_buf(),
             bootstrap_node_id: None,
-            bootstrap_node_name: xp_test_fixtures::slot_s615().to_owned(),
+            bootstrap_node_name: xp_test_fixtures::label_node_a().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         })
@@ -447,7 +449,7 @@ mod tests {
 
         let handle = NodeEgressProbeHandle {
             inner: Arc::new(NodeEgressProbeHandleInner {
-                local_node_id: xp_test_fixtures::slot_s615().to_owned(),
+                local_node_id: xp_test_fixtures::label_node_a().to_owned(),
                 store,
                 trigger_tx: Some(tx),
             }),

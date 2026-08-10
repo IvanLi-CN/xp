@@ -23,18 +23,18 @@ const report: TrafficReport = {
 	timezone: "UTC",
 	summary: {
 		mode: "cycle",
-		uplink_bytes: fixtureCatalog.slotNumber.n0(),
-		downlink_bytes: fixtureCatalog.slotNumber.n0(),
-		total_bytes: fixtureCatalog.slotNumber.n0(),
+		uplink_bytes: fixtureCatalog.number.value1(),
+		downlink_bytes: fixtureCatalog.number.value1(),
+		total_bytes: fixtureCatalog.number.value1(),
 		complete: true,
 	},
 	current: [
 		{
 			start_at: fixtureCatalog.timestamp.baseline(),
-			end_at: fixtureCatalog.slotString.s279(),
-			uplink_bytes: fixtureCatalog.slotNumber.n2(),
-			downlink_bytes: fixtureCatalog.slotNumber.n3(),
-			total_bytes: fixtureCatalog.slotNumber.n6(),
+			end_at: fixtureCatalog.timestamp.t20260729T185500(),
+			uplink_bytes: fixtureCatalog.number.value3(),
+			downlink_bytes: fixtureCatalog.number.value4(),
+			total_bytes: fixtureCatalog.number.value7(),
 			complete: true,
 			is_current_day: false,
 		},
@@ -43,7 +43,7 @@ const report: TrafficReport = {
 		{
 			start_at: fixtureCatalog.timestamp.earlier(),
 			end_at: fixtureCatalog.timestamp.baseline(),
-			uplink_bytes: fixtureCatalog.slotNumber.n2(),
+			uplink_bytes: fixtureCatalog.number.value3(),
 			downlink_bytes: null,
 			total_bytes: null,
 			complete: false,
@@ -51,7 +51,7 @@ const report: TrafficReport = {
 		},
 	],
 	partial: false,
-	last_sample_at: fixtureCatalog.slotString.s279(),
+	last_sample_at: fixtureCatalog.timestamp.t20260729T185500(),
 	warnings: [],
 };
 

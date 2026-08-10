@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fireEvent, userEvent, within } from "@storybook/test";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
-const ENDPOINT_ID = fixtureCatalog.slotString.s120();
+const ENDPOINT_ID = fixtureCatalog.endpointId.fixture120();
 
 const meta = {
 	title: "Pages/EndpointDetailsPage",
@@ -15,10 +15,10 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s118(),
-						node_name: fixtureCatalog.slotString.s33(),
-						access_host: fixtureCatalog.slotString.s119(),
-						api_base_url: fixtureCatalog.slotString.s34(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						node_name: fixtureCatalog.nodeName.fixture33(),
+						access_host: fixtureCatalog.host.fixture119(),
+						api_base_url: fixtureCatalog.service.fixture34(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -29,21 +29,21 @@ const meta = {
 				],
 				endpoints: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s120(),
-						node_id: fixtureCatalog.slotString.s118(),
-						tag: fixtureCatalog.slotString.s121(),
+						endpoint_id: fixtureCatalog.endpointId.fixture120(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						tag: fixtureCatalog.endpointTag.fixture121(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {
-								dest: fixtureCatalog.slotString.s2(),
-								server_names: fixtureCatalog.slotList.l5(),
+								dest: fixtureCatalog.address.loopbackPort39002(),
+								server_names: fixtureCatalog.hostList.edge5(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 							managed_default: true,
 							canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
-							accepted_authorities: fixtureCatalog.slotList.l6(),
+							accepted_authorities: fixtureCatalog.hostList.edge6(),
 						},
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
@@ -79,10 +79,10 @@ export const ManagedDefaultAliases: Story = {
 			await canvas.findByText("acceptedAuthorities"),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findAllByText(fixtureCatalog.slotList.l6()[0]),
+			await canvas.findAllByText(fixtureCatalog.hostList.edge6()[0]),
 		).toHaveLength(2);
 		await expect(
-			await canvas.findAllByText(fixtureCatalog.slotList.l6()[1]),
+			await canvas.findAllByText(fixtureCatalog.hostList.edge6()[1]),
 		).toHaveLength(2);
 		await expect(
 			await canvas.findByText(
@@ -99,11 +99,11 @@ export const MihomoSmuxDefaults: Story = {
 			data: {
 				endpoints: [
 					{
-						endpoint_id: ENDPOINT_ID,
-						node_id: NODE_ID,
-						tag: "legacy-ss2022",
-						kind: "ss2022_2022_blake3_aes_128_gcm",
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture120(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						tag: fixtureCatalog.endpointTag.fixture121(),
+						kind: fixtureCatalog.endpoint.ssKind(),
+						port: fixtureCatalog.endpoint.port443(),
 						meta: {},
 					},
 				],
@@ -130,10 +130,10 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s118(),
-						node_name: fixtureCatalog.slotString.s33(),
-						access_host: fixtureCatalog.slotString.s99(),
-						api_base_url: fixtureCatalog.slotString.s123(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						node_name: fixtureCatalog.nodeName.fixture33(),
+						access_host: fixtureCatalog.host.fixture99(),
+						api_base_url: fixtureCatalog.service.fixture123(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -144,21 +144,21 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s120(),
-						node_id: fixtureCatalog.slotString.s118(),
-						tag: fixtureCatalog.slotString.s121(),
+						endpoint_id: fixtureCatalog.endpointId.fixture120(),
+						node_id: fixtureCatalog.nodeId.fixture118(),
+						tag: fixtureCatalog.endpointTag.fixture121(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {
-								dest: fixtureCatalog.slotString.s2(),
-								server_names: fixtureCatalog.slotList.l5(),
+								dest: fixtureCatalog.address.loopbackPort39002(),
+								server_names: fixtureCatalog.hostList.edge5(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 							managed_default: true,
 							canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
-							accepted_authorities: fixtureCatalog.slotList.l6(),
+							accepted_authorities: fixtureCatalog.hostList.edge6(),
 						},
 						short_ids: ["2a3b4c"],
 						active_short_id: "2a3b4c",
@@ -214,11 +214,11 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText(`https://${fixtureCatalog.slotString.s2()}`),
+			).findByText(`https://${fixtureCatalog.address.loopbackPort39002()}`),
 		);
 		await expect(
 			await canvas.findByLabelText("canary upstream url"),
-		).toHaveValue(`https://${fixtureCatalog.slotString.s2()}`);
+		).toHaveValue(`https://${fixtureCatalog.address.loopbackPort39002()}`);
 
 		await userEvent.click(
 			await canvas.findByRole("button", {
@@ -240,16 +240,16 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 	tags: ["managed-vless-autocomplete"],
 	parameters: {
 		router: {
-			initialEntry: `/endpoints/${fixtureCatalog.slotString.s128()}`,
+			initialEntry: `/endpoints/${fixtureCatalog.endpointId.fixture128()}`,
 		},
 		mockApi: {
 			data: {
 				nodes: [
 					{
-						node_id: fixtureCatalog.slotString.s124(),
-						node_name: fixtureCatalog.slotString.s125(),
-						access_host: fixtureCatalog.slotString.s126(),
-						api_base_url: fixtureCatalog.slotString.s127(),
+						node_id: fixtureCatalog.nodeId.fixture124(),
+						node_name: fixtureCatalog.nodeName.fixture125(),
+						access_host: fixtureCatalog.host.fixture126(),
+						api_base_url: fixtureCatalog.service.fixture127(),
 						quota_limit_bytes: 0,
 						quota_reset: {
 							policy: "monthly",
@@ -260,15 +260,15 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 				],
 				endpoints: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s128(),
-						node_id: fixtureCatalog.slotString.s124(),
-						tag: fixtureCatalog.slotString.s129(),
+						endpoint_id: fixtureCatalog.endpointId.fixture128(),
+						node_id: fixtureCatalog.nodeId.fixture124(),
+						tag: fixtureCatalog.endpointTag.fixture129(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {
-								dest: fixtureCatalog.slotString.s2(),
-								server_names: fixtureCatalog.slotList.l7(),
+								dest: fixtureCatalog.address.loopbackPort39002(),
+								server_names: fixtureCatalog.hostList.edge7(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -291,11 +291,11 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 		await userEvent.click(
 			await within(
 				await within(document.body).findByTestId("autocomplete-suggestions"),
-			).findByText(`https://${fixtureCatalog.slotString.s2()}`),
+			).findByText(`https://${fixtureCatalog.address.loopbackPort39002()}`),
 		);
 		await expect(
 			await canvas.findByLabelText("canary upstream url"),
-		).toHaveValue(`https://${fixtureCatalog.slotString.s2()}`);
+		).toHaveValue(`https://${fixtureCatalog.address.loopbackPort39002()}`);
 
 		await userEvent.click(
 			await canvas.findByRole("button", {

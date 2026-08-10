@@ -132,10 +132,10 @@ fn cloudflare_api_base_url_defaults_to_hostname() {
         account_id: "acc".to_string(),
         zone_id: "zone".to_string(),
         zone_name: "example.com".to_string(),
-        hostname: xp_test_fixtures::slot_s556().to_owned(),
+        hostname: xp_test_fixtures::host_fixture556().to_owned(),
         tunnel_name: "xp-node-1".to_string(),
         origin_url: DEFAULT_CLOUDFLARE_ORIGIN_URL.to_string(),
-        token: xp_test_fixtures::slot_s460().to_owned(),
+        token: xp_test_fixtures::token_fixture460().to_owned(),
         token_source: CloudflareTokenSource::Env,
     };
     let env = env_map(&[]);
@@ -143,16 +143,16 @@ fn cloudflare_api_base_url_defaults_to_hostname() {
     let access_host = resolve_access_host(&env, &api_base_url, Some(&cf)).unwrap();
     assert_eq!(
         api_base_url,
-        format!("https://{}", xp_test_fixtures::slot_s556())
+        format!("https://{}", xp_test_fixtures::host_fixture556())
     );
-    assert_eq!(access_host, xp_test_fixtures::slot_s556());
+    assert_eq!(access_host, xp_test_fixtures::host_fixture556());
 }
 
 #[test]
 fn decodes_join_token_leader_api_base_url() {
     let token = crate::cluster_identity::JoinToken {
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        leader_api_base_url: xp_test_fixtures::slot_s558().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        leader_api_base_url: xp_test_fixtures::service_fixture558().to_owned(),
         cluster_ca_pem: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_string(),
         token_id: "token-id".to_string(),
         one_time_secret: "secret".to_string(),
@@ -161,7 +161,7 @@ fn decodes_join_token_leader_api_base_url() {
     .encode_base64url_json();
     assert_eq!(
         decode_join_token_leader_api_base_url(&token).as_deref(),
-        Some(xp_test_fixtures::slot_s558())
+        Some(xp_test_fixtures::service_fixture558())
     );
 }
 
@@ -170,21 +170,21 @@ async fn existing_container_metadata_ignores_stale_join_token_leader() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
     let token = crate::cluster_identity::JoinToken {
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        leader_api_base_url: xp_test_fixtures::slot_s559().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        leader_api_base_url: xp_test_fixtures::service_fixture559().to_owned(),
         cluster_ca_pem: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n".to_string(),
-        token_id: xp_test_fixtures::slot_s560().to_owned(),
+        token_id: xp_test_fixtures::node_id_fixture560().to_owned(),
         one_time_secret: "secret".to_string(),
         expires_at: chrono::Utc::now(),
     }
     .encode_base64url_json();
     let meta = ClusterMetadata {
         schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        node_id: xp_test_fixtures::slot_s560().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        node_id: xp_test_fixtures::node_id_fixture560().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(false),
     };
@@ -215,11 +215,11 @@ async fn joined_container_syncs_configured_low_memory_admin_token_hash() {
     .unwrap();
     let meta = ClusterMetadata {
         schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        node_id: xp_test_fixtures::slot_s562().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        node_id: xp_test_fixtures::node_id_fixture562().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(false),
     };
@@ -280,11 +280,11 @@ async fn joined_container_rejects_high_memory_configured_admin_token_hash() {
     let paths = Paths::new(tmp.path().to_path_buf());
     let meta = ClusterMetadata {
         schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        node_id: xp_test_fixtures::slot_s562().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        node_id: xp_test_fixtures::node_id_fixture562().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(false),
     };
@@ -315,11 +315,11 @@ async fn joined_container_without_configured_hash_preserves_persisted_hash() {
     .unwrap();
     let meta = ClusterMetadata {
         schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        node_id: xp_test_fixtures::slot_s562().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        node_id: xp_test_fixtures::node_id_fixture562().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(false),
     };
@@ -351,11 +351,11 @@ fn zone_candidates_walk_suffixes() {
 fn detects_metadata_mismatch_without_blocking_reuse() {
     let meta = ClusterMetadata {
         schema_version: crate::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
-        cluster_id: xp_test_fixtures::slot_s557().to_owned(),
-        node_id: xp_test_fixtures::slot_s562().to_owned(),
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        cluster_id: xp_test_fixtures::cluster_fixture557().to_owned(),
+        node_id: xp_test_fixtures::node_id_fixture562().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         has_cluster_ca_key: true,
         is_bootstrap_node: Some(true),
     };
@@ -590,11 +590,13 @@ fn prepare_runtime_inputs_honors_custom_canary_token_file() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
     let spec = ContainerSpec {
-        node_name: xp_test_fixtures::slot_s605().to_owned(),
-        access_host: xp_test_fixtures::slot_s556().to_owned(),
-        api_base_url: xp_test_fixtures::slot_s561().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture556().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture561().to_owned(),
         data_dir: PathBuf::from("/var/lib/xp/data"),
-        bind: xp_test_fixtures::slot_s563().parse().unwrap(),
+        bind: xp_test_fixtures::address_loopback_port39563()
+            .parse()
+            .unwrap(),
         xray_api_addr: "127.0.0.1:10085".parse().unwrap(),
         startup: ContainerStartup::Bootstrap { needs_init: true },
         configured_admin_token_hash: Some(VALID_ADMIN_TOKEN_HASH.to_string()),
@@ -674,7 +676,7 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
     let current = DefaultVlessEndpointSpec {
         port: 53842,
         reality_dest: crate::config::DEFAULT_VLESS_CANARY_BIND.to_string(),
-        server_names: xp_test_fixtures::slot_l36(),
+        server_names: xp_test_fixtures::host_list_edge36(),
         server_names_source: crate::protocol::RealityServerNamesSource::Manual,
         fingerprint: "chrome".to_string(),
     };
@@ -683,7 +685,7 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
     let desired = DefaultVlessEndpointSpec {
         port: 60000,
         reality_dest: "127.0.0.1:49043".to_string(),
-        server_names: xp_test_fixtures::slot_l36(),
+        server_names: xp_test_fixtures::host_list_edge36(),
         server_names_source: crate::protocol::RealityServerNamesSource::Manual,
         fingerprint: "firefox".to_string(),
     };
@@ -694,7 +696,10 @@ fn vless_reconcile_preserves_keys_and_updates_reality_settings() {
         serde_json::from_value(updated.meta.clone()).unwrap();
     assert_eq!(updated.port, 53842);
     assert_eq!(new_meta.reality.dest, "127.0.0.1:49043");
-    assert_eq!(new_meta.reality.server_names, xp_test_fixtures::slot_l36());
+    assert_eq!(
+        new_meta.reality.server_names,
+        xp_test_fixtures::host_list_edge36()
+    );
     assert_eq!(new_meta.reality.fingerprint, "firefox");
     assert_eq!(new_meta.reality_keys, old_meta.reality_keys);
     assert_eq!(new_meta.short_ids, old_meta.short_ids);

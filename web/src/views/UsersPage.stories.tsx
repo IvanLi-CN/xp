@@ -17,19 +17,19 @@ const meta = {
 				nodeQuotas: [
 					{
 						user_id: USER_ID_1,
-						node_id: fixtureCatalog.slotString.s32(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 						quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 						quota_reset_source: "user",
 					},
 					{
 						user_id: USER_ID_1,
-						node_id: fixtureCatalog.slotString.s36(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
 						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "user",
 					},
 					{
 						user_id: USER_ID_2,
-						node_id: fixtureCatalog.slotString.s36(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
 						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "user",
 					},
@@ -67,7 +67,7 @@ export const LongValues: Story = {
 						user_id: USER_ID_1,
 						display_name:
 							"Alice with a very long display name that should truncate nicely",
-						subscription_token: fixtureCatalog.slotString.s170(),
+						subscription_token: fixtureCatalog.token.fixture170(),
 						credential_epoch: 0,
 						priority_tier: "p3",
 						quota_reset: {
@@ -79,7 +79,7 @@ export const LongValues: Story = {
 					{
 						user_id: USER_ID_2,
 						display_name: "Bob",
-						subscription_token: fixtureCatalog.slotString.s171(),
+						subscription_token: fixtureCatalog.token.fixture171(),
 						credential_epoch: 0,
 						priority_tier: "p3",
 						quota_reset: {
@@ -92,19 +92,19 @@ export const LongValues: Story = {
 				nodeQuotas: [
 					{
 						user_id: USER_ID_1,
-						node_id: fixtureCatalog.slotString.s32(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 						quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 						quota_reset_source: "user",
 					},
 					{
 						user_id: USER_ID_1,
-						node_id: fixtureCatalog.slotString.s36(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
 						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "user",
 					},
 					{
 						user_id: USER_ID_2,
-						node_id: fixtureCatalog.slotString.s36(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
 						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "user",
 					},
@@ -118,7 +118,7 @@ export const LongValues: Story = {
 			await canvas.findByText(/Alice with a very long display name/),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText(fixtureCatalog.slotString.s170()),
+			await canvas.findByText(fixtureCatalog.token.fixture170()),
 		).toBeInTheDocument();
 	},
 };

@@ -374,7 +374,7 @@ mod tests {
         let peer = crate::mesh_telemetry::MeshPeerTelemetry {
             buckets: std::collections::VecDeque::from([
                 crate::mesh_telemetry::MeshTelemetryBucket {
-                    minute: xp_test_fixtures::slot_s623().to_owned(),
+                    minute: xp_test_fixtures::timestamp_at20231230_t230000_z().to_owned(),
                     mesh_success: 1,
                     ..Default::default()
                 },

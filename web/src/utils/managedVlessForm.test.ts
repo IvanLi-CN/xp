@@ -47,8 +47,8 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 			canaryUpstreamSuggestionsFromManagedEndpointDests(
 				[
 					{
-						endpoint_id: fixtureCatalog.slotString.s105(),
-						node_id: fixtureCatalog.slotString.s106(),
+						endpoint_id: fixtureCatalog.endpointId.fixture105(),
+						node_id: fixtureCatalog.nodeId.fixture106(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: true,
@@ -58,19 +58,19 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 						},
 					},
 					{
-						endpoint_id: fixtureCatalog.slotString.s107(),
-						node_id: fixtureCatalog.slotString.s106(),
+						endpoint_id: fixtureCatalog.endpointId.fixture107(),
+						node_id: fixtureCatalog.nodeId.fixture106(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: false,
 							reality: {
-								dest: fixtureCatalog.slotString.s108(),
+								dest: fixtureCatalog.address.loopbackPort39108(),
 							},
 						},
 					},
 					{
-						endpoint_id: fixtureCatalog.slotString.s109(),
-						node_id: fixtureCatalog.slotString.s110(),
+						endpoint_id: fixtureCatalog.endpointId.fixture109(),
+						node_id: fixtureCatalog.nodeId.fixture110(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: true,
@@ -80,7 +80,7 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 						},
 					},
 				],
-				fixtureCatalog.slotString.s106(),
+				fixtureCatalog.nodeId.fixture106(),
 			),
 		).toEqual([
 			{

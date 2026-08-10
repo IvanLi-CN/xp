@@ -1,0 +1,20 @@
+id: fixture-policy-typescript-no-positional-fixture-accessor
+snapshots:
+  fixtureCatalog.slotList.l5():
+    labels:
+    - source: slotList
+      style: primary
+      start: 15
+      end: 23
+  fixtureCatalog.slotNumber.n4():
+    labels:
+    - source: slotNumber
+      style: primary
+      start: 15
+      end: 25
+  fixtureCatalog.slotString.s229():
+    labels:
+    - source: slotString
+      style: primary
+      start: 15
+      end: 25

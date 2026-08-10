@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 mod network;
@@ -20,7 +21,7 @@ struct Catalog {
     metrics: Metrics,
     operations: operations::Operations,
     lists: Lists,
-    slots: Slots,
+    fixtures: Fixtures,
     subscription: Subscription,
 }
 #[derive(Deserialize)]
@@ -216,11 +217,11 @@ struct Lists {
 #[derive(Deserialize)]
 #[allow(dead_code)]
 #[serde(deny_unknown_fields)]
-struct Slots {
-    strings: Vec<String>,
-    numbers: Vec<serde_json::Value>,
+struct Fixtures {
+    strings: BTreeMap<String, BTreeMap<String, String>>,
+    numbers: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
     #[serde(rename = "stringLists")]
-    string_lists: Vec<Vec<String>>,
+    string_lists: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
 #[derive(Deserialize)]
@@ -601,2318 +602,2267 @@ pub fn subscription_api_subscribed() -> &'static str {
     &catalog().subscription.api_bases[11]
 }
 
-// fixture-policy-slots:start
-pub fn slot_s0() -> &'static str {
-    &catalog().slots.strings[0]
+// fixture-policy-values:start
+pub fn timestamp_at20260729_t080000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260729T080000"]
 }
-pub fn slot_s1() -> &'static str {
-    &catalog().slots.strings[1]
+pub fn address_loopback_port39001() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39001"]
 }
-pub fn slot_s2() -> &'static str {
-    &catalog().slots.strings[2]
+pub fn address_loopback_port39002() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39002"]
 }
-pub fn slot_s3() -> &'static str {
-    &catalog().slots.strings[3]
+pub fn service_fixture3() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture3"]
 }
-pub fn slot_s4() -> &'static str {
-    &catalog().slots.strings[4]
+pub fn timestamp_at20240101_t000400000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000400"]
 }
-pub fn slot_s5() -> &'static str {
-    &catalog().slots.strings[5]
+pub fn timestamp_at20240101_t000500000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000500"]
 }
-pub fn slot_s6() -> &'static str {
-    &catalog().slots.strings[6]
+pub fn timestamp_at20240101_t000600000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000600"]
 }
-pub fn slot_s7() -> &'static str {
-    &catalog().slots.strings[7]
+pub fn timestamp_at20240101_t000700000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000700"]
 }
-pub fn slot_s8() -> &'static str {
-    &catalog().slots.strings[8]
+pub fn timestamp_at20240101_t000800000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000800"]
 }
-pub fn slot_s9() -> &'static str {
-    &catalog().slots.strings[9]
+pub fn timestamp_at20240101_t000900000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T000900"]
 }
-pub fn slot_s10() -> &'static str {
-    &catalog().slots.strings[10]
+pub fn timestamp_at20240101_t001000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001000"]
 }
-pub fn slot_s11() -> &'static str {
-    &catalog().slots.strings[11]
+pub fn timestamp_at20240101_t001100000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001100"]
 }
-pub fn slot_s12() -> &'static str {
-    &catalog().slots.strings[12]
+pub fn timestamp_at20240101_t001200000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001200"]
 }
-pub fn slot_s13() -> &'static str {
-    &catalog().slots.strings[13]
+pub fn timestamp_at20240101_t001300000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001300"]
 }
-pub fn slot_s14() -> &'static str {
-    &catalog().slots.strings[14]
+pub fn timestamp_at20240101_t001400000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001400"]
 }
-pub fn slot_s15() -> &'static str {
-    &catalog().slots.strings[15]
+pub fn timestamp_at20240101_t001500000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001500"]
 }
-pub fn slot_s16() -> &'static str {
-    &catalog().slots.strings[16]
+pub fn timestamp_at20240101_t001600000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T001600"]
 }
-pub fn slot_s17() -> &'static str {
-    &catalog().slots.strings[17]
+pub fn node_id_fixture17() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture17"]
 }
-pub fn slot_s18() -> &'static str {
-    &catalog().slots.strings[18]
+pub fn node_name_fixture18() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture18"]
 }
-pub fn slot_s19() -> &'static str {
-    &catalog().slots.strings[19]
+pub fn service_fixture19() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture19"]
 }
-pub fn slot_s20() -> &'static str {
-    &catalog().slots.strings[20]
+pub fn host_fixture20() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture20"]
 }
-pub fn slot_s21() -> &'static str {
-    &catalog().slots.strings[21]
+pub fn timestamp_at20240101_t002100000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T002100"]
 }
-pub fn slot_s22() -> &'static str {
-    &catalog().slots.strings[22]
+pub fn timestamp_at20240101_t002200000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T002200"]
 }
-pub fn slot_s23() -> &'static str {
-    &catalog().slots.strings[23]
+pub fn timestamp_at20240101_t002300000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T002300"]
 }
-pub fn slot_s24() -> &'static str {
-    &catalog().slots.strings[24]
+pub fn timestamp_at20260308_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T000000"]
 }
-pub fn slot_s25() -> &'static str {
-    &catalog().slots.strings[25]
+pub fn timestamp_at20260308_t000200_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T000200"]
 }
-pub fn slot_s26() -> &'static str {
-    &catalog().slots.strings[26]
+pub fn timestamp_at20260308_t000100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T000100"]
 }
-pub fn slot_s27() -> &'static str {
-    &catalog().slots.strings[27]
+pub fn endpoint_id_fixture27() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture27"]
 }
-pub fn slot_s28() -> &'static str {
-    &catalog().slots.strings[28]
+pub fn endpoint_tag_fixture28() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture28"]
 }
-pub fn slot_s29() -> &'static str {
-    &catalog().slots.strings[29]
+pub fn address_documentation192_0_2_30() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_30"]
 }
-pub fn slot_s30() -> &'static str {
-    &catalog().slots.strings[30]
+pub fn endpoint_id_fixture30() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture30"]
 }
-pub fn slot_s31() -> &'static str {
-    &catalog().slots.strings[31]
+pub fn address_documentation192_0_2_32() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_32"]
 }
-pub fn slot_s32() -> &'static str {
-    &catalog().slots.strings[32]
+pub fn node_id_fixture32() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture32"]
 }
-pub fn slot_s33() -> &'static str {
-    &catalog().slots.strings[33]
+pub fn node_name_fixture33() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture33"]
 }
-pub fn slot_s34() -> &'static str {
-    &catalog().slots.strings[34]
+pub fn service_fixture34() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture34"]
 }
-pub fn slot_s35() -> &'static str {
-    &catalog().slots.strings[35]
+pub fn host_fixture35() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture35"]
 }
-pub fn slot_s36() -> &'static str {
-    &catalog().slots.strings[36]
+pub fn node_id_fixture36() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture36"]
 }
-pub fn slot_s37() -> &'static str {
-    &catalog().slots.strings[37]
+pub fn node_name_fixture37() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture37"]
 }
-pub fn slot_s38() -> &'static str {
-    &catalog().slots.strings[38]
+pub fn service_fixture38() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture38"]
 }
-pub fn slot_s39() -> &'static str {
-    &catalog().slots.strings[39]
+pub fn host_fixture39() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture39"]
 }
-pub fn slot_s40() -> &'static str {
-    &catalog().slots.strings[40]
+pub fn endpoint_id_fixture40() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture40"]
 }
-pub fn slot_s41() -> &'static str {
-    &catalog().slots.strings[41]
+pub fn endpoint_tag_fixture41() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture41"]
 }
-pub fn slot_s42() -> &'static str {
-    &catalog().slots.strings[42]
+pub fn address_loopback_port39042() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39042"]
 }
-pub fn slot_s43() -> &'static str {
-    &catalog().slots.strings[43]
+pub fn endpoint_id_fixture43() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture43"]
 }
-pub fn slot_s44() -> &'static str {
-    &catalog().slots.strings[44]
+pub fn endpoint_tag_fixture44() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture44"]
 }
-pub fn slot_s45() -> &'static str {
-    &catalog().slots.strings[45]
+pub fn token_fixture45() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture45"]
 }
-pub fn slot_s46() -> &'static str {
-    &catalog().slots.strings[46]
+pub fn token_fixture46() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture46"]
 }
-pub fn slot_s47() -> &'static str {
-    &catalog().slots.strings[47]
+pub fn timestamp_at20260307_t010000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260307T010000"]
 }
-pub fn slot_s48() -> &'static str {
-    &catalog().slots.strings[48]
+pub fn timestamp_at20260308_t005900_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T005900"]
 }
-pub fn slot_s49() -> &'static str {
-    &catalog().slots.strings[49]
+pub fn endpoint_tag_fixture49() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture49"]
 }
-pub fn slot_s50() -> &'static str {
-    &catalog().slots.strings[50]
+pub fn endpoint_id_fixture50() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture50"]
 }
-pub fn slot_s51() -> &'static str {
-    &catalog().slots.strings[51]
+pub fn endpoint_tag_fixture51() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture51"]
 }
-pub fn slot_s52() -> &'static str {
-    &catalog().slots.strings[52]
+pub fn timestamp_at20260308_t005800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T005800"]
 }
-pub fn slot_s53() -> &'static str {
-    &catalog().slots.strings[53]
+pub fn cluster_fixture53() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture53"]
 }
-pub fn slot_s54() -> &'static str {
-    &catalog().slots.strings[54]
+pub fn timestamp_at20260131_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260131T000000"]
 }
-pub fn slot_s55() -> &'static str {
-    &catalog().slots.strings[55]
+pub fn endpoint_id_fixture55() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture55"]
 }
-pub fn slot_s56() -> &'static str {
-    &catalog().slots.strings[56]
+pub fn node_id_fixture56() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture56"]
 }
-pub fn slot_s57() -> &'static str {
-    &catalog().slots.strings[57]
+pub fn node_id_fixture57() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture57"]
 }
-pub fn slot_s58() -> &'static str {
-    &catalog().slots.strings[58]
+pub fn address_loopback_port39058() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39058"]
 }
-pub fn slot_s59() -> &'static str {
-    &catalog().slots.strings[59]
+pub fn address_loopback_port39059() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39059"]
 }
-pub fn slot_s60() -> &'static str {
-    &catalog().slots.strings[60]
+pub fn node_name_fixture60() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture60"]
 }
-pub fn slot_s61() -> &'static str {
-    &catalog().slots.strings[61]
+pub fn host_fixture61() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture61"]
 }
-pub fn slot_s62() -> &'static str {
-    &catalog().slots.strings[62]
+pub fn service_fixture62() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture62"]
 }
-pub fn slot_s63() -> &'static str {
-    &catalog().slots.strings[63]
+pub fn node_id_fixture63() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture63"]
 }
-pub fn slot_s64() -> &'static str {
-    &catalog().slots.strings[64]
+pub fn endpoint_tag_fixture64() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture64"]
 }
-pub fn slot_s65() -> &'static str {
-    &catalog().slots.strings[65]
+pub fn node_name_fixture65() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture65"]
 }
-pub fn slot_s66() -> &'static str {
-    &catalog().slots.strings[66]
+pub fn host_fixture66() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture66"]
 }
-pub fn slot_s67() -> &'static str {
-    &catalog().slots.strings[67]
+pub fn service_fixture67() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture67"]
 }
-pub fn slot_s68() -> &'static str {
-    &catalog().slots.strings[68]
+pub fn endpoint_id_fixture68() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture68"]
 }
-pub fn slot_s69() -> &'static str {
-    &catalog().slots.strings[69]
+pub fn node_id_fixture69() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture69"]
 }
-pub fn slot_s70() -> &'static str {
-    &catalog().slots.strings[70]
+pub fn node_id_fixture70() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture70"]
 }
-pub fn slot_s71() -> &'static str {
-    &catalog().slots.strings[71]
+pub fn token_fixture71() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture71"]
 }
-pub fn slot_s72() -> &'static str {
-    &catalog().slots.strings[72]
+pub fn node_id_fixture72() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture72"]
 }
-pub fn slot_s73() -> &'static str {
-    &catalog().slots.strings[73]
+pub fn node_id_fixture73() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture73"]
 }
-pub fn slot_s74() -> &'static str {
-    &catalog().slots.strings[74]
+pub fn node_name_fixture74() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture74"]
 }
-pub fn slot_s75() -> &'static str {
-    &catalog().slots.strings[75]
+pub fn host_fixture75() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture75"]
 }
-pub fn slot_s76() -> &'static str {
-    &catalog().slots.strings[76]
+pub fn service_fixture76() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture76"]
 }
-pub fn slot_s77() -> &'static str {
-    &catalog().slots.strings[77]
+pub fn node_id_fixture77() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture77"]
 }
-pub fn slot_s78() -> &'static str {
-    &catalog().slots.strings[78]
+pub fn endpoint_tag_fixture78() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture78"]
 }
-pub fn slot_s79() -> &'static str {
-    &catalog().slots.strings[79]
+pub fn token_fixture79() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture79"]
 }
-pub fn slot_s80() -> &'static str {
-    &catalog().slots.strings[80]
+pub fn token_fixture80() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture80"]
 }
-pub fn slot_s81() -> &'static str {
-    &catalog().slots.strings[81]
+pub fn timestamp_at20240101_t012100000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T012100"]
 }
-pub fn slot_s82() -> &'static str {
-    &catalog().slots.strings[82]
+pub fn timestamp_at20260807_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260807T000000"]
 }
-pub fn slot_s83() -> &'static str {
-    &catalog().slots.strings[83]
+pub fn node_name_fixture83() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture83"]
 }
-pub fn slot_s84() -> &'static str {
-    &catalog().slots.strings[84]
+pub fn cluster_fixture84() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture84"]
 }
-pub fn slot_s85() -> &'static str {
-    &catalog().slots.strings[85]
+pub fn service_fixture85() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture85"]
 }
-pub fn slot_s86() -> &'static str {
-    &catalog().slots.strings[86]
+pub fn node_name_fixture86() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture86"]
 }
-pub fn slot_s87() -> &'static str {
-    &catalog().slots.strings[87]
+pub fn service_fixture87() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture87"]
 }
-pub fn slot_s88() -> &'static str {
-    &catalog().slots.strings[88]
+pub fn host_fixture88() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture88"]
 }
-pub fn slot_s89() -> &'static str {
-    &catalog().slots.strings[89]
+pub fn endpoint_tag_fixture89() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture89"]
 }
-pub fn slot_s90() -> &'static str {
-    &catalog().slots.strings[90]
+pub fn token_fixture90() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture90"]
 }
-pub fn slot_s91() -> &'static str {
-    &catalog().slots.strings[91]
+pub fn timestamp_at20260301_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260301T000000"]
 }
-pub fn slot_s92() -> &'static str {
-    &catalog().slots.strings[92]
+pub fn token_fixture92() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture92"]
 }
-pub fn slot_s93() -> &'static str {
-    &catalog().slots.strings[93]
+pub fn node_id_fixture93() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture93"]
 }
-pub fn slot_s94() -> &'static str {
-    &catalog().slots.strings[94]
+pub fn token_fixture94() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture94"]
 }
-pub fn slot_s95() -> &'static str {
-    &catalog().slots.strings[95]
+pub fn cluster_fixture95() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture95"]
 }
-pub fn slot_s96() -> &'static str {
-    &catalog().slots.strings[96]
+pub fn service_fixture96() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture96"]
 }
-pub fn slot_s97() -> &'static str {
-    &catalog().slots.strings[97]
+pub fn cluster_fixture97() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture97"]
 }
-pub fn slot_s98() -> &'static str {
-    &catalog().slots.strings[98]
+pub fn node_id_fixture98() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture98"]
 }
-pub fn slot_s99() -> &'static str {
-    &catalog().slots.strings[99]
+pub fn host_fixture99() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture99"]
 }
-pub fn slot_s100() -> &'static str {
-    &catalog().slots.strings[100]
+pub fn endpoint_id_fixture100() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture100"]
 }
-pub fn slot_s101() -> &'static str {
-    &catalog().slots.strings[101]
+pub fn endpoint_tag_fixture101() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture101"]
 }
-pub fn slot_s102() -> &'static str {
-    &catalog().slots.strings[102]
+pub fn token_fixture102() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture102"]
 }
-pub fn slot_s103() -> &'static str {
-    &catalog().slots.strings[103]
+pub fn cluster_fixture103() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture103"]
 }
-pub fn slot_s104() -> &'static str {
-    &catalog().slots.strings[104]
+pub fn timestamp_at20260805_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260805T000000"]
 }
-pub fn slot_s105() -> &'static str {
-    &catalog().slots.strings[105]
+pub fn endpoint_id_fixture105() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture105"]
 }
-pub fn slot_s106() -> &'static str {
-    &catalog().slots.strings[106]
+pub fn node_id_fixture106() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture106"]
 }
-pub fn slot_s107() -> &'static str {
-    &catalog().slots.strings[107]
+pub fn endpoint_id_fixture107() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture107"]
 }
-pub fn slot_s108() -> &'static str {
-    &catalog().slots.strings[108]
+pub fn address_loopback_port39108() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39108"]
 }
-pub fn slot_s109() -> &'static str {
-    &catalog().slots.strings[109]
+pub fn endpoint_id_fixture109() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture109"]
 }
-pub fn slot_s110() -> &'static str {
-    &catalog().slots.strings[110]
+pub fn node_id_fixture110() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture110"]
 }
-pub fn slot_s111() -> &'static str {
-    &catalog().slots.strings[111]
+pub fn address_loopback_port39111() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39111"]
 }
-pub fn slot_s112() -> &'static str {
-    &catalog().slots.strings[112]
+pub fn service_fixture112() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture112"]
 }
-pub fn slot_s113() -> &'static str {
-    &catalog().slots.strings[113]
+pub fn node_id_fixture113() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture113"]
 }
-pub fn slot_s114() -> &'static str {
-    &catalog().slots.strings[114]
+pub fn host_fixture114() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture114"]
 }
-pub fn slot_s115() -> &'static str {
-    &catalog().slots.strings[115]
+pub fn service_fixture115() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture115"]
 }
-pub fn slot_s116() -> &'static str {
-    &catalog().slots.strings[116]
+pub fn address_documentation192_0_2_117() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_117"]
 }
-pub fn slot_s117() -> &'static str {
-    &catalog().slots.strings[117]
+pub fn timestamp_at20260424_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260424T000000"]
 }
-pub fn slot_s118() -> &'static str {
-    &catalog().slots.strings[118]
+pub fn node_id_fixture118() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture118"]
 }
-pub fn slot_s119() -> &'static str {
-    &catalog().slots.strings[119]
+pub fn host_fixture119() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture119"]
 }
-pub fn slot_s120() -> &'static str {
-    &catalog().slots.strings[120]
+pub fn endpoint_id_fixture120() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture120"]
 }
-pub fn slot_s121() -> &'static str {
-    &catalog().slots.strings[121]
+pub fn endpoint_tag_fixture121() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture121"]
 }
-pub fn slot_s122() -> &'static str {
-    &catalog().slots.strings[122]
+pub fn service_fixture122() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture122"]
 }
-pub fn slot_s123() -> &'static str {
-    &catalog().slots.strings[123]
+pub fn service_fixture123() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture123"]
 }
-pub fn slot_s124() -> &'static str {
-    &catalog().slots.strings[124]
+pub fn node_id_fixture124() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture124"]
 }
-pub fn slot_s125() -> &'static str {
-    &catalog().slots.strings[125]
+pub fn node_name_fixture125() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture125"]
 }
-pub fn slot_s126() -> &'static str {
-    &catalog().slots.strings[126]
+pub fn host_fixture126() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture126"]
 }
-pub fn slot_s127() -> &'static str {
-    &catalog().slots.strings[127]
+pub fn service_fixture127() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture127"]
 }
-pub fn slot_s128() -> &'static str {
-    &catalog().slots.strings[128]
+pub fn endpoint_id_fixture128() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture128"]
 }
-pub fn slot_s129() -> &'static str {
-    &catalog().slots.strings[129]
+pub fn endpoint_tag_fixture129() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture129"]
 }
-pub fn slot_s130() -> &'static str {
-    &catalog().slots.strings[130]
+pub fn host_fixture130() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture130"]
 }
-pub fn slot_s131() -> &'static str {
-    &catalog().slots.strings[131]
+pub fn service_fixture131() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture131"]
 }
-pub fn slot_s132() -> &'static str {
-    &catalog().slots.strings[132]
+pub fn endpoint_id_fixture132() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture132"]
 }
-pub fn slot_s133() -> &'static str {
-    &catalog().slots.strings[133]
+pub fn endpoint_tag_fixture133() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture133"]
 }
-pub fn slot_s134() -> &'static str {
-    &catalog().slots.strings[134]
+pub fn node_id_fixture134() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture134"]
 }
-pub fn slot_s135() -> &'static str {
-    &catalog().slots.strings[135]
+pub fn node_name_fixture135() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture135"]
 }
-pub fn slot_s136() -> &'static str {
-    &catalog().slots.strings[136]
+pub fn service_fixture136() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture136"]
 }
-pub fn slot_s137() -> &'static str {
-    &catalog().slots.strings[137]
+pub fn host_fixture137() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture137"]
 }
-pub fn slot_s138() -> &'static str {
-    &catalog().slots.strings[138]
+pub fn endpoint_id_fixture138() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture138"]
 }
-pub fn slot_s139() -> &'static str {
-    &catalog().slots.strings[139]
+pub fn endpoint_tag_fixture139() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture139"]
 }
-pub fn slot_s140() -> &'static str {
-    &catalog().slots.strings[140]
+pub fn endpoint_id_fixture140() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture140"]
 }
-pub fn slot_s141() -> &'static str {
-    &catalog().slots.strings[141]
+pub fn endpoint_tag_fixture141() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture141"]
 }
-pub fn slot_s142() -> &'static str {
-    &catalog().slots.strings[142]
+pub fn address_documentation192_0_2_143() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_143"]
 }
-pub fn slot_s143() -> &'static str {
-    &catalog().slots.strings[143]
+pub fn timestamp_at20260308_t010500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T010500"]
 }
-pub fn slot_s144() -> &'static str {
-    &catalog().slots.strings[144]
+pub fn endpoint_id_fixture144() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture144"]
 }
-pub fn slot_s145() -> &'static str {
-    &catalog().slots.strings[145]
+pub fn node_id_fixture145() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture145"]
 }
-pub fn slot_s146() -> &'static str {
-    &catalog().slots.strings[146]
+pub fn node_name_fixture146() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture146"]
 }
-pub fn slot_s147() -> &'static str {
-    &catalog().slots.strings[147]
+pub fn host_fixture147() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture147"]
 }
-pub fn slot_s148() -> &'static str {
-    &catalog().slots.strings[148]
+pub fn service_fixture148() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture148"]
 }
-pub fn slot_s149() -> &'static str {
-    &catalog().slots.strings[149]
+pub fn node_id_fixture149() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture149"]
 }
-pub fn slot_s150() -> &'static str {
-    &catalog().slots.strings[150]
+pub fn node_name_fixture150() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture150"]
 }
-pub fn slot_s151() -> &'static str {
-    &catalog().slots.strings[151]
+pub fn host_fixture151() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture151"]
 }
-pub fn slot_s152() -> &'static str {
-    &catalog().slots.strings[152]
+pub fn service_fixture152() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture152"]
 }
-pub fn slot_s153() -> &'static str {
-    &catalog().slots.strings[153]
+pub fn node_id_fixture153() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture153"]
 }
-pub fn slot_s154() -> &'static str {
-    &catalog().slots.strings[154]
+pub fn node_name_fixture154() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture154"]
 }
-pub fn slot_s155() -> &'static str {
-    &catalog().slots.strings[155]
+pub fn host_fixture155() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture155"]
 }
-pub fn slot_s156() -> &'static str {
-    &catalog().slots.strings[156]
+pub fn service_fixture156() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture156"]
 }
-pub fn slot_s157() -> &'static str {
-    &catalog().slots.strings[157]
+pub fn endpoint_id_fixture157() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture157"]
 }
-pub fn slot_s158() -> &'static str {
-    &catalog().slots.strings[158]
+pub fn endpoint_tag_fixture158() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture158"]
 }
-pub fn slot_s159() -> &'static str {
-    &catalog().slots.strings[159]
+pub fn address_loopback_port39159() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39159"]
 }
-pub fn slot_s160() -> &'static str {
-    &catalog().slots.strings[160]
+pub fn endpoint_id_fixture160() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture160"]
 }
-pub fn slot_s161() -> &'static str {
-    &catalog().slots.strings[161]
+pub fn endpoint_tag_fixture161() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture161"]
 }
-pub fn slot_s162() -> &'static str {
-    &catalog().slots.strings[162]
+pub fn endpoint_id_fixture162() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture162"]
 }
-pub fn slot_s163() -> &'static str {
-    &catalog().slots.strings[163]
+pub fn endpoint_tag_fixture163() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture163"]
 }
-pub fn slot_s164() -> &'static str {
-    &catalog().slots.strings[164]
+pub fn address_loopback_port39164() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39164"]
 }
-pub fn slot_s165() -> &'static str {
-    &catalog().slots.strings[165]
+pub fn endpoint_id_fixture165() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture165"]
 }
-pub fn slot_s166() -> &'static str {
-    &catalog().slots.strings[166]
+pub fn endpoint_tag_fixture166() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture166"]
 }
-pub fn slot_s167() -> &'static str {
-    &catalog().slots.strings[167]
+pub fn address_loopback_port39167() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39167"]
 }
-pub fn slot_s168() -> &'static str {
-    &catalog().slots.strings[168]
+pub fn token_fixture168() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture168"]
 }
-pub fn slot_s169() -> &'static str {
-    &catalog().slots.strings[169]
+pub fn token_fixture169() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture169"]
 }
-pub fn slot_s170() -> &'static str {
-    &catalog().slots.strings[170]
+pub fn token_fixture170() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture170"]
 }
-pub fn slot_s171() -> &'static str {
-    &catalog().slots.strings[171]
+pub fn token_fixture171() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture171"]
 }
-pub fn slot_s172() -> &'static str {
-    &catalog().slots.strings[172]
+pub fn endpoint_id_fixture172() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture172"]
 }
-pub fn slot_s173() -> &'static str {
-    &catalog().slots.strings[173]
+pub fn service_fixture173() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture173"]
 }
-pub fn slot_s174() -> &'static str {
-    &catalog().slots.strings[174]
+pub fn service_fixture174() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture174"]
 }
-pub fn slot_s175() -> &'static str {
-    &catalog().slots.strings[175]
+pub fn service_fixture175() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture175"]
 }
-pub fn slot_s176() -> &'static str {
-    &catalog().slots.strings[176]
+pub fn service_fixture176() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture176"]
 }
-pub fn slot_s177() -> &'static str {
-    &catalog().slots.strings[177]
+pub fn timestamp_at20260728_t120000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260728T120000"]
 }
-pub fn slot_s178() -> &'static str {
-    &catalog().slots.strings[178]
+pub fn service_fixture178() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture178"]
 }
-pub fn slot_s179() -> &'static str {
-    &catalog().slots.strings[179]
+pub fn host_fixture179() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture179"]
 }
-pub fn slot_s180() -> &'static str {
-    &catalog().slots.strings[180]
+pub fn service_fixture180() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture180"]
 }
-pub fn slot_s181() -> &'static str {
-    &catalog().slots.strings[181]
+pub fn host_fixture181() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture181"]
 }
-pub fn slot_s182() -> &'static str {
-    &catalog().slots.strings[182]
+pub fn node_id_fixture182() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture182"]
 }
-pub fn slot_s183() -> &'static str {
-    &catalog().slots.strings[183]
+pub fn service_fixture183() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture183"]
 }
-pub fn slot_s184() -> &'static str {
-    &catalog().slots.strings[184]
+pub fn service_fixture184() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture184"]
 }
-pub fn slot_s185() -> &'static str {
-    &catalog().slots.strings[185]
+pub fn endpoint_id_fixture185() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture185"]
 }
-pub fn slot_s186() -> &'static str {
-    &catalog().slots.strings[186]
+pub fn endpoint_id_fixture186() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture186"]
 }
-pub fn slot_s187() -> &'static str {
-    &catalog().slots.strings[187]
+pub fn node_id_fixture187() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture187"]
 }
-pub fn slot_s188() -> &'static str {
-    &catalog().slots.strings[188]
+pub fn node_id_fixture188() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture188"]
 }
-pub fn slot_s189() -> &'static str {
-    &catalog().slots.strings[189]
+pub fn node_id_fixture189() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture189"]
 }
-pub fn slot_s190() -> &'static str {
-    &catalog().slots.strings[190]
+pub fn node_id_fixture190() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture190"]
 }
-pub fn slot_s191() -> &'static str {
-    &catalog().slots.strings[191]
+pub fn endpoint_tag_fixture191() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture191"]
 }
-pub fn slot_s192() -> &'static str {
-    &catalog().slots.strings[192]
+pub fn endpoint_tag_fixture192() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture192"]
 }
-pub fn slot_s193() -> &'static str {
-    &catalog().slots.strings[193]
+pub fn endpoint_tag_fixture193() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture193"]
 }
-pub fn slot_s194() -> &'static str {
-    &catalog().slots.strings[194]
+pub fn endpoint_tag_fixture194() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture194"]
 }
-pub fn slot_s195() -> &'static str {
-    &catalog().slots.strings[195]
+pub fn endpoint_tag_fixture195() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture195"]
 }
-pub fn slot_s196() -> &'static str {
-    &catalog().slots.strings[196]
+pub fn endpoint_id_fixture196() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture196"]
 }
-pub fn slot_s197() -> &'static str {
-    &catalog().slots.strings[197]
+pub fn endpoint_tag_fixture197() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture197"]
 }
-pub fn slot_s198() -> &'static str {
-    &catalog().slots.strings[198]
+pub fn endpoint_id_fixture198() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture198"]
 }
-pub fn slot_s199() -> &'static str {
-    &catalog().slots.strings[199]
+pub fn endpoint_tag_fixture199() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture199"]
 }
-pub fn slot_s200() -> &'static str {
-    &catalog().slots.strings[200]
+pub fn endpoint_tag_fixture200() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture200"]
 }
-pub fn slot_s201() -> &'static str {
-    &catalog().slots.strings[201]
+pub fn endpoint_tag_fixture201() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture201"]
 }
-pub fn slot_s202() -> &'static str {
-    &catalog().slots.strings[202]
+pub fn address_documentation192_0_2_3() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_3"]
 }
-pub fn slot_s203() -> &'static str {
-    &catalog().slots.strings[203]
+pub fn timestamp_at20260704_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260704T000000"]
 }
-pub fn slot_s204() -> &'static str {
-    &catalog().slots.strings[204]
+pub fn token_fixture204() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture204"]
 }
-pub fn slot_s205() -> &'static str {
-    &catalog().slots.strings[205]
+pub fn token_fixture205() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture205"]
 }
-pub fn slot_s206() -> &'static str {
-    &catalog().slots.strings[206]
+pub fn node_id_fixture206() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture206"]
 }
-pub fn slot_s207() -> &'static str {
-    &catalog().slots.strings[207]
+pub fn node_name_fixture207() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture207"]
 }
-pub fn slot_s208() -> &'static str {
-    &catalog().slots.strings[208]
+pub fn service_fixture208() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture208"]
 }
-pub fn slot_s209() -> &'static str {
-    &catalog().slots.strings[209]
+pub fn host_fixture209() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture209"]
 }
-pub fn slot_s210() -> &'static str {
-    &catalog().slots.strings[210]
+pub fn node_name_fixture210() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture210"]
 }
-pub fn slot_s211() -> &'static str {
-    &catalog().slots.strings[211]
+pub fn service_fixture211() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture211"]
 }
-pub fn slot_s212() -> &'static str {
-    &catalog().slots.strings[212]
+pub fn host_fixture212() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture212"]
 }
-pub fn slot_s213() -> &'static str {
-    &catalog().slots.strings[213]
+pub fn node_id_fixture213() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture213"]
 }
-pub fn slot_s214() -> &'static str {
-    &catalog().slots.strings[214]
+pub fn service_fixture214() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture214"]
 }
-pub fn slot_s215() -> &'static str {
-    &catalog().slots.strings[215]
+pub fn host_fixture215() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture215"]
 }
-pub fn slot_s216() -> &'static str {
-    &catalog().slots.strings[216]
+pub fn endpoint_tag_fixture216() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture216"]
 }
-pub fn slot_s217() -> &'static str {
-    &catalog().slots.strings[217]
+pub fn timestamp_at20260728_t140015_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260728T140015"]
 }
-pub fn slot_s218() -> &'static str {
-    &catalog().slots.strings[218]
+pub fn timestamp_at20260728_t140010_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260728T140010"]
 }
-pub fn slot_s219() -> &'static str {
-    &catalog().slots.strings[219]
+pub fn timestamp_at20260728_t140012_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260728T140012"]
 }
-pub fn slot_s220() -> &'static str {
-    &catalog().slots.strings[220]
+pub fn node_id_fixture220() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture220"]
 }
-pub fn slot_s221() -> &'static str {
-    &catalog().slots.strings[221]
+pub fn timestamp_at20240101_t034100000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T034100"]
 }
-pub fn slot_s222() -> &'static str {
-    &catalog().slots.strings[222]
+pub fn timestamp_at20260311_t110010_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260311T110010"]
 }
-pub fn slot_s223() -> &'static str {
-    &catalog().slots.strings[223]
+pub fn timestamp_at20260311_t110011_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260311T110011"]
 }
-pub fn slot_s224() -> &'static str {
-    &catalog().slots.strings[224]
+pub fn node_id_fixture224() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture224"]
 }
-pub fn slot_s225() -> &'static str {
-    &catalog().slots.strings[225]
+pub fn timestamp_at20260311_t110005_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260311T110005"]
 }
-pub fn slot_s226() -> &'static str {
-    &catalog().slots.strings[226]
+pub fn node_name_fixture226() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture226"]
 }
-pub fn slot_s227() -> &'static str {
-    &catalog().slots.strings[227]
+pub fn service_fixture227() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture227"]
 }
-pub fn slot_s228() -> &'static str {
-    &catalog().slots.strings[228]
+pub fn host_fixture228() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture228"]
 }
-pub fn slot_s229() -> &'static str {
-    &catalog().slots.strings[229]
+pub fn node_id_fixture229() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture229"]
 }
-pub fn slot_s230() -> &'static str {
-    &catalog().slots.strings[230]
+pub fn service_fixture230() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture230"]
 }
-pub fn slot_s231() -> &'static str {
-    &catalog().slots.strings[231]
+pub fn host_fixture231() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture231"]
 }
-pub fn slot_s232() -> &'static str {
-    &catalog().slots.strings[232]
+pub fn timestamp_at20240101_t035200000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T035200"]
 }
-pub fn slot_s233() -> &'static str {
-    &catalog().slots.strings[233]
+pub fn node_id_fixture233() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture233"]
 }
-pub fn slot_s234() -> &'static str {
-    &catalog().slots.strings[234]
+pub fn host_fixture234() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture234"]
 }
-pub fn slot_s235() -> &'static str {
-    &catalog().slots.strings[235]
+pub fn service_fixture235() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture235"]
 }
-pub fn slot_s236() -> &'static str {
-    &catalog().slots.strings[236]
+pub fn timestamp_at20260311_t110500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260311T110500"]
 }
-pub fn slot_s237() -> &'static str {
-    &catalog().slots.strings[237]
+pub fn timestamp_at20260311_t110501_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260311T110501"]
 }
-pub fn slot_s238() -> &'static str {
-    &catalog().slots.strings[238]
+pub fn node_id_fixture238() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture238"]
 }
-pub fn slot_s239() -> &'static str {
-    &catalog().slots.strings[239]
+pub fn node_name_fixture239() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture239"]
 }
-pub fn slot_s240() -> &'static str {
-    &catalog().slots.strings[240]
+pub fn endpoint_id_fixture240() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture240"]
 }
-pub fn slot_s241() -> &'static str {
-    &catalog().slots.strings[241]
+pub fn node_id_fixture241() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture241"]
 }
-pub fn slot_s242() -> &'static str {
-    &catalog().slots.strings[242]
+pub fn service_fixture242() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture242"]
 }
-pub fn slot_s243() -> &'static str {
-    &catalog().slots.strings[243]
+pub fn node_id_fixture243() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture243"]
 }
-pub fn slot_s244() -> &'static str {
-    &catalog().slots.strings[244]
+pub fn host_fixture244() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture244"]
 }
-pub fn slot_s245() -> &'static str {
-    &catalog().slots.strings[245]
+pub fn service_fixture245() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture245"]
 }
-pub fn slot_s246() -> &'static str {
-    &catalog().slots.strings[246]
+pub fn node_id_fixture246() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture246"]
 }
-pub fn slot_s247() -> &'static str {
-    &catalog().slots.strings[247]
+pub fn node_name_fixture247() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture247"]
 }
-pub fn slot_s248() -> &'static str {
-    &catalog().slots.strings[248]
+pub fn host_fixture248() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture248"]
 }
-pub fn slot_s249() -> &'static str {
-    &catalog().slots.strings[249]
+pub fn service_fixture249() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture249"]
 }
-pub fn slot_s250() -> &'static str {
-    &catalog().slots.strings[250]
+pub fn endpoint_id_fixture250() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture250"]
 }
-pub fn slot_s251() -> &'static str {
-    &catalog().slots.strings[251]
+pub fn endpoint_tag_fixture251() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture251"]
 }
-pub fn slot_s252() -> &'static str {
-    &catalog().slots.strings[252]
+pub fn token_fixture252() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture252"]
 }
-pub fn slot_s253() -> &'static str {
-    &catalog().slots.strings[253]
+pub fn token_fixture253() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture253"]
 }
-pub fn slot_s254() -> &'static str {
-    &catalog().slots.strings[254]
+pub fn token_fixture254() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture254"]
 }
-pub fn slot_s255() -> &'static str {
-    &catalog().slots.strings[255]
+pub fn endpoint_id_fixture255() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture255"]
 }
-pub fn slot_s256() -> &'static str {
-    &catalog().slots.strings[256]
+pub fn endpoint_tag_fixture256() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture256"]
 }
-pub fn slot_s257() -> &'static str {
-    &catalog().slots.strings[257]
+pub fn token_fixture257() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture257"]
 }
-pub fn slot_s258() -> &'static str {
-    &catalog().slots.strings[258]
+pub fn node_id_fixture258() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture258"]
 }
-pub fn slot_s259() -> &'static str {
-    &catalog().slots.strings[259]
+pub fn node_name_fixture259() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture259"]
 }
-pub fn slot_s260() -> &'static str {
-    &catalog().slots.strings[260]
+pub fn service_fixture260() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture260"]
 }
-pub fn slot_s261() -> &'static str {
-    &catalog().slots.strings[261]
+pub fn service_fixture261() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture261"]
 }
-pub fn slot_s262() -> &'static str {
-    &catalog().slots.strings[262]
+pub fn host_fixture262() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture262"]
 }
-pub fn slot_s263() -> &'static str {
-    &catalog().slots.strings[263]
+pub fn node_id_fixture263() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture263"]
 }
-pub fn slot_s264() -> &'static str {
-    &catalog().slots.strings[264]
+pub fn service_fixture264() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture264"]
 }
-pub fn slot_s265() -> &'static str {
-    &catalog().slots.strings[265]
+pub fn host_fixture265() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture265"]
 }
-pub fn slot_s266() -> &'static str {
-    &catalog().slots.strings[266]
+pub fn host_fixture266() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture266"]
 }
-pub fn slot_s267() -> &'static str {
-    &catalog().slots.strings[267]
+pub fn service_fixture267() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture267"]
 }
-pub fn slot_s268() -> &'static str {
-    &catalog().slots.strings[268]
+pub fn timestamp_at20240101_t042800000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T042800"]
 }
-pub fn slot_s269() -> &'static str {
-    &catalog().slots.strings[269]
+pub fn timestamp_at20240101_t042900000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T042900"]
 }
-pub fn slot_s270() -> &'static str {
-    &catalog().slots.strings[270]
+pub fn endpoint_id_fixture270() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture270"]
 }
-pub fn slot_s271() -> &'static str {
-    &catalog().slots.strings[271]
+pub fn node_id_fixture271() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture271"]
 }
-pub fn slot_s272() -> &'static str {
-    &catalog().slots.strings[272]
+pub fn endpoint_tag_fixture272() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture272"]
 }
-pub fn slot_s273() -> &'static str {
-    &catalog().slots.strings[273]
+pub fn endpoint_id_fixture273() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture273"]
 }
-pub fn slot_s274() -> &'static str {
-    &catalog().slots.strings[274]
+pub fn node_id_fixture274() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture274"]
 }
-pub fn slot_s275() -> &'static str {
-    &catalog().slots.strings[275]
+pub fn endpoint_tag_fixture275() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture275"]
 }
-pub fn slot_s276() -> &'static str {
-    &catalog().slots.strings[276]
+pub fn node_name_fixture276() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture276"]
 }
-pub fn slot_s277() -> &'static str {
-    &catalog().slots.strings[277]
+pub fn service_fixture277() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture277"]
 }
-pub fn slot_s278() -> &'static str {
-    &catalog().slots.strings[278]
+pub fn host_fixture278() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture278"]
 }
-pub fn slot_s279() -> &'static str {
-    &catalog().slots.strings[279]
+pub fn timestamp_at20260729_t185500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260729T185500"]
 }
-pub fn slot_s280() -> &'static str {
-    &catalog().slots.strings[280]
+pub fn node_name_fixture280() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture280"]
 }
-pub fn slot_s281() -> &'static str {
-    &catalog().slots.strings[281]
+pub fn service_fixture281() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture281"]
 }
-pub fn slot_s282() -> &'static str {
-    &catalog().slots.strings[282]
+pub fn host_fixture282() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture282"]
 }
-pub fn slot_s283() -> &'static str {
-    &catalog().slots.strings[283]
+pub fn timestamp_at20260303_t120000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260303T120000"]
 }
-pub fn slot_s284() -> &'static str {
-    &catalog().slots.strings[284]
+pub fn host_fixture284() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture284"]
 }
-pub fn slot_s285() -> &'static str {
-    &catalog().slots.strings[285]
+pub fn endpoint_id_fixture285() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture285"]
 }
-pub fn slot_s286() -> &'static str {
-    &catalog().slots.strings[286]
+pub fn endpoint_id_fixture286() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture286"]
 }
-pub fn slot_s287() -> &'static str {
-    &catalog().slots.strings[287]
+pub fn endpoint_id_fixture287() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture287"]
 }
-pub fn slot_s288() -> &'static str {
-    &catalog().slots.strings[288]
+pub fn endpoint_id_fixture288() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture288"]
 }
-pub fn slot_s289() -> &'static str {
-    &catalog().slots.strings[289]
+pub fn endpoint_tag_fixture289() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture289"]
 }
-pub fn slot_s290() -> &'static str {
-    &catalog().slots.strings[290]
+pub fn node_id_fixture290() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture290"]
 }
-pub fn slot_s291() -> &'static str {
-    &catalog().slots.strings[291]
+pub fn node_name_fixture291() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture291"]
 }
-pub fn slot_s292() -> &'static str {
-    &catalog().slots.strings[292]
+pub fn node_name_fixture292() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture292"]
 }
-pub fn slot_s293() -> &'static str {
-    &catalog().slots.strings[293]
+pub fn node_name_fixture293() -> &'static str {
+    &catalog().fixtures.strings["nodeName"]["fixture293"]
 }
-pub fn slot_s294() -> &'static str {
-    &catalog().slots.strings[294]
+pub fn timestamp_at20260803_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260803T000000"]
 }
-pub fn slot_s295() -> &'static str {
-    &catalog().slots.strings[295]
+pub fn service_fixture295() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture295"]
 }
-pub fn slot_s296() -> &'static str {
-    &catalog().slots.strings[296]
+pub fn service_fixture296() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture296"]
 }
-pub fn slot_s297() -> &'static str {
-    &catalog().slots.strings[297]
+pub fn address_loopback_port39297() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39297"]
 }
-pub fn slot_s298() -> &'static str {
-    &catalog().slots.strings[298]
+pub fn host_fixture298() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture298"]
 }
-pub fn slot_s299() -> &'static str {
-    &catalog().slots.strings[299]
+pub fn token_fixture299() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture299"]
 }
-pub fn slot_s300() -> &'static str {
-    &catalog().slots.strings[300]
+pub fn service_fixture300() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture300"]
 }
-pub fn slot_s301() -> &'static str {
-    &catalog().slots.strings[301]
+pub fn node_id_fixture301() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture301"]
 }
-pub fn slot_s302() -> &'static str {
-    &catalog().slots.strings[302]
+pub fn host_fixture302() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture302"]
 }
-pub fn slot_s303() -> &'static str {
-    &catalog().slots.strings[303]
+pub fn service_fixture303() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture303"]
 }
-pub fn slot_s304() -> &'static str {
-    &catalog().slots.strings[304]
+pub fn endpoint_id_fixture304() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture304"]
 }
-pub fn slot_s305() -> &'static str {
-    &catalog().slots.strings[305]
+pub fn endpoint_tag_fixture305() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture305"]
 }
-pub fn slot_s306() -> &'static str {
-    &catalog().slots.strings[306]
+pub fn host_fixture306() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture306"]
 }
-pub fn slot_s307() -> &'static str {
-    &catalog().slots.strings[307]
+pub fn host_fixture307() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture307"]
 }
-pub fn slot_s308() -> &'static str {
-    &catalog().slots.strings[308]
+pub fn host_fixture308() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture308"]
 }
-pub fn slot_s309() -> &'static str {
-    &catalog().slots.strings[309]
+pub fn endpoint_tag_fixture309() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture309"]
 }
-pub fn slot_s310() -> &'static str {
-    &catalog().slots.strings[310]
+pub fn endpoint_tag_fixture310() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture310"]
 }
-pub fn slot_s311() -> &'static str {
-    &catalog().slots.strings[311]
+pub fn address_loopback_port39311() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39311"]
 }
-pub fn slot_s312() -> &'static str {
-    &catalog().slots.strings[312]
+pub fn node_id_fixture312() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture312"]
 }
-pub fn slot_s313() -> &'static str {
-    &catalog().slots.strings[313]
+pub fn service_fixture313() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture313"]
 }
-pub fn slot_s314() -> &'static str {
-    &catalog().slots.strings[314]
+pub fn endpoint_tag_fixture314() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture314"]
 }
-pub fn slot_s315() -> &'static str {
-    &catalog().slots.strings[315]
+pub fn endpoint_id_fixture315() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture315"]
 }
-pub fn slot_s316() -> &'static str {
-    &catalog().slots.strings[316]
+pub fn endpoint_tag_fixture316() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture316"]
 }
-pub fn slot_s317() -> &'static str {
-    &catalog().slots.strings[317]
+pub fn node_id_fixture317() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture317"]
 }
-pub fn slot_s318() -> &'static str {
-    &catalog().slots.strings[318]
+pub fn endpoint_id_fixture318() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture318"]
 }
-pub fn slot_s319() -> &'static str {
-    &catalog().slots.strings[319]
+pub fn endpoint_tag_fixture319() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture319"]
 }
-pub fn slot_s320() -> &'static str {
-    &catalog().slots.strings[320]
+pub fn service_fixture320() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture320"]
 }
-pub fn slot_s321() -> &'static str {
-    &catalog().slots.strings[321]
+pub fn endpoint_tag_fixture321() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture321"]
 }
-pub fn slot_s322() -> &'static str {
-    &catalog().slots.strings[322]
+pub fn host_fixture322() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture322"]
 }
-pub fn slot_s323() -> &'static str {
-    &catalog().slots.strings[323]
+pub fn address_loopback_port39323() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39323"]
 }
-pub fn slot_s324() -> &'static str {
-    &catalog().slots.strings[324]
+pub fn endpoint_id_fixture324() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture324"]
 }
-pub fn slot_s325() -> &'static str {
-    &catalog().slots.strings[325]
+pub fn node_id_fixture325() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture325"]
 }
-pub fn slot_s326() -> &'static str {
-    &catalog().slots.strings[326]
+pub fn endpoint_tag_fixture326() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture326"]
 }
-pub fn slot_s327() -> &'static str {
-    &catalog().slots.strings[327]
+pub fn host_fixture327() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture327"]
 }
-pub fn slot_s328() -> &'static str {
-    &catalog().slots.strings[328]
+pub fn host_fixture328() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture328"]
 }
-pub fn slot_s329() -> &'static str {
-    &catalog().slots.strings[329]
+pub fn node_id_fixture329() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture329"]
 }
-pub fn slot_s330() -> &'static str {
-    &catalog().slots.strings[330]
+pub fn host_fixture330() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture330"]
 }
-pub fn slot_s331() -> &'static str {
-    &catalog().slots.strings[331]
+pub fn service_fixture331() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture331"]
 }
-pub fn slot_s332() -> &'static str {
-    &catalog().slots.strings[332]
+pub fn node_id_fixture332() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture332"]
 }
-pub fn slot_s333() -> &'static str {
-    &catalog().slots.strings[333]
+pub fn cluster_fixture333() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture333"]
 }
-pub fn slot_s334() -> &'static str {
-    &catalog().slots.strings[334]
+pub fn token_fixture334() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture334"]
 }
-pub fn slot_s335() -> &'static str {
-    &catalog().slots.strings[335]
+pub fn node_id_fixture335() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture335"]
 }
-pub fn slot_s336() -> &'static str {
-    &catalog().slots.strings[336]
+pub fn host_fixture336() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture336"]
 }
-pub fn slot_s337() -> &'static str {
-    &catalog().slots.strings[337]
+pub fn address_loopback_port39337() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39337"]
 }
-pub fn slot_s338() -> &'static str {
-    &catalog().slots.strings[338]
+pub fn node_id_fixture338() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture338"]
 }
-pub fn slot_s339() -> &'static str {
-    &catalog().slots.strings[339]
+pub fn host_fixture339() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture339"]
 }
-pub fn slot_s340() -> &'static str {
-    &catalog().slots.strings[340]
+pub fn service_fixture340() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture340"]
 }
-pub fn slot_s341() -> &'static str {
-    &catalog().slots.strings[341]
+pub fn endpoint_id_fixture341() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture341"]
 }
-pub fn slot_s342() -> &'static str {
-    &catalog().slots.strings[342]
+pub fn endpoint_tag_fixture342() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture342"]
 }
-pub fn slot_s343() -> &'static str {
-    &catalog().slots.strings[343]
+pub fn timestamp_at20240101_t054300000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T054300"]
 }
-pub fn slot_s344() -> &'static str {
-    &catalog().slots.strings[344]
+pub fn timestamp_at20240101_t054400000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T054400"]
 }
-pub fn slot_s345() -> &'static str {
-    &catalog().slots.strings[345]
+pub fn timestamp_at20240101_t054500000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T054500"]
 }
-pub fn slot_s346() -> &'static str {
-    &catalog().slots.strings[346]
+pub fn node_id_fixture346() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture346"]
 }
-pub fn slot_s347() -> &'static str {
-    &catalog().slots.strings[347]
+pub fn endpoint_tag_fixture347() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture347"]
 }
-pub fn slot_s348() -> &'static str {
-    &catalog().slots.strings[348]
+pub fn token_fixture348() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture348"]
 }
-pub fn slot_s349() -> &'static str {
-    &catalog().slots.strings[349]
+pub fn node_id_fixture349() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture349"]
 }
-pub fn slot_s350() -> &'static str {
-    &catalog().slots.strings[350]
+pub fn host_fixture350() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture350"]
 }
-pub fn slot_s351() -> &'static str {
-    &catalog().slots.strings[351]
+pub fn service_fixture351() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture351"]
 }
-pub fn slot_s352() -> &'static str {
-    &catalog().slots.strings[352]
+pub fn address_documentation192_0_2_153() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_153"]
 }
-pub fn slot_s353() -> &'static str {
-    &catalog().slots.strings[353]
+pub fn timestamp_at20240101_t055300000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T055300"]
 }
-pub fn slot_s354() -> &'static str {
-    &catalog().slots.strings[354]
+pub fn endpoint_id_fixture354() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture354"]
 }
-pub fn slot_s355() -> &'static str {
-    &catalog().slots.strings[355]
+pub fn address_loopback_port39355() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39355"]
 }
-pub fn slot_s356() -> &'static str {
-    &catalog().slots.strings[356]
+pub fn endpoint_tag_fixture356() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture356"]
 }
-pub fn slot_s357() -> &'static str {
-    &catalog().slots.strings[357]
+pub fn node_id_fixture357() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture357"]
 }
-pub fn slot_s358() -> &'static str {
-    &catalog().slots.strings[358]
+pub fn address_loopback_port39358() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39358"]
 }
-pub fn slot_s359() -> &'static str {
-    &catalog().slots.strings[359]
+pub fn address_loopback_port39359() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39359"]
 }
-pub fn slot_s360() -> &'static str {
-    &catalog().slots.strings[360]
+pub fn endpoint_tag_fixture360() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture360"]
 }
-pub fn slot_s361() -> &'static str {
-    &catalog().slots.strings[361]
+pub fn endpoint_tag_fixture361() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture361"]
 }
-pub fn slot_s362() -> &'static str {
-    &catalog().slots.strings[362]
+pub fn endpoint_id_fixture362() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture362"]
 }
-pub fn slot_s363() -> &'static str {
-    &catalog().slots.strings[363]
+pub fn endpoint_tag_fixture363() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture363"]
 }
-pub fn slot_s364() -> &'static str {
-    &catalog().slots.strings[364]
+pub fn endpoint_id_fixture364() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture364"]
 }
-pub fn slot_s365() -> &'static str {
-    &catalog().slots.strings[365]
+pub fn endpoint_tag_fixture365() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture365"]
 }
-pub fn slot_s366() -> &'static str {
-    &catalog().slots.strings[366]
+pub fn token_fixture366() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture366"]
 }
-pub fn slot_s367() -> &'static str {
-    &catalog().slots.strings[367]
+pub fn timestamp_at20240101_t060700000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T060700"]
 }
-pub fn slot_s368() -> &'static str {
-    &catalog().slots.strings[368]
+pub fn timestamp_at20240101_t060800000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T060800"]
 }
-pub fn slot_s369() -> &'static str {
-    &catalog().slots.strings[369]
+pub fn node_id_fixture369() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture369"]
 }
-pub fn slot_s370() -> &'static str {
-    &catalog().slots.strings[370]
+pub fn host_fixture370() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture370"]
 }
-pub fn slot_s371() -> &'static str {
-    &catalog().slots.strings[371]
+pub fn service_fixture371() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture371"]
 }
-pub fn slot_s372() -> &'static str {
-    &catalog().slots.strings[372]
+pub fn host_fixture372() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture372"]
 }
-pub fn slot_s373() -> &'static str {
-    &catalog().slots.strings[373]
+pub fn service_fixture373() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture373"]
 }
-pub fn slot_s374() -> &'static str {
-    &catalog().slots.strings[374]
+pub fn endpoint_id_fixture374() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture374"]
 }
-pub fn slot_s375() -> &'static str {
-    &catalog().slots.strings[375]
+pub fn endpoint_tag_fixture375() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture375"]
 }
-pub fn slot_s376() -> &'static str {
-    &catalog().slots.strings[376]
+pub fn endpoint_id_fixture376() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture376"]
 }
-pub fn slot_s377() -> &'static str {
-    &catalog().slots.strings[377]
+pub fn endpoint_tag_fixture377() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture377"]
 }
-pub fn slot_s378() -> &'static str {
-    &catalog().slots.strings[378]
+pub fn cluster_fixture378() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture378"]
 }
-pub fn slot_s379() -> &'static str {
-    &catalog().slots.strings[379]
+pub fn cluster_fixture379() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture379"]
 }
-pub fn slot_s380() -> &'static str {
-    &catalog().slots.strings[380]
+pub fn service_fixture380() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture380"]
 }
-pub fn slot_s381() -> &'static str {
-    &catalog().slots.strings[381]
+pub fn endpoint_tag_fixture381() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture381"]
 }
-pub fn slot_s382() -> &'static str {
-    &catalog().slots.strings[382]
+pub fn host_fixture382() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture382"]
 }
-pub fn slot_s383() -> &'static str {
-    &catalog().slots.strings[383]
+pub fn node_id_fixture383() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture383"]
 }
-pub fn slot_s384() -> &'static str {
-    &catalog().slots.strings[384]
+pub fn endpoint_tag_fixture384() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture384"]
 }
-pub fn slot_s385() -> &'static str {
-    &catalog().slots.strings[385]
+pub fn host_fixture385() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture385"]
 }
-pub fn slot_s386() -> &'static str {
-    &catalog().slots.strings[386]
+pub fn service_fixture386() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture386"]
 }
-pub fn slot_s387() -> &'static str {
-    &catalog().slots.strings[387]
+pub fn token_fixture387() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture387"]
 }
-pub fn slot_s388() -> &'static str {
-    &catalog().slots.strings[388]
+pub fn address_documentation192_0_2_189() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_189"]
 }
-pub fn slot_s389() -> &'static str {
-    &catalog().slots.strings[389]
+pub fn timestamp_at20240101_t062900000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T062900"]
 }
-pub fn slot_s390() -> &'static str {
-    &catalog().slots.strings[390]
+pub fn endpoint_tag_fixture390() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture390"]
 }
-pub fn slot_s391() -> &'static str {
-    &catalog().slots.strings[391]
+pub fn endpoint_tag_fixture391() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture391"]
 }
-pub fn slot_s392() -> &'static str {
-    &catalog().slots.strings[392]
+pub fn timestamp_at20240101_t063200000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T063200"]
 }
-pub fn slot_s393() -> &'static str {
-    &catalog().slots.strings[393]
+pub fn endpoint_id_fixture393() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture393"]
 }
-pub fn slot_s394() -> &'static str {
-    &catalog().slots.strings[394]
+pub fn endpoint_tag_fixture394() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture394"]
 }
-pub fn slot_s395() -> &'static str {
-    &catalog().slots.strings[395]
+pub fn node_id_fixture395() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture395"]
 }
-pub fn slot_s396() -> &'static str {
-    &catalog().slots.strings[396]
+pub fn host_fixture396() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture396"]
 }
-pub fn slot_s397() -> &'static str {
-    &catalog().slots.strings[397]
+pub fn service_fixture397() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture397"]
 }
-pub fn slot_s398() -> &'static str {
-    &catalog().slots.strings[398]
+pub fn token_fixture398() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture398"]
 }
-pub fn slot_s399() -> &'static str {
-    &catalog().slots.strings[399]
+pub fn endpoint_tag_fixture399() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture399"]
 }
-pub fn slot_s400() -> &'static str {
-    &catalog().slots.strings[400]
+pub fn node_id_fixture400() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture400"]
 }
-pub fn slot_s401() -> &'static str {
-    &catalog().slots.strings[401]
+pub fn host_fixture401() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture401"]
 }
-pub fn slot_s402() -> &'static str {
-    &catalog().slots.strings[402]
+pub fn timestamp_at20240101_t064200000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T064200"]
 }
-pub fn slot_s403() -> &'static str {
-    &catalog().slots.strings[403]
+pub fn address_documentation192_0_2_4() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_4"]
 }
-pub fn slot_s404() -> &'static str {
-    &catalog().slots.strings[404]
+pub fn host_fixture404() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture404"]
 }
-pub fn slot_s405() -> &'static str {
-    &catalog().slots.strings[405]
+pub fn cluster_fixture405() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture405"]
 }
-pub fn slot_s406() -> &'static str {
-    &catalog().slots.strings[406]
+pub fn service_fixture406() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture406"]
 }
-pub fn slot_s407() -> &'static str {
-    &catalog().slots.strings[407]
+pub fn service_fixture407() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture407"]
 }
-pub fn slot_s408() -> &'static str {
-    &catalog().slots.strings[408]
+pub fn node_id_fixture408() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture408"]
 }
-pub fn slot_s409() -> &'static str {
-    &catalog().slots.strings[409]
+pub fn service_fixture409() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture409"]
 }
-pub fn slot_s410() -> &'static str {
-    &catalog().slots.strings[410]
+pub fn node_id_fixture410() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture410"]
 }
-pub fn slot_s411() -> &'static str {
-    &catalog().slots.strings[411]
+pub fn address_loopback_port39411() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39411"]
 }
-pub fn slot_s412() -> &'static str {
-    &catalog().slots.strings[412]
+pub fn host_fixture412() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture412"]
 }
-pub fn slot_s413() -> &'static str {
-    &catalog().slots.strings[413]
+pub fn host_fixture413() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture413"]
 }
-pub fn slot_s414() -> &'static str {
-    &catalog().slots.strings[414]
+pub fn service_fixture414() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture414"]
 }
-pub fn slot_s415() -> &'static str {
-    &catalog().slots.strings[415]
+pub fn timestamp_at20240101_t065500000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T065500"]
 }
-pub fn slot_s416() -> &'static str {
-    &catalog().slots.strings[416]
+pub fn host_fixture416() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture416"]
 }
-pub fn slot_s417() -> &'static str {
-    &catalog().slots.strings[417]
+pub fn service_fixture417() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture417"]
 }
-pub fn slot_s418() -> &'static str {
-    &catalog().slots.strings[418]
+pub fn timestamp_at20240101_t065800000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T065800"]
 }
-pub fn slot_s419() -> &'static str {
-    &catalog().slots.strings[419]
+pub fn endpoint_tag_fixture419() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture419"]
 }
-pub fn slot_s420() -> &'static str {
-    &catalog().slots.strings[420]
+pub fn node_id_fixture420() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture420"]
 }
-pub fn slot_s421() -> &'static str {
-    &catalog().slots.strings[421]
+pub fn service_fixture421() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture421"]
 }
-pub fn slot_s422() -> &'static str {
-    &catalog().slots.strings[422]
+pub fn service_fixture422() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture422"]
 }
-pub fn slot_s423() -> &'static str {
-    &catalog().slots.strings[423]
+pub fn service_fixture423() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture423"]
 }
-pub fn slot_s424() -> &'static str {
-    &catalog().slots.strings[424]
+pub fn node_id_fixture424() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture424"]
 }
-pub fn slot_s425() -> &'static str {
-    &catalog().slots.strings[425]
+pub fn host_fixture425() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture425"]
 }
-pub fn slot_s426() -> &'static str {
-    &catalog().slots.strings[426]
+pub fn service_fixture426() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture426"]
 }
-pub fn slot_s427() -> &'static str {
-    &catalog().slots.strings[427]
+pub fn timestamp_at20240101_t070700000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T070700"]
 }
-pub fn slot_s428() -> &'static str {
-    &catalog().slots.strings[428]
+pub fn timestamp_at20240101_t070800000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T070800"]
 }
-pub fn slot_s429() -> &'static str {
-    &catalog().slots.strings[429]
+pub fn node_id_fixture429() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture429"]
 }
-pub fn slot_s430() -> &'static str {
-    &catalog().slots.strings[430]
+pub fn host_fixture430() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture430"]
 }
-pub fn slot_s431() -> &'static str {
-    &catalog().slots.strings[431]
+pub fn service_fixture431() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture431"]
 }
-pub fn slot_s432() -> &'static str {
-    &catalog().slots.strings[432]
+pub fn host_fixture432() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture432"]
 }
-pub fn slot_s433() -> &'static str {
-    &catalog().slots.strings[433]
+pub fn service_fixture433() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture433"]
 }
-pub fn slot_s434() -> &'static str {
-    &catalog().slots.strings[434]
+pub fn endpoint_id_fixture434() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture434"]
 }
-pub fn slot_s435() -> &'static str {
-    &catalog().slots.strings[435]
+pub fn endpoint_tag_fixture435() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture435"]
 }
-pub fn slot_s436() -> &'static str {
-    &catalog().slots.strings[436]
+pub fn endpoint_id_fixture436() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture436"]
 }
-pub fn slot_s437() -> &'static str {
-    &catalog().slots.strings[437]
+pub fn endpoint_tag_fixture437() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture437"]
 }
-pub fn slot_s438() -> &'static str {
-    &catalog().slots.strings[438]
+pub fn endpoint_id_fixture438() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture438"]
 }
-pub fn slot_s439() -> &'static str {
-    &catalog().slots.strings[439]
+pub fn endpoint_tag_fixture439() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture439"]
 }
-pub fn slot_s440() -> &'static str {
-    &catalog().slots.strings[440]
+pub fn host_fixture440() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture440"]
 }
-pub fn slot_s441() -> &'static str {
-    &catalog().slots.strings[441]
+pub fn service_fixture441() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture441"]
 }
-pub fn slot_s442() -> &'static str {
-    &catalog().slots.strings[442]
+pub fn endpoint_tag_fixture442() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture442"]
 }
-pub fn slot_s443() -> &'static str {
-    &catalog().slots.strings[443]
+pub fn host_fixture443() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture443"]
 }
-pub fn slot_s444() -> &'static str {
-    &catalog().slots.strings[444]
+pub fn host_fixture444() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture444"]
 }
-pub fn slot_s445() -> &'static str {
-    &catalog().slots.strings[445]
+pub fn endpoint_tag_fixture445() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture445"]
 }
-pub fn slot_s446() -> &'static str {
-    &catalog().slots.strings[446]
+pub fn endpoint_tag_fixture446() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture446"]
 }
-pub fn slot_s447() -> &'static str {
-    &catalog().slots.strings[447]
+pub fn address_loopback_port0() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort0"]
 }
-pub fn slot_s448() -> &'static str {
-    &catalog().slots.strings[448]
+pub fn label_empty() -> &'static str {
+    &catalog().fixtures.strings["label"]["empty"]
 }
-pub fn slot_s449() -> &'static str {
-    &catalog().slots.strings[449]
+pub fn url_loopback62416() -> &'static str {
+    &catalog().fixtures.strings["url"]["loopback62416"]
 }
-pub fn slot_s450() -> &'static str {
-    &catalog().slots.strings[450]
+pub fn identifier_ulid_c() -> &'static str {
+    &catalog().fixtures.strings["identifier"]["ulidC"]
 }
-pub fn slot_s451() -> &'static str {
-    &catalog().slots.strings[451]
+pub fn service_fixture451() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture451"]
 }
-pub fn slot_s452() -> &'static str {
-    &catalog().slots.strings[452]
+pub fn endpoint_tag_fixture452() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture452"]
 }
-pub fn slot_s453() -> &'static str {
-    &catalog().slots.strings[453]
+pub fn label_endpoint1() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpoint1"]
 }
-pub fn slot_s454() -> &'static str {
-    &catalog().slots.strings[454]
+pub fn node_id_fixture455() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture455"]
 }
-pub fn slot_s455() -> &'static str {
-    &catalog().slots.strings[455]
+pub fn endpoint_id_fixture456() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture456"]
 }
-pub fn slot_s456() -> &'static str {
-    &catalog().slots.strings[456]
+pub fn identifier_ulid_d() -> &'static str {
+    &catalog().fixtures.strings["identifier"]["ulidD"]
 }
-pub fn slot_s457() -> &'static str {
-    &catalog().slots.strings[457]
+pub fn host_fixture458() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture458"]
 }
-pub fn slot_s458() -> &'static str {
-    &catalog().slots.strings[458]
+pub fn service_fixture459() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture459"]
 }
-pub fn slot_s459() -> &'static str {
-    &catalog().slots.strings[459]
+pub fn token_fixture460() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture460"]
 }
-pub fn slot_s460() -> &'static str {
-    &catalog().slots.strings[460]
+pub fn label_ss1() -> &'static str {
+    &catalog().fixtures.strings["label"]["ss1"]
 }
-pub fn slot_s461() -> &'static str {
-    &catalog().slots.strings[461]
+pub fn address_documentation203_0_113_30() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation203_0_113_30"]
 }
-pub fn slot_s462() -> &'static str {
-    &catalog().slots.strings[462]
+pub fn timestamp_at20990101_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20990101T000000"]
 }
-pub fn slot_s463() -> &'static str {
-    &catalog().slots.strings[463]
+pub fn host_fixture465() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture465"]
 }
-pub fn slot_s464() -> &'static str {
-    &catalog().slots.strings[464]
+pub fn address_loopback_port39466() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39466"]
 }
-pub fn slot_s465() -> &'static str {
-    &catalog().slots.strings[465]
+pub fn label_vless1() -> &'static str {
+    &catalog().fixtures.strings["label"]["vless1"]
 }
-pub fn slot_s466() -> &'static str {
-    &catalog().slots.strings[466]
+pub fn label_n1() -> &'static str {
+    &catalog().fixtures.strings["label"]["n1"]
 }
-pub fn slot_s467() -> &'static str {
-    &catalog().slots.strings[467]
+pub fn label_node_afixture_test() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeAFixtureTest"]
 }
-pub fn slot_s468() -> &'static str {
-    &catalog().slots.strings[468]
+pub fn label_edge_afixture_test() -> &'static str {
+    &catalog().fixtures.strings["label"]["edgeAFixtureTest"]
 }
-pub fn slot_s469() -> &'static str {
-    &catalog().slots.strings[469]
+pub fn node_id_fixture472() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture472"]
 }
-pub fn slot_s470() -> &'static str {
-    &catalog().slots.strings[470]
+pub fn host_fixture473() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture473"]
 }
-pub fn slot_s471() -> &'static str {
-    &catalog().slots.strings[471]
+pub fn service_fixture474() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture474"]
 }
-pub fn slot_s472() -> &'static str {
-    &catalog().slots.strings[472]
+pub fn node_id_fixture475() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture475"]
 }
-pub fn slot_s473() -> &'static str {
-    &catalog().slots.strings[473]
+pub fn cluster_fixture476() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture476"]
 }
-pub fn slot_s474() -> &'static str {
-    &catalog().slots.strings[474]
+pub fn label_node1() -> &'static str {
+    &catalog().fixtures.strings["label"]["node1"]
 }
-pub fn slot_s475() -> &'static str {
-    &catalog().slots.strings[475]
+pub fn node_id_fixture479() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture479"]
 }
-pub fn slot_s476() -> &'static str {
-    &catalog().slots.strings[476]
+pub fn endpoint_tag_fixture480() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture480"]
 }
-pub fn slot_s477() -> &'static str {
-    &catalog().slots.strings[477]
+pub fn label_sub1() -> &'static str {
+    &catalog().fixtures.strings["label"]["sub1"]
 }
-pub fn slot_s478() -> &'static str {
-    &catalog().slots.strings[478]
+pub fn host_fixture484() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture484"]
 }
-pub fn slot_s479() -> &'static str {
-    &catalog().slots.strings[479]
+pub fn label_sub_test_token() -> &'static str {
+    &catalog().fixtures.strings["label"]["subTestToken"]
 }
-pub fn slot_s480() -> &'static str {
-    &catalog().slots.strings[480]
+pub fn endpoint_tag_fixture487() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture487"]
 }
-pub fn slot_s481() -> &'static str {
-    &catalog().slots.strings[481]
+pub fn timestamp_at20240101_t080800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T080800"]
 }
-pub fn slot_s482() -> &'static str {
-    &catalog().slots.strings[482]
+pub fn timestamp_at20240101_t080900_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T080900"]
 }
-pub fn slot_s483() -> &'static str {
-    &catalog().slots.strings[483]
+pub fn address_documentation192_0_2_91() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_91"]
 }
-pub fn slot_s484() -> &'static str {
-    &catalog().slots.strings[484]
+pub fn identifier_ulid_e() -> &'static str {
+    &catalog().fixtures.strings["identifier"]["ulidE"]
 }
-pub fn slot_s485() -> &'static str {
-    &catalog().slots.strings[485]
+pub fn host_fixture494() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture494"]
 }
-pub fn slot_s486() -> &'static str {
-    &catalog().slots.strings[486]
+pub fn service_fixture495() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture495"]
 }
-pub fn slot_s487() -> &'static str {
-    &catalog().slots.strings[487]
+pub fn cluster_fixture496() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture496"]
 }
-pub fn slot_s488() -> &'static str {
-    &catalog().slots.strings[488]
+pub fn service_fixture497() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture497"]
 }
-pub fn slot_s489() -> &'static str {
-    &catalog().slots.strings[489]
+pub fn endpoint_tag_fixture498() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture498"]
 }
-pub fn slot_s490() -> &'static str {
-    &catalog().slots.strings[490]
+pub fn label_endpoint2() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpoint2"]
 }
-pub fn slot_s491() -> &'static str {
-    &catalog().slots.strings[491]
+pub fn timestamp_at20240101_t082100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T082100"]
 }
-pub fn slot_s492() -> &'static str {
-    &catalog().slots.strings[492]
+pub fn label_endpoint3() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpoint3"]
 }
-pub fn slot_s493() -> &'static str {
-    &catalog().slots.strings[493]
+pub fn label_peer_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["peerA"]
 }
-pub fn slot_s494() -> &'static str {
-    &catalog().slots.strings[494]
+pub fn label_peer_afixture_test() -> &'static str {
+    &catalog().fixtures.strings["label"]["peerAFixtureTest"]
 }
-pub fn slot_s495() -> &'static str {
-    &catalog().slots.strings[495]
+pub fn url_https_public_peer_afixture_test() -> &'static str {
+    &catalog().fixtures.strings["url"]["publicPeerA"]
 }
-pub fn slot_s496() -> &'static str {
-    &catalog().slots.strings[496]
+pub fn endpoint_tag_fixture507() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture507"]
 }
-pub fn slot_s497() -> &'static str {
-    &catalog().slots.strings[497]
+pub fn address_loopback() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopback"]
 }
-pub fn slot_s498() -> &'static str {
-    &catalog().slots.strings[498]
+pub fn label_peer_afixture_test_variant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["peerAFixtureTestVariant2"]
 }
-pub fn slot_s499() -> &'static str {
-    &catalog().slots.strings[499]
+pub fn endpoint_tag_fixture510() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture510"]
 }
-pub fn slot_s500() -> &'static str {
-    &catalog().slots.strings[500]
+pub fn cluster_fixture511() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture511"]
 }
-pub fn slot_s501() -> &'static str {
-    &catalog().slots.strings[501]
+pub fn token_fixture512() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture512"]
 }
-pub fn slot_s502() -> &'static str {
-    &catalog().slots.strings[502]
+pub fn host_fixture513() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture513"]
 }
-pub fn slot_s503() -> &'static str {
-    &catalog().slots.strings[503]
+pub fn address_loopback_port39514() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39514"]
 }
-pub fn slot_s504() -> &'static str {
-    &catalog().slots.strings[504]
+pub fn label_node_keep() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeKeep"]
 }
-pub fn slot_s505() -> &'static str {
-    &catalog().slots.strings[505]
+pub fn host_fixture516() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture516"]
 }
-pub fn slot_s506() -> &'static str {
-    &catalog().slots.strings[506]
+pub fn service_fixture517() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture517"]
 }
-pub fn slot_s507() -> &'static str {
-    &catalog().slots.strings[507]
+pub fn endpoint_tag_fixture518() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture518"]
 }
-pub fn slot_s508() -> &'static str {
-    &catalog().slots.strings[508]
+pub fn timestamp_at20240101_t083900_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T083900"]
 }
-pub fn slot_s509() -> &'static str {
-    &catalog().slots.strings[509]
+pub fn timestamp_at20240101_t084000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T084000"]
 }
-pub fn slot_s510() -> &'static str {
-    &catalog().slots.strings[510]
+pub fn timestamp_at20240101_t084100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T084100"]
 }
-pub fn slot_s511() -> &'static str {
-    &catalog().slots.strings[511]
+pub fn node_id_fixture523() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture523"]
 }
-pub fn slot_s512() -> &'static str {
-    &catalog().slots.strings[512]
+pub fn host_fixture524() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture524"]
 }
-pub fn slot_s513() -> &'static str {
-    &catalog().slots.strings[513]
+pub fn service_fixture525() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture525"]
 }
-pub fn slot_s514() -> &'static str {
-    &catalog().slots.strings[514]
+pub fn address_documentation192_0_2_127() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation192_0_2_127"]
 }
-pub fn slot_s515() -> &'static str {
-    &catalog().slots.strings[515]
+pub fn label_ss2() -> &'static str {
+    &catalog().fixtures.strings["label"]["ss2"]
 }
-pub fn slot_s516() -> &'static str {
-    &catalog().slots.strings[516]
+pub fn address_loopback_port39528() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39528"]
 }
-pub fn slot_s517() -> &'static str {
-    &catalog().slots.strings[517]
+pub fn label_vless_test() -> &'static str {
+    &catalog().fixtures.strings["label"]["vlessTest"]
 }
-pub fn slot_s518() -> &'static str {
-    &catalog().slots.strings[518]
+pub fn url_tcp_origin_fixture_test443() -> &'static str {
+    &catalog().fixtures.strings["url"]["origin443"]
 }
-pub fn slot_s519() -> &'static str {
-    &catalog().slots.strings[519]
+pub fn address_loopback_port39531() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39531"]
 }
-pub fn slot_s520() -> &'static str {
-    &catalog().slots.strings[520]
+pub fn endpoint_id_fixture533() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture533"]
 }
-pub fn slot_s521() -> &'static str {
-    &catalog().slots.strings[521]
+pub fn endpoint_tag_fixture534() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture534"]
 }
-pub fn slot_s522() -> &'static str {
-    &catalog().slots.strings[522]
+pub fn endpoint_tag_fixture535() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture535"]
 }
-pub fn slot_s523() -> &'static str {
-    &catalog().slots.strings[523]
+pub fn label_vless2() -> &'static str {
+    &catalog().fixtures.strings["label"]["vless2"]
 }
-pub fn slot_s524() -> &'static str {
-    &catalog().slots.strings[524]
+pub fn endpoint_id_fixture538() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture538"]
 }
-pub fn slot_s525() -> &'static str {
-    &catalog().slots.strings[525]
+pub fn endpoint_tag_fixture539() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture539"]
 }
-pub fn slot_s526() -> &'static str {
-    &catalog().slots.strings[526]
+pub fn label_sub2() -> &'static str {
+    &catalog().fixtures.strings["label"]["sub2"]
 }
-pub fn slot_s527() -> &'static str {
-    &catalog().slots.strings[527]
+pub fn timestamp_at20240101_t090100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T090100"]
 }
-pub fn slot_s528() -> &'static str {
-    &catalog().slots.strings[528]
+pub fn timestamp_at20240101_t090200_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T090200"]
 }
-pub fn slot_s529() -> &'static str {
-    &catalog().slots.strings[529]
+pub fn label_node_drop() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeDrop"]
 }
-pub fn slot_s530() -> &'static str {
-    &catalog().slots.strings[530]
+pub fn host_fixture544() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture544"]
 }
-pub fn slot_s531() -> &'static str {
-    &catalog().slots.strings[531]
+pub fn service_fixture545() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture545"]
 }
-pub fn slot_s532() -> &'static str {
-    &catalog().slots.strings[532]
+pub fn host_fixture546() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture546"]
 }
-pub fn slot_s533() -> &'static str {
-    &catalog().slots.strings[533]
+pub fn service_fixture547() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture547"]
 }
-pub fn slot_s534() -> &'static str {
-    &catalog().slots.strings[534]
+pub fn label_endpoint_drop() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpointDrop"]
 }
-pub fn slot_s535() -> &'static str {
-    &catalog().slots.strings[535]
+pub fn label_endpoint_drop_variant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpointDropVariant2"]
 }
-pub fn slot_s536() -> &'static str {
-    &catalog().slots.strings[536]
+pub fn label_endpoint_new() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpointNew"]
 }
-pub fn slot_s537() -> &'static str {
-    &catalog().slots.strings[537]
+pub fn label_endpoint_new_variant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpointNewVariant2"]
 }
-pub fn slot_s538() -> &'static str {
-    &catalog().slots.strings[538]
+pub fn host_fixture552() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture552"]
 }
-pub fn slot_s539() -> &'static str {
-    &catalog().slots.strings[539]
+pub fn host_fixture553() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture553"]
 }
-pub fn slot_s540() -> &'static str {
-    &catalog().slots.strings[540]
+pub fn label_xp_fixture_test() -> &'static str {
+    &catalog().fixtures.strings["label"]["xpFixtureTest"]
 }
-pub fn slot_s541() -> &'static str {
-    &catalog().slots.strings[541]
+pub fn token_fixture555() -> &'static str {
+    &catalog().fixtures.strings["token"]["fixture555"]
 }
-pub fn slot_s542() -> &'static str {
-    &catalog().slots.strings[542]
+pub fn host_fixture556() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture556"]
 }
-pub fn slot_s543() -> &'static str {
-    &catalog().slots.strings[543]
+pub fn cluster_fixture557() -> &'static str {
+    &catalog().fixtures.strings["cluster"]["fixture557"]
 }
-pub fn slot_s544() -> &'static str {
-    &catalog().slots.strings[544]
+pub fn service_fixture558() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture558"]
 }
-pub fn slot_s545() -> &'static str {
-    &catalog().slots.strings[545]
+pub fn service_fixture559() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture559"]
 }
-pub fn slot_s546() -> &'static str {
-    &catalog().slots.strings[546]
+pub fn node_id_fixture560() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture560"]
 }
-pub fn slot_s547() -> &'static str {
-    &catalog().slots.strings[547]
+pub fn service_fixture561() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture561"]
 }
-pub fn slot_s548() -> &'static str {
-    &catalog().slots.strings[548]
+pub fn node_id_fixture562() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture562"]
 }
-pub fn slot_s549() -> &'static str {
-    &catalog().slots.strings[549]
+pub fn address_loopback_port39563() -> &'static str {
+    &catalog().fixtures.strings["address"]["loopbackPort39563"]
 }
-pub fn slot_s550() -> &'static str {
-    &catalog().slots.strings[550]
+pub fn service_fixture564() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture564"]
 }
-pub fn slot_s551() -> &'static str {
-    &catalog().slots.strings[551]
+pub fn timestamp_at20240101_t092500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T092500"]
 }
-pub fn slot_s552() -> &'static str {
-    &catalog().slots.strings[552]
+pub fn host_fixture566() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture566"]
 }
-pub fn slot_s553() -> &'static str {
-    &catalog().slots.strings[553]
+pub fn service_fixture567() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture567"]
 }
-pub fn slot_s554() -> &'static str {
-    &catalog().slots.strings[554]
+pub fn timestamp_at20240101_t092800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T092800"]
 }
-pub fn slot_s555() -> &'static str {
-    &catalog().slots.strings[555]
+pub fn endpoint_tag_fixture569() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture569"]
 }
-pub fn slot_s556() -> &'static str {
-    &catalog().slots.strings[556]
+pub fn identifier_ulid_a() -> &'static str {
+    &catalog().fixtures.strings["identifier"]["ulidA"]
 }
-pub fn slot_s557() -> &'static str {
-    &catalog().slots.strings[557]
+pub fn service_fixture571() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture571"]
 }
-pub fn slot_s558() -> &'static str {
-    &catalog().slots.strings[558]
+pub fn service_fixture572() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture572"]
 }
-pub fn slot_s559() -> &'static str {
-    &catalog().slots.strings[559]
+pub fn service_fixture573() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture573"]
 }
-pub fn slot_s560() -> &'static str {
-    &catalog().slots.strings[560]
+pub fn identifier_ulid_b() -> &'static str {
+    &catalog().fixtures.strings["identifier"]["ulidB"]
 }
-pub fn slot_s561() -> &'static str {
-    &catalog().slots.strings[561]
+pub fn host_fixture575() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture575"]
 }
-pub fn slot_s562() -> &'static str {
-    &catalog().slots.strings[562]
+pub fn url_loopback1() -> &'static str {
+    &catalog().fixtures.strings["url"]["loopback1"]
 }
-pub fn slot_s563() -> &'static str {
-    &catalog().slots.strings[563]
+pub fn timestamp_at20240101_t093700_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T093700"]
 }
-pub fn slot_s564() -> &'static str {
-    &catalog().slots.strings[564]
+pub fn timestamp_at20240101_t093800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20240101T093800"]
 }
-pub fn slot_s565() -> &'static str {
-    &catalog().slots.strings[565]
+pub fn host_fixture580() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture580"]
 }
-pub fn slot_s566() -> &'static str {
-    &catalog().slots.strings[566]
+pub fn service_fixture581() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture581"]
 }
-pub fn slot_s567() -> &'static str {
-    &catalog().slots.strings[567]
+pub fn host_fixture582() -> &'static str {
+    &catalog().fixtures.strings["host"]["fixture582"]
 }
-pub fn slot_s568() -> &'static str {
-    &catalog().slots.strings[568]
+pub fn service_fixture583() -> &'static str {
+    &catalog().fixtures.strings["service"]["fixture583"]
 }
-pub fn slot_s569() -> &'static str {
-    &catalog().slots.strings[569]
+pub fn endpoint_id_fixture584() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture584"]
 }
-pub fn slot_s570() -> &'static str {
-    &catalog().slots.strings[570]
+pub fn endpoint_tag_fixture585() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture585"]
 }
-pub fn slot_s571() -> &'static str {
-    &catalog().slots.strings[571]
+pub fn endpoint_id_fixture586() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture586"]
 }
-pub fn slot_s572() -> &'static str {
-    &catalog().slots.strings[572]
+pub fn endpoint_tag_fixture587() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture587"]
 }
-pub fn slot_s573() -> &'static str {
-    &catalog().slots.strings[573]
+pub fn node_id_fixture588() -> &'static str {
+    &catalog().fixtures.strings["nodeId"]["fixture588"]
 }
-pub fn slot_s574() -> &'static str {
-    &catalog().slots.strings[574]
+pub fn endpoint_id_fixture589() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixture589"]
 }
-pub fn slot_s575() -> &'static str {
-    &catalog().slots.strings[575]
+pub fn endpoint_tag_fixture590() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture590"]
 }
-pub fn slot_s576() -> &'static str {
-    &catalog().slots.strings[576]
+pub fn label_node_afixture_test_variant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeAFixtureTestVariant2"]
 }
-pub fn slot_s577() -> &'static str {
-    &catalog().slots.strings[577]
+pub fn url_https_node_afixture_test() -> &'static str {
+    &catalog().fixtures.strings["url"]["nodeA"]
 }
-pub fn slot_s578() -> &'static str {
-    &catalog().slots.strings[578]
+pub fn endpoint_tag_fixture593() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture593"]
 }
-pub fn slot_s579() -> &'static str {
-    &catalog().slots.strings[579]
+pub fn endpoint_tag_fixture596() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixture596"]
 }
-pub fn slot_s580() -> &'static str {
-    &catalog().slots.strings[580]
+pub fn label_e1() -> &'static str {
+    &catalog().fixtures.strings["label"]["e1"]
 }
-pub fn slot_s581() -> &'static str {
-    &catalog().slots.strings[581]
+pub fn label_e2() -> &'static str {
+    &catalog().fixtures.strings["label"]["e2"]
 }
-pub fn slot_s582() -> &'static str {
-    &catalog().slots.strings[582]
+pub fn label_e3() -> &'static str {
+    &catalog().fixtures.strings["label"]["e3"]
 }
-pub fn slot_s583() -> &'static str {
-    &catalog().slots.strings[583]
+pub fn label_e4() -> &'static str {
+    &catalog().fixtures.strings["label"]["e4"]
 }
-pub fn slot_s584() -> &'static str {
-    &catalog().slots.strings[584]
+pub fn label_vless_e1() -> &'static str {
+    &catalog().fixtures.strings["label"]["vlessE1"]
 }
-pub fn slot_s585() -> &'static str {
-    &catalog().slots.strings[585]
+pub fn label_vless_e3() -> &'static str {
+    &catalog().fixtures.strings["label"]["vlessE3"]
 }
-pub fn slot_s586() -> &'static str {
-    &catalog().slots.strings[586]
+pub fn label_ss_e2() -> &'static str {
+    &catalog().fixtures.strings["label"]["ssE2"]
 }
-pub fn slot_s587() -> &'static str {
-    &catalog().slots.strings[587]
+pub fn label_ss_e4() -> &'static str {
+    &catalog().fixtures.strings["label"]["ssE4"]
 }
-pub fn slot_s588() -> &'static str {
-    &catalog().slots.strings[588]
+pub fn label_node1_variant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["node1Variant2"]
 }
-pub fn slot_s589() -> &'static str {
-    &catalog().slots.strings[589]
+pub fn label_node2() -> &'static str {
+    &catalog().fixtures.strings["label"]["node2"]
 }
-pub fn slot_s590() -> &'static str {
-    &catalog().slots.strings[590]
+pub fn endpoint_fixtureinline_a() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixtureinlineA"]
 }
-pub fn slot_s591() -> &'static str {
-    &catalog().slots.strings[591]
+pub fn endpoint_fixtureinline_b() -> &'static str {
+    &catalog().fixtures.strings["endpointId"]["fixtureinlineB"]
 }
-pub fn slot_s592() -> &'static str {
-    &catalog().slots.strings[592]
+pub fn endpoint_tag_fixtureinline_a() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixtureinlineA"]
 }
-pub fn slot_s593() -> &'static str {
-    &catalog().slots.strings[593]
+pub fn endpoint_tag_fixtureinline_b() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixtureinlineB"]
 }
-pub fn slot_s594() -> &'static str {
-    &catalog().slots.strings[594]
+pub fn endpoint_tag_fixtureinline() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixtureinline"]
 }
-pub fn slot_s595() -> &'static str {
-    &catalog().slots.strings[595]
+pub fn address_documentation203_0_113_8() -> &'static str {
+    &catalog().fixtures.strings["address"]["documentation203_0_113_8"]
 }
-pub fn slot_s596() -> &'static str {
-    &catalog().slots.strings[596]
+pub fn label_node_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeA"]
 }
-pub fn slot_s597() -> &'static str {
-    &catalog().slots.strings[597]
+pub fn label_node_b() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeB"]
 }
-pub fn slot_s598() -> &'static str {
-    &catalog().slots.strings[598]
+pub fn timestamp_at20260520_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260520T000000"]
 }
-pub fn slot_s599() -> &'static str {
-    &catalog().slots.strings[599]
+pub fn timestamp_at20260729_t000500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260729T000500"]
 }
-pub fn slot_s600() -> &'static str {
-    &catalog().slots.strings[600]
+pub fn timestamp_at20260520_t115500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260520T115500"]
 }
-pub fn slot_s601() -> &'static str {
-    &catalog().slots.strings[601]
+pub fn label_endpoint_missing() -> &'static str {
+    &catalog().fixtures.strings["label"]["endpointMissing"]
 }
-pub fn slot_s602() -> &'static str {
-    &catalog().slots.strings[602]
+pub fn endpoint_tag_fixturetest() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixturetest"]
 }
-pub fn slot_s603() -> &'static str {
-    &catalog().slots.strings[603]
+pub fn label_sub_user1() -> &'static str {
+    &catalog().fixtures.strings["label"]["subUser1"]
 }
-pub fn slot_s604() -> &'static str {
-    &catalog().slots.strings[604]
+pub fn timestamp_at20231230_t230000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20231230T230000"]
 }
-pub fn slot_s605() -> &'static str {
-    &catalog().slots.strings[605]
+pub fn timestamp_at20260501_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260501T000000"]
 }
-pub fn slot_s606() -> &'static str {
-    &catalog().slots.strings[606]
+pub fn timestamp_at20260601_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260601T000000"]
 }
-pub fn slot_s607() -> &'static str {
-    &catalog().slots.strings[607]
+pub fn timestamp_at20260515_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260515T000000"]
 }
-pub fn slot_s608() -> &'static str {
-    &catalog().slots.strings[608]
+pub fn timestamp_at20260615_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260615T000000"]
 }
-pub fn slot_s609() -> &'static str {
-    &catalog().slots.strings[609]
+pub fn timestamp_at20260807_t120000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260807T120000"]
 }
-pub fn slot_s610() -> &'static str {
-    &catalog().slots.strings[610]
+pub fn timestamp_at20260808_t120000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120000"]
 }
-pub fn slot_s611() -> &'static str {
-    &catalog().slots.strings[611]
+pub fn timestamp_at20260808_t115500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T115500"]
 }
-pub fn slot_s612() -> &'static str {
-    &catalog().slots.strings[612]
+pub fn timestamp_at20260808_t120730_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120730"]
 }
-pub fn slot_s613() -> &'static str {
-    &catalog().slots.strings[613]
+pub fn timestamp_at20260808_t120500000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120500"]
 }
-pub fn slot_s614() -> &'static str {
-    &catalog().slots.strings[614]
+pub fn timestamp_at20260808_t120000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120000"]
 }
-pub fn slot_s615() -> &'static str {
-    &catalog().slots.strings[615]
+pub fn timestamp_at20260808_t120800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120800"]
 }
-pub fn slot_s616() -> &'static str {
-    &catalog().slots.strings[616]
+pub fn timestamp_at20260806_t120000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260806T120000"]
 }
-pub fn slot_s617() -> &'static str {
-    &catalog().slots.strings[617]
+pub fn timestamp_at20260807_t115800_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260807T115800"]
 }
-pub fn slot_s618() -> &'static str {
-    &catalog().slots.strings[618]
+pub fn timestamp_at20260807_t120200_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260807T120200"]
 }
-pub fn slot_s619() -> &'static str {
-    &catalog().slots.strings[619]
+pub fn timestamp_at20260808_t120030_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260808T120030"]
 }
-pub fn slot_s620() -> &'static str {
-    &catalog().slots.strings[620]
+pub fn timestamp_at20260807_t120100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260807T120100"]
 }
-pub fn slot_s621() -> &'static str {
-    &catalog().slots.strings[621]
+pub fn label_fixture_duplicate() -> &'static str {
+    &catalog().fixtures.strings["label"]["fixtureDuplicate"]
 }
-pub fn slot_s622() -> &'static str {
-    &catalog().slots.strings[622]
+pub fn label_hinet() -> &'static str {
+    &catalog().fixtures.strings["label"]["hinet"]
 }
-pub fn slot_s623() -> &'static str {
-    &catalog().slots.strings[623]
+pub fn label_keep() -> &'static str {
+    &catalog().fixtures.strings["label"]["keep"]
 }
-pub fn slot_s624() -> &'static str {
-    &catalog().slots.strings[624]
+pub fn label_drop() -> &'static str {
+    &catalog().fixtures.strings["label"]["drop"]
 }
-pub fn slot_s625() -> &'static str {
-    &catalog().slots.strings[625]
+pub fn label_tokyo() -> &'static str {
+    &catalog().fixtures.strings["label"]["tokyo"]
 }
-pub fn slot_s626() -> &'static str {
-    &catalog().slots.strings[626]
+pub fn label_extra_node() -> &'static str {
+    &catalog().fixtures.strings["label"]["extraNode"]
 }
-pub fn slot_s627() -> &'static str {
-    &catalog().slots.strings[627]
+pub fn label_remote_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["remoteA"]
 }
-pub fn slot_s628() -> &'static str {
-    &catalog().slots.strings[628]
+pub fn label_nodebeta() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodebeta"]
 }
-pub fn slot_s629() -> &'static str {
-    &catalog().slots.strings[629]
+pub fn label_node_unreachable() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeUnreachable"]
 }
-pub fn slot_s630() -> &'static str {
-    &catalog().slots.strings[630]
+pub fn label_node_remote() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeRemote"]
 }
-pub fn slot_s631() -> &'static str {
-    &catalog().slots.strings[631]
+pub fn label_tcp_node() -> &'static str {
+    &catalog().fixtures.strings["label"]["tcpNode"]
 }
-pub fn slot_s632() -> &'static str {
-    &catalog().slots.strings[632]
+pub fn label_target() -> &'static str {
+    &catalog().fixtures.strings["label"]["target"]
 }
-pub fn slot_s633() -> &'static str {
-    &catalog().slots.strings[633]
+pub fn label_sender() -> &'static str {
+    &catalog().fixtures.strings["label"]["sender"]
 }
-pub fn slot_s634() -> &'static str {
-    &catalog().slots.strings[634]
+pub fn timestamp_at20260520_t080000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260520T080000"]
 }
-pub fn slot_s635() -> &'static str {
-    &catalog().slots.strings[635]
+pub fn timestamp_at20260520_t074200_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260520T074200"]
 }
-pub fn slot_s636() -> &'static str {
-    &catalog().slots.strings[636]
+pub fn timestamp_at20260308_t003000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T003000"]
 }
-pub fn slot_s637() -> &'static str {
-    &catalog().slots.strings[637]
+pub fn timestamp_at20260308_t005500_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T005500"]
 }
-pub fn slot_s638() -> &'static str {
-    &catalog().slots.strings[638]
+pub fn timestamp_at20260301_t010000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260301T010000"]
 }
-pub fn slot_s639() -> &'static str {
-    &catalog().slots.strings[639]
+pub fn label_aardvark() -> &'static str {
+    &catalog().fixtures.strings["label"]["aardvark"]
 }
-pub fn slot_s640() -> &'static str {
-    &catalog().slots.strings[640]
+pub fn label_alpha() -> &'static str {
+    &catalog().fixtures.strings["label"]["alpha"]
 }
-pub fn slot_s641() -> &'static str {
-    &catalog().slots.strings[641]
+pub fn label_beta() -> &'static str {
+    &catalog().fixtures.strings["label"]["beta"]
 }
-pub fn slot_s642() -> &'static str {
-    &catalog().slots.strings[642]
+pub fn label_dash_host() -> &'static str {
+    &catalog().fixtures.strings["label"]["dashHost"]
 }
-pub fn slot_s643() -> &'static str {
-    &catalog().slots.strings[643]
+pub fn label_dot_host() -> &'static str {
+    &catalog().fixtures.strings["label"]["dotHost"]
 }
-pub fn slot_s644() -> &'static str {
-    &catalog().slots.strings[644]
+pub fn label_japan() -> &'static str {
+    &catalog().fixtures.strings["label"]["japan"]
 }
-pub fn slot_s645() -> &'static str {
-    &catalog().slots.strings[645]
+pub fn label_node_beta() -> &'static str {
+    &catalog().fixtures.strings["label"]["nodeBeta"]
 }
-pub fn slot_s646() -> &'static str {
-    &catalog().slots.strings[646]
+pub fn label_only_us() -> &'static str {
+    &catalog().fixtures.strings["label"]["onlyUs"]
 }
-pub fn slot_s647() -> &'static str {
-    &catalog().slots.strings[647]
+pub fn label_osaka_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["osakaA"]
 }
-pub fn slot_s648() -> &'static str {
-    &catalog().slots.strings[648]
+pub fn label_osaka_b() -> &'static str {
+    &catalog().fixtures.strings["label"]["osakaB"]
 }
-pub fn slot_s649() -> &'static str {
-    &catalog().slots.strings[649]
+pub fn label_seoul_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["seoulA"]
 }
-pub fn slot_s650() -> &'static str {
-    &catalog().slots.strings[650]
+pub fn label_singapore_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["singaporeA"]
 }
-pub fn slot_s651() -> &'static str {
-    &catalog().slots.strings[651]
+pub fn label_tokyo_a() -> &'static str {
+    &catalog().fixtures.strings["label"]["tokyoA"]
 }
-pub fn slot_s652() -> &'static str {
-    &catalog().slots.strings[652]
+pub fn label_tokyo_b() -> &'static str {
+    &catalog().fixtures.strings["label"]["tokyoB"]
 }
-pub fn slot_s653() -> &'static str {
-    &catalog().slots.strings[653]
+pub fn label_tokyo_avariant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["tokyoAVariant2"]
 }
-pub fn slot_s654() -> &'static str {
-    &catalog().slots.strings[654]
+pub fn label_hkl() -> &'static str {
+    &catalog().fixtures.strings["label"]["hkl"]
 }
-pub fn slot_s655() -> &'static str {
-    &catalog().slots.strings[655]
+pub fn label_mystery() -> &'static str {
+    &catalog().fixtures.strings["label"]["mystery"]
 }
-pub fn slot_s656() -> &'static str {
-    &catalog().slots.strings[656]
+pub fn label_relay_japan() -> &'static str {
+    &catalog().fixtures.strings["label"]["relayJapan"]
 }
-pub fn slot_s657() -> &'static str {
-    &catalog().slots.strings[657]
+pub fn label_singapore_avariant2() -> &'static str {
+    &catalog().fixtures.strings["label"]["singaporeAVariant2"]
 }
-pub fn slot_s658() -> &'static str {
-    &catalog().slots.strings[658]
+pub fn label_tokyo_avariant3() -> &'static str {
+    &catalog().fixtures.strings["label"]["tokyoAVariant3"]
 }
-pub fn slot_s659() -> &'static str {
-    &catalog().slots.strings[659]
+pub fn timestamp_at20260519_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260519T000000"]
 }
-pub fn slot_s660() -> &'static str {
-    &catalog().slots.strings[660]
+pub fn timestamp_at20260401_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260401T000000"]
 }
-pub fn slot_s661() -> &'static str {
-    &catalog().slots.strings[661]
+pub fn timestamp_at20260701_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260701T000000"]
 }
-pub fn slot_s662() -> &'static str {
-    &catalog().slots.strings[662]
+pub fn timestamp_at20260801_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260801T000000"]
 }
-pub fn slot_s663() -> &'static str {
-    &catalog().slots.strings[663]
+pub fn timestamp_at20260901_t000000_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260901T000000"]
 }
-pub fn slot_s664() -> &'static str {
-    &catalog().slots.strings[664]
+pub fn timestamp_at20260308_t101100_z() -> &'static str {
+    &catalog().fixtures.strings["timestamp"]["t20260308T101100"]
 }
-pub fn slot_s665() -> &'static str {
-    &catalog().slots.strings[665]
+pub fn number_value1<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value1"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s666() -> &'static str {
-    &catalog().slots.strings[666]
+pub fn number_value2<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value2"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s667() -> &'static str {
-    &catalog().slots.strings[667]
+pub fn number_value3<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value3"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s668() -> &'static str {
-    &catalog().slots.strings[668]
+pub fn number_value4<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value4"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s669() -> &'static str {
-    &catalog().slots.strings[669]
+pub fn number_value5<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value5"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s670() -> &'static str {
-    &catalog().slots.strings[670]
+pub fn number_value6<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value6"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s671() -> &'static str {
-    &catalog().slots.strings[671]
+pub fn number_value7<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value7"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s672() -> &'static str {
-    &catalog().slots.strings[672]
+pub fn number_value8<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value8"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s673() -> &'static str {
-    &catalog().slots.strings[673]
+pub fn number_value9<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value9"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s674() -> &'static str {
-    &catalog().slots.strings[674]
+pub fn number_value32<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value32"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s675() -> &'static str {
-    &catalog().slots.strings[675]
+pub fn number_value76<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value76"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s676() -> &'static str {
-    &catalog().slots.strings[676]
+pub fn number_value28<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value28"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s677() -> &'static str {
-    &catalog().slots.strings[677]
+pub fn number_value110<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value110"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s678() -> &'static str {
-    &catalog().slots.strings[678]
+pub fn number_value120<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value120"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s679() -> &'static str {
-    &catalog().slots.strings[679]
+pub fn number_value111<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value111"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s680() -> &'static str {
-    &catalog().slots.strings[680]
+pub fn number_value123<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value123"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s681() -> &'static str {
-    &catalog().slots.strings[681]
+pub fn number_value0<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value0"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s682() -> &'static str {
-    &catalog().slots.strings[682]
+pub fn number_value0_point72<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value0Point72"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s683() -> &'static str {
-    &catalog().slots.strings[683]
+pub fn number_value19<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value19"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_s684() -> &'static str {
-    &catalog().slots.strings[684]
+pub fn number_value20<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value20"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n0<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[0].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value21<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value21"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n1<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[1].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value22<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value22"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n2<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[2].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value23<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value23"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n3<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[3].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value24<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value24"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n4<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[4].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value10<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value10"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n5<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[5].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value30<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value30"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n6<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[6].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value40<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value40"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n7<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[7].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value42<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value42"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n8<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[8].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value50<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value50"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n9<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[9].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value60<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value60"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n10<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[10].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value100<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value100"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n11<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[11].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value200<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value200"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n12<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[12].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value864<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value864"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n13<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[13].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value1152<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value1152"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n14<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[14].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value2016<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value2016"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n15<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[15].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value93<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value93"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n16<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[16].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value124<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value124"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n17<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[17].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value217<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value217"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n18<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[18].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value300<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value300"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n19<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[19].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value900<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value900"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n20<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[20].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value65<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value65"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n21<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[21].clone())
-        .expect("fixture numeric slot is valid")
+pub fn number_value724<T: DeserializeOwned>() -> T {
+    serde_json::from_value(catalog().fixtures.numbers["value"]["value724"].clone())
+        .expect("fixture numeric value is valid")
 }
-pub fn slot_n22<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[22].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_empty() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["empty"].clone()
 }
-pub fn slot_n23<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[23].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge1() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge1"].clone()
 }
-pub fn slot_n24<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[24].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge3() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge3"].clone()
 }
-pub fn slot_n25<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[25].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge4() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge4"].clone()
 }
-pub fn slot_n26<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[26].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge5() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge5"].clone()
 }
-pub fn slot_n27<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[27].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge6() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge6"].clone()
 }
-pub fn slot_n28<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[28].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge7() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge7"].clone()
 }
-pub fn slot_n29<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[29].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge8() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge8"].clone()
 }
-pub fn slot_n30<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[30].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge9() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge9"].clone()
 }
-pub fn slot_n31<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[31].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge10() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge10"].clone()
 }
-pub fn slot_n38<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[38].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge11() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge11"].clone()
 }
-pub fn slot_n39<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[39].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge12() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge12"].clone()
 }
-pub fn slot_n40<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[40].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge13() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge13"].clone()
 }
-pub fn slot_n41<T: DeserializeOwned>() -> T {
-    serde_json::from_value(catalog().slots.numbers[41].clone())
-        .expect("fixture numeric slot is valid")
+pub fn host_list_edge14() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge14"].clone()
 }
-pub fn slot_l0() -> Vec<String> {
-    catalog().slots.string_lists[0].clone()
+pub fn host_list_edge15() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge15"].clone()
 }
-pub fn slot_l1() -> Vec<String> {
-    catalog().slots.string_lists[1].clone()
+pub fn host_list_edge16() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge16"].clone()
 }
-pub fn slot_l2() -> Vec<String> {
-    catalog().slots.string_lists[2].clone()
+pub fn host_list_edge17() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge17"].clone()
 }
-pub fn slot_l3() -> Vec<String> {
-    catalog().slots.string_lists[3].clone()
+pub fn host_list_edge18() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge18"].clone()
 }
-pub fn slot_l4() -> Vec<String> {
-    catalog().slots.string_lists[4].clone()
+pub fn host_list_edge19() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge19"].clone()
 }
-pub fn slot_l5() -> Vec<String> {
-    catalog().slots.string_lists[5].clone()
+pub fn host_list_edge20() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge20"].clone()
 }
-pub fn slot_l6() -> Vec<String> {
-    catalog().slots.string_lists[6].clone()
+pub fn host_list_edge21() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge21"].clone()
 }
-pub fn slot_l7() -> Vec<String> {
-    catalog().slots.string_lists[7].clone()
+pub fn host_list_edge22() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge22"].clone()
 }
-pub fn slot_l8() -> Vec<String> {
-    catalog().slots.string_lists[8].clone()
+pub fn host_list_edge24() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge24"].clone()
 }
-pub fn slot_l9() -> Vec<String> {
-    catalog().slots.string_lists[9].clone()
+pub fn host_list_edge25() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge25"].clone()
 }
-pub fn slot_l10() -> Vec<String> {
-    catalog().slots.string_lists[10].clone()
+pub fn host_list_edge27() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge27"].clone()
 }
-pub fn slot_l11() -> Vec<String> {
-    catalog().slots.string_lists[11].clone()
+pub fn host_list_edge28() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge28"].clone()
 }
-pub fn slot_l12() -> Vec<String> {
-    catalog().slots.string_lists[12].clone()
+pub fn host_list_edge29() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge29"].clone()
 }
-pub fn slot_l13() -> Vec<String> {
-    catalog().slots.string_lists[13].clone()
+pub fn host_list_edge30() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge30"].clone()
 }
-pub fn slot_l14() -> Vec<String> {
-    catalog().slots.string_lists[14].clone()
+pub fn host_list_edge31() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge31"].clone()
 }
-pub fn slot_l15() -> Vec<String> {
-    catalog().slots.string_lists[15].clone()
+pub fn host_list_edge_bfixture_test() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edgeBFixtureTest"].clone()
 }
-pub fn slot_l16() -> Vec<String> {
-    catalog().slots.string_lists[16].clone()
+pub fn host_list_edge34() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge34"].clone()
 }
-pub fn slot_l17() -> Vec<String> {
-    catalog().slots.string_lists[17].clone()
+pub fn host_list_edge36() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge36"].clone()
 }
-pub fn slot_l18() -> Vec<String> {
-    catalog().slots.string_lists[18].clone()
+pub fn host_list_edge37() -> Vec<String> {
+    catalog().fixtures.string_lists["hostList"]["edge37"].clone()
 }
-pub fn slot_l19() -> Vec<String> {
-    catalog().slots.string_lists[19].clone()
-}
-pub fn slot_l20() -> Vec<String> {
-    catalog().slots.string_lists[20].clone()
-}
-pub fn slot_l21() -> Vec<String> {
-    catalog().slots.string_lists[21].clone()
-}
-pub fn slot_l22() -> Vec<String> {
-    catalog().slots.string_lists[22].clone()
-}
-pub fn slot_l23() -> Vec<String> {
-    catalog().slots.string_lists[23].clone()
-}
-pub fn slot_l24() -> Vec<String> {
-    catalog().slots.string_lists[24].clone()
-}
-pub fn slot_l25() -> Vec<String> {
-    catalog().slots.string_lists[25].clone()
-}
-pub fn slot_l26() -> Vec<String> {
-    catalog().slots.string_lists[26].clone()
-}
-pub fn slot_l27() -> Vec<String> {
-    catalog().slots.string_lists[27].clone()
-}
-pub fn slot_l28() -> Vec<String> {
-    catalog().slots.string_lists[28].clone()
-}
-pub fn slot_l29() -> Vec<String> {
-    catalog().slots.string_lists[29].clone()
-}
-pub fn slot_l30() -> Vec<String> {
-    catalog().slots.string_lists[30].clone()
-}
-pub fn slot_l31() -> Vec<String> {
-    catalog().slots.string_lists[31].clone()
-}
-pub fn slot_l32() -> Vec<String> {
-    catalog().slots.string_lists[32].clone()
-}
-pub fn slot_l33() -> Vec<String> {
-    catalog().slots.string_lists[33].clone()
-}
-pub fn slot_l34() -> Vec<String> {
-    catalog().slots.string_lists[34].clone()
-}
-pub fn slot_l35() -> Vec<String> {
-    catalog().slots.string_lists[35].clone()
-}
-pub fn slot_l36() -> Vec<String> {
-    catalog().slots.string_lists[36].clone()
-}
-pub fn slot_l37() -> Vec<String> {
-    catalog().slots.string_lists[37].clone()
-}
-// fixture-policy-slots:end
+// fixture-policy-values:end

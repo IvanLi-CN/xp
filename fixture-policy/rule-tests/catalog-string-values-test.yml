@@ -10,7 +10,25 @@ valid:
       "identifiers": { "probeConfigPrimary": "config-fixture-a" },
       "timestamps": { "probeLatest": "2026-02-19T23:00:10Z" }
     }
-  - '{ "slots": { "strings": ["2024-01-01T00:00:00.000Z"] } }'
-  - '{ "slots": { "strings": ["hinet", "extra-node", "node-unreachable"] } }'
+  - |
+    {
+      "fixtures": {
+        "strings": {
+          "timestamp": { "t20240101T000000": "2024-01-01T00:00:00.000Z" }
+        }
+      }
+    }
+  - |
+    {
+      "fixtures": {
+        "strings": {
+          "label": {
+            "hinet": "hinet",
+            "extraNode": "extra-node",
+            "nodeUnreachable": "node-unreachable"
+          }
+        }
+      }
+    }
 invalid:
   - '{ "hosts": { "primary": "unapproved.invalid" } }'

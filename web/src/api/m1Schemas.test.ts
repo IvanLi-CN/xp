@@ -37,18 +37,18 @@ describe("ClusterInfoResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			ClusterInfoResponseSchema.parse({
-				cluster_id: fixtureCatalog.slotString.s95(),
-				node_id: fixtureCatalog.slotString.s95(),
+				cluster_id: fixtureCatalog.cluster.fixture95(),
+				node_id: fixtureCatalog.cluster.fixture95(),
 				role: "leader",
-				leader_api_base_url: fixtureCatalog.slotString.s96(),
+				leader_api_base_url: fixtureCatalog.service.fixture96(),
 				term: 1,
 				xp_version: "0.0.0",
 			}),
 		).toEqual({
-			cluster_id: fixtureCatalog.slotString.s95(),
-			node_id: fixtureCatalog.slotString.s95(),
+			cluster_id: fixtureCatalog.cluster.fixture95(),
+			node_id: fixtureCatalog.cluster.fixture95(),
 			role: "leader",
-			leader_api_base_url: fixtureCatalog.slotString.s96(),
+			leader_api_base_url: fixtureCatalog.service.fixture96(),
 			term: 1,
 			xp_version: "0.0.0",
 		});
@@ -57,8 +57,8 @@ describe("ClusterInfoResponseSchema", () => {
 	it("rejects missing fields declared by every pinned release", () => {
 		expect(() =>
 			ClusterInfoResponseSchema.parse({
-				cluster_id: fixtureCatalog.slotString.s97(),
-				node_id: fixtureCatalog.slotString.s98(),
+				cluster_id: fixtureCatalog.cluster.fixture97(),
+				node_id: fixtureCatalog.nodeId.fixture98(),
 				role: "leader",
 			}),
 		).toThrow();
@@ -71,10 +71,10 @@ describe("AdminNodesResponseSchema", () => {
 			AdminNodesResponseSchema.parse({
 				items: [
 					{
-						node_id: fixtureCatalog.slotString.s95(),
-						node_name: fixtureCatalog.slotString.s32(),
-						api_base_url: fixtureCatalog.slotString.s96(),
-						access_host: fixtureCatalog.slotString.s99(),
+						node_id: fixtureCatalog.cluster.fixture95(),
+						node_name: fixtureCatalog.nodeId.fixture32(),
+						api_base_url: fixtureCatalog.service.fixture96(),
+						access_host: fixtureCatalog.host.fixture99(),
 						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 						quota_reset: fixtureCatalog.quota.reset(),
 					},
@@ -83,10 +83,10 @@ describe("AdminNodesResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					node_id: fixtureCatalog.slotString.s95(),
-					node_name: fixtureCatalog.slotString.s32(),
-					api_base_url: fixtureCatalog.slotString.s96(),
-					access_host: fixtureCatalog.slotString.s99(),
+					node_id: fixtureCatalog.cluster.fixture95(),
+					node_name: fixtureCatalog.nodeId.fixture32(),
+					api_base_url: fixtureCatalog.service.fixture96(),
+					access_host: fixtureCatalog.host.fixture99(),
 					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 					quota_reset: fixtureCatalog.quota.reset(),
 				},
@@ -99,17 +99,17 @@ describe("AdminEndpointSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminEndpointSchema.parse({
-				endpoint_id: fixtureCatalog.slotString.s100(),
-				node_id: fixtureCatalog.slotString.s100(),
-				tag: fixtureCatalog.slotString.s101(),
+				endpoint_id: fixtureCatalog.endpointId.fixture100(),
+				node_id: fixtureCatalog.endpointId.fixture100(),
+				tag: fixtureCatalog.endpointTag.fixture101(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: fixtureCatalog.endpoint.port443(),
 				meta: {},
 			}),
 		).toEqual({
-			endpoint_id: fixtureCatalog.slotString.s100(),
-			node_id: fixtureCatalog.slotString.s100(),
-			tag: fixtureCatalog.slotString.s101(),
+			endpoint_id: fixtureCatalog.endpointId.fixture100(),
+			node_id: fixtureCatalog.endpointId.fixture100(),
+			tag: fixtureCatalog.endpointTag.fixture101(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: fixtureCatalog.endpoint.port443(),
 			meta: {},
@@ -123,9 +123,9 @@ describe("AdminEndpointsResponseSchema", () => {
 			AdminEndpointsResponseSchema.parse({
 				items: [
 					{
-						endpoint_id: fixtureCatalog.slotString.s100(),
-						node_id: fixtureCatalog.slotString.s100(),
-						tag: fixtureCatalog.slotString.s101(),
+						endpoint_id: fixtureCatalog.endpointId.fixture100(),
+						node_id: fixtureCatalog.endpointId.fixture100(),
+						tag: fixtureCatalog.endpointTag.fixture101(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: fixtureCatalog.endpoint.port443(),
 						meta: {},
@@ -135,9 +135,9 @@ describe("AdminEndpointsResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					endpoint_id: fixtureCatalog.slotString.s100(),
-					node_id: fixtureCatalog.slotString.s100(),
-					tag: fixtureCatalog.slotString.s101(),
+					endpoint_id: fixtureCatalog.endpointId.fixture100(),
+					node_id: fixtureCatalog.endpointId.fixture100(),
+					tag: fixtureCatalog.endpointTag.fixture101(),
 					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port443(),
 					meta: {},
@@ -151,12 +151,12 @@ describe("AdminEndpointRotateResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminEndpointRotateResponseSchema.parse({
-				endpoint_id: fixtureCatalog.slotString.s100(),
+				endpoint_id: fixtureCatalog.endpointId.fixture100(),
 				active_short_id: "0123456789abcdef",
 				short_ids: ["0123456789abcdef", "0123456789abcdff"],
 			}),
 		).toEqual({
-			endpoint_id: fixtureCatalog.slotString.s100(),
+			endpoint_id: fixtureCatalog.endpointId.fixture100(),
 			active_short_id: "0123456789abcdef",
 			short_ids: ["0123456789abcdef", "0123456789abcdff"],
 		});
@@ -169,9 +169,9 @@ describe("AdminUsersResponseSchema", () => {
 			AdminUsersResponseSchema.parse({
 				items: [
 					{
-						user_id: fixtureCatalog.slotString.s100(),
+						user_id: fixtureCatalog.endpointId.fixture100(),
 						display_name: "alice",
-						subscription_token: fixtureCatalog.slotString.s102(),
+						subscription_token: fixtureCatalog.token.fixture102(),
 						credential_epoch: 0,
 						priority_tier: "p3",
 						quota_reset: fixtureCatalog.quota.reset(),
@@ -181,9 +181,9 @@ describe("AdminUsersResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					user_id: fixtureCatalog.slotString.s100(),
+					user_id: fixtureCatalog.endpointId.fixture100(),
 					display_name: "alice",
-					subscription_token: fixtureCatalog.slotString.s102(),
+					subscription_token: fixtureCatalog.token.fixture102(),
 					credential_epoch: 0,
 					priority_tier: "p3",
 					quota_reset: fixtureCatalog.quota.reset(),
@@ -202,7 +202,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 						user_id: fixtureCatalog.identifier.userPrimary(),
 						display_name: "alice",
 						priority_tier: "p1",
-						endpoint_ids: [fixtureCatalog.slotString.s40()],
+						endpoint_ids: [fixtureCatalog.endpointId.fixture40()],
 						stored_weight: 6000,
 						editor_weight: 6000,
 						source: "explicit",
@@ -223,7 +223,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "alice",
 					priority_tier: "p1",
-					endpoint_ids: [fixtureCatalog.slotString.s40()],
+					endpoint_ids: [fixtureCatalog.endpointId.fixture40()],
 					stored_weight: 6000,
 					editor_weight: 6000,
 					source: "explicit",
@@ -245,10 +245,10 @@ describe("AdminUserTokenResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminUserTokenResponseSchema.parse({
-				subscription_token: fixtureCatalog.slotString.s102(),
+				subscription_token: fixtureCatalog.token.fixture102(),
 			}),
 		).toEqual({
-			subscription_token: fixtureCatalog.slotString.s102(),
+			subscription_token: fixtureCatalog.token.fixture102(),
 		});
 	});
 });
@@ -286,8 +286,8 @@ describe("GetAdminUserAccessResponseSchema", () => {
 				items: [
 					{
 						user_id: fixtureCatalog.identifier.userPrimary(),
-						endpoint_id: fixtureCatalog.slotString.s40(),
-						node_id: fixtureCatalog.slotString.s32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					},
 				],
 				auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
@@ -296,8 +296,8 @@ describe("GetAdminUserAccessResponseSchema", () => {
 			items: [
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
-					endpoint_id: fixtureCatalog.slotString.s40(),
-					node_id: fixtureCatalog.slotString.s32(),
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
 				},
 			],
 			auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
@@ -314,8 +314,8 @@ describe("PutAdminUserAccessResponseSchema", () => {
 				items: [
 					{
 						user_id: fixtureCatalog.identifier.userPrimary(),
-						endpoint_id: fixtureCatalog.slotString.s40(),
-						node_id: fixtureCatalog.slotString.s32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					},
 				],
 				auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],
@@ -326,8 +326,8 @@ describe("PutAdminUserAccessResponseSchema", () => {
 			items: [
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
-					endpoint_id: fixtureCatalog.slotString.s40(),
-					node_id: fixtureCatalog.slotString.s32(),
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
 				},
 			],
 			auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],

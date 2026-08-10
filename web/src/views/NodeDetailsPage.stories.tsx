@@ -243,8 +243,8 @@ export const RuntimeHistoryFallback: Story = {
 							daily_traffic: [
 								{
 									date: "2026-05-20",
-									uplink_bytes: fixtureCatalog.slotNumber.n2(),
-									downlink_bytes: fixtureCatalog.slotNumber.n3(),
+									uplink_bytes: fixtureCatalog.number.value3(),
+									downlink_bytes: fixtureCatalog.number.value4(),
 									updated_at: fixtureCatalog.timestamp.baseline(),
 								},
 							],
@@ -255,17 +255,17 @@ export const RuntimeHistoryFallback: Story = {
 										{
 											component: "xp",
 											status: "up",
-											observed_at: fixtureCatalog.slotString.s653(),
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
 										},
 										{
 											component: "xray",
 											status: "down",
-											observed_at: fixtureCatalog.slotString.s653(),
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
 										},
 										{
 											component: "cloudflared",
 											status: "up",
-											observed_at: fixtureCatalog.slotString.s653(),
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
 										},
 									],
 								},
@@ -273,7 +273,7 @@ export const RuntimeHistoryFallback: Story = {
 							component_status_events: [
 								{
 									event_id: "fallback-event-1",
-									occurred_at: fixtureCatalog.slotString.s654(),
+									occurred_at: fixtureCatalog.timestamp.t20260520T074200(),
 									component: "xray",
 									message: "xray status changed: up -> down",
 									from_status: "up",

@@ -1,0 +1,17 @@
+id: fixture-policy-typescript-no-positional-fixture-accessor
+language: TypeScript
+severity: error
+message: Positional fixture accessors are forbidden; use a named fixtureCatalog accessor.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+  - web/src/fixture-policy/catalog.ts
+rule:
+  all:
+    - kind: property_identifier
+    - regex: '^(slotString|slotNumber|slotList)$'

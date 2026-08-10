@@ -45,7 +45,7 @@ function UpgradeHarness() {
 				versionCheck={{
 					kind: "update_available",
 					latest_tag: "v3.21.10",
-					checked_at: fixtureCatalog.slotString.s294(),
+					checked_at: fixtureCatalog.timestamp.t20260803T000000(),
 					repo: "IvanLi-CN/xp",
 				}}
 				upgradeStatus={{
@@ -58,7 +58,7 @@ function UpgradeHarness() {
 						finished_at: null,
 						exit_code: null,
 						message: null,
-						updated_at: fixtureCatalog.slotString.s294(),
+						updated_at: fixtureCatalog.timestamp.t20260803T000000(),
 					},
 				}}
 				upgradeObservation={observation}

@@ -11,16 +11,28 @@ rule:
         - not:
             any:
               - pattern: |
-                  function stringSlotEntry(_value: string, index: number) {
-                    return [`s${index}`, () => catalog.slots.strings[index]];
+                  function createStringAccessors<Values extends Record<string, string>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => value]),
+                    ) as StringAccessors<Values>;
                   }
               - pattern: |
-                  function numberSlotEntry(_value: number, index: number) {
-                    return [`n${index}`, () => catalog.slots.numbers[index]];
+                  function createNumberAccessors<Values extends Record<string, number>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => value]),
+                    ) as NumberAccessors<Values>;
                   }
               - pattern: |
-                  function listSlotEntry(_value: string[], index: number) {
-                    return [`l${index}`, () => [...catalog.slots.stringLists[index]]];
+                  function createListAccessors<Values extends Record<string, string[]>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => [...value]]),
+                    ) as ListAccessors<Values>;
                   }
               - pattern: |
                   function createSubscriptionTokenFactory() {
@@ -36,9 +48,9 @@ rule:
                   }
               - pattern: |
                   function nextMeshPeerNodeId() {
-                    const slotIndex = meshPeerNodeIdIndexes[meshPeerNodeIdIndex % meshPeerNodeIdIndexes.length];
+                    const nodeId = meshPeerNodeIds[meshPeerNodeIdIndex % meshPeerNodeIds.length];
                     meshPeerNodeIdIndex += 1;
-                    return catalog.slots.strings[slotIndex];
+                    return nodeId;
                   }
               - pattern: |
                   function nextSubscriptionToken() {
@@ -54,14 +66,18 @@ rule:
     - all:
         - kind: arrow_function
         - not:
+            any:
+              - pattern: '([name, value]) => [name, () => value]'
+              - pattern: '() => value'
+              - pattern: '([name, value]) => [name, () => [...value]]'
+              - pattern: '() => [...value]'
+        - not:
             all:
               - inside:
                   stopBy: end
                   all:
                     - kind: function_declaration
-                    - has:
-                        field: name
-                        pattern: createSubscriptionTokenFactory
+                    - regex: '^function create(?:SubscriptionTokenFactory|StringAccessors|NumberAccessors|ListAccessors)'
               - has:
                   field: body
                   pattern: |

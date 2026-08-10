@@ -9,30 +9,30 @@ import type {
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 
-const ENDPOINT_ID = fixtureCatalog.slotString.s120();
+const ENDPOINT_ID = fixtureCatalog.endpointId.fixture120();
 
 const nodes: AdminNode[] = [
 	{
-		node_id: fixtureCatalog.slotString.s206(),
-		node_name: fixtureCatalog.slotString.s207(),
-		api_base_url: fixtureCatalog.slotString.s208(),
-		access_host: fixtureCatalog.slotString.s209(),
+		node_id: fixtureCatalog.nodeId.fixture206(),
+		node_name: fixtureCatalog.nodeName.fixture207(),
+		api_base_url: fixtureCatalog.service.fixture208(),
+		access_host: fixtureCatalog.host.fixture209(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
-		node_id: fixtureCatalog.slotString.s134(),
-		node_name: fixtureCatalog.slotString.s210(),
-		api_base_url: fixtureCatalog.slotString.s211(),
-		access_host: fixtureCatalog.slotString.s212(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		node_name: fixtureCatalog.nodeName.fixture210(),
+		api_base_url: fixtureCatalog.service.fixture211(),
+		access_host: fixtureCatalog.host.fixture212(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
-		node_id: fixtureCatalog.slotString.s213(),
-		node_name: fixtureCatalog.slotString.s99(),
-		api_base_url: fixtureCatalog.slotString.s214(),
-		access_host: fixtureCatalog.slotString.s215(),
+		node_id: fixtureCatalog.nodeId.fixture213(),
+		node_name: fixtureCatalog.host.fixture99(),
+		api_base_url: fixtureCatalog.service.fixture214(),
+		access_host: fixtureCatalog.host.fixture215(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
@@ -40,20 +40,20 @@ const nodes: AdminNode[] = [
 
 const endpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: fixtureCatalog.slotString.s120(),
-		node_id: fixtureCatalog.slotString.s134(),
-		tag: fixtureCatalog.slotString.s216(),
+		endpoint_id: fixtureCatalog.endpointId.fixture120(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		tag: fixtureCatalog.endpointTag.fixture216(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 443,
 		meta: {},
 		probe: {
-			latest_checked_at: fixtureCatalog.slotString.s217(),
+			latest_checked_at: fixtureCatalog.timestamp.t20260728T140015(),
 			latest_latency_ms_p50: 32,
 			slots: [
 				{
 					hour: fixtureCatalog.timestamp.probeHour(),
 					status: "up",
-					checked_at: fixtureCatalog.slotString.s217(),
+					checked_at: fixtureCatalog.timestamp.t20260728T140015(),
 					latency_ms_p50: 32,
 				},
 			],
@@ -62,7 +62,7 @@ const endpoints: AdminEndpoint[] = [
 ];
 
 const history: AdminEndpointProbeHistoryResponse = {
-	endpoint_id: fixtureCatalog.slotString.s120(),
+	endpoint_id: fixtureCatalog.endpointId.fixture120(),
 	participating_nodes: 3,
 	slots: [
 		{
@@ -77,24 +77,24 @@ const history: AdminEndpointProbeHistoryResponse = {
 			latency_ms_p95: 76,
 			by_node: [
 				{
-					node_id: fixtureCatalog.slotString.s134(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 					ok: true,
-					checked_at: fixtureCatalog.slotString.s218(),
-					latency_ms: fixtureCatalog.slotNumber.n9(),
+					checked_at: fixtureCatalog.timestamp.t20260728T140010(),
+					latency_ms: fixtureCatalog.number.value32(),
 					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
-					node_id: fixtureCatalog.slotString.s206(),
+					node_id: fixtureCatalog.nodeId.fixture206(),
 					ok: true,
-					checked_at: fixtureCatalog.slotString.s219(),
-					latency_ms: fixtureCatalog.slotNumber.n10(),
+					checked_at: fixtureCatalog.timestamp.t20260728T140012(),
+					latency_ms: fixtureCatalog.number.value76(),
 					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
-					node_id: fixtureCatalog.slotString.s213(),
+					node_id: fixtureCatalog.nodeId.fixture213(),
 					ok: true,
-					checked_at: fixtureCatalog.slotString.s217(),
-					latency_ms: fixtureCatalog.slotNumber.n11(),
+					checked_at: fixtureCatalog.timestamp.t20260728T140015(),
+					latency_ms: fixtureCatalog.number.value28(),
 					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 			],
@@ -109,7 +109,7 @@ const run: AdminEndpointProbeRunStatusResponse = {
 	config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 	nodes: [
 		{
-			node_id: fixtureCatalog.slotString.s134(),
+			node_id: fixtureCatalog.nodeId.fixture134(),
 			status: "finished",
 			progress: {
 				run_id: fixtureCatalog.identifier.probeRunPrimary(),
@@ -119,12 +119,12 @@ const run: AdminEndpointProbeRunStatusResponse = {
 				endpoints_total: 1,
 				endpoints_done: 1,
 				started_at: fixtureCatalog.timestamp.baseline(),
-				updated_at: fixtureCatalog.slotString.s221(),
-				finished_at: fixtureCatalog.slotString.s218(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140010(),
 			},
 		},
 		{
-			node_id: fixtureCatalog.slotString.s206(),
+			node_id: fixtureCatalog.nodeId.fixture206(),
 			status: "finished",
 			progress: {
 				run_id: fixtureCatalog.identifier.probeRunPrimary(),
@@ -134,12 +134,12 @@ const run: AdminEndpointProbeRunStatusResponse = {
 				endpoints_total: 1,
 				endpoints_done: 1,
 				started_at: fixtureCatalog.timestamp.baseline(),
-				updated_at: fixtureCatalog.slotString.s221(),
-				finished_at: fixtureCatalog.slotString.s219(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140012(),
 			},
 		},
 		{
-			node_id: fixtureCatalog.slotString.s213(),
+			node_id: fixtureCatalog.nodeId.fixture213(),
 			status: "finished",
 			progress: {
 				run_id: fixtureCatalog.identifier.probeRunPrimary(),
@@ -149,8 +149,8 @@ const run: AdminEndpointProbeRunStatusResponse = {
 				endpoints_total: 1,
 				endpoints_done: 1,
 				started_at: fixtureCatalog.timestamp.baseline(),
-				updated_at: fixtureCatalog.slotString.s221(),
-				finished_at: fixtureCatalog.slotString.s217(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140015(),
 			},
 		},
 	],
@@ -196,9 +196,9 @@ export const HistoryWithNodeNames: Story = {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			fixtureCatalog.slotString.s207(),
-			fixtureCatalog.slotString.s210(),
-			fixtureCatalog.slotString.s99(),
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
+			fixtureCatalog.host.fixture99(),
 		]);
 	},
 };
@@ -218,9 +218,9 @@ export const LiveRunWithNodeNames: Story = {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			fixtureCatalog.slotString.s207(),
-			fixtureCatalog.slotString.s210(),
-			fixtureCatalog.slotString.s99(),
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
+			fixtureCatalog.host.fixture99(),
 		]);
 	},
 };

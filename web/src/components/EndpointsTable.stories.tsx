@@ -13,162 +13,162 @@ import { EndpointsTable } from "./EndpointsTable";
 function makeSlots(): AdminEndpointProbeSlot[] {
 	return [
 		{
-			hour: fixtureCatalog.slotString.s4(),
+			hour: fixtureCatalog.timestamp.t20240101T000400(),
 			status: "down",
 			latency_ms_p50: 200,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s5(),
+			hour: fixtureCatalog.timestamp.t20240101T000500(),
 			status: "up",
 			latency_ms_p50: 201,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s6(),
+			hour: fixtureCatalog.timestamp.t20240101T000600(),
 			status: "up",
 			latency_ms_p50: 202,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s7(),
+			hour: fixtureCatalog.timestamp.t20240101T000700(),
 			status: "up",
 			latency_ms_p50: 203,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s8(),
+			hour: fixtureCatalog.timestamp.t20240101T000800(),
 			status: "up",
 			latency_ms_p50: 204,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s9(),
+			hour: fixtureCatalog.timestamp.t20240101T000900(),
 			status: "up",
 			latency_ms_p50: 205,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s10(),
+			hour: fixtureCatalog.timestamp.t20240101T001000(),
 			status: "up",
 			latency_ms_p50: 206,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s11(),
+			hour: fixtureCatalog.timestamp.t20240101T001100(),
 			status: "degraded",
 			latency_ms_p50: 207,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s12(),
+			hour: fixtureCatalog.timestamp.t20240101T001200(),
 			status: "up",
 			latency_ms_p50: 208,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s13(),
+			hour: fixtureCatalog.timestamp.t20240101T001300(),
 			status: "up",
 			latency_ms_p50: 209,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s14(),
+			hour: fixtureCatalog.timestamp.t20240101T001400(),
 			status: "up",
 			latency_ms_p50: 210,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s15(),
+			hour: fixtureCatalog.timestamp.t20240101T001500(),
 			status: "down",
 			latency_ms_p50: 211,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s16(),
+			hour: fixtureCatalog.timestamp.t20240101T001600(),
 			status: "up",
 			latency_ms_p50: 212,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s21(),
+			hour: fixtureCatalog.timestamp.t20240101T002100(),
 			status: "up",
 			latency_ms_p50: 213,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s22(),
+			hour: fixtureCatalog.timestamp.t20240101T002200(),
 			status: "degraded",
 			latency_ms_p50: 214,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s23(),
+			hour: fixtureCatalog.timestamp.t20240101T002300(),
 			status: "up",
 			latency_ms_p50: 215,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s24(),
+			hour: fixtureCatalog.timestamp.t20260308T000000(),
 			status: "up",
 			latency_ms_p50: 216,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s25(),
+			hour: fixtureCatalog.timestamp.t20260308T000200(),
 			status: "up",
 			latency_ms_p50: 217,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s26(),
+			hour: fixtureCatalog.timestamp.t20260308T000100(),
 			status: "up",
 			latency_ms_p50: 218,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s47(),
+			hour: fixtureCatalog.timestamp.t20260307T010000(),
 			status: "up",
 			latency_ms_p50: 219,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s48(),
+			hour: fixtureCatalog.timestamp.t20260308T005900(),
 			status: "up",
 			latency_ms_p50: 220,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s52(),
+			hour: fixtureCatalog.timestamp.t20260308T005800(),
 			status: "degraded",
 			latency_ms_p50: 221,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s54(),
+			hour: fixtureCatalog.timestamp.t20260131T000000(),
 			status: "down",
 			latency_ms_p50: 222,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 		{
-			hour: fixtureCatalog.slotString.s81(),
+			hour: fixtureCatalog.timestamp.t20240101T012100(),
 			status: "up",
 			latency_ms_p50: 223,
-			checked_at: fixtureCatalog.slotString.s269(),
+			checked_at: fixtureCatalog.timestamp.t20240101T042900(),
 		},
 	];
 }
 
-const LONG_NODE_NAME = fixtureCatalog.slotString.s276();
+const LONG_NODE_NAME = fixtureCatalog.nodeName.fixture276();
 
 const ENDPOINTS: AdminEndpoint[] = [
 	{
-		endpoint_id: fixtureCatalog.slotString.s270(),
-		node_id: fixtureCatalog.slotString.s271(),
-		tag: fixtureCatalog.slotString.s272(),
+		endpoint_id: fixtureCatalog.endpointId.fixture270(),
+		node_id: fixtureCatalog.nodeId.fixture271(),
+		tag: fixtureCatalog.endpointTag.fixture272(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 53842,
-		meta: { public_domain: fixtureCatalog.slotString.s212() },
+		meta: { public_domain: fixtureCatalog.host.fixture212() },
 		probe: {
 			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 293,
@@ -176,12 +176,12 @@ const ENDPOINTS: AdminEndpoint[] = [
 		},
 	},
 	{
-		endpoint_id: fixtureCatalog.slotString.s273(),
-		node_id: fixtureCatalog.slotString.s274(),
-		tag: fixtureCatalog.slotString.s275(),
+		endpoint_id: fixtureCatalog.endpointId.fixture273(),
+		node_id: fixtureCatalog.nodeId.fixture274(),
+		tag: fixtureCatalog.endpointTag.fixture275(),
 		kind: fixtureCatalog.endpoint.ssKind(),
 		port: 53843,
-		meta: { public_domain: fixtureCatalog.slotString.s278() },
+		meta: { public_domain: fixtureCatalog.host.fixture278() },
 		probe: {
 			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
 			latest_latency_ms_p50: 223,
@@ -192,18 +192,18 @@ const ENDPOINTS: AdminEndpoint[] = [
 
 const NODES: AdminNode[] = [
 	{
-		node_id: fixtureCatalog.slotString.s271(),
-		node_name: fixtureCatalog.slotString.s276(),
-		api_base_url: fixtureCatalog.slotString.s211(),
-		access_host: fixtureCatalog.slotString.s212(),
+		node_id: fixtureCatalog.nodeId.fixture271(),
+		node_name: fixtureCatalog.nodeName.fixture276(),
+		api_base_url: fixtureCatalog.service.fixture211(),
+		access_host: fixtureCatalog.host.fixture212(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
 	{
-		node_id: fixtureCatalog.slotString.s274(),
-		node_name: fixtureCatalog.slotString.s37(),
-		api_base_url: fixtureCatalog.slotString.s277(),
-		access_host: fixtureCatalog.slotString.s278(),
+		node_id: fixtureCatalog.nodeId.fixture274(),
+		node_name: fixtureCatalog.nodeName.fixture37(),
+		api_base_url: fixtureCatalog.service.fixture277(),
+		access_host: fixtureCatalog.host.fixture278(),
 		quota_limit_bytes: 0,
 		quota_reset: { policy: "unlimited" },
 	},
@@ -257,7 +257,9 @@ export const ResponsiveNoScroll: Story = {
 		}
 
 		// Sanity-check key fields are rendered (CSS truncation doesn't change textContent).
-		const tags = await canvas.findAllByText(fixtureCatalog.slotString.s272());
+		const tags = await canvas.findAllByText(
+			fixtureCatalog.endpointTag.fixture272(),
+		);
 		expect(tags).toHaveLength(2);
 
 		const vless = await canvas.findAllByText("VLESS");

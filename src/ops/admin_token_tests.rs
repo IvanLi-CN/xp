@@ -129,7 +129,7 @@ async fn admin_token_set_rejects_short_plaintext() {
         paths,
         AdminTokenSetArgs {
             hash: None,
-            token: Some(xp_test_fixtures::slot_s555().to_owned()),
+            token: Some(xp_test_fixtures::token_fixture555().to_owned()),
             token_stdin: false,
             keep_plaintext: false,
             quiet: true,

@@ -21,17 +21,17 @@ fn sample(
         "u1::e1" => InboundIpMinuteSample {
             membership_key: membership_key.to_string(),
             user_id: user_id.to_string(),
-            node_id: xp_test_fixtures::slot_s468().to_owned(),
-            endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
-            endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            endpoint_id: xp_test_fixtures::label_endpoint2().to_owned(),
+            endpoint_tag: xp_test_fixtures::label_endpoint2().to_owned(),
             ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
         },
         "u2::e2" => InboundIpMinuteSample {
             membership_key: membership_key.to_string(),
             user_id: user_id.to_string(),
-            node_id: xp_test_fixtures::slot_s468().to_owned(),
-            endpoint_id: xp_test_fixtures::slot_s502().to_owned(),
-            endpoint_tag: xp_test_fixtures::slot_s503().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            endpoint_id: xp_test_fixtures::label_endpoint3().to_owned(),
+            endpoint_tag: xp_test_fixtures::label_endpoint3().to_owned(),
             ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
         },
         _ => panic!("unknown inbound IP fixture membership: {membership_key}"),
@@ -251,9 +251,9 @@ fn normalize_recomputes_minutes_and_prunes_memberships() {
             "u1::e1".to_string(),
             PersistedInboundIpMembership {
                 user_id: "u1".to_string(),
-                node_id: xp_test_fixtures::slot_s468().to_owned(),
-                endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
+                node_id: xp_test_fixtures::label_n1().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint2().to_owned(),
+                endpoint_tag: xp_test_fixtures::label_endpoint2().to_owned(),
                 ips: BTreeMap::from([(
                     "203.0.113.7".to_string(),
                     PersistedInboundIpRecord {
@@ -263,8 +263,9 @@ fn normalize_recomputes_minutes_and_prunes_memberships() {
                             bitmap
                         },
                         minutes: 99,
-                        first_seen_at: xp_test_fixtures::slot_s684().to_owned(),
-                        last_seen_at: xp_test_fixtures::slot_s501().to_owned(),
+                        first_seen_at: xp_test_fixtures::timestamp_at20260308_t101100_z()
+                            .to_owned(),
+                        last_seen_at: xp_test_fixtures::timestamp_at20240101_t082100_z().to_owned(),
                         geo: PersistedInboundIpGeo::default(),
                     },
                 )]),
@@ -327,13 +328,13 @@ fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
         &[
             InboundIpUsageMembershipView {
                 membership_key: "u1::e1".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s499().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s500().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint2().to_owned(),
+                endpoint_tag: xp_test_fixtures::label_endpoint2().to_owned(),
             },
             InboundIpUsageMembershipView {
                 membership_key: "u2::e2".to_string(),
-                endpoint_id: xp_test_fixtures::slot_s502().to_owned(),
-                endpoint_tag: xp_test_fixtures::slot_s503().to_owned(),
+                endpoint_id: xp_test_fixtures::label_endpoint3().to_owned(),
+                endpoint_tag: xp_test_fixtures::label_endpoint3().to_owned(),
             },
         ],
         Vec::new(),
@@ -353,8 +354,8 @@ fn build_window_view_deduplicates_unique_ip_counts_and_merges_segments() {
     assert_eq!(
         ip.endpoint_tags,
         vec![
-            xp_test_fixtures::slot_s500().to_owned(),
-            xp_test_fixtures::slot_s503().to_owned(),
+            xp_test_fixtures::label_endpoint2().to_owned(),
+            xp_test_fixtures::label_endpoint3().to_owned(),
         ]
     );
 

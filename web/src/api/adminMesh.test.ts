@@ -20,8 +20,8 @@ function peerFixture() {
 		availability_1h: fixtureCatalog.metric.availabilityFull(),
 		availability_24h: fixtureCatalog.metric.availabilityFull(),
 		mesh_availability_24h: fixtureCatalog.metric.availabilityFull(),
-		latency_p50_ms: fixtureCatalog.slotNumber.n19(),
-		latency_p95_ms: fixtureCatalog.slotNumber.n25(),
+		latency_p50_ms: fixtureCatalog.number.value20(),
+		latency_p95_ms: fixtureCatalog.number.value30(),
 		buckets: [
 			{
 				minute: fixtureCatalog.timestamp.recent(),
@@ -32,7 +32,7 @@ function peerFixture() {
 				fallback_success: 0,
 				end_to_end_success: 1,
 				end_to_end_failure: 0,
-				latency_samples_ms: [fixtureCatalog.slotNumber.n19()],
+				latency_samples_ms: [fixtureCatalog.number.value20()],
 			},
 		],
 	};
@@ -53,12 +53,12 @@ describe("AdminMeshPeerSchema", () => {
 			mesh_transport: {
 				protocol: "h2",
 				health: "healthy",
-				connection_generation: fixtureCatalog.slotNumber.n3(),
-				current_connection_requests: fixtureCatalog.slotNumber.n9(),
-				requests_5m: fixtureCatalog.slotNumber.n9(),
-				connection_starts_5m: fixtureCatalog.slotNumber.n0(),
-				requests_1h: fixtureCatalog.slotNumber.n31(),
-				connection_starts_1h: fixtureCatalog.slotNumber.n1(),
+				connection_generation: fixtureCatalog.number.value4(),
+				current_connection_requests: fixtureCatalog.number.value32(),
+				requests_5m: fixtureCatalog.number.value32(),
+				connection_starts_5m: fixtureCatalog.number.value1(),
+				requests_1h: fixtureCatalog.number.value200(),
+				connection_starts_1h: fixtureCatalog.number.value2(),
 				last_connection_started_at: fixtureCatalog.timestamp.recent(),
 			},
 		});

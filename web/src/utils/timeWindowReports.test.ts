@@ -25,30 +25,30 @@ const trafficResponse: AdminNodeTrafficResponse = {
 	node,
 	traffic: {
 		window: "24h",
-		window_start_at: fixtureCatalog.slotString.s628(),
-		window_end_at: fixtureCatalog.slotString.s629(),
+		window_start_at: fixtureCatalog.timestamp.t20260807T120000(),
+		window_end_at: fixtureCatalog.timestamp.t20260808T120000(),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			uplink_bytes: fixtureCatalog.slotNumber.n24(),
-			downlink_bytes: fixtureCatalog.slotNumber.n19(),
-			total_bytes: fixtureCatalog.slotNumber.n25(),
+			uplink_bytes: fixtureCatalog.number.value10(),
+			downlink_bytes: fixtureCatalog.number.value20(),
+			total_bytes: fixtureCatalog.number.value30(),
 			complete: true,
 		},
 		current: [
 			{
-				start_at: fixtureCatalog.slotString.s630(),
-				end_at: fixtureCatalog.slotString.s629(),
-				uplink_bytes: fixtureCatalog.slotNumber.n3(),
-				downlink_bytes: fixtureCatalog.slotNumber.n5(),
-				total_bytes: fixtureCatalog.slotNumber.n24(),
+				start_at: fixtureCatalog.timestamp.t20260808T115500(),
+				end_at: fixtureCatalog.timestamp.t20260808T120000(),
+				uplink_bytes: fixtureCatalog.number.value4(),
+				downlink_bytes: fixtureCatalog.number.value6(),
+				total_bytes: fixtureCatalog.number.value10(),
 				complete: true,
 				is_current_day: false,
 			},
 		],
 		reference: [],
 		partial: false,
-		last_sample_at: fixtureCatalog.slotString.s629(),
+		last_sample_at: fixtureCatalog.timestamp.t20260808T120000(),
 		warnings: [],
 	},
 };
@@ -92,8 +92,8 @@ describe("time window report alignment", () => {
 		const report: AdminNodeTcpConnectionsResponse = {
 			node,
 			window: "24h",
-			window_start: fixtureCatalog.slotString.s628(),
-			window_end: fixtureCatalog.slotString.s629(),
+			window_start: fixtureCatalog.timestamp.t20260807T120000(),
+			window_end: fixtureCatalog.timestamp.t20260808T120000(),
 			warnings: [],
 			endpoints: [
 				{
@@ -108,8 +108,8 @@ describe("time window report alignment", () => {
 					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
 					port: fixtureCatalog.endpoint.port443(),
 					series: [
-						{ minute: fixtureCatalog.slotString.s629(), count: 3 },
-						{ minute: fixtureCatalog.slotString.s634(), count: 9 },
+						{ minute: fixtureCatalog.timestamp.t20260808T120000(), count: 3 },
+						{ minute: fixtureCatalog.timestamp.t20260808T120800(), count: 9 },
 					],
 				},
 			],
@@ -123,7 +123,7 @@ describe("time window report alignment", () => {
 
 		expect(aligned.window_end).toBe("2026-08-08T12:07:00.000Z");
 		expect(aligned.per_endpoint_series[0]?.series).toEqual([
-			{ minute: fixtureCatalog.slotString.s629(), count: 3 },
+			{ minute: fixtureCatalog.timestamp.t20260808T120000(), count: 3 },
 		]);
 	});
 
@@ -132,8 +132,8 @@ describe("time window report alignment", () => {
 			node,
 			window: "24h",
 			geo_source: "country_is",
-			window_start: fixtureCatalog.slotString.s635(),
-			window_end: fixtureCatalog.slotString.s628(),
+			window_start: fixtureCatalog.timestamp.t20260806T120000(),
+			window_end: fixtureCatalog.timestamp.t20260807T120000(),
 			warnings: [],
 			unique_ip_series: [],
 			timeline: [
@@ -145,8 +145,8 @@ describe("time window report alignment", () => {
 					minutes: 1_440,
 					segments: [
 						{
-							start_minute: fixtureCatalog.slotString.s636(),
-							end_minute: fixtureCatalog.slotString.s637(),
+							start_minute: fixtureCatalog.timestamp.t20260807T115800(),
+							end_minute: fixtureCatalog.timestamp.t20260807T120200(),
 						},
 					],
 				},
@@ -158,7 +158,7 @@ describe("time window report alignment", () => {
 					endpoint_tags: ["edge-a", "aged-out"],
 					region: "Test",
 					operator: "Example",
-					last_seen_at: fixtureCatalog.slotString.s637(),
+					last_seen_at: fixtureCatalog.timestamp.t20260807T120200(),
 				},
 			],
 		};
@@ -182,8 +182,8 @@ describe("time window report alignment", () => {
 		const unchanged = alignNodeIpUsageResponse(
 			{
 				...report,
-				window_start: fixtureCatalog.slotString.s639(),
-				window_end: fixtureCatalog.slotString.s629(),
+				window_start: fixtureCatalog.timestamp.t20260807T120100(),
+				window_end: fixtureCatalog.timestamp.t20260808T120000(),
 				ips: completeIps,
 			},
 			"24h",

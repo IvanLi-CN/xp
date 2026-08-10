@@ -72,12 +72,12 @@ export function handleAdminConfigAndEndpointRoutes({
 }: RouteContext): boolean {
 	if (path === "/api/admin/config" && method === "GET") {
 		jsonResponse(route, {
-			bind: fixtureCatalog.slotString.s58(),
-			xray_api_addr: fixtureCatalog.slotString.s59(),
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: fixtureCatalog.slotString.s74(),
-			access_host: fixtureCatalog.slotString.s75(),
-			api_base_url: fixtureCatalog.slotString.s76(),
+			node_name: fixtureCatalog.nodeName.fixture74(),
+			access_host: fixtureCatalog.host.fixture75(),
+			api_base_url: fixtureCatalog.service.fixture76(),
 			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
@@ -98,9 +98,9 @@ export function handleAdminConfigAndEndpointRoutes({
 	if (path === "/api/admin/endpoints" && method === "POST") {
 		const payload = parseJsonBody(request);
 		const newEndpoint: AdminEndpointLike = {
-			endpoint_id: fixtureCatalog.slotString.s68(),
-			node_id: fixtureCatalog.slotString.s77(),
-			tag: fixtureCatalog.slotString.s78(),
+			endpoint_id: fixtureCatalog.endpointId.fixture68(),
+			node_id: fixtureCatalog.nodeId.fixture77(),
+			tag: fixtureCatalog.endpointTag.fixture78(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: fixtureCatalog.endpoint.port9443(),
 			meta: { reality: fixtureCatalog.endpoint.reality() },

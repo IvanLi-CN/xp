@@ -1,0 +1,14 @@
+id: fixture-policy-rust-no-positional-fixture-accessor
+snapshots:
+  use xp_test_fixtures::slot_n4 as fixture_slot_n4;:
+    labels:
+    - source: slot_n4
+      style: primary
+      start: 22
+      end: 29
+  xp_test_fixtures::slot_s229():
+    labels:
+    - source: slot_s229
+      style: primary
+      start: 18
+      end: 27

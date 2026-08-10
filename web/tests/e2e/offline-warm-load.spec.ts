@@ -443,8 +443,8 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 	page,
 }) => {
 	const token = `${Date.now()}`;
-	const tokenStorageKey = fixtureCatalog.slotString.s79();
-	const tokenStorageValue = fixtureCatalog.slotString.s80();
+	const tokenStorageKey = fixtureCatalog.token.fixture79();
+	const tokenStorageValue = fixtureCatalog.token.fixture80();
 	await page.goto("/__e2e_legacy_client__.html");
 	const legacyCacheName = await page.evaluate(
 		() => `workbox-precache-v2-${location.origin}/`,
@@ -601,7 +601,7 @@ test("migrates a legacy client around a complete XP waiting worker", async ({
 			}),
 		);
 	});
-	await setAdminToken(migratedPage, fixtureCatalog.slotString.s80());
+	await setAdminToken(migratedPage, fixtureCatalog.token.fixture80());
 	await setupApiMocks(migratedPage, { mockStatusEvents: false });
 	const runtimeErrors: string[] = [];
 	migratedPage.on("console", (message) => {

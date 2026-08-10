@@ -10,8 +10,8 @@ function upgradeStatus(state: UpgradeState) {
 		state === "idle"
 			? { finished_at: null, started_at: null }
 			: {
-					finished_at: fixtureCatalog.slotString.s464(),
-					started_at: fixtureCatalog.slotString.s82(),
+					finished_at: fixtureCatalog.timestamp.t20990101T000000(),
+					started_at: fixtureCatalog.timestamp.t20260807T000000(),
 				};
 	return {
 		support: {
@@ -26,20 +26,20 @@ function upgradeStatus(state: UpgradeState) {
 			...lifecycle,
 			exit_code: state === "succeeded" ? 0 : state === "idle" ? null : 1,
 			message: null,
-			updated_at: fixtureCatalog.slotString.s464(),
+			updated_at: fixtureCatalog.timestamp.t20990101T000000(),
 		},
 	};
 }
 
 const meshStatus = {
-	generated_at: fixtureCatalog.slotString.s82(),
+	generated_at: fixtureCatalog.timestamp.t20260807T000000(),
 	revision: 1,
 	local: {
-		node_id: fixtureCatalog.slotString.s32(),
-		node_name: fixtureCatalog.slotString.s83(),
-		cluster_id: fixtureCatalog.slotString.s84(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture83(),
+		cluster_id: fixtureCatalog.cluster.fixture84(),
 		role: "leader",
-		leader_api_base_url: fixtureCatalog.slotString.s85(),
+		leader_api_base_url: fixtureCatalog.service.fixture85(),
 		term: 1,
 		mesh_proxy_status: "direct",
 		mesh_proxy_reason: null,
@@ -71,10 +71,10 @@ for (const terminalState of ["succeeded", "failed", "unsupported"] as const) {
 					current: { package: "3.23.1", release_tag: "v3.23.1" },
 					latest: {
 						release_tag: "v3.23.2",
-						published_at: fixtureCatalog.slotString.s82(),
+						published_at: fixtureCatalog.timestamp.t20260807T000000(),
 					},
 					has_update: true,
-					checked_at: fixtureCatalog.slotString.s82(),
+					checked_at: fixtureCatalog.timestamp.t20260807T000000(),
 					compare_reason: "update_available",
 					source: {
 						kind: "github_release",
@@ -167,10 +167,10 @@ test("clears an ambiguous start error after status confirms success", async ({
 				current: { package: "3.23.1", release_tag: "v3.23.1" },
 				latest: {
 					release_tag: "v3.23.2",
-					published_at: fixtureCatalog.slotString.s82(),
+					published_at: fixtureCatalog.timestamp.t20260807T000000(),
 				},
 				has_update: true,
-				checked_at: fixtureCatalog.slotString.s82(),
+				checked_at: fixtureCatalog.timestamp.t20260807T000000(),
 				compare_reason: "update_available",
 				source: {
 					kind: "github_release",

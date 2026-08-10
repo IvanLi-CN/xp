@@ -719,7 +719,7 @@
     "source_lines": 4438
   },
   "src/state/tests.rs": {
-    "source_lines": 2432
+    "source_lines": 2448
   },
   "src/subscription.rs": {
     "long_line_count": 5,
@@ -767,7 +767,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2480
+    "source_lines": 2492
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -1077,8 +1077,8 @@
   },
   "web/src/views/UserDetailsPage.test.tsx": {
     "long_line_count": 8,
-    "max_line_length": 152,
-    "source_lines": 1154
+    "max_line_length": 156,
+    "source_lines": 1188
   },
   "web/src/views/UserDetailsPage.tsx": {
     "long_line_count": 14,
@@ -1102,7 +1102,7 @@
     "max_line_length": 862
   },
   "fixture-policy/rules/rust-adapter-output-provenance.yml": {
-    "long_line_count": 1,
+    "long_line_count": 3,
     "max_line_length": 325
   },
   "fixture-policy/rules/rust-fixture-data.yml": {

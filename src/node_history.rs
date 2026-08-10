@@ -2213,10 +2213,10 @@ mod tests {
 
     fn runtime(events: Vec<NodeRuntimeEvent>) -> LocalNodeRuntimeSnapshot {
         LocalNodeRuntimeSnapshot {
-            node_id: xp_test_fixtures::slot_s615().to_owned(),
+            node_id: xp_test_fixtures::label_node_a().to_owned(),
             summary: NodeRuntimeSummary {
                 status: RuntimeSummaryStatus::Up,
-                updated_at: xp_test_fixtures::slot_s617().to_owned(),
+                updated_at: xp_test_fixtures::timestamp_at20260520_t000000_z().to_owned(),
             },
             components: vec![
                 component(RuntimeComponent::Xp, RuntimeStatus::Up),
@@ -2258,23 +2258,23 @@ mod tests {
     ) -> TrafficReport {
         TrafficReport {
             window: "24h".to_string(),
-            window_start_at: xp_test_fixtures::slot_s679().to_owned(),
+            window_start_at: xp_test_fixtures::timestamp_at20260519_t000000_z().to_owned(),
             window_end_at: window_end_at.to_string(),
             timezone: "UTC".to_string(),
             summary: TrafficSummary {
                 mode: "rolling_30d".to_string(),
                 cycle_start_at: xp_test_fixtures::none(),
                 cycle_end_at: xp_test_fixtures::none(),
-                uplink_bytes: xp_test_fixtures::slot_n16(),
-                downlink_bytes: xp_test_fixtures::slot_n16(),
-                total_bytes: xp_test_fixtures::slot_n16(),
+                uplink_bytes: xp_test_fixtures::number_value0(),
+                downlink_bytes: xp_test_fixtures::number_value0(),
+                total_bytes: xp_test_fixtures::number_value0(),
                 complete: true,
                 tracking_since: None,
             },
             current,
             reference: None,
             partial: false,
-            last_sample_at: Some(xp_test_fixtures::slot_s617().to_owned()),
+            last_sample_at: Some(xp_test_fixtures::timestamp_at20260520_t000000_z().to_owned()),
             warnings: Vec::new(),
         }
     }
@@ -2456,8 +2456,8 @@ mod tests {
                     complete: true,
                     warnings: Vec::new(),
                     cycle: Some(TrafficCycleContext {
-                        start_at: xp_test_fixtures::slot_s624().to_owned(),
-                        end_at: xp_test_fixtures::slot_s625().to_owned(),
+                        start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+                        end_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
                         mode: TrafficCycleMode::Monthly,
                     }),
                     user_cycles: BTreeMap::new(),
@@ -2571,16 +2571,16 @@ mod tests {
     #[test]
     fn cycle_accumulator_can_be_complete_after_a_valid_starting_bucket() {
         let context = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s624().to_owned(),
-            end_at: xp_test_fixtures::slot_s625().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let mut accumulator = Some(TrafficCycleAccumulator {
             mode: "monthly".to_string(),
-            start_at: xp_test_fixtures::slot_s680().to_owned(),
-            end_at: xp_test_fixtures::slot_s624().to_owned(),
-            uplink_bytes: xp_test_fixtures::slot_n30(),
-            downlink_bytes: xp_test_fixtures::slot_n31(),
+            start_at: xp_test_fixtures::timestamp_at20260401_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+            uplink_bytes: xp_test_fixtures::number_value100(),
+            downlink_bytes: xp_test_fixtures::number_value200(),
             complete: true,
             tracking_since: "2026-04-01T00:05:00Z".to_string(),
             warnings: Vec::new(),
@@ -2600,13 +2600,13 @@ mod tests {
     #[test]
     fn cycle_configuration_warning_is_included_in_report_warnings() {
         let first = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s624().to_owned(),
-            end_at: xp_test_fixtures::slot_s627().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260615_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let second = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s625().to_owned(),
-            end_at: xp_test_fixtures::slot_s681().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260701_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let mut accumulator = None;
@@ -2722,10 +2722,10 @@ mod tests {
             }],
             cycle: Some(TrafficCycleAccumulator {
                 mode: "monthly".to_string(),
-                start_at: xp_test_fixtures::slot_s681().to_owned(),
-                end_at: xp_test_fixtures::slot_s682().to_owned(),
-                uplink_bytes: xp_test_fixtures::slot_n24(),
-                downlink_bytes: xp_test_fixtures::slot_n19(),
+                start_at: xp_test_fixtures::timestamp_at20260701_t000000_z().to_owned(),
+                end_at: xp_test_fixtures::timestamp_at20260801_t000000_z().to_owned(),
+                uplink_bytes: xp_test_fixtures::number_value10(),
+                downlink_bytes: xp_test_fixtures::number_value20(),
                 complete: true,
                 tracking_since: "2026-07-28T00:05:00Z".to_string(),
                 warnings: Vec::new(),
@@ -2744,10 +2744,10 @@ mod tests {
             }],
             cycle: Some(TrafficCycleAccumulator {
                 mode: "monthly".to_string(),
-                start_at: xp_test_fixtures::slot_s682().to_owned(),
-                end_at: xp_test_fixtures::slot_s683().to_owned(),
-                uplink_bytes: xp_test_fixtures::slot_n25(),
-                downlink_bytes: xp_test_fixtures::slot_n26(),
+                start_at: xp_test_fixtures::timestamp_at20260801_t000000_z().to_owned(),
+                end_at: xp_test_fixtures::timestamp_at20260901_t000000_z().to_owned(),
+                uplink_bytes: xp_test_fixtures::number_value30(),
+                downlink_bytes: xp_test_fixtures::number_value40(),
                 complete: true,
                 tracking_since: "2026-08-01T00:05:00Z".to_string(),
                 warnings: Vec::new(),
@@ -2845,8 +2845,10 @@ mod tests {
                 now,
                 "node-b",
                 NodeHistorySnapshot {
-                    node_id: xp_test_fixtures::slot_s616().to_owned(),
-                    last_synced_at: Some(xp_test_fixtures::slot_s618().to_owned()),
+                    node_id: xp_test_fixtures::label_node_b().to_owned(),
+                    last_synced_at: Some(
+                        xp_test_fixtures::timestamp_at20260729_t000500_z().to_owned(),
+                    ),
                     last_sync_error: None,
                     daily_traffic: Vec::new(),
                     daily_component_status: Vec::new(),
@@ -2870,13 +2872,13 @@ mod tests {
         let first = "2026-05-31T23:55:00Z".parse::<DateTime<Utc>>().unwrap();
         let second = "2026-06-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let old_cycle = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s624().to_owned(),
-            end_at: xp_test_fixtures::slot_s625().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let new_cycle = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s625().to_owned(),
-            end_at: xp_test_fixtures::slot_s681().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260701_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
 
@@ -3099,15 +3101,15 @@ mod tests {
                 }],
                 cycle: Some(TrafficCycleAccumulator {
                     mode: "monthly".to_string(),
-                    start_at: xp_test_fixtures::slot_s624().to_owned(),
-                    end_at: xp_test_fixtures::slot_s625().to_owned(),
-                    uplink_bytes: xp_test_fixtures::slot_n24(),
-                    downlink_bytes: xp_test_fixtures::slot_n19(),
+                    start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+                    end_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
+                    uplink_bytes: xp_test_fixtures::number_value10(),
+                    downlink_bytes: xp_test_fixtures::number_value20(),
                     complete: true,
                     tracking_since: "2026-05-01T00:00:00Z".to_string(),
                     warnings: Vec::new(),
                 }),
-                last_sample_at: Some(xp_test_fixtures::slot_s619().to_owned()),
+                last_sample_at: Some(xp_test_fixtures::timestamp_at20260520_t115500_z().to_owned()),
                 ..NodeTrafficRollupSnapshot::default()
             },
             TrafficWindow::Days31,
@@ -3198,7 +3200,7 @@ mod tests {
                 now,
                 "node-a",
                 NodeHistorySnapshot {
-                    node_id: xp_test_fixtures::slot_s615().to_owned(),
+                    node_id: xp_test_fixtures::label_node_a().to_owned(),
                     last_synced_at: xp_test_fixtures::none(),
                     last_sync_error: None,
                     daily_traffic: Vec::new(),
@@ -3224,8 +3226,8 @@ mod tests {
         let removed = "2026-05-20T00:10:00Z".parse::<DateTime<Utc>>().unwrap();
         let expired = "2026-08-19T00:15:00Z".parse::<DateTime<Utc>>().unwrap();
         let cycle = TrafficCycleContext {
-            start_at: xp_test_fixtures::slot_s624().to_owned(),
-            end_at: xp_test_fixtures::slot_s625().to_owned(),
+            start_at: xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned(),
+            end_at: xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned(),
             mode: TrafficCycleMode::Monthly,
         };
         let cycles = || BTreeMap::from([("user-a".to_string(), cycle.clone())]);
@@ -3432,19 +3434,23 @@ mod tests {
     fn merged_reports_do_not_sum_incompatible_quota_cycles() {
         let mut first = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         first.summary.mode = "cycle".to_string();
-        first.summary.cycle_start_at = Some(xp_test_fixtures::slot_s624().to_owned());
-        first.summary.cycle_end_at = Some(xp_test_fixtures::slot_s625().to_owned());
-        first.summary.uplink_bytes = xp_test_fixtures::slot_n30();
-        first.summary.downlink_bytes = xp_test_fixtures::slot_n31();
-        first.summary.total_bytes = xp_test_fixtures::slot_n38();
+        first.summary.cycle_start_at =
+            Some(xp_test_fixtures::timestamp_at20260501_t000000_z().to_owned());
+        first.summary.cycle_end_at =
+            Some(xp_test_fixtures::timestamp_at20260601_t000000_z().to_owned());
+        first.summary.uplink_bytes = xp_test_fixtures::number_value100();
+        first.summary.downlink_bytes = xp_test_fixtures::number_value200();
+        first.summary.total_bytes = xp_test_fixtures::number_value300();
 
         let mut second = report_with_current_points("2026-05-20T00:10:00Z", Vec::new());
         second.summary.mode = "cycle".to_string();
-        second.summary.cycle_start_at = Some(xp_test_fixtures::slot_s626().to_owned());
-        second.summary.cycle_end_at = Some(xp_test_fixtures::slot_s627().to_owned());
-        second.summary.uplink_bytes = xp_test_fixtures::slot_n26();
-        second.summary.downlink_bytes = xp_test_fixtures::slot_n28();
-        second.summary.total_bytes = xp_test_fixtures::slot_n39();
+        second.summary.cycle_start_at =
+            Some(xp_test_fixtures::timestamp_at20260515_t000000_z().to_owned());
+        second.summary.cycle_end_at =
+            Some(xp_test_fixtures::timestamp_at20260615_t000000_z().to_owned());
+        second.summary.uplink_bytes = xp_test_fixtures::number_value40();
+        second.summary.downlink_bytes = xp_test_fixtures::number_value50();
+        second.summary.total_bytes = xp_test_fixtures::number_value900();
 
         let merged = merge_traffic_reports(
             &[first, second],
@@ -3550,7 +3556,7 @@ mod tests {
         let events = (0..80)
             .map(|i| NodeRuntimeEvent {
                 event_id: format!("evt-{i}"),
-                occurred_at: xp_test_fixtures::slot_s617().to_owned(),
+                occurred_at: xp_test_fixtures::timestamp_at20260520_t000000_z().to_owned(),
                 component: RuntimeComponent::Xray,
                 kind: NodeRuntimeEventKind::StatusChanged,
                 message: "xray status changed".to_string(),

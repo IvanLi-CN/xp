@@ -119,7 +119,7 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
-		subscription_token: fixtureCatalog.slotString.s254(),
+		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
@@ -128,10 +128,10 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: fixtureCatalog.slotString.s134(),
-				node_name: fixtureCatalog.slotString.s135(),
-				api_base_url: fixtureCatalog.slotString.s136(),
-				access_host: fixtureCatalog.slotString.s137(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				node_name: fixtureCatalog.nodeName.fixture135(),
+				api_base_url: fixtureCatalog.service.fixture136(),
+				access_host: fixtureCatalog.host.fixture137(),
 				quota_limit_bytes: 0,
 				quota_reset: {
 					policy: "monthly",
@@ -145,25 +145,25 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
-				endpoint_id: fixtureCatalog.slotString.s138(),
-				node_id: fixtureCatalog.slotString.s134(),
-				tag: fixtureCatalog.slotString.s139(),
+				endpoint_id: fixtureCatalog.endpointId.fixture138(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture139(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 443,
 				meta: {},
 			},
 			{
-				endpoint_id: fixtureCatalog.slotString.s140(),
-				node_id: fixtureCatalog.slotString.s134(),
-				tag: fixtureCatalog.slotString.s141(),
+				endpoint_id: fixtureCatalog.endpointId.fixture140(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture141(),
 				kind: fixtureCatalog.endpoint.ssKind(),
 				port: 8443,
 				meta: {},
 			},
 			{
-				endpoint_id: fixtureCatalog.slotString.s255(),
-				node_id: fixtureCatalog.slotString.s134(),
-				tag: fixtureCatalog.slotString.s256(),
+				endpoint_id: fixtureCatalog.endpointId.fixture255(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture256(),
 				kind: fixtureCatalog.endpoint.ssKind(),
 				port: 9443,
 				meta: {},
@@ -180,7 +180,7 @@ function setupMocks(args?: {
 		items: [
 			{
 				user_id: fixtureCatalog.identifier.userPrimary(),
-				node_id: fixtureCatalog.slotString.s134(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
 				quota_limit_bytes: 0,
 				quota_reset_source: "user",
 			},
@@ -193,7 +193,7 @@ function setupMocks(args?: {
 		items: [
 			{
 				user_id: fixtureCatalog.identifier.userPrimary(),
-				node_id: fixtureCatalog.slotString.s134(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
 				quota_limit_bytes: 1024,
 				used_bytes: 0,
 				remaining_bytes: 1024,
@@ -218,10 +218,10 @@ function setupMocks(args?: {
 				groups: [
 					{
 						node: {
-							node_id: fixtureCatalog.slotString.s134(),
-							node_name: fixtureCatalog.slotString.s135(),
-							api_base_url: fixtureCatalog.slotString.s136(),
-							access_host: fixtureCatalog.slotString.s137(),
+							node_id: fixtureCatalog.nodeId.fixture134(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture136(),
+							access_host: fixtureCatalog.host.fixture137(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -230,36 +230,42 @@ function setupMocks(args?: {
 							},
 						},
 						geo_source: "country_is",
-						window_start: fixtureCatalog.slotString.s24(),
-						window_end: fixtureCatalog.slotString.s25(),
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
-							{ minute: fixtureCatalog.slotString.s26(), count: 2 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000100(),
+								count: 2,
+							},
 						],
 						timeline: [
 							{
 								lane_key: "edge-tokyo|203.0.113.7",
-								endpoint_id: fixtureCatalog.slotString.s40(),
-								endpoint_tag: fixtureCatalog.slotString.s41(),
-								ip: fixtureCatalog.slotString.s29(),
+								endpoint_id: fixtureCatalog.endpointId.fixture40(),
+								endpoint_tag: fixtureCatalog.endpointTag.fixture41(),
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 2,
 								segments: [
 									{
-										start_minute: fixtureCatalog.slotString.s24(),
-										end_minute: fixtureCatalog.slotString.s26(),
+										start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+										end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 									},
 								],
 							},
 						],
 						ips: [
 							{
-								ip: fixtureCatalog.slotString.s29(),
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 2,
-								endpoint_tags: [fixtureCatalog.slotString.s41()],
+								endpoint_tags: [fixtureCatalog.endpointTag.fixture41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: fixtureCatalog.slotString.s26(),
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 							},
 						],
 					},
@@ -275,14 +281,14 @@ function setupMocks(args?: {
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
-		node_id: fixtureCatalog.slotString.s134(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
 		quota_limit_bytes: 0,
 		quota_reset_source: "user",
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
-		subscription_token: fixtureCatalog.slotString.s254(),
+		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
 		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
@@ -301,7 +307,7 @@ function setupMocks(args?: {
 		extra_proxy_providers_yaml: "",
 	});
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
-		subscription_token: fixtureCatalog.slotString.s257(),
+		subscription_token: fixtureCatalog.token.fixture257(),
 	});
 	vi.mocked(resetAdminUserCredentials).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
@@ -327,8 +333,8 @@ describe("<UserDetailsPage />", () => {
 			access: [
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
-					endpoint_id: fixtureCatalog.slotString.s138(),
-					node_id: fixtureCatalog.slotString.s134(),
+					endpoint_id: fixtureCatalog.endpointId.fixture138(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 				},
 			],
 		});
@@ -342,7 +348,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		const checkbox = await screenByLabel(
-			`Toggle ${fixtureCatalog.slotString.s135()} VLESS`,
+			`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
 		);
 		expect(checkbox).toBeChecked();
 	});
@@ -355,7 +361,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
-		expect(await queryByText(fixtureCatalog.slotString.s134())).toBeNull();
+		expect(await queryByText(fixtureCatalog.nodeId.fixture134())).toBeNull();
 	});
 
 	it("applies selected endpoints via putAdminUserAccess", async () => {
@@ -364,7 +370,9 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
-			await screenByLabel(`Toggle ${fixtureCatalog.slotString.s135()} VLESS`),
+			await screenByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
+			),
 		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
@@ -375,7 +383,7 @@ describe("<UserDetailsPage />", () => {
 				{
 					items: [
 						{
-							endpoint_id: fixtureCatalog.slotString.s138(),
+							endpoint_id: fixtureCatalog.endpointId.fixture138(),
 						},
 					],
 				},
@@ -403,12 +411,12 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
-			await screenByLabel(`Toggle row ${fixtureCatalog.slotString.s135()}`),
+			await screenByLabel(`Toggle row ${fixtureCatalog.nodeName.fixture135()}`),
 		);
 
 		expect(
 			await screenByText(
-				`Node all-select covers current endpoints on ${fixtureCatalog.slotString.s135()} only. Future endpoints still follow protocol all-select defaults.`,
+				`Node all-select covers current endpoints on ${fixtureCatalog.nodeName.fixture135()} only. Future endpoints still follow protocol all-select defaults.`,
 			),
 		).toBeTruthy();
 	});
@@ -418,8 +426,8 @@ describe("<UserDetailsPage />", () => {
 			access: [
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
-					endpoint_id: fixtureCatalog.slotString.s138(),
-					node_id: fixtureCatalog.slotString.s134(),
+					endpoint_id: fixtureCatalog.endpointId.fixture138(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 				},
 			],
 		});
@@ -427,7 +435,9 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
-			await screenByLabel(`Toggle ${fixtureCatalog.slotString.s135()} VLESS`),
+			await screenByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
+			),
 		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
@@ -457,12 +467,12 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
@@ -473,8 +483,8 @@ describe("<UserDetailsPage />", () => {
 				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: fixtureCatalog.slotString.s140() },
-						{ endpoint_id: fixtureCatalog.slotString.s255() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture140() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture255() },
 					]),
 				},
 			);
@@ -488,13 +498,13 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		const allToggle = await screenByLabel("Toggle all");
 		const rowToggle = await screenByLabel(
-			`Toggle row ${fixtureCatalog.slotString.s135()}`,
+			`Toggle row ${fixtureCatalog.nodeName.fixture135()}`,
 		);
 		const columnToggle = await screenByLabel("Toggle SS2022");
 
@@ -513,11 +523,13 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 
 		expect(
-			await queryByLabel(`Toggle ${fixtureCatalog.slotString.s135()} SS2022`),
+			await queryByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} SS2022`,
+			),
 		).toBeNull();
 		expect(
 			await screenByLabel(
-				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeTruthy();
 	});
@@ -529,18 +541,18 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 
@@ -552,8 +564,8 @@ describe("<UserDetailsPage />", () => {
 				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: fixtureCatalog.slotString.s140() },
-						{ endpoint_id: fixtureCatalog.slotString.s255() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture140() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture255() },
 					]),
 				},
 			);
@@ -576,7 +588,7 @@ describe("<UserDetailsPage />", () => {
 
 		const tree = await screenByRole(
 			"tree",
-			`Endpoint options for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+			`Endpoint options for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 		);
 		expect((tree.parentElement as HTMLElement | null)?.className).not.toContain(
 			"absolute",
@@ -590,28 +602,28 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				`Toggle endpoint tree for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Toggle endpoint tree for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				`Toggle all endpoints for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				`Toggle endpoint tree for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Toggle endpoint tree for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s141()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				`Select endpoint ${fixtureCatalog.slotString.s256()} for ${fixtureCatalog.slotString.s134()} ss2022_2022_blake3_aes_128_gcm`,
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 	});
@@ -636,7 +648,7 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith(
-				fixtureCatalog.slotString.s254(),
+				fixtureCatalog.token.fixture254(),
 				"raw",
 			);
 		});
@@ -661,7 +673,7 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith(
-				fixtureCatalog.slotString.s254(),
+				fixtureCatalog.token.fixture254(),
 				"mihomo",
 			);
 		});
@@ -687,7 +699,7 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith(
-				fixtureCatalog.slotString.s254(),
+				fixtureCatalog.token.fixture254(),
 				"mihomo",
 				"mirror",
 			);
@@ -835,11 +847,11 @@ rules: []
 		setupMocks();
 		vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValueOnce({
 			partial: true,
-			unreachable_nodes: [fixtureCatalog.slotString.s258()],
+			unreachable_nodes: [fixtureCatalog.nodeId.fixture258()],
 			items: [
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
-					node_id: fixtureCatalog.slotString.s134(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 					quota_limit_bytes: 1024,
 					used_bytes: 0,
 					remaining_bytes: 1024,
@@ -854,7 +866,7 @@ rules: []
 		expect(await screenByText("Quota status is partial.")).toBeTruthy();
 		expect(
 			await screenByText(
-				`Unreachable nodes: ${fixtureCatalog.slotString.s258()}`,
+				`Unreachable nodes: ${fixtureCatalog.nodeId.fixture258()}`,
 			),
 		).toBeTruthy();
 	});
@@ -873,10 +885,10 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: fixtureCatalog.slotString.s134(),
-							node_name: fixtureCatalog.slotString.s135(),
-							api_base_url: fixtureCatalog.slotString.s136(),
-							access_host: fixtureCatalog.slotString.s137(),
+							node_id: fixtureCatalog.nodeId.fixture134(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture136(),
+							access_host: fixtureCatalog.host.fixture137(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -885,30 +897,33 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: fixtureCatalog.slotString.s24(),
-						window_end: fixtureCatalog.slotString.s25(),
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
 						],
 						timeline: [],
 						ips: [
 							{
-								ip: fixtureCatalog.slotString.s29(),
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 1,
-								endpoint_tags: [fixtureCatalog.slotString.s41()],
+								endpoint_tags: [fixtureCatalog.endpointTag.fixture41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: fixtureCatalog.slotString.s24(),
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000000(),
 							},
 						],
 					},
 					{
 						node: {
-							node_id: fixtureCatalog.slotString.s258(),
-							node_name: fixtureCatalog.slotString.s259(),
-							api_base_url: fixtureCatalog.slotString.s260(),
-							access_host: fixtureCatalog.slotString.s244(),
+							node_id: fixtureCatalog.nodeId.fixture258(),
+							node_name: fixtureCatalog.nodeName.fixture259(),
+							api_base_url: fixtureCatalog.service.fixture260(),
+							access_host: fixtureCatalog.host.fixture244(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -917,21 +932,24 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: fixtureCatalog.slotString.s24(),
-						window_end: fixtureCatalog.slotString.s25(),
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
 						],
 						timeline: [],
 						ips: [
 							{
-								ip: fixtureCatalog.slotString.s142(),
+								ip: fixtureCatalog.address.documentation192_0_2_143(),
 								minutes: 1,
 								endpoint_tags: ["edge-osaka"],
 								region: "Japan / Osaka",
 								operator: "CarrierNet",
-								last_seen_at: fixtureCatalog.slotString.s24(),
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000000(),
 							},
 						],
 					},
@@ -952,26 +970,32 @@ rules: []
 		});
 		await waitFor(() => {
 			expect(
-				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s135()}`),
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture135()}`,
+				),
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByRole("tab", { name: fixtureCatalog.slotString.s135() }),
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture135() }),
 		).toHaveAttribute("aria-selected", "true");
 		expect(
-			screen.queryByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+			screen.queryByText(
+				`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+			),
 		).not.toBeInTheDocument();
 
 		fireEvent.click(
-			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
 		);
 		await waitFor(() => {
 			expect(
-				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+				),
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
 		).toHaveAttribute("aria-selected", "true");
 		expect(
 			screen.getByText("Geo enrichment uses the free country.is hosted API."),
@@ -988,14 +1012,18 @@ rules: []
 		});
 		await waitFor(() => {
 			expect(
-				screen.getByText(`Usage details · ${fixtureCatalog.slotString.s259()}`),
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+				),
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.queryByText(`Usage details · ${fixtureCatalog.slotString.s135()}`),
+			screen.queryByText(
+				`Usage details · ${fixtureCatalog.nodeName.fixture135()}`,
+			),
 		).not.toBeInTheDocument();
 		expect(
-			screen.getByRole("tab", { name: fixtureCatalog.slotString.s259() }),
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
 		).toHaveAttribute("aria-selected", "true");
 	});
 
@@ -1013,10 +1041,10 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: fixtureCatalog.slotString.s145(),
-							node_name: fixtureCatalog.slotString.s135(),
-							api_base_url: fixtureCatalog.slotString.s261(),
-							access_host: fixtureCatalog.slotString.s262(),
+							node_id: fixtureCatalog.nodeId.fixture145(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture261(),
+							access_host: fixtureCatalog.host.fixture262(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -1025,21 +1053,24 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: fixtureCatalog.slotString.s24(),
-						window_end: fixtureCatalog.slotString.s25(),
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
 						],
 						timeline: [],
 						ips: [],
 					},
 					{
 						node: {
-							node_id: fixtureCatalog.slotString.s263(),
-							node_name: fixtureCatalog.slotString.s135(),
-							api_base_url: fixtureCatalog.slotString.s264(),
-							access_host: fixtureCatalog.slotString.s265(),
+							node_id: fixtureCatalog.nodeId.fixture263(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture264(),
+							access_host: fixtureCatalog.host.fixture265(),
 							quota_limit_bytes: 0,
 							quota_reset: {
 								policy: "monthly",
@@ -1048,11 +1079,14 @@ rules: []
 							},
 						},
 						geo_source: "country_is",
-						window_start: fixtureCatalog.slotString.s24(),
-						window_end: fixtureCatalog.slotString.s25(),
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: fixtureCatalog.slotString.s24(), count: 1 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
 						],
 						timeline: [],
 						ips: [],
@@ -1067,13 +1101,13 @@ rules: []
 		await waitFor(() => {
 			expect(
 				screen.getByRole("tab", {
-					name: `${fixtureCatalog.slotString.s135()} · ${fixtureCatalog.slotString.s262()}`,
+					name: `${fixtureCatalog.nodeName.fixture135()} · ${fixtureCatalog.host.fixture262()}`,
 				}),
 			).toBeInTheDocument();
 		});
 		expect(
 			screen.getByRole("tab", {
-				name: `${fixtureCatalog.slotString.s135()} · ${fixtureCatalog.slotString.s265()}`,
+				name: `${fixtureCatalog.nodeName.fixture135()} · ${fixtureCatalog.host.fixture265()}`,
 			}),
 		).toBeInTheDocument();
 	});
@@ -1087,7 +1121,7 @@ rules: []
 				},
 				window: "24h",
 				partial: true,
-				unreachable_nodes: [fixtureCatalog.slotString.s258()],
+				unreachable_nodes: [fixtureCatalog.nodeId.fixture258()],
 				warnings: [],
 				groups: [],
 			},
@@ -1102,7 +1136,7 @@ rules: []
 		});
 		expect(
 			screen.getByText(
-				`Unreachable nodes: ${fixtureCatalog.slotString.s258()}`,
+				`Unreachable nodes: ${fixtureCatalog.nodeId.fixture258()}`,
 			),
 		).toBeInTheDocument();
 		expect(screen.getByText("Usage details unavailable")).toBeInTheDocument();
