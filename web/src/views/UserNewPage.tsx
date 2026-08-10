@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { createAdminUser } from "../api/adminUsers";
+import { type AdminUsersResponse, createAdminUser } from "../api/adminUsers";
 import { isBackendApiError } from "../api/backendError";
 import type { UserQuotaReset } from "../api/quotaReset";
 import { useApiCapability } from "../api/useApiCompatibility";
@@ -30,6 +30,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { appendAdminUser } from "./adminUsersCache";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -135,7 +136,11 @@ export function UserNewPage() {
 										display_name: values.displayName.trim(),
 										quota_reset: quotaReset,
 									});
-									await queryClient.invalidateQueries({
+									queryClient.setQueryData<AdminUsersResponse>(
+										["adminUsers", adminToken],
+										(previous) => appendAdminUser(previous, created),
+									);
+									void queryClient.invalidateQueries({
 										queryKey: ["adminUsers", adminToken],
 									});
 									pushToast({ variant: "success", message: "User created." });

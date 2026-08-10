@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { fetchAdminConfig } from "../api/adminConfig";
 import {
+	type AdminEndpointsResponse,
 	DEFAULT_MIHOMO_SMUX_CONFIG,
 	createAdminEndpoint,
 	fetchAdminEndpoints,
@@ -221,8 +222,15 @@ export function EndpointNewPage() {
 				...(mihomoSmux ? { mihomo_smux: mihomoSmux } : {}),
 			});
 		},
-		onSuccess: async (endpoint) => {
-			await queryClient.invalidateQueries({
+		onSuccess: (endpoint) => {
+			queryClient.setQueryData<AdminEndpointsResponse>(
+				["adminEndpoints", adminToken],
+				(previous) =>
+					previous
+						? { ...previous, items: [...previous.items, endpoint] }
+						: previous,
+			);
+			void queryClient.invalidateQueries({
 				queryKey: ["adminEndpoints", adminToken],
 			});
 			pushToast({

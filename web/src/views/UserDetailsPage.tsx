@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import type {
@@ -16,6 +16,7 @@ import {
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
+	type AdminUsersResponse,
 	deleteAdminUser,
 	fetchAdminUser,
 	fetchAdminUserMihomoProfile,
@@ -29,7 +30,6 @@ import type { UserQuotaReset } from "../api/quotaReset";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	type SubscriptionFormat,
-	fetchSubscription,
 } from "../api/subscription";
 import { useApiCapability } from "../api/useApiCompatibility";
 import {
@@ -78,6 +78,8 @@ import {
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
+import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
+import { useUserRouteTransientState } from "./useUserRouteTransientState";
 import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
 
 const PROTOCOLS = [
@@ -151,20 +153,11 @@ export function UserDetailsPage() {
 	);
 	const [isApplyingAccess, setIsApplyingAccess] = useState(false);
 	const [accessError, setAccessError] = useState<string | null>(null);
-	const [resetTokenOpen, setResetTokenOpen] = useState(false);
-	const [isResettingToken, setIsResettingToken] = useState(false);
-	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
-	const [isResettingCredentials, setIsResettingCredentials] = useState(false);
 	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
 		DEFAULT_SUBSCRIPTION_FORMAT,
 	);
 	const [useExternalResourceMirror, setUseExternalResourceMirror] =
 		useState(false);
-	const [subOpen, setSubOpen] = useState(false);
-	const [subLoading, setSubLoading] = useState(false);
-	const [subText, setSubText] = useState("");
-	const [subError, setSubError] = useState<string | null>(null);
-	const subscriptionPreviewRequestRef = useRef(0);
 	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
 	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
 	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
@@ -173,8 +166,28 @@ export function UserDetailsPage() {
 	const [mihomoProfileSaveError, setMihomoProfileSaveError] = useState<
 		string | null
 	>(null);
-	const [deleteOpen, setDeleteOpen] = useState(false);
-	const [isDeleting, setIsDeleting] = useState(false);
+	const {
+		currentUserIdRef,
+		deleteOpen,
+		isCurrentTransientState,
+		isDeleting,
+		isResettingCredentials,
+		isResettingToken,
+		loadSubscriptionPreview: loadUserSubscriptionPreview,
+		resetCredentialsOpen,
+		resetTokenOpen,
+		setDeleteOpen,
+		setIsDeleting,
+		setIsResettingCredentials,
+		setIsResettingToken,
+		setResetCredentialsOpen,
+		setResetTokenOpen,
+		setSubOpen,
+		subError,
+		subLoading,
+		subOpen,
+		subText,
+	} = useUserRouteTransientState(userId);
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
 	const userQuery = useQuery({
@@ -741,28 +754,14 @@ export function UserDetailsPage() {
 		nextFormat = subFormat,
 		nextMirror = useExternalResourceMirror,
 	) {
-		if (!subscriptionToken) return;
-		const requestId = ++subscriptionPreviewRequestRef.current;
-		setSubLoading(true);
-		setSubError(null);
 		setSubFormat(nextFormat);
 		setUseExternalResourceMirror(nextMirror);
-		try {
-			const text =
-				nextFormat === "mihomo" && nextMirror
-					? await fetchSubscription(subscriptionToken, nextFormat, "mirror")
-					: await fetchSubscription(subscriptionToken, nextFormat);
-			if (requestId !== subscriptionPreviewRequestRef.current) return;
-			setSubText(text);
-		} catch (error) {
-			if (requestId !== subscriptionPreviewRequestRef.current) return;
-			setSubError(formatError(error));
-			setSubText("");
-		} finally {
-			if (requestId === subscriptionPreviewRequestRef.current) {
-				setSubLoading(false);
-			}
-		}
+		await loadUserSubscriptionPreview(
+			subscriptionToken,
+			nextFormat,
+			nextMirror,
+			formatError,
+		);
 	}
 
 	async function retryAccessData() {
@@ -810,16 +809,18 @@ export function UserDetailsPage() {
 							policy: "unlimited",
 							tz_offset_minutes: resetTzOffsetMinutes,
 						};
-			await patchAdminUser(adminToken, userId, {
+			const savedUser = await patchAdminUser(adminToken, userId, {
 				display_name: normalizedDisplayName,
 				quota_reset: quotaReset,
 			});
-			await Promise.all([
-				userQuery.refetch(),
-				queryClient.invalidateQueries({
-					queryKey: ["adminUsers", adminToken],
-				}),
-			]);
+			await userQuery.refetch();
+			queryClient.setQueryData<AdminUsersResponse>(
+				["adminUsers", adminToken],
+				(previous) => replaceAdminUser(previous, savedUser),
+			);
+			void queryClient.invalidateQueries({
+				queryKey: ["adminUsers", adminToken],
+			});
 			pushToast({ variant: "success", message: "User updated" });
 			return true;
 		} catch (error) {
@@ -882,64 +883,85 @@ export function UserDetailsPage() {
 
 	async function confirmResetToken() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsResettingToken(true);
 		try {
-			const result = await resetAdminUserToken(adminToken, userId);
+			const result = await resetAdminUserToken(adminToken, targetUserId);
+			if (currentUserIdRef.current !== targetUserId) return;
 			await userQuery.refetch();
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "success",
 				message: `Subscription token reset: ${result.subscription_token}`,
 			});
 			setResetTokenOpen(false);
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to reset token: ${formatError(error)}`,
 			});
 		} finally {
-			setIsResettingToken(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsResettingToken(false);
+			}
 		}
 	}
 
 	async function confirmResetCredentials() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsResettingCredentials(true);
 		try {
-			const result = await resetAdminUserCredentials(adminToken, userId);
+			const result = await resetAdminUserCredentials(adminToken, targetUserId);
+			if (currentUserIdRef.current !== targetUserId) return;
 			await userQuery.refetch();
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "success",
 				message: `Credentials reset: epoch=${result.credential_epoch}`,
 			});
 			setResetCredentialsOpen(false);
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to reset credentials: ${formatError(error)}`,
 			});
 		} finally {
-			setIsResettingCredentials(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsResettingCredentials(false);
+			}
 		}
 	}
 
 	async function confirmDeleteUser() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsDeleting(true);
 		try {
-			await deleteAdminUser(adminToken, userId);
-			await queryClient.invalidateQueries({
+			await deleteAdminUser(adminToken, targetUserId);
+			queryClient.setQueryData<AdminUsersResponse>(
+				["adminUsers", adminToken],
+				(previous) => removeAdminUser(previous, targetUserId),
+			);
+			void queryClient.invalidateQueries({
 				queryKey: ["adminUsers", adminToken],
 			});
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({ variant: "success", message: "User deleted" });
 			navigate({ to: "/users" });
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to delete user: ${formatError(error)}`,
 			});
 		} finally {
-			setIsDeleting(false);
-			setDeleteOpen(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsDeleting(false);
+				setDeleteOpen(false);
+			}
 		}
 	}
 
@@ -1693,7 +1715,7 @@ export function UserDetailsPage() {
 			) : null}
 
 			<SubscriptionPreviewDialog
-				open={subOpen}
+				open={isCurrentTransientState && subOpen}
 				onClose={() => setSubOpen(false)}
 				subscriptionUrl={subscriptionUrl}
 				format={subFormat}
@@ -1707,7 +1729,7 @@ export function UserDetailsPage() {
 				}
 			/>
 			<ConfirmDialog
-				open={resetTokenOpen}
+				open={isCurrentTransientState && resetTokenOpen}
 				title="Reset subscription token"
 				description="This invalidates the old token immediately."
 				confirmLabel={isResettingToken ? "Resetting..." : "Reset"}
@@ -1717,7 +1739,7 @@ export function UserDetailsPage() {
 			/>
 
 			<ConfirmDialog
-				open={resetCredentialsOpen}
+				open={isCurrentTransientState && resetCredentialsOpen}
 				title="Reset credentials"
 				description="This rotates derived credentials for the user (VLESS UUID / SS2022 user PSK)."
 				confirmLabel={isResettingCredentials ? "Resetting..." : "Reset"}
@@ -1727,7 +1749,7 @@ export function UserDetailsPage() {
 			/>
 
 			<ConfirmDialog
-				open={deleteOpen}
+				open={isCurrentTransientState && deleteOpen}
 				title="Delete user"
 				description="This cannot be undone."
 				cancelLabel="Cancel"
