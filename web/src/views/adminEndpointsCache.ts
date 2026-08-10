@@ -4,7 +4,10 @@ import type {
 	AdminEndpoint,
 	AdminEndpointsResponse,
 } from "../api/adminEndpoints";
-import type { AdminNodesResponse } from "../api/adminNodes";
+import type {
+	AdminNodePatchRequest,
+	AdminNodesResponse,
+} from "../api/adminNodes";
 
 export function appendAdminEndpoint(
 	previous: AdminEndpointsResponse | undefined,
@@ -53,6 +56,29 @@ function removeAdminEndpointsForNode(
 		: previous;
 }
 
+export function syncNode(
+	queryClient: QueryClient,
+	adminToken: string,
+	nodeId: string,
+	patch: AdminNodePatchRequest,
+) {
+	queryClient.setQueryData<AdminNodesResponse>(
+		["adminNodes", adminToken],
+		(previous) =>
+			previous
+				? {
+						...previous,
+						items: previous.items.map((item) =>
+							item.node_id === nodeId ? { ...item, ...patch } : item,
+						),
+					}
+				: previous,
+	);
+	void queryClient.invalidateQueries({
+		queryKey: ["adminNodes", adminToken],
+	});
+}
+
 export const resourceListCache = {
 	append: appendAdminEndpoint,
 	update(
@@ -76,6 +102,9 @@ export const resourceListCache = {
 		void queryClient.invalidateQueries({
 			queryKey: ["adminEndpoints", adminToken],
 		});
+		queryClient.removeQueries({
+			queryKey: ["adminEndpoint", adminToken, endpointId],
+		});
 	},
 	nodeDeleted(queryClient: QueryClient, adminToken: string, nodeId: string) {
 		queryClient.setQueryData<AdminNodesResponse>(
@@ -97,6 +126,12 @@ export const resourceListCache = {
 		});
 		void queryClient.invalidateQueries({
 			queryKey: ["adminEndpoints", adminToken],
+		});
+		queryClient.removeQueries({
+			queryKey: ["adminNode", adminToken, nodeId],
+		});
+		queryClient.removeQueries({
+			queryKey: ["adminEndpoint", adminToken],
 		});
 	},
 };

@@ -75,18 +75,16 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
-import { resourceListCache } from "./adminEndpointsCache";
+import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
 	isNodeQuotaDraftDirty,
 	nodeQuotaDraftFromNode,
 	toNodeQuotaReset,
 } from "./nodeQuotaDraft";
 function formatErrorMessage(error: unknown): string {
-	if (isBackendApiError(error)) {
-		const code = error.code ? ` ${error.code}` : "";
-		return `${error.status}${code}: ${error.message}`;
-	}
-	return String(error);
+	return isBackendApiError(error)
+		? `${error.status}${error.code ? ` ${error.code}` : ""}: ${error.message}`
+		: String(error);
 }
 function summaryBadgeVariant(status: string) {
 	switch (status) {
@@ -491,7 +489,6 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
 	});
-
 	const runtimeQuery = useQuery({
 		queryKey: ["adminNodeRuntime", adminToken, nodeId],
 		enabled: adminToken.length > 0 && nodesCapability.available,
@@ -689,6 +686,7 @@ export function NodeDetailsPage() {
 
 		try {
 			await patchAdminNode(adminToken, nodeId, payload);
+			syncNode(queryClient, adminToken, nodeId, payload);
 			pushToast({ variant: "success", message: "Node updated." });
 			await nodeQuery.refetch();
 			return true;
@@ -711,8 +709,8 @@ export function NodeDetailsPage() {
 		nodeQuery,
 		pushToast,
 		quotaForm,
+		queryClient,
 	]);
-
 	const handleSaveQuotaReset = quotaForm.handleSubmit(() => {
 		void saveQuotaReset();
 	});
@@ -1374,6 +1372,9 @@ export function NodeDetailsPage() {
 									onApply={async (nextBytes: number) => {
 										try {
 											await patchAdminNode(adminToken, nodeId, {
+												quota_limit_bytes: nextBytes,
+											});
+											syncNode(queryClient, adminToken, nodeId, {
 												quota_limit_bytes: nextBytes,
 											});
 											pushToast({

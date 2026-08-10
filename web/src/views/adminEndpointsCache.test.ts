@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { AdminEndpointsResponse } from "../api/adminEndpoints";
+import { createQueryClient } from "../queryClient";
 import {
 	appendAdminEndpoint,
 	removeAdminEndpoints,
 	replaceAdminEndpoint,
+	resourceListCache,
+	syncNode,
 } from "./adminEndpointsCache";
 
 const endpoint = {
@@ -35,5 +38,48 @@ describe("admin endpoint cache", () => {
 		expect(
 			removeAdminEndpoints(cached, ["endpoint-1", "endpoint-2"])?.items,
 		).toEqual([]);
+	});
+
+	it("synchronizes updates and removes deleted resource detail caches", () => {
+		const queryClient = createQueryClient();
+		queryClient.setQueryData(["adminNodes", "token"], {
+			items: [
+				{
+					node_id: "node-1",
+					node_name: "Tokyo",
+					quota_limit_bytes: 0,
+				},
+			],
+		});
+		queryClient.setQueryData(
+			["adminEndpoint", "token", "endpoint-1"],
+			endpoint,
+		);
+		queryClient.setQueryData(["adminNode", "token", "node-1"], {
+			node_id: "node-1",
+		});
+
+		syncNode(queryClient, "token", "node-1", { quota_limit_bytes: 1024 });
+		expect(
+			queryClient.getQueryData<{ items: Array<{ quota_limit_bytes: number }> }>(
+				["adminNodes", "token"],
+			)?.items[0].quota_limit_bytes,
+		).toBe(1024);
+
+		resourceListCache.remove(queryClient, "token", "endpoint-1");
+		expect(
+			queryClient.getQueryData(["adminEndpoint", "token", "endpoint-1"]),
+		).toBeUndefined();
+		queryClient.setQueryData(["adminEndpoint", "token", "endpoint-2"], {
+			...endpoint,
+			endpoint_id: "endpoint-2",
+		});
+		resourceListCache.nodeDeleted(queryClient, "token", "node-1");
+		expect(
+			queryClient.getQueryData(["adminNode", "token", "node-1"]),
+		).toBeUndefined();
+		expect(
+			queryClient.getQueryData(["adminEndpoint", "token", "endpoint-2"]),
+		).toBeUndefined();
 	});
 });
