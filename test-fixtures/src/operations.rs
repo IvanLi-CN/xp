@@ -22,10 +22,18 @@ struct EndpointOperations {
     ss_kind: String,
     #[serde(rename = "port443")]
     port_443: u16,
+    #[serde(rename = "port444")]
+    port_444: u16,
+    #[serde(rename = "port445")]
+    port_445: u16,
     #[serde(rename = "port8443")]
     port_8443: u16,
+    #[serde(rename = "port8388")]
+    port_8388: u16,
     #[serde(rename = "port9443")]
     port_9443: u16,
+    #[serde(rename = "port53842")]
+    port_53842: u16,
     #[serde(rename = "port53843")]
     port_53843: u16,
     #[serde(rename = "port53844")]
@@ -86,6 +94,16 @@ struct QuotaOperations {
     #[serde(rename = "oneGiB")]
     one_gib: u64,
     reset: serde_json::Value,
+    #[serde(rename = "resetNode")]
+    reset_node: serde_json::Value,
+    #[serde(rename = "resetNodeMidMonth")]
+    reset_node_mid_month: serde_json::Value,
+    #[serde(rename = "resetUnlimited")]
+    reset_unlimited: serde_json::Value,
+    #[serde(rename = "resetUnlimitedRequest")]
+    reset_unlimited_request: serde_json::Value,
+    #[serde(rename = "resetUserMidMonth")]
+    reset_user_mid_month: serde_json::Value,
     #[serde(rename = "resetSource")]
     reset_source: String,
 }
@@ -142,12 +160,28 @@ pub fn endpoint_port_443() -> u16 {
     catalog().operations.endpoint.port_443
 }
 
+pub fn endpoint_port_444() -> u16 {
+    catalog().operations.endpoint.port_444
+}
+
+pub fn endpoint_port_445() -> u16 {
+    catalog().operations.endpoint.port_445
+}
+
 pub fn endpoint_port_8443() -> u16 {
     catalog().operations.endpoint.port_8443
 }
 
+pub fn endpoint_port_8388() -> u16 {
+    catalog().operations.endpoint.port_8388
+}
+
 pub fn endpoint_port_9443() -> u16 {
     catalog().operations.endpoint.port_9443
+}
+
+pub fn endpoint_port_53842() -> u16 {
+    catalog().operations.endpoint.port_53842
 }
 
 pub fn endpoint_port_53843() -> u16 {
@@ -240,6 +274,26 @@ pub fn quota_remaining_bytes() -> u64 {
 
 pub fn quota_reset() -> &'static serde_json::Value {
     &catalog().operations.quota.reset
+}
+
+pub fn quota_reset_node() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_node
+}
+
+pub fn quota_reset_node_mid_month() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_node_mid_month
+}
+
+pub fn quota_reset_unlimited() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_unlimited
+}
+
+pub fn quota_reset_unlimited_request() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_unlimited_request
+}
+
+pub fn quota_reset_user_mid_month() -> &'static serde_json::Value {
+    &catalog().operations.quota.reset_user_mid_month
 }
 
 pub fn quota_reset_source() -> &'static str {
