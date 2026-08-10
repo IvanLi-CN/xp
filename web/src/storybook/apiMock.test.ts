@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodeQuotaReset } from "../api/quotaReset";
+import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { createMockApi } from "../../.storybook/mocks/apiMock";
@@ -324,7 +324,7 @@ describe("storybook api mock", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					node_id: fixtureCatalog.slotString.s32(),
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port9443(),
 					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
@@ -842,5 +842,81 @@ describe("storybook api mock", () => {
 			inherit_global: boolean;
 		};
 		expect(policyAfter.inherit_global).toBe(false);
+	});
+
+	it("sanitizes configured operational records before responding", async () => {
+		const mock = createMockApi({
+			data: {
+				nodes: [
+					{
+						node_id: fixtureCatalog.identifier.nodeTertiary(),
+						node_name: fixtureCatalog.identifier.nodeNameTertiary(),
+						access_host: fixtureCatalog.host.tertiary(),
+						api_base_url: fixtureCatalog.url.tertiaryApi(),
+						quota_limit_bytes: fixtureCatalog.quota.fifteenGiB(),
+						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
+					},
+				],
+				endpoints: [
+					{
+						endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
+						node_id: fixtureCatalog.identifier.nodeTertiary(),
+						tag: fixtureCatalog.identifier.endpointTagTertiary(),
+						kind: fixtureCatalog.endpoint.ssKind(),
+						port: fixtureCatalog.endpoint.port9443(),
+						meta: {
+							server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
+						},
+					},
+				],
+				users: [
+					{
+						user_id: fixtureCatalog.identifier.userQuinary(),
+						display_name: "Configured user",
+						subscription_token: fixtureCatalog.identifier.tokenQuinary(),
+						credential_epoch: fixtureCatalog.user.credentialEpoch(),
+						priority_tier: fixtureCatalog.user.priorityTierDefault(),
+						quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+					},
+				],
+			},
+		});
+
+		const [nodesRes, endpointsRes, usersRes] = await Promise.all([
+			mock.handle(jsonRequest("/api/admin/nodes", { method: "GET" })),
+			mock.handle(jsonRequest("/api/admin/endpoints", { method: "GET" })),
+			mock.handle(jsonRequest("/api/admin/users", { method: "GET" })),
+		]);
+
+		expect(nodesRes.ok).toBe(true);
+		expect(endpointsRes.ok).toBe(true);
+		expect(usersRes.ok).toBe(true);
+		expect(
+			(await nodesRes.json()) as { items: Array<{ node_id: string }> },
+		).toMatchObject({
+			items: [{ node_id: fixtureCatalog.slotString.s32() }],
+		});
+		expect(
+			(await endpointsRes.json()) as {
+				items: Array<{
+					endpoint_id: string;
+					kind: string;
+					port: number;
+				}>;
+			},
+		).toMatchObject({
+			items: [
+				{
+					endpoint_id: fixtureCatalog.slotString.s40(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port443(),
+				},
+			],
+		});
+		expect(
+			(await usersRes.json()) as { items: Array<{ user_id: string }> },
+		).toMatchObject({
+			items: [{ user_id: fixtureCatalog.identifier.userPrimary() }],
+		});
 	});
 });

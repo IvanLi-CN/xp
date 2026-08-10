@@ -1,0 +1,8 @@
+id: fixture-policy-typescript-user-id-literal
+valid:
+  - 'const user = { user_id: fixtureCatalog.identifier.userPrimary() };'
+  - 'const user = { user_id: fixtureUserId(stateUser) };'
+invalid:
+  - 'const user = { user_id: "live-user" };'
+  - 'const user = { user_id: process.env.TEST_USER_ID };'
+  - 'const user = { user_id: payload.user_id };'

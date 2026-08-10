@@ -57,6 +57,12 @@ import {
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
 import {
+	sanitizeFixtureEndpoint,
+	sanitizeFixtureNode,
+	sanitizeFixtureQuota,
+	sanitizeFixtureUser,
+} from "./fixtureStateSanitizers";
+import {
 	buildNodeDeletePreviewEndpoint,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
@@ -280,13 +286,15 @@ function sseResponse(
 
 function ensureEndpointRecord(
 	seed: MockEndpointSeed,
-	_counters: MockState["counters"],
+	index: number,
 ): MockEndpointRecord {
-	return {
-		...seed,
-		short_ids: fixtureCatalog.endpoint.shortIds(),
-		active_short_id: fixtureCatalog.endpoint.activeShortId(),
-	};
+	return sanitizeFixtureEndpoint(seed, index) as MockEndpointRecord;
+}
+
+function fixtureUserId(user: AdminUser): string {
+	return user.user_id === fixtureCatalog.identifier.userSecondary()
+		? fixtureCatalog.identifier.userSecondary()
+		: fixtureCatalog.identifier.userPrimary();
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
@@ -555,14 +563,14 @@ function buildDefaultUserTraffic(
 	});
 	return {
 		"24h": {
-			user: { user_id: user.user_id, display_name: user.display_name },
+			user: { user_id: fixtureUserId(user), display_name: user.display_name },
 			traffic: buildTrafficReport("24h"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
 		},
 		"31d": {
-			user: { user_id: user.user_id, display_name: user.display_name },
+			user: { user_id: fixtureUserId(user), display_name: user.display_name },
 			traffic: buildTrafficReport("31d"),
 			nodes: nodeOptions,
 			partial: false,
@@ -680,7 +688,7 @@ function buildDefaultUserIpUsage(
 
 	return {
 		user: {
-			user_id: user.user_id,
+			user_id: fixtureUserId(user),
 			display_name: user.display_name,
 		},
 		window: "24h",
@@ -1014,13 +1022,19 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		user: 1,
 	};
 
-	const endpoints = merged.endpoints.map((endpoint) =>
-		ensureEndpointRecord(endpoint, counters),
+	const endpoints = merged.endpoints.map((endpoint, index) =>
+		ensureEndpointRecord(endpoint, index),
 	);
+	const nodes = merged.nodes.map(sanitizeFixtureNode);
+	const users = merged.users.map(sanitizeFixtureUser);
+	const nodeQuotas = merged.nodeQuotas.map(sanitizeFixtureQuota);
 
 	const state: MockState = {
 		...clone(merged),
+		nodes,
 		endpoints,
+		users,
+		nodeQuotas,
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
@@ -1597,7 +1611,7 @@ async function handleRequest(
 		const items: AdminQuotaPolicyGlobalWeightRow[] = state.users.map((user) => {
 			const storedWeight = state.userGlobalWeights[user.user_id];
 			return {
-				user_id: user.user_id,
+				user_id: fixtureUserId(user),
 				display_name: user.display_name,
 				priority_tier: user.priority_tier,
 				stored_weight: storedWeight,
@@ -1710,7 +1724,7 @@ async function handleRequest(
 				(entry) => entry.node_id === nodeId,
 			)?.weight;
 			items.push({
-				user_id: user.user_id,
+				user_id: fixtureUserId(user),
 				display_name: user.display_name,
 				priority_tier: user.priority_tier,
 				endpoint_ids: [...endpointIdsSet].sort(),
@@ -2082,7 +2096,7 @@ async function handleRequest(
 			if (!quotaUserIds.has(u.user_id)) return [];
 			return [
 				{
-					user_id: u.user_id,
+					user_id: fixtureUserId(u),
 					...(u.user_id === fixtureCatalog.identifier.userPrimary()
 						? primaryQuota
 						: secondaryQuota),

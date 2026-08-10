@@ -24,6 +24,10 @@ rule:
             \s*(\[?\s*)?"
         - regex: >-
             (?xs) ^.*json!\(.*
+            "(published_at)"\s*:
+            \s*(\[?\s*)?"
+        - regex: >-
+            (?xs) ^.*json!\(.*
             "(dest|server_names|public_domain|server_name)"\s*:
             \s*(?:std::|serde_json::from_|request|payload|body)
         - regex: >-
@@ -34,3 +38,11 @@ rule:
             (?xs) ^.*json!\(.*
             "(server_psk_b64|user_psk_b64|password)"\s*:
             \s*(?:std::|serde_json::from_|request|payload|body)
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(published_at)"\s*:
+            \s*(?:std::|serde_json::from_|request|payload|body)
+        - regex: >-
+            (?xs) ^.*json!\(.*
+            "(browser_download_url)"\s*:
+            \s*(?:std::|serde_json::from_|request|payload|body|fs::)

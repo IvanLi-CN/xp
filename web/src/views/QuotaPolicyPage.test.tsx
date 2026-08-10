@@ -132,7 +132,7 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminUsers).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
 				subscription_token: fixtureCatalog.slotString.s204(),
 				credential_epoch: 0,
@@ -144,7 +144,7 @@ function setupDefaultMocks() {
 				},
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
 				subscription_token: fixtureCatalog.slotString.s205(),
 				credential_epoch: 0,
@@ -161,7 +161,7 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminQuotaPolicyNodeWeightRows).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
 				priority_tier: "p1",
 				endpoint_ids: ["ep-1"],
@@ -170,7 +170,7 @@ function setupDefaultMocks() {
 				source: "explicit",
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
 				priority_tier: "p2",
 				endpoint_ids: ["ep-2"],
@@ -183,7 +183,7 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminQuotaPolicyGlobalWeightRows).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
 				priority_tier: "p1",
 				stored_weight: 6000,
@@ -191,7 +191,7 @@ function setupDefaultMocks() {
 				source: "explicit",
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
 				priority_tier: "p2",
 				stored_weight: 4000,
@@ -226,7 +226,7 @@ function setupDefaultMocks() {
 		},
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
-		user_id: "user-1",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Alice",
 		subscription_token: fixtureCatalog.slotString.s204(),
 		credential_epoch: 0,
@@ -333,7 +333,7 @@ describe("<QuotaPolicyPage />", () => {
 				expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(3);
 			});
 			const thirdCall = vi.mocked(putAdminUserNodeWeight).mock.calls[2];
-			expect(thirdCall?.[1]).toBe("user-2");
+			expect(thirdCall?.[1]).toBe(fixtureCatalog.identifier.userSecondary());
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
 				configurable: true,
@@ -582,16 +582,30 @@ describe("<QuotaPolicyPage />", () => {
 				"global-ratio-editor-table",
 			);
 			expect(within(globalTable).queryByText("Input (%)")).toBeNull();
-			expect(within(globalTable).queryByText("user-1")).toBeNull();
-			expect(within(globalTable).queryByText("user-2")).toBeNull();
+			expect(
+				within(globalTable).queryByText(
+					fixtureCatalog.identifier.userPrimary(),
+				),
+			).toBeNull();
+			expect(
+				within(globalTable).queryByText(
+					fixtureCatalog.identifier.userSecondary(),
+				),
+			).toBeNull();
 
 			await openNodeTab(view.container);
 			const nodeTable = await within(view.container).findByTestId(
 				"ratio-editor-table",
 			);
 			expect(within(nodeTable).queryByText("Input (%)")).toBeNull();
-			expect(within(nodeTable).queryByText("user-1")).toBeNull();
-			expect(within(nodeTable).queryByText("user-2")).toBeNull();
+			expect(
+				within(nodeTable).queryByText(fixtureCatalog.identifier.userPrimary()),
+			).toBeNull();
+			expect(
+				within(nodeTable).queryByText(
+					fixtureCatalog.identifier.userSecondary(),
+				),
+			).toBeNull();
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
 				configurable: true,
@@ -610,54 +624,49 @@ describe("<QuotaPolicyPage />", () => {
 		});
 		try {
 			const view = renderPage();
+			const userId = fixtureCatalog.identifier.userPrimary();
+			const globalPercentTestId = `global-ratio-table-percent-${userId}`;
+			const nodePercentTestId = `ratio-table-percent-${userId}`;
 			await within(view.container).findByTestId("global-ratio-editor-table");
 
 			const globalDisplay = within(view.container).getByTestId(
-				"global-ratio-table-percent-user-1-display",
+				`${globalPercentTestId}-display`,
 			);
 			fireEvent.doubleClick(globalDisplay);
 			const globalInput = within(view.container).getByTestId(
-				"global-ratio-table-percent-user-1-input",
+				`${globalPercentTestId}-input`,
 			);
 			fireEvent.change(globalInput, { target: { value: "60" } });
 			fireEvent.keyDown(globalInput, { key: "Enter" });
 
 			await waitFor(() => {
 				expect(
-					within(view.container).queryByTestId(
-						"global-ratio-table-percent-user-1-input",
-					),
+					within(view.container).queryByTestId(`${globalPercentTestId}-input`),
 				).toBeNull();
 			});
 			expect(
-				within(view.container).getByTestId(
-					"global-ratio-table-percent-user-1-display",
-				),
+				within(view.container).getByTestId(`${globalPercentTestId}-display`),
 			).toHaveTextContent("60.00%");
 
 			await openNodeTab(view.container);
 			await within(view.container).findByTestId("ratio-editor-table");
 			const nodeDisplay = within(view.container).getByTestId(
-				"ratio-table-percent-user-1-display",
+				`${nodePercentTestId}-display`,
 			);
 			fireEvent.doubleClick(nodeDisplay);
 			const nodeInput = within(view.container).getByTestId(
-				"ratio-table-percent-user-1-input",
+				`${nodePercentTestId}-input`,
 			);
 			fireEvent.change(nodeInput, { target: { value: "70" } });
 			fireEvent.keyDown(nodeInput, { key: "Enter" });
 
 			await waitFor(() => {
 				expect(
-					within(view.container).queryByTestId(
-						"ratio-table-percent-user-1-input",
-					),
+					within(view.container).queryByTestId(`${nodePercentTestId}-input`),
 				).toBeNull();
 			});
 			expect(
-				within(view.container).getByTestId(
-					"ratio-table-percent-user-1-display",
-				),
+				within(view.container).getByTestId(`${nodePercentTestId}-display`),
 			).toHaveTextContent("70.00%");
 			expect(within(view.container).getByText("7000")).toBeInTheDocument();
 			expect(within(view.container).getByText("3000")).toBeInTheDocument();

@@ -1,0 +1,36 @@
+id: fixture-policy-typescript-endpoint-kind
+language: TypeScript
+severity: error
+message: Fixture endpoint kinds must use a catalog accessor.
+note: Use fixtureCatalog.endpoint.vlessKind() or fixtureCatalog.endpoint.ssKind().
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        regex: '^kind$'
+    - inside:
+        stopBy: end
+        all:
+          - kind: object
+          - has:
+              kind: pair
+              has:
+                field: key
+                regex: '^(endpoint_id|endpointId|port)$'
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: fixtureCatalog.endpoint.vlessKind()
+            - pattern: fixtureCatalog.endpoint.ssKind()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.endpoint.ssKind() : fixtureCatalog.endpoint.vlessKind()

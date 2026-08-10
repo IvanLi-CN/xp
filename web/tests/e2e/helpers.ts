@@ -430,7 +430,6 @@ export async function setupApiMocks(
 			[fixtureCatalog.identifier.userPrimary()]: catalogMihomoProfile(),
 		},
 	};
-	let userSeq = state.users.length + 1;
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
@@ -625,8 +624,8 @@ export async function setupApiMocks(
 			const displayName =
 				typeof payload.display_name === "string"
 					? payload.display_name
-					: `User ${userSeq}`;
-			const userId = `user-${userSeq++}`;
+					: "Fixture user";
+			const userId = fixtureCatalog.identifier.userTertiary();
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,

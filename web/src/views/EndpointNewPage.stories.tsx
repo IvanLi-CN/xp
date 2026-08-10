@@ -111,7 +111,7 @@ export const ManagedDefaultAutocompleteSuggestions: Story = {
 						endpoint_id: fixtureCatalog.slotString.s132(),
 						node_id: fixtureCatalog.slotString.s118(),
 						tag: fixtureCatalog.slotString.s133(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 443,
 						meta: {
 							reality: {

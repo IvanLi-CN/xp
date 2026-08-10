@@ -8,6 +8,10 @@ valid:
     let meta = json!({
       "dest": xp_test_fixtures::endpoint_authority_53844(),
     });
+  - |
+    let release = json!({
+      "published_at": xp_test_fixtures::release_current_timestamp(),
+    });
 invalid:
   - |
     let meta = json!({
@@ -26,4 +30,12 @@ invalid:
   - |
     let meta = json!({
       "reality": { "dest": request.destination }
+    });
+  - |
+    let release = json!({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  - |
+    let release = json!({
+      "browser_download_url": std::env::var("LIVE_URL")
     });

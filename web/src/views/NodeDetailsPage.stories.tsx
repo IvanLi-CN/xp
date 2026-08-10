@@ -39,7 +39,7 @@ const nodeEndpoints: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		tag: fixtureCatalog.identifier.endpointTagPrimary(),
-		kind: "ss2022_2022_blake3_aes_128_gcm",
+		kind: fixtureCatalog.endpoint.ssKind(),
 		port: 8388,
 		meta: {},
 	},
@@ -47,7 +47,7 @@ const nodeEndpoints: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		tag: fixtureCatalog.identifier.endpointTagSecondary(),
-		kind: "vless_reality_vision_tcp",
+		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 443,
 		meta: {
 			dest: fixtureCatalog.address.loopback49043(),

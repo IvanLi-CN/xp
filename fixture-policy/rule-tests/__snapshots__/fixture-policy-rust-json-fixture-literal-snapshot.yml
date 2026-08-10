@@ -68,3 +68,27 @@ snapshots:
       style: primary
       start: 11
       end: 109
+  ? |
+    let release = json!({
+      "browser_download_url": std::env::var("LIVE_URL")
+    });
+  : labels:
+    - source: |-
+        json!({
+          "browser_download_url": std::env::var("LIVE_URL")
+        })
+      style: primary
+      start: 14
+      end: 76
+  ? |
+    let release = json!({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": "2026-01-20T00:00:00Z"
+        })
+      style: primary
+      start: 14
+      end: 65

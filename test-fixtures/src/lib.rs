@@ -146,6 +146,12 @@ struct Timestamps {
     baseline: String,
     recent: String,
     later: String,
+    #[serde(rename = "releasePrevious")]
+    release_previous: String,
+    #[serde(rename = "releaseCurrent")]
+    release_current: String,
+    #[serde(rename = "releaseHttp")]
+    release_http: String,
     #[serde(rename = "probeHour")]
     probe_hour: String,
     #[serde(rename = "probeLatest")]
@@ -385,6 +391,18 @@ pub fn earlier_timestamp() -> &'static str {
 
 pub fn later_timestamp() -> &'static str {
     &catalog().timestamps.later
+}
+
+pub fn release_previous_timestamp() -> &'static str {
+    &catalog().timestamps.release_previous
+}
+
+pub fn release_current_timestamp() -> &'static str {
+    &catalog().timestamps.release_current
+}
+
+pub fn release_http_timestamp() -> &'static str {
+    &catalog().timestamps.release_http
 }
 
 pub fn probe_hour() -> &'static str {

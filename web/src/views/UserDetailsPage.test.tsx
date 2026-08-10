@@ -57,7 +57,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ userId: "u_01HUSERAAAAAA" }),
+		useParams: () => ({ userId: fixtureCatalog.identifier.userPrimary() }),
 	};
 });
 
@@ -117,7 +117,7 @@ function setupMocks(args?: {
 	};
 }) {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
 		subscription_token: fixtureCatalog.slotString.s254(),
 		credential_epoch: 0,
@@ -148,7 +148,7 @@ function setupMocks(args?: {
 				endpoint_id: fixtureCatalog.slotString.s138(),
 				node_id: fixtureCatalog.slotString.s134(),
 				tag: fixtureCatalog.slotString.s139(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 443,
 				meta: {},
 			},
@@ -156,7 +156,7 @@ function setupMocks(args?: {
 				endpoint_id: fixtureCatalog.slotString.s140(),
 				node_id: fixtureCatalog.slotString.s134(),
 				tag: fixtureCatalog.slotString.s141(),
-				kind: "ss2022_2022_blake3_aes_128_gcm",
+				kind: fixtureCatalog.endpoint.ssKind(),
 				port: 8443,
 				meta: {},
 			},
@@ -164,7 +164,7 @@ function setupMocks(args?: {
 				endpoint_id: fixtureCatalog.slotString.s255(),
 				node_id: fixtureCatalog.slotString.s134(),
 				tag: fixtureCatalog.slotString.s256(),
-				kind: "ss2022_2022_blake3_aes_128_gcm",
+				kind: fixtureCatalog.endpoint.ssKind(),
 				port: 9443,
 				meta: {},
 			},
@@ -179,7 +179,7 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
 		items: [
 			{
-				user_id: "u_01HUSERAAAAAA",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				node_id: fixtureCatalog.slotString.s134(),
 				quota_limit_bytes: 0,
 				quota_reset_source: "user",
@@ -192,7 +192,7 @@ function setupMocks(args?: {
 		unreachable_nodes: [],
 		items: [
 			{
-				user_id: "u_01HUSERAAAAAA",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				node_id: fixtureCatalog.slotString.s134(),
 				quota_limit_bytes: 1024,
 				used_bytes: 0,
@@ -208,7 +208,7 @@ function setupMocks(args?: {
 			args?.ipUsage ??
 			args?.userIpUsage ?? {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window,
@@ -274,13 +274,13 @@ function setupMocks(args?: {
 		auto_assign_endpoint_kinds: [],
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		node_id: fixtureCatalog.slotString.s134(),
 		quota_limit_bytes: 0,
 		quota_reset_source: "user",
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
 		subscription_token: fixtureCatalog.slotString.s254(),
 		credential_epoch: 0,
@@ -304,7 +304,7 @@ function setupMocks(args?: {
 		subscription_token: fixtureCatalog.slotString.s257(),
 	});
 	vi.mocked(resetAdminUserCredentials).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		credential_epoch: 1,
 	});
 	vi.mocked(fetchSubscription).mockResolvedValue(
@@ -326,7 +326,7 @@ describe("<UserDetailsPage />", () => {
 		setupMocks({
 			access: [
 				{
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					endpoint_id: fixtureCatalog.slotString.s138(),
 					node_id: fixtureCatalog.slotString.s134(),
 				},
@@ -371,7 +371,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: [
 						{
@@ -417,7 +417,7 @@ describe("<UserDetailsPage />", () => {
 		setupMocks({
 			access: [
 				{
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					endpoint_id: fixtureCatalog.slotString.s138(),
 					node_id: fixtureCatalog.slotString.s134(),
 				},
@@ -434,7 +434,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{ items: [] },
 			);
 		});
@@ -470,7 +470,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
 						{ endpoint_id: fixtureCatalog.slotString.s140() },
@@ -549,7 +549,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
 						{ endpoint_id: fixtureCatalog.slotString.s140() },
@@ -706,7 +706,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: "port: 0\nproxy-groups: []\n",
 					extra_proxies_yaml: "",
@@ -742,7 +742,7 @@ rules: []
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: `port: 0
 rules: []
@@ -787,7 +787,7 @@ rules: []
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: `port: 0
 rules: []
@@ -838,7 +838,7 @@ rules: []
 			unreachable_nodes: [fixtureCatalog.slotString.s258()],
 			items: [
 				{
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					node_id: fixtureCatalog.slotString.s134(),
 					quota_limit_bytes: 1024,
 					used_bytes: 0,
@@ -863,7 +863,7 @@ rules: []
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",
@@ -945,7 +945,7 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				"24h",
 				expect.any(AbortSignal),
 			);
@@ -981,7 +981,7 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -1003,7 +1003,7 @@ rules: []
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",
@@ -1082,7 +1082,7 @@ rules: []
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",

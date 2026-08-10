@@ -59,6 +59,9 @@
     "baseline": "2024-01-01T00:00:00Z",
     "recent": "2024-01-02T00:00:00Z",
     "later": "2024-01-03T00:00:00Z",
+    "releasePrevious": "2026-01-19T00:00:00Z",
+    "releaseCurrent": "2026-01-20T00:00:00Z",
+    "releaseHttp": "2026-01-31T00:00:00Z",
     "probeHour": "2026-03-11T11:00:00Z",
     "probeLatest": "2026-02-19T23:00:10Z",
     "date": "2024-01-01"

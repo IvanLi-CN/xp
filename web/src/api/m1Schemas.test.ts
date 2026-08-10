@@ -102,7 +102,7 @@ describe("AdminEndpointSchema", () => {
 				endpoint_id: fixtureCatalog.slotString.s100(),
 				node_id: fixtureCatalog.slotString.s100(),
 				tag: fixtureCatalog.slotString.s101(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: fixtureCatalog.endpoint.port443(),
 				meta: {},
 			}),
@@ -110,7 +110,7 @@ describe("AdminEndpointSchema", () => {
 			endpoint_id: fixtureCatalog.slotString.s100(),
 			node_id: fixtureCatalog.slotString.s100(),
 			tag: fixtureCatalog.slotString.s101(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: fixtureCatalog.endpoint.port443(),
 			meta: {},
 		});
@@ -126,7 +126,7 @@ describe("AdminEndpointsResponseSchema", () => {
 						endpoint_id: fixtureCatalog.slotString.s100(),
 						node_id: fixtureCatalog.slotString.s100(),
 						tag: fixtureCatalog.slotString.s101(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: fixtureCatalog.endpoint.port443(),
 						meta: {},
 					},
@@ -138,7 +138,7 @@ describe("AdminEndpointsResponseSchema", () => {
 					endpoint_id: fixtureCatalog.slotString.s100(),
 					node_id: fixtureCatalog.slotString.s100(),
 					tag: fixtureCatalog.slotString.s101(),
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port443(),
 					meta: {},
 				},
@@ -199,7 +199,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 			AdminQuotaPolicyNodeWeightRowsResponseSchema.parse({
 				items: [
 					{
-						user_id: "user-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
 						display_name: "alice",
 						priority_tier: "p1",
 						endpoint_ids: [fixtureCatalog.slotString.s40()],
@@ -208,7 +208,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 						source: "explicit",
 					},
 					{
-						user_id: "user-2",
+						user_id: fixtureCatalog.identifier.userSecondary(),
 						display_name: "bob",
 						priority_tier: "p2",
 						endpoint_ids: ["endpoint-2"],
@@ -220,7 +220,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					user_id: "user-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "alice",
 					priority_tier: "p1",
 					endpoint_ids: [fixtureCatalog.slotString.s40()],
@@ -229,7 +229,7 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 					source: "explicit",
 				},
 				{
-					user_id: "user-2",
+					user_id: fixtureCatalog.identifier.userSecondary(),
 					display_name: "bob",
 					priority_tier: "p2",
 					endpoint_ids: ["endpoint-2"],
@@ -285,7 +285,7 @@ describe("GetAdminUserAccessResponseSchema", () => {
 			GetAdminUserAccessResponseSchema.parse({
 				items: [
 					{
-						user_id: "user-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
 						endpoint_id: fixtureCatalog.slotString.s40(),
 						node_id: fixtureCatalog.slotString.s32(),
 					},
@@ -295,7 +295,7 @@ describe("GetAdminUserAccessResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					user_id: "user-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					endpoint_id: fixtureCatalog.slotString.s40(),
 					node_id: fixtureCatalog.slotString.s32(),
 				},
@@ -313,7 +313,7 @@ describe("PutAdminUserAccessResponseSchema", () => {
 				deleted: 2,
 				items: [
 					{
-						user_id: "user-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
 						endpoint_id: fixtureCatalog.slotString.s40(),
 						node_id: fixtureCatalog.slotString.s32(),
 					},
@@ -325,7 +325,7 @@ describe("PutAdminUserAccessResponseSchema", () => {
 			deleted: 2,
 			items: [
 				{
-					user_id: "user-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					endpoint_id: fixtureCatalog.slotString.s40(),
 					node_id: fixtureCatalog.slotString.s32(),
 				},

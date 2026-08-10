@@ -109,7 +109,7 @@ function setupMocks() {
 		endpoint_id: fixtureCatalog.slotString.s172(),
 		node_id: fixtureCatalog.slotString.s32(),
 		tag: fixtureCatalog.slotString.s121(),
-		kind: "vless_reality_vision_tcp",
+		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 53844,
 		meta: {
 			reality: {
@@ -143,7 +143,7 @@ describe("EndpointDetailsPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s172(),
 			node_id: fixtureCatalog.slotString.s32(),
 			tag: fixtureCatalog.slotString.s121(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 53844,
 			meta: {
 				reality: {
@@ -211,7 +211,7 @@ describe("EndpointDetailsPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s172(),
 			node_id: fixtureCatalog.slotString.s32(),
 			tag: fixtureCatalog.slotString.s121(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 53844,
 			meta: {},
 		});
@@ -234,18 +234,18 @@ describe("EndpointDetailsPage", () => {
 
 	it("does not render or submit SMux settings to a legacy endpoint API", async () => {
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "legacy-ss2022",
-			kind: "ss2022_2022_blake3_aes_128_gcm",
+			endpoint_id: fixtureCatalog.slotString.s172(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s121(),
+			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 53844,
 			meta: {},
 		});
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "legacy-ss2022",
-			kind: "ss2022_2022_blake3_aes_128_gcm",
+			endpoint_id: fixtureCatalog.slotString.s172(),
+			node_id: fixtureCatalog.slotString.s32(),
+			tag: fixtureCatalog.slotString.s121(),
+			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 53844,
 			meta: {},
 		});
@@ -302,7 +302,7 @@ describe("EndpointDetailsPage", () => {
 				endpoint_id: fixtureCatalog.slotString.s172(),
 				node_id: fixtureCatalog.slotString.s124(),
 				tag: fixtureCatalog.slotString.s129(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 53844,
 				meta: {
 					reality: {
@@ -318,7 +318,7 @@ describe("EndpointDetailsPage", () => {
 				endpoint_id: fixtureCatalog.slotString.s172(),
 				node_id: fixtureCatalog.slotString.s124(),
 				tag: fixtureCatalog.slotString.s129(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 53844,
 				meta: {
 					reality: {

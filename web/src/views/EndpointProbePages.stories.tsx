@@ -43,7 +43,7 @@ const endpoints: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.slotString.s120(),
 		node_id: fixtureCatalog.slotString.s134(),
 		tag: fixtureCatalog.slotString.s216(),
-		kind: "vless_reality_vision_tcp",
+		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 443,
 		meta: {},
 		probe: {

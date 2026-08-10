@@ -49,7 +49,7 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 					{
 						endpoint_id: fixtureCatalog.slotString.s105(),
 						node_id: fixtureCatalog.slotString.s106(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: true,
 							reality: {
@@ -60,7 +60,7 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 					{
 						endpoint_id: fixtureCatalog.slotString.s107(),
 						node_id: fixtureCatalog.slotString.s106(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: false,
 							reality: {
@@ -71,7 +71,7 @@ describe("canaryUpstreamSuggestionsFromManagedEndpointDests", () => {
 					{
 						endpoint_id: fixtureCatalog.slotString.s109(),
 						node_id: fixtureCatalog.slotString.s110(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						meta: {
 							managed_default: true,
 							reality: {

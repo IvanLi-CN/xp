@@ -1,0 +1,44 @@
+id: fixture-policy-tsx-user-id-literal
+snapshots:
+  'const user = { user_id: "live-user" };':
+    labels:
+    - source: 'user_id: "live-user"'
+      style: primary
+      start: 15
+      end: 35
+    - source: user_id
+      style: secondary
+      start: 15
+      end: 22
+    - source: '"live-user"'
+      style: secondary
+      start: 24
+      end: 35
+  'const user = { user_id: payload.user_id };':
+    labels:
+    - source: 'user_id: payload.user_id'
+      style: primary
+      start: 15
+      end: 39
+    - source: user_id
+      style: secondary
+      start: 15
+      end: 22
+    - source: payload.user_id
+      style: secondary
+      start: 24
+      end: 39
+  'const user = { user_id: process.env.TEST_USER_ID };':
+    labels:
+    - source: 'user_id: process.env.TEST_USER_ID'
+      style: primary
+      start: 15
+      end: 48
+    - source: user_id
+      style: secondary
+      start: 15
+      end: 22
+    - source: process.env.TEST_USER_ID
+      style: secondary
+      start: 24
+      end: 48

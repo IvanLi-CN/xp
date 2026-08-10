@@ -1,0 +1,29 @@
+id: fixture-policy-typescript-endpoint-kind
+valid:
+  - |
+    const endpoint = {
+      endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+      port: fixtureCatalog.endpoint.port443(),
+      kind: fixtureCatalog.endpoint.vlessKind(),
+    };
+  - |
+    const source = { kind: "github-releases" };
+  - |
+    const endpoint = {
+      port: fixtureCatalog.endpoint.port8443(),
+      kind: payload.kind === fixtureCatalog.endpoint.ssKind()
+        ? fixtureCatalog.endpoint.ssKind()
+        : fixtureCatalog.endpoint.vlessKind(),
+    };
+invalid:
+  - |
+    const endpoint = {
+      endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+      port: fixtureCatalog.endpoint.port443(),
+      kind: "vless_reality_vision_tcp",
+    };
+  - |
+    const endpoint = {
+      port: fixtureCatalog.endpoint.port8443(),
+      kind: process.env.TEST_ENDPOINT_KIND,
+    };

@@ -575,7 +575,7 @@ describe("<NodeDetailsPage />", () => {
 				{
 					endpoint_id: fixtureCatalog.slotString.s144(),
 					tag: fixtureCatalog.slotString.s141(),
-					kind: "ss2022_2022_blake3_aes_128_gcm",
+					kind: fixtureCatalog.endpoint.ssKind(),
 					port: 8388,
 				},
 			],
@@ -605,7 +605,7 @@ describe("<NodeDetailsPage />", () => {
 				{
 					endpoint_id: fixtureCatalog.slotString.s144(),
 					tag: fixtureCatalog.slotString.s141(),
-					kind: "ss2022_2022_blake3_aes_128_gcm",
+					kind: fixtureCatalog.endpoint.ssKind(),
 					port: 8388,
 				},
 			],

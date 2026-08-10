@@ -1,0 +1,17 @@
+id: fixture-policy-typescript-mock-endpoint-spread
+language: TypeScript
+severity: error
+message: Storybook endpoint records must not spread untrusted seed data.
+note: Construct endpoint records through the catalog-backed sanitizer.
+files:
+  - web/.storybook/mocks/apiMock.ts
+rule:
+  all:
+    - kind: spread_element
+    - inside:
+        stopBy: end
+        all:
+          - kind: function_declaration
+          - has:
+              field: name
+              pattern: ensureEndpointRecord

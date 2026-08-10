@@ -24,7 +24,7 @@ test.describe("managed VLESS autocomplete", () => {
 					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
 					node_id: fixtureCatalog.identifier.nodePrimary(),
 					tag: fixtureCatalog.identifier.endpointTagPrimary(),
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port443(),
 					meta: {
 						managed_default: true,
@@ -97,7 +97,7 @@ test.describe("managed VLESS autocomplete", () => {
 					endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
 					node_id: fixtureCatalog.identifier.nodeSecondary(),
 					tag: fixtureCatalog.identifier.endpointTagSecondary(),
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port53844(),
 					meta: {
 						managed_default: true,

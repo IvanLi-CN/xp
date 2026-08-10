@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
-const userIdA = "01JQUSER000000000000000000";
-const userIdB = "01JQUSER000000000000000001";
+const userIdA = fixtureCatalog.identifier.userPrimary();
+const userIdB = fixtureCatalog.identifier.userSecondary();
 
 const meta = {
 	title: "Pages/QuotaPolicyPage",
@@ -56,7 +56,7 @@ const meta = {
 						endpoint_id: fixtureCatalog.slotString.s157(),
 						node_id: fixtureCatalog.slotString.s145(),
 						tag: fixtureCatalog.slotString.s158(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 443,
 						meta: {
 							reality: {
@@ -71,7 +71,7 @@ const meta = {
 						endpoint_id: fixtureCatalog.slotString.s160(),
 						node_id: fixtureCatalog.slotString.s145(),
 						tag: fixtureCatalog.slotString.s161(),
-						kind: "ss2022_2022_blake3_aes_128_gcm",
+						kind: fixtureCatalog.endpoint.ssKind(),
 						port: 8443,
 						meta: {
 							method: "2022-blake3-aes-128-gcm",
@@ -81,7 +81,7 @@ const meta = {
 						endpoint_id: fixtureCatalog.slotString.s162(),
 						node_id: fixtureCatalog.slotString.s149(),
 						tag: fixtureCatalog.slotString.s163(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 444,
 						meta: {
 							reality: {
@@ -96,7 +96,7 @@ const meta = {
 						endpoint_id: fixtureCatalog.slotString.s165(),
 						node_id: fixtureCatalog.slotString.s153(),
 						tag: fixtureCatalog.slotString.s166(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 445,
 						meta: {
 							reality: {

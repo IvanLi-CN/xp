@@ -35,7 +35,7 @@ const DESIGN_ALERTS: AlertsResponse = {
 		{
 			type: "quota_banned_membership",
 			membership_key: "u_01HUSERAAAAAA::ep_01HENDPTAAAAAA",
-			user_id: "u_01HUSERAAAAAA",
+			user_id: fixtureCatalog.identifier.userPrimary(),
 			endpoint_id: fixtureCatalog.slotString.s240(),
 			owner_node_id: fixtureCatalog.slotString.s241(),
 			quota_banned: true,
@@ -91,7 +91,7 @@ const DESIGN_ENDPOINTS: Array<
 		endpoint_id: fixtureCatalog.slotString.s240(),
 		node_id: fixtureCatalog.slotString.s241(),
 		tag: fixtureCatalog.slotString.s139(),
-		kind: "vless_reality_vision_tcp",
+		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 443,
 		meta: {
 			reality: {
@@ -111,7 +111,7 @@ const DESIGN_ENDPOINTS: Array<
 		endpoint_id: fixtureCatalog.slotString.s250(),
 		node_id: fixtureCatalog.slotString.s243(),
 		tag: fixtureCatalog.slotString.s251(),
-		kind: "ss2022_2022_blake3_aes_128_gcm",
+		kind: fixtureCatalog.endpoint.ssKind(),
 		port: 8443,
 		meta: {
 			method: "2022-blake3-aes-128-gcm",
@@ -123,7 +123,7 @@ const DESIGN_ENDPOINTS: Array<
 
 const DESIGN_USERS: AdminUser[] = [
 	{
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Customer A",
 		subscription_token: fixtureCatalog.slotString.s252(),
 		credential_epoch: 0,
@@ -135,7 +135,7 @@ const DESIGN_USERS: AdminUser[] = [
 		} satisfies UserQuotaReset,
 	},
 	{
-		user_id: "u_01HUSERBBBBBB",
+		user_id: fixtureCatalog.identifier.userSecondary(),
 		display_name: "Customer B",
 		subscription_token: fixtureCatalog.slotString.s253(),
 		credential_epoch: 0,
@@ -149,16 +149,16 @@ const DESIGN_USERS: AdminUser[] = [
 ];
 
 const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
-	u_01HUSERAAAAAA: [
+	[fixtureCatalog.identifier.userPrimary()]: [
 		{
-			user_id: "u_01HUSERAAAAAA",
+			user_id: fixtureCatalog.identifier.userPrimary(),
 			endpoint_id: fixtureCatalog.slotString.s240(),
 			node_id: fixtureCatalog.slotString.s241(),
 		},
 	],
-	u_01HUSERBBBBBB: [
+	[fixtureCatalog.identifier.userSecondary()]: [
 		{
-			user_id: "u_01HUSERBBBBBB",
+			user_id: fixtureCatalog.identifier.userSecondary(),
 			endpoint_id: fixtureCatalog.slotString.s250(),
 			node_id: fixtureCatalog.slotString.s243(),
 		},
@@ -167,7 +167,7 @@ const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
 
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		node_id: fixtureCatalog.slotString.s241(),
 		quota_limit_bytes: 10 * 2 ** 30,
 		quota_reset_source: "user",

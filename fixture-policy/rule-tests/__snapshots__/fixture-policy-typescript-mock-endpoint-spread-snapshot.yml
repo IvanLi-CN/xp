@@ -1,0 +1,22 @@
+id: fixture-policy-typescript-mock-endpoint-spread
+snapshots:
+  ? |
+    function ensureEndpointRecord(seed) {
+      return { ...seed, port: fixtureCatalog.endpoint.port443() };
+    }
+  : labels:
+    - source: '...seed'
+      style: primary
+      start: 49
+      end: 56
+    - source: ensureEndpointRecord
+      style: secondary
+      start: 9
+      end: 29
+    - source: |-
+        function ensureEndpointRecord(seed) {
+          return { ...seed, port: fixtureCatalog.endpoint.port443() };
+        }
+      style: secondary
+      start: 0
+      end: 102

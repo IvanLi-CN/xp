@@ -1,0 +1,23 @@
+id: fixture-policy-tsx-user-id-literal
+language: Tsx
+severity: error
+message: Fixture user IDs must not use literals or external input.
+note: Use a fixtureCatalog identifier accessor or a catalog-backed state sanitizer.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        regex: '^user_id$'
+    - has:
+        field: value
+        any:
+          - kind: string
+          - regex: '^(process[.]env|JSON[.]parse|fetch\(|payload[.]|request[.]|body[.]|readJson\()'

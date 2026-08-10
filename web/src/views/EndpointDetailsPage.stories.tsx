@@ -32,7 +32,7 @@ const meta = {
 						endpoint_id: fixtureCatalog.slotString.s120(),
 						node_id: fixtureCatalog.slotString.s118(),
 						tag: fixtureCatalog.slotString.s121(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {
@@ -147,7 +147,7 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 						endpoint_id: fixtureCatalog.slotString.s120(),
 						node_id: fixtureCatalog.slotString.s118(),
 						tag: fixtureCatalog.slotString.s121(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {
@@ -263,7 +263,7 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 						endpoint_id: fixtureCatalog.slotString.s128(),
 						node_id: fixtureCatalog.slotString.s124(),
 						tag: fixtureCatalog.slotString.s129(),
-						kind: "vless_reality_vision_tcp",
+						kind: fixtureCatalog.endpoint.vlessKind(),
 						port: 53844,
 						meta: {
 							reality: {

@@ -166,7 +166,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.slotString.s270(),
 		node_id: fixtureCatalog.slotString.s271(),
 		tag: fixtureCatalog.slotString.s272(),
-		kind: "vless_reality_vision_tcp",
+		kind: fixtureCatalog.endpoint.vlessKind(),
 		port: 53842,
 		meta: { public_domain: fixtureCatalog.slotString.s212() },
 		probe: {
@@ -179,7 +179,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		endpoint_id: fixtureCatalog.slotString.s273(),
 		node_id: fixtureCatalog.slotString.s274(),
 		tag: fixtureCatalog.slotString.s275(),
-		kind: "ss2022_2022_blake3_aes_128_gcm",
+		kind: fixtureCatalog.endpoint.ssKind(),
 		port: 53843,
 		meta: { public_domain: fixtureCatalog.slotString.s278() },
 		probe: {

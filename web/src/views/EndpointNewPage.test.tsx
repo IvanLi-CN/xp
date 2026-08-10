@@ -103,7 +103,7 @@ function setupNodeMocks() {
 				endpoint_id: fixtureCatalog.slotString.s132(),
 				node_id: fixtureCatalog.slotString.s182(),
 				tag: fixtureCatalog.slotString.s133(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 443,
 				meta: {
 					reality: {
@@ -154,7 +154,7 @@ describe("EndpointNewPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s105(),
 			node_id: fixtureCatalog.slotString.s182(),
 			tag: fixtureCatalog.slotString.s105(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
 				managed_default: true,
@@ -176,7 +176,7 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
@@ -208,7 +208,7 @@ describe("EndpointNewPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s105(),
 			node_id: fixtureCatalog.slotString.s182(),
 			tag: fixtureCatalog.slotString.s105(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: { managed_default: true },
 		});
@@ -227,7 +227,7 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.optional.undefined(),
@@ -241,7 +241,7 @@ describe("EndpointNewPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s105(),
 			node_id: fixtureCatalog.slotString.s182(),
 			tag: fixtureCatalog.slotString.s105(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
 				managed_default: true,
@@ -284,7 +284,7 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
@@ -306,7 +306,7 @@ describe("EndpointNewPage", () => {
 					endpoint_id: fixtureCatalog.slotString.s132(),
 					node_id: fixtureCatalog.slotString.s182(),
 					tag: fixtureCatalog.slotString.s133(),
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: 443,
 					meta: {
 						reality: {
@@ -374,7 +374,7 @@ describe("EndpointNewPage", () => {
 				endpoint_id: fixtureCatalog.slotString.s185(),
 				node_id: fixtureCatalog.slotString.s182(),
 				tag: fixtureCatalog.slotString.s185(),
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				port: 8443,
 				meta: {
 					managed_default: true,
@@ -406,7 +406,7 @@ describe("EndpointNewPage", () => {
 
 			await waitFor(() => {
 				expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-					kind: "vless_reality_vision_tcp",
+					kind: fixtureCatalog.endpoint.vlessKind(),
 					node_id: fixtureCatalog.slotString.s182(),
 					port: 8443,
 					accepted_authorities: fixtureCatalog.authority.host130Port8443(),
@@ -462,7 +462,7 @@ describe("EndpointNewPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s186(),
 			node_id: fixtureCatalog.slotString.s124(),
 			tag: fixtureCatalog.slotString.s186(),
-			kind: "vless_reality_vision_tcp",
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {
 				managed_default: true,
@@ -505,7 +505,7 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "vless_reality_vision_tcp",
+				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.slotString.s124(),
 				port: 443,
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
@@ -545,7 +545,7 @@ describe("EndpointNewPage", () => {
 			endpoint_id: fixtureCatalog.slotString.s105(),
 			node_id: fixtureCatalog.slotString.s182(),
 			tag: fixtureCatalog.slotString.s105(),
-			kind: "ss2022_2022_blake3_aes_128_gcm",
+			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 443,
 			meta: {},
 		});
@@ -571,7 +571,7 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "ss2022_2022_blake3_aes_128_gcm",
+				kind: fixtureCatalog.endpoint.ssKind(),
 				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
 				mihomo_smux: {
@@ -586,10 +586,10 @@ describe("EndpointNewPage", () => {
 
 	it("does not validate hidden SS2022 SMux values after switching to VLESS", async () => {
 		vi.mocked(createAdminEndpoint).mockResolvedValue({
-			endpoint_id: "ep-vless",
-			node_id: "node-alpha",
-			tag: "ep-vless",
-			kind: "vless_reality_vision_tcp",
+			endpoint_id: fixtureCatalog.slotString.s105(),
+			node_id: fixtureCatalog.slotString.s182(),
+			tag: fixtureCatalog.slotString.s105(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
 			port: 443,
 			meta: {},
 		});
@@ -612,11 +612,11 @@ describe("EndpointNewPage", () => {
 
 		await waitFor(() => {
 			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
-				kind: "vless_reality_vision_tcp",
-				node_id: "node-alpha",
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				node_id: fixtureCatalog.slotString.s182(),
 				port: 443,
-				canary_upstream: undefined,
-				accepted_authorities: undefined,
+				canary_upstream: fixtureCatalog.optional.undefined(),
+				accepted_authorities: fixtureCatalog.optional.undefined(),
 			});
 		});
 	});

@@ -425,7 +425,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
             .and(path("/repos/acme/xp/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "tag_name": latest_tag,
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;
@@ -491,7 +491,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
             .and(path("/repos/acme/xp2/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "tag_name": "main",
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;
@@ -528,7 +528,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
         Mock::given(method("GET"))
             .and(path("/repos/acme/xp3/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;

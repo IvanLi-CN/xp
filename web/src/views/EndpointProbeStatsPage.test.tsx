@@ -71,7 +71,7 @@ describe("<EndpointProbeStatsPage />", () => {
 			endpoint_id: fixtureCatalog.slotString.s40(),
 			node_id: fixtureCatalog.slotString.s32(),
 			tag: fixtureCatalog.slotString.s139(),
-			kind: "ss2022_2022_blake3_aes_128_gcm",
+			kind: fixtureCatalog.endpoint.ssKind(),
 			port: 443,
 			meta: {},
 		});
