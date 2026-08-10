@@ -121,12 +121,8 @@ function setupMocks(args?: {
 		node_name: fixtureCatalog.nodeName.fixture135(),
 		api_base_url: fixtureCatalog.service.fixture136(),
 		access_host: fixtureCatalog.host.fixture137(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly" as const,
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 		egress_probe: {
 			public_ipv4: fixtureCatalog.address.documentation192_0_2_117(),
 			public_ipv6: "2001:db8::8",
@@ -293,19 +289,19 @@ function setupMocks(args?: {
 					{
 						endpoint_id: fixtureCatalog.endpointId.fixture138(),
 						endpoint_tag: fixtureCatalog.endpointTag.fixture139(),
-						port: 443,
+						port: fixtureCatalog.endpoint.port443(),
 					},
 					{
 						endpoint_id: fixtureCatalog.endpointId.fixture140(),
 						endpoint_tag: fixtureCatalog.endpointTag.fixture141(),
-						port: 8388,
+						port: fixtureCatalog.endpoint.port8388(),
 					},
 				],
 				per_endpoint_series: [
 					{
 						endpoint_id: fixtureCatalog.endpointId.fixture138(),
 						endpoint_tag: fixtureCatalog.endpointTag.fixture139(),
-						port: 443,
+						port: fixtureCatalog.endpoint.port443(),
 						series: [
 							{
 								minute: fixtureCatalog.timestamp.t20260308T005800(),
@@ -320,7 +316,7 @@ function setupMocks(args?: {
 					{
 						endpoint_id: fixtureCatalog.endpointId.fixture140(),
 						endpoint_tag: fixtureCatalog.endpointTag.fixture141(),
-						port: 8388,
+						port: fixtureCatalog.endpoint.port8388(),
 						series: [
 							{
 								minute: fixtureCatalog.timestamp.t20260308T005800(),
@@ -507,9 +503,7 @@ describe("<NodeDetailsPage />", () => {
 				"admintoken",
 				fixtureCatalog.nodeId.fixture134(),
 				{
-					quota_reset: {
-						policy: "unlimited",
-					},
+					quota_reset: fixtureCatalog.quota.resetUnlimitedRequest(),
 				},
 			);
 		});
@@ -579,7 +573,7 @@ describe("<NodeDetailsPage />", () => {
 					endpoint_id: fixtureCatalog.endpointId.fixture144(),
 					tag: fixtureCatalog.endpointTag.fixture141(),
 					kind: fixtureCatalog.endpoint.ssKind(),
-					port: 8388,
+					port: fixtureCatalog.endpoint.port8388(),
 				},
 			],
 		});
@@ -611,7 +605,7 @@ describe("<NodeDetailsPage />", () => {
 					endpoint_id: fixtureCatalog.endpointId.fixture144(),
 					tag: fixtureCatalog.endpointTag.fixture141(),
 					kind: fixtureCatalog.endpoint.ssKind(),
-					port: 8388,
+					port: fixtureCatalog.endpoint.port8388(),
 				},
 			],
 		});
@@ -665,12 +659,8 @@ describe("<NodeDetailsPage />", () => {
 					node_name: fixtureCatalog.nodeName.fixture135(),
 					api_base_url: fixtureCatalog.service.fixture136(),
 					access_host: fixtureCatalog.host.fixture137(),
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetNode(),
 				},
 				window: "24h",
 				geo_source: "country_is",

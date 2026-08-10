@@ -112,6 +112,33 @@ rule:
                           field: name
                           pattern: buildFixtureEndpointIdentifierResponse
             - all:
+                - pattern: endpoint.endpoint_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserAccessItem
+            - all:
+                - pattern: endpoint.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserAccessItem
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserNodeWeightItem
+            - all:
                 - pattern: node.node_id
                 - inside:
                     stopBy: end
@@ -138,4 +165,13 @@ rule:
                       - has:
                           field: name
                           pattern: buildSubscriptionTokenResponse
+            - all:
+                - pattern: user.subscription_token
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
             - pattern: catalogTimestampOffset($$$)

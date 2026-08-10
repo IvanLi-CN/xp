@@ -27,6 +27,15 @@ rule:
             - pattern: state.nextEndpointTag()
             - pattern: state.nextSubscriptionToken()
             - pattern: state.nextUserId()
+            - all:
+                - pattern: nextSubscriptionToken()
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
             - pattern: 'null'
 constraints:
   FIELD:

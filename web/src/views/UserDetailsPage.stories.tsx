@@ -25,24 +25,16 @@ const nodes: AdminNode[] = [
 		node_name: fixtureCatalog.identifier.nodeNameSecondary(),
 		access_host: fixtureCatalog.host.primary(),
 		api_base_url: fixtureCatalog.url.primaryApi(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 	{
 		node_id: fixtureCatalog.identifier.nodeSecondary(),
 		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 		access_host: fixtureCatalog.host.secondary(),
 		api_base_url: fixtureCatalog.url.secondaryApi(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 ];
 
@@ -52,7 +44,7 @@ const endpoints: AdminEndpoint[] = [
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		tag: fixtureCatalog.identifier.endpointTagPrimary(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: 443,
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {},
 	},
 	{
@@ -60,7 +52,7 @@ const endpoints: AdminEndpoint[] = [
 		node_id: fixtureCatalog.identifier.nodeSecondary(),
 		tag: fixtureCatalog.identifier.endpointTagSecondary(),
 		kind: fixtureCatalog.endpoint.ssKind(),
-		port: 8443,
+		port: fixtureCatalog.endpoint.port8443(),
 		meta: {},
 	},
 ];
@@ -99,13 +91,13 @@ const meta = {
 					{
 						user_id: fixtureCatalog.identifier.userPrimary(),
 						node_id: fixtureCatalog.identifier.nodePrimary(),
-						quota_limit_bytes: 10 * 2 ** 30,
+						quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 						quota_reset_source: "user",
 					},
 					{
 						user_id: fixtureCatalog.identifier.userPrimary(),
 						node_id: fixtureCatalog.identifier.nodeSecondary(),
-						quota_limit_bytes: 5 * 2 ** 30,
+						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "node",
 					},
 				],
@@ -270,24 +262,16 @@ export const UsageDetailsDuplicateNames: Story = {
 						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 						access_host: fixtureCatalog.host.primary(),
 						api_base_url: fixtureCatalog.url.primaryApi(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 					{
 						node_id: fixtureCatalog.identifier.endpointSecondary(),
 						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 						access_host: fixtureCatalog.host.secondary(),
 						api_base_url: fixtureCatalog.url.secondaryApi(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 				userIpUsageByUserId: Object.fromEntries([

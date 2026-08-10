@@ -12,12 +12,8 @@ const node: AdminNode = {
 	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 	access_host: fixtureCatalog.host.primary(),
 	api_base_url: fixtureCatalog.url.primaryApi(),
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly",
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.resetNode(),
 	egress_probe: {
 		public_ipv4: fixtureCatalog.address.tertiaryIpv4(),
 		public_ipv6: "2001:db8::8",
@@ -40,7 +36,7 @@ const nodeEndpoints: AdminEndpoint[] = [
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		tag: fixtureCatalog.identifier.endpointTagPrimary(),
 		kind: fixtureCatalog.endpoint.ssKind(),
-		port: 8388,
+		port: fixtureCatalog.endpoint.port8388(),
 		meta: {},
 	},
 	{
@@ -48,7 +44,7 @@ const nodeEndpoints: AdminEndpoint[] = [
 		node_id: fixtureCatalog.identifier.nodePrimary(),
 		tag: fixtureCatalog.identifier.endpointTagSecondary(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: 443,
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {
 			dest: fixtureCatalog.address.loopback49043(),
 			server_names: fixtureCatalog.list.primaryServerNames(),

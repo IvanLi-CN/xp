@@ -70,11 +70,7 @@ export const LongValues: Story = {
 						subscription_token: fixtureCatalog.token.fixture170(),
 						credential_epoch: 0,
 						priority_tier: "p3",
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 480,
-						},
+						quota_reset: fixtureCatalog.quota.reset(),
 					},
 					{
 						user_id: USER_ID_2,
@@ -82,11 +78,7 @@ export const LongValues: Story = {
 						subscription_token: fixtureCatalog.token.fixture171(),
 						credential_epoch: 0,
 						priority_tier: "p3",
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 15,
-							tz_offset_minutes: 480,
-						},
+						quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
 					},
 				],
 				nodeQuotas: [

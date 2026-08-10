@@ -122,7 +122,7 @@ function setupMocks(args?: {
 		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
-		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
@@ -132,12 +132,8 @@ function setupMocks(args?: {
 				node_name: fixtureCatalog.nodeName.fixture135(),
 				api_base_url: fixtureCatalog.service.fixture136(),
 				access_host: fixtureCatalog.host.fixture137(),
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
@@ -149,7 +145,7 @@ function setupMocks(args?: {
 				node_id: fixtureCatalog.nodeId.fixture134(),
 				tag: fixtureCatalog.endpointTag.fixture139(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				port: 443,
+				port: fixtureCatalog.endpoint.port443(),
 				meta: {},
 			},
 			{
@@ -157,7 +153,7 @@ function setupMocks(args?: {
 				node_id: fixtureCatalog.nodeId.fixture134(),
 				tag: fixtureCatalog.endpointTag.fixture141(),
 				kind: fixtureCatalog.endpoint.ssKind(),
-				port: 8443,
+				port: fixtureCatalog.endpoint.port8443(),
 				meta: {},
 			},
 			{
@@ -165,7 +161,7 @@ function setupMocks(args?: {
 				node_id: fixtureCatalog.nodeId.fixture134(),
 				tag: fixtureCatalog.endpointTag.fixture256(),
 				kind: fixtureCatalog.endpoint.ssKind(),
-				port: 9443,
+				port: fixtureCatalog.endpoint.port9443(),
 				meta: {},
 			},
 		],
@@ -181,7 +177,7 @@ function setupMocks(args?: {
 			{
 				user_id: fixtureCatalog.identifier.userPrimary(),
 				node_id: fixtureCatalog.nodeId.fixture134(),
-				quota_limit_bytes: 0,
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 				quota_reset_source: "user",
 			},
 		],
@@ -194,7 +190,7 @@ function setupMocks(args?: {
 			{
 				user_id: fixtureCatalog.identifier.userPrimary(),
 				node_id: fixtureCatalog.nodeId.fixture134(),
-				quota_limit_bytes: 1024,
+				quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 				used_bytes: 0,
 				remaining_bytes: 1024,
 				cycle_end_at: null,
@@ -222,12 +218,8 @@ function setupMocks(args?: {
 							node_name: fixtureCatalog.nodeName.fixture135(),
 							api_base_url: fixtureCatalog.service.fixture136(),
 							access_host: fixtureCatalog.host.fixture137(),
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.timestamp.t20260308T000000(),
@@ -282,7 +274,7 @@ function setupMocks(args?: {
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		node_id: fixtureCatalog.nodeId.fixture134(),
-		quota_limit_bytes: 0,
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 		quota_reset_source: "user",
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
@@ -291,7 +283,7 @@ function setupMocks(args?: {
 		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
-		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
 	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue(
@@ -852,7 +844,7 @@ rules: []
 				{
 					user_id: fixtureCatalog.identifier.userPrimary(),
 					node_id: fixtureCatalog.nodeId.fixture134(),
-					quota_limit_bytes: 1024,
+					quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 					used_bytes: 0,
 					remaining_bytes: 1024,
 					cycle_end_at: null,
@@ -889,12 +881,8 @@ rules: []
 							node_name: fixtureCatalog.nodeName.fixture135(),
 							api_base_url: fixtureCatalog.service.fixture136(),
 							access_host: fixtureCatalog.host.fixture137(),
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.timestamp.t20260308T000000(),
@@ -924,12 +912,8 @@ rules: []
 							node_name: fixtureCatalog.nodeName.fixture259(),
 							api_base_url: fixtureCatalog.service.fixture260(),
 							access_host: fixtureCatalog.host.fixture244(),
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.timestamp.t20260308T000000(),
@@ -1045,12 +1029,8 @@ rules: []
 							node_name: fixtureCatalog.nodeName.fixture135(),
 							api_base_url: fixtureCatalog.service.fixture261(),
 							access_host: fixtureCatalog.host.fixture262(),
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.timestamp.t20260308T000000(),
@@ -1071,12 +1051,8 @@ rules: []
 							node_name: fixtureCatalog.nodeName.fixture135(),
 							api_base_url: fixtureCatalog.service.fixture264(),
 							access_host: fixtureCatalog.host.fixture265(),
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
 						window_start: fixtureCatalog.timestamp.t20260308T000000(),

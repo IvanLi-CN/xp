@@ -11,9 +11,13 @@ import {
 	type AdminUserNodeQuota,
 	type NodeQuotaReset,
 	type UserQuotaReset,
+	buildFixtureUserAccessItem,
+	buildFixtureUserNodeWeightItem,
+	hasFixtureNodeQuotaReset,
 	normalizeFixtureEndpoint,
 	normalizeFixtureNode,
 	normalizeFixtureQuota,
+	normalizeFixtureQuotaLimit,
 	normalizeFixtureUser,
 } from "./fixtureStateSanitizers";
 
@@ -594,9 +598,24 @@ export async function setupApiMocks(
 				errorResponse(route, `node not found: ${nodeId}`, 404);
 				return;
 			}
-			void parseJsonBody(request);
-			node.quota_limit_bytes = fixtureCatalog.quota.limitBytes();
-			node.quota_reset = fixtureCatalog.quota.reset() as NodeQuotaReset;
+			const requestBody = parseJsonBody(request);
+			const quotaLimit = normalizeFixtureQuotaLimit(
+				requestBody.quota_limit_bytes,
+			);
+			if (quotaLimit === fixtureCatalog.quota.usedBytes()) {
+				node.quota_limit_bytes = fixtureCatalog.quota.usedBytes();
+			} else if (quotaLimit === fixtureCatalog.quota.limitBytes()) {
+				node.quota_limit_bytes = fixtureCatalog.quota.limitBytes();
+			} else if (quotaLimit === fixtureCatalog.quota.oneGiB()) {
+				node.quota_limit_bytes = fixtureCatalog.quota.oneGiB();
+			} else if (quotaLimit === fixtureCatalog.quota.fiveGiB()) {
+				node.quota_limit_bytes = fixtureCatalog.quota.fiveGiB();
+			} else if (quotaLimit === fixtureCatalog.quota.tenGiB()) {
+				node.quota_limit_bytes = fixtureCatalog.quota.tenGiB();
+			}
+			if (hasFixtureNodeQuotaReset(requestBody.quota_reset)) {
+				node.quota_reset = fixtureCatalog.quota.reset() as NodeQuotaReset;
+			}
 			jsonResponse(route, node);
 			return;
 		}
@@ -710,11 +729,7 @@ export async function setupApiMocks(
 				.map((endpointId) => {
 					const endpoint = endpointById.get(endpointId);
 					if (!endpoint) throw new Error(`missing endpoint: ${endpointId}`);
-					return {
-						user_id: userId,
-						endpoint_id: fixtureCatalog.endpointId.fixture40(),
-						node_id: fixtureCatalog.nodeId.fixture32(),
-					};
+					return buildFixtureUserAccessItem(userId, endpoint);
 				});
 			state.userAccessByUserId[userId] = nextItems;
 
@@ -777,19 +792,30 @@ export async function setupApiMocks(
 					errorResponse(route, `Node not found: ${nodeId}`, 404);
 					return;
 				}
-				void parseJsonBody(request);
+				const requestBody = parseJsonBody(request);
+				const rawWeight = requestBody.weight;
+				if (typeof rawWeight !== "number") {
+					errorResponse(route, "invalid JSON payload: missing weight", 400);
+					return;
+				}
+				if (!Number.isFinite(rawWeight) || !Number.isInteger(rawWeight)) {
+					errorResponse(route, "invalid weight: must be an integer", 400);
+					return;
+				}
+				if (rawWeight < 0 || rawWeight > 65535) {
+					errorResponse(
+						route,
+						"invalid weight: must be between 0 and 65535",
+						400,
+					);
+					return;
+				}
 
 				const items = state.userNodeWeights[userId] ?? [];
-				const next: AdminUserNodeWeightItem =
-					nodeId === fixtureCatalog.nodeId.fixture32()
-						? {
-								node_id: fixtureCatalog.nodeId.fixture32(),
-								weight: fixtureCatalog.number.value120(),
-							}
-						: {
-								node_id: fixtureCatalog.nodeId.fixture36(),
-								weight: fixtureCatalog.number.value120(),
-							};
+				const next: AdminUserNodeWeightItem = buildFixtureUserNodeWeightItem(
+					node,
+					rawWeight,
+				);
 				state.userNodeWeights[userId] = [
 					...items.filter((i) => i.node_id !== nodeId),
 					next,
@@ -805,9 +831,9 @@ export async function setupApiMocks(
 					errorResponse(route, `User not found: ${userId}`, 404);
 					return;
 				}
-				user.subscription_token = fixtureCatalog.identifier.tokenQuinary();
+				user.subscription_token = nextSubscriptionToken();
 				jsonResponse(route, {
-					subscription_token: fixtureCatalog.identifier.tokenQuinary(),
+					subscription_token: user.subscription_token,
 				});
 				return;
 			}

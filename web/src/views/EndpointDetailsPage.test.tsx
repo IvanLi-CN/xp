@@ -96,12 +96,8 @@ function setupMocks() {
 				node_name: fixtureCatalog.nodeName.fixture33(),
 				access_host: fixtureCatalog.host.fixture119(),
 				api_base_url: fixtureCatalog.service.fixture34(),
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
@@ -110,7 +106,7 @@ function setupMocks() {
 		node_id: fixtureCatalog.nodeId.fixture32(),
 		tag: fixtureCatalog.endpointTag.fixture121(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: 53844,
+		port: fixtureCatalog.endpoint.port53844(),
 		meta: {
 			reality: {
 				dest: fixtureCatalog.address.loopback39043(),
@@ -144,7 +140,7 @@ describe("EndpointDetailsPage", () => {
 			node_id: fixtureCatalog.nodeId.fixture32(),
 			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
-			port: 53844,
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {
 				reality: {
 					dest: fixtureCatalog.address.loopback39043(),
@@ -197,7 +193,7 @@ describe("EndpointDetailsPage", () => {
 				"admintoken",
 				fixtureCatalog.endpointId.fixture172(),
 				{
-					port: 53844,
+					port: fixtureCatalog.endpoint.port53844(),
 					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 					accepted_authorities:
 						fixtureCatalog.authority.existingAndHost119Port53844(),
@@ -212,7 +208,7 @@ describe("EndpointDetailsPage", () => {
 			node_id: fixtureCatalog.nodeId.fixture32(),
 			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.vlessKind(),
-			port: 53844,
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 
@@ -228,7 +224,7 @@ describe("EndpointDetailsPage", () => {
 				"admintoken",
 				fixtureCatalog.endpointId.fixture172(),
 				{
-					port: 53844,
+					port: fixtureCatalog.endpoint.port53844(),
 					accepted_authorities:
 						fixtureCatalog.authority.existingAuthoritiesPort443(),
 				},
@@ -242,7 +238,7 @@ describe("EndpointDetailsPage", () => {
 			node_id: fixtureCatalog.nodeId.fixture32(),
 			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.ssKind(),
-			port: 53844,
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
@@ -250,7 +246,7 @@ describe("EndpointDetailsPage", () => {
 			node_id: fixtureCatalog.nodeId.fixture32(),
 			tag: fixtureCatalog.endpointTag.fixture121(),
 			kind: fixtureCatalog.endpoint.ssKind(),
-			port: 53844,
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 
@@ -270,7 +266,7 @@ describe("EndpointDetailsPage", () => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
 				fixtureCatalog.endpointId.fixture172(),
-				{ port: 53844 },
+				{ port: fixtureCatalog.endpoint.port53844() },
 			);
 		});
 	});
@@ -289,12 +285,8 @@ describe("EndpointDetailsPage", () => {
 						node_name: fixtureCatalog.nodeName.fixture125(),
 						access_host: fixtureCatalog.host.fixture126(),
 						api_base_url: fixtureCatalog.service.fixture127(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 			});
@@ -303,7 +295,7 @@ describe("EndpointDetailsPage", () => {
 				node_id: fixtureCatalog.nodeId.fixture124(),
 				tag: fixtureCatalog.endpointTag.fixture129(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				port: 53844,
+				port: fixtureCatalog.endpoint.port53844(),
 				meta: {
 					reality: {
 						dest: fixtureCatalog.address.loopback39043(),
@@ -319,7 +311,7 @@ describe("EndpointDetailsPage", () => {
 				node_id: fixtureCatalog.nodeId.fixture124(),
 				tag: fixtureCatalog.endpointTag.fixture129(),
 				kind: fixtureCatalog.endpoint.vlessKind(),
-				port: 53844,
+				port: fixtureCatalog.endpoint.port53844(),
 				meta: {
 					reality: {
 						dest: fixtureCatalog.address.loopback39043(),
@@ -374,7 +366,7 @@ describe("EndpointDetailsPage", () => {
 					"admintoken",
 					fixtureCatalog.endpointId.fixture172(),
 					{
-						port: 53844,
+						port: fixtureCatalog.endpoint.port53844(),
 						canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 						accepted_authorities: fixtureCatalog.authority.host126Port53844(),
 					},
@@ -394,12 +386,8 @@ describe("EndpointDetailsPage", () => {
 					node_name: fixtureCatalog.nodeName.fixture33(),
 					access_host: fixtureCatalog.string.none(),
 					api_base_url: fixtureCatalog.service.fixture123(),
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetNode(),
 				},
 			],
 		});

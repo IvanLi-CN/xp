@@ -167,7 +167,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		node_id: fixtureCatalog.nodeId.fixture271(),
 		tag: fixtureCatalog.endpointTag.fixture272(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: 53842,
+		port: fixtureCatalog.endpoint.port53842(),
 		meta: { public_domain: fixtureCatalog.host.fixture212() },
 		probe: {
 			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
@@ -180,7 +180,7 @@ const ENDPOINTS: AdminEndpoint[] = [
 		node_id: fixtureCatalog.nodeId.fixture274(),
 		tag: fixtureCatalog.endpointTag.fixture275(),
 		kind: fixtureCatalog.endpoint.ssKind(),
-		port: 53843,
+		port: fixtureCatalog.endpoint.port53843(),
 		meta: { public_domain: fixtureCatalog.host.fixture278() },
 		probe: {
 			latest_checked_at: fixtureCatalog.timestamp.probeLatest(),
@@ -196,16 +196,16 @@ const NODES: AdminNode[] = [
 		node_name: fixtureCatalog.nodeName.fixture276(),
 		api_base_url: fixtureCatalog.service.fixture211(),
 		access_host: fixtureCatalog.host.fixture212(),
-		quota_limit_bytes: 0,
-		quota_reset: { policy: "unlimited" },
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 	{
 		node_id: fixtureCatalog.nodeId.fixture274(),
 		node_name: fixtureCatalog.nodeName.fixture37(),
 		api_base_url: fixtureCatalog.service.fixture277(),
 		access_host: fixtureCatalog.host.fixture278(),
-		quota_limit_bytes: 0,
-		quota_reset: { policy: "unlimited" },
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 ];
 

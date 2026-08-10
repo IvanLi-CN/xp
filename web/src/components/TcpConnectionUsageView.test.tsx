@@ -24,19 +24,19 @@ const baseReport: Pick<
 		{
 			endpoint_id: fixtureCatalog.endpointId.fixture287(),
 			endpoint_tag: fixtureCatalog.nodeName.fixture280(),
-			port: 443,
+			port: fixtureCatalog.endpoint.port443(),
 		},
 		{
 			endpoint_id: fixtureCatalog.endpointId.fixture288(),
 			endpoint_tag: fixtureCatalog.endpointTag.fixture289(),
-			port: 8443,
+			port: fixtureCatalog.endpoint.port8443(),
 		},
 	],
 	per_endpoint_series: [
 		{
 			endpoint_id: fixtureCatalog.endpointId.fixture287(),
 			endpoint_tag: fixtureCatalog.nodeName.fixture280(),
-			port: 443,
+			port: fixtureCatalog.endpoint.port443(),
 			series: [
 				{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 2 },
 				{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 4 },
@@ -45,7 +45,7 @@ const baseReport: Pick<
 		{
 			endpoint_id: fixtureCatalog.endpointId.fixture288(),
 			endpoint_tag: fixtureCatalog.endpointTag.fixture289(),
-			port: 8443,
+			port: fixtureCatalog.endpoint.port8443(),
 			series: [
 				{ minute: fixtureCatalog.timestamp.t20260308T005800(), count: 1 },
 				{ minute: fixtureCatalog.timestamp.t20260308T005900(), count: 3 },

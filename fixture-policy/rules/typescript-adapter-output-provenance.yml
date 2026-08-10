@@ -139,7 +139,7 @@ rule:
                   regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
               - has:
                   field: body
-                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
+                  regex: '(?s)^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
               - has:
                   field: body
                   regex: '^\[\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'

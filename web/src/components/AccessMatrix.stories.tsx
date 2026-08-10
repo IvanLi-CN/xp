@@ -33,27 +33,42 @@ function createInitialCells(): Record<
 		n_01HnodeA: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture191() },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture191(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture192() },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture192(),
+				},
 			},
 		},
 		n_01HnodeB: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture193() },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture193(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "on",
-				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture194() },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture194(),
+				},
 			},
 		},
 		n_01HnodeC: {
 			vless_reality_vision_tcp: {
 				value: "off",
-				meta: { port: 443, tag: fixtureCatalog.endpointTag.fixture195() },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture195(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
@@ -62,12 +77,12 @@ function createInitialCells(): Record<
 						{
 							endpointId: fixtureCatalog.endpointId.fixture196(),
 							tag: fixtureCatalog.endpointTag.fixture197(),
-							port: 8443,
+							port: fixtureCatalog.endpoint.port8443(),
 						},
 						{
 							endpointId: fixtureCatalog.endpointId.fixture198(),
 							tag: fixtureCatalog.endpointTag.fixture199(),
-							port: 9443,
+							port: fixtureCatalog.endpoint.port9443(),
 						},
 					],
 				},
@@ -80,7 +95,10 @@ function createInitialCells(): Record<
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: fixtureCatalog.endpointTag.fixture200() },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture200(),
+				},
 			},
 		},
 	};
@@ -109,7 +127,10 @@ function useDemoMatrixState() {
 				...meta,
 				selectedEndpointId: first.endpointId,
 				selectedEndpointIds: allEndpointIds,
-				port: first.port,
+				port:
+					first.port === fixtureCatalog.endpoint.port9443()
+						? fixtureCatalog.endpoint.port9443()
+						: fixtureCatalog.endpoint.port8443(),
 			},
 		};
 	}
@@ -225,7 +246,12 @@ function useDemoMatrixState() {
 					...cell.meta,
 					selectedEndpointId: firstSelected,
 					selectedEndpointIds: nextSelected,
-					port: firstMatch?.port,
+					port:
+						firstMatch?.port === fixtureCatalog.endpoint.port8443()
+							? fixtureCatalog.endpoint.port8443()
+							: firstMatch?.port === fixtureCatalog.endpoint.port9443()
+								? fixtureCatalog.endpoint.port9443()
+								: fixtureCatalog.optional.undefined(),
 				},
 			};
 			return next;

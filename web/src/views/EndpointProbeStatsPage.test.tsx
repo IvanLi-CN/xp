@@ -72,7 +72,7 @@ describe("<EndpointProbeStatsPage />", () => {
 			node_id: fixtureCatalog.nodeId.fixture32(),
 			tag: fixtureCatalog.endpointTag.fixture139(),
 			kind: fixtureCatalog.endpoint.ssKind(),
-			port: 443,
+			port: fixtureCatalog.endpoint.port443(),
 			meta: {},
 		});
 		vi.mocked(fetchAdminEndpointProbeHistory).mockResolvedValue({
@@ -118,16 +118,16 @@ describe("<EndpointProbeStatsPage />", () => {
 					node_name: fixtureCatalog.nodeName.fixture210(),
 					api_base_url: fixtureCatalog.service.fixture211(),
 					access_host: fixtureCatalog.host.fixture212(),
-					quota_limit_bytes: 0,
-					quota_reset: { policy: "unlimited" },
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetUnlimited(),
 				},
 				{
 					node_id: fixtureCatalog.nodeId.fixture36(),
 					node_name: fixtureCatalog.nodeName.fixture207(),
 					api_base_url: fixtureCatalog.service.fixture208(),
 					access_host: fixtureCatalog.host.fixture209(),
-					quota_limit_bytes: 0,
-					quota_reset: { policy: "unlimited" },
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetUnlimited(),
 				},
 			],
 		});

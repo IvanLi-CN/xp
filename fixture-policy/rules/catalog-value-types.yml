@@ -107,7 +107,8 @@ rule:
         - has:
             field: key
             any:
-              - regex: '^("port443"|"port8443"|"port9443"|"port53843"|"port53844")$'
+              - regex: '^("port443"|"port444"|"port445"|"port8443"|"port8388")$'
+              - regex: '^("port9443"|"port53842"|"port53843"|"port53844")$'
               - regex: '^("limitBytes"|"usedBytes"|"remainingBytes"|"fiveGiB"|"tenGiB")$'
               - regex: '^("elevenGiB"|"fifteenGiB"|"fourGiB"|"oneGiB"|"credentialEpoch")$'
         - has:
@@ -120,7 +121,10 @@ rule:
             field: key
             any:
               - regex: '^("reality"|"realityAlternate"|"realityKeys"|"vlessMeta")$'
-              - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped"|"reset")$'
+              - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped")$'
+              - regex: '^("reset"|"resetNode"|"resetNodeMidMonth")$'
+              - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'
+              - regex: '^"resetUserMidMonth"$'
         - has:
             field: value
             not:

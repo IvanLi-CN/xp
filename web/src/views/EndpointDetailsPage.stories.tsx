@@ -19,12 +19,8 @@ const meta = {
 						node_name: fixtureCatalog.nodeName.fixture33(),
 						access_host: fixtureCatalog.host.fixture119(),
 						api_base_url: fixtureCatalog.service.fixture34(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 				endpoints: [
@@ -33,7 +29,7 @@ const meta = {
 						node_id: fixtureCatalog.nodeId.fixture118(),
 						tag: fixtureCatalog.endpointTag.fixture121(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
-						port: 53844,
+						port: fixtureCatalog.endpoint.port53844(),
 						meta: {
 							reality: {
 								dest: fixtureCatalog.address.loopbackPort39002(),
@@ -134,12 +130,8 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 						node_name: fixtureCatalog.nodeName.fixture33(),
 						access_host: fixtureCatalog.host.fixture99(),
 						api_base_url: fixtureCatalog.service.fixture123(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 				endpoints: [
@@ -148,7 +140,7 @@ export const ManagedDefaultAliasDefaultsTo443: Story = {
 						node_id: fixtureCatalog.nodeId.fixture118(),
 						tag: fixtureCatalog.endpointTag.fixture121(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
-						port: 53844,
+						port: fixtureCatalog.endpoint.port53844(),
 						meta: {
 							reality: {
 								dest: fixtureCatalog.address.loopbackPort39002(),
@@ -250,12 +242,8 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 						node_name: fixtureCatalog.nodeName.fixture125(),
 						access_host: fixtureCatalog.host.fixture126(),
 						api_base_url: fixtureCatalog.service.fixture127(),
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 				endpoints: [
@@ -264,7 +252,7 @@ export const ManagedDefaultNodeAliasSuggestionsWithoutUpstreamHistory: Story = {
 						node_id: fixtureCatalog.nodeId.fixture124(),
 						tag: fixtureCatalog.endpointTag.fixture129(),
 						kind: fixtureCatalog.endpoint.vlessKind(),
-						port: 53844,
+						port: fixtureCatalog.endpoint.port53844(),
 						meta: {
 							reality: {
 								dest: fixtureCatalog.address.loopbackPort39002(),

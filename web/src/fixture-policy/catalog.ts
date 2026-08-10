@@ -326,8 +326,13 @@ export const fixtureCatalog = {
 		ssKind: () =>
 			catalog.operations.endpoint.ssKind as "ss2022_2022_blake3_aes_128_gcm",
 		port443: () => catalog.operations.endpoint.port443,
+		port444: () => catalog.operations.endpoint.port444,
+		port445: () => catalog.operations.endpoint.port445,
 		port8443: () => catalog.operations.endpoint.port8443,
+		port8388: () => catalog.operations.endpoint.port8388,
 		port9443: () => catalog.operations.endpoint.port9443,
+		port53842: () => catalog.operations.endpoint.port53842,
+		port53843: () => catalog.operations.endpoint.port53843,
 		port53844: () => catalog.operations.endpoint.port53844,
 		reality: () => catalog.operations.endpoint.reality,
 		realityAlternate: () => catalog.operations.endpoint.realityAlternate,
@@ -353,7 +358,39 @@ export const fixtureCatalog = {
 		fifteenGiB: () => catalog.operations.quota.fifteenGiB,
 		fourGiB: () => catalog.operations.quota.fourGiB,
 		oneGiB: () => catalog.operations.quota.oneGiB,
-		reset: () => catalog.operations.quota.reset,
+		reset: () =>
+			catalog.operations.quota.reset as {
+				policy: "monthly";
+				day_of_month: number;
+				tz_offset_minutes: number;
+			},
+		resetNode: () =>
+			catalog.operations.quota.resetNode as {
+				policy: "monthly";
+				day_of_month: number;
+				tz_offset_minutes: null;
+			},
+		resetNodeMidMonth: () =>
+			catalog.operations.quota.resetNodeMidMonth as {
+				policy: "monthly";
+				day_of_month: number;
+				tz_offset_minutes: null;
+			},
+		resetUnlimited: () =>
+			catalog.operations.quota.resetUnlimited as {
+				policy: "unlimited";
+				tz_offset_minutes: null;
+			},
+		resetUnlimitedRequest: () =>
+			catalog.operations.quota.resetUnlimitedRequest as {
+				policy: "unlimited";
+			},
+		resetUserMidMonth: () =>
+			catalog.operations.quota.resetUserMidMonth as {
+				policy: "monthly";
+				day_of_month: number;
+				tz_offset_minutes: number;
+			},
 		resetSource: () => catalog.operations.quota.resetSource as "user",
 	},
 	user: {

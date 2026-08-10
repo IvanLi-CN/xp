@@ -80,8 +80,12 @@
 			"vlessKind": "vless_reality_vision_tcp",
 			"ssKind": "ss2022_2022_blake3_aes_128_gcm",
 			"port443": 443,
+			"port444": 444,
+			"port445": 445,
 			"port8443": 8443,
+			"port8388": 8388,
 			"port9443": 9443,
+			"port53842": 53842,
 			"port53843": 53843,
 			"port53844": 53844,
 			"reality": {
@@ -160,6 +164,28 @@
 			"reset": {
 				"policy": "monthly",
 				"day_of_month": 1,
+				"tz_offset_minutes": 480
+			},
+			"resetNode": {
+				"policy": "monthly",
+				"day_of_month": 1,
+				"tz_offset_minutes": null
+			},
+			"resetNodeMidMonth": {
+				"policy": "monthly",
+				"day_of_month": 15,
+				"tz_offset_minutes": null
+			},
+			"resetUnlimited": {
+				"policy": "unlimited",
+				"tz_offset_minutes": null
+			},
+			"resetUnlimitedRequest": {
+				"policy": "unlimited"
+			},
+			"resetUserMidMonth": {
+				"policy": "monthly",
+				"day_of_month": 15,
 				"tz_offset_minutes": 480
 			},
 			"resetSource": "user"

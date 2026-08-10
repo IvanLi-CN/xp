@@ -28,7 +28,7 @@ function renderMatrix(args?: {
 						vless: {
 							value: "off",
 							meta: {
-								port: 443,
+								port: fixtureCatalog.endpoint.port443(),
 								endpointId: fixtureCatalog.endpointId.fixture138(),
 							},
 						},
@@ -77,12 +77,12 @@ describe("<AccessMatrix />", () => {
 								{
 									endpointId: fixtureCatalog.endpointId.fixture285(),
 									tag: fixtureCatalog.endpointTag.fixture141(),
-									port: 443,
+									port: fixtureCatalog.endpoint.port443(),
 								},
 								{
 									endpointId: fixtureCatalog.endpointId.fixture286(),
 									tag: fixtureCatalog.endpointTag.fixture256(),
-									port: 8443,
+									port: fixtureCatalog.endpoint.port8443(),
 								},
 							],
 						},

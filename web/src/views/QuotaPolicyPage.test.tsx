@@ -119,12 +119,8 @@ function setupDefaultMocks() {
 				node_name: fixtureCatalog.nodeName.fixture33(),
 				api_base_url: fixtureCatalog.service.fixture34(),
 				access_host: fixtureCatalog.host.fixture35(),
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
@@ -137,11 +133,7 @@ function setupDefaultMocks() {
 				subscription_token: fixtureCatalog.token.fixture204(),
 				credential_epoch: 0,
 				priority_tier: "p1",
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				},
+				quota_reset: fixtureCatalog.quota.reset(),
 			},
 			{
 				user_id: fixtureCatalog.identifier.userSecondary(),
@@ -149,11 +141,7 @@ function setupDefaultMocks() {
 				subscription_token: fixtureCatalog.token.fixture205(),
 				credential_epoch: 0,
 				priority_tier: "p2",
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				},
+				quota_reset: fixtureCatalog.quota.reset(),
 			},
 		],
 	});
@@ -218,12 +206,8 @@ function setupDefaultMocks() {
 		node_name: fixtureCatalog.nodeName.fixture33(),
 		api_base_url: fixtureCatalog.service.fixture34(),
 		access_host: fixtureCatalog.host.fixture35(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
 		user_id: fixtureCatalog.identifier.userPrimary(),
@@ -231,11 +215,7 @@ function setupDefaultMocks() {
 		subscription_token: fixtureCatalog.token.fixture204(),
 		credential_epoch: 0,
 		priority_tier: "p1",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: 480,
-		},
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 }
 

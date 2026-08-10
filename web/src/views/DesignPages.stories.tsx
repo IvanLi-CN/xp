@@ -7,7 +7,6 @@ import type { AdminNode } from "../api/adminNodes";
 import type { AdminUserAccessItem } from "../api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
-import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
 
 function Empty() {
 	return <></>;
@@ -52,35 +51,24 @@ const DESIGN_NODES: AdminNode[] = [
 		node_name: fixtureCatalog.nodeName.fixture33(),
 		access_host: fixtureCatalog.host.fixture137(),
 		api_base_url: fixtureCatalog.service.fixture242(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 	{
 		node_id: fixtureCatalog.nodeId.fixture243(),
 		node_name: fixtureCatalog.nodeName.fixture37(),
 		access_host: fixtureCatalog.host.fixture244(),
 		api_base_url: fixtureCatalog.service.fixture245(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 15,
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNodeMidMonth(),
 	},
 	{
 		node_id: fixtureCatalog.nodeId.fixture246(),
 		node_name: fixtureCatalog.nodeName.fixture247(),
 		access_host: fixtureCatalog.host.fixture248(),
 		api_base_url: fixtureCatalog.service.fixture249(),
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "unlimited",
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 ];
 
@@ -92,7 +80,7 @@ const DESIGN_ENDPOINTS: Array<
 		node_id: fixtureCatalog.nodeId.fixture241(),
 		tag: fixtureCatalog.endpointTag.fixture139(),
 		kind: fixtureCatalog.endpoint.vlessKind(),
-		port: 443,
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {
 			reality: {
 				dest: fixtureCatalog.address.loopbackPort39002(),
@@ -112,7 +100,7 @@ const DESIGN_ENDPOINTS: Array<
 		node_id: fixtureCatalog.nodeId.fixture243(),
 		tag: fixtureCatalog.endpointTag.fixture251(),
 		kind: fixtureCatalog.endpoint.ssKind(),
-		port: 8443,
+		port: fixtureCatalog.endpoint.port8443(),
 		meta: {
 			method: "2022-blake3-aes-128-gcm",
 		},
@@ -128,11 +116,7 @@ const DESIGN_USERS: AdminUser[] = [
 		subscription_token: fixtureCatalog.token.fixture252(),
 		credential_epoch: 0,
 		priority_tier: "p3",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: 480,
-		} satisfies UserQuotaReset,
+		quota_reset: fixtureCatalog.quota.reset(),
 	},
 	{
 		user_id: fixtureCatalog.identifier.userSecondary(),
@@ -140,11 +124,7 @@ const DESIGN_USERS: AdminUser[] = [
 		subscription_token: fixtureCatalog.token.fixture253(),
 		credential_epoch: 0,
 		priority_tier: "p3",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 15,
-			tz_offset_minutes: 480,
-		} satisfies UserQuotaReset,
+		quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
 	},
 ];
 
@@ -169,7 +149,7 @@ const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
 		user_id: fixtureCatalog.identifier.userPrimary(),
 		node_id: fixtureCatalog.nodeId.fixture241(),
-		quota_limit_bytes: 10 * 2 ** 30,
+		quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 		quota_reset_source: "user",
 	},
 ];

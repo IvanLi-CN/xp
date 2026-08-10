@@ -163,3 +163,54 @@ export function normalizeFixtureQuota(
 		quota_reset_source: fixtureCatalog.quota.resetSource(),
 	};
 }
+
+export function normalizeFixtureQuotaLimit(value: unknown): number | undefined {
+	if (value === fixtureCatalog.quota.usedBytes()) {
+		return fixtureCatalog.quota.usedBytes();
+	}
+	if (value === fixtureCatalog.quota.limitBytes()) {
+		return fixtureCatalog.quota.limitBytes();
+	}
+	if (value === fixtureCatalog.quota.oneGiB()) {
+		return fixtureCatalog.quota.oneGiB();
+	}
+	if (value === fixtureCatalog.quota.fiveGiB()) {
+		return fixtureCatalog.quota.fiveGiB();
+	}
+	if (value === fixtureCatalog.quota.tenGiB()) {
+		return fixtureCatalog.quota.tenGiB();
+	}
+	return undefined;
+}
+
+export function hasFixtureNodeQuotaReset(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const reset = fixtureCatalog.quota.reset();
+	const candidate = value as Record<string, unknown>;
+	return (
+		candidate.policy === reset.policy &&
+		candidate.day_of_month === reset.day_of_month &&
+		candidate.tz_offset_minutes === reset.tz_offset_minutes
+	);
+}
+
+export function buildFixtureUserAccessItem(
+	userId: string,
+	endpoint: AdminEndpoint,
+) {
+	return {
+		user_id: userId,
+		endpoint_id: endpoint.endpoint_id,
+		node_id: endpoint.node_id,
+	};
+}
+
+export function buildFixtureUserNodeWeightItem(
+	node: AdminNode,
+	weight: number,
+) {
+	return {
+		node_id: node.node_id,
+		weight,
+	};
+}

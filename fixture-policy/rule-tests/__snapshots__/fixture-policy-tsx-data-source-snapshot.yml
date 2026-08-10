@@ -181,6 +181,51 @@ snapshots:
       start: 33
       end: 50
   ? |
+    const fixture = { port: 443 };
+  : labels:
+    - source: 'port: 443'
+      style: primary
+      start: 18
+      end: 27
+    - source: port
+      style: secondary
+      start: 18
+      end: 22
+    - source: '443'
+      style: secondary
+      start: 24
+      end: 27
+  ? |
+    const fixture = { quota_limit_bytes: 4096 };
+  : labels:
+    - source: 'quota_limit_bytes: 4096'
+      style: primary
+      start: 18
+      end: 41
+    - source: quota_limit_bytes
+      style: secondary
+      start: 18
+      end: 35
+    - source: '4096'
+      style: secondary
+      start: 37
+      end: 41
+  ? |
+    const fixture = { quota_reset: { policy: "unlimited" } };
+  : labels:
+    - source: 'quota_reset: { policy: "unlimited" }'
+      style: primary
+      start: 18
+      end: 54
+    - source: quota_reset
+      style: secondary
+      start: 18
+      end: 29
+    - source: '{ policy: "unlimited" }'
+      style: secondary
+      start: 31
+      end: 54
+  ? |
     const fixture = { run_id: "unapproved-run" };
   : labels:
     - source: 'run_id: "unapproved-run"'

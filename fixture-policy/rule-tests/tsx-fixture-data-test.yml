@@ -6,6 +6,18 @@ valid:
     const fixture = { start_at: fixtureCatalog.timestamp.baseline() };
   - |
     const fixture = {
+      port: fixtureCatalog.endpoint.port443(),
+      quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+      quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
+    };
+  - |
+    const fixture = {
+      port: selected === "alternate"
+        ? fixtureCatalog.endpoint.port9443()
+        : fixtureCatalog.endpoint.port8443(),
+    };
+  - |
+    const fixture = {
       owner_node_id: fixtureCatalog.identifier.nodePrimary(),
       bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
       first_seen_at: fixtureCatalog.timestamp.recent(),
@@ -39,3 +51,9 @@ invalid:
     const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
   - |
     const fixture = { last_success_at: new Date().toISOString() };
+  - |
+    const fixture = { port: 443 };
+  - |
+    const fixture = { quota_limit_bytes: 4096 };
+  - |
+    const fixture = { quota_reset: { policy: "unlimited" } };
