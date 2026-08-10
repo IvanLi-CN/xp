@@ -41,6 +41,7 @@ import {
 import { fetchDemoSubscription } from "./mockApi";
 import { useDemo } from "./store";
 import type { DemoEndpoint, DemoUser } from "./types";
+import { useDemoUserDraftNavigation } from "./useDemoUserDraftNavigation";
 
 const DEMO_PROTOCOLS = [
 	{ protocolId: "vless", label: "VLESS" },
@@ -51,10 +52,6 @@ type DemoUserTab = "user" | "access" | "quotaStatus" | "usageDetails";
 
 function endpointProtocolId(endpoint: DemoEndpoint) {
 	return endpoint.kind === "vless_reality_vision_tcp" ? "vless" : "ss2022";
-}
-
-function normalizeSelection(ids: string[]) {
-	return [...new Set(ids)].sort();
 }
 
 export function DemoUsersPage() {
@@ -557,7 +554,6 @@ export function DemoUserDetailsPage() {
 		setMihomoMixinYaml(user?.mihomoMixinYaml ?? "");
 		setMihomoExtraProxiesYaml("");
 		setMihomoExtraProxyProvidersYaml("");
-		setActiveUsageNodeId(null);
 	}, [
 		user?.displayName,
 		user?.endpointIds,
@@ -566,8 +562,44 @@ export function DemoUserDetailsPage() {
 		user?.quotaLimitGb,
 		user?.tier,
 	]);
+	const currentUser = user;
+	const {
+		accessDirty: dirty,
+		mihomoDirty,
+		profileDirty,
+		saveAccess,
+		saveMihomoProfile,
+		saveProfile,
+	} = useDemoUserDraftNavigation({
+		userId,
+		user: currentUser,
+		canWrite,
+		defaultLimitGb: state.quotaPolicy.defaultLimitGb,
+		updateUser,
+		pushToast,
+		draft: {
+			displayName,
+			resetPolicy,
+			tier,
+			locale,
+			selectedIds,
+			mihomoMixinYaml,
+		},
+		setters: {
+			setDisplayName,
+			setResetPolicy,
+			setResetDay,
+			setResetTzOffsetMinutes,
+			setTier,
+			setLocale,
+			setSelectedIds,
+			setMihomoMixinYaml,
+			setMihomoExtraProxiesYaml,
+			setMihomoExtraProxyProvidersYaml,
+		},
+	});
 
-	if (!user) {
+	if (!currentUser) {
 		return (
 			<PageState
 				variant="error"
@@ -582,21 +614,10 @@ export function DemoUserDetailsPage() {
 		);
 	}
 
-	const currentUser = user;
 	const assignedEndpoints = state.endpoints.filter((endpoint) =>
 		currentUser.endpointIds.includes(endpoint.id),
 	);
 	const selectedEndpointSet = new Set(selectedIds);
-	const dirty =
-		normalizeSelection(selectedIds).join("|") !==
-		normalizeSelection(currentUser.endpointIds).join("|");
-	const profileDirty =
-		displayName !== currentUser.displayName ||
-		locale !== currentUser.locale ||
-		tier !== currentUser.tier ||
-		(resetPolicy === "unlimited") !== (currentUser.quotaLimitGb === null);
-	const mihomoDirty = mihomoMixinYaml !== currentUser.mihomoMixinYaml;
-
 	function endpointIdsFor(nodeId: string, protocolId: string) {
 		return state.endpoints
 			.filter(
@@ -708,13 +729,15 @@ export function DemoUserDetailsPage() {
 		null;
 
 	async function fetchSubscriptionPreview(nextFormat = subscriptionFormat) {
+		const userForPreview = currentUser;
+		if (!userForPreview) return;
 		setSubscriptionOpen(true);
 		setSubscriptionFormat(nextFormat);
 		setSubscriptionLoading(true);
 		setSubscriptionError(null);
 		try {
 			setSubscriptionText(
-				await fetchDemoSubscription(state, currentUser, nextFormat),
+				await fetchDemoSubscription(state, userForPreview, nextFormat),
 			);
 		} catch (error) {
 			setSubscriptionError(
@@ -727,9 +750,11 @@ export function DemoUserDetailsPage() {
 	}
 
 	function resetSubscriptionToken() {
+		const userForReset = currentUser;
+		if (!userForReset) return;
 		const suffix = Date.now().toString(36).toUpperCase();
-		updateUser(currentUser.id, {
-			subscriptionToken: `sub_${currentUser.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}_${suffix}`,
+		updateUser(userForReset.id, {
+			subscriptionToken: `sub_${userForReset.id.replace(/[^a-z0-9]/gi, "").toUpperCase()}_${suffix}`,
 		});
 		setResetTokenOpen(false);
 		pushToast({ variant: "success", message: "Subscription token reset." });
@@ -964,13 +989,7 @@ export function DemoUserDetailsPage() {
 							<div>
 								<Button
 									disabled={!canWrite || !mihomoDirty}
-									onClick={() => {
-										updateUser(user.id, { mihomoMixinYaml });
-										pushToast({
-											variant: "success",
-											message: "Mihomo profile saved.",
-										});
-									}}
+									onClick={() => void saveMihomoProfile()}
 								>
 									Save mihomo mixin
 								</Button>
@@ -979,23 +998,7 @@ export function DemoUserDetailsPage() {
 
 						<Button
 							disabled={!canWrite || !profileDirty}
-							onClick={() => {
-								updateUser(user.id, {
-									displayName,
-									locale,
-									tier,
-									quotaLimitGb:
-										resetPolicy === "unlimited"
-											? null
-											: (user.quotaLimitGb ??
-												state.quotaPolicy.defaultLimitGb ??
-												100),
-								});
-								pushToast({
-									variant: "success",
-									message: "User saved.",
-								});
-							}}
+							onClick={() => void saveProfile()}
 						>
 							Save user
 						</Button>
@@ -1011,10 +1014,7 @@ export function DemoUserDetailsPage() {
 						</div>
 						<Button
 							disabled={!dirty || !canWrite}
-							onClick={() => {
-								updateUser(user.id, { endpointIds: selectedIds });
-								pushToast({ variant: "success", message: "Access saved." });
-							}}
+							onClick={() => void saveAccess()}
 						>
 							Apply access
 						</Button>

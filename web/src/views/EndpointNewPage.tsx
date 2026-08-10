@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { fetchAdminConfig } from "../api/adminConfig";
 import {
+	type AdminEndpointsResponse,
 	DEFAULT_MIHOMO_SMUX_CONFIG,
 	createAdminEndpoint,
 	fetchAdminEndpoints,
@@ -54,6 +55,7 @@ import {
 	mergeManagedVlessAutocompleteSuggestions,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
+import { resourceListCache } from "./adminEndpointsCache";
 
 const kindOptions = [
 	{
@@ -101,6 +103,7 @@ type EndpointFormInput = z.input<typeof endpointSchema>;
 
 export function EndpointNewPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
 	const endpointsCapability = useApiCapability("admin.endpoints");
@@ -221,6 +224,13 @@ export function EndpointNewPage() {
 			});
 		},
 		onSuccess: (endpoint) => {
+			queryClient.setQueryData<AdminEndpointsResponse>(
+				["adminEndpoints", adminToken],
+				(previous) => resourceListCache.append(previous, endpoint),
+			);
+			void queryClient.invalidateQueries({
+				queryKey: ["adminEndpoints", adminToken],
+			});
 			pushToast({
 				variant: "success",
 				message: "Endpoint created successfully.",

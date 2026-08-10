@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
 	type AdminEndpointCanaryProbeResponse,
@@ -12,12 +12,10 @@ import {
 	type MihomoSmuxConfig,
 	deleteAdminEndpoint,
 	fetchAdminEndpoint,
-	parseMihomoSmuxConfig,
 	patchAdminEndpoint,
 	rotateAdminEndpointShortId,
 } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
-import { isBackendApiError } from "../api/backendError";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
@@ -55,6 +53,7 @@ import {
 	normalizeAcceptedAuthority,
 	validateAcceptedAuthority,
 } from "../utils/acceptedAuthority";
+import { formatBackendError } from "../utils/backendErrorMessage";
 import {
 	type CanaryUpstreamMode,
 	arraysEqual,
@@ -73,15 +72,11 @@ import {
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "../utils/realityServerName";
-
-function formatErrorMessage(error: unknown): string {
-	if (isBackendApiError(error)) {
-		const code = error.code ? ` ${error.code}` : "";
-		return `${error.status}${code}: ${error.message}`;
-	}
-	if (error instanceof Error) return error.message;
-	return String(error);
-}
+import { resourceListCache } from "./adminEndpointsCache";
+import {
+	useEndpointDraft,
+	useEndpointDraftNavigation,
+} from "./useEndpointDraft";
 
 export function EndpointDetailsPage() {
 	const { endpointId } = useParams({ from: "/app/endpoints/$endpointId" });
@@ -95,7 +90,6 @@ export function EndpointDetailsPage() {
 	const nodesCapability = useApiCapability("admin.nodes");
 	const probesCapability = useApiCapability("admin.node-probes");
 	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
-
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
 	const endpointQuery = useQuery({
@@ -108,7 +102,6 @@ export function EndpointDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
-
 	const [port, setPort] = useState("");
 	const [realityDest, setRealityDest] = useState("");
 	const [realityServerNamesManual, setRealityServerNamesManual] = useState<
@@ -129,33 +122,34 @@ export function EndpointDetailsPage() {
 	} | null>(null);
 	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-
-	useEffect(() => {
-		const endpoint = endpointQuery.data;
-		if (!endpoint) return;
-		setPort(String(endpoint.port));
-		const smux = parseMihomoSmuxConfig(endpoint.meta.mihomo_smux);
-		setMihomoSmux(smux);
-		setMihomoSmuxMaxConnections(String(smux.max_connections));
-		setMihomoSmuxMinStreams(String(smux.min_streams));
-		if (endpoint.kind === "vless_reality_vision_tcp") {
-			const metaSnapshot = parseVlessMeta(endpoint.meta);
-			setRealityDest(metaSnapshot.realityDest);
-			setRealityServerNamesManual(metaSnapshot.realityServerNames);
-			setRealityFingerprint(metaSnapshot.realityFingerprint);
-			setUpstreamUrl(metaSnapshot.canaryUpstreamUrl);
-			setUpstreamMode(metaSnapshot.canaryUpstreamMode);
-			setAcceptedAuthorities(metaSnapshot.acceptedAuthorities);
-		} else {
-			setRealityDest("");
-			setRealityServerNamesManual([]);
-			setRealityFingerprint("");
-			setUpstreamUrl("");
-			setUpstreamMode("auto");
-			setAcceptedAuthorities([]);
-		}
-	}, [endpointQuery.data]);
-
+	const { discard: discardEndpointDraft, isDirty: endpointDirty } =
+		useEndpointDraft(
+			endpointQuery.data,
+			{
+				port,
+				realityDest,
+				realityServerNamesManual,
+				realityFingerprint,
+				upstreamUrl,
+				upstreamMode,
+				acceptedAuthorities,
+				mihomoSmux,
+				mihomoSmuxMaxConnections,
+				mihomoSmuxMinStreams,
+			},
+			{
+				setPort,
+				setRealityDest,
+				setRealityServerNamesManual,
+				setRealityFingerprint,
+				setUpstreamUrl,
+				setUpstreamMode,
+				setAcceptedAuthorities,
+				setMihomoSmux,
+				setMihomoSmuxMaxConnections,
+				setMihomoSmuxMinStreams,
+			},
+		);
 	const patchMutation = useMutation({
 		mutationFn: async () => {
 			const endpoint = endpointQuery.data;
@@ -186,17 +180,14 @@ export function EndpointDetailsPage() {
 				);
 				if (changedMihomoSmux) payload.mihomo_smux = changedMihomoSmux;
 			}
-
 			if (endpoint.kind === "vless_reality_vision_tcp") {
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				if (!metaSnapshot.managedDefault) {
 					const fingerprintValue = realityFingerprint.trim() || "chrome";
 					const destInput = realityDest.trim();
-
 					const serverNames = realityServerNamesManual
 						.map(normalizeRealityServerName)
 						.filter((s) => s.length > 0);
-
 					const destValue = destInput;
 
 					const realityChanged =
@@ -263,9 +254,10 @@ export function EndpointDetailsPage() {
 				["adminEndpoint", adminToken, endpointId],
 				endpoint,
 			);
+			resourceListCache.update(queryClient, adminToken, endpoint);
 		},
 		onError: (error) => {
-			pushToast({ variant: "error", message: formatErrorMessage(error) });
+			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
 
@@ -279,20 +271,28 @@ export function EndpointDetailsPage() {
 			endpointQuery.refetch();
 		},
 		onError: (error) => {
-			pushToast({ variant: "error", message: formatErrorMessage(error) });
+			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
 
 	const deleteMutation = useMutation({
 		mutationFn: () => deleteAdminEndpoint(adminToken, endpointId),
 		onSuccess: () => {
+			resourceListCache.remove(queryClient, adminToken, endpointId);
 			pushToast({ variant: "success", message: "Endpoint deleted." });
 			navigate({ to: "/endpoints" });
 		},
 		onError: (error) => {
-			pushToast({ variant: "error", message: formatErrorMessage(error) });
+			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
+
+	useEndpointDraftNavigation(
+		endpointId,
+		endpointDirty,
+		patchMutation,
+		discardEndpointDraft,
+	);
 
 	const probeRunMutation = useMutation({
 		mutationFn: () => runAdminEndpointProbeRun(adminToken),
@@ -310,7 +310,7 @@ export function EndpointDetailsPage() {
 			});
 		},
 		onError: (error) => {
-			pushToast({ variant: "error", message: formatErrorMessage(error) });
+			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
 
@@ -330,7 +330,7 @@ export function EndpointDetailsPage() {
 			});
 		},
 		onError: (error) => {
-			pushToast({ variant: "error", message: formatErrorMessage(error) });
+			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
 
@@ -386,7 +386,7 @@ export function EndpointDetailsPage() {
 			<PageState
 				variant="error"
 				title="Failed to load endpoint"
-				description={formatErrorMessage(endpointQuery.error)}
+				description={formatBackendError(endpointQuery.error)}
 				error={endpointQuery.error}
 				action={
 					<Button variant="secondary" onClick={() => endpointQuery.refetch()}>

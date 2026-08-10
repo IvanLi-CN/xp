@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppShell } from "./AppShell";
+import { ObjectNavigationGuardProvider } from "./ObjectNavigationGuard";
 
 type AppLayoutProps = {
 	children?: ReactNode;
@@ -8,50 +9,52 @@ type AppLayoutProps = {
 
 export function AppLayout({ children }: AppLayoutProps) {
 	return (
-		<AppShell
-			brand={{
-				name: "xp",
-				subtitle: "cluster manager",
-				markSrc: "/xp-mark.png",
-			}}
-			navGroups={[
-				{
-					title: "Nav",
-					items: [
-						{ label: "Dashboard", to: "/", icon: "tabler:layout-dashboard" },
-						{
-							label: "System status",
-							to: "/system-status",
-							icon: "tabler:activity-heartbeat",
-						},
-						{ label: "Nodes", to: "/nodes", icon: "tabler:server" },
-						{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" },
-						{ label: "Users", to: "/users", icon: "tabler:users" },
-					],
-				},
-				{
-					title: "Settings",
-					items: [
-						{
-							label: "Quota policy",
-							to: "/quota-policy",
-							icon: "tabler:gauge",
-						},
-						{
-							label: "Service config",
-							to: "/service-config",
-							icon: "tabler:settings",
-						},
-						{
-							label: "Tools",
-							to: "/tools",
-							icon: "tabler:tool",
-						},
-					],
-				},
-			]}
-		>
-			{children}
-		</AppShell>
+		<ObjectNavigationGuardProvider>
+			<AppShell
+				brand={{
+					name: "xp",
+					subtitle: "cluster manager",
+					markSrc: "/xp-mark.png",
+				}}
+				navGroups={[
+					{
+						title: "Nav",
+						items: [
+							{ label: "Dashboard", to: "/", icon: "tabler:layout-dashboard" },
+							{
+								label: "System status",
+								to: "/system-status",
+								icon: "tabler:activity-heartbeat",
+							},
+							{ label: "Nodes", to: "/nodes", icon: "tabler:server" },
+							{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" },
+							{ label: "Users", to: "/users", icon: "tabler:users" },
+						],
+					},
+					{
+						title: "Settings",
+						items: [
+							{
+								label: "Quota policy",
+								to: "/quota-policy",
+								icon: "tabler:gauge",
+							},
+							{
+								label: "Service config",
+								to: "/service-config",
+								icon: "tabler:settings",
+							},
+							{
+								label: "Tools",
+								to: "/tools",
+								icon: "tabler:tool",
+							},
+						],
+					},
+				]}
+			>
+				{children}
+			</AppShell>
+		</ObjectNavigationGuardProvider>
 	);
 }

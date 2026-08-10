@@ -1,7 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import yaml from "js-yaml";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import type {
@@ -17,6 +16,7 @@ import {
 import { fetchAdminUserNodeQuotaStatus } from "../api/adminUserNodeQuotaStatus";
 import { fetchAdminUserNodeQuotas } from "../api/adminUserNodeQuotas";
 import {
+	type AdminUsersResponse,
 	deleteAdminUser,
 	fetchAdminUser,
 	fetchAdminUserMihomoProfile,
@@ -30,7 +30,6 @@ import type { UserQuotaReset } from "../api/quotaReset";
 import {
 	DEFAULT_SUBSCRIPTION_FORMAT,
 	type SubscriptionFormat,
-	fetchSubscription,
 } from "../api/subscription";
 import { useApiCapability } from "../api/useApiCompatibility";
 import {
@@ -43,6 +42,7 @@ import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
+import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
@@ -77,146 +77,16 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
+import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
+import { useUserRouteTransientState } from "./useUserRouteTransientState";
+import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
 
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
 	{ protocolId: "ss2022_2022_blake3_aes_128_gcm", label: "SS2022" },
 ] as const;
 type SupportedProtocolId = (typeof PROTOCOLS)[number]["protocolId"];
-type MihomoProfileDraft = {
-	mixin_yaml: string;
-	extra_proxies_yaml: string;
-	extra_proxy_providers_yaml: string;
-};
-
-const { dump, load } = yaml;
-function isYamlMapping(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function parseYamlSequenceOrNull(raw: string): unknown[] | null {
-	if (raw.trim() === "") {
-		return [];
-	}
-	try {
-		const value = load(raw);
-		return Array.isArray(value) ? value : null;
-	} catch {
-		return null;
-	}
-}
-function parseYamlMappingOrNull(raw: string): Record<string, unknown> | null {
-	if (raw.trim() === "") {
-		return {};
-	}
-	try {
-		const value = load(raw);
-		return isYamlMapping(value) ? value : null;
-	} catch {
-		return null;
-	}
-}
-
-function getYamlProxyName(proxy: unknown): string | null {
-	return isYamlMapping(proxy) && typeof proxy.name === "string"
-		? proxy.name
-		: null;
-}
-
-function mergeLegacyProxiesPreferExtra(
-	extraProxies: unknown[],
-	legacyProxies: unknown[],
-): unknown[] | null {
-	const existingNames = new Set<string>();
-	for (const proxy of extraProxies) {
-		const name = getYamlProxyName(proxy);
-		if (!name) {
-			return null;
-		}
-		existingNames.add(name);
-	}
-
-	const merged = [...extraProxies];
-	for (const proxy of legacyProxies) {
-		const name = getYamlProxyName(proxy);
-		if (!name) {
-			return null;
-		}
-		if (existingNames.has(name)) {
-			continue;
-		}
-		merged.push(proxy);
-	}
-	return merged;
-}
-
-function normalizeMihomoProfileDraftForSave(
-	profile: MihomoProfileDraft,
-): MihomoProfileDraft {
-	if (profile.mixin_yaml.trim() === "") {
-		return profile;
-	}
-
-	let mixinRoot: unknown;
-	try {
-		mixinRoot = load(profile.mixin_yaml);
-	} catch {
-		return profile;
-	}
-	if (!isYamlMapping(mixinRoot)) {
-		return profile;
-	}
-
-	let mixinMap: Record<string, unknown> = { ...mixinRoot };
-	let mixinChanged = false;
-	let extraProxiesYaml = profile.extra_proxies_yaml;
-	let extraProxyProvidersYaml = profile.extra_proxy_providers_yaml;
-
-	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxies")) {
-		const value = mixinMap.proxies;
-		if (!Array.isArray(value)) {
-			return profile;
-		}
-		const extraProxies = parseYamlSequenceOrNull(extraProxiesYaml);
-		if (extraProxies === null) {
-			return profile;
-		}
-		const merged = mergeLegacyProxiesPreferExtra(extraProxies, value);
-		if (merged === null) {
-			return profile;
-		}
-		extraProxiesYaml = dump(merged);
-		const { proxies: _removedProxies, ...nextMixinMap } = mixinMap;
-		mixinMap = nextMixinMap;
-		mixinChanged = true;
-	}
-
-	if (Object.prototype.hasOwnProperty.call(mixinMap, "proxy-providers")) {
-		const value = mixinMap["proxy-providers"];
-		if (!isYamlMapping(value)) {
-			return profile;
-		}
-		const extraProxyProviders = parseYamlMappingOrNull(extraProxyProvidersYaml);
-		if (extraProxyProviders === null) {
-			return profile;
-		}
-		extraProxyProvidersYaml = dump({ ...value, ...extraProxyProviders });
-		const { "proxy-providers": _removedProxyProviders, ...nextMixinMap } =
-			mixinMap;
-		mixinMap = nextMixinMap;
-		mixinChanged = true;
-	}
-
-	if (!mixinChanged) {
-		return profile;
-	}
-
-	return {
-		mixin_yaml: dump(mixinMap),
-		extra_proxies_yaml: extraProxiesYaml,
-		extra_proxy_providers_yaml: extraProxyProvidersYaml,
-	};
-}
-
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
 		const code = err.code ? ` ${err.code}` : "";
@@ -241,6 +111,7 @@ export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
@@ -264,6 +135,8 @@ export function UserDetailsPage() {
 	const [trafficNodeOptions, setTrafficNodeOptions] = useState<
 		UserTrafficNodeOption[]
 	>([]);
+	const [trafficNodeOptionsUserId, setTrafficNodeOptionsUserId] =
+		useState(userId);
 	const [displayName, setDisplayName] = useState("");
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -280,20 +153,11 @@ export function UserDetailsPage() {
 	);
 	const [isApplyingAccess, setIsApplyingAccess] = useState(false);
 	const [accessError, setAccessError] = useState<string | null>(null);
-	const [resetTokenOpen, setResetTokenOpen] = useState(false);
-	const [isResettingToken, setIsResettingToken] = useState(false);
-	const [resetCredentialsOpen, setResetCredentialsOpen] = useState(false);
-	const [isResettingCredentials, setIsResettingCredentials] = useState(false);
 	const [subFormat, setSubFormat] = useState<SubscriptionFormat>(
 		DEFAULT_SUBSCRIPTION_FORMAT,
 	);
 	const [useExternalResourceMirror, setUseExternalResourceMirror] =
 		useState(false);
-	const [subOpen, setSubOpen] = useState(false);
-	const [subLoading, setSubLoading] = useState(false);
-	const [subText, setSubText] = useState("");
-	const [subError, setSubError] = useState<string | null>(null);
-	const subscriptionPreviewRequestRef = useRef(0);
 	const [mihomoMixinYaml, setMihomoMixinYaml] = useState("");
 	const [mihomoExtraProxiesYaml, setMihomoExtraProxiesYaml] = useState("");
 	const [mihomoExtraProxyProvidersYaml, setMihomoExtraProxyProvidersYaml] =
@@ -302,8 +166,28 @@ export function UserDetailsPage() {
 	const [mihomoProfileSaveError, setMihomoProfileSaveError] = useState<
 		string | null
 	>(null);
-	const [deleteOpen, setDeleteOpen] = useState(false);
-	const [isDeleting, setIsDeleting] = useState(false);
+	const {
+		currentUserIdRef,
+		deleteOpen,
+		isCurrentTransientState,
+		isDeleting,
+		isResettingCredentials,
+		isResettingToken,
+		loadSubscriptionPreview: loadUserSubscriptionPreview,
+		resetCredentialsOpen,
+		resetTokenOpen,
+		setDeleteOpen,
+		setIsDeleting,
+		setIsResettingCredentials,
+		setIsResettingToken,
+		setResetCredentialsOpen,
+		setResetTokenOpen,
+		setSubOpen,
+		subError,
+		subLoading,
+		subOpen,
+		subText,
+	} = useUserRouteTransientState(userId);
 	const inputClassName = inputControlClass(prefs.density);
 	const selectClassName = selectControlClass(prefs.density);
 	const userQuery = useQuery({
@@ -346,25 +230,38 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
+	const hasCurrentTrafficNodeOptions = trafficNodeOptionsUserId === userId;
+	const activeTrafficNodeForUser = resolveUserTrafficNodeFilter({
+		activeNodeId: activeTrafficNodeId,
+		options: trafficNodeOptions,
+		optionsUserId: trafficNodeOptionsUserId,
+		userId,
+	});
 	const { ipUsageDisplay, ipUsageQuery, trafficDisplay, trafficQuery } =
 		useUserTimeWindowReports({
 			adminToken,
 			ipUsageEnabled: enabledFor(trafficCapability) && tab === "usageDetails",
 			ipUsageWindow,
-			nodeId: activeTrafficNodeId,
+			nodeId: activeTrafficNodeForUser,
 			trafficEnabled: enabledFor(trafficCapability) && tab === "traffic",
 			trafficWindow: prefs.trafficWindow,
 			userId,
 		});
 	useEffect(() => {
-		if (trafficQuery.data?.nodes) {
-			setTrafficNodeOptions(trafficQuery.data.nodes);
-		}
-	}, [trafficQuery.data?.nodes]);
+		const nodes = trafficQuery.data?.nodes;
+		if (!nodes) return;
+		setTrafficNodeOptions(nodes);
+		setTrafficNodeOptionsUserId(userId);
+		setActiveTrafficNodeId((current) =>
+			current && nodes.some((node) => node.node_id === current)
+				? current
+				: null,
+		);
+	}, [trafficQuery.data?.nodes, userId]);
 	const user = userQuery.data;
 	const availableTrafficNodes =
 		trafficQuery.data?.nodes ??
-		(trafficNodeOptions.length > 0
+		(hasCurrentTrafficNodeOptions && trafficNodeOptions.length > 0
 			? trafficNodeOptions
 			: (nodesQuery.data?.items ?? []).map((node) => ({
 					node_id: node.node_id,
@@ -372,7 +269,7 @@ export function UserDetailsPage() {
 				})));
 	const trafficNodeSelector = (
 		<Select
-			value={activeTrafficNodeId ?? "all"}
+			value={activeTrafficNodeForUser ?? "all"}
 			onValueChange={(value) =>
 				setActiveTrafficNodeId(value === "all" ? null : value)
 			}
@@ -453,13 +350,6 @@ export function UserDetailsPage() {
 		}
 		return url.toString();
 	}, [subFormat, subscriptionToken, useExternalResourceMirror]);
-
-	useEffect(() => {
-		if (!userId) return;
-		setIpUsageWindow("24h");
-		setActiveTrafficNodeId(null);
-		setTrafficNodeOptions([]);
-	}, [userId]);
 
 	useEffect(() => {
 		if (!user) return;
@@ -776,9 +666,67 @@ export function UserDetailsPage() {
 		!nodesQuery.isError &&
 		!endpointsQuery.isError &&
 		!accessQuery.isError;
+	const profileDirty = useMemo(() => {
+		if (!user) return false;
+		const quotaReset = user.quota_reset;
+		return (
+			displayName.trim() !== user.display_name ||
+			resetPolicy !== quotaReset.policy ||
+			(resetPolicy === "monthly" &&
+				(quotaReset.policy !== "monthly" ||
+					resetDay !== quotaReset.day_of_month)) ||
+			resetTzOffsetMinutes !== quotaReset.tz_offset_minutes
+		);
+	}, [displayName, resetDay, resetPolicy, resetTzOffsetMinutes, user]);
+	const accessDirty = useMemo(() => {
+		if (!isAccessReady) return false;
+		const currentIds = access
+			.map((item) => item.endpoint_id)
+			.sort()
+			.join("|");
+		return [...selectedEndpointIds].sort().join("|") !== currentIds;
+	}, [access, isAccessReady, selectedEndpointIds]);
+	const mihomoProfileDirty = useMemo(() => {
+		if (!mihomoProfileQuery.data) return false;
+		return (
+			mihomoMixinYaml !== mihomoProfileQuery.data.mixin_yaml ||
+			mihomoExtraProxiesYaml !== mihomoProfileQuery.data.extra_proxies_yaml ||
+			mihomoExtraProxyProvidersYaml !==
+				mihomoProfileQuery.data.extra_proxy_providers_yaml
+		);
+	}, [
+		mihomoExtraProxiesYaml,
+		mihomoExtraProxyProvidersYaml,
+		mihomoMixinYaml,
+		mihomoProfileQuery.data,
+	]);
 
-	async function applyAccessMatrix() {
-		if (!adminToken || !userId || !isAccessReady) return;
+	useObjectNavigationDirtySections(`user:${userId}`, [
+		{
+			id: "profile",
+			label: "user profile",
+			isDirty: () => profileDirty,
+			save: saveUserProfile,
+			discard: discardUserProfileDraft,
+		},
+		{
+			id: "access",
+			label: "access",
+			isDirty: () => accessDirty,
+			save: applyAccessMatrix,
+			discard: discardAccessDraft,
+		},
+		{
+			id: "mihomo-profile",
+			label: "Mihomo profile",
+			isDirty: () => mihomoProfileDirty,
+			save: saveUserMihomoProfile,
+			discard: discardMihomoProfileDraft,
+		},
+	]);
+
+	async function applyAccessMatrix(): Promise<boolean> {
+		if (!adminToken || !userId || !isAccessReady) return false;
 		setIsApplyingAccess(true);
 		setAccessError(null);
 		try {
@@ -793,8 +741,10 @@ export function UserDetailsPage() {
 				variant: "success",
 				message: `Access updated (+${res.created} -${res.deleted})`,
 			});
+			return true;
 		} catch (error) {
 			setAccessError(formatError(error));
+			return false;
 		} finally {
 			setIsApplyingAccess(false);
 		}
@@ -804,28 +754,14 @@ export function UserDetailsPage() {
 		nextFormat = subFormat,
 		nextMirror = useExternalResourceMirror,
 	) {
-		if (!subscriptionToken) return;
-		const requestId = ++subscriptionPreviewRequestRef.current;
-		setSubLoading(true);
-		setSubError(null);
 		setSubFormat(nextFormat);
 		setUseExternalResourceMirror(nextMirror);
-		try {
-			const text =
-				nextFormat === "mihomo" && nextMirror
-					? await fetchSubscription(subscriptionToken, nextFormat, "mirror")
-					: await fetchSubscription(subscriptionToken, nextFormat);
-			if (requestId !== subscriptionPreviewRequestRef.current) return;
-			setSubText(text);
-		} catch (error) {
-			if (requestId !== subscriptionPreviewRequestRef.current) return;
-			setSubError(formatError(error));
-			setSubText("");
-		} finally {
-			if (requestId === subscriptionPreviewRequestRef.current) {
-				setSubLoading(false);
-			}
-		}
+		await loadUserSubscriptionPreview(
+			subscriptionToken,
+			nextFormat,
+			nextMirror,
+			formatError,
+		);
 	}
 
 	async function retryAccessData() {
@@ -836,19 +772,19 @@ export function UserDetailsPage() {
 		]);
 	}
 
-	async function saveUserProfile() {
-		if (!adminToken || !userId) return;
+	async function saveUserProfile(): Promise<boolean> {
+		if (!adminToken || !userId) return false;
 		const normalizedDisplayName = displayName.trim();
 		if (normalizedDisplayName.length === 0) {
 			setUserSaveError("Display name is required.");
-			return;
+			return false;
 		}
 		if (
 			resetPolicy === "monthly" &&
 			(!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31)
 		) {
 			setUserSaveError("Day of month must be between 1 and 31.");
-			return;
+			return false;
 		}
 		if (
 			!Number.isInteger(resetTzOffsetMinutes) ||
@@ -856,7 +792,7 @@ export function UserDetailsPage() {
 			resetTzOffsetMinutes > 840
 		) {
 			setUserSaveError("TZ offset must be between -720 and 840 minutes.");
-			return;
+			return false;
 		}
 
 		setIsSavingUser(true);
@@ -873,21 +809,30 @@ export function UserDetailsPage() {
 							policy: "unlimited",
 							tz_offset_minutes: resetTzOffsetMinutes,
 						};
-			await patchAdminUser(adminToken, userId, {
+			const savedUser = await patchAdminUser(adminToken, userId, {
 				display_name: normalizedDisplayName,
 				quota_reset: quotaReset,
 			});
 			await userQuery.refetch();
+			queryClient.setQueryData<AdminUsersResponse>(
+				["adminUsers", adminToken],
+				(previous) => replaceAdminUser(previous, savedUser),
+			);
+			void queryClient.invalidateQueries({
+				queryKey: ["adminUsers", adminToken],
+			});
 			pushToast({ variant: "success", message: "User updated" });
+			return true;
 		} catch (error) {
 			setUserSaveError(formatError(error));
+			return false;
 		} finally {
 			setIsSavingUser(false);
 		}
 	}
 
-	async function saveUserMihomoProfile() {
-		if (!adminToken || !userId) return;
+	async function saveUserMihomoProfile(): Promise<boolean> {
+		if (!adminToken || !userId) return false;
 		setIsSavingMihomoProfile(true);
 		setMihomoProfileSaveError(null);
 		try {
@@ -899,70 +844,124 @@ export function UserDetailsPage() {
 			await putAdminUserMihomoProfile(adminToken, userId, profile);
 			await mihomoProfileQuery.refetch();
 			pushToast({ variant: "success", message: "Mihomo mixin updated" });
+			return true;
 		} catch (error) {
 			setMihomoProfileSaveError(formatError(error));
+			return false;
 		} finally {
 			setIsSavingMihomoProfile(false);
 		}
 	}
 
+	function discardUserProfileDraft() {
+		if (!user) return;
+		setDisplayName(user.display_name);
+		if (user.quota_reset.policy === "monthly") {
+			setResetPolicy("monthly");
+			setResetDay(user.quota_reset.day_of_month);
+		} else {
+			setResetPolicy("unlimited");
+			setResetDay(1);
+		}
+		setResetTzOffsetMinutes(user.quota_reset.tz_offset_minutes);
+		setUserSaveError(null);
+	}
+
+	function discardAccessDraft() {
+		setAccessError(null);
+		setAccessInitForUserId(null);
+	}
+
+	function discardMihomoProfileDraft() {
+		const profile = mihomoProfileQuery.data;
+		if (!profile) return;
+		setMihomoMixinYaml(profile.mixin_yaml);
+		setMihomoExtraProxiesYaml(profile.extra_proxies_yaml);
+		setMihomoExtraProxyProvidersYaml(profile.extra_proxy_providers_yaml);
+		setMihomoProfileSaveError(null);
+	}
+
 	async function confirmResetToken() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsResettingToken(true);
 		try {
-			const result = await resetAdminUserToken(adminToken, userId);
+			const result = await resetAdminUserToken(adminToken, targetUserId);
+			if (currentUserIdRef.current !== targetUserId) return;
 			await userQuery.refetch();
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "success",
 				message: `Subscription token reset: ${result.subscription_token}`,
 			});
 			setResetTokenOpen(false);
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to reset token: ${formatError(error)}`,
 			});
 		} finally {
-			setIsResettingToken(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsResettingToken(false);
+			}
 		}
 	}
 
 	async function confirmResetCredentials() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsResettingCredentials(true);
 		try {
-			const result = await resetAdminUserCredentials(adminToken, userId);
+			const result = await resetAdminUserCredentials(adminToken, targetUserId);
+			if (currentUserIdRef.current !== targetUserId) return;
 			await userQuery.refetch();
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "success",
 				message: `Credentials reset: epoch=${result.credential_epoch}`,
 			});
 			setResetCredentialsOpen(false);
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to reset credentials: ${formatError(error)}`,
 			});
 		} finally {
-			setIsResettingCredentials(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsResettingCredentials(false);
+			}
 		}
 	}
 
 	async function confirmDeleteUser() {
 		if (!adminToken || !userId) return;
+		const targetUserId = userId;
 		setIsDeleting(true);
 		try {
-			await deleteAdminUser(adminToken, userId);
+			await deleteAdminUser(adminToken, targetUserId);
+			queryClient.setQueryData<AdminUsersResponse>(
+				["adminUsers", adminToken],
+				(previous) => removeAdminUser(previous, targetUserId),
+			);
+			void queryClient.invalidateQueries({
+				queryKey: ["adminUsers", adminToken],
+			});
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({ variant: "success", message: "User deleted" });
 			navigate({ to: "/users" });
 		} catch (error) {
+			if (currentUserIdRef.current !== targetUserId) return;
 			pushToast({
 				variant: "error",
 				message: `Failed to delete user: ${formatError(error)}`,
 			});
 		} finally {
-			setIsDeleting(false);
-			setDeleteOpen(false);
+			if (currentUserIdRef.current === targetUserId) {
+				setIsDeleting(false);
+				setDeleteOpen(false);
+			}
 		}
 	}
 
@@ -1716,7 +1715,7 @@ export function UserDetailsPage() {
 			) : null}
 
 			<SubscriptionPreviewDialog
-				open={subOpen}
+				open={isCurrentTransientState && subOpen}
 				onClose={() => setSubOpen(false)}
 				subscriptionUrl={subscriptionUrl}
 				format={subFormat}
@@ -1730,7 +1729,7 @@ export function UserDetailsPage() {
 				}
 			/>
 			<ConfirmDialog
-				open={resetTokenOpen}
+				open={isCurrentTransientState && resetTokenOpen}
 				title="Reset subscription token"
 				description="This invalidates the old token immediately."
 				confirmLabel={isResettingToken ? "Resetting..." : "Reset"}
@@ -1740,7 +1739,7 @@ export function UserDetailsPage() {
 			/>
 
 			<ConfirmDialog
-				open={resetCredentialsOpen}
+				open={isCurrentTransientState && resetCredentialsOpen}
 				title="Reset credentials"
 				description="This rotates derived credentials for the user (VLESS UUID / SS2022 user PSK)."
 				confirmLabel={isResettingCredentials ? "Resetting..." : "Reset"}
@@ -1750,7 +1749,7 @@ export function UserDetailsPage() {
 			/>
 
 			<ConfirmDialog
-				open={deleteOpen}
+				open={isCurrentTransientState && deleteOpen}
 				title="Delete user"
 				description="This cannot be undone."
 				cancelLabel="Cancel"

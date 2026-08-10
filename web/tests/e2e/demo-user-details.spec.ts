@@ -16,7 +16,7 @@ test("demo user details follow the production user-management layout", async ({
 	).toBeVisible();
 	await expect(page.getByRole("button", { name: "Delete user" })).toBeVisible();
 
-	await expect(page.getByText("Display name")).toBeVisible();
+	await expect(page.getByText("Display name", { exact: true })).toBeVisible();
 	await expect(page.getByText("Subscription token:")).toBeVisible();
 	await expect(page.getByText("Mihomo mixin config")).toBeVisible();
 	const subscriptionFormat = page.getByTestId("demo-subscription-format");

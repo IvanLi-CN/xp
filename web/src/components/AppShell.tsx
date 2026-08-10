@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
+import {
+	Link,
+	Outlet,
+	useNavigate,
+	useRouterState,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import {
 	useCallback,
@@ -61,8 +66,13 @@ import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates
 import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
 import { useUpgradeObservation } from "../offline/useUpgradeObservation";
+import {
+	type AppNavigationGroup,
+	AppResourceNavigation,
+} from "./AppResourceNavigation";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { useObjectNavigationGuard } from "./ObjectNavigationGuard";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
@@ -79,10 +89,7 @@ import {
 type AppShellProps = {
 	brand: { name: string; subtitle?: string; markSrc?: string };
 	navItems?: Array<{ label: string; to: string; icon: string }>;
-	navGroups?: Array<{
-		title: string;
-		items: Array<{ label: string; to: string; icon: string }>;
-	}>;
+	navGroups?: AppNavigationGroup[];
 	headerStatus?: ReactNode;
 	children?: ReactNode;
 };
@@ -113,11 +120,22 @@ export function AppShell({
 	children,
 }: AppShellProps) {
 	const navigate = useNavigate();
+	const pathname = useRouterState({
+		select: (state) => state.location.pathname,
+	});
 	const queryClient = useQueryClient();
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const [adminToken] = useState(() => readAdminToken());
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
+	const { requestNavigation } = useObjectNavigationGuard();
+	const compatibility = apiCompatibility.data ?? null;
+	const compatibilityError =
+		apiCompatibility.isError && compatibility === null
+			? formatApiError(apiCompatibility.error)
+			: !runtime.isOnline && compatibility === null
+				? "API compatibility is unavailable while offline."
+				: null;
 	const alertsCapabilityAvailable =
 		apiCompatibility.data?.kind === "compatible" &&
 		apiCompatibility.data.isFeatureAvailable("admin.alerts");
@@ -381,6 +399,23 @@ export function AppShell({
 				]
 			: []);
 
+	const navigateLink = useCallback(
+		(href: string) => {
+			setMobileNavOpen(false);
+			void navigate({ to: href as never });
+		},
+		[navigate],
+	);
+
+	const navigateResource = useCallback(
+		(href: string) => {
+			requestNavigation(() => {
+				navigateLink(href);
+			});
+		},
+		[navigateLink, requestNavigation],
+	);
+
 	const navEntries = useMemo(
 		() =>
 			effectiveNavGroups.flatMap((group) =>
@@ -569,35 +604,17 @@ export function AppShell({
 	) : null;
 
 	const navContent = (
-		<nav aria-label="Primary navigation" className="xp-panel p-4">
-			<div className="space-y-6">
-				{effectiveNavGroups.map((group) => (
-					<div key={group.title} className="space-y-2">
-						<p className="px-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-							{group.title}
-						</p>
-						<ul className="space-y-1.5">
-							{group.items.map((item) => (
-								<li key={item.to}>
-									<Link
-										to={item.to}
-										className="flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/60 hover:text-foreground"
-										activeProps={{
-											className:
-												"border-primary/25 bg-primary/10 text-foreground shadow-sm",
-										}}
-										onClick={() => setMobileNavOpen(false)}
-									>
-										<Icon name={item.icon} className="size-5 opacity-80" />
-										<span className="truncate">{item.label}</span>
-									</Link>
-								</li>
-							))}
-						</ul>
-					</div>
-				))}
-			</div>
-		</nav>
+		<AppResourceNavigation
+			adminToken={adminToken}
+			compatibility={compatibility}
+			compatibilityError={compatibilityError}
+			compatibilityPending={apiCompatibility.isFetching}
+			groups={effectiveNavGroups}
+			pathname={pathname}
+			onNavigate={navigateLink}
+			onResourceNavigate={navigateResource}
+			onRetryCompatibility={() => void apiCompatibility.refetch()}
+		/>
 	);
 
 	return (
