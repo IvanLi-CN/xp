@@ -16,6 +16,10 @@ pub fn public_fallback_url() -> &'static str {
     &catalog().urls.public_fallback
 }
 
+pub fn catch_all_service() -> &'static str {
+    &catalog().urls.catch_all_service
+}
+
 pub fn loopback_39043_address() -> &'static str {
     &catalog().addresses.loopback_39043
 }

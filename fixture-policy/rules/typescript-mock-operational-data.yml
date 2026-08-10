@@ -25,6 +25,13 @@ rule:
         not:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                $OTHER_CONDITION ? fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR() :
+                fixtureCatalog.$THIRD_GROUP.$THIRD_ACCESSOR()
             - pattern: 'null'
             - all:
                 - pattern: seed.$FIELD

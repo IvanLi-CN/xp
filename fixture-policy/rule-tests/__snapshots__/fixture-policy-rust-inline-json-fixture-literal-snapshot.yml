@@ -1,0 +1,32 @@
+id: fixture-policy-rust-inline-json-fixture-literal
+snapshots:
+  ? |
+    mod tests {
+      fn inline_fixture() {
+        let ingress = json!({
+          "hostname": "live.example",
+          "service": Some(request.service),
+        });
+      }
+    }
+  : labels:
+    - source: |-
+        json!({
+              "hostname": "live.example",
+              "service": Some(request.service),
+            })
+      style: primary
+      start: 54
+      end: 142
+    - source: |-
+        mod tests {
+          fn inline_fixture() {
+            let ingress = json!({
+              "hostname": "live.example",
+              "service": Some(request.service),
+            });
+          }
+        }
+      style: secondary
+      start: 0
+      end: 149

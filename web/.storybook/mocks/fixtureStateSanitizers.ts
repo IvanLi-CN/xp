@@ -45,6 +45,12 @@ export function sanitizeFixtureNode(
 		normalized.access_host = fixtureCatalog.slotString.s39();
 		normalized.api_base_url = fixtureCatalog.slotString.s38();
 	}
+	if (_node.node_id === fixtureCatalog.slotString.s63()) {
+		normalized.node_id = fixtureCatalog.slotString.s63();
+		normalized.node_name = fixtureCatalog.slotString.s63();
+		normalized.access_host = fixtureCatalog.slotString.s114();
+		normalized.api_base_url = fixtureCatalog.slotString.s115();
+	}
 	return normalized;
 }
 
@@ -100,12 +106,22 @@ export function sanitizeFixtureUser(
 }
 
 export function sanitizeFixtureQuota(
-	_quota: AdminUserNodeQuota,
+	quota: AdminUserNodeQuota,
 ): AdminUserNodeQuota {
+	const isSecondary =
+		quota.user_id === fixtureCatalog.identifier.userSecondary() ||
+		quota.node_id === fixtureCatalog.identifier.nodeSecondary();
 	return {
-		user_id: fixtureCatalog.identifier.userPrimary(),
-		node_id: fixtureCatalog.identifier.nodePrimary(),
-		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+		user_id: isSecondary
+			? fixtureCatalog.identifier.userSecondary()
+			: fixtureCatalog.identifier.userPrimary(),
+		node_id: isSecondary
+			? fixtureCatalog.identifier.nodeSecondary()
+			: fixtureCatalog.identifier.nodePrimary(),
+		quota_limit_bytes:
+			quota.quota_limit_bytes === fixtureCatalog.quota.fiveGiB()
+				? fixtureCatalog.quota.fiveGiB()
+				: fixtureCatalog.quota.limitBytes(),
 		quota_reset_source: fixtureCatalog.quota.resetSource(),
 	};
 }

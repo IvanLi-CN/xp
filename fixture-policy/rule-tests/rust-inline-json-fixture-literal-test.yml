@@ -1,0 +1,25 @@
+id: fixture-policy-rust-inline-json-fixture-literal
+valid:
+  - |
+    let ingress = json!({
+      "hostname": "outside.fixture.test",
+    });
+  - |
+    mod tests {
+      fn catalog_backed_ingress() {
+        let ingress = json!({
+          "hostname": xp_test_fixtures::slot_s554(),
+          "service": xp_test_fixtures::catch_all_service(),
+        });
+      }
+    }
+invalid:
+  - |
+    mod tests {
+      fn inline_fixture() {
+        let ingress = json!({
+          "hostname": "live.example",
+          "service": Some(request.service),
+        });
+      }
+    }

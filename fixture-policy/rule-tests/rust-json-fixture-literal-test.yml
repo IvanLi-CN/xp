@@ -17,6 +17,14 @@ valid:
     let release = json!({
       "published_at": xp_test_fixtures::release_current_timestamp(),
     });
+  - |
+    async fn reality_domains_reject_invalid_server_names() {
+      let request = req_authed_json(
+        "POST",
+        "/api/admin/reality-domains",
+        json!({ "server_name": server_name }),
+      );
+    }
 invalid:
   - |
     let meta = json!({
@@ -68,7 +76,7 @@ invalid:
     });
   - |
     let meta = json!({
-      "dest": Some(request.destination)
+      "reality": { "dest": Some(request.destination) }
     });
   - |
     let meta = json!({
@@ -76,8 +84,33 @@ invalid:
     });
   - |
     let meta = json!({
-      "dest": format!("{}", request.destination)
+      "reality": { "dest": format!("{}", request.destination) }
     });
+  - |
+    let host = request.hostname;
+    let ingress = json!({
+      "hostname": Some(host),
+    });
+  - |
+    let ingress = json!({
+      "service": input.service,
+    });
+  - |
+    let ingress = json!({
+      "origin_url": match request.url {
+        value => value,
+      },
+    });
+  - |
+    let ingress = json!({
+      "service": format!("{}", external_service),
+    });
+  - |
+    let request = req_authed_json(
+      "POST",
+      "/api/admin/endpoints",
+      json!({ "service": request.service }),
+    );
   - |
     let release = json!({
       "published_at": release_secret()

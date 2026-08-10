@@ -46,7 +46,6 @@ import type {
 	AdminUser,
 	AdminUserCreateRequest,
 	AdminUserPatchRequest,
-	AdminUserTokenResponse,
 } from "../../src/api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
@@ -54,17 +53,27 @@ import {
 	DEFAULT_API_CAPABILITIES,
 	type MockStateSeed,
 } from "./apiMockContract";
+import {
+	buildNodeDeletePreviewResponse,
+	buildNodeEgressProbeRefreshResponse,
+	buildStatusHelloResponse,
+	buildSubscriptionTokenResponse,
+	buildUserAccessItem,
+	catalogTimestampOffset,
+} from "./apiMockFixtureBuilders";
 import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
 import {
-	buildNodeDeletePreviewEndpoint,
-	buildUserNodeQuotaStatusItem,
-} from "./staticFixtureMappings";
+	sanitizeFixtureEndpoint,
+	sanitizeFixtureNode,
+	sanitizeFixtureQuota,
+	sanitizeFixtureUser,
+} from "./fixtureStateSanitizers";
+import { buildUserNodeQuotaStatusItem } from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
-	probe?: Parameters<typeof handleEndpointProbeRequest>[1];
 	failAdminConfig?: boolean;
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
@@ -303,7 +312,7 @@ function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
 		if (i % 121 === 0) status = "down";
 		if (i % 79 === 0) status = "unknown";
 		slots.push({
-			slot_start: fixtureCatalog.slotString.s6(),
+			slot_start: catalogTimestampOffset(-i * 30 * 60 * 1000),
 			status,
 		});
 	}
@@ -329,25 +338,39 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 			component: "xray",
 			status: downNode ? "down" : "up",
 			last_ok_at: fixtureCatalog.slotString.s8(),
-			last_fail_at: fixtureCatalog.slotString.s9(),
-			down_since: fixtureCatalog.slotString.s10(),
+			last_fail_at: downNode
+				? fixtureCatalog.slotString.s9()
+				: fixtureCatalog.optional.none(),
+			down_since: downNode
+				? fixtureCatalog.slotString.s10()
+				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 2 : 0,
 			recoveries_observed: 1,
 			restart_attempts: downNode ? 1 : 0,
-			last_restart_at: fixtureCatalog.slotString.s11(),
+			last_restart_at: downNode
+				? fixtureCatalog.slotString.s11()
+				: fixtureCatalog.optional.none(),
 			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 		{
 			component: "cloudflared",
 			status: downNode ? "down" : "disabled",
-			last_ok_at: fixtureCatalog.slotString.s12(),
-			last_fail_at: fixtureCatalog.slotString.s13(),
-			down_since: fixtureCatalog.slotString.s14(),
+			last_ok_at: downNode
+				? fixtureCatalog.slotString.s12()
+				: fixtureCatalog.optional.none(),
+			last_fail_at: downNode
+				? fixtureCatalog.slotString.s13()
+				: fixtureCatalog.optional.none(),
+			down_since: downNode
+				? fixtureCatalog.slotString.s14()
+				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 3 : 0,
 			recoveries_observed: 0,
 			restart_attempts: downNode ? 1 : 0,
-			last_restart_at: fixtureCatalog.slotString.s13(),
-			last_restart_fail_at: fixtureCatalog.slotString.s13(),
+			last_restart_at: downNode
+				? fixtureCatalog.slotString.s13()
+				: fixtureCatalog.optional.none(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 	];
 }
@@ -470,13 +493,16 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 }
 
 function buildTrafficPoint(
+	window: TrafficWindow,
+	index: number,
 	isCurrentDay: boolean,
 	isGap = false,
 ): NonNullable<TrafficReport["current"]>[number] {
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
 	if (isGap) {
 		return {
-			start_at: fixtureCatalog.timestamp.baseline(),
-			end_at: fixtureCatalog.timestamp.recent(),
+			start_at: catalogTimestampOffset(index * step),
+			end_at: catalogTimestampOffset((index + 1) * step),
 			uplink_bytes: null,
 			downlink_bytes: null,
 			total_bytes: null,
@@ -486,25 +512,46 @@ function buildTrafficPoint(
 	}
 
 	return {
-		start_at: fixtureCatalog.timestamp.baseline(),
-		end_at: fixtureCatalog.timestamp.recent(),
-		uplink_bytes: fixtureCatalog.slotNumber.n2(),
-		downlink_bytes: fixtureCatalog.slotNumber.n3(),
-		total_bytes: fixtureCatalog.slotNumber.n6(),
+		start_at: catalogTimestampOffset(index * step),
+		end_at: catalogTimestampOffset((index + 1) * step),
+		uplink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n2()
+				: fixtureCatalog.slotNumber.n3(),
+		downlink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n4()
+				: fixtureCatalog.slotNumber.n5(),
+		total_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n7()
+				: fixtureCatalog.slotNumber.n24(),
 		complete: true,
 		is_current_day: isCurrentDay,
 	};
 }
 
-function buildReferenceTrafficPoint(): NonNullable<
-	TrafficReport["reference"]
->[number] {
+function buildReferenceTrafficPoint(
+	window: TrafficWindow,
+	index: number,
+): NonNullable<TrafficReport["reference"]>[number] {
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
+	const count = window === "24h" ? 288 : 31;
 	return {
-		start_at: fixtureCatalog.timestamp.earlier(),
-		end_at: fixtureCatalog.timestamp.baseline(),
-		uplink_bytes: fixtureCatalog.slotNumber.n2(),
-		downlink_bytes: fixtureCatalog.slotNumber.n3(),
-		total_bytes: fixtureCatalog.slotNumber.n6(),
+		start_at: catalogTimestampOffset((index - count) * step),
+		end_at: catalogTimestampOffset((index + 1 - count) * step),
+		uplink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n1()
+				: fixtureCatalog.slotNumber.n2(),
+		downlink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n2()
+				: fixtureCatalog.slotNumber.n3(),
+		total_bytes:
+			index % 2 === 0
+				? fixtureCatalog.slotNumber.n4()
+				: fixtureCatalog.slotNumber.n6(),
 		complete: true,
 		is_current_day: false,
 	};
@@ -514,12 +561,14 @@ function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
 	const count = window === "24h" ? 288 : 31;
 	const current = Array.from({ length: count }, (_, index) =>
 		buildTrafficPoint(
+			window,
+			index,
 			window === "31d" && index === count - 1,
 			gap && index > 112 && index < 124,
 		),
 	);
-	const reference = Array.from({ length: count }, () =>
-		buildReferenceTrafficPoint(),
+	const reference = current.map((_, index) =>
+		buildReferenceTrafficPoint(window, index),
 	);
 	const summary =
 		window === "24h"
@@ -533,23 +582,24 @@ function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
 					downlink_bytes: fixtureCatalog.slotNumber.n36(),
 					total_bytes: fixtureCatalog.slotNumber.n37(),
 				};
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
 	return {
 		window,
-		window_start_at: fixtureCatalog.timestamp.baseline(),
-		window_end_at: fixtureCatalog.timestamp.recent(),
+		window_start_at: catalogTimestampOffset(0),
+		window_end_at: catalogTimestampOffset(count * step),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			cycle_start_at: fixtureCatalog.timestamp.earlier(),
-			cycle_end_at: fixtureCatalog.timestamp.later(),
+			cycle_start_at: fixtureCatalog.timestamp.baseline(),
+			cycle_end_at: catalogTimestampOffset(count * step),
 			...summary,
 			complete: !gap,
-			tracking_since: fixtureCatalog.timestamp.baseline(),
+			tracking_since: catalogTimestampOffset(0),
 		},
 		current,
 		reference,
 		partial: false,
-		last_sample_at: fixtureCatalog.slotString.s23(),
+		last_sample_at: catalogTimestampOffset(count * step),
 		warnings: [],
 	};
 }
@@ -992,57 +1042,34 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 	const overrides = config?.data;
 
 	const merged: MockStateSeed = {
-		health: overrides?.health ?? base.health,
-		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
-		versionCheck: overrides?.versionCheck ?? base.versionCheck,
-		capabilities: overrides?.capabilities ?? base.capabilities,
-		nodes: overrides?.nodes ?? base.nodes,
-		endpoints: overrides?.endpoints ?? base.endpoints,
-		realityDomains: overrides?.realityDomains ?? base.realityDomains,
-		users: overrides?.users ?? base.users,
-		userAccessByUserId: {
-			...base.userAccessByUserId,
-			...(overrides?.userAccessByUserId ?? {}),
-		},
-		userAutoAssignEndpointKindsByUserId: {
-			...base.userAutoAssignEndpointKindsByUserId,
-			...(overrides?.userAutoAssignEndpointKindsByUserId ?? {}),
-		},
-		nodeQuotas: overrides?.nodeQuotas ?? base.nodeQuotas,
-		nodeIpUsageByNodeId: {
-			...base.nodeIpUsageByNodeId,
-			...(overrides?.nodeIpUsageByNodeId ?? {}),
-		},
-		nodeTcpConnectionsByNodeId: {
-			...base.nodeTcpConnectionsByNodeId,
-			...(overrides?.nodeTcpConnectionsByNodeId ?? {}),
-		},
-		nodeHistoryByNodeId: {
-			...base.nodeHistoryByNodeId,
-			...(overrides?.nodeHistoryByNodeId ?? {}),
-		},
-		userIpUsageByUserId: {
-			...base.userIpUsageByUserId,
-			...(overrides?.userIpUsageByUserId ?? {}),
-		},
-		nodeTrafficByNodeId: {
-			...base.nodeTrafficByNodeId,
-			...(overrides?.nodeTrafficByNodeId ?? {}),
-		},
-		userTrafficByUserId: {
-			...base.userTrafficByUserId,
-			...(overrides?.userTrafficByUserId ?? {}),
-		},
-		userNodeWeights: overrides?.userNodeWeights ?? base.userNodeWeights,
-		userGlobalWeights: overrides?.userGlobalWeights ?? base.userGlobalWeights,
-		nodeWeightPolicies:
-			overrides?.nodeWeightPolicies ?? base.nodeWeightPolicies,
-		quotaSummaries: overrides?.quotaSummaries ?? base.quotaSummaries,
-		alerts: overrides?.alerts ?? base.alerts,
-		subscriptions: {
-			...base.subscriptions,
-			...(overrides?.subscriptions ?? {}),
-		},
+		health: base.health,
+		clusterInfo: base.clusterInfo,
+		versionCheck: base.versionCheck,
+		capabilities: base.capabilities,
+		nodes: (overrides?.nodes ?? base.nodes).map(sanitizeFixtureNode),
+		endpoints: (overrides?.endpoints ?? base.endpoints).map(
+			sanitizeFixtureEndpoint,
+		),
+		realityDomains: base.realityDomains,
+		users: (overrides?.users ?? base.users).map(sanitizeFixtureUser),
+		userAccessByUserId: base.userAccessByUserId,
+		userAutoAssignEndpointKindsByUserId:
+			base.userAutoAssignEndpointKindsByUserId,
+		nodeQuotas: (overrides?.nodeQuotas ?? base.nodeQuotas).map(
+			sanitizeFixtureQuota,
+		),
+		nodeIpUsageByNodeId: base.nodeIpUsageByNodeId,
+		nodeTcpConnectionsByNodeId: base.nodeTcpConnectionsByNodeId,
+		nodeHistoryByNodeId: base.nodeHistoryByNodeId,
+		userIpUsageByUserId: base.userIpUsageByUserId,
+		nodeTrafficByNodeId: base.nodeTrafficByNodeId,
+		userTrafficByUserId: base.userTrafficByUserId,
+		userNodeWeights: base.userNodeWeights,
+		userGlobalWeights: base.userGlobalWeights,
+		nodeWeightPolicies: base.nodeWeightPolicies,
+		quotaSummaries: base.quotaSummaries,
+		alerts: base.alerts,
+		subscriptions: base.subscriptions,
 	};
 
 	const counters = {
@@ -1172,11 +1199,7 @@ function applyAutoAssignForEndpoint(
 		if (items.some((item) => item.endpoint_id === endpoint.endpoint_id)) {
 			continue;
 		}
-		items.push({
-			user_id: userId,
-			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
-			node_id: fixtureCatalog.slotString.s32(),
-		});
+		items.push(buildUserAccessItem(userId, endpoint));
 		items.sort((a, b) => a.endpoint_id.localeCompare(b.endpoint_id));
 	}
 }
@@ -1280,10 +1303,7 @@ async function handleRequest(
 		return sseResponse([
 			{
 				event: "hello",
-				data: {
-					node_id: fixtureCatalog.slotString.s57(),
-					connected_at: fixtureCatalog.slotString.s7(),
-				},
+				data: buildStatusHelloResponse(state.clusterInfo),
 			},
 			{
 				event: "snapshot",
@@ -1365,12 +1385,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		return jsonResponse({
-			node_id: fixtureCatalog.identifier.nodePrimary(),
-			endpoints: state.endpoints
-				.filter((endpoint) => endpoint.node_id === nodeId)
-				.map(buildNodeDeletePreviewEndpoint),
-		});
+		return jsonResponse(buildNodeDeletePreviewResponse(node, state.endpoints));
 	}
 
 	const nodeEgressProbeRefreshMatch = path.match(
@@ -1382,11 +1397,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		return jsonResponse({
-			node_id: fixtureCatalog.slotString.s32(),
-			accepted: true,
-			egress_probe: clone(node.egress_probe),
-		});
+		return jsonResponse(buildNodeEgressProbeRefreshResponse(node));
 	}
 
 	if (path === "/api/admin/nodes/runtime" && method === "GET") {
@@ -1584,22 +1595,27 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 
-		const payload = await readJson<unknown>(req);
-		if (!payload) {
+		const payload = await readJson<{ weight?: number }>(req);
+		if (!payload || typeof payload.weight !== "number") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
 
 		const items = state.userNodeWeights[userId] ?? [];
 		const next: AdminUserNodeWeightItem =
-			nodeId === fixtureCatalog.slotString.s32()
+			nodeId === fixtureCatalog.slotString.s63()
 				? {
-						node_id: fixtureCatalog.slotString.s32(),
+						node_id: fixtureCatalog.slotString.s63(),
 						weight: fixtureCatalog.slotNumber.n13(),
 					}
-				: {
-						node_id: fixtureCatalog.slotString.s36(),
-						weight: fixtureCatalog.slotNumber.n13(),
-					};
+				: nodeId === fixtureCatalog.slotString.s32()
+					? {
+							node_id: fixtureCatalog.slotString.s32(),
+							weight: fixtureCatalog.slotNumber.n13(),
+						}
+					: {
+							node_id: fixtureCatalog.slotString.s36(),
+							weight: fixtureCatalog.slotNumber.n13(),
+						};
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
 			next,
@@ -1643,8 +1659,8 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 
-		const payload = await readJson<unknown>(req);
-		if (!payload) {
+		const payload = await readJson<{ weight?: number }>(req);
+		if (!payload || typeof payload.weight !== "number") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
 
@@ -1668,7 +1684,12 @@ async function handleRequest(
 			return jsonResponse(
 				clone(
 					state.nodeWeightPolicies[nodeId] ?? {
-						node_id: fixtureCatalog.slotString.s32(),
+						node_id:
+							nodeId === fixtureCatalog.slotString.s63()
+								? fixtureCatalog.slotString.s63()
+								: nodeId === fixtureCatalog.slotString.s36()
+									? fixtureCatalog.slotString.s36()
+									: fixtureCatalog.slotString.s32(),
 						inherit_global: true,
 					},
 				),
@@ -1684,7 +1705,12 @@ async function handleRequest(
 				);
 			}
 			const nextPolicy: AdminQuotaPolicyNodePolicy = {
-				node_id: fixtureCatalog.slotString.s32(),
+				node_id:
+					nodeId === fixtureCatalog.slotString.s63()
+						? fixtureCatalog.slotString.s63()
+						: nodeId === fixtureCatalog.slotString.s36()
+							? fixtureCatalog.slotString.s36()
+							: fixtureCatalog.slotString.s32(),
 				inherit_global: payload.inherit_global,
 			};
 			state.nodeWeightPolicies[nodeId] = nextPolicy;
@@ -1844,7 +1870,12 @@ async function handleRequest(
 		}
 		const domain: AdminRealityDomain = {
 			domain_id: fixtureCatalog.identifier.endpointTertiary(),
-			server_name: fixtureCatalog.host.tertiary(),
+			server_name:
+				payload.server_name === fixtureCatalog.host.serverPrimary()
+					? fixtureCatalog.host.serverPrimary()
+					: payload.server_name === fixtureCatalog.host.serverSecondary()
+						? fixtureCatalog.host.serverSecondary()
+						: fixtureCatalog.host.tertiary(),
 			disabled_node_ids: [],
 		};
 		state.realityDomains = [...state.realityDomains, domain];
@@ -1900,8 +1931,17 @@ async function handleRequest(
 			}
 			const updated: AdminRealityDomain = {
 				...existing,
-				server_name: fixtureCatalog.host.tertiary(),
-				disabled_node_ids: [],
+				server_name:
+					payload.server_name === fixtureCatalog.host.serverPrimary()
+						? fixtureCatalog.host.serverPrimary()
+						: payload.server_name === fixtureCatalog.host.serverSecondary()
+							? fixtureCatalog.host.serverSecondary()
+							: fixtureCatalog.host.tertiary(),
+				disabled_node_ids: payload.disabled_node_ids?.includes(
+					fixtureCatalog.identifier.nodeSecondary(),
+				)
+					? [fixtureCatalog.identifier.nodeSecondary()]
+					: [],
 			};
 			state.realityDomains = state.realityDomains.map((d) =>
 				d.domain_id === domainId ? updated : d,
@@ -1949,14 +1989,27 @@ async function handleRequest(
 			);
 		}
 		const endpoint: AdminEndpoint = {
-			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
-			node_id: fixtureCatalog.slotString.s32(),
-			tag: fixtureCatalog.slotString.s41(),
+			endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
+			node_id:
+				payload.node_id === fixtureCatalog.slotString.s63()
+					? fixtureCatalog.slotString.s63()
+					: payload.node_id === fixtureCatalog.slotString.s36()
+						? fixtureCatalog.slotString.s36()
+						: fixtureCatalog.slotString.s32(),
+			tag:
+				payload.kind === fixtureCatalog.endpoint.ssKind()
+					? fixtureCatalog.slotString.s44()
+					: fixtureCatalog.slotString.s41(),
 			kind:
 				payload.kind === fixtureCatalog.endpoint.ssKind()
 					? fixtureCatalog.endpoint.ssKind()
 					: fixtureCatalog.endpoint.vlessKind(),
-			port: fixtureCatalog.endpoint.port9443(),
+			port:
+				payload.port === fixtureCatalog.endpoint.port443()
+					? fixtureCatalog.endpoint.port443()
+					: payload.port === fixtureCatalog.endpoint.port9443()
+						? fixtureCatalog.endpoint.port9443()
+						: fixtureCatalog.endpoint.port8443(),
 			meta,
 		};
 		const record: MockEndpointRecord = {
@@ -1983,7 +2036,12 @@ async function handleRequest(
 		endpoint.active_short_id = fixtureCatalog.endpoint.activeShortId();
 		endpoint.short_ids = fixtureCatalog.endpoint.shortIds();
 		return jsonResponse({
-			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_id:
+				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
+					? fixtureCatalog.identifier.endpointTertiary()
+					: endpoint.endpoint_id === fixtureCatalog.slotString.s43()
+						? fixtureCatalog.slotString.s43()
+						: fixtureCatalog.slotString.s40(),
 			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
@@ -2015,10 +2073,20 @@ async function handleRequest(
 		const authority =
 			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
 		return jsonResponse({
-			endpoint_id: fixtureCatalog.slotString.s40(),
+			endpoint_id:
+				endpoint.endpoint_id === fixtureCatalog.identifier.endpointTertiary()
+					? fixtureCatalog.identifier.endpointTertiary()
+					: endpoint.endpoint_id === fixtureCatalog.slotString.s43()
+						? fixtureCatalog.slotString.s43()
+						: fixtureCatalog.slotString.s40(),
 			url: `https://${authority}/generate_204`,
-			nodes: state.nodes.map(() => ({
-				node_id: fixtureCatalog.slotString.s32(),
+			nodes: state.nodes.map((item) => ({
+				node_id:
+					item.node_id === fixtureCatalog.slotString.s63()
+						? fixtureCatalog.slotString.s63()
+						: item.node_id === fixtureCatalog.slotString.s36()
+							? fixtureCatalog.slotString.s36()
+							: fixtureCatalog.slotString.s32(),
 				ok: true,
 				status: 204,
 				latency_ms: fixtureCatalog.slotNumber.n8(),
@@ -2052,7 +2120,12 @@ async function handleRequest(
 			} as Record<string, unknown>;
 			const updated: MockEndpointRecord = {
 				...endpoint,
-				port: fixtureCatalog.endpoint.port443(),
+				port:
+					payload.port === fixtureCatalog.endpoint.port8443()
+						? fixtureCatalog.endpoint.port8443()
+						: payload.port === fixtureCatalog.endpoint.port9443()
+							? fixtureCatalog.endpoint.port9443()
+							: fixtureCatalog.endpoint.port443(),
 				meta: nextMeta,
 			};
 			state.endpoints = state.endpoints.map((item) =>
@@ -2184,16 +2257,15 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "user not found");
 		}
 		const previousSubscriptionToken = user.subscription_token;
-		user.subscription_token = fixtureCatalog.identifier.tokenQuinary();
+		user.subscription_token = fixtureCatalog.identifier.nextSubscriptionToken();
 		state.users = state.users.map((item) =>
 			item.user_id === userId ? user : item,
 		);
 		delete state.subscriptions[previousSubscriptionToken];
 		state.subscriptions[user.subscription_token] = buildSubscriptionText(null);
-		const response: AdminUserTokenResponse = {
-			subscription_token: fixtureCatalog.identifier.tokenQuinary(),
-		};
-		return jsonResponse(response);
+		return jsonResponse(
+			buildSubscriptionTokenResponse(user.subscription_token),
+		);
 	}
 
 	const userAccessMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/access$/);
@@ -2258,11 +2330,7 @@ async function handleRequest(
 			.map((endpointId) => {
 				const endpoint = endpointById.get(endpointId);
 				if (!endpoint) throw new Error("endpoint not found");
-				return {
-					user_id: userId,
-					endpoint_id: fixtureCatalog.slotString.s40(),
-					node_id: fixtureCatalog.slotString.s32(),
-				};
+				return buildUserAccessItem(userId, endpoint);
 			});
 
 		state.userAccessByUserId[userId] = nextItems;
@@ -2344,16 +2412,12 @@ async function handleRequest(
 
 export function createMockApi(config?: StorybookApiMockConfig): MockApi {
 	let state = buildState(config);
-	let probe = config?.probe;
 	return {
 		reset(nextConfig?: StorybookApiMockConfig) {
 			state = buildState(nextConfig);
-			probe = nextConfig?.probe;
 		},
 		async handle(req: Request) {
-			return (
-				handleEndpointProbeRequest(req, probe) ?? handleRequest(state, req)
-			);
+			return handleEndpointProbeRequest(req) ?? handleRequest(state, req);
 		},
 	};
 }

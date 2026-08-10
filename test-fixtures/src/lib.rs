@@ -23,7 +23,6 @@ struct Catalog {
     slots: Slots,
     subscription: Subscription,
 }
-
 #[derive(Deserialize)]
 #[allow(dead_code)]
 #[serde(deny_unknown_fields)]
@@ -72,6 +71,7 @@ struct Urls {
     canary_https_alternate: String,
     #[serde(rename = "canaryHttpLoopback")]
     canary_http_loopback: String,
+    #[serde(rename = "catchAllService")] catch_all_service: String,
     #[serde(rename = "publicFallback")]
     public_fallback: String,
     #[serde(rename = "publicOrigin")]

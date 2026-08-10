@@ -1,17 +1,19 @@
-id: fixture-policy-rust-json-fixture-literal
+id: fixture-policy-rust-inline-json-fixture-literal
 language: Rust
 severity: error
-message: Rust JSON fixture macros must use direct catalog accessors for operational data.
+message: Inline Rust JSON fixtures must use direct catalog accessors for operational data.
 note: Use a direct xp_test_fixtures accessor instead.
 files:
-  - tests/**/*.rs
-  - src/**/*_tests.rs
-  - src/**/tests.rs
-  - src/**/tests/**/*.rs
-  - src/**/test_fixtures.rs
+  - src/**/*.rs
 rule:
   all:
     - kind: macro_invocation
+    - inside:
+        stopBy: end
+        pattern: |
+          mod tests {
+            $$$
+          }
     - not:
         inside:
           stopBy: end

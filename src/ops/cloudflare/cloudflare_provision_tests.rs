@@ -119,7 +119,7 @@ async fn mount_old_tunnel_preflight(server: &MockServer, ingress: serde_json::Va
 async fn mount_existing_target_config(server: &MockServer) {
     let config = response(serde_json::json!({
         "config": {
-            "ingress": [{ "service": xp_test_fixtures::public_fallback_url() }]
+            "ingress": [{ "service": xp_test_fixtures::catch_all_service() }]
         }
     }));
     Mock::given(method("GET"))
@@ -162,7 +162,7 @@ async fn shared_legacy_tunnel_fails_before_any_cloudflare_write() {
                 "hostname": xp_test_fixtures::secondary_host(),
                 "service": xp_test_fixtures::secondary_api_url()
             },
-            { "service": xp_test_fixtures::public_fallback_url() }
+            { "service": xp_test_fixtures::catch_all_service() }
         ]),
     )
     .await;
@@ -209,7 +209,7 @@ async fn existing_target_migration_dry_run_uses_only_get_requests() {
                 "hostname": xp_test_fixtures::slot_s554(),
                 "service": xp_test_fixtures::primary_api_url()
             },
-            { "service": xp_test_fixtures::public_fallback_url() }
+            { "service": xp_test_fixtures::catch_all_service() }
         ]),
     )
     .await;
@@ -288,7 +288,7 @@ async fn single_hostname_legacy_tunnel_migrates_automatically() {
                 "hostname": xp_test_fixtures::slot_s554(),
                 "service": xp_test_fixtures::secondary_api_url()
             },
-            { "service": xp_test_fixtures::public_fallback_url() }
+            { "service": xp_test_fixtures::catch_all_service() }
         ]),
     )
     .await;
@@ -364,7 +364,7 @@ async fn existing_target_migration_runs_without_compatibility_flag() {
                 "hostname": xp_test_fixtures::slot_s554(),
                 "service": xp_test_fixtures::primary_api_url()
             },
-            { "service": xp_test_fixtures::public_fallback_url() }
+            { "service": xp_test_fixtures::catch_all_service() }
         ]),
     )
     .await;

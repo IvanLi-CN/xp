@@ -1137,6 +1137,14 @@
     "long_line_count": 1,
     "max_line_length": 103
   },
+  "fixture-policy/rules/rust-inline-json-fixture-literal.yml": {
+    "long_line_count": 4,
+    "max_line_length": 130
+  },
+  "fixture-policy/rules/rust-json-fixture-literal.yml": {
+    "long_line_count": 4,
+    "max_line_length": 130
+  },
   "fixture-policy/rules/typescript-storybook-fixture-data.yml": {
     "long_line_count": 4,
     "max_line_length": 806

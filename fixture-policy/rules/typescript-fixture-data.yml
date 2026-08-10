@@ -32,6 +32,13 @@ rule:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                $OTHER_CONDITION ? fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR() :
+                fixtureCatalog.$THIRD_GROUP.$THIRD_ACCESSOR()
             - pattern: 'null'
             - all:
                 - pattern: seed.$FIELD
@@ -62,3 +69,42 @@ rule:
                       - has:
                           field: name
                           pattern: buildNodeRuntimeEventStream
+            - all:
+                - pattern: endpoint.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildUserAccessItem
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          any:
+                            - pattern: buildNodeDeletePreviewResponse
+                            - pattern: buildNodeEgressProbeRefreshResponse
+            - all:
+                - pattern: clusterInfo.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildStatusHelloResponse
+            - all:
+                - pattern: token
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildSubscriptionTokenResponse
+            - pattern: catalogTimestampOffset($$$)

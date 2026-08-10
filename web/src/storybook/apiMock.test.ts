@@ -759,7 +759,7 @@ describe("storybook api mock", () => {
 			accepted: boolean;
 			egress_probe?: { subscription_region: string };
 		};
-		expect(payload.node_id).toBe(fixtureCatalog.slotString.s32());
+		expect(payload.node_id).toBe(nodeId);
 		expect(payload.accepted).toBe(true);
 		expect(payload.egress_probe?.subscription_region).toBeTruthy();
 	});
@@ -802,6 +802,86 @@ describe("storybook api mock", () => {
 		expect(payloads.map((payload) => payload.node_id)).toEqual([
 			nodeId,
 			nodeId,
+		]);
+	});
+
+	it("keeps runtime slots and traffic points distinct", async () => {
+		const mock = createMockApi();
+		const nodesRes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		const nodes = (await nodesRes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId =
+			nodes.items[0]?.node_id ?? fixtureCatalog.identifier.nodePrimary();
+
+		const runtimeRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/runtime`, { method: "GET" }),
+		);
+		expect(runtimeRes.ok).toBe(true);
+		const runtime = (await runtimeRes.json()) as {
+			recent_slots: Array<{ slot_start: string }>;
+		};
+		expect(
+			new Set(runtime.recent_slots.map((slot) => slot.slot_start)).size,
+		).toBe(runtime.recent_slots.length);
+
+		const trafficRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/traffic?window=24h`, {
+				method: "GET",
+			}),
+		);
+		expect(trafficRes.ok).toBe(true);
+		const traffic = (await trafficRes.json()) as {
+			traffic: {
+				current: Array<{ start_at: string; total_bytes: number | null }>;
+			};
+		};
+		expect(
+			new Set(traffic.traffic.current.map((point) => point.start_at)).size,
+		).toBe(traffic.traffic.current.length);
+		expect(
+			new Set(traffic.traffic.current.map((point) => point.total_bytes)).size,
+		).toBeGreaterThan(1);
+	});
+
+	it("sanitizes configured quotas without losing approved identities", async () => {
+		const mock = createMockApi({
+			data: {
+				nodeQuotas: [
+					{
+						user_id: fixtureCatalog.identifier.userSecondary(),
+						node_id: fixtureCatalog.identifier.nodeSecondary(),
+						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
+						quota_reset_source: fixtureCatalog.quota.resetSource(),
+					},
+				],
+			},
+		});
+
+		const response = await mock.handle(
+			jsonRequest(
+				`/api/admin/users/${fixtureCatalog.identifier.userSecondary()}/node-quotas`,
+				{ method: "GET" },
+			),
+		);
+		expect(response.ok).toBe(true);
+		const payload = (await response.json()) as {
+			items: Array<{
+				user_id: string;
+				node_id: string;
+				quota_limit_bytes: number;
+				quota_reset_source: string;
+			}>;
+		};
+		expect(payload.items).toEqual([
+			{
+				user_id: fixtureCatalog.identifier.userSecondary(),
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
+				quota_reset_source: fixtureCatalog.quota.resetSource(),
+			},
 		]);
 	});
 

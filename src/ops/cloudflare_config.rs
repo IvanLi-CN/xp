@@ -426,17 +426,30 @@ mod tests {
                 "warp-routing": { "enabled": true },
                 "originRequest": { "connectTimeout": 30 },
                 "ingress": [
-                    { "hostname": "ssh.example.com", "service": "ssh://localhost:22" },
-                    { "hostname": "xp.example.com", "path": "/old", "service": "http://old" },
-                    { "hostname": "xp.example.com", "service": "http://old-two" },
-                    { "service": "http_status:404" }
+                    {
+                        "hostname": xp_test_fixtures::secondary_host(),
+                        "service": xp_test_fixtures::secondary_api_url()
+                    },
+                    {
+                        "hostname": xp_test_fixtures::primary_host(),
+                        "path": "/old",
+                        "service": xp_test_fixtures::secondary_api_url()
+                    },
+                    {
+                        "hostname": xp_test_fixtures::primary_host(),
+                        "service": xp_test_fixtures::tertiary_api_url()
+                    },
+                    { "service": xp_test_fixtures::catch_all_service() }
                 ]
             },
             "unknown_top_level": { "keep": true }
         });
-        let actual =
-            merge_remote_tunnel_config(&remote, "xp.example.com", "http://127.0.0.1:62416")
-                .unwrap();
+        let actual = merge_remote_tunnel_config(
+            &remote,
+            xp_test_fixtures::primary_host(),
+            xp_test_fixtures::primary_api_url(),
+        )
+        .unwrap();
         assert_eq!(actual["unknown_top_level"], remote["unknown_top_level"]);
         assert_eq!(
             actual["config"]["warp-routing"],
@@ -448,7 +461,10 @@ mod tests {
         );
         assert_eq!(
             actual["config"]["ingress"][1],
-            json!({"hostname":"xp.example.com","service":"http://127.0.0.1:62416"})
+            json!({
+                "hostname": xp_test_fixtures::primary_host(),
+                "service": xp_test_fixtures::primary_api_url()
+            })
         );
         assert_eq!(
             actual["config"]["ingress"][2],
@@ -460,12 +476,20 @@ mod tests {
     fn remote_merge_rejects_ambiguous_catch_all() {
         let remote = json!({
             "ingress": [
-                { "service": "http_status:404" },
-                { "hostname": "xp.example.com", "service": "http://old" }
+                { "service": xp_test_fixtures::catch_all_service() },
+                {
+                    "hostname": xp_test_fixtures::primary_host(),
+                    "service": xp_test_fixtures::primary_api_url()
+                }
             ]
         });
         assert_eq!(
-            merge_remote_tunnel_config(&remote, "xp.example.com", "http://new").unwrap_err(),
+            merge_remote_tunnel_config(
+                &remote,
+                xp_test_fixtures::primary_host(),
+                xp_test_fixtures::secondary_api_url(),
+            )
+            .unwrap_err(),
             "remote_tunnel_ingress_has_ambiguous_catch_all"
         );
     }
@@ -475,15 +499,25 @@ mod tests {
         let remote = json!({
             "config": {
                 "ingress": [
-                    { "hostname": "ssh.example.com", "service": "ssh://localhost:22" },
-                    { "hostname": "xp.example.com", "service": "http://old" },
-                    { "hostname": "tcp.example.com", "service": "tcp://localhost:5432" },
-                    { "service": "http_status:404" }
+                    {
+                        "hostname": xp_test_fixtures::secondary_host(),
+                        "service": xp_test_fixtures::secondary_api_url()
+                    },
+                    {
+                        "hostname": xp_test_fixtures::primary_host(),
+                        "service": xp_test_fixtures::primary_api_url()
+                    },
+                    {
+                        "hostname": xp_test_fixtures::tertiary_host(),
+                        "service": xp_test_fixtures::tertiary_api_url()
+                    },
+                    { "service": xp_test_fixtures::catch_all_service() }
                 ]
             }
         });
 
-        let migrated = remove_remote_hostname_rules(&remote, "xp.example.com").unwrap();
+        let migrated =
+            remove_remote_hostname_rules(&remote, xp_test_fixtures::primary_host()).unwrap();
 
         assert_eq!(
             migrated["config"]["ingress"][0],

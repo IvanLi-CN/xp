@@ -4,11 +4,6 @@ import type {
 } from "../../src/api/adminEndpointProbes";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
-export type StorybookEndpointProbeMock = {
-	historyByEndpointId?: Record<string, AdminEndpointProbeHistoryResponse>;
-	runsByRunId?: Record<string, AdminEndpointProbeRunStatusResponse>;
-};
-
 function fixtureProbeHistory(): AdminEndpointProbeHistoryResponse {
 	return {
 		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
@@ -76,20 +71,14 @@ function sseResponse(
 	});
 }
 
-export function handleEndpointProbeRequest(
-	req: Request,
-	probe?: StorybookEndpointProbeMock,
-): Response | undefined {
+export function handleEndpointProbeRequest(req: Request): Response | undefined {
 	const method = req.method.toUpperCase();
 	const path = new URL(req.url, "http://localhost").pathname;
 	const historyMatch = path.match(
 		/^\/api\/admin\/endpoints\/([^/]+)\/probe-history$/,
 	);
 	if (historyMatch && method === "GET") {
-		const endpointId = decodeURIComponent(historyMatch[1]);
-		return jsonResponse(
-			probe?.historyByEndpointId?.[endpointId] ?? fixtureProbeHistory(),
-		);
+		return jsonResponse(fixtureProbeHistory());
 	}
 
 	const eventsMatch = path.match(
@@ -112,8 +101,7 @@ export function handleEndpointProbeRequest(
 		/^\/api\/admin\/endpoints\/probe\/runs\/([^/]+)$/,
 	);
 	if (runMatch && method === "GET") {
-		const runId = decodeURIComponent(runMatch[1]);
-		return jsonResponse(probe?.runsByRunId?.[runId] ?? fixtureProbeRun());
+		return jsonResponse(fixtureProbeRun());
 	}
 
 	return undefined;

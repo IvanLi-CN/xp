@@ -1,6 +1,19 @@
 id: fixture-policy-rust-json-fixture-literal
 snapshots:
   ? |
+    let host = request.hostname;
+    let ingress = json!({
+      "hostname": Some(host),
+    });
+  : labels:
+    - source: |-
+        json!({
+          "hostname": Some(host),
+        })
+      style: primary
+      start: 43
+      end: 79
+  ? |
     let ingress = json!({
       "hostname": "live.example",
       "service": "https://live.example",
@@ -14,6 +27,46 @@ snapshots:
       style: primary
       start: 14
       end: 91
+  ? |
+    let ingress = json!({
+      "origin_url": match request.url {
+        value => value,
+      },
+    });
+  : labels:
+    - source: |-
+        json!({
+          "origin_url": match request.url {
+            value => value,
+          },
+        })
+      style: primary
+      start: 14
+      end: 85
+  ? |
+    let ingress = json!({
+      "service": format!("{}", external_service),
+    });
+  : labels:
+    - source: |-
+        json!({
+          "service": format!("{}", external_service),
+        })
+      style: primary
+      start: 14
+      end: 70
+  ? |
+    let ingress = json!({
+      "service": input.service,
+    });
+  : labels:
+    - source: |-
+        json!({
+          "service": input.service,
+        })
+      style: primary
+      start: 14
+      end: 52
   ? |
     let meta = json!({
       "dest": Some(request.destination)
@@ -50,6 +103,30 @@ snapshots:
       style: primary
       start: 11
       end: 65
+  ? |
+    let meta = json!({
+      "reality": { "dest": Some(request.destination) }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": Some(request.destination) }
+        })
+      style: primary
+      start: 11
+      end: 72
+  ? |
+    let meta = json!({
+      "reality": { "dest": format!("{}", request.destination) }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": format!("{}", request.destination) }
+        })
+      style: primary
+      start: 11
+      end: 81
   ? |
     let meta = json!({
       "reality": { "dest": request.destination }
@@ -227,3 +304,14 @@ snapshots:
       style: primary
       start: 14
       end: 59
+  ? |
+    let request = req_authed_json(
+      "POST",
+      "/api/admin/endpoints",
+      json!({ "service": request.service }),
+    );
+  : labels:
+    - source: 'json!({ "service": request.service })'
+      style: primary
+      start: 69
+      end: 106
