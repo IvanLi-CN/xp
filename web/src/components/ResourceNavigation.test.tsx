@@ -67,6 +67,7 @@ describe("<ResourceNavigation />", () => {
 		expect(
 			resourceList.querySelector("[data-radix-scroll-area-viewport]"),
 		).toBeInTheDocument();
+		expect(resourceList.querySelector("ul")).toHaveClass("w-0", "min-w-full");
 
 		fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
 		expect(onNavigate).toHaveBeenCalledWith("/");
@@ -95,7 +96,9 @@ describe("<ResourceNavigation />", () => {
 			screen.getByRole("button", { name: "Collapse Users" }),
 		).toHaveAttribute("aria-expanded", "true");
 		expect(activeUser).toHaveClass("bg-primary/10");
+		expect(activeUser).toHaveClass("rounded-full");
 		expect(activeUser).toHaveAttribute("aria-current", "page");
+		expect(activeUser).not.toHaveAttribute("title");
 		await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
 
 		fireEvent.click(activeUser);

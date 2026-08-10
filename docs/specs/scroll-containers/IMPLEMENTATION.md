@@ -13,7 +13,12 @@
 - `web/src/components/ui/scroll-area.tsx` 使用 Radix 的 root、viewport、vertical scrollbar 和真实 thumb。
 - `web/src/components/ui/scroll-area.stories.tsx` 提供长列表状态，供 light/dark 主题下人工检查滚动条外观。
 - `web/src/components/ResourceNavigation.tsx` 的对象二级导航以固定十行高度采用
-  `ScrollArea`；活动对象沿用最近边界、无动画的 viewport 定位。
+  `ScrollArea`；连续内容列通过 `w-0 min-w-full` 固定在 viewport 宽度内，活动对象沿用最近边界、
+  无动画的 viewport 定位。
+- `web/src/components/ResourceNavigationChildLink.tsx` 将长名称位移限制在名称自身的 overflow
+  viewport，不扩展 `ScrollArea` 的横向能力；reduced motion 下改用项目 Tooltip。
+- `web/src/components/ResourceNavigation.stories.tsx` 覆盖长名称、完整选中胶囊、外层无横向
+  overflow 及 reduced-motion fallback。
 - 历史原生 `overflow-*` 面板不要求纯文档变更后的立即迁移；新增或实质改造时应按 `SPEC.md` 采用该组件。
 
 ## Remaining Gaps
@@ -25,6 +30,8 @@
 - `web/src/components/ui/scroll-area.tsx`
 - `web/src/components/ui/scroll-area.stories.tsx`
 - `web/src/components/ResourceNavigation.tsx`
+- `web/src/components/ResourceNavigationChildLink.tsx`
+- `web/src/components/ResourceNavigation.stories.tsx`
 
 ## References
 

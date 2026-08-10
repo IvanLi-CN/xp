@@ -120,6 +120,7 @@ export type DemoSession = {
 export type DemoState = {
 	scenarioId: DemoScenarioId;
 	session: DemoSession | null;
+	localNodeId: string;
 	nodes: DemoNode[];
 	endpoints: DemoEndpoint[];
 	users: DemoUser[];

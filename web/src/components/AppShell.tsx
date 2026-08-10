@@ -610,6 +610,7 @@ export function AppShell({
 			compatibilityError={compatibilityError}
 			compatibilityPending={apiCompatibility.isFetching}
 			groups={effectiveNavGroups}
+			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
 			onNavigate={navigateLink}
 			onResourceNavigate={navigateResource}
