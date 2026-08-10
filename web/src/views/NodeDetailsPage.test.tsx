@@ -85,6 +85,7 @@ function renderPage() {
 	const result = render(page());
 	return {
 		...result,
+		queryClient,
 		rerenderPage: () => result.rerender(page()),
 	};
 }
@@ -590,7 +591,13 @@ describe("<NodeDetailsPage />", () => {
 				},
 			],
 		});
-		renderPage();
+		const { queryClient } = renderPage();
+		queryClient.setQueryData(["adminNodes", "admintoken"], {
+			items: [{ node_id: "node-tokyo" }],
+		});
+		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
+			items: [{ endpoint_id: "endpoint-ss", node_id: "node-tokyo" }],
+		});
 
 		fireEvent.click(await screenByRole("tab", "Danger zone"));
 		fireEvent.click(await screenByRole("button", "Delete node"));
@@ -602,6 +609,18 @@ describe("<NodeDetailsPage />", () => {
 				expectedEndpointIds: ["endpoint-ss"],
 			});
 		});
+		expect(
+			queryClient.getQueryData<{ items: Array<{ node_id: string }> }>([
+				"adminNodes",
+				"admintoken",
+			])?.items,
+		).toEqual([]);
+		expect(
+			queryClient.getQueryData<{ items: Array<{ endpoint_id: string }> }>([
+				"adminEndpoints",
+				"admintoken",
+			])?.items,
+		).toEqual([]);
 		expect(mockNavigate).toHaveBeenCalledWith({ to: "/nodes" });
 	});
 

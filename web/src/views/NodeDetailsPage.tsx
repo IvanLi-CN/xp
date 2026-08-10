@@ -75,6 +75,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
+import { resourceListCache } from "./adminEndpointsCache";
 import {
 	isNodeQuotaDraftDirty,
 	nodeQuotaDraftFromNode,
@@ -87,9 +88,7 @@ function formatErrorMessage(error: unknown): string {
 	}
 	return String(error);
 }
-function summaryBadgeVariant(
-	status: string,
-): "success" | "warning" | "destructive" | "ghost" {
+function summaryBadgeVariant(status: string) {
 	switch (status) {
 		case "up":
 			return "success";
@@ -101,9 +100,7 @@ function summaryBadgeVariant(
 			return "ghost";
 	}
 }
-function componentBadgeVariant(
-	status: string,
-): "success" | "warning" | "destructive" | "ghost" | "outline" {
+function componentBadgeVariant(status: string) {
 	switch (status) {
 		case "up":
 			return "success";
@@ -117,9 +114,7 @@ function componentBadgeVariant(
 			return "outline";
 	}
 }
-function eventBadgeVariant(
-	kind: NodeRuntimeEvent["kind"],
-): "warning" | "info" | "success" | "destructive" | "ghost" {
+function eventBadgeVariant(kind: NodeRuntimeEvent["kind"]) {
 	switch (kind) {
 		case "status_changed":
 			return "warning";
@@ -1773,6 +1768,11 @@ export function NodeDetailsPage() {
 												(endpoint) => endpoint.endpoint_id,
 											),
 										});
+										resourceListCache.nodeDeleted(
+											queryClient,
+											adminToken,
+											nodeId,
+										);
 										pushToast({
 											variant: "success",
 											message: "Node deleted.",

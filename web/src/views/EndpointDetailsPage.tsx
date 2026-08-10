@@ -72,6 +72,7 @@ import {
 	realityServerNameSuggestionFromDest,
 	validateRealityServerName,
 } from "../utils/realityServerName";
+import { resourceListCache } from "./adminEndpointsCache";
 import {
 	useEndpointDraft,
 	useEndpointDraftNavigation,
@@ -253,6 +254,7 @@ export function EndpointDetailsPage() {
 				["adminEndpoint", adminToken, endpointId],
 				endpoint,
 			);
+			resourceListCache.update(queryClient, adminToken, endpoint);
 		},
 		onError: (error) => {
 			pushToast({ variant: "error", message: formatBackendError(error) });
@@ -276,6 +278,7 @@ export function EndpointDetailsPage() {
 	const deleteMutation = useMutation({
 		mutationFn: () => deleteAdminEndpoint(adminToken, endpointId),
 		onSuccess: () => {
+			resourceListCache.remove(queryClient, adminToken, endpointId);
 			pushToast({ variant: "success", message: "Endpoint deleted." });
 			navigate({ to: "/endpoints" });
 		},

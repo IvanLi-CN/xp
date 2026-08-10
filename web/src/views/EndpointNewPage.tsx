@@ -55,6 +55,7 @@ import {
 	mergeManagedVlessAutocompleteSuggestions,
 	normalizeAcceptedAuthorities,
 } from "../utils/managedVlessForm";
+import { resourceListCache } from "./adminEndpointsCache";
 
 const kindOptions = [
 	{
@@ -225,10 +226,7 @@ export function EndpointNewPage() {
 		onSuccess: (endpoint) => {
 			queryClient.setQueryData<AdminEndpointsResponse>(
 				["adminEndpoints", adminToken],
-				(previous) =>
-					previous
-						? { ...previous, items: [...previous.items, endpoint] }
-						: previous,
+				(previous) => resourceListCache.append(previous, endpoint),
 			);
 			void queryClient.invalidateQueries({
 				queryKey: ["adminEndpoints", adminToken],
