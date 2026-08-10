@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Icon } from "./Icon";
 
@@ -86,6 +86,7 @@ export function ResourceNavigation({
 	const groupsRef = useRef(groups);
 	groupsRef.current = groups;
 	const activeChildRef = useRef<HTMLAnchorElement | null>(null);
+	const disclosureIdPrefix = useId().replaceAll(":", "");
 
 	useEffect(() => {
 		setExpanded(defaultExpanded(groupsRef.current, pathname));
@@ -129,11 +130,11 @@ export function ResourceNavigation({
 	}
 
 	function toggleItem(item: ResourceNavigationItem) {
+		const nextValue = !expanded[item.id];
 		setExpanded((current) => {
-			const nextValue = !current[item.id];
-			if (nextValue) onResourceRequested?.(item.id);
 			return { ...current, [item.id]: nextValue };
 		});
+		if (nextValue) onResourceRequested?.(item.id);
 	}
 
 	return (
@@ -149,12 +150,15 @@ export function ResourceNavigation({
 								const isResource = item.children !== undefined;
 								const isExpanded = expanded[item.id] ?? false;
 								const isActive = isRouteMatch(pathname, item.href);
-								const panelId = `${ariaLabel.replaceAll(" ", "-")}-${item.id}-children`;
+								const panelId = `${disclosureIdPrefix}-${item.id}-children`;
 								return (
 									<li key={item.id} className="space-y-1">
 										<div className="flex items-center gap-1">
 											<a
 												href={item.href}
+												aria-current={
+													pathname === item.href ? "page" : undefined
+												}
 												className={[
 													primaryLinkClass,
 													isActive
@@ -241,6 +245,9 @@ export function ResourceNavigation({
 																		href={child.href}
 																		title={child.ariaLabel}
 																		aria-label={child.ariaLabel}
+																		aria-current={
+																			isChildActive ? "page" : undefined
+																		}
 																		className={[
 																			childLinkClass,
 																			isChildActive

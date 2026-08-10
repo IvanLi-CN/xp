@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -78,6 +78,7 @@ import {
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
+import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
 
 const PROTOCOLS = [
 	{ protocolId: "vless_reality_vision_tcp", label: "VLESS" },
@@ -108,6 +109,7 @@ export function UserDetailsPage() {
 	const adminToken = readAdminToken();
 	const runtime = useAppRuntime();
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { userId } = useParams({ from: "/app/users/$userId" });
 	const { pushToast } = useToast();
 	const prefs = useUiPrefs();
@@ -131,6 +133,8 @@ export function UserDetailsPage() {
 	const [trafficNodeOptions, setTrafficNodeOptions] = useState<
 		UserTrafficNodeOption[]
 	>([]);
+	const [trafficNodeOptionsUserId, setTrafficNodeOptionsUserId] =
+		useState(userId);
 	const [displayName, setDisplayName] = useState("");
 	const [resetPolicy, setResetPolicy] = useState<"monthly" | "unlimited">(
 		"monthly",
@@ -213,25 +217,38 @@ export function UserDetailsPage() {
 		queryFn: ({ signal }) =>
 			fetchAdminUserNodeQuotaStatus(adminToken, userId, signal),
 	});
+	const hasCurrentTrafficNodeOptions = trafficNodeOptionsUserId === userId;
+	const activeTrafficNodeForUser = resolveUserTrafficNodeFilter({
+		activeNodeId: activeTrafficNodeId,
+		options: trafficNodeOptions,
+		optionsUserId: trafficNodeOptionsUserId,
+		userId,
+	});
 	const { ipUsageDisplay, ipUsageQuery, trafficDisplay, trafficQuery } =
 		useUserTimeWindowReports({
 			adminToken,
 			ipUsageEnabled: enabledFor(trafficCapability) && tab === "usageDetails",
 			ipUsageWindow,
-			nodeId: activeTrafficNodeId,
+			nodeId: activeTrafficNodeForUser,
 			trafficEnabled: enabledFor(trafficCapability) && tab === "traffic",
 			trafficWindow: prefs.trafficWindow,
 			userId,
 		});
 	useEffect(() => {
-		if (trafficQuery.data?.nodes) {
-			setTrafficNodeOptions(trafficQuery.data.nodes);
-		}
-	}, [trafficQuery.data?.nodes]);
+		const nodes = trafficQuery.data?.nodes;
+		if (!nodes) return;
+		setTrafficNodeOptions(nodes);
+		setTrafficNodeOptionsUserId(userId);
+		setActiveTrafficNodeId((current) =>
+			current && nodes.some((node) => node.node_id === current)
+				? current
+				: null,
+		);
+	}, [trafficQuery.data?.nodes, userId]);
 	const user = userQuery.data;
 	const availableTrafficNodes =
 		trafficQuery.data?.nodes ??
-		(trafficNodeOptions.length > 0
+		(hasCurrentTrafficNodeOptions && trafficNodeOptions.length > 0
 			? trafficNodeOptions
 			: (nodesQuery.data?.items ?? []).map((node) => ({
 					node_id: node.node_id,
@@ -239,7 +256,7 @@ export function UserDetailsPage() {
 				})));
 	const trafficNodeSelector = (
 		<Select
-			value={activeTrafficNodeId ?? "all"}
+			value={activeTrafficNodeForUser ?? "all"}
 			onValueChange={(value) =>
 				setActiveTrafficNodeId(value === "all" ? null : value)
 			}
@@ -797,7 +814,12 @@ export function UserDetailsPage() {
 				display_name: normalizedDisplayName,
 				quota_reset: quotaReset,
 			});
-			await userQuery.refetch();
+			await Promise.all([
+				userQuery.refetch(),
+				queryClient.invalidateQueries({
+					queryKey: ["adminUsers", adminToken],
+				}),
+			]);
 			pushToast({ variant: "success", message: "User updated" });
 			return true;
 		} catch (error) {
@@ -905,6 +927,9 @@ export function UserDetailsPage() {
 		setIsDeleting(true);
 		try {
 			await deleteAdminUser(adminToken, userId);
+			await queryClient.invalidateQueries({
+				queryKey: ["adminUsers", adminToken],
+			});
 			pushToast({ variant: "success", message: "User deleted" });
 			navigate({ to: "/users" });
 		} catch (error) {

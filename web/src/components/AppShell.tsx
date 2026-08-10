@@ -130,6 +130,11 @@ export function AppShell({
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const { requestNavigation } = useObjectNavigationGuard();
 	const compatibility = apiCompatibility.data ?? null;
+	const compatibilityError = apiCompatibility.isError
+		? formatApiError(apiCompatibility.error)
+		: !runtime.isOnline && compatibility === null
+			? "API compatibility is unavailable while offline."
+			: null;
 	const alertsCapabilityAvailable =
 		apiCompatibility.data?.kind === "compatible" &&
 		apiCompatibility.data.isFeatureAvailable("admin.alerts");
@@ -601,10 +606,13 @@ export function AppShell({
 		<AppResourceNavigation
 			adminToken={adminToken}
 			compatibility={compatibility}
+			compatibilityError={compatibilityError}
+			compatibilityPending={apiCompatibility.isFetching}
 			groups={effectiveNavGroups}
 			pathname={pathname}
 			onNavigate={navigateLink}
 			onResourceNavigate={navigateResource}
+			onRetryCompatibility={() => void apiCompatibility.refetch()}
 		/>
 	);
 

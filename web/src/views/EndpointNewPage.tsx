@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
@@ -101,6 +101,7 @@ type EndpointFormInput = z.input<typeof endpointSchema>;
 
 export function EndpointNewPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
 	const adminToken = readAdminToken();
 	const endpointsCapability = useApiCapability("admin.endpoints");
@@ -220,7 +221,10 @@ export function EndpointNewPage() {
 				...(mihomoSmux ? { mihomo_smux: mihomoSmux } : {}),
 			});
 		},
-		onSuccess: (endpoint) => {
+		onSuccess: async (endpoint) => {
+			await queryClient.invalidateQueries({
+				queryKey: ["adminEndpoints", adminToken],
+			});
 			pushToast({
 				variant: "success",
 				message: "Endpoint created successfully.",

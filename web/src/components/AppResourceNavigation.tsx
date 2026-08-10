@@ -22,10 +22,13 @@ type ResourceId = "nodes" | "endpoints" | "users";
 type AppResourceNavigationProps = {
 	adminToken: string;
 	compatibility: ApiCompatibilityResult | null;
+	compatibilityError: string | null;
+	compatibilityPending: boolean;
 	groups: AppNavigationGroup[];
 	pathname: string;
 	onNavigate: (href: string) => void;
 	onResourceNavigate: (href: string) => void;
+	onRetryCompatibility: () => void;
 };
 
 function formatApiError(error: unknown): string {
@@ -47,10 +50,13 @@ function resourceIdForPath(path: string): ResourceId | null {
 export function AppResourceNavigation({
 	adminToken,
 	compatibility,
+	compatibilityError,
+	compatibilityPending,
 	groups,
 	pathname,
 	onNavigate,
 	onResourceNavigate,
+	onRetryCompatibility,
 }: AppResourceNavigationProps) {
 	const [requestedResources, setRequestedResources] = useState<
 		Record<ResourceId, boolean>
@@ -64,12 +70,13 @@ export function AppResourceNavigation({
 	const nodesActive = pathname.startsWith("/nodes/");
 	const endpointsActive = pathname.startsWith("/endpoints/");
 	const usersActive = pathname.startsWith("/users/");
+	const nodesRequested = requestedResources.nodes || nodesActive;
+	const endpointsRequested = requestedResources.endpoints || endpointsActive;
+	const usersRequested = requestedResources.users || usersActive;
 	const adminNodes = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled:
-			adminToken.length > 0 &&
-			nodesCapability.available &&
-			(requestedResources.nodes || nodesActive),
+			adminToken.length > 0 && nodesCapability.available && nodesRequested,
 		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
 	});
 	const adminEndpoints = useQuery({
@@ -77,15 +84,13 @@ export function AppResourceNavigation({
 		enabled:
 			adminToken.length > 0 &&
 			endpointsCapability.available &&
-			(requestedResources.endpoints || endpointsActive),
+			endpointsRequested,
 		queryFn: ({ signal }) => fetchAdminEndpoints(adminToken, signal),
 	});
 	const adminUsers = useQuery({
 		queryKey: ["adminUsers", adminToken],
 		enabled:
-			adminToken.length > 0 &&
-			usersCapability.available &&
-			(requestedResources.users || usersActive),
+			adminToken.length > 0 && usersCapability.available && usersRequested,
 		queryFn: ({ signal }) => fetchAdminUsers(adminToken, signal),
 	});
 
@@ -99,17 +104,20 @@ export function AppResourceNavigation({
 					ariaLabel: `Node ${node.node_name || "unnamed"} (${node.node_id})`,
 				})),
 				isLoading:
-					adminNodes.isLoading ||
-					((requestedResources.nodes || nodesActive) &&
-						nodesCapability.pending),
+					adminNodes.isLoading || (nodesRequested && compatibilityPending),
 				error: adminNodes.isError
 					? formatApiError(adminNodes.error)
-					: adminToken.length === 0 && (requestedResources.nodes || nodesActive)
-						? "Admin token required"
-						: nodesCapability.unavailable
-							? nodesCapability.reason
-							: null,
-				onRetry: () => void adminNodes.refetch(),
+					: compatibilityError && nodesRequested
+						? compatibilityError
+						: adminToken.length === 0 && nodesRequested
+							? "Admin token required"
+							: nodesCapability.unavailable
+								? nodesCapability.reason
+								: null,
+				onRetry: () =>
+					compatibilityError
+						? onRetryCompatibility()
+						: void adminNodes.refetch(),
 			},
 			endpoints: {
 				children: (adminEndpoints.data?.items ?? []).map((endpoint) => ({
@@ -120,17 +128,20 @@ export function AppResourceNavigation({
 				})),
 				isLoading:
 					adminEndpoints.isLoading ||
-					((requestedResources.endpoints || endpointsActive) &&
-						endpointsCapability.pending),
+					(endpointsRequested && compatibilityPending),
 				error: adminEndpoints.isError
 					? formatApiError(adminEndpoints.error)
-					: adminToken.length === 0 &&
-							(requestedResources.endpoints || endpointsActive)
-						? "Admin token required"
-						: endpointsCapability.unavailable
-							? endpointsCapability.reason
-							: null,
-				onRetry: () => void adminEndpoints.refetch(),
+					: compatibilityError && endpointsRequested
+						? compatibilityError
+						: adminToken.length === 0 && endpointsRequested
+							? "Admin token required"
+							: endpointsCapability.unavailable
+								? endpointsCapability.reason
+								: null,
+				onRetry: () =>
+					compatibilityError
+						? onRetryCompatibility()
+						: void adminEndpoints.refetch(),
 			},
 			users: {
 				children: (adminUsers.data?.items ?? []).map((user) => ({
@@ -140,17 +151,20 @@ export function AppResourceNavigation({
 					ariaLabel: `User ${user.display_name || "unnamed"} (${user.user_id})`,
 				})),
 				isLoading:
-					adminUsers.isLoading ||
-					((requestedResources.users || usersActive) &&
-						usersCapability.pending),
+					adminUsers.isLoading || (usersRequested && compatibilityPending),
 				error: adminUsers.isError
 					? formatApiError(adminUsers.error)
-					: adminToken.length === 0 && (requestedResources.users || usersActive)
-						? "Admin token required"
-						: usersCapability.unavailable
-							? usersCapability.reason
-							: null,
-				onRetry: () => void adminUsers.refetch(),
+					: compatibilityError && usersRequested
+						? compatibilityError
+						: adminToken.length === 0 && usersRequested
+							? "Admin token required"
+							: usersCapability.unavailable
+								? usersCapability.reason
+								: null,
+				onRetry: () =>
+					compatibilityError
+						? onRetryCompatibility()
+						: void adminUsers.refetch(),
 			},
 		};
 		return groups.map((group) => ({
@@ -171,14 +185,16 @@ export function AppResourceNavigation({
 		adminNodes,
 		adminToken.length,
 		adminUsers,
+		compatibilityError,
+		compatibilityPending,
 		endpointsCapability,
+		endpointsRequested,
 		groups,
 		nodesCapability,
-		nodesActive,
-		requestedResources,
+		nodesRequested,
+		onRetryCompatibility,
 		usersCapability,
-		endpointsActive,
-		usersActive,
+		usersRequested,
 	]);
 
 	return (
