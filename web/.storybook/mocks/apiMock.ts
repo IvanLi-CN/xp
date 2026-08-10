@@ -409,6 +409,29 @@ function buildNodeRuntimeDetail(
 	};
 }
 
+function buildNodeRuntimeEventStream(node: AdminNode): Response {
+	const detail = buildNodeRuntimeDetail(node);
+	return sseResponse([
+		{
+			event: "hello",
+			data: {
+				node_id: node.node_id,
+				connected_at: fixtureCatalog.slotString.s7(),
+			},
+		},
+		{
+			event: "snapshot",
+			data: {
+				node_id: node.node_id,
+				summary: detail.summary,
+				components: detail.components,
+				recent_slots: detail.recent_slots,
+				events: detail.events,
+			},
+		},
+	]);
+}
+
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	const components = buildRuntimeComponents(node);
 	return {
@@ -1421,26 +1444,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		const detail = buildNodeRuntimeDetail(node);
-		return sseResponse([
-			{
-				event: "hello",
-				data: {
-					node_id: fixtureCatalog.slotString.s17(),
-					connected_at: fixtureCatalog.slotString.s7(),
-				},
-			},
-			{
-				event: "snapshot",
-				data: {
-					node_id: fixtureCatalog.slotString.s17(),
-					summary: detail.summary,
-					components: detail.components,
-					recent_slots: detail.recent_slots,
-					events: detail.events,
-				},
-			},
-		]);
+		return buildNodeRuntimeEventStream(node);
 	}
 
 	const nodeIpUsageMatch = path.match(

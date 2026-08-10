@@ -14,3 +14,19 @@ invalid:
     const user = {
       ['user_id']: payload.user_id,
     };
+  - |
+    const endpoint = {
+      [`kind`]: fixtureCatalog.endpoint.vlessKind(),
+    };
+  - |
+    const user = {
+      [`user_id`]: fixtureCatalog.identifier.userPrimary(),
+    };
+  - |
+    const endpoint = {
+      [kind]: fixtureCatalog.endpoint.vlessKind(),
+    };
+  - |
+    const user = {
+      [user_id]: fixtureCatalog.identifier.userPrimary(),
+    };

@@ -764,6 +764,47 @@ describe("storybook api mock", () => {
 		expect(payload.egress_probe?.subscription_region).toBeTruthy();
 	});
 
+	it("keeps runtime event node identities aligned with configured nodes", async () => {
+		const nodeId = fixtureCatalog.slotString.s63();
+		const mock = createMockApi({
+			data: {
+				nodes: [
+					{
+						node_id: fixtureCatalog.slotString.s63(),
+						node_name: fixtureCatalog.slotString.s63(),
+						access_host: fixtureCatalog.slotString.s114(),
+						api_base_url: fixtureCatalog.slotString.s115(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
+					},
+				],
+			},
+		});
+
+		const response = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/runtime/events`, {
+				method: "GET",
+			}),
+		);
+		expect(response.ok).toBe(true);
+		const payloads = (await response.text())
+			.trim()
+			.split("\n\n")
+			.map((event) => {
+				const dataLine = event
+					.split("\n")
+					.find((line) => line.startsWith("data: "));
+				if (!dataLine) throw new Error("runtime event is missing data");
+				return JSON.parse(dataLine.slice("data: ".length)) as {
+					node_id: string;
+				};
+			});
+		expect(payloads.map((payload) => payload.node_id)).toEqual([
+			nodeId,
+			nodeId,
+		]);
+	});
+
 	it("supports quota policy global weight rows and node inherit policy", async () => {
 		const mock = createMockApi();
 

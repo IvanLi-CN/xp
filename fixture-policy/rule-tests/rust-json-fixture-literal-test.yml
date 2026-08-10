@@ -49,6 +49,18 @@ invalid:
       "published_at": format!("{}", "2026-01-20T00:00:00Z")
     });
   - |
+    let meta = json!({
+      "server_names": [request.server_names]
+    });
+  - |
+    let meta = json!({
+      "short_ids": [payload.short_id]
+    });
+  - |
+    let release = json!({
+      "published_at": release_secret()
+    });
+  - |
     let release = json!({
       "browser_download_url": "https://github.com/live/download"
     });

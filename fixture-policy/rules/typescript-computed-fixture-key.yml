@@ -14,4 +14,9 @@ files:
 rule:
   all:
     - kind: computed_property_name
-    - regex: "^\\[\\s*['\\\"](kind|user_id)['\\\"]\\s*\\]$"
+    - any:
+        - regex: "^\\[\\s*(?:['\\\"](?:kind|user_id)['\\\"]|`(?:kind|user_id)`)\\s*\\]$"
+        - has:
+            all:
+              - kind: identifier
+              - regex: "^(kind|user_id)$"

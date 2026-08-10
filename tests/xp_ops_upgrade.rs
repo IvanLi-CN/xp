@@ -6,7 +6,6 @@ mod linux {
     use std::path::{Path, PathBuf};
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use xp_test_fixtures::{release_current_timestamp, release_previous_timestamp};
 
     async fn mount_latest_and_tag_release(
         server: &MockServer,
@@ -17,7 +16,7 @@ mod linux {
         let body = serde_json::json!({
           "tag_name": tag,
           "prerelease": false,
-          "published_at": release_current_timestamp(),
+          "published_at": xp_test_fixtures::release_current_timestamp(),
           "assets": [
             { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
             { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },
@@ -310,7 +309,7 @@ mod linux {
               {
                 "tag_name": "v0.1.998-rc.1",
                 "prerelease": true,
-                "published_at": release_previous_timestamp(),
+                "published_at": xp_test_fixtures::release_previous_timestamp(),
                 "assets": [
                   { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
                   { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },
@@ -320,7 +319,7 @@ mod linux {
               {
                 "tag_name": "v0.1.999-rc.1",
                 "prerelease": true,
-                "published_at": release_current_timestamp(),
+                "published_at": xp_test_fixtures::release_current_timestamp(),
                 "assets": [
                   { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
                   { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },

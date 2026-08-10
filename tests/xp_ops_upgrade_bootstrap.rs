@@ -4,7 +4,6 @@ mod linux {
     use std::{env, fs, path::Path};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use xp_test_fixtures::release_current_timestamp;
 
     fn asset_name(binary: &str) -> String {
         let architecture = match env::consts::ARCH {
@@ -52,7 +51,7 @@ mod linux {
         let release = serde_json::json!({
             "tag_name": target_tag.clone(),
             "prerelease": false,
-            "published_at": release_current_timestamp(),
+            "published_at": xp_test_fixtures::release_current_timestamp(),
             "assets": [
                 { "name": xp_asset.clone(), "browser_download_url": xp_url },
                 { "name": xp_ops_asset.clone(), "browser_download_url": xp_ops_url },

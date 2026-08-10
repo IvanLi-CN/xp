@@ -25,6 +25,30 @@ snapshots:
       start: 11
       end: 66
   ? |
+    let meta = json!({
+      "server_names": [request.server_names]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "server_names": [request.server_names]
+        })
+      style: primary
+      start: 11
+      end: 62
+  ? |
+    let meta = json!({
+      "short_ids": [payload.short_id]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "short_ids": [payload.short_id]
+        })
+      style: primary
+      start: 11
+      end: 55
+  ? |
     let meta = serde_json::json!({
       "reality": { "dest": "live.example:443" }
     });
@@ -141,3 +165,15 @@ snapshots:
       style: primary
       start: 14
       end: 80
+  ? |
+    let release = json!({
+      "published_at": release_secret()
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": release_secret()
+        })
+      style: primary
+      start: 14
+      end: 59

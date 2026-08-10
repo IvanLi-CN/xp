@@ -25,15 +25,15 @@ rule:
         - regex: >-
             (?xs) ^.*json\s*!\s*\(.*
             "(dest|server_names|public_domain|server_name)"\s*:
-            \s*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
         - regex: >-
             (?xs) ^.*json\s*!\(.*
             "(private_key|public_key|short_ids|active_short_id)"\s*:
-            \s*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
         - regex: >-
             (?xs) ^.*json\s*!\(.*
             "(server_psk_b64|user_psk_b64|password)"\s*:
-            \s*(?:std::|serde_json::from_|request|payload|body)
+            \s*(?:[\[{]\s*)*(?:std::|serde_json::from_|request|payload|body)
         - all:
             - regex: >-
                 (?xs) ^.*json\s*!\s*\(.*
@@ -41,7 +41,7 @@ rule:
             - not:
                 regex: >-
                   (?xs) "published_at"\s*:
-                  \s*(?:xp_test_fixtures::)?release_[A-Za-z0-9_]+\(\)
+                  \s*xp_test_fixtures::release_[A-Za-z0-9_]+\(\)
         - all:
             - regex: >-
                 (?xs) ^.*json\s*!\s*\(.*

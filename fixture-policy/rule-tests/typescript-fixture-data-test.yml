@@ -10,6 +10,10 @@ valid:
       };
     }
   - |
+    function buildNodeRuntimeEventStream(node) {
+      return { node_id: node.node_id };
+    }
+  - |
     const fixture = { host: fixtureCatalog.host.primary() };
   - |
     const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
