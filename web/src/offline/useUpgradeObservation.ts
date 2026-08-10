@@ -5,6 +5,7 @@ import type { UpgradeJobStatus } from "@/api/adminUpgrade";
 import {
 	type UpgradeObservation,
 	beginUpgradeObservation,
+	observeExistingUpgradeStatus,
 	observeUpgradeStatus,
 	readUpgradeObservation,
 	refreshTimedOutObservation,
@@ -50,6 +51,17 @@ export function useUpgradeObservation() {
 		[],
 	);
 
+	const observeExistingStatus = useCallback(
+		(status: UpgradeJobStatus | null) => {
+			setObservation((current) => {
+				const next = observeExistingUpgradeStatus(current, status, Date.now());
+				if (next !== current) writeUpgradeObservation(next);
+				return next;
+			});
+		},
+		[],
+	);
+
 	const clear = useCallback(() => updateObservation(setObservation, null), []);
 
 	useEffect(() => {
@@ -71,6 +83,7 @@ export function useUpgradeObservation() {
 		begin,
 		clear,
 		observeStatus,
+		observeExistingStatus,
 		refreshTimedOutStatus,
 	};
 }

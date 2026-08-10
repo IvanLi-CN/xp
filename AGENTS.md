@@ -49,8 +49,9 @@
   `/etc/sudoers.d/91-xp-upgrade` policy; the polkit rule is only a compatibility supplement because
   CentOS 7-class polkit does not reliably expose `unit` / `verb` details. OpenRC nodes must include
   the root-owned fixed `/usr/local/libexec/xp-openrc-upgrade-trigger` helper and narrow
-  `/etc/doas.conf` rules for its `--check` probe and fixed `xp-upgrade start`; the unprivileged
-  service verifies readiness through the helper and must not read root-only `doas.conf` directly.
+  `/etc/doas.conf` rules for its `--check` probe and fixed `start` action; the helper may only
+  inspect, zap a crashed `xp-upgrade`, and start that fixed service. The unprivileged service
+  verifies readiness through the helper and must not read root-only `doas.conf` directly.
   This helper cannot be installed by the already-running pre-helper `xp-ops` binary: when an
   existing OpenRC host crosses this release boundary, the root operator must run `xp-ops init`
   after `xp-ops upgrade` completes. Missing or removed helper assets remain unsupported until that
@@ -60,7 +61,9 @@
   unsupported. The systemd `xp-upgrade.service` must invoke `xp-ops _upgrade-runner` directly and
   pass `XP_DATA_DIR` through the unit environment, not through shell-expanded `--data-dir` command
   text. If the one-shot runner fails before writing a terminal status, the admin upgrade status API
-  must reconcile the durable `running` / `restarting` status to `failed`.
+  must reconcile the durable `running` / `restarting` status to `failed`. The Web start guard uses
+  an advisory process lock rather than lock-file existence and releases it before invoking the host
+  trigger. OpenRC backgrounds the one-shot and zaps its service state after every runner exit.
 - All host-managed upgrade paths share one disk-retention contract: transaction-local binary
   backups only, zero `.bak.*`/`.failed.*` binaries after success or successful rollback; a
   `rollback_failed` filesystem error preserves the affected transaction backup for manual recovery
@@ -76,6 +79,9 @@
   terminal status, a structured rejection, or timeout. During that observation, duplicate Upgrade
   remains disabled even if the popover is manually closed; timeout stays locked until a manual
   status query proves an active job (new window) or idle/terminal state (unlock).
+  `upgrade_already_running` remains observable only when the immediate status refresh finds an
+  active job. An older idle/terminal status is an explicit stale conflict: report it immediately
+  and unlock Upgrade instead of waiting for the observation timeout.
 - The Web PWA must keep each build's complete static app shell in a build-versioned precache. New
   workers wait for explicit user confirmation; `xp_sw_metadata` owns cross-tab
   `clientId -> buildId` records. Old app-shell caches remain until reconciliation proves that no

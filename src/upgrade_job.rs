@@ -4,7 +4,6 @@ use crate::ops::{
     upgrade_artifacts::{UpgradeStorage, assess_upgrade_storage},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -30,6 +29,10 @@ const OPENRC_UPGRADE_SERVICE: &str = "xp-upgrade";
 const OPENRC_RC_SERVICE: &str = "/sbin/rc-service";
 const OPENRC_UPGRADE_SCRIPT_PATH: &str = "/etc/init.d/xp-upgrade";
 const OPENRC_UPGRADE_TRIGGER_PATH: &str = "/usr/local/libexec/xp-openrc-upgrade-trigger";
+mod delegate_status;
+mod start_lock;
+use delegate_status::*;
+use start_lock::StartLock;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UpgradeJobState {
@@ -97,31 +100,6 @@ pub fn upgrade_dir(data_dir: &Path) -> PathBuf {
 }
 fn lock_path(data_dir: &Path) -> PathBuf {
     upgrade_dir(data_dir).join(LOCK_FILE)
-}
-
-struct StartLock {
-    path: PathBuf,
-}
-
-impl StartLock {
-    fn acquire(data_dir: &Path) -> Result<Self, UpgradeStartError> {
-        let dir = upgrade_dir(data_dir);
-        fs::create_dir_all(&dir)?;
-        let path = lock_path(data_dir);
-        match File::options().write(true).create_new(true).open(&path) {
-            Ok(_) => Ok(Self { path }),
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
-                Err(UpgradeStartError::Active)
-            }
-            Err(err) => Err(UpgradeStartError::Io(err)),
-        }
-    }
-}
-
-impl Drop for StartLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
 }
 
 pub fn now_rfc3339() -> String {
@@ -444,7 +422,7 @@ pub fn start_upgrade(
     repo: Option<String>,
 ) -> Result<UpgradeJobStatus, UpgradeStartError> {
     validate_target_tag(target_tag)?;
-    let _lock = StartLock::acquire(data_dir)?;
+    let lock = StartLock::acquire(data_dir)?;
 
     let current = read_reconciled_status(data_dir)?;
     if current.state.is_active() {
@@ -498,6 +476,7 @@ pub fn start_upgrade(
         updated_at: now,
     };
     write_status(data_dir, &status)?;
+    drop(lock);
 
     if let Err(message) = trigger_upgrade_service(support.trigger) {
         let now = now_rfc3339();
@@ -603,13 +582,13 @@ fn reconcile_active_status<F>(
     detect_failure: F,
 ) -> io::Result<UpgradeJobStatus>
 where
-    F: FnOnce() -> Option<String>,
+    F: FnOnce(&UpgradeJobStatus) -> Option<String>,
 {
     if !status.state.is_active() {
         return Ok(status);
     }
 
-    let Some(message) = detect_failure() else {
+    let Some(message) = detect_failure(&status) else {
         return Ok(status);
     };
 
@@ -626,62 +605,6 @@ where
     };
     write_status(data_dir, &failed)?;
     Ok(failed)
-}
-
-fn detect_upgrade_delegate_failure() -> Option<String> {
-    detect_systemd_upgrade_failure()
-}
-
-fn detect_systemd_upgrade_failure() -> Option<String> {
-    if !command_exists("systemctl") {
-        return None;
-    }
-
-    let output = Command::new("systemctl")
-        .args([
-            "show",
-            SYSTEMD_UPGRADE_UNIT,
-            "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus",
-            "--no-pager",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let fields = parse_systemctl_show(&text);
-    if fields.get("LoadState").map(String::as_str) != Some("loaded") {
-        return None;
-    }
-    if fields.get("ActiveState").map(String::as_str) != Some("failed") {
-        return None;
-    }
-
-    let result = fields
-        .get("Result")
-        .map(String::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown");
-    let status = fields
-        .get("ExecMainStatus")
-        .map(String::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown");
-    Some(format!(
-        "upgrade runner failed: {SYSTEMD_UPGRADE_UNIT} is failed \
-         (result={result}, exit_status={status})"
-    ))
-}
-
-fn parse_systemctl_show(raw: &str) -> HashMap<String, String> {
-    raw.lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            Some((key.to_string(), value.to_string()))
-        })
-        .collect()
 }
 
 fn trigger_systemd_upgrade_service() -> Result<(), String> {
@@ -716,8 +639,8 @@ fn openrc_doas_check_args() -> [&'static str; 3] {
     ["-n", OPENRC_UPGRADE_TRIGGER_PATH, "--check"]
 }
 
-fn openrc_trigger_args() -> [&'static str; 4] {
-    ["-n", OPENRC_RC_SERVICE, OPENRC_UPGRADE_SERVICE, "start"]
+fn openrc_trigger_args() -> [&'static str; 3] {
+    ["-n", OPENRC_UPGRADE_TRIGGER_PATH, "start"]
 }
 
 fn run_status(cmd: &mut Command) -> Result<(), String> {
@@ -809,7 +732,7 @@ mod tests {
         write_status(tmp.path(), &status).unwrap();
 
         let loaded = read_status(tmp.path()).unwrap();
-        let reconciled = reconcile_active_status(tmp.path(), loaded, || {
+        let reconciled = reconcile_active_status(tmp.path(), loaded, |_| {
             Some(
                 concat!(
                     "upgrade runner failed: xp-upgrade.service is failed ",
@@ -850,7 +773,7 @@ mod tests {
         write_status(tmp.path(), &status).unwrap();
 
         let loaded = read_status(tmp.path()).unwrap();
-        let reconciled = reconcile_active_status(tmp.path(), loaded, || None).unwrap();
+        let reconciled = reconcile_active_status(tmp.path(), loaded, |_| None).unwrap();
 
         assert_eq!(reconciled.state, UpgradeJobState::Running);
         assert_eq!(reconciled.finished_at, None);
@@ -964,6 +887,54 @@ mod tests {
         let _lock = StartLock::acquire(tmp.path()).unwrap();
         let err = start_upgrade(tmp.path(), "v0.2.0", None).unwrap_err();
         assert!(matches!(err, UpgradeStartError::Active));
+    }
+
+    #[test]
+    fn stale_start_lock_file_does_not_reject_a_new_claim() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir_all(upgrade_dir(tmp.path())).unwrap();
+        fs::write(lock_path(tmp.path()), "stale\n").unwrap();
+
+        let lock = StartLock::acquire(tmp.path()).unwrap();
+        drop(lock);
+        assert!(lock_path(tmp.path()).exists());
+        StartLock::acquire(tmp.path()).unwrap();
+    }
+
+    #[test]
+    fn openrc_crashed_status_is_reconciled_as_delegate_failure() {
+        let status = UpgradeJobStatus {
+            state: UpgradeJobState::Running,
+            target_tag: Some("v0.2.0".to_string()),
+            repo: None,
+            started_at: None,
+            finished_at: None,
+            exit_code: None,
+            message: None,
+            updated_at: "2026-07-04T00:00:00Z".to_string(),
+        };
+        let now = chrono::DateTime::parse_from_rfc3339("2026-07-04T00:00:20Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            openrc_failure_message(" * status: crashed", &status, now),
+            Some("upgrade runner failed: xp-upgrade is crashed".to_string())
+        );
+        assert_eq!(
+            openrc_failure_message(" * status: stopped", &status, now),
+            Some("upgrade runner failed: xp-upgrade stopped before completion".to_string())
+        );
+        assert_eq!(
+            openrc_failure_message(" * status: started", &status, now),
+            None
+        );
+        let within_grace = chrono::DateTime::parse_from_rfc3339("2026-07-04T00:00:05Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            openrc_failure_message(" * status: stopped", &status, within_grace),
+            None
+        );
     }
 
     #[test]

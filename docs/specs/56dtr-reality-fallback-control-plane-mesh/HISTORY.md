@@ -25,6 +25,9 @@
 - Connection reuse telemetry derives an ephemeral fingerprint from socket metadata but persists
   only aggregate generations and counters. This makes churn diagnosable without exposing network
   identity.
+- Web upgrade 的互斥所有权属于活进程锁，而不是锁文件路径。OpenRC one-shot 必须在退出后
+  清理自身状态；409 只有在状态刷新证明任务仍 active 时才进入观察，否则作为 stale conflict
+  立即解锁。
 
 ## Supersession
 

@@ -24,6 +24,9 @@
   System Status row actions use shared 32x32 icon targets with consistent focus and tooltip
   behavior, while mobile text actions remain available.
 - systemd、OpenRC、container cutover guard、可取消的 pre-consumption marker 与 operator documentation。
+- Web upgrade start 使用 advisory `flock` 且在 host trigger 前释放。OpenRC delegate 通过固定
+  helper 启动后台 one-shot，结束后 zap 服务状态；Web 将 409 后的 active job 与旧终态冲突
+  分开处理。
 - Storybook state gallery、mock-only `ui_demo`、desktop/mobile visual evidence。
 - Peer transport uses a constrained desktop grid for its data and action columns, while narrower
   viewports switch to full-width stacked rows. Storybook asserts the two desktop action targets are

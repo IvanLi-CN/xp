@@ -13,18 +13,21 @@ fn openrc_upgrade_policy_only_allows_readiness_check_and_runner_start() {
 
     let doas = fs::read_to_string(paths.etc_doas_conf()).unwrap();
     assert!(doas.contains("permit nopass root"));
-    assert!(doas.contains("permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start"));
     assert!(doas.contains(
         "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check"
     ));
+    assert!(doas.contains(
+        "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args start"
+    ));
+    assert!(!doas.contains("cmd /sbin/rc-service args xp-upgrade start"));
     assert!(!doas.contains("xp-upgrade restart"));
-    assert!(!doas.contains("xp-openrc-upgrade-trigger args start"));
 
     let script = openrc_xp_upgrade_script();
     assert!(script.contains("xp-ops _upgrade-runner"));
     assert!(script.contains(r#""${XP_DATA_DIR:-/var/lib/xp/data}""#));
-    assert!(!script.contains("command_background="));
-    assert!(!script.contains("pidfile="));
+    assert!(script.contains("command_background=\"yes\""));
+    assert!(script.contains("pidfile=\"/run/xp-upgrade.pid\""));
+    assert!(script.contains("rc-service xp-upgrade zap"));
 }
 
 #[test]
@@ -49,14 +52,17 @@ fn openrc_upgrade_policy_backfills_check_without_duplicating_start_rule() {
     assert!(doas.contains("permit nopass operator as root cmd /usr/bin/id"));
     assert!(doas.contains("# Managed by xp-ops: allow xp to start the upgrade runner"));
     assert!(!doas.contains("# Managed by xp-ops: allow xp to check and start the upgrade runner"));
+    assert!(!doas.contains("cmd /sbin/rc-service args xp-upgrade start"));
     assert_eq!(
-        doas.matches("permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start")
-            .count(),
+        doas.matches(
+            "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check"
+        )
+        .count(),
         1
     );
     assert_eq!(
         doas.matches(
-            "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check"
+            "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args start"
         )
         .count(),
         1
@@ -79,9 +85,9 @@ fn openrc_upgrade_trigger_helper_only_checks_fixed_assets() {
         ))
     );
     assert!(helper.contains("[ \"$#\" -ne 1 ]"));
-    assert!(helper.contains("[ \"$1\" != \"--check\" ]"));
     assert!(helper.contains("[ -x /etc/init.d/xp-upgrade ]"));
     assert!(helper.contains("grep -Fqx"));
-    assert!(!helper.contains("rc-service xp-upgrade start"));
+    assert!(helper.contains("rc-service xp-upgrade start"));
+    assert!(helper.contains("rc-service xp-upgrade zap"));
     assert!(!helper.contains("$@"));
 }

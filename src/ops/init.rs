@@ -496,14 +496,26 @@ fn write_openrc_upgrade_policy(paths: &Paths, mode: Mode) -> Result<(), ExitErro
     let legacy_marker = "# Managed by xp-ops: allow xp to start the upgrade runner";
     let rules = [
         "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check",
-        "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start",
+        "permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args start",
     ];
+    let legacy_start_rule = "permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start";
+    let removed_legacy_rule = existing
+        .lines()
+        .any(|line| line.trim() == legacy_start_rule);
+    let mut existing = existing
+        .lines()
+        .filter(|line| line.trim() != legacy_start_rule)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !existing.is_empty() {
+        existing.push('\n');
+    }
     let missing_rules: Vec<&str> = rules
         .iter()
         .copied()
         .filter(|rule| !doas_policy_has_line(&existing, rule))
         .collect();
-    if missing_rules.is_empty() {
+    if missing_rules.is_empty() && !removed_legacy_rule {
         return Ok(());
     }
 
@@ -552,17 +564,10 @@ fn write_openrc_upgrade_trigger_delegate(paths: &Paths, mode: Mode) -> Result<()
 }
 
 fn openrc_upgrade_trigger_helper_script() -> String {
-    r#"#!/bin/sh
-set -eu
-
-if [ "$#" -ne 1 ] || [ "$1" != "--check" ]; then
-  echo "usage: xp-openrc-upgrade-trigger --check" >&2
-  exit 64
-fi
-
-[ -x /etc/init.d/xp-upgrade ]
-grep -Fqx 'permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start' /etc/doas.conf
-"#
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/ops/openrc/xp-upgrade-trigger"
+    ))
     .to_string()
 }
 
@@ -720,8 +725,10 @@ name="xp-upgrade"
 description="xp web-triggered upgrade runner"
 
 command="/bin/sh"
-command_args='-c '"'"'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp-ops _upgrade-runner --data-dir "${XP_DATA_DIR:-/var/lib/xp/data}"'"'"''
+command_args='-c '"'"'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; /usr/local/bin/xp-ops _upgrade-runner --data-dir "${XP_DATA_DIR:-/var/lib/xp/data}"; result=$?; /sbin/rc-service xp-upgrade zap >/dev/null 2>&1 || true; exit "$result"'"'"''
 command_user="root:root"
+command_background="yes"
+pidfile="/run/xp-upgrade.pid"
 
 depend() {
   need net

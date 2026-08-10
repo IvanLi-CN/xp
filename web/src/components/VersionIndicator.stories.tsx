@@ -63,6 +63,14 @@ function Wrap(props: { children: ReactNode }) {
 	);
 }
 
+function EvidenceWrap(props: { children: ReactNode }) {
+	return (
+		<div className="flex min-h-[30rem] items-start justify-center p-12">
+			{props.children}
+		</div>
+	);
+}
+
 function UpgradeObservationHarness() {
 	const [observation, setObservation] = useState<UpgradeObservation | null>(
 		null,
@@ -375,6 +383,47 @@ export const TerminalResult: Story = {
 			/>
 		</Wrap>
 	),
+};
+
+export const StaleUpgradeConflict: Story = {
+	render: () => (
+		<>
+			<style>
+				{`button[aria-label="Upgrade start conflicted with stale node status."] {
+					visibility: hidden;
+				}`}
+			</style>
+			<EvidenceWrap>
+				<VersionIndicator
+					xpVersion="0.1.0"
+					defaultOpen
+					versionCheck={{
+						kind: "update_available",
+						latest_tag: "v0.2.0",
+						checked_at: "2026-07-04T00:00:00Z",
+						repo: "IvanLi-CN/xp",
+					}}
+					upgradeStatus={baseUpgradeStatus}
+					upgradeObservation={{
+						targetTag: "v0.2.0",
+						deadlineAtMs: Date.now() + 60_000,
+						startedAtMs: Date.now(),
+						phase: "conflict",
+					}}
+					onRefreshUpgradeStatus={() => {}}
+					onStartUpgrade={() => {}}
+				/>
+			</EvidenceWrap>
+		</>
+	),
+	play: async () => {
+		await expect(
+			await screen.findByText(/rejected the upgrade as already running/i),
+		).toBeInTheDocument();
+		await expect(
+			await screen.findByRole("button", { name: "Upgrade" }),
+		).toBeEnabled();
+	},
 };
 
 export const ConfirmKeepsPopoverOpen: Story = {

@@ -134,6 +134,12 @@
 - marker 未消费时可由容器的 `container cancel-internal-auth-v2-cutover` 取消。
 - 新 binary 在多节点且没有 marker 时拒绝启动，交给现有升级路径回滚。
 - marker 消费后持久化 epoch；此后拒绝 v1 回滚，同 epoch 的 Web upgrade 再次可用。
+- Web upgrade 的 start guard 使用进程死亡时自动释放的 advisory lock，并在调用 host trigger
+  前释放；磁盘上的 `start.lock` 文件本身不表示存在活动任务。
+- OpenRC 只能通过 root-owned 固定 helper 的 `--check` / `start` 入口触发。runner 后台执行并
+  在退出后 zap one-shot 状态；crashed runner 会把遗留 active status 收敛为 `failed`。
+- Web 收到 `upgrade_already_running` 后必须立即刷新状态：真实 active job 继续观察，只有旧
+  terminal/idle 状态时立即显示 stale conflict 并解锁，不等待一分钟超时。
 - 若 marker 已被新进程消费，随后重启或 runtime reconcile 失败都只保留 v2 XP；绝不恢复旧 v1
   XP binary。
 

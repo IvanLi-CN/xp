@@ -1,10 +1,26 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 1 ] || [ "$1" != "--check" ]; then
-  echo "usage: xp-openrc-upgrade-trigger --check" >&2
+if [ "$#" -ne 1 ]; then
+  echo "usage: xp-openrc-upgrade-trigger {--check|start}" >&2
   exit 64
 fi
 
-[ -x /etc/init.d/xp-upgrade ]
-grep -Fqx 'permit nopass xp as root cmd /sbin/rc-service args xp-upgrade start' /etc/doas.conf
+check() {
+  [ -x /etc/init.d/xp-upgrade ]
+  grep -Fqx 'permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args --check' /etc/doas.conf
+  grep -Fqx 'permit nopass xp as root cmd /usr/local/libexec/xp-openrc-upgrade-trigger args start' /etc/doas.conf
+}
+
+case "$1" in
+  --check) check ;;
+  start)
+    check
+    status="$(/sbin/rc-service xp-upgrade status 2>&1 || true)"
+    case "$status" in
+      *crashed*) /sbin/rc-service xp-upgrade zap ;;
+    esac
+    exec /sbin/rc-service xp-upgrade start
+    ;;
+  *) echo "usage: xp-openrc-upgrade-trigger {--check|start}" >&2; exit 64 ;;
+esac
