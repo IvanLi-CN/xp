@@ -87,3 +87,11 @@ invalid:
     const fixtureCatalog = {
       host: { get primary() { return "live.example"; } },
     };
+  - |
+    const bad = (key: string) => catalog[key];
+  - |
+    const unsafe = createStringAccessors({ unsafe: "live.example" });
+  - |
+    const unsafe = createNumberAccessors({ unsafe: 4096 });
+  - |
+    const unsafe = createListAccessors({ unsafe: ["live.example"] });

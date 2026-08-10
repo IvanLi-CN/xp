@@ -105,6 +105,19 @@ rule:
                     return token;
                   }
     - kind: function_expression
+    - all:
+        - kind: arrow_function
+        - has:
+            field: parameters
+            not:
+              pattern: ()
+        - not:
+            inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - any:
+                  - regex: '^function create(?:StringAccessors|NumberAccessors|ListAccessors)'
     - kind: method_definition
     - all:
         - kind: arrow_function
@@ -161,3 +174,14 @@ rule:
               - has:
                   field: body
                   regex: '^catalog[.]operations[.]subscription[.]clashLines[.]join\("\\n"\)$'
+    - all:
+        - kind: call_expression
+        - any:
+            - pattern: createStringAccessors($VALUE)
+            - pattern: createNumberAccessors($VALUE)
+            - pattern: createListAccessors($VALUE)
+        - not:
+            any:
+              - pattern: createStringAccessors(catalog.fixtures.strings.$GROUP)
+              - pattern: createNumberAccessors(catalog.fixtures.numbers.value)
+              - pattern: createListAccessors(catalog.fixtures.stringLists.hostList)

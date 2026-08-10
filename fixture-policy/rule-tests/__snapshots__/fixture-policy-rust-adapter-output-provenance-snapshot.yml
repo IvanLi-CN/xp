@@ -32,6 +32,18 @@ snapshots:
       start: 0
       end: 50
   ? |
+    pub fn indexed_host(index: usize) -> &'static str {
+        &catalog().subscription.tags[index]
+    }
+  : labels:
+    - source: |-
+        pub fn indexed_host(index: usize) -> &'static str {
+            &catalog().subscription.tags[index]
+        }
+      style: primary
+      start: 0
+      end: 93
+  ? |
     pub fn injected_host() -> &'static str {
         "unapproved.fixture.test"
     }

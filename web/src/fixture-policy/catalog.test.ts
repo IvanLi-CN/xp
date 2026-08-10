@@ -23,7 +23,16 @@ describe("fixtureCatalog subscription token factory", () => {
 
 		const firstUserFactory = fixtureCatalog.identifier.createUserIdFactory();
 		const secondUserFactory = fixtureCatalog.identifier.createUserIdFactory();
-		expect(secondUserFactory()).toBe(firstUserFactory());
+		expect([
+			firstUserFactory(),
+			firstUserFactory(),
+			firstUserFactory(),
+		]).toEqual([
+			fixtureCatalog.identifier.userTertiary(),
+			fixtureCatalog.identifier.userQuaternary(),
+			fixtureCatalog.identifier.userQuinary(),
+		]);
+		expect(secondUserFactory()).toBe(fixtureCatalog.identifier.userTertiary());
 	});
 
 	it("exposes named fixture values without positional slot access", () => {

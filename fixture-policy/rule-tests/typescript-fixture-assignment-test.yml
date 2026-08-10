@@ -19,3 +19,7 @@ invalid:
     report.bootstrap_api_base_url = "https://unapproved.fixture.test";
   - |
     endpoint.canary_upstream = payload.canary_upstream;
+  - |
+    user.priority_tier = payload.priority_tier;
+  - |
+    user.quota_reset = payload.quota_reset;

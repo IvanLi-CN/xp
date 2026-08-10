@@ -23,6 +23,9 @@ rule:
         - regex: '^fn '
         - not:
             regex: '^fn catalog\('
+    - all:
+        - kind: function_item
+        - regex: '^pub fn [A-Za-z_][A-Za-z0-9_]*(?:<[^>{}]*>)?\([^)]*[^ )][^)]*\)'
     - kind: const_item
     - all:
         - kind: static_item
@@ -40,7 +43,7 @@ rule:
               - has:
                   field: body
                   any:
-                    - regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[[^]]+\])+(?:\s+as\s+u32)?\))\s*\}$'
+                    - regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[(?:"[^"]+"|[0-9]+)\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[(?:"[^"]+"|[0-9]+)\])+(?:\s+as\s+u32)?\))\s*\}$'
                     - regex: '^\{\s*serde_json::from_value\(catalog\(\)\.fixtures\.numbers\["value"\]\["[A-Za-z0-9]+"\]\.clone\(\)\)\s*\.expect\("fixture numeric value is valid"\)\s*\}$'
     - all:
         - kind: string_literal

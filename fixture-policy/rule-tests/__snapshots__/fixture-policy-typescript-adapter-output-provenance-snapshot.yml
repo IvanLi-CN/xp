@@ -1,6 +1,17 @@
 id: fixture-policy-typescript-adapter-output-provenance
 snapshots:
   ? |
+    const bad = (key: string) => catalog[key];
+  : labels:
+    - source: '(key: string) => catalog[key]'
+      style: primary
+      start: 12
+      end: 41
+    - source: '(key: string)'
+      style: secondary
+      start: 12
+      end: 25
+  ? |
     const fixtureCatalog = {
       host: { get primary() { return "live.example"; } },
     };
@@ -60,6 +71,27 @@ snapshots:
       style: primary
       start: 48
       end: 68
+  ? |
+    const unsafe = createListAccessors({ unsafe: ["live.example"] });
+  : labels:
+    - source: 'createListAccessors({ unsafe: ["live.example"] })'
+      style: primary
+      start: 15
+      end: 64
+  ? |
+    const unsafe = createNumberAccessors({ unsafe: 4096 });
+  : labels:
+    - source: 'createNumberAccessors({ unsafe: 4096 })'
+      style: primary
+      start: 15
+      end: 54
+  ? |
+    const unsafe = createStringAccessors({ unsafe: "live.example" });
+  : labels:
+    - source: 'createStringAccessors({ unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 64
   ? |
     function createStringAccessors(_value: string, index: number) {
       return [`s${index}`, () => "live.example"];

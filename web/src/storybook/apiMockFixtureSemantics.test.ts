@@ -3,7 +3,12 @@ import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { createMockApi } from "../../.storybook/mocks/apiMock";
 import { handleAdminConfigAndEndpointRoutes } from "../../tests/e2e/adminEndpointRouteMocks";
-import { normalizeFixtureEndpoint } from "../../tests/e2e/fixtureStateSanitizers";
+import {
+	type AdminUser,
+	type UserQuotaReset,
+	applyFixtureUserPatch,
+	normalizeFixtureEndpoint,
+} from "../../tests/e2e/fixtureStateSanitizers";
 
 const baseUrl = "http://localhost";
 
@@ -12,6 +17,29 @@ function jsonRequest(path: string, init?: RequestInit) {
 }
 
 describe("storybook fixture semantics", () => {
+	it("preserves approved E2E user patch settings", () => {
+		const user: AdminUser = {
+			user_id: fixtureCatalog.identifier.userPrimary(),
+			display_name: "Fixture user",
+			subscription_token: fixtureCatalog.identifier.tokenPrimary(),
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+		};
+
+		applyFixtureUserPatch(user, {
+			display_name: "Renamed fixture user",
+			priority_tier: fixtureCatalog.user.priorityTierCreated(),
+			quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
+		});
+
+		expect(user).toMatchObject({
+			display_name: "Renamed fixture user",
+			priority_tier: fixtureCatalog.user.priorityTierCreated(),
+			quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
+		});
+	});
+
 	it("preserves approved user patch settings", async () => {
 		const mock = createMockApi();
 		const usersResponse = await mock.handle(

@@ -11,6 +11,7 @@ import {
 	type AdminUserNodeQuota,
 	type NodeQuotaReset,
 	type UserQuotaReset,
+	applyFixtureUserPatch,
 	buildFixtureUserAccessItem,
 	buildFixtureUserNodeWeightItem,
 	hasFixtureNodeQuotaReset,
@@ -89,6 +90,7 @@ type MockState = {
 	userMihomoProfiles: Record<string, MockMihomoProfile>;
 	nextEndpointId: () => string;
 	nextEndpointTag: () => string;
+	nextUserId: () => string;
 };
 
 function catalogMihomoProfile(): MockMihomoProfile {
@@ -410,6 +412,7 @@ export async function setupApiMocks(
 		fixtureCatalog.identifier.createSubscriptionTokenFactory();
 	const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
 	const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
+	const nextUserId = fixtureCatalog.identifier.createUserIdFactory();
 	const users = (options.users ?? defaultUsers).map(normalizeFixtureUser);
 	const nodes = (options.nodes ?? defaultNodes).map(normalizeFixtureNode);
 	const endpoints = (options.endpoints ?? defaultEndpoints).map(
@@ -448,6 +451,7 @@ export async function setupApiMocks(
 		},
 		nextEndpointId,
 		nextEndpointTag,
+		nextUserId,
 	};
 	await page.route("**/api/**", async (route) => {
 		const request = route.request();
@@ -656,7 +660,7 @@ export async function setupApiMocks(
 				typeof payload.display_name === "string"
 					? payload.display_name
 					: "Fixture user";
-			const userId = fixtureCatalog.identifier.userTertiary();
+			const userId = state.nextUserId();
 			const newUser: AdminUser = {
 				user_id: userId,
 				display_name: displayName,
@@ -910,11 +914,7 @@ export async function setupApiMocks(
 					return;
 				}
 				const payload = parseJsonBody(request);
-				if (typeof payload.display_name === "string") {
-					user.display_name = payload.display_name;
-				}
-				user.priority_tier = fixtureCatalog.user.priorityTierDefault();
-				user.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
+				applyFixtureUserPatch(user, payload);
 				jsonResponse(route, user);
 				return;
 			}

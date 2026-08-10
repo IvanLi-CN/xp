@@ -52,6 +52,64 @@ export type AdminUserNodeQuota = {
 	quota_reset_source: QuotaResetSource;
 };
 
+export function applyFixtureUserPatch(
+	user: AdminUser,
+	payload: Record<string, unknown>,
+): void {
+	if (typeof payload.display_name === "string") {
+		user.display_name = payload.display_name;
+	}
+	if (payload.priority_tier === fixtureCatalog.user.priorityTierPrimary()) {
+		user.priority_tier = fixtureCatalog.user.priorityTierPrimary();
+	} else if (
+		payload.priority_tier === fixtureCatalog.user.priorityTierCreated()
+	) {
+		user.priority_tier = fixtureCatalog.user.priorityTierCreated();
+	} else if (
+		payload.priority_tier === fixtureCatalog.user.priorityTierDefault()
+	) {
+		user.priority_tier = fixtureCatalog.user.priorityTierDefault();
+	}
+	if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.reset(),
+		)
+	) {
+		user.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
+	} else if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.resetUserMidMonth(),
+		)
+	) {
+		user.quota_reset =
+			fixtureCatalog.quota.resetUserMidMonth() as UserQuotaReset;
+	} else if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.resetUserUnlimited(),
+		)
+	) {
+		user.quota_reset =
+			fixtureCatalog.quota.resetUserUnlimited() as UserQuotaReset;
+	}
+}
+
+function matchesFixtureUserQuotaReset(
+	value: unknown,
+	expected: UserQuotaReset,
+): boolean {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	return (
+		candidate.policy === expected.policy &&
+		candidate.tz_offset_minutes === expected.tz_offset_minutes &&
+		(expected.policy === "unlimited" ||
+			candidate.day_of_month === expected.day_of_month)
+	);
+}
+
 export function normalizeFixtureNode(
 	node: AdminNode,
 	index: number,

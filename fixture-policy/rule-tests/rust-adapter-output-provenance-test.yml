@@ -45,3 +45,7 @@ invalid:
         let _ = catalog();
         LIVE
     }
+  - |
+    pub fn indexed_host(index: usize) -> &'static str {
+        &catalog().subscription.tags[index]
+    }
