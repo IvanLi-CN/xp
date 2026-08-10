@@ -21,6 +21,9 @@
 
 - `geo_source` 默认为 `missing`；当 `XP_IP_GEO_ENABLED=true` 时为 `country_is`（启用后会把入站公网 IP 发送到第三方 `country.is` 做解析）。
 - `XP_IP_GEO_ORIGIN` 可覆盖默认 `https://api.country.is`（用于自建同接口实现或特殊网络环境）。
+- host-managed `xp-ops deploy --ip-geo` 和 `xp-ops tui` 的 `ip_geo_enabled` 开关是写入
+  `XP_IP_GEO_ENABLED=true` 的唯一部署入口。未显式启用时，deploy 保留已有 env 值；新节点
+  不写该键，继续使用程序默认 `false`。既有节点不会被自动回填。
 - Geo 查询仅针对当前分钟新出现、且本地持久化记录尚无 Geo 的公网 IP；结果写入缓存后不重复查询。
 - 节点主动探测链路会在启动后立即探测一次出口公网 IP，并周期性刷新；Geo 结果与订阅地区映射持久化后供 Mihomo 系统分组读取。
 - 当节点主动探测失败时，保留最近一次成功 Geo/地区归类并标记 stale，不引入第二套人工 override 真相源。

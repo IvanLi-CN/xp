@@ -62,6 +62,34 @@ fn write_migration_files(paths: &Paths) {
     .unwrap();
 }
 
+#[test]
+fn deferred_provision_can_mark_persisted_tunnel_enabled_after_service_start() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    write_migration_files(&paths);
+    let settings_path = paths.etc_xp_ops_cloudflare_settings();
+    let deferred = fs::read_to_string(&settings_path)
+        .unwrap()
+        .replace("\"enabled\": true", "\"enabled\": false");
+    fs::write(&settings_path, deferred).unwrap();
+
+    set_persisted_tunnel_enabled(&paths, true).unwrap();
+
+    let settings = fs::read_to_string(settings_path).unwrap();
+    assert!(settings.contains("\"enabled\": true"));
+}
+
+#[test]
+fn marking_tunnel_enabled_requires_provisioned_settings() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+
+    let error = set_persisted_tunnel_enabled(&paths, true)
+        .expect_err("missing provisioned Tunnel settings must fail deploy");
+    assert_eq!(error.code, 6);
+    assert!(error.message.contains("cloudflare_settings_missing"));
+}
+
 async fn mount_old_tunnel_preflight(server: &MockServer, ingress: serde_json::Value) {
     Mock::given(method("GET"))
         .and(path(

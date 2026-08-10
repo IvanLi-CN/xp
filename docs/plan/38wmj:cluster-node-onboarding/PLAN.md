@@ -153,7 +153,10 @@ None
 
 - Web 端复用现有 join token 生成接口，并在前端基于已登录的 admin token + 节点输入项拼装“可复制的命令块”（覆盖“下载安装到可运行”为止”）。
 - `xp-ops deploy` 增加“join 模式编排”：复用现有 install/init/enable 逻辑，将 `xp bootstrap (xp init)` 替换为“执行 join 并完成落盘”，并在写入 `/etc/xp/xp.env` 时自动同步 leader 的 `XP_ADMIN_TOKEN`（命令行不暴露明文）。
-- Cloudflare join 路径必须先完成 tunnel/DNS provision；当 deploy 同时负责启服务时，再在 `xp join` 前验证公共 `api_base_url` 已可探测。服务端对无效 `token_id/api_base_url` 的请求必须返回标准 JSON 错误，而不是断连接。
+- Cloudflare join 路径必须先完成 tunnel/DNS provision，但不得在此阶段启动 Tunnel；完成 `xp join` 和
+  `/etc/xp/xp.env` 写入后，当 deploy 同时负责启服务时，按 `xray`、`xp`、`cloudflared` 顺序启用并启动或
+  重启，逐个确认 ready，并只在最终公共 `api_base_url/health` 返回 HTTP `200` 时成功。服务端对无效
+  `token_id/api_base_url` 的请求必须返回标准 JSON 错误，而不是断连接。
 - 默认以“避免泄漏与避免隐式不一致”为原则：stdin 优先、错误提示清晰、默认不覆写现有 token。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）

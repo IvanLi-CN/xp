@@ -91,6 +91,12 @@
   release tag and local endpoint fingerprints. Missing profile capabilities degrade only their
   feature, while declared capability 404/schema failures remain regressions.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
+- Host-managed initial joins provision Tunnel/DNS without starting `cloudflared`, then join the
+  cluster and write `/etc/xp/xp.env` before enabling then starting or restarting `xray`, `xp`,
+  and optional `cloudflared` in order with readiness checks. A joined node is successful only
+  after its public `api_base_url/health` returns HTTP `200`; post-join health failure preserves
+  membership and metadata for retry. Geo remains disabled by default and is written only by explicit
+  host-managed `--ip-geo` / TUI opt-in, never by automatic backfill.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the

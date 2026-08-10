@@ -71,6 +71,7 @@ fn save_tui_config_omits_legacy_save_token_field() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_enabled: true,
         ddns_enabled: false,
+        ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
@@ -106,6 +107,22 @@ fn load_tui_config_supports_public_domain_alias() {
 }
 
 #[test]
+fn tui_ip_geo_toggle_is_persisted_and_passed_to_deploy_values() {
+    let (tmp, paths) = test_paths();
+    let mut app = App::new(&paths);
+
+    app.focus = 4;
+    app.handle_toggle();
+    assert!(app.ip_geo_enabled);
+    assert!(app.to_values().unwrap().ip_geo_enabled);
+
+    save_tui_config(&paths, &app.to_values().unwrap()).unwrap();
+    let raw = fs::read_to_string(tmp.path().join("etc/xp-ops/deploy/settings.json")).unwrap();
+    assert!(raw.contains("\"ip_geo_enabled\": true"));
+    assert!(App::new(&paths).ip_geo_enabled);
+}
+
+#[test]
 fn save_tui_config_persists_managed_default_fields() {
     let (tmp, paths) = test_paths();
     let values = AppValues {
@@ -113,6 +130,7 @@ fn save_tui_config_persists_managed_default_fields() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_enabled: true,
         ddns_enabled: true,
+        ip_geo_enabled: false,
         ddns_zone_id: Some("zone-ddns".to_string()),
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
@@ -174,6 +192,7 @@ fn save_token_empty_keeps_existing_token_unchanged() {
         access_host: String::new(),
         cloudflare_enabled: true,
         ddns_enabled: false,
+        ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: None,
         zone_id: None,
@@ -208,6 +227,7 @@ fn save_token_non_empty_writes_trimmed_value() {
         access_host: String::new(),
         cloudflare_enabled: true,
         ddns_enabled: false,
+        ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: None,
         zone_id: None,
@@ -242,6 +262,7 @@ fn save_tui_config_error_includes_deploy_dir() {
         access_host: String::new(),
         cloudflare_enabled: true,
         ddns_enabled: false,
+        ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: None,
         zone_id: None,
@@ -276,6 +297,7 @@ fn save_token_error_includes_token_dir() {
         access_host: String::new(),
         cloudflare_enabled: true,
         ddns_enabled: false,
+        ip_geo_enabled: false,
         ddns_zone_id: None,
         account_id: None,
         zone_id: None,

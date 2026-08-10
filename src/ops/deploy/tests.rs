@@ -1,5 +1,6 @@
 use super::*;
 use axum::{Router, http::StatusCode, routing::get};
+use clap::Parser;
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -42,6 +43,7 @@ fn ensure_xp_env_admin_token_hash_keeps_xray_defaults_on_second_run() {
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -54,6 +56,7 @@ fn ensure_xp_env_admin_token_hash_keeps_xray_defaults_on_second_run() {
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -78,6 +81,7 @@ fn ensure_xp_env_admin_token_hash_keeps_xray_defaults_on_second_run() {
     assert!(env.contains("XP_CLOUDFLARED_RESTART_TIMEOUT_SECS="));
     assert!(env.contains("XP_CLOUDFLARED_SYSTEMD_UNIT="));
     assert!(env.contains("XP_CLOUDFLARED_OPENRC_SERVICE="));
+    assert!(!env.contains("XP_IP_GEO_ENABLED="));
 }
 
 #[test]
@@ -108,6 +112,7 @@ XP_XRAY_CUSTOM=keep-me\n",
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -145,6 +150,7 @@ XP_CLOUDFLARED_RESTART_MODE=none\n",
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -183,6 +189,7 @@ fn ensure_xp_env_admin_token_hash_writes_managed_default_endpoint_keys() {
         "https://example.com",
         false,
         "",
+        false,
         &managed_defaults,
         false,
     )
@@ -223,6 +230,7 @@ XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID=zone-123\n",
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -264,6 +272,7 @@ XP_DEFAULT_SS_PORT=53843\n",
         "https://example.com",
         false,
         "",
+        false,
         &empty_managed_defaults(),
         false,
     )
@@ -274,6 +283,98 @@ XP_DEFAULT_SS_PORT=53843\n",
     assert!(env.contains("XP_DEFAULT_VLESS_SERVER_NAMES='cdn-a.example.test,cdn-b.example.test'"));
     assert!(env.contains("XP_DEFAULT_VLESS_FINGERPRINT='chrome'"));
     assert!(env.contains("XP_DEFAULT_SS_PORT='53843'"));
+}
+
+#[test]
+fn bootstrap_geo_opt_in_writes_true_and_omission_preserves_existing_value() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+
+    fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+    fs::write(
+        paths.etc_xp_env(),
+        format!("XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\nXP_IP_GEO_ENABLED=false\n"),
+    )
+    .unwrap();
+
+    ensure_xp_env_admin_token_hash_bootstrap(
+        &paths,
+        Mode::Real,
+        "node-1",
+        "example.com",
+        "https://example.com",
+        false,
+        "",
+        false,
+        &empty_managed_defaults(),
+        false,
+    )
+    .unwrap();
+    assert!(read_env(&paths).contains("XP_IP_GEO_ENABLED=false"));
+
+    ensure_xp_env_admin_token_hash_bootstrap(
+        &paths,
+        Mode::Real,
+        "node-1",
+        "example.com",
+        "https://example.com",
+        false,
+        "",
+        true,
+        &empty_managed_defaults(),
+        false,
+    )
+    .unwrap();
+    let env = read_env(&paths);
+    assert!(env.contains("XP_IP_GEO_ENABLED=true"));
+    assert!(!env.contains("XP_IP_GEO_ENABLED=false"));
+}
+
+#[test]
+fn join_geo_opt_in_writes_true_and_omission_preserves_existing_value() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+
+    fs::create_dir_all(paths.etc_xp_dir()).unwrap();
+    fs::write(
+        paths.etc_xp_env(),
+        format!("XP_ADMIN_TOKEN_HASH={VALID_ADMIN_TOKEN_HASH}\nXP_IP_GEO_ENABLED=false\n"),
+    )
+    .unwrap();
+
+    ensure_xp_env_admin_token_hash_join(
+        &paths,
+        Mode::Real,
+        VALID_ADMIN_TOKEN_HASH,
+        "node-1",
+        "example.com",
+        "https://example.com",
+        false,
+        "",
+        false,
+        &empty_managed_defaults(),
+        false,
+    )
+    .unwrap();
+    assert!(read_env(&paths).contains("XP_IP_GEO_ENABLED=false"));
+
+    ensure_xp_env_admin_token_hash_join(
+        &paths,
+        Mode::Real,
+        VALID_ADMIN_TOKEN_HASH,
+        "node-1",
+        "example.com",
+        "https://example.com",
+        false,
+        "",
+        true,
+        &empty_managed_defaults(),
+        false,
+    )
+    .unwrap();
+    let env = read_env(&paths);
+    assert!(env.contains("XP_IP_GEO_ENABLED=true"));
+    assert!(!env.contains("XP_IP_GEO_ENABLED=false"));
 }
 
 #[test]
@@ -366,6 +467,7 @@ async fn build_plan_cloudflare_token_missing_error_is_actionable() {
             ddns: false,
             no_ddns: true,
         },
+        ip_geo_enabled: false,
         account_id: Some("acc".to_string()),
         zone_id: Some("zone".to_string()),
         hostname: Some("node-1.example.com".to_string()),
@@ -424,6 +526,7 @@ async fn build_plan_allows_default_vless_port_without_server_names() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+        ip_geo_enabled: false,
         account_id: None,
         zone_id: None,
         hostname: None,
@@ -478,6 +581,7 @@ async fn build_plan_rejects_zero_managed_default_ports() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+        ip_geo_enabled: false,
         account_id: None,
         zone_id: None,
         hostname: None,
@@ -544,6 +648,7 @@ async fn build_plan_rejects_zero_managed_default_ports_from_existing_env() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+        ip_geo_enabled: false,
         account_id: None,
         zone_id: None,
         hostname: None,
@@ -614,6 +719,7 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
         access_host: "node-1.example.net".to_string(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle::default(),
         ddns_toggle: crate::ops::cli::DdnsToggle::default(),
+        ip_geo_enabled: false,
         account_id: None,
         zone_id: None,
         hostname: None,
@@ -654,17 +760,98 @@ async fn build_plan_detects_token_need_from_existing_managed_vless_env() {
     );
 }
 
+#[test]
+fn post_join_service_activation_orders_and_waits_each_service() {
+    assert_eq!(managed_service_names(false), ["xray", "xp"]);
+    assert_eq!(managed_service_names(true), ["xray", "xp", "cloudflared"]);
+    assert_eq!(
+        managed_service_activation_steps(true),
+        vec![
+            ManagedServiceActivationStep::Enable("xray"),
+            ManagedServiceActivationStep::StartOrRestart("xray"),
+            ManagedServiceActivationStep::WaitReady("xray"),
+            ManagedServiceActivationStep::Enable("xp"),
+            ManagedServiceActivationStep::StartOrRestart("xp"),
+            ManagedServiceActivationStep::WaitReady("xp"),
+            ManagedServiceActivationStep::Enable("cloudflared"),
+            ManagedServiceActivationStep::StartOrRestart("cloudflared"),
+            ManagedServiceActivationStep::WaitReady("cloudflared"),
+        ]
+    );
+}
+
+#[test]
+fn service_activation_rejects_command_failures() {
+    assert!(ensure_service_command_succeeded("xp", "enable", Ok(true)).is_ok());
+
+    let status_error = ensure_service_command_succeeded("xp", "enable", Ok(false))
+        .expect_err("non-zero service command must fail deploy");
+    assert_eq!(status_error.code, 6);
+    assert!(
+        status_error
+            .message
+            .contains("service_failed: xp enable failed")
+    );
+
+    let execution_error = ensure_service_command_succeeded(
+        "xp",
+        "start/restart",
+        Err(io::Error::other("systemctl unavailable")),
+    )
+    .expect_err("unavailable service command must fail deploy");
+    assert_eq!(execution_error.code, 6);
+    assert!(
+        execution_error
+            .message
+            .contains("service_failed: xp start/restart: systemctl unavailable")
+    );
+}
+
+#[test]
+fn existing_cluster_metadata_marks_deploy_as_post_join_recovery() {
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let metadata = paths.map_abs(Path::new("/var/lib/xp/data/cluster/metadata.json"));
+
+    assert!(!cluster_metadata_exists(&paths));
+    fs::create_dir_all(metadata.parent().unwrap()).unwrap();
+    fs::write(metadata, "{}\n").unwrap();
+    assert!(cluster_metadata_exists(&paths));
+}
+
+#[test]
+fn deploy_cli_uses_explicit_ip_geo_flag_name() {
+    let cli = crate::ops::cli::Cli::try_parse_from([
+        "xp-ops",
+        "deploy",
+        "--node-name",
+        "node-1",
+        "--access-host",
+        "node-1.example.net",
+        "--no-cloudflare",
+        "--no-enable-services",
+        "--ip-geo",
+        "--dry-run",
+    ])
+    .unwrap();
+
+    let crate::ops::cli::Command::Deploy(args) = cli.command.unwrap() else {
+        panic!("expected deploy command");
+    };
+    assert!(args.ip_geo_enabled);
+}
+
 #[tokio::test]
-async fn public_api_probe_accepts_non_530_edge_response() {
+async fn post_join_public_api_probe_accepts_only_http_200() {
     let mock = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/health"))
-        .respond_with(ResponseTemplate::new(502))
+        .respond_with(ResponseTemplate::new(200))
         .mount(&mock)
         .await;
 
     let client = reqwest::Client::builder().build().unwrap();
-    let status = wait_for_public_api_health_with_client(
+    let status = wait_for_post_join_public_api_health_with_client(
         &client,
         &format!("{}/health", mock.uri()),
         1,
@@ -672,36 +859,39 @@ async fn public_api_probe_accepts_non_530_edge_response() {
     )
     .await
     .unwrap();
-    assert_eq!(status.as_u16(), 502);
+    assert_eq!(status.as_u16(), 200);
 }
 
 #[tokio::test]
-async fn public_api_probe_rejects_cloudflare_530() {
-    let mock = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/health"))
-        .respond_with(ResponseTemplate::new(530))
-        .mount(&mock)
-        .await;
+async fn post_join_public_api_probe_rejects_non_200_edge_responses() {
+    for status in [502, 530] {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&mock)
+            .await;
 
-    let client = reqwest::Client::builder().build().unwrap();
-    let err = wait_for_public_api_health_with_client(
-        &client,
-        &format!("{}/health", mock.uri()),
-        1,
-        Duration::from_millis(1),
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        err.message.contains("preflight_failed") && err.message.contains("http 530"),
-        "unexpected error: {}",
-        err.message
-    );
+        let client = reqwest::Client::builder().build().unwrap();
+        let err = wait_for_post_join_public_api_health_with_client(
+            &client,
+            &format!("{}/health", mock.uri()),
+            1,
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.message.contains("post_join_health_failed")
+                && err.message.contains(&format!("http {status}")),
+            "unexpected error: {}",
+            err.message
+        );
+    }
 }
 
 #[tokio::test]
-async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
+async fn post_join_public_api_probe_retries_transport_errors_until_healthy() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
@@ -709,10 +899,7 @@ async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
     let (ready_tx, ready_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(60)).await;
-        let app = Router::new().route(
-            "/health",
-            get(|| async { (StatusCode::BAD_GATEWAY, "edge warming") }),
-        );
+        let app = Router::new().route("/health", get(|| async { (StatusCode::OK, "ready") }));
         let listener = TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -723,7 +910,7 @@ async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
     });
 
     let client = reqwest::Client::builder().build().unwrap();
-    let status = wait_for_public_api_health_with_client(
+    let status = wait_for_post_join_public_api_health_with_client(
         &client,
         &format!("http://{addr}/health"),
         10,
@@ -733,5 +920,29 @@ async fn public_api_probe_retries_transport_errors_until_edge_is_ready() {
     .unwrap();
 
     let _ = ready_tx.send(());
-    assert_eq!(status.as_u16(), 502);
+    assert_eq!(status.as_u16(), 200);
+}
+
+#[tokio::test]
+async fn post_join_public_api_probe_reports_timeouts_as_recoverable_failure() {
+    let mock = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(50)))
+        .mount(&mock)
+        .await;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1))
+        .build()
+        .unwrap();
+    let err = wait_for_post_join_public_api_health_with_client(
+        &client,
+        &format!("{}/health", mock.uri()),
+        1,
+        Duration::from_millis(1),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.message.contains("post_join_health_failed"));
 }

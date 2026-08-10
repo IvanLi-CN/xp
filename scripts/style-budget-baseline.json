@@ -247,10 +247,6 @@
     "long_line_count": 11,
     "max_line_length": 211
   },
-  "docs/plan/38wmj:cluster-node-onboarding/contracts/cli.md": {
-    "long_line_count": 2,
-    "max_line_length": 178
-  },
   "docs/plan/38wmj:cluster-node-onboarding/contracts/file-formats.md": {
     "long_line_count": 6,
     "max_line_length": 167
@@ -635,7 +631,7 @@
   "src/ops/cloudflare.rs": {
     "long_line_count": 3,
     "max_line_length": 504,
-    "source_lines": 1087
+    "source_lines": 1093
   },
   "src/ops/container.rs": {
     "long_line_count": 10,
@@ -645,7 +641,7 @@
   "src/ops/deploy.rs": {
     "long_line_count": 21,
     "max_line_length": 187,
-    "source_lines": 2308
+    "source_lines": 2416
   },
   "src/ops/deploy/tests.rs": {
     "long_line_count": 4,
@@ -663,7 +659,7 @@
   "src/ops/tui.rs": {
     "long_line_count": 2,
     "max_line_length": 175,
-    "source_lines": 1016
+    "source_lines": 1034
   },
   "src/ops/xp.rs": {
     "long_line_count": 7,
