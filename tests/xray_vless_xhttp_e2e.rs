@@ -42,7 +42,6 @@ use xp::{
 };
 
 const RESPONSE_BODY: &str = "xp-xhttp-e2e-ok";
-const SUBSCRIPTION_SECRET: &str = "xp-xhttp-e2e-ephemeral-secret";
 
 struct TestServer {
     addr: SocketAddr,
@@ -133,7 +132,7 @@ async fn spawn_plain_http_server() -> TestServer {
 
 async fn spawn_reality_destination() -> TestServer {
     let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("TLS key");
-    let cert = CertificateParams::new(vec!["localhost".to_string()])
+    let cert = CertificateParams::new(xp_test_fixtures::host_list_edge1())
         .expect("TLS certificate params")
         .self_signed(&key)
         .expect("self-signed TLS certificate");
@@ -289,18 +288,18 @@ async fn spawn_mihomo(
     }
 }
 
-fn xhttp_endpoint(port: u16, reality_destination_port: u16) -> Endpoint {
+fn xhttp_endpoint(port: u16) -> Endpoint {
     let keypair = generate_reality_keypair(&mut OsRng);
     Endpoint {
-        endpoint_id: "xhttp-e2e-endpoint".to_string(),
-        node_id: "xhttp-e2e-node".to_string(),
-        tag: "vless-xhttp-e2e".to_string(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port,
         meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
             reality: RealityConfig {
-                dest: format!("host.docker.internal:{reality_destination_port}"),
-                server_names: vec!["localhost".to_string()],
+                dest: xp_test_fixtures::address_loopback_port39001().to_owned(),
+                server_names: xp_test_fixtures::host_list_edge1(),
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: "chrome".to_string(),
             },
@@ -308,10 +307,10 @@ fn xhttp_endpoint(port: u16, reality_destination_port: u16) -> Endpoint {
                 private_key: keypair.private_key,
                 public_key: keypair.public_key,
             },
-            short_ids: vec!["0123456789abcdef".to_string()],
-            active_short_id: "0123456789abcdef".to_string(),
-            canary_upstream: None,
-            accepted_authorities: vec![],
+            short_ids: xp_test_fixtures::endpoint_short_ids(),
+            active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+            canary_upstream: xp_test_fixtures::none(),
+            accepted_authorities: xp_test_fixtures::host_list_empty(),
             mihomo_smux: MihomoSmuxConfig::default(),
             transport: VlessRealityTransport::Xhttp,
             managed_default: true,
@@ -320,32 +319,37 @@ fn xhttp_endpoint(port: u16, reality_destination_port: u16) -> Endpoint {
     }
 }
 
+fn set_reality_destination_port(endpoint: &mut Endpoint, port: u16) {
+    endpoint.meta["reality"]["dest"] =
+        serde_json::Value::String(format!("host.docker.internal:{port}"));
+}
+
 fn render_mihomo_config(endpoint: &Endpoint, external_port: u16, socks_port: u16) -> String {
     let user = User {
-        user_id: "xhttp-e2e-user".to_string(),
+        user_id: xp_test_fixtures::primary_user_id().to_owned(),
         display_name: "xhttp-e2e".to_string(),
-        subscription_token: "ephemeral".to_string(),
+        subscription_token: xp_test_fixtures::primary_token().to_owned(),
         credential_epoch: 0,
         priority_tier: UserPriorityTier::P2,
         quota_reset: UserQuotaReset::default(),
     };
     let node = Node {
-        node_id: endpoint.node_id.clone(),
-        node_name: "xhttp-e2e-node".to_string(),
-        access_host: "127.0.0.1".to_string(),
-        api_base_url: "http://127.0.0.1".to_string(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        access_host: xp_test_fixtures::address_loopback().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     let membership = NodeUserEndpointMembership {
-        user_id: user.user_id.clone(),
-        node_id: endpoint.node_id.clone(),
-        endpoint_id: endpoint.endpoint_id.clone(),
+        user_id: xp_test_fixtures::primary_user_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
     };
     let mut advertised_endpoint = endpoint.clone();
     advertised_endpoint.port = external_port;
     let rendered = subscription::build_clash_yaml(
-        SUBSCRIPTION_SECRET,
+        xp_test_fixtures::primary_token(),
         &user,
         &[membership],
         &[advertised_endpoint],
@@ -405,9 +409,14 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
 
     let reality_destination = spawn_reality_destination().await;
     let target = spawn_plain_http_server().await;
-    let endpoint = xhttp_endpoint(vless_port, reality_destination.addr.port());
-    let uuid = credentials::derive_vless_uuid(SUBSCRIPTION_SECRET, "xhttp-e2e-user", 0)
-        .expect("derive VLESS UUID");
+    let mut endpoint = xhttp_endpoint(vless_port);
+    set_reality_destination_port(&mut endpoint, reality_destination.addr.port());
+    let uuid = credentials::derive_vless_uuid(
+        xp_test_fixtures::primary_token(),
+        xp_test_fixtures::primary_user_id(),
+        0,
+    )
+    .expect("derive VLESS UUID");
     let mut xray = xray::connect(xray_api_addr)
         .await
         .expect("connect Xray API");
@@ -416,11 +425,14 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
         .expect("add Xray XHTTP inbound");
     xray.alter_inbound(
         xp::xray::proto::xray::app::proxyman::command::AlterInboundRequest {
-            tag: endpoint.tag.clone(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
             operation: Some(
                 xp::xray::builder::build_add_user_operation(
                     &endpoint,
-                    &membership_xray_email("xhttp-e2e-user", &endpoint.endpoint_id),
+                    &membership_xray_email(
+                        xp_test_fixtures::primary_user_id(),
+                        &endpoint.endpoint_id,
+                    ),
                     Some(&uuid),
                     None,
                 )

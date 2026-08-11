@@ -76,7 +76,6 @@ fn short_id_rotation_preserves_missing_legacy_optional_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
 
-    let node_id = store.list_nodes()[0].node_id.clone();
     let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
@@ -102,8 +101,8 @@ fn short_id_rotation_preserves_missing_legacy_optional_fields() {
     store.state_mut().endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
-            endpoint_id: endpoint_id.clone(),
-            node_id,
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
             tag: xp_test_fixtures::label_ss2().to_owned(),
             kind: EndpointKind::VlessRealityVisionTcp,
             port: 443,
