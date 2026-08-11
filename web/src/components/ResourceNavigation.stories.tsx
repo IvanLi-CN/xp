@@ -74,6 +74,17 @@ const groups: ResourceNavigationGroup[] = [
 				icon: "tabler:plug",
 				children: [
 					{
+						id: "endpoint-tokyo",
+						label: "tokyo-reality-443",
+						href: "/endpoints/endpoint-tokyo",
+						ariaLabel:
+							"Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+						leadingIcon: {
+							name: "tabler:plug-connected",
+							tone: "primary",
+						},
+					},
+					{
 						id: "endpoint-sgp",
 						label: LONG_ENDPOINT,
 						href: "/endpoints/endpoint-sgp",
@@ -237,6 +248,16 @@ export const ObjectIconIdentity: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Expand Endpoints" }),
 		);
+		await expect(
+			canvas.getByRole("link", {
+				name: "Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+			}),
+		).toHaveAttribute("data-leading-icon-name", "tabler:plug-connected");
+		await expect(
+			canvas.getByRole("link", {
+				name: "Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+			}),
+		).toHaveAttribute("data-leading-icon-tone", "primary");
 		await expect(
 			canvas.getByRole("link", {
 				name: `Endpoint ${LONG_ENDPOINT} (endpoint-sgp)`,

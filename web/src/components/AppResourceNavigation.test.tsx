@@ -21,8 +21,19 @@ const nodeGroups = [
 	},
 ];
 
+const endpointGroups = [
+	{
+		title: "Nav",
+		items: [{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" }],
+	},
+];
+
 function formatNodeLabel(nodeName: string, nodeId: string) {
 	return `${nodeName} (${nodeId})`;
+}
+
+function formatEndpointLabel(endpointName: string, endpointId: string) {
+	return `${endpointName} (${endpointId})`;
 }
 
 describe("<AppResourceNavigation />", () => {
@@ -120,5 +131,75 @@ describe("<AppResourceNavigation />", () => {
 			"tabler:server-2",
 		);
 		expect(ordinaryNode).toHaveAttribute("data-leading-icon-tone", "muted");
+	});
+
+	it("marks only endpoints on the current hosting node with a special icon", () => {
+		const queryClient = createQueryClient();
+		const localNodeId = fixtureCatalog.identifier.nodePrimary();
+		const remoteNodeId = fixtureCatalog.identifier.nodeSecondary();
+		const localEndpointId = fixtureCatalog.identifier.endpointPrimary();
+		const remoteEndpointId = fixtureCatalog.identifier.endpointSecondary();
+		const localEndpointName = "tokyo-reality-443";
+		const remoteEndpointName = "osaka-ss-8443";
+		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
+			items: [
+				{
+					endpoint_id: localEndpointId,
+					node_id: localNodeId,
+					tag: localEndpointName,
+					kind: "vless_reality_vision_tcp",
+					port: 443,
+					meta: {},
+				},
+				{
+					endpoint_id: remoteEndpointId,
+					node_id: remoteNodeId,
+					tag: remoteEndpointName,
+					kind: "ss2022_2022_blake3_aes_128_gcm",
+					port: 8443,
+					meta: {},
+				},
+			],
+		});
+		const compatibility = resolveApiCompatibility({
+			capabilities: ["admin.endpoints"],
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<AppResourceNavigation
+					adminToken="admintoken"
+					compatibility={compatibility}
+					compatibilityError={null}
+					compatibilityPending={false}
+					groups={endpointGroups}
+					localNodeId={localNodeId}
+					pathname={`/endpoints/${remoteEndpointId}`}
+					onNavigate={vi.fn()}
+					onResourceNavigate={vi.fn()}
+					onRetryCompatibility={vi.fn()}
+				/>
+			</QueryClientProvider>,
+		);
+
+		const localEndpoint = screen.getByRole("link", {
+			name: `Endpoint on current hosting node ${formatEndpointLabel(
+				localEndpointName,
+				localEndpointId,
+			)}`,
+		});
+		const remoteEndpoint = screen.getByRole("link", {
+			name: `Endpoint ${formatEndpointLabel(remoteEndpointName, remoteEndpointId)}`,
+		});
+		expect(localEndpoint).toHaveAttribute(
+			"data-leading-icon-name",
+			"tabler:plug-connected",
+		);
+		expect(localEndpoint).toHaveAttribute("data-leading-icon-tone", "primary");
+		expect(remoteEndpoint).toHaveAttribute(
+			"data-leading-icon-name",
+			"tabler:link",
+		);
+		expect(remoteEndpoint).toHaveAttribute("data-leading-icon-tone", "muted");
 	});
 });

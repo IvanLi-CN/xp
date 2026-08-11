@@ -146,8 +146,8 @@ nodes use the distinct `server-2` silhouette.
 ![Desktop resource navigation node icons](./assets/resource-navigation-node-icons.png)
 
 PR: include
-Desktop `/demo`: endpoint children use `link`, distinct from the `plug` resource
-category icon.
+Desktop `/demo`: current-hosting-node endpoint uses cyan `plug-connected`;
+other endpoint children use `link`, both distinct from the `plug` resource category icon.
 ![Desktop resource navigation endpoint icons](./assets/resource-navigation-endpoint-icons.png)
 
 PR: include
