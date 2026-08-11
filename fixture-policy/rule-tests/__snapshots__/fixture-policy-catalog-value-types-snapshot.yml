@@ -1,0 +1,156 @@
+id: fixture-policy-catalog-value-types
+snapshots:
+  '{ "latencyLow": "12" }':
+    labels:
+    - source: '"latencyLow": "12"'
+      style: primary
+      start: 2
+      end: 20
+    - source: '"latencyLow"'
+      style: secondary
+      start: 2
+      end: 14
+    - source: '"12"'
+      style: secondary
+      start: 16
+      end: 20
+  '{ "metrics": true }':
+    labels:
+    - source: '"metrics": true'
+      style: primary
+      start: 2
+      end: 17
+    - source: '"metrics"'
+      style: secondary
+      start: 2
+      end: 11
+    - source: 'true'
+      style: secondary
+      start: 13
+      end: 17
+  '{ "operations": true }':
+    labels:
+    - source: '"operations": true'
+      style: primary
+      start: 2
+      end: 20
+    - source: '"operations"'
+      style: secondary
+      start: 2
+      end: 14
+    - source: 'true'
+      style: secondary
+      start: 16
+      end: 20
+  '{ "operations": { "endpoint": { "port443": "443" } } }':
+    labels:
+    - source: '"port443": "443"'
+      style: primary
+      start: 32
+      end: 48
+    - source: '"port443"'
+      style: secondary
+      start: 32
+      end: 41
+    - source: '"443"'
+      style: secondary
+      start: 43
+      end: 48
+  '{ "operations": { "endpoint": { "reality": "not-an-object" } } }':
+    labels:
+    - source: '"reality": "not-an-object"'
+      style: primary
+      start: 32
+      end: 58
+    - source: '"reality"'
+      style: secondary
+      start: 32
+      end: 41
+    - source: '"not-an-object"'
+      style: secondary
+      start: 43
+      end: 58
+  '{ "operations": { "endpoint": { "shortIds": "not-an-array" } } }':
+    labels:
+    - source: '"shortIds": "not-an-array"'
+      style: primary
+      start: 32
+      end: 58
+    - source: '"shortIds"'
+      style: secondary
+      start: 32
+      end: 42
+    - source: '"not-an-array"'
+      style: secondary
+      start: 44
+      end: 58
+  '{ "operations": { "endpoint": { "vlessKind": { "invalid": true } } } }':
+    labels:
+    - source: '"vlessKind": { "invalid": true }'
+      style: primary
+      start: 32
+      end: 64
+    - source: '"vlessKind"'
+      style: secondary
+      start: 32
+      end: 43
+    - source: '{ "invalid": true }'
+      style: secondary
+      start: 45
+      end: 64
+  '{ "operations": { "quota": { "reset": [] } } }':
+    labels:
+    - source: '"reset": []'
+      style: primary
+      start: 29
+      end: 40
+    - source: '"reset"'
+      style: secondary
+      start: 29
+      end: 36
+    - source: '[]'
+      style: secondary
+      start: 38
+      end: 40
+  '{ "operations": { "subscription": { "clashLines": "not-an-array" } } }':
+    labels:
+    - source: '"clashLines": "not-an-array"'
+      style: primary
+      start: 36
+      end: 64
+    - source: '"clashLines"'
+      style: secondary
+      start: 36
+      end: 48
+    - source: '"not-an-array"'
+      style: secondary
+      start: 50
+      end: 64
+  '{ "primary": 12 }':
+    labels:
+    - source: '"primary": 12'
+      style: primary
+      start: 2
+      end: 15
+    - source: '"primary"'
+      style: secondary
+      start: 2
+      end: 11
+    - source: '12'
+      style: secondary
+      start: 13
+      end: 15
+  '{ "primaryServerNames": "edge-a.fixture.test" }':
+    labels:
+    - source: '"primaryServerNames": "edge-a.fixture.test"'
+      style: primary
+      start: 2
+      end: 45
+    - source: '"primaryServerNames"'
+      style: secondary
+      start: 2
+      end: 22
+    - source: '"edge-a.fixture.test"'
+      style: secondary
+      start: 24
+      end: 45

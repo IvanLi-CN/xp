@@ -4,8 +4,44 @@ use super::*;
 use pretty_assertions::assert_eq;
 use serde_yaml::Value;
 use std::collections::BTreeMap;
-
-const MIRROR_BASE: &str = "https://xp.example/api/mihomo/resources";
+use xp_test_fixtures::{
+    endpoint_server_psk_b64, endpoint_server_psk_b64_alternate, endpoint_server_psk_b64_escaped,
+    label_aardvark as fixture_label_aardvark, label_alpha as fixture_label_alpha,
+    label_beta as fixture_label_beta, label_dash_host as fixture_label_dash_host,
+    label_dot_host as fixture_label_dot_host, label_hkl as fixture_label_hkl,
+    label_japan as fixture_label_japan, label_mystery as fixture_label_mystery,
+    label_node_beta as fixture_label_node_beta,
+    label_node1_variant2 as fixture_label_node1_variant2, label_only_us as fixture_label_only_us,
+    label_osaka_a as fixture_label_osaka_a, label_osaka_b as fixture_label_osaka_b,
+    label_relay_japan as fixture_label_relay_japan, label_seoul_a as fixture_label_seoul_a,
+    label_singapore_a as fixture_label_singapore_a,
+    label_singapore_avariant2 as fixture_label_singapore_avariant2,
+    label_tokyo_a as fixture_label_tokyo_a, label_tokyo_avariant2 as fixture_label_tokyo_avariant2,
+    label_tokyo_avariant3 as fixture_label_tokyo_avariant3, label_tokyo_b as fixture_label_tokyo_b,
+    subscription_api_aardvark as fixture_api_aardvark, subscription_api_dash as fixture_api_dash,
+    subscription_api_dot as fixture_api_dot,
+    subscription_api_loopback_https as fixture_api_loopback_https,
+    subscription_api_seoul_a as fixture_api_seoul_a, subscription_api_shared as fixture_api_shared,
+    subscription_api_subscribed as fixture_api_subscribed,
+    subscription_api_tokyo_a as fixture_api_tokyo_a,
+    subscription_api_tokyo_b as fixture_api_tokyo_b,
+    subscription_api_unsubscribed as fixture_api_unsubscribed,
+    subscription_api_xp_node as fixture_api_xp_node, subscription_host_alpha as fixture_host_alpha,
+    subscription_host_beta as fixture_host_beta, subscription_host_dash as fixture_host_dash,
+    subscription_host_dot as fixture_host_dot, subscription_host_empty as fixture_host_empty,
+    subscription_host_endpoint_node as fixture_host_endpoint_node,
+    subscription_host_example as fixture_host_example, subscription_host_hkl as fixture_host_hkl,
+    subscription_host_jp as fixture_host_jp, subscription_host_mystery as fixture_host_mystery,
+    subscription_host_new as fixture_host_new, subscription_host_relay as fixture_host_relay,
+    subscription_host_relay_a as fixture_host_relay_a,
+    subscription_host_relay_b as fixture_host_relay_b,
+    subscription_host_relay_jp as fixture_host_relay_jp,
+    subscription_host_seoul as fixture_host_seoul, subscription_host_shared as fixture_host_shared,
+    subscription_host_singapore as fixture_host_singapore,
+    subscription_host_tokyo_a as fixture_host_tokyo_a, subscription_host_us as fixture_host_us,
+    subscription_node_n1 as fixture_node_n1, subscription_node_n2 as fixture_node_n2,
+    subscription_node_n3 as fixture_node_n3,
+};
 
 #[test]
 fn mihomo_mirror_rewrites_external_resources_and_injects_fixed_geox_assets() {
@@ -26,15 +62,15 @@ proxy-providers:
     };
     let yaml = build_mihomo_provider_yaml_with_node_probes_mode(
         SEED,
-        &user("u1", "alice"),
+        &user("alice"),
         &[],
         &[],
         &[],
         &BTreeMap::new(),
         &profile,
-        "https://xp.example/api/sub/system",
+        xp_test_fixtures::subscription_provider_system_url(),
         MihomoExternalResourceMode::Mirror,
-        MIRROR_BASE,
+        xp_test_fixtures::mihomo_mirror_base_url(),
     )
     .expect("mirror rendering should succeed");
     let root: Value = serde_yaml::from_str(&yaml).expect("valid yaml");
@@ -47,7 +83,7 @@ proxy-providers:
     assert!(
         geox.get(Value::String("geoip".to_string()))
             .and_then(Value::as_str)
-            .is_some_and(|url| url.starts_with(MIRROR_BASE))
+            .is_some_and(|url| url.starts_with(xp_test_fixtures::mihomo_mirror_base_url()))
     );
     let provider = root
         .get("proxy-providers")
@@ -59,7 +95,7 @@ proxy-providers:
         provider
             .get(Value::String("url".to_string()))
             .and_then(Value::as_str)
-            .is_some_and(|url| url.starts_with(MIRROR_BASE))
+            .is_some_and(|url| url.starts_with(xp_test_fixtures::mihomo_mirror_base_url()))
     );
     assert_eq!(
         provider.get(Value::String("proxy".to_string())),
@@ -83,15 +119,15 @@ rule-providers:
     };
     let err = build_mihomo_provider_yaml_with_node_probes_mode(
         SEED,
-        &user("u1", "alice"),
+        &user("alice"),
         &[],
         &[],
         &[],
         &BTreeMap::new(),
         &profile,
-        "https://xp.example/api/sub/system",
+        xp_test_fixtures::subscription_provider_system_url(),
         MihomoExternalResourceMode::Mirror,
-        MIRROR_BASE,
+        xp_test_fixtures::mihomo_mirror_base_url(),
     )
     .expect_err("invalid mirror resource should be rejected");
     assert!(matches!(
@@ -103,15 +139,23 @@ rule-providers:
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successful_probe() {
     let nodes = vec![
-        node("n1", "tokyo-a", "tokyo-a.example.com"),
-        node("n2", "hkl", "hkl.example.com"),
-        node("n3", "mystery", "mystery.example.com"),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_avariant3,
+            fixture_host_tokyo_a(),
+        ),
+        node(fixture_node_n2(), fixture_label_hkl, fixture_host_hkl()),
+        node(
+            fixture_node_n3(),
+            fixture_label_mystery,
+            fixture_host_mystery(),
+        ),
     ];
     let mut probes = BTreeMap::new();
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: "2026-04-24T00:00:00Z".to_string(),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t080800_z().to_owned(),
             ..NodeEgressProbeState::default()
         },
     );
@@ -134,7 +178,11 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_before_first_successfu
 
 #[test]
 fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe() {
-    let nodes = vec![node("n1", "singapore-a", "singapore-a.example.com")];
+    let nodes = vec![node(
+        fixture_node_n1(),
+        fixture_label_singapore_avariant2,
+        fixture_host_singapore(),
+    )];
 
     let region_map = build_mihomo_base_region_map(&nodes, &BTreeMap::new());
 
@@ -146,7 +194,11 @@ fn build_mihomo_base_region_map_keeps_singapore_slug_as_other_before_first_probe
 
 #[test]
 fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant3,
+        fixture_host_tokyo_a(),
+    )];
     let probes = probe_map(&[("n1", NodeSubscriptionRegion::Taiwan)]);
 
     let region_map = build_mihomo_base_region_map(&nodes, &probes);
@@ -159,13 +211,19 @@ fn build_mihomo_base_region_map_prefers_successful_probe_over_legacy_slug() {
 
 #[test]
 fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_probe() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant3,
+        fixture_host_tokyo_a(),
+    )];
     let mut probes = BTreeMap::new();
     probes.insert(
         "n1".to_string(),
         NodeEgressProbeState {
-            checked_at: "2026-04-24T01:00:00Z".to_string(),
-            selected_public_ip: Some("198.51.100.9".to_string()),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t080900_z().to_owned(),
+            selected_public_ip: Some(
+                xp_test_fixtures::address_documentation192_0_2_91().to_owned(),
+            ),
             subscription_region: NodeSubscriptionRegion::Other,
             error_summary: Some("country.is lookup failed".to_string()),
             ..NodeEgressProbeState::default()
@@ -182,7 +240,11 @@ fn build_mihomo_base_region_map_falls_back_to_legacy_slug_after_failed_first_pro
 
 #[test]
 fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant3,
+        fixture_host_tokyo_a(),
+    )];
     let mut stale_probe = egress_probe(NodeSubscriptionRegion::Taiwan, "TW", "203.0.113.30");
     stale_probe.last_success_at = Some("2026-04-24T00:00:00Z".to_string());
 
@@ -199,11 +261,15 @@ fn build_mihomo_base_region_map_keeps_last_successful_probe_region_when_stale() 
 
 #[test]
 fn build_mihomo_base_region_map_keeps_invalidated_probe_region_other_without_slug_fallback() {
-    let nodes = vec![node("n1", "tokyo-a", "tokyo-a.example.com")];
+    let nodes = vec![node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant3,
+        fixture_host_tokyo_a(),
+    )];
     let probe = NodeEgressProbeState {
         subscription_region: NodeSubscriptionRegion::Other,
-        checked_at: "2026-04-24T01:00:00Z".to_string(),
-        selected_public_ip: Some("198.51.100.9".to_string()),
+        checked_at: xp_test_fixtures::timestamp_at20240101_t080900_z().to_owned(),
+        selected_public_ip: Some(xp_test_fixtures::address_documentation192_0_2_91().to_owned()),
         classification_invalidated_at: Some("2026-04-24T01:00:00Z".to_string()),
         error_summary: Some("country.is lookup failed".to_string()),
         ..NodeEgressProbeState::default()
@@ -228,14 +294,15 @@ fn app_proxy_group_shape_only_matches_hidden_wrapper_name() {
 
 #[test]
 fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
 
-    // A valid base64 string that includes '+' and '/' to exercise percent encoding.
-    let server_psk_b64 = "+/v7+/v7+/v7+/v7+/v7+w==";
-
-    let ep = endpoint_ss("e1", "n1", "ss", 443, server_psk_b64);
-    let m = membership("u1", "n1", "e1");
+    let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64_escaped());
+    let m = membership("n1", "e1");
 
     let lines = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap();
     assert_eq!(lines.len(), 1);
@@ -246,15 +313,19 @@ fn ss2022_password_is_percent_encoded_in_raw_uri_userinfo_plain_form() {
     assert!(uri.contains("%2F"));
     assert!(uri.contains("%3D"));
     assert!(uri.contains("%3A"));
-    assert!(uri.contains("@example.com:443"));
+    assert!(uri.contains("@example.fixture.test:443"));
 }
 
 #[test]
 fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
-    let u = user("u1", "hello world");
-    let n = node("n1", "node-1", "example.com");
-    let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
-    let m = membership("u1", "n1", "e1");
+    let u = user("hello world");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
+    let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
+    let m = membership("n1", "e1");
 
     let lines = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap();
     assert_eq!(lines.len(), 1);
@@ -266,10 +337,14 @@ fn name_is_url_encoded_in_fragment_space_is_percent_20_not_plus() {
 
 #[test]
 fn empty_node_access_host_is_error() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "");
-    let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
-    let m = membership("u1", "n1", "e1");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_empty(),
+    );
+    let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
+    let m = membership("n1", "e1");
 
     let err = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap_err();
     assert_eq!(
@@ -283,10 +358,14 @@ fn empty_node_access_host_is_error() {
 
 #[test]
 fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "   ");
-    let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
-    let m = membership("u1", "n1", "e1");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_empty(),
+    );
+    let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
+    let m = membership("n1", "e1");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -305,16 +384,14 @@ fn whitespace_node_access_host_is_error_for_mihomo_yaml() {
 
 #[test]
 fn vless_server_names_empty_is_error() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
-    let meta = serde_json::json!({
-      "reality": {"dest": "example.com:443", "server_names": [], "fingerprint": "chrome"},
-      "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},
-      "short_ids": ["0123456789abcdef"],
-      "active_short_id": "0123456789abcdef"
-    });
-    let ep = endpoint_vless("e1", "n1", "vless", 443, meta);
-    let m = membership("u1", "n1", "e1");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
+    let ep = endpoint_vless_without_server_names("e1", "n1", "vless", 443);
+    let m = membership("n1", "e1");
 
     let err = build_raw_lines(SEED, &u, &[m], &[ep], &[n]).unwrap_err();
     assert_eq!(
@@ -327,9 +404,13 @@ fn vless_server_names_empty_is_error() {
 
 #[test]
 fn empty_membership_list_produces_empty_output() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
-    let ep = endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
+    let ep = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
 
     let out = build_raw_lines(SEED, &u, &[], &[ep], &[n]).unwrap();
     assert!(out.is_empty());
@@ -343,13 +424,17 @@ fn empty_membership_list_produces_empty_output() {
 
 #[test]
 fn order_is_deterministic() {
-    let u = user("u1", "alice");
-    let n = node("n1", "node-1", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_node1_variant2,
+        fixture_host_example(),
+    );
 
-    let ep1 = endpoint_ss("e1", "n1", "tag-2", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
-    let ep2 = endpoint_ss("e2", "n1", "tag-1", 443, "AAAAAAAAAAAAAAAAAAAAAA==");
-    let m1 = membership("u1", "n1", "e1");
-    let m2 = membership("u1", "n1", "e2");
+    let ep1 = endpoint_ss("e1", "n1", "tag-2", 443, endpoint_server_psk_b64());
+    let ep2 = endpoint_ss("e2", "n1", "tag-1", 443, endpoint_server_psk_b64());
+    let m1 = membership("n1", "e1");
+    let m2 = membership("n1", "e2");
 
     let out1 = build_raw_lines(
         SEED,
@@ -367,24 +452,17 @@ fn order_is_deterministic() {
 
 #[test]
 fn build_mihomo_yaml_preserves_mixin_defined_proxies_and_outer_group() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -455,7 +533,7 @@ providerB:
         .expect("proxy-groups must be a list");
     let relay_group = proxy_groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("missing per-server relay group");
     assert!(
         !proxy_groups
@@ -537,24 +615,17 @@ providerB:
 
 #[test]
 fn build_mihomo_provider_yaml_moves_generated_system_proxies_to_provider_payload() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -585,7 +656,7 @@ providerA:
         &[n],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -614,7 +685,7 @@ providerA:
         system_provider
             .get(Value::String("url".to_string()))
             .and_then(Value::as_str),
-        Some("https://sub.example.com/api/sub/token/mihomo/provider/system")
+        Some(xp_test_fixtures::subscription_provider_system_url())
     );
 
     let proxy_groups = root
@@ -750,34 +821,34 @@ providerA:
 
 #[test]
 fn build_mihomo_provider_yaml_groups_relay_by_access_host() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n1 = node_with_api_base(
-        "n1",
-        "Tokyo A",
-        "shared.example.com",
-        "https://tokyo-a.example.com",
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_shared(),
+        fixture_api_tokyo_a(),
     );
     let n2 = node_with_api_base(
-        "n2",
-        "Tokyo B",
-        "shared.example.com",
-        "https://tokyo-b.example.com",
+        fixture_node_n2(),
+        fixture_label_tokyo_b,
+        fixture_host_shared(),
+        fixture_api_tokyo_b(),
     );
     let n3 = node_with_api_base(
-        "n3",
-        "Seoul A",
-        "seoul.example.com",
-        "https://seoul-a.example.com",
+        fixture_node_n3(),
+        fixture_label_seoul_a,
+        fixture_host_seoul(),
+        fixture_api_seoul_a(),
     );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e3", "n3", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e3", "n3", "ss", 443, endpoint_server_psk_b64()),
     ];
     let memberships = vec![
-        membership("u1", "n1", "e1"),
-        membership("u1", "n2", "e2"),
-        membership("u1", "n3", "e3"),
+        membership("n1", "e1"),
+        membership("n2", "e2"),
+        membership("n3", "e3"),
     ];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
@@ -798,7 +869,7 @@ providerA:
         &endpoints,
         &[n1, n2, n3],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -813,7 +884,7 @@ providerA:
         .collect::<Vec<_>>();
     assert_eq!(
         relay_names,
-        vec!["🛣️ seoul-example-com", "🛣️ shared-example-com"]
+        vec!["🛣️ seoul-fixture-test", "🛣️ shared-fixture-test"]
     );
     let relay_url = |name: &str| {
         groups
@@ -823,12 +894,12 @@ providerA:
             .and_then(Value::as_str)
     };
     assert_eq!(
-        relay_url("🛣️ shared-example-com"),
+        relay_url("🛣️ shared-fixture-test"),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
     assert_eq!(
-        relay_url("🛣️ seoul-example-com"),
-        Some("https://seoul-a.example.com/api/health")
+        relay_url("🛣️ seoul-fixture-test"),
+        Some(xp_test_fixtures::subscription_health_seoul_a())
     );
 
     let system_yaml = build_mihomo_provider_system_yaml(
@@ -838,22 +909,22 @@ providerA:
         &endpoints,
         &[
             node_with_api_base(
-                "n1",
-                "Tokyo A",
-                "shared.example.com",
-                "https://tokyo-a.example.com",
+                fixture_node_n1(),
+                fixture_label_tokyo_a,
+                fixture_host_shared(),
+                fixture_api_tokyo_a(),
             ),
             node_with_api_base(
-                "n2",
-                "Tokyo B",
-                "shared.example.com",
-                "https://tokyo-b.example.com",
+                fixture_node_n2(),
+                fixture_label_tokyo_b,
+                fixture_host_shared(),
+                fixture_api_tokyo_b(),
             ),
             node_with_api_base(
-                "n3",
-                "Seoul A",
-                "seoul.example.com",
-                "https://seoul-a.example.com",
+                fixture_node_n3(),
+                fixture_label_seoul_a,
+                fixture_host_seoul(),
+                fixture_api_seoul_a(),
             ),
         ],
     )
@@ -875,35 +946,35 @@ providerA:
 
     assert_eq!(
         proxy_dialer("Tokyo-A-ss-chain").as_deref(),
-        Some("🛣️ shared-example-com")
+        Some("🛣️ shared-fixture-test")
     );
     assert_eq!(
         proxy_dialer("Tokyo-B-ss-chain").as_deref(),
-        Some("🛣️ shared-example-com")
+        Some("🛣️ shared-fixture-test")
     );
     assert_eq!(
         proxy_dialer("Seoul-A-ss-chain").as_deref(),
-        Some("🛣️ seoul-example-com")
+        Some("🛣️ seoul-fixture-test")
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_uses_default_health_when_api_base_is_loopback() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n = node_with_api_base(
-        "n1",
-        "Tokyo A",
-        "relay.example.com",
-        "https://127.0.0.1:62416",
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+        fixture_api_loopback_https(),
     );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -923,7 +994,7 @@ providerA:
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -932,7 +1003,7 @@ providerA:
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ relay-example-com")
+                group.get("name").and_then(Value::as_str) == Some("🛣️ relay-fixture-test")
             })
         })
         .expect("relay group should exist");
@@ -945,24 +1016,24 @@ providerA:
 
 #[test]
 fn build_mihomo_provider_yaml_uses_api_health_when_shared_access_host_has_one_api_base() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n1 = node_with_api_base(
-        "n1",
-        "Tokyo A",
-        "shared.example.com",
-        "https://shared-api.example.com",
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_shared(),
+        fixture_api_shared(),
     );
     let n2 = node_with_api_base(
-        "n2",
-        "Tokyo B",
-        "shared.example.com",
-        "https://shared-api.example.com",
+        fixture_node_n2(),
+        fixture_label_tokyo_b,
+        fixture_host_shared(),
+        fixture_api_shared(),
     );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n2", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n2", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -982,7 +1053,7 @@ providerA:
         &endpoints,
         &[n1, n2],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -991,33 +1062,33 @@ providerA:
         .and_then(Value::as_sequence)
         .and_then(|groups| {
             groups.iter().find(|group| {
-                group.get("name").and_then(Value::as_str) == Some("🛣️ shared-example-com")
+                group.get("name").and_then(Value::as_str) == Some("🛣️ shared-fixture-test")
             })
         })
         .expect("shared relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://shared-api.example.com/api/health")
+        Some(xp_test_fixtures::subscription_health_shared())
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n = node_with_api_base(
-        "n1",
-        "Node Beta",
-        "endpoint-node.example.com",
-        "https://xp-node.example.com",
+        fixture_node_n1(),
+        fixture_label_node_beta,
+        fixture_host_endpoint_node(),
+        fixture_api_xp_node(),
     );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless-vision-e1",
         53844,
-        vless_meta("example.com:443", &["example.com"], true),
+        VlessFixtureMode::ManagedDefault,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1031,7 +1102,7 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1041,24 +1112,24 @@ fn build_mihomo_provider_yaml_uses_managed_default_vless_port_for_relay_url() {
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://endpoint-node.example.com:53844/generate_204")
+        Some(xp_test_fixtures::subscription_health_endpoint_node())
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has_ss_membership() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n = node_with_api_base(
-        "n1",
-        "Node Beta",
-        "endpoint-node.example.com",
-        "https://xp-node.example.com",
+        fixture_node_n1(),
+        fixture_label_node_beta,
+        fixture_host_endpoint_node(),
+        fixture_api_xp_node(),
     );
     let endpoints = vec![
         endpoint_vless(
@@ -1066,11 +1137,11 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
             "n1",
             "vless-vision-e1",
             53844,
-            vless_meta("example.com:443", &["example.com"], true),
+            VlessFixtureMode::ManagedDefault,
         ),
-        endpoint_ss("e2", "n1", "ss", 53843, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e2", "n1", "ss", 53843, endpoint_server_psk_b64()),
     ];
-    let memberships = vec![membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1084,7 +1155,7 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1094,33 +1165,33 @@ fn build_mihomo_provider_yaml_uses_node_managed_vless_port_even_if_user_only_has
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://endpoint-node.example.com:53844/generate_204")
+        Some(xp_test_fixtures::subscription_health_endpoint_node())
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n = node_with_api_base(
-        "n1",
-        "Node Beta",
-        "endpoint-node.example.com",
-        "https://xp-node.example.com",
+        fixture_node_n1(),
+        fixture_label_node_beta,
+        fixture_host_endpoint_node(),
+        fixture_api_xp_node(),
     );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless-vision-e1",
         53844,
-        vless_meta("example.com:443", &["example.com"], false),
+        VlessFixtureMode::ExplicitlyUnmanaged,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1134,7 +1205,7 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1144,34 +1215,34 @@ fn build_mihomo_provider_yaml_ignores_non_managed_vless_for_relay_url() {
         .and_then(|groups| {
             groups.iter().find(|group| {
                 group.get("name").and_then(Value::as_str)
-                    == Some("🛣️ endpoint-dash-node-example-com")
+                    == Some("🛣️ endpoint-dash-node-fixture-test")
             })
         })
         .expect("relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://xp-node.example.com/api/health")
+        Some(xp_test_fixtures::subscription_health_xp_node())
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n1 = node_with_api_base(
-        "n1",
-        "Tokyo B",
-        "shared.example.com",
-        "https://tokyo-b.example.com",
+        fixture_node_n1(),
+        fixture_label_tokyo_b,
+        fixture_host_shared(),
+        fixture_api_tokyo_b(),
     );
     let n2 = node_with_api_base(
-        "n2",
-        "Aardvark",
-        "shared.example.com",
-        "https://aardvark.example.com",
+        fixture_node_n2(),
+        fixture_label_aardvark,
+        fixture_host_shared(),
+        fixture_api_aardvark(),
     );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
     ];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
@@ -1189,7 +1260,7 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host
             &endpoints,
             &[n1.clone(), n2.clone()],
             &profile,
-            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+            xp_test_fixtures::subscription_provider_system_url(),
         )
         .unwrap();
         let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1204,36 +1275,33 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_same_access_host
     };
 
     assert_eq!(
-        relay_names_for(vec![membership("u1", "n1", "e1")]),
-        vec!["🛣️ shared-example-com"]
+        relay_names_for(vec![membership("n1", "e1")]),
+        vec!["🛣️ shared-fixture-test"]
     );
     assert_eq!(
-        relay_names_for(vec![
-            membership("u1", "n1", "e1"),
-            membership("u1", "n2", "e2"),
-        ]),
-        vec!["🛣️ shared-example-com"]
+        relay_names_for(vec![membership("n1", "e1"), membership("n2", "e2"),]),
+        vec!["🛣️ shared-fixture-test"]
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug_collisions() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n1 = node_with_api_base(
-        "n1",
-        "Dot Host",
-        "a.b.example.com",
-        "https://dot.example.com",
+        fixture_node_n1(),
+        fixture_label_dot_host,
+        fixture_host_dot(),
+        fixture_api_dot(),
     );
     let n2 = node_with_api_base(
-        "n2",
-        "Dash Host",
-        "a-b.example.com",
-        "https://dash.example.com",
+        fixture_node_n2(),
+        fixture_label_dash_host,
+        fixture_host_dash(),
+        fixture_api_dash(),
     );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
     ];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
@@ -1251,7 +1319,7 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
             &endpoints,
             &[n1.clone(), n2.clone()],
             &profile,
-            "https://sub.example.com/api/sub/token/mihomo/provider/system",
+            xp_test_fixtures::subscription_provider_system_url(),
         )
         .unwrap();
         let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1266,37 +1334,38 @@ fn build_mihomo_provider_yaml_keeps_relay_group_name_stable_for_access_host_slug
     };
 
     assert_eq!(
-        relay_names_for(vec![membership("u1", "n1", "e1")]),
-        std::collections::BTreeSet::from(["🛣️ a-b-example-com".to_string()])
+        relay_names_for(vec![membership("n1", "e1")]),
+        std::collections::BTreeSet::from(["🛣️ a-dash-dot-dash-b-fixture-test".to_string()])
     );
     assert_eq!(
-        relay_names_for(vec![membership("u1", "n2", "e2")]),
-        std::collections::BTreeSet::from(["🛣️ a-dash-b-example-com".to_string()])
+        relay_names_for(vec![membership("n2", "e2")]),
+        std::collections::BTreeSet::from(["🛣️ a-dash-b-fixture-test".to_string()])
     );
     assert_eq!(
-        relay_names_for(vec![
-            membership("u1", "n1", "e1"),
-            membership("u1", "n2", "e2"),
-        ]),
+        relay_names_for(vec![membership("n1", "e1"), membership("n2", "e2"),]),
         std::collections::BTreeSet::from([
-            "🛣️ a-b-example-com".to_string(),
-            "🛣️ a-dash-b-example-com".to_string(),
+            "🛣️ a-dash-dot-dash-b-fixture-test".to_string(),
+            "🛣️ a-dash-b-fixture-test".to_string(),
         ])
     );
 }
 
 #[test]
 fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -1307,7 +1376,7 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
   cipher: 2022-blake3-aes-128-gcm
   password: "abc:def"
   udp: true
-  dialer-proxy: 🛣️ relay-example-com
+  dialer-proxy: 🛣️ relay-fixture-test
 "#
         .to_string(),
         extra_proxy_providers_yaml: "".to_string(),
@@ -1326,27 +1395,26 @@ fn build_mihomo_yaml_keeps_generated_relay_group_ref_in_extra_proxy_dialer_proxy
         .expect("custom extra proxy should exist");
     assert_eq!(
         custom.get("dialer-proxy").and_then(Value::as_str),
-        Some("🛣️ relay-example-com")
+        Some("🛣️ relay-fixture-test")
     );
 }
 
 #[test]
 fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_ref_in_main_config() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        }),
+        VlessFixtureMode::Standard,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -1371,7 +1439,7 @@ fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_re
         &[n],
         &probe_map(&[("n1", NodeSubscriptionRegion::Japan)]),
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect_err("main config must not silently remap provider payload proxy references");
     let message = err.to_string();
@@ -1383,26 +1451,30 @@ fn validate_mihomo_profile_via_provider_render_rejects_provider_payload_proxy_re
 
 #[test]
 fn build_mihomo_yaml_generated_relay_group_wins_custom_name_collision() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
 proxy-groups:
-  - name: "🛣️ relay-example-com"
+  - name: "🛣️ relay-fixture-test"
     type: select
     proxies: ["DIRECT"]
   - name: Auto
     type: select
-    proxies: ["🛣️ relay-example-com"]
+    proxies: ["🛣️ relay-fixture-test"]
 rules: []
 "#
         .to_string(),
@@ -1418,7 +1490,7 @@ rules: []
         .expect("proxy-groups must exist");
     let relay_groups = groups
         .iter()
-        .filter(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ relay-example-com"))
+        .filter(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ relay-fixture-test"))
         .collect::<Vec<_>>();
     assert_eq!(relay_groups.len(), 1);
     assert_eq!(
@@ -1434,33 +1506,37 @@ rules: []
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(auto_refs, vec!["🛣️ relay-example-com"]);
+    assert_eq!(auto_refs, vec!["🛣️ relay-fixture-test"]);
 }
 
 #[test]
 fn build_mihomo_provider_yaml_rejects_reserved_proxy_name_collision() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
 proxy-groups:
   - name: Auto
     type: select
-    proxies: ["🛣️ relay-example-com"]
+    proxies: ["🛣️ relay-fixture-test"]
 rules: []
 "#
         .to_string(),
         extra_proxies_yaml: r#"
-- name: "🛣️ relay-example-com"
+- name: "🛣️ relay-fixture-test"
   type: ss
   server: custom.example.com
   port: 443
@@ -1474,7 +1550,7 @@ rules: []
   cipher: 2022-blake3-aes-128-gcm
   password: "abc:def"
   udp: true
-  dialer-proxy: "🛣️ relay-example-com"
+  dialer-proxy: "🛣️ relay-fixture-test"
 "#
         .to_string(),
         extra_proxy_providers_yaml: "".to_string(),
@@ -1487,37 +1563,37 @@ rules: []
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect_err("reserved proxy name collision must be rejected");
     assert_eq!(
         err,
         SubscriptionError::MihomoReservedProxyNameConflict {
-            name: "🛣️ relay-example-com".to_string(),
+            name: "🛣️ relay-fixture-test".to_string(),
         }
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_limits_relay_groups_to_subscribed_nodes() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let n1 = node_with_api_base(
-        "n1",
-        "Aardvark",
-        "shared.example.com",
-        "https://unsubscribed.example.com",
+        fixture_node_n1(),
+        fixture_label_aardvark,
+        fixture_host_shared(),
+        fixture_api_unsubscribed(),
     );
     let n2 = node_with_api_base(
-        "n2",
-        "Tokyo B",
-        "shared.example.com",
-        "https://subscribed.example.com",
+        fixture_node_n2(),
+        fixture_label_tokyo_b,
+        fixture_host_shared(),
+        fixture_api_subscribed(),
     );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
     ];
-    let memberships = vec![membership("u1", "n2", "e2")];
+    let memberships = vec![membership("n2", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1537,7 +1613,7 @@ providerA:
         &endpoints,
         &[n1.clone(), n2.clone()],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1550,14 +1626,14 @@ providerA:
         .filter_map(|group| group.get("name").and_then(Value::as_str))
         .filter(|name| name.starts_with(MIHOMO_RELAY_GROUP_PREFIX))
         .collect::<Vec<_>>();
-    assert_eq!(relay_names, vec!["🛣️ shared-example-com"]);
+    assert_eq!(relay_names, vec!["🛣️ shared-fixture-test"]);
     let relay = groups
         .iter()
-        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ shared-example-com"))
+        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ shared-fixture-test"))
         .expect("subscribed relay group should exist");
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
-        Some("https://subscribed.example.com/api/health")
+        Some(xp_test_fixtures::subscription_health_subscribed())
     );
 
     let system_yaml =
@@ -1573,21 +1649,21 @@ providerA:
         })
         .and_then(|proxy| proxy.get("dialer-proxy"))
         .and_then(Value::as_str);
-    assert_eq!(chain_dialer, Some("🛣️ shared-example-com"));
+    assert_eq!(chain_dialer, Some("🛣️ shared-fixture-test"));
 }
 
 #[test]
 fn build_mihomo_provider_yaml_avoids_legacy_region_relay_alias_names() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Japan", "jp.example.com");
+    let u = user("alice");
+    let n = node(fixture_node_n1(), fixture_label_japan, fixture_host_jp());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -1617,7 +1693,7 @@ providerA:
         std::slice::from_ref(&n),
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect_err("legacy region relay aliases must be rejected");
     assert!(
@@ -1638,19 +1714,23 @@ providerA:
         })
         .and_then(|proxy| proxy.get("dialer-proxy"))
         .and_then(Value::as_str);
-    assert_eq!(chain_dialer, Some("🛣️ jp-example-com"));
+    assert_eq!(chain_dialer, Some("🛣️ jp-fixture-test"));
 }
 
 #[test]
 fn build_mihomo_provider_yaml_deduplicates_disambiguated_relay_group_names() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Japan", "jp.example.com");
-    let n2 = node("n2", "relay-Japan", "relay-jp.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_japan, fixture_host_jp());
+    let n2 = node(
+        fixture_node_n2(),
+        fixture_label_relay_japan,
+        fixture_host_relay_jp(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 443, endpoint_server_psk_b64()),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n2", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n2", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1675,7 +1755,7 @@ providerA:
         &[n1.clone(), n2.clone()],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1690,7 +1770,7 @@ providerA:
         .collect::<Vec<_>>();
     assert_eq!(
         relay_names,
-        vec!["🛣️ jp-example-com", "🛣️ relay-dash-jp-example-com"]
+        vec!["🛣️ jp-fixture-test", "🛣️ relay-dash-jp-fixture-test"]
     );
 
     let system_yaml =
@@ -1711,26 +1791,30 @@ providerA:
     };
     assert_eq!(
         chain_dialer("Japan-ss-chain").as_deref(),
-        Some("🛣️ jp-example-com")
+        Some("🛣️ jp-fixture-test")
     );
     assert_eq!(
         chain_dialer("relay-Japan-ss-chain").as_deref(),
-        Some("🛣️ relay-dash-jp-example-com")
+        Some("🛣️ relay-dash-jp-fixture-test")
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_injects_default_aggregate_groups() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules:\n  - MATCH,🚀 节点选择\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1751,7 +1835,7 @@ providerA:
         &[n],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1810,24 +1894,17 @@ providerA:
 
 #[test]
 fn build_mihomo_provider_yaml_places_visible_region_block_after_quality_groups() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -1870,7 +1947,7 @@ rules: []
         &endpoints,
         &[n],
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -1927,24 +2004,17 @@ rules: []
 
 #[test]
 fn build_mihomo_provider_yaml_moves_hidden_relay_groups_after_system_visible_groups() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "relay.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_relay(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -1966,7 +2036,7 @@ providerA:
         &[n],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect("build mihomo provider yaml should succeed");
     let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
@@ -1982,51 +2052,37 @@ providerA:
             .unwrap_or(usize::MAX)
     };
 
-    assert!(index_of("🛣️ relay-example-com") > index_of("🔒 落地"));
-    assert!(index_of("🛣️ relay-example-com") > index_of("🤯 All"));
-    assert!(index_of("🛣️ relay-example-com") > index_of("🚀 节点选择"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🔒 落地"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🤯 All"));
+    assert!(index_of("🛣️ relay-fixture-test") > index_of("🚀 节点选择"));
 }
 
 #[test]
 fn build_mihomo_provider_yaml_locks_system_proxy_group_sequence() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let nodes = vec![
-        node("n1", "Tokyo A", "relay-a.example.com"),
-        node("n2", "Osaka B", "relay-b.example.com"),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_a,
+            fixture_host_relay_a(),
+        ),
+        node(
+            fixture_node_n2(),
+            fixture_label_osaka_b,
+            fixture_host_relay_b(),
+        ),
     ];
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
-        endpoint_ss("e3", "n2", "ss", 443, "BBBBBBBBBBBBBBBBBBBBBB=="),
-        endpoint_vless(
-            "e4",
-            "n2",
-            "vless",
-            9443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
+        endpoint_ss("e3", "n2", "ss", 443, endpoint_server_psk_b64_alternate()),
+        endpoint_vless("e4", "n2", "vless", 9443, VlessFixtureMode::Standard),
     ];
     let memberships = vec![
-        membership("u1", "n1", "e1"),
-        membership("u1", "n1", "e2"),
-        membership("u1", "n2", "e3"),
-        membership("u1", "n2", "e4"),
+        membership("n1", "e1"),
+        membership("n1", "e2"),
+        membership("n2", "e3"),
+        membership("n2", "e4"),
     ];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
@@ -2060,7 +2116,7 @@ providerA:
         &nodes,
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect("build mihomo provider yaml should succeed");
     let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
@@ -2113,31 +2169,27 @@ providerA:
         ]
     );
     assert!(
-        names.ends_with(&["🛣️ relay-dash-a-example-com", "🛣️ relay-dash-b-example-com",]),
+        names.ends_with(&[
+            "🛣️ relay-dash-a-fixture-test",
+            "🛣️ relay-dash-b-fixture-test",
+        ]),
         "hidden relay groups must stay at the tail"
     );
 }
 
 #[test]
 fn build_mihomo_provider_yaml_keeps_unprobed_singapore_nodes_in_other_group() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Singapore A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_singapore_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -2165,7 +2217,7 @@ rules: []
         &[n],
         &BTreeMap::new(),
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -2201,7 +2253,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_helper_order_keeps_other_aliases() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:
@@ -2261,24 +2313,17 @@ fn known_non_other_region_filter_avoids_matching_embedded_us_fragments() {
 
 #[test]
 fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
 
     let yaml = build_mihomo_provider_system_yaml(SEED, &u, &memberships, &endpoints, &[n]).unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
@@ -2303,24 +2348,17 @@ fn build_mihomo_provider_system_yaml_contains_all_system_proxies() {
 
 #[test]
 fn build_mihomo_provider_yaml_preserves_direct_refs_via_system_provider() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group_with_relay:
@@ -2366,7 +2404,7 @@ rules: []
         &[n],
         &probes,
         &profile,
-        "https://sub.example.com/api/sub/token/mihomo/provider/system",
+        xp_test_fixtures::subscription_provider_system_url(),
     )
     .expect_err("legacy landing and direct proxy refs must be rejected");
     let message = err.to_string();
@@ -2380,7 +2418,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_rejects_non_mapping_template() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "- not-a-mapping".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -2393,16 +2431,20 @@ fn build_mihomo_yaml_rejects_non_mapping_template() {
 
 #[test]
 fn build_mihomo_yaml_adds_missing_outer_group() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -2450,7 +2492,7 @@ providerA:
 
     let relay = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group should be auto-added");
     assert_eq!(
         relay.get("type"),
@@ -2499,16 +2541,20 @@ providerA:
 
 #[test]
 fn build_mihomo_yaml_injects_relay_filter() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0
 rules: []
@@ -2543,7 +2589,7 @@ providerA:
 
     let relay = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group should exist");
     assert_eq!(
         relay.get("filter").and_then(Value::as_str),
@@ -2562,16 +2608,20 @@ providerA:
 
 #[test]
 fn build_mihomo_yaml_prunes_missing_proxy_and_provider_refs_when_extras_cleared() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -2654,7 +2704,7 @@ rules: []
 
     let relay_group = groups
         .iter()
-        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-com"))
+        .find(|g| g.get("name").and_then(Value::as_str) == Some("🛣️ example-fixture-test"))
         .expect("relay group must exist");
     let relay_proxy_names = relay_group
         .get("proxies")
@@ -2668,24 +2718,17 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_reorders_user_groups_using_helper_template_order() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:
@@ -2865,7 +2908,7 @@ rules: []
             "🛬 Tokyo-A",
             "🚀 节点选择",
             "💎 节点选择",
-            "🛣️ example-com",
+            "🛣️ example-fixture-test",
         ]
     );
 
@@ -3013,24 +3056,17 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_remaps_legacy_landing_refs_before_replaying_helper_order() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group_with_relay:
@@ -3116,16 +3152,20 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_remaps_landing_only_legacy_refs_before_helper_replay() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group_with_relay:
@@ -3200,16 +3240,24 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_remaps_multiple_landing_only_legacy_refs_using_final_landing_order() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let nodes = vec![
-        node("n1", "Tokyo B", "example.com"),
-        node("n2", "Osaka A", "example.com"),
+        node(
+            fixture_node_n1(),
+            fixture_label_tokyo_b,
+            fixture_host_example(),
+        ),
+        node(
+            fixture_node_n2(),
+            fixture_label_osaka_a,
+            fixture_host_example(),
+        ),
     ];
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_ss("e2", "n2", "ss", 8443, "BBBBBBBBBBBBBBBBBBBBBB=="),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_ss("e2", "n2", "ss", 8443, endpoint_server_psk_b64_alternate()),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n2", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n2", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group_with_relay:
@@ -3295,24 +3343,17 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_injects_default_high_quality_candidates() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules:\n  - MATCH,🚀 节点选择\n".to_string(),
         extra_proxies_yaml: "".to_string(),
@@ -3357,7 +3398,7 @@ fn build_mihomo_yaml_injects_default_high_quality_candidates() {
 
 #[test]
 fn build_mihomo_yaml_preserves_existing_high_quality_provider_candidates() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3414,7 +3455,7 @@ providerA:
 
 #[test]
 fn build_mihomo_yaml_preserves_existing_canonical_star_region_order() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3463,7 +3504,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_falls_back_to_in_place_order_when_specialized_helper_missing() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:
@@ -3545,16 +3586,20 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_does_not_treat_extra_suffix_proxies_as_relay_groups() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:
@@ -3646,7 +3691,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_prunes_legacy_outer_ref_from_hidden_non_select_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:
@@ -3712,7 +3757,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_user_defined_relay_prefixed_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3756,7 +3801,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_standalone_user_defined_relay_prefixed_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3787,7 +3832,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_mixin_defined_proxy_with_user_relay_dialer() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3830,7 +3875,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_extra_relay_prefixed_proxy_dialer() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -3873,7 +3918,7 @@ fn build_mihomo_yaml_preserves_extra_relay_prefixed_proxy_dialer() {
 
 #[test]
 fn build_mihomo_yaml_removes_user_defined_legacy_region_relay_prefixed_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3917,7 +3962,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_removes_custom_shared_outer_ref_and_group() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -3962,7 +4007,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_removes_custom_shared_outer_group_referenced_by_rules() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4001,7 +4046,7 @@ rules:
 
 #[test]
 fn build_mihomo_yaml_remaps_legacy_relay_rule_target_without_custom_group() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4036,16 +4081,20 @@ rules:
 
 #[test]
 fn build_mihomo_yaml_preserves_unknown_relay_prefixed_rule_targets() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "new-host.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_new(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4078,16 +4127,20 @@ rules:
 
 #[test]
 fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4133,16 +4186,20 @@ fn build_mihomo_yaml_maps_region_relay_ref_to_direct_in_extra_proxy_dialer_proxy
 
 #[test]
 fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4188,16 +4245,20 @@ fn build_mihomo_yaml_maps_shared_outer_ref_to_direct_in_extra_proxy_dialer_proxy
 
 #[test]
 fn build_mihomo_yaml_removes_custom_shared_outer_dialer_proxy() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4248,7 +4309,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_maps_legacy_dialer_to_direct_without_relay_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4284,16 +4345,20 @@ fn build_mihomo_yaml_maps_legacy_dialer_to_direct_without_relay_groups() {
 
 #[test]
 fn build_mihomo_yaml_removes_custom_region_relay_dialer_proxy() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo-A", "tokyo-a.example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_avariant2,
+        fixture_host_tokyo_a(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4347,7 +4412,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_unknown_relay_prefixed_dialer_proxy() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4383,7 +4448,7 @@ fn build_mihomo_yaml_preserves_unknown_relay_prefixed_dialer_proxy() {
 
 #[test]
 fn build_mihomo_yaml_preserves_provider_backed_relay_prefixed_dialer_proxy() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4425,7 +4490,7 @@ providerA:
 
 #[test]
 fn build_mihomo_yaml_rewrites_managed_us_region_refs_even_if_extra_proxy_shares_name() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4479,7 +4544,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_does_not_generate_landing_groups_for_extra_proxies() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4534,7 +4599,7 @@ fn build_mihomo_yaml_does_not_generate_landing_groups_for_extra_proxies() {
 
 #[test]
 fn build_mihomo_yaml_keeps_region_labeled_extra_proxies_in_managed_groups() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0\nrules: []\n".to_string(),
         extra_proxies_yaml: r#"
@@ -4589,7 +4654,7 @@ fn build_mihomo_yaml_keeps_region_labeled_extra_proxies_in_managed_groups() {
 
 #[test]
 fn build_mihomo_yaml_removes_template_landing_groups_when_base_missing() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4638,16 +4703,20 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_keeps_include_all_proxies_groups_without_direct_fallback() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Tokyo A", "example.com");
+    let u = user("alice");
+    let n = node(
+        fixture_node_n1(),
+        fixture_label_tokyo_a,
+        fixture_host_example(),
+    );
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4695,16 +4764,16 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_injects_direct_when_relay_group_has_no_provider_candidates() {
-    let u = user("u1", "alice");
-    let n = node("n1", "Only US", "us.example.com");
+    let u = user("alice");
+    let n = node(fixture_node_n1(), fixture_label_only_us, fixture_host_us());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0
 rules: []
@@ -4733,7 +4802,7 @@ rules: []
 
     let relay = groups
         .iter()
-        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ us-example-com"))
+        .find(|group| group.get("name").and_then(Value::as_str) == Some("🛣️ us-fixture-test"))
         .expect("relay group should exist");
     let proxies = relay
         .get("proxies")
@@ -4744,7 +4813,7 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_builtin_outbound_refs() {
-    let u = user("u1", "alice");
+    let u = user("alice");
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4784,42 +4853,20 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_remaps_supported_legacy_proxy_refs_and_prunes_old_region_refs() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
-    let n2 = node("n2", "Beta", "beta.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
+    let n2 = node(fixture_node_n2(), fixture_label_beta, fixture_host_beta());
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
-        endpoint_ss("e3", "n2", "ss", 443, "BBBBBBBBBBBBBBBBBBBBBB=="),
-        endpoint_vless(
-            "e4",
-            "n2",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
+        endpoint_ss("e3", "n2", "ss", 443, endpoint_server_psk_b64_alternate()),
+        endpoint_vless("e4", "n2", "vless", 8443, VlessFixtureMode::Standard),
     ];
     let memberships = vec![
-        membership("u1", "n1", "e1"),
-        membership("u1", "n1", "e2"),
-        membership("u1", "n2", "e3"),
-        membership("u1", "n2", "e4"),
+        membership("n1", "e1"),
+        membership("n1", "e2"),
+        membership("n2", "e3"),
+        membership("n2", "e4"),
     ];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
@@ -4895,24 +4942,13 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_prunes_legacy_chain_refs_even_when_generated_count_is_smaller() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![
-        endpoint_ss("e1", "n1", "ss", 443, "AAAAAAAAAAAAAAAAAAAAAA=="),
-        endpoint_vless(
-            "e2",
-            "n1",
-            "vless",
-            8443,
-            serde_json::json!({
-              "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-              "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-              "short_ids": ["0123456789abcdef"],
-              "active_short_id": "0123456789abcdef"
-            }),
-        ),
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
     ];
-    let memberships = vec![membership("u1", "n1", "e1"), membership("u1", "n1", "e2")];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -4977,16 +5013,16 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_chain_suffixes() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_ss(
         "e1",
         "n1",
         "ss",
         443,
-        "AAAAAAAAAAAAAAAAAAAAAA==",
+        endpoint_server_psk_b64(),
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -5041,21 +5077,16 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_preserves_extra_proxy_refs_with_reality_suffixes() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        }),
+        VlessFixtureMode::Standard,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -5120,21 +5151,16 @@ rules: []
 
 #[test]
 fn build_mihomo_yaml_dedupes_all_proxy_refs_in_groups() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        }),
+        VlessFixtureMode::Standard,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 port: 0
@@ -5189,21 +5215,16 @@ mod mihomo_smux;
 
 #[test]
 fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {
-    let u = user("u1", "alice");
-    let n1 = node("n1", "Alpha", "alpha.example.com");
+    let u = user("alice");
+    let n1 = node(fixture_node_n1(), fixture_label_alpha, fixture_host_alpha());
     let endpoints = vec![endpoint_vless(
         "e1",
         "n1",
         "vless",
         8443,
-        serde_json::json!({
-          "reality": {"dest": "example.com:443", "server_names": ["sni.example.com"], "fingerprint": "chrome"},
-          "reality_keys": {"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "public_key": "PBK"},
-          "short_ids": ["0123456789abcdef"],
-          "active_short_id": "0123456789abcdef"
-        }),
+        VlessFixtureMode::Standard,
     )];
-    let memberships = vec![membership("u1", "n1", "e1")];
+    let memberships = vec![membership("n1", "e1")];
     let profile = UserMihomoProfile {
         mixin_yaml: r#"
 proxy-group:

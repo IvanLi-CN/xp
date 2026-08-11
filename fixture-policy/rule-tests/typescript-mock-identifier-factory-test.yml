@@ -1,0 +1,23 @@
+id: fixture-policy-typescript-mock-identifier-factory
+valid:
+  - |
+    const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+    const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
+    const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+    const nextUserId = fixtureCatalog.identifier.createUserIdFactory();
+    const state = {
+      nextEndpointId,
+      nextEndpointTag,
+      nextSubscriptionToken,
+      nextUserId,
+    };
+invalid:
+  - |
+    const nextEndpointId = () => process.env.ENDPOINT_ID;
+  - |
+    const nextEndpointTag = () => `tag-${counter}`;
+  - |
+    const nextUserId = () => userId;
+  - |
+    const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+    const state = { nextEndpointId: () => process.env.ENDPOINT_ID };

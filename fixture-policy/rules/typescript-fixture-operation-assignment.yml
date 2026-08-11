@@ -1,0 +1,29 @@
+id: fixture-policy-typescript-operation-assignment-source
+language: TypeScript
+severity: error
+message: Fixture operation field assignments must use a direct fixtureCatalog accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the adapter.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: assignment_expression
+    - has:
+        field: left
+        pattern: $OBJECT.$FIELD
+    - has:
+        field: right
+        not:
+          any:
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: 'null'
+constraints:
+  FIELD:
+    regex: '^(port|quotaLimitBytes|quota_limit_bytes|quotaReset|quota_reset)$'

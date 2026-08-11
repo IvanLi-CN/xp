@@ -1,15 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { AccessMatrix, type AccessMatrixCellState } from "./AccessMatrix";
 
 const NODES = [
-	{ nodeId: "n_01HnodeA", label: "node-a" },
-	{ nodeId: "n_01HnodeB", label: "node-b" },
-	{ nodeId: "n_01HnodeC", label: "node-c" },
-	{ nodeId: "n_01HnodeD", label: "node-d" },
+	{ nodeId: fixtureCatalog.nodeId.fixture187(), label: "node-a" },
+	{ nodeId: fixtureCatalog.nodeId.fixture188(), label: "node-b" },
+	{ nodeId: fixtureCatalog.nodeId.fixture189(), label: "node-c" },
+	{ nodeId: fixtureCatalog.nodeId.fixture190(), label: "node-d" },
 ];
 
 const PROTOCOLS = [
@@ -32,34 +33,57 @@ function createInitialCells(): Record<
 		n_01HnodeA: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: "node-a-vless" },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture191(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: "node-a-ss" },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture192(),
+				},
 			},
 		},
 		n_01HnodeB: {
 			vless_reality_vision_tcp: {
 				value: "on",
-				meta: { port: 443, tag: "node-b-vless" },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture193(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "on",
-				meta: { port: 8443, tag: "node-b-ss" },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture194(),
+				},
 			},
 		},
 		n_01HnodeC: {
 			vless_reality_vision_tcp: {
 				value: "off",
-				meta: { port: 443, tag: "node-c-vless" },
+				meta: {
+					port: fixtureCatalog.endpoint.port443(),
+					tag: fixtureCatalog.endpointTag.fixture195(),
+				},
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
 				meta: {
 					options: [
-						{ endpointId: "ep_01HSS1", tag: "node-c-ss-1", port: 8443 },
-						{ endpointId: "ep_01HSS2", tag: "node-c-ss-2", port: 9443 },
+						{
+							endpointId: fixtureCatalog.endpointId.fixture196(),
+							tag: fixtureCatalog.endpointTag.fixture197(),
+							port: fixtureCatalog.endpoint.port8443(),
+						},
+						{
+							endpointId: fixtureCatalog.endpointId.fixture198(),
+							tag: fixtureCatalog.endpointTag.fixture199(),
+							port: fixtureCatalog.endpoint.port9443(),
+						},
 					],
 				},
 			},
@@ -71,7 +95,10 @@ function createInitialCells(): Record<
 			},
 			ss2022_2022_blake3_aes_128_gcm: {
 				value: "off",
-				meta: { port: 8443, tag: "node-d-ss" },
+				meta: {
+					port: fixtureCatalog.endpoint.port8443(),
+					tag: fixtureCatalog.endpointTag.fixture200(),
+				},
 			},
 		},
 	};
@@ -100,7 +127,10 @@ function useDemoMatrixState() {
 				...meta,
 				selectedEndpointId: first.endpointId,
 				selectedEndpointIds: allEndpointIds,
-				port: first.port,
+				port:
+					first.port === fixtureCatalog.endpoint.port9443()
+						? fixtureCatalog.endpoint.port9443()
+						: fixtureCatalog.endpoint.port8443(),
 			},
 		};
 	}
@@ -216,7 +246,12 @@ function useDemoMatrixState() {
 					...cell.meta,
 					selectedEndpointId: firstSelected,
 					selectedEndpointIds: nextSelected,
-					port: firstMatch?.port,
+					port:
+						firstMatch?.port === fixtureCatalog.endpoint.port8443()
+							? fixtureCatalog.endpoint.port8443()
+							: firstMatch?.port === fixtureCatalog.endpoint.port9443()
+								? fixtureCatalog.endpoint.port9443()
+								: fixtureCatalog.optional.undefined(),
 				},
 			};
 			return next;

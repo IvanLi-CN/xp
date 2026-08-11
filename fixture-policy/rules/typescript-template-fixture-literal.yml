@@ -1,0 +1,18 @@
+id: fixture-policy-typescript-template-fixture-literal
+language: TypeScript
+severity: error
+message: Fixture templates must not embed operational endpoint or credential literals.
+note: Interpolate a direct fixtureCatalog accessor instead.
+files:
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: string_fragment
+    - regex: '(^[A-Za-z0-9]{16,}={0,2}$|[A-Za-z0-9-]+[.]example[.]com|[A-Za-z0-9_-]+:password)'
+    - inside:
+        stopBy: end
+        kind: template_string

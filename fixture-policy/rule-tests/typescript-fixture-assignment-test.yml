@@ -1,0 +1,31 @@
+id: fixture-policy-typescript-assignment-source
+valid:
+  - |
+    report.start_at = fixtureCatalog.timestamp.baseline();
+  - |
+    report.total_bytes = null;
+  - |
+    report.bootstrap_access_host = fixtureCatalog.host.primary();
+  - |
+    user.subscription_token = state.nextSubscriptionToken();
+invalid:
+  - |
+    report.start_at = "unapproved-timestamp";
+  - |
+    report.total_bytes = Number.parseInt(raw, 10);
+  - |
+    report.cycle_end_at = new Date().toISOString();
+  - |
+    report.bootstrap_api_base_url = "https://unapproved.fixture.test";
+  - |
+    endpoint.canary_upstream = payload.canary_upstream;
+  - |
+    user.priority_tier = payload.priority_tier;
+  - |
+    user.quota_reset = payload.quota_reset;
+  - |
+    report["priority_tier"] = "live-tier";
+  - |
+    report.requests_1h = payload.requests_1h;
+  - |
+    report.connection_starts_1h = payload.connection_starts_1h;

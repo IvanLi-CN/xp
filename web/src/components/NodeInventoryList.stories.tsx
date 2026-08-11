@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodeRuntimeListItem } from "../api/adminNodeRuntime";
 import {
@@ -7,27 +8,100 @@ import {
 	NodeInventoryList,
 } from "./NodeInventoryList";
 
-function buildRecentSlots(
-	startIso: string,
-	statuses: Array<"up" | "degraded" | "down" | "unknown">,
-) {
-	const start = Date.parse(startIso);
-	return statuses.map((status, index) => ({
-		slot_start: new Date(start + index * 30 * 60 * 1000).toISOString(),
-		status,
-	}));
+type RecentSlotStatus = "up" | "degraded" | "down" | "unknown";
+
+type RecentSlotStatuses = readonly [
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+	RecentSlotStatus,
+];
+
+function buildRecentSlots(statuses: RecentSlotStatuses) {
+	const [
+		slot0,
+		slot1,
+		slot2,
+		slot3,
+		slot4,
+		slot5,
+		slot6,
+		slot7,
+		slot8,
+		slot9,
+		slot10,
+		slot11,
+	] = statuses;
+
+	return [
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000400(),
+			status: slot0,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000500(),
+			status: slot1,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000600(),
+			status: slot2,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000700(),
+			status: slot3,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000800(),
+			status: slot4,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T000900(),
+			status: slot5,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001000(),
+			status: slot6,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001100(),
+			status: slot7,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001200(),
+			status: slot8,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001300(),
+			status: slot9,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001400(),
+			status: slot10,
+		},
+		{
+			slot_start: fixtureCatalog.timestamp.t20240101T001500(),
+			status: slot11,
+		},
+	];
 }
 
 const sampleNodes: AdminNodeRuntimeListItem[] = [
 	{
-		node_id: "01J000000000000000000000001",
-		node_name: "tokyo-edge-a",
-		api_base_url:
-			"https://tokyo-edge-a.example.invalid/admin/runtime/super/long/path",
-		access_host: "tokyo-edge-a.example.invalid",
+		node_id: fixtureCatalog.nodeId.fixture229(),
+		node_name: fixtureCatalog.nodeName.fixture280(),
+		api_base_url: fixtureCatalog.service.fixture281(),
+		access_host: fixtureCatalog.host.fixture282(),
 		summary: {
 			status: "up",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.timestamp.t20260303T120000(),
 		},
 		components: [
 			{
@@ -45,7 +119,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 0,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"degraded",
@@ -61,13 +135,13 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 		]),
 	},
 	{
-		node_id: "01J000000000000000000000002",
-		node_name: "",
-		api_base_url: "https://node-b.example.invalid",
-		access_host: "very-long-hostname-node-b.example.invalid",
+		node_id: fixtureCatalog.nodeId.fixture233(),
+		node_name: fixtureCatalog.host.fixture99(),
+		api_base_url: fixtureCatalog.service.fixture235(),
+		access_host: fixtureCatalog.host.fixture284(),
 		summary: {
 			status: "degraded",
-			updated_at: "2026-03-03T12:00:00Z",
+			updated_at: fixtureCatalog.timestamp.t20260303T120000(),
 		},
 		components: [
 			{
@@ -92,7 +166,7 @@ const sampleNodes: AdminNodeRuntimeListItem[] = [
 				restart_attempts: 2,
 			},
 		],
-		recent_slots: buildRecentSlots("2026-03-03T00:00:00Z", [
+		recent_slots: buildRecentSlots([
 			"up",
 			"up",
 			"down",

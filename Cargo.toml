@@ -84,3 +84,4 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
 wiremock = "0.6.5"
 x509-parser = "0.18"
+xp-test-fixtures = { path = "test-fixtures" }

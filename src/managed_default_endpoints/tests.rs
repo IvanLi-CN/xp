@@ -7,46 +7,62 @@ fn endpoint_vless(
     managed_default: Option<bool>,
 ) -> Endpoint {
     let mut meta = serde_json::json!({
-        "reality": {
-            "dest": "example.com:443",
-            "server_names": server_names,
-            "fingerprint": "chrome"
-        },
-        "reality_keys": {
-            "private_key": "private",
-            "public_key": "public"
-        },
-        "short_ids": ["0123456789abcdef"],
-        "active_short_id": "0123456789abcdef"
+        "reality": xp_test_fixtures::endpoint_reality(),
+        "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+        "short_ids": xp_test_fixtures::endpoint_short_ids(),
+        "active_short_id": xp_test_fixtures::endpoint_active_short_id()
     });
+    meta["reality"]["server_names"] = serde_json::json!(server_names);
     if let Some(value) = managed_default {
         meta["managed_default"] = serde_json::Value::Bool(value);
     }
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: "n1".to_string(),
-        tag: format!("vless-vision-{endpoint_id}"),
-        kind: EndpointKind::VlessRealityVisionTcp,
-        port,
-        meta,
+    match endpoint_id {
+        "e1" => Endpoint {
+            endpoint_id: xp_test_fixtures::subscription_endpoint_e1().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture507().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port,
+            meta,
+        },
+        "e2" => Endpoint {
+            endpoint_id: xp_test_fixtures::subscription_endpoint_e2().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture507().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port,
+            meta,
+        },
+        _ => panic!("unknown VLESS endpoint fixture: {endpoint_id}"),
     }
 }
 
 fn endpoint_ss(endpoint_id: &str, port: u16, managed_default: Option<bool>) -> Endpoint {
     let mut meta = serde_json::json!({
         "method": SS2022_METHOD_2022_BLAKE3_AES_128_GCM,
-        "server_psk_b64": "AAAAAAAAAAAAAAAAAAAAAA=="
+        "server_psk_b64": xp_test_fixtures::endpoint_server_psk_b64()
     });
     if let Some(value) = managed_default {
         meta["managed_default"] = serde_json::Value::Bool(value);
     }
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: "n1".to_string(),
-        tag: format!("ss2022-{endpoint_id}"),
-        kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-        port,
-        meta,
+    match endpoint_id {
+        "s1" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture510().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port,
+            meta,
+        },
+        "s2" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_ss2().to_owned(),
+            node_id: xp_test_fixtures::label_n1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture510().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port,
+            meta,
+        },
+        _ => panic!("unknown Shadowsocks endpoint fixture: {endpoint_id}"),
     }
 }
 
@@ -93,7 +109,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
         vless: Some(DefaultVlessEndpointSpec {
             port: 30443,
             reality_dest: "127.0.0.1:39043".to_string(),
-            server_names: vec!["example.com".to_string()],
+            server_names: xp_test_fixtures::host_list_edge31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         }),
@@ -112,7 +128,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
             &[endpoint],
             HostManagedDefaultEndpointsOptions {
                 explicit: &spec,
-                access_host: "node.example.com",
+                access_host: xp_test_fixtures::label_node_afixture_test(),
                 vless_canary_bind: bind,
             },
             &mut writer,
@@ -129,7 +145,10 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
                 serde_json::from_value(endpoint.meta.clone()).unwrap();
             assert!(meta.managed_default);
             assert_eq!(meta.reality.dest, "127.0.0.1:39043");
-            assert_eq!(meta.reality.server_names, vec!["example.com"]);
+            assert_eq!(
+                meta.reality.server_names,
+                xp_test_fixtures::host_list_edge31()
+            );
             assert_eq!(endpoint.port, 30445);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -143,7 +162,7 @@ async fn missing_managed_vless_bootstraps_at_explicit_port() {
         vless: Some(DefaultVlessEndpointSpec {
             port: 30445,
             reality_dest: "127.0.0.1:39043".to_string(),
-            server_names: vec!["node.example.com".to_string()],
+            server_names: xp_test_fixtures::host_list_edge30(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         }),
@@ -162,7 +181,7 @@ async fn missing_managed_vless_bootstraps_at_explicit_port() {
             &[],
             HostManagedDefaultEndpointsOptions {
                 explicit: &spec,
-                access_host: "node.example.com",
+                access_host: xp_test_fixtures::label_node_afixture_test(),
                 vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
             },
             &mut writer,
@@ -205,7 +224,7 @@ async fn existing_managed_ss_preserves_cluster_port_when_bootstrap_port_is_stale
             &[endpoint],
             HostManagedDefaultEndpointsOptions {
                 explicit: &spec,
-                access_host: "node.example.com",
+                access_host: xp_test_fixtures::label_node_afixture_test(),
                 vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
             },
             &mut writer,
@@ -226,7 +245,7 @@ async fn existing_managed_vless_preserves_cluster_port_when_bootstrap_port_is_st
         vless: Some(DefaultVlessEndpointSpec {
             port: 30443,
             reality_dest: "127.0.0.1:39043".to_string(),
-            server_names: vec!["node.example.com".to_string()],
+            server_names: xp_test_fixtures::host_list_edge30(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         }),
@@ -245,7 +264,7 @@ async fn existing_managed_vless_preserves_cluster_port_when_bootstrap_port_is_st
             &[endpoint],
             HostManagedDefaultEndpointsOptions {
                 explicit: &spec,
-                access_host: "node.example.com",
+                access_host: xp_test_fixtures::label_node_afixture_test(),
                 vless_canary_bind: "127.0.0.1:39043".parse().unwrap(),
             },
             &mut writer,
@@ -481,7 +500,7 @@ async fn persists_adopted_endpoint_ids_before_later_kind_fails() {
         vless: Some(DefaultVlessEndpointSpec {
             port: 53844,
             reality_dest: "127.0.0.1:39043".to_string(),
-            server_names: vec!["example.com".to_string()],
+            server_names: xp_test_fixtures::host_list_edge31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         }),
@@ -522,6 +541,9 @@ async fn persists_adopted_endpoint_ids_before_later_kind_fails() {
     );
     assert_eq!(writes.len(), 1);
     let state = load_managed_default_endpoints_state(tempdir.path()).unwrap();
-    assert_eq!(state.vless_endpoint_id.as_deref(), Some("e1"));
+    assert_eq!(
+        state.vless_endpoint_id.as_deref(),
+        Some(xp_test_fixtures::subscription_endpoint_e1())
+    );
     assert_eq!(state.ss_endpoint_id, None);
 }

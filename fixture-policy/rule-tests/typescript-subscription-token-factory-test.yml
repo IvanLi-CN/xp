@@ -1,0 +1,38 @@
+id: fixture-policy-typescript-subscription-token-factory
+valid:
+  - |
+    const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+  - |
+    let nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+    nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+  - |
+    async function handleRequest(
+      state: MockState,
+      req: Request,
+      nextSubscriptionToken: () => string,
+    ): Promise<Response> {
+      return new Response(nextSubscriptionToken());
+    }
+    function createMockApi() {
+      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+      return handleRequest(state, req, nextSubscriptionToken);
+    }
+invalid:
+  - |
+    const nextSubscriptionToken = () => process.env.TEST_TOKEN;
+  - |
+    let nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+    nextSubscriptionToken = () => process.env.TEST_TOKEN;
+  - |
+    function proxy(nextSubscriptionToken: () => string) {
+      return handleRequest(state, req, nextSubscriptionToken);
+    }
+  - |
+    function createMockApi(nextSubscriptionToken: () => string) {
+      return handleRequest(state, req, nextSubscriptionToken);
+    }
+  - |
+    function createMockApi() {
+      const nextSubscriptionToken = fixtureCatalog.identifier.createSubscriptionTokenFactory();
+      return handleRequest(state, req, () => process.env.TEST_TOKEN);
+    }

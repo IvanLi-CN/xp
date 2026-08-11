@@ -1,0 +1,72 @@
+id: fixture-policy-tsx-endpoint-kind
+snapshots:
+  ? |
+    const endpoint = {
+      endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+      port: fixtureCatalog.endpoint.port443(),
+      kind: "vless_reality_vision_tcp",
+    };
+  : labels:
+    - source: 'kind: "vless_reality_vision_tcp"'
+      style: primary
+      start: 124
+      end: 156
+    - source: kind
+      style: secondary
+      start: 124
+      end: 128
+    - source: endpoint_id
+      style: secondary
+      start: 21
+      end: 32
+    - source: 'endpoint_id: fixtureCatalog.identifier.endpointPrimary()'
+      style: secondary
+      start: 21
+      end: 77
+    - source: |-
+        {
+          endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+          port: fixtureCatalog.endpoint.port443(),
+          kind: "vless_reality_vision_tcp",
+        }
+      style: secondary
+      start: 17
+      end: 159
+    - source: '"vless_reality_vision_tcp"'
+      style: secondary
+      start: 130
+      end: 156
+  ? |
+    const endpoint = {
+      port: fixtureCatalog.endpoint.port8443(),
+      kind: process.env.TEST_ENDPOINT_KIND,
+    };
+  : labels:
+    - source: 'kind: process.env.TEST_ENDPOINT_KIND'
+      style: primary
+      start: 65
+      end: 101
+    - source: kind
+      style: secondary
+      start: 65
+      end: 69
+    - source: port
+      style: secondary
+      start: 21
+      end: 25
+    - source: 'port: fixtureCatalog.endpoint.port8443()'
+      style: secondary
+      start: 21
+      end: 61
+    - source: |-
+        {
+          port: fixtureCatalog.endpoint.port8443(),
+          kind: process.env.TEST_ENDPOINT_KIND,
+        }
+      style: secondary
+      start: 17
+      end: 104
+    - source: process.env.TEST_ENDPOINT_KIND
+      style: secondary
+      start: 71
+      end: 101

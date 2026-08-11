@@ -1,0 +1,92 @@
+id: fixture-policy-rust-inline-data-source
+language: Rust
+severity: error
+message: Inline Rust unit-test fixture data must use a direct xp_test_fixtures accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the Rust adapter.
+files:
+  - src/**/*.rs
+rule:
+  all:
+    - kind: field_initializer
+    - inside:
+        stopBy: end
+        pattern: |
+          mod $MODULE {
+            $$$
+          }
+    - has:
+        field: field
+        any:
+          - regex: '^(access_host|api_base_url|host|hostname|server_names|accepted_authorities|canary_upstream|node_id|node_name|owner_node_id|bootstrap_node_id|bootstrap_node_name|bootstrap_access_host|bootstrap_api_base_url|endpoint_id|endpoint_tag|subscription_token|token|token_id|secret|one_time_secret|password|cluster_ca_pem|first_seen_at|last_seen_at|last_probe_at|last_synced_at|last_ok_at|last_fail_at|down_since|last_restart_at|last_restart_fail_at|slot_start|observed_at|occurred_at|window_start|window_end|window_start_at|window_end_at|minute|start_minute|end_minute|created_at|updated_at|checked_at|connected_at|timestamp|start_at|end_at|latency_ms|probe_latency_ms|traffic_bytes|total_bytes|bytes|requests|connections|throughput|ip|public_ipv4|selected_public_ip|dest|destination|tag|bind|cluster_id|leader_api_base_url|mesh_url|mesh_base_url|public_base_url|generated_at|last_sample_at|last_transition_at|cycle_start_at|cycle_end_at|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|public_origin|run_id|config_hash|latest_checked_at|last_success_at)$'
+          - regex: '^(short_ids|active_short_id)$'
+          - regex: '^hour$'
+    # This rollback test must pass paths created by its temporary directory to the system under test.
+    - not:
+        inside:
+          stopBy: end
+          pattern: |
+            fn runtime_rollback_restores_both_binaries() {
+              $$$
+            }
+    - not:
+        inside:
+          stopBy: end
+          any:
+            # These test cases model elapsed transport windows with the SUT clock.
+            - pattern: |
+                fn mesh_transport_health_uses_the_five_minute_churn_threshold() {
+                  $$$
+                }
+            - pattern: |
+                fn mesh_transport_counts_are_bounded_to_the_requested_window() {
+                  $$$
+                }
+            - pattern: |
+                fn mesh_transport_status_is_optional_and_preserves_unknown_state() {
+                  $$$
+                }
+            - pattern: |
+                fn mesh_status_etag_tracks_reuse_evidence_but_not_generation_time() {
+                  $$$
+                }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^bootstrap_node_id$'
+          - has:
+              field: value
+              pattern: None
+          - inside:
+              stopBy: end
+              pattern: StoreInit { $$$ }
+    - not:
+        all:
+          - has:
+              field: field
+              regex: '^window_end_at$'
+          - has:
+              field: value
+              pattern: window_end_at.to_string()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: report_with_current_points
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()
+            - pattern: xp_test_fixtures::$ACCESSOR().into()
+            - pattern: Some(xp_test_fixtures::$ACCESSOR())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().to_owned())
+            - pattern: Some(xp_test_fixtures::$ACCESSOR().parse().unwrap())
+            - pattern: xp_test_fixtures::$ACCESSOR().parse().unwrap()
+constraints:
+  MODULE:
+    regex: '^[a-z_]*tests?$'

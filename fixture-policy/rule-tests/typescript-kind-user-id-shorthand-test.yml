@@ -1,0 +1,10 @@
+id: fixture-policy-typescript-kind-user-id-shorthand
+valid:
+  - 'const fixture = { kind: fixtureCatalog.endpoint.vlessKind() };'
+invalid:
+  - |
+    const kind = payload.kind;
+    const fixture = { kind };
+  - |
+    const user_id = payload.user_id;
+    const fixture = { user_id };

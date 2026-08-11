@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn upsert_vless_endpoint_preserves_missing_legacy_smux_field() {
     let mut state = PersistedState::empty();
-    let mut endpoint = vless_endpoint("endpoint_legacy", "node_1");
+    let endpoint_id = xp_test_fixtures::label_vless1();
+    let mut endpoint = vless_endpoint("vless_1", xp_test_fixtures::label_node1());
     endpoint
         .meta
         .as_object_mut()
@@ -17,7 +18,7 @@ fn upsert_vless_endpoint_preserves_missing_legacy_smux_field() {
     assert!(
         state
             .endpoints
-            .get("endpoint_legacy")
+            .get(endpoint_id)
             .and_then(|saved| saved.meta.get("mihomo_smux"))
             .is_none()
     );
@@ -26,10 +27,10 @@ fn upsert_vless_endpoint_preserves_missing_legacy_smux_field() {
 #[test]
 fn reality_domain_update_preserves_missing_legacy_smux_field() {
     let mut state = PersistedState::empty();
-    state
-        .nodes
-        .insert("node_1".to_string(), test_node("node_1"));
-    let mut endpoint = vless_endpoint("endpoint_global_legacy", "node_1");
+    let node_id = xp_test_fixtures::label_node1();
+    let endpoint_id = xp_test_fixtures::label_vless2();
+    state.nodes.insert(node_id.to_owned(), test_node(node_id));
+    let mut endpoint = vless_endpoint("vless_2", node_id);
     let object = endpoint.meta.as_object_mut().unwrap();
     object
         .get_mut("reality")
@@ -48,7 +49,7 @@ fn reality_domain_update_preserves_missing_legacy_smux_field() {
     DesiredStateCommand::CreateRealityDomain {
         domain: crate::domain::RealityDomain {
             domain_id: "domain_1".to_string(),
-            server_name: "global.example.com".to_string(),
+            server_name: xp_test_fixtures::primary_server_name().to_owned(),
             disabled_node_ids: BTreeSet::new(),
         },
     }
@@ -58,7 +59,7 @@ fn reality_domain_update_preserves_missing_legacy_smux_field() {
     assert!(
         state
             .endpoints
-            .get("endpoint_global_legacy")
+            .get(endpoint_id)
             .unwrap()
             .meta
             .get("mihomo_smux")

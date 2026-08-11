@@ -579,12 +579,21 @@ fn is_unspecified_ip(ip: &IpAddr) -> bool {
 mod tests {
     use super::*;
 
-    fn endpoint_view(id: &str, tag: &str, port: u16) -> TcpConnectionEndpointView {
+    fn endpoint_view_a() -> TcpConnectionEndpointView {
         TcpConnectionEndpointView {
-            node_id: "node-1".to_string(),
-            endpoint_id: id.to_string(),
-            endpoint_tag: tag.to_string(),
-            port,
+            node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+            endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+            endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
+            port: 443,
+        }
+    }
+
+    fn endpoint_view_b() -> TcpConnectionEndpointView {
+        TcpConnectionEndpointView {
+            node_id: xp_test_fixtures::label_node2().to_owned(),
+            endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+            endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
+            port: 8443,
         }
     }
 
@@ -598,16 +607,16 @@ mod tests {
             None,
             &[
                 TcpConnectionMinuteSample {
-                    node_id: "node-1".to_string(),
-                    endpoint_id: "ep-a".to_string(),
-                    endpoint_tag: "edge-a".to_string(),
+                    node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                     port: 443,
                     count: 3,
                 },
                 TcpConnectionMinuteSample {
-                    node_id: "node-1".to_string(),
-                    endpoint_id: "ep-b".to_string(),
-                    endpoint_tag: "edge-b".to_string(),
+                    node_id: xp_test_fixtures::label_node2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
                     port: 8443,
                     count: 1,
                 },
@@ -618,10 +627,7 @@ mod tests {
             &usage,
             minute,
             TcpConnectionUsageWindow::Hours24,
-            &[
-                endpoint_view("ep-a", "edge-a", 443),
-                endpoint_view("ep-b", "edge-b", 8443),
-            ],
+            &[endpoint_view_a(), endpoint_view_b()],
         );
         assert_eq!(report.endpoints.len(), 2);
         assert_eq!(report.per_endpoint_series.len(), 2);
@@ -651,9 +657,9 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: "node-1".to_string(),
-                endpoint_id: "ep-a".to_string(),
-                endpoint_tag: "edge-a".to_string(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 2,
             }],
@@ -663,14 +669,14 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: "node-1".to_string(),
-                endpoint_id: "ep-a".to_string(),
-                endpoint_tag: "edge-a".to_string(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 0,
             }],
         );
-        let counts = &usage.endpoints["ep-a"].counts;
+        let counts = &usage.endpoints[xp_test_fixtures::endpoint_fixtureinline_a()].counts;
         assert_eq!(counts[MINUTES_WINDOW - 2], 2);
         assert_eq!(counts[MINUTES_WINDOW - 1], 0);
     }
@@ -684,9 +690,9 @@ mod tests {
             true,
             None,
             &[TcpConnectionMinuteSample {
-                node_id: "node-1".to_string(),
-                endpoint_id: "ep-a".to_string(),
-                endpoint_tag: "edge-a".to_string(),
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                 port: 443,
                 count: 2,
             }],
@@ -706,24 +712,28 @@ mod tests {
             None,
             &[
                 TcpConnectionMinuteSample {
-                    node_id: "node-1".to_string(),
-                    endpoint_id: "ep-a".to_string(),
-                    endpoint_tag: "edge-a".to_string(),
+                    node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
                     port: 443,
                     count: 2,
                 },
                 TcpConnectionMinuteSample {
-                    node_id: "node-2".to_string(),
-                    endpoint_id: "ep-b".to_string(),
-                    endpoint_tag: "edge-b".to_string(),
+                    node_id: xp_test_fixtures::label_node2().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_fixtureinline_b().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_b().to_owned(),
                     port: 8443,
                     count: 1,
                 },
             ],
         );
-        assert!(usage.clear_endpoint("ep-a"));
-        assert!(usage.endpoints.contains_key("ep-b"));
-        assert!(usage.clear_node("node-2"));
+        assert!(usage.clear_endpoint(xp_test_fixtures::endpoint_fixtureinline_a()));
+        assert!(
+            usage
+                .endpoints
+                .contains_key(xp_test_fixtures::endpoint_fixtureinline_b())
+        );
+        assert!(usage.clear_node(xp_test_fixtures::label_node2()));
         assert!(usage.endpoints.is_empty());
     }
 

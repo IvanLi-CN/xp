@@ -77,7 +77,7 @@ fn store_init(data_dir: &Path, bootstrap_node_id: String, node_name: String) -> 
         bootstrap_node_id: Some(bootstrap_node_id),
         bootstrap_node_name: node_name,
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
 }
 
@@ -266,7 +266,7 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
     for i in 1..=node_count {
         metas.push(NodeMeta {
             name: format!("node-{i}"),
-            api_base_url: "https://127.0.0.1:62416".to_string(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: rpcs[i - 1].base_url.clone(),
         });
     }
@@ -290,7 +290,7 @@ async fn run_raft_cluster_replication_smoke(node_count: usize) -> anyhow::Result
     let user = User {
         user_id: "user-1".to_string(),
         display_name: "replication-smoke".to_string(),
-        subscription_token: "sub_test_token".to_string(),
+        subscription_token: xp_test_fixtures::label_sub_test_token().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::Monthly {
@@ -373,7 +373,7 @@ async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow:
         let rpc = spawn_raft_rpc_server(raft.raft()).await.context("rpc-1")?;
         let meta = NodeMeta {
             name: "node-1".to_string(),
-            api_base_url: "https://127.0.0.1:62416".to_string(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: rpc.base_url.clone(),
         };
 
@@ -385,7 +385,7 @@ async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow:
         let user = User {
             user_id: "user-restart".to_string(),
             display_name: "restart-smoke".to_string(),
-            subscription_token: "sub_test_token".to_string(),
+            subscription_token: xp_test_fixtures::label_sub_test_token().to_owned(),
             credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset: UserQuotaReset::Monthly {
@@ -444,7 +444,7 @@ async fn raft_single_node_restart_recovers_state_and_snapshot_files() -> anyhow:
         .context("restart rpc-1")?;
     let meta = NodeMeta {
         name: "node-1".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         raft_endpoint: rpc.base_url.clone(),
     };
     raft.initialize_single_node_if_needed(node_id, meta)

@@ -16,7 +16,7 @@ mod linux {
         let body = serde_json::json!({
           "tag_name": tag,
           "prerelease": false,
-          "published_at": "2026-01-20T00:00:00Z",
+          "published_at": xp_test_fixtures::release_current_timestamp(),
           "assets": [
             { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
             { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },
@@ -309,7 +309,7 @@ mod linux {
               {
                 "tag_name": "v0.1.998-rc.1",
                 "prerelease": true,
-                "published_at": "2026-01-19T00:00:00Z",
+                "published_at": xp_test_fixtures::release_previous_timestamp(),
                 "assets": [
                   { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
                   { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },
@@ -319,7 +319,7 @@ mod linux {
               {
                 "tag_name": "v0.1.999-rc.1",
                 "prerelease": true,
-                "published_at": "2026-01-20T00:00:00Z",
+                "published_at": xp_test_fixtures::release_current_timestamp(),
                 "assets": [
                   { "name": xp_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_asset) },
                   { "name": xp_ops_asset, "browser_download_url": format!("{}/download/{}", server.uri(), xp_ops_asset) },

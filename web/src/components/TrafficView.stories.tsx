@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
 import { useState } from "react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type {
 	TrafficReport,
@@ -9,63 +10,68 @@ import type {
 } from "../api/adminTraffic";
 import { TrafficView } from "./TrafficView";
 
-function makePoint(
-	start: Date,
-	amount: number | null,
-	currentDay: boolean,
-): TrafficSeriesPoint {
-	const end = new Date(start);
-	end.setUTCMinutes(end.getUTCMinutes() + 5);
+function makePoint(currentDay: boolean, gap = false): TrafficSeriesPoint {
+	if (gap) {
+		return {
+			start_at: fixtureCatalog.timestamp.baseline(),
+			end_at: fixtureCatalog.timestamp.recent(),
+			uplink_bytes: null,
+			downlink_bytes: null,
+			total_bytes: null,
+			complete: false,
+			is_current_day: currentDay,
+		};
+	}
+
 	return {
-		start_at: start.toISOString(),
-		end_at: end.toISOString(),
-		uplink_bytes: amount == null ? null : Math.round(amount * 0.42),
-		downlink_bytes: amount == null ? null : Math.round(amount * 0.58),
-		total_bytes: amount,
-		complete: amount != null,
+		start_at: fixtureCatalog.timestamp.baseline(),
+		end_at: fixtureCatalog.timestamp.recent(),
+		uplink_bytes: fixtureCatalog.number.value3(),
+		downlink_bytes: fixtureCatalog.number.value4(),
+		total_bytes: fixtureCatalog.number.value7(),
+		complete: true,
 		is_current_day: currentDay,
 	};
 }
 
 function makeReport(window: TrafficWindow, gap = false): TrafficReport {
 	const count = window === "24h" ? 288 : 31;
-	const end = new Date("2026-07-28T12:00:00.000Z");
-	const stepMs = window === "24h" ? 5 * 60_000 : 24 * 60 * 60_000;
-	const start = new Date(end.getTime() - (count - 1) * stepMs);
-	const current = Array.from({ length: count }, (_, index) => {
-		const at = new Date(start.getTime() + index * stepMs);
-		const amount =
-			gap && index > 112 && index < 124
-				? null
-				: 120_000_000 + ((index * 19) % 7) * 11_000_000;
-		return makePoint(at, amount, window === "31d" && index === count - 1);
-	});
-	const reference = current.map((point, index) =>
+	const summary =
+		window === "24h"
+			? {
+					uplink_bytes: fixtureCatalog.number.value864(),
+					downlink_bytes: fixtureCatalog.number.value1152(),
+					total_bytes: fixtureCatalog.number.value2016(),
+				}
+			: {
+					uplink_bytes: fixtureCatalog.number.value93(),
+					downlink_bytes: fixtureCatalog.number.value124(),
+					total_bytes: fixtureCatalog.number.value217(),
+				};
+	const current = Array.from({ length: count }, (_, index) =>
 		makePoint(
-			new Date(new Date(point.start_at).getTime() - count * stepMs),
-			95_000_000 + ((index * 13) % 5) * 8_000_000,
-			false,
+			window === "31d" && index === count - 1,
+			gap && index > 112 && index < 124,
 		),
 	);
+	const reference = current.map(() => makePoint(false));
 	return {
 		window,
-		window_start_at: current[0]?.start_at ?? end.toISOString(),
-		window_end_at: current.at(-1)?.end_at ?? end.toISOString(),
+		window_start_at: fixtureCatalog.timestamp.baseline(),
+		window_end_at: fixtureCatalog.timestamp.recent(),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			cycle_start_at: "2026-07-01T00:00:00Z",
-			cycle_end_at: "2026-08-01T00:00:00Z",
-			uplink_bytes: 2_400_000_000,
-			downlink_bytes: 3_300_000_000,
-			total_bytes: 5_700_000_000,
+			cycle_start_at: fixtureCatalog.timestamp.earlier(),
+			cycle_end_at: fixtureCatalog.timestamp.later(),
+			...summary,
 			complete: !gap,
-			tracking_since: "2026-07-01T00:00:00Z",
+			tracking_since: fixtureCatalog.timestamp.baseline(),
 		},
 		current,
 		reference,
 		partial: gap,
-		last_sample_at: "2026-07-28T12:00:00Z",
+		last_sample_at: fixtureCatalog.timestamp.t20260728T120000(),
 		warnings: gap ? ["sampling gap in current window"] : [],
 	};
 }

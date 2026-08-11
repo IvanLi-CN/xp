@@ -63,7 +63,7 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     let body = serde_json::json!({
         "tag_name": "v0.1.999",
         "prerelease": false,
-        "published_at": "2026-07-29T00:00:00Z",
+        "published_at": xp_test_fixtures::release_current_timestamp(),
         "assets": release_assets
     });
     for release_path in [
@@ -192,7 +192,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let release = serde_json::json!({
         "tag_name": "v0.1.999",
         "prerelease": false,
-        "published_at": "2026-07-29T00:00:00Z",
+        "published_at": xp_test_fixtures::release_current_timestamp(),
         "assets": release_assets,
     });
     for release_path in [

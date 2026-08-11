@@ -368,16 +368,18 @@ mod tests {
 
     #[test]
     fn mesh_availability_uses_only_the_last_24_hours() {
-        let now = Utc::now();
+        let now = xp_test_fixtures::baseline_timestamp()
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
         let peer = crate::mesh_telemetry::MeshPeerTelemetry {
             buckets: std::collections::VecDeque::from([
                 crate::mesh_telemetry::MeshTelemetryBucket {
-                    minute: (now - chrono::Duration::hours(25)).to_rfc3339(),
+                    minute: xp_test_fixtures::timestamp_at20231230_t230000_z().to_owned(),
                     mesh_success: 1,
                     ..Default::default()
                 },
                 crate::mesh_telemetry::MeshTelemetryBucket {
-                    minute: now.to_rfc3339(),
+                    minute: xp_test_fixtures::baseline_timestamp().to_owned(),
                     mesh_failure: 1,
                     ..Default::default()
                 },

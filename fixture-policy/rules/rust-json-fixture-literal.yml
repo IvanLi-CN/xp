@@ -1,0 +1,58 @@
+id: fixture-policy-rust-json-fixture-literal
+language: Rust
+severity: error
+message: Rust JSON fixture macros must use direct catalog accessors for operational data.
+note: Use a direct xp_test_fixtures accessor instead.
+files:
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+rule:
+  all:
+    - kind: macro_invocation
+    - not:
+        inside:
+          stopBy: end
+          pattern: |
+            async fn reality_domains_reject_invalid_server_names() {
+              $$$
+            }
+    - any:
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"reality".*"dest"\s*:
+            - not:
+                regex: >-
+                  "dest"\s*:\s*xp_test_fixtures::[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"(server_names|public_domain|server_name|hostname|service|origin_url)"\s*:
+            - not:
+                regex: >-
+                  "(server_names|public_domain|server_name|hostname|service|origin_url)"\s*:\s*xp_test_fixtures::[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"(private_key|public_key|short_ids|active_short_id)"\s*:
+            - not:
+                regex: >-
+                  "(private_key|public_key|short_ids|active_short_id)"\s*:\s*xp_test_fixtures::[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"(server_psk_b64|user_psk_b64|password)"\s*:
+            - not:
+                regex: >-
+                  "(server_psk_b64|user_psk_b64|password)"\s*:\s*xp_test_fixtures::[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"published_at"\s*:
+            - not:
+                regex: >-
+                  "published_at"\s*:\s*xp_test_fixtures::release_[A-Za-z0-9_]+\(\)
+        - all:
+            - regex: >-
+                (?xs) ^.*json\s*!\s*\(.*"browser_download_url"\s*:
+            - not:
+                regex: >-
+                  "browser_download_url"\s*:\s*(?:format!\(.*?server\.uri\(\).*?\)|xp_url|xp_ops_url|checksums_url)

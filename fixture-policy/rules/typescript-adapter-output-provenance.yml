@@ -1,0 +1,221 @@
+id: fixture-policy-typescript-adapter-output-provenance
+language: TypeScript
+severity: error
+message: Fixture adapter accessors must derive values from the checked-in catalog.
+files:
+  - web/src/fixture-policy/catalog.ts
+rule:
+  any:
+    - all:
+        - kind: function_declaration
+        - not:
+            any:
+              - pattern: |
+                  function createStringAccessors<Values extends Record<string, string>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => value]),
+                    ) as StringAccessors<Values>;
+                  }
+              - pattern: |
+                  function createNumberAccessors<Values extends Record<string, number>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => value]),
+                    ) as NumberAccessors<Values>;
+                  }
+              - pattern: |
+                  function createListAccessors<Values extends Record<string, string[]>>(
+                    values: Values,
+                  ) {
+                    return Object.fromEntries(
+                      Object.entries(values).map(([name, value]) => [name, () => [...value]]),
+                    ) as ListAccessors<Values>;
+                  }
+              - pattern: |
+                  function createSubscriptionTokenFactory() {
+                    let subscriptionTokenIndex = 0;
+                    return () => {
+                      const token = catalog.subscription.tokens[subscriptionTokenIndex];
+                      if (!token) {
+                        throw new Error("synthetic subscription token catalog exhausted");
+                      }
+                      subscriptionTokenIndex += 1;
+                      return token;
+                    };
+                  }
+              - pattern: |
+                  function createEndpointIdFactory() {
+                    let endpointIdIndex = 0;
+                    const endpointIds = Object.values(catalog.fixtures.strings.endpointId);
+                    return () => {
+                      const endpointId = endpointIds[endpointIdIndex];
+                      if (!endpointId) {
+                        throw new Error("synthetic endpoint ID catalog exhausted");
+                      }
+                      endpointIdIndex += 1;
+                      return endpointId;
+                    };
+                  }
+              - pattern: |
+                  function createEndpointTagFactory() {
+                    let endpointTagIndex = 0;
+                    const endpointTags = Object.values(catalog.fixtures.strings.endpointTag);
+                    return () => {
+                      const endpointTag = endpointTags[endpointTagIndex];
+                      if (!endpointTag) {
+                        throw new Error("synthetic endpoint tag catalog exhausted");
+                      }
+                      endpointTagIndex += 1;
+                      return endpointTag;
+                    };
+                  }
+              - pattern: |
+                  function createUserIdFactory() {
+                    let userIdIndex = 0;
+                    const userIds = [
+                      catalog.identifiers.userTertiary,
+                      catalog.identifiers.userQuaternary,
+                      catalog.identifiers.userQuinary,
+                    ];
+                    return () => {
+                      const userId = userIds[userIdIndex];
+                      if (!userId) {
+                        throw new Error("synthetic user ID catalog exhausted");
+                      }
+                      userIdIndex += 1;
+                      return userId;
+                    };
+                  }
+              - pattern: |
+                  function nextMeshPeerNodeId() {
+                    const nodeId = meshPeerNodeIds[meshPeerNodeIdIndex % meshPeerNodeIds.length];
+                    meshPeerNodeIdIndex += 1;
+                    return nodeId;
+                  }
+              - pattern: |
+                  function nextSubscriptionToken() {
+                    const token = catalog.subscription.tokens[nextSubscriptionTokenIndex];
+                    if (!token) {
+                      throw new Error("synthetic subscription token catalog exhausted");
+                    }
+                    nextSubscriptionTokenIndex += 1;
+                    return token;
+                  }
+    - kind: function_expression
+    - all:
+        - kind: arrow_function
+        - has:
+            field: parameters
+            not:
+              pattern: ()
+        - not:
+            inside:
+              stopBy: end
+              all:
+                - kind: function_declaration
+                - any:
+                  - regex: '^function create(?:StringAccessors|NumberAccessors|ListAccessors)'
+    - kind: method_definition
+    - all:
+        - kind: arrow_function
+        - not:
+            any:
+              - pattern: '([name, value]) => [name, () => value]'
+              - pattern: '() => value'
+              - pattern: '([name, value]) => [name, () => [...value]]'
+              - pattern: '() => [...value]'
+        - not:
+            all:
+              - inside:
+                  stopBy: end
+                  all:
+                    - kind: function_declaration
+                    - any:
+                        - regex: '^function create(?:SubscriptionTokenFactory|EndpointIdFactory|EndpointTagFactory|UserIdFactory)'
+                        - regex: '^function create(?:StringAccessors|NumberAccessors|ListAccessors)'
+        - not:
+            any:
+              - has:
+                  field: body
+                  regex: '^null$'
+              - has:
+                  field: body
+                  regex: '^undefined$'
+              - has:
+                  field: body
+                  regex: '^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+$'
+              - has:
+                  field: body
+                  regex: '^\[\s*\.\.\.catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+              - has:
+                  field: body
+                  regex: '(?s)^catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+(?:\s+as\s+.+)$'
+              - has:
+                  field: body
+                  regex: '^\[\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,?\s*\]$'
+              - has:
+                  field: body
+                  regex: '(?s)^\(\s*\{\s*url:\s*catalog(?:[.][A-Za-z_$][A-Za-z0-9_$]*|\[[^]]+\])+\s*,\s*mode:\s*"auto"\s+as\s+const\s*,?\s*\}\s*\)$'
+              - has:
+                  field: body
+                  regex: '^createSubscriptionTokenFactory\(\)$'
+              - has:
+                  field: body
+                  regex: '^createEndpointIdFactory\(\)$'
+              - has:
+                  field: body
+                  regex: '^createEndpointTagFactory\(\)$'
+              - has:
+                  field: body
+                  regex: '^createUserIdFactory\(\)$'
+              - has:
+                  field: body
+                  regex: '^catalog[.]operations[.]subscription[.]clashLines[.]join\("\\n"\)$'
+    - all:
+        - kind: call_expression
+        - any:
+            - pattern: createStringAccessors($VALUE)
+            - pattern: createNumberAccessors($VALUE)
+            - pattern: createListAccessors($VALUE)
+            - pattern: (createStringAccessors)($VALUE)
+            - pattern: (createNumberAccessors)($VALUE)
+            - pattern: (createListAccessors)($VALUE)
+            - pattern: createStringAccessors.call($RECEIVER, $VALUE)
+            - pattern: createNumberAccessors.call($RECEIVER, $VALUE)
+            - pattern: createListAccessors.call($RECEIVER, $VALUE)
+        - not:
+            any:
+              - pattern: createStringAccessors(catalog.fixtures.strings.$GROUP)
+              - pattern: createNumberAccessors(catalog.fixtures.numbers.value)
+              - pattern: createListAccessors(catalog.fixtures.stringLists.hostList)
+    - any:
+        - pattern: const $NAME = createStringAccessors
+        - pattern: const $NAME = createNumberAccessors
+        - pattern: const $NAME = createListAccessors
+        - pattern: const $NAME = (createStringAccessors)
+        - pattern: const $NAME = (createNumberAccessors)
+        - pattern: const $NAME = (createListAccessors)
+        - pattern: let $NAME = createStringAccessors
+        - pattern: let $NAME = createNumberAccessors
+        - pattern: let $NAME = createListAccessors
+        - pattern: let $NAME = (createStringAccessors)
+        - pattern: let $NAME = (createNumberAccessors)
+        - pattern: let $NAME = (createListAccessors)
+        - pattern: var $NAME = createStringAccessors
+        - pattern: var $NAME = createNumberAccessors
+        - pattern: var $NAME = createListAccessors
+        - pattern: var $NAME = (createStringAccessors)
+        - pattern: var $NAME = (createNumberAccessors)
+        - pattern: var $NAME = (createListAccessors)
+    - all:
+        - kind: assignment_expression
+        - any:
+            - pattern: $NAME = createStringAccessors
+            - pattern: $NAME = createNumberAccessors
+            - pattern: $NAME = createListAccessors
+            - pattern: $NAME = (createStringAccessors)
+            - pattern: $NAME = (createNumberAccessors)
+            - pattern: $NAME = (createListAccessors)

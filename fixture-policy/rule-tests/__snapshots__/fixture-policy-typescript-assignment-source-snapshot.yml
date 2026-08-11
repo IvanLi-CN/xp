@@ -1,0 +1,152 @@
+id: fixture-policy-typescript-assignment-source
+snapshots:
+  ? |
+    endpoint.canary_upstream = payload.canary_upstream;
+  : labels:
+    - source: endpoint.canary_upstream = payload.canary_upstream
+      style: primary
+      start: 0
+      end: 50
+    - source: endpoint.canary_upstream
+      style: secondary
+      start: 0
+      end: 24
+    - source: payload.canary_upstream
+      style: secondary
+      start: 27
+      end: 50
+  ? |
+    report.bootstrap_api_base_url = "https://unapproved.fixture.test";
+  : labels:
+    - source: report.bootstrap_api_base_url = "https://unapproved.fixture.test"
+      style: primary
+      start: 0
+      end: 65
+    - source: report.bootstrap_api_base_url
+      style: secondary
+      start: 0
+      end: 29
+    - source: '"https://unapproved.fixture.test"'
+      style: secondary
+      start: 32
+      end: 65
+  ? |
+    report.connection_starts_1h = payload.connection_starts_1h;
+  : labels:
+    - source: report.connection_starts_1h = payload.connection_starts_1h
+      style: primary
+      start: 0
+      end: 58
+    - source: report.connection_starts_1h
+      style: secondary
+      start: 0
+      end: 27
+    - source: payload.connection_starts_1h
+      style: secondary
+      start: 30
+      end: 58
+  ? |
+    report.cycle_end_at = new Date().toISOString();
+  : labels:
+    - source: report.cycle_end_at = new Date().toISOString()
+      style: primary
+      start: 0
+      end: 46
+    - source: report.cycle_end_at
+      style: secondary
+      start: 0
+      end: 19
+    - source: new Date().toISOString()
+      style: secondary
+      start: 22
+      end: 46
+  ? |
+    report.requests_1h = payload.requests_1h;
+  : labels:
+    - source: report.requests_1h = payload.requests_1h
+      style: primary
+      start: 0
+      end: 40
+    - source: report.requests_1h
+      style: secondary
+      start: 0
+      end: 18
+    - source: payload.requests_1h
+      style: secondary
+      start: 21
+      end: 40
+  ? |
+    report.start_at = "unapproved-timestamp";
+  : labels:
+    - source: report.start_at = "unapproved-timestamp"
+      style: primary
+      start: 0
+      end: 40
+    - source: report.start_at
+      style: secondary
+      start: 0
+      end: 15
+    - source: '"unapproved-timestamp"'
+      style: secondary
+      start: 18
+      end: 40
+  ? |
+    report.total_bytes = Number.parseInt(raw, 10);
+  : labels:
+    - source: report.total_bytes = Number.parseInt(raw, 10)
+      style: primary
+      start: 0
+      end: 45
+    - source: report.total_bytes
+      style: secondary
+      start: 0
+      end: 18
+    - source: Number.parseInt(raw, 10)
+      style: secondary
+      start: 21
+      end: 45
+  ? |
+    report["priority_tier"] = "live-tier";
+  : labels:
+    - source: report["priority_tier"] = "live-tier"
+      style: primary
+      start: 0
+      end: 37
+    - source: report["priority_tier"]
+      style: secondary
+      start: 0
+      end: 23
+    - source: '"live-tier"'
+      style: secondary
+      start: 26
+      end: 37
+  ? |
+    user.priority_tier = payload.priority_tier;
+  : labels:
+    - source: user.priority_tier = payload.priority_tier
+      style: primary
+      start: 0
+      end: 42
+    - source: user.priority_tier
+      style: secondary
+      start: 0
+      end: 18
+    - source: payload.priority_tier
+      style: secondary
+      start: 21
+      end: 42
+  ? |
+    user.quota_reset = payload.quota_reset;
+  : labels:
+    - source: user.quota_reset = payload.quota_reset
+      style: primary
+      start: 0
+      end: 38
+    - source: user.quota_reset
+      style: secondary
+      start: 0
+      end: 16
+    - source: payload.quota_reset
+      style: secondary
+      start: 19
+      end: 38

@@ -1,0 +1,146 @@
+id: fixture-policy-catalog-value-types
+language: Json
+severity: error
+message: Fixture catalog keys must retain their fixed JSON value types.
+files:
+  - fixture-policy/catalog.json
+rule:
+  any:
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("hosts"|"addresses"|"urls"|"identifiers"|"timestamps"|"metrics"|"operations"|"lists"|"fixtures"|"subscription")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("primary"|"secondary"|"tertiary"|"serverPrimary"|"serverSecondary"|"primaryIpv4"|"secondaryIpv4"|"tertiaryIpv4"|"loopback"|"loopback39043"|"loopback49043"|"primaryApi"|"secondaryApi"|"tertiaryApi"|"canaryHttpsListener"|"canaryHttpsAlternate"|"canaryHttpLoopback"|"publicFallback"|"publicOrigin"|"nodePrimary"|"nodeSecondary"|"nodeTertiary"|"nodeNamePrimary"|"nodeNameSecondary"|"nodeNameTertiary"|"endpointPrimary"|"endpointSecondary"|"endpointTertiary"|"userPrimary"|"userSecondary"|"userTertiary"|"userQuaternary"|"userQuinary"|"tokenPrimary"|"tokenSecondary"|"tokenTertiary"|"tokenQuaternary"|"tokenQuinary"|"probeRunPrimary"|"probeRunSecondary"|"probeConfigPrimary"|"clusterPrimary"|"endpointTagPrimary"|"endpointTagSecondary"|"endpointTagTertiary"|"endpointTagMissing"|"earlier"|"baseline"|"recent"|"later"|"probeHour"|"probeLatest")$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("latencyLow"|"latencyHigh"|"trafficBytes"|"availabilityLow"|"availabilityHigh"|"availabilityFull")$'
+        - has:
+            field: value
+            not:
+              kind: number
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("primaryServerNames"|"secondaryServerNames"|"tertiaryServerNames"|"loopbackServerNames"|"primaryAuthorities"|"tertiaryAuthorities"|"existingAuthoritiesPort443"|"existingAndHost119Port53844"|"host119Port53844"|"host126"|"host126Port443"|"host126Port53844"|"host130"|"host130Port443"|"host130Port8443"|"tokens"|"userIds")$'
+              - regex: '^"emptyAuthorities"$'
+        - has:
+            field: value
+            not:
+              kind: array
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("strings"|"numbers"|"stringLists"|"value"|"hostList")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: |-
+              (?x)^"(
+                node|nodeId|nodeName|endpoint|endpointId|endpointTag|token|cluster|
+                service|host|timestamp|address|url|identifier|label
+              )"$
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^"date"$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("endpoint"|"quota"|"user")$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("vlessKind"|"ssKind"|"activeShortId")$'
+              - regex: '^("serverPskB64"|"serverPskB64Alternate")$'
+              - regex: '^("serverPskB64Escaped"|"userPskB64"|"authority53844")$'
+              - regex: '^("authorityAlias"|"canaryH2c")$'
+              - regex: '^("resetSource"|"resetSourceNode"|"priorityTierPrimary")$'
+              - regex: '^("priorityTierDefault"|"priorityTierCreated")$'
+              - regex: '^("rawUri"|"providerSystemUrl")$'
+              - regex: '^("mihomoMirrorBase"|"healthSeoulA"|"healthShared")$'
+              - regex: '^("healthEndpointNode"|"healthXpNode")$'
+              - regex: '^("healthSubscribed"|"providerHost"|"providerPassword")$'
+              - regex: '^("dest"|"server_names_source")$'
+              - regex: '^("fingerprint"|"private_key"|"public_key"|"method")$'
+        - has:
+            field: value
+            not:
+              kind: string
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("port443"|"port444"|"port445"|"port8443"|"port8388")$'
+              - regex: '^("port9443"|"port53842"|"port53843"|"port53844")$'
+              - regex: '^("limitBytes"|"usedBytes"|"remainingBytes"|"fiveGiB"|"tenGiB")$'
+              - regex: '^("elevenGiB"|"fifteenGiB"|"fourGiB"|"oneGiB"|"credentialEpoch")$'
+        - has:
+            field: value
+            not:
+              kind: number
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            any:
+              - regex: '^("reality"|"realityAlternate"|"realityKeys"|"vlessMeta")$'
+              - regex: '^"realitySecondary"$'
+              - regex: '^("ssMeta"|"ssMetaAlternate"|"ssMetaEscaped")$'
+              - regex: '^("reset"|"resetNode"|"resetNodeMidMonth")$'
+              - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'
+              - regex: '^("resetUserMidMonth"|"resetUserUnlimited")$'
+              - regex: '^("resetUnlimited"|"resetUnlimitedRequest")$'
+              - regex: '^"resetUserMidMonth"$'
+        - has:
+            field: value
+            not:
+              kind: object
+    - all:
+        - kind: pair
+        - has:
+            field: key
+            regex: '^("server_names"|"shortIds"|"short_ids"|"clashLines")$'
+        - has:
+            field: value
+            not:
+              kind: array

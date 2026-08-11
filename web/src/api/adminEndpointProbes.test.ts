@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { AdminEndpointProbeHistoryResponseSchema } from "./adminEndpointProbes";
 
 describe("AdminEndpointProbeHistoryResponseSchema", () => {
 	it("accepts legacy probe history payloads without participating_nodes", () => {
 		const parsed = AdminEndpointProbeHistoryResponseSchema.parse({
-			endpoint_id: "endpoint-1",
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
 			expected_nodes: 2,
 			slots: [
 				{
-					hour: "2026-03-11T11:00:00Z",
+					hour: fixtureCatalog.timestamp.probeHour(),
 					status: "up",
 					ok_count: 2,
 					sample_count: 2,

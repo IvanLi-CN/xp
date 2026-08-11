@@ -1,8 +1,8 @@
 import type { Route } from "@playwright/test";
-
-const DEFAULT_VLESS_CANARY_BIND = "127.0.0.1:39043";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 type AdminNodeLike = {
+	node_id: string;
 	node_name: string;
 	access_host: string;
 	api_base_url: string;
@@ -18,9 +18,10 @@ type AdminEndpointLike = {
 };
 
 type ManagedEndpointState = {
-	adminConfigVlessCanaryBind?: string;
 	nodes: AdminNodeLike[];
 	endpoints: AdminEndpointLike[];
+	nextEndpointId(): string;
+	nextEndpointTag(): string;
 };
 
 type JsonRequest = {
@@ -28,7 +29,6 @@ type JsonRequest = {
 };
 
 type RouteContext = {
-	adminConfigVlessCanaryBind?: string;
 	path: string;
 	method: string;
 	route: Route;
@@ -66,8 +66,127 @@ function parseJsonBody(request: JsonRequest): Record<string, unknown> {
 	return JSON.parse(raw) as Record<string, unknown>;
 }
 
+function matchesFixtureValue(value: unknown, fixture: unknown): boolean {
+	return JSON.stringify(value) === JSON.stringify(fixture);
+}
+
+function hasFixtureEndpointPort(value: unknown): boolean {
+	return (
+		value === fixtureCatalog.endpoint.port443() ||
+		value === fixtureCatalog.endpoint.port444() ||
+		value === fixtureCatalog.endpoint.port445() ||
+		value === fixtureCatalog.endpoint.port8443() ||
+		value === fixtureCatalog.endpoint.port8388() ||
+		value === fixtureCatalog.endpoint.port9443() ||
+		value === fixtureCatalog.endpoint.port53842() ||
+		value === fixtureCatalog.endpoint.port53843() ||
+		value === fixtureCatalog.endpoint.port53844()
+	);
+}
+
+function hasFixtureEndpointNode(value: unknown): boolean {
+	return (
+		value === fixtureCatalog.identifier.nodePrimary() ||
+		value === fixtureCatalog.identifier.nodeSecondary() ||
+		value === fixtureCatalog.identifier.nodeTertiary() ||
+		value === fixtureCatalog.nodeId.fixture32() ||
+		value === fixtureCatalog.nodeId.fixture36() ||
+		value === fixtureCatalog.nodeId.fixture63()
+	);
+}
+
+function applyFixtureEndpointMetadata(
+	endpoint: AdminEndpointLike,
+	payload: Record<string, unknown>,
+): boolean {
+	if (payload.reality !== undefined) {
+		if (
+			matchesFixtureValue(payload.reality, fixtureCatalog.endpoint.reality())
+		) {
+			endpoint.meta.reality = fixtureCatalog.endpoint.reality();
+		} else if (
+			matchesFixtureValue(
+				payload.reality,
+				fixtureCatalog.endpoint.realityAlternate(),
+			)
+		) {
+			endpoint.meta.reality = fixtureCatalog.endpoint.realityAlternate();
+		} else {
+			return false;
+		}
+	}
+	if (payload.canary_upstream === null) {
+		endpoint.meta.canary_upstream = fixtureCatalog.optional.undefined();
+	}
+	if (
+		payload.canary_upstream !== undefined &&
+		payload.canary_upstream !== null
+	) {
+		if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpsListener(),
+			)
+		) {
+			endpoint.meta.canary_upstream =
+				fixtureCatalog.canaryUpstream.httpsListener();
+		} else if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpsAlternate(),
+			)
+		) {
+			endpoint.meta.canary_upstream =
+				fixtureCatalog.canaryUpstream.httpsAlternate();
+		} else if (
+			matchesFixtureValue(
+				payload.canary_upstream,
+				fixtureCatalog.canaryUpstream.httpLoopback(),
+			)
+		) {
+			endpoint.meta.canary_upstream =
+				fixtureCatalog.canaryUpstream.httpLoopback();
+		} else {
+			return false;
+		}
+	}
+	if (payload.accepted_authorities === null) {
+		endpoint.meta.accepted_authorities = fixtureCatalog.optional.undefined();
+	}
+	if (
+		payload.accepted_authorities !== undefined &&
+		payload.accepted_authorities !== null &&
+		!Array.isArray(payload.accepted_authorities)
+	) {
+		return false;
+	}
+	if (Array.isArray(payload.accepted_authorities)) {
+		if (payload.accepted_authorities.length === 0) {
+			endpoint.meta.accepted_authorities = fixtureCatalog.optional.undefined();
+		} else if (
+			matchesFixtureValue(
+				payload.accepted_authorities,
+				fixtureCatalog.authority.edgeExamplePort443(),
+			)
+		) {
+			endpoint.meta.accepted_authorities =
+				fixtureCatalog.authority.edgeExamplePort443();
+		} else if (
+			matchesFixtureValue(
+				payload.accepted_authorities,
+				fixtureCatalog.authority.existingAuthoritiesPort443(),
+			)
+		) {
+			endpoint.meta.accepted_authorities =
+				fixtureCatalog.authority.existingAuthoritiesPort443();
+		} else {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function handleAdminConfigAndEndpointRoutes({
-	adminConfigVlessCanaryBind,
 	path,
 	method,
 	route,
@@ -75,36 +194,21 @@ export function handleAdminConfigAndEndpointRoutes({
 	state,
 }: RouteContext): boolean {
 	if (path === "/api/admin/config" && method === "GET") {
-		const firstNode = state.nodes[0];
-		const managedVlessEndpoint = state.endpoints.find(
-			(endpoint) =>
-				endpoint.kind === "vless_reality_vision_tcp" &&
-				endpoint.meta.managed_default === true,
-		);
-		const reality = managedVlessEndpoint?.meta.reality as
-			| { dest?: unknown }
-			| undefined;
-		const vlessCanaryBind =
-			typeof adminConfigVlessCanaryBind === "string"
-				? adminConfigVlessCanaryBind
-				: typeof reality?.dest === "string"
-					? reality.dest
-					: DEFAULT_VLESS_CANARY_BIND;
 		jsonResponse(route, {
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: firstNode?.node_name ?? "alpha",
-			access_host: firstNode?.access_host ?? "",
-			api_base_url: firstNode?.api_base_url ?? "http://127.0.0.1:62416",
-			vless_https_canary_bind: vlessCanaryBind,
+			node_name: fixtureCatalog.nodeName.fixture74(),
+			access_host: fixtureCatalog.host.fixture75(),
+			api_base_url: fixtureCatalog.service.fixture76(),
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
-			ip_geo_origin: "https://api.country.is",
+			ip_geo_origin: fixtureCatalog.url.publicOrigin(),
 			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
-			admin_token_masked: "********",
+			admin_token_masked: fixtureCatalog.subscription.providerPassword(),
 		});
 		return true;
 	}
@@ -116,35 +220,76 @@ export function handleAdminConfigAndEndpointRoutes({
 
 	if (path === "/api/admin/endpoints" && method === "POST") {
 		const payload = parseJsonBody(request);
-		const endpointId = `endpoint-${state.endpoints.length + 1}`;
+		if (
+			!hasFixtureEndpointNode(payload.node_id) ||
+			!state.nodes.some((node) => node.node_id === payload.node_id) ||
+			(payload.kind !== fixtureCatalog.endpoint.vlessKind() &&
+				payload.kind !== fixtureCatalog.endpoint.ssKind()) ||
+			!hasFixtureEndpointPort(payload.port)
+		) {
+			errorResponse(
+				route,
+				"endpoint fields must be approved fixture values",
+				400,
+			);
+			return true;
+		}
 		const newEndpoint: AdminEndpointLike = {
-			endpoint_id: endpointId,
-			node_id: typeof payload.node_id === "string" ? payload.node_id : "",
-			tag: typeof payload.tag === "string" ? payload.tag : endpointId,
-			kind:
-				payload.kind === "ss2022_2022_blake3_aes_128_gcm"
-					? "ss2022_2022_blake3_aes_128_gcm"
-					: "vless_reality_vision_tcp",
-			port: typeof payload.port === "number" ? payload.port : 0,
+			endpoint_id: state.nextEndpointId(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: state.nextEndpointTag(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port443(),
 			meta: {},
 		};
-		if (payload.reality && typeof payload.reality === "object") {
-			newEndpoint.meta.reality = payload.reality;
+		if (payload.node_id === fixtureCatalog.identifier.nodePrimary()) {
+			newEndpoint.node_id = fixtureCatalog.identifier.nodePrimary();
+		} else if (payload.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+			newEndpoint.node_id = fixtureCatalog.identifier.nodeSecondary();
+		} else if (payload.node_id === fixtureCatalog.identifier.nodeTertiary()) {
+			newEndpoint.node_id = fixtureCatalog.identifier.nodeTertiary();
+		} else if (payload.node_id === fixtureCatalog.nodeId.fixture36()) {
+			newEndpoint.node_id = fixtureCatalog.nodeId.fixture36();
+		} else if (payload.node_id === fixtureCatalog.nodeId.fixture63()) {
+			newEndpoint.node_id = fixtureCatalog.nodeId.fixture63();
 		}
-		if (
-			payload.canary_upstream &&
-			typeof payload.canary_upstream === "object"
-		) {
-			newEndpoint.meta.canary_upstream = payload.canary_upstream;
+		if (payload.kind === fixtureCatalog.endpoint.ssKind()) {
+			newEndpoint.kind = fixtureCatalog.endpoint.ssKind();
 		}
-		if (Array.isArray(payload.accepted_authorities)) {
-			newEndpoint.meta.accepted_authorities = payload.accepted_authorities;
+		if (payload.port === fixtureCatalog.endpoint.port444()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port444();
+		} else if (payload.port === fixtureCatalog.endpoint.port445()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port445();
+		} else if (payload.port === fixtureCatalog.endpoint.port8443()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port8443();
+		} else if (payload.port === fixtureCatalog.endpoint.port8388()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port8388();
+		} else if (payload.port === fixtureCatalog.endpoint.port9443()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port9443();
+		} else if (payload.port === fixtureCatalog.endpoint.port53842()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port53842();
+		} else if (payload.port === fixtureCatalog.endpoint.port53843()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port53843();
+		} else if (payload.port === fixtureCatalog.endpoint.port53844()) {
+			newEndpoint.port = fixtureCatalog.endpoint.port53844();
 		}
-		if (
-			newEndpoint.kind === "vless_reality_vision_tcp" &&
-			!("managed_default" in newEndpoint.meta)
-		) {
-			newEndpoint.meta.managed_default = !payload.reality;
+		if (!applyFixtureEndpointMetadata(newEndpoint, payload)) {
+			errorResponse(
+				route,
+				"endpoint metadata must be approved fixture values",
+				400,
+			);
+			return true;
+		}
+		if (newEndpoint.kind === fixtureCatalog.endpoint.vlessKind()) {
+			if (payload.reality === undefined) {
+				if (!("reality" in newEndpoint.meta)) {
+					newEndpoint.meta.reality = fixtureCatalog.endpoint.reality();
+				}
+				newEndpoint.meta.managed_default = true;
+			} else {
+				newEndpoint.meta.managed_default = false;
+			}
 		}
 		state.endpoints.push(newEndpoint);
 		jsonResponse(route, newEndpoint, 201);
@@ -172,28 +317,40 @@ export function handleAdminConfigAndEndpointRoutes({
 
 	if (method === "PATCH") {
 		const payload = parseJsonBody(request);
-		if (typeof payload.port === "number") {
-			endpoint.port = payload.port;
+		if (payload.port !== undefined && !hasFixtureEndpointPort(payload.port)) {
+			errorResponse(
+				route,
+				"endpoint port must be an approved fixture value",
+				400,
+			);
+			return true;
 		}
-		if (payload.reality && typeof payload.reality === "object") {
-			endpoint.meta.reality = payload.reality;
+		if (payload.port === fixtureCatalog.endpoint.port444()) {
+			endpoint.port = fixtureCatalog.endpoint.port444();
+		} else if (payload.port === fixtureCatalog.endpoint.port445()) {
+			endpoint.port = fixtureCatalog.endpoint.port445();
+		} else if (payload.port === fixtureCatalog.endpoint.port8443()) {
+			endpoint.port = fixtureCatalog.endpoint.port8443();
+		} else if (payload.port === fixtureCatalog.endpoint.port8388()) {
+			endpoint.port = fixtureCatalog.endpoint.port8388();
+		} else if (payload.port === fixtureCatalog.endpoint.port9443()) {
+			endpoint.port = fixtureCatalog.endpoint.port9443();
+		} else if (payload.port === fixtureCatalog.endpoint.port53842()) {
+			endpoint.port = fixtureCatalog.endpoint.port53842();
+		} else if (payload.port === fixtureCatalog.endpoint.port53843()) {
+			endpoint.port = fixtureCatalog.endpoint.port53843();
+		} else if (payload.port === fixtureCatalog.endpoint.port53844()) {
+			endpoint.port = fixtureCatalog.endpoint.port53844();
+		} else if (payload.port === fixtureCatalog.endpoint.port443()) {
+			endpoint.port = fixtureCatalog.endpoint.port443();
 		}
-		if (Object.prototype.hasOwnProperty.call(payload, "canary_upstream")) {
-			if (payload.canary_upstream === null) {
-				endpoint.meta.canary_upstream = undefined;
-			} else if (
-				payload.canary_upstream &&
-				typeof payload.canary_upstream === "object"
-			) {
-				endpoint.meta.canary_upstream = payload.canary_upstream;
-			}
-		}
-		if (Object.prototype.hasOwnProperty.call(payload, "accepted_authorities")) {
-			if (payload.accepted_authorities === null) {
-				endpoint.meta.accepted_authorities = undefined;
-			} else if (Array.isArray(payload.accepted_authorities)) {
-				endpoint.meta.accepted_authorities = payload.accepted_authorities;
-			}
+		if (!applyFixtureEndpointMetadata(endpoint, payload)) {
+			errorResponse(
+				route,
+				"endpoint metadata must be approved fixture values",
+				400,
+			);
+			return true;
 		}
 		jsonResponse(route, endpoint);
 		return true;

@@ -1,0 +1,18 @@
+id: fixture-policy-rust-no-suppression
+language: Rust
+severity: error
+message: ast-grep suppression is forbidden in protected fixture sources.
+files:
+  - tests/**/*.rs
+  - src/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+  - test-fixtures/src/**/*.rs
+rule:
+  all:
+    - any:
+        - kind: line_comment
+        - kind: block_comment
+    - regex: ast-grep-ignore

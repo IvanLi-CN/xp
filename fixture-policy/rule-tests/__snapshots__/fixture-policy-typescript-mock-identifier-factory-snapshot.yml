@@ -1,0 +1,67 @@
+id: fixture-policy-typescript-mock-identifier-factory
+snapshots:
+  ? |
+    const nextEndpointId = () => process.env.ENDPOINT_ID;
+  : labels:
+    - source: nextEndpointId = () => process.env.ENDPOINT_ID
+      style: primary
+      start: 6
+      end: 52
+    - source: nextEndpointId
+      style: secondary
+      start: 6
+      end: 20
+    - source: () => process.env.ENDPOINT_ID
+      style: secondary
+      start: 23
+      end: 52
+  ? |
+    const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+    const state = { nextEndpointId: () => process.env.ENDPOINT_ID };
+  : labels:
+    - source: '{ nextEndpointId: () => process.env.ENDPOINT_ID }'
+      style: primary
+      start: 90
+      end: 139
+    - source: nextEndpointId
+      style: secondary
+      start: 92
+      end: 106
+    - source: () => process.env.ENDPOINT_ID
+      style: secondary
+      start: 108
+      end: 137
+    - source: 'nextEndpointId: () => process.env.ENDPOINT_ID'
+      style: secondary
+      start: 92
+      end: 137
+  ? |
+    const nextEndpointTag = () => `tag-${counter}`;
+  : labels:
+    - source: nextEndpointTag = () => `tag-${counter}`
+      style: primary
+      start: 6
+      end: 46
+    - source: nextEndpointTag
+      style: secondary
+      start: 6
+      end: 21
+    - source: () => `tag-${counter}`
+      style: secondary
+      start: 24
+      end: 46
+  ? |
+    const nextUserId = () => userId;
+  : labels:
+    - source: nextUserId = () => userId
+      style: primary
+      start: 6
+      end: 31
+    - source: nextUserId
+      style: secondary
+      start: 6
+      end: 16
+    - source: () => userId
+      style: secondary
+      start: 19
+      end: 31

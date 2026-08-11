@@ -1,0 +1,12 @@
+id: fixture-policy-typescript-adapter-catalog-origin
+snapshots:
+  ? |
+    const catalog = { hosts: { primary: "live.example" } };
+    const primary = () => catalog.hosts.primary;
+  : labels:
+    - source: |
+        const catalog = { hosts: { primary: "live.example" } };
+        const primary = () => catalog.hosts.primary;
+      style: primary
+      start: 0
+      end: 101

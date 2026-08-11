@@ -1,0 +1,186 @@
+id: fixture-policy-typescript-data-source
+language: TypeScript
+severity: error
+message: Fixture operational data must be a direct fixtureCatalog accessor call.
+note: Add an approved synthetic accessor to the fixture adapter.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        any:
+          - regex: '^(accessHost|access_host|apiBaseUrl|api_base_url|host|hostname|serverNames|server_names|acceptedAuthorities|accepted_authorities|canaryUpstreamUrl|canary_upstream_url|canary_upstream|nodeId|node_id|nodeName|node_name|ownerNodeId|owner_node_id|bootstrapNodeId|bootstrap_node_id|bootstrapNodeName|bootstrap_node_name|bootstrapAccessHost|bootstrap_access_host|bootstrapApiBaseUrl|bootstrap_api_base_url|endpointId|endpoint_id|endpointTag|endpoint_tag|subscriptionToken|subscription_token|token|secret|password|ip|public_ipv4|selected_public_ip|dest|destination|xray_api_addr|tag|bind|cluster_id|leader_api_base_url|mesh_url|meshBaseUrl|mesh_base_url|publicBaseUrl|public_base_url|publicOrigin|runId|run_id|configHash|config_hash|shortIds|short_ids|activeShortId|active_short_id)$'
+          - regex: '^(port|quotaLimitBytes|quota_limit_bytes|quotaReset|quota_reset)$'
+          - regex: '^(firstSeenAt|first_seen_at|lastSeenAt|last_seen_at|lastProbeAt|last_probe_at|lastSyncedAt|last_synced_at|lastOkAt|last_ok_at|lastFailAt|last_fail_at|downSince|down_since|lastRestartAt|last_restart_at|lastRestartFailAt|last_restart_fail_at|slotStart|slot_start|observedAt|observed_at|occurredAt|occurred_at|windowStart|window_start|windowEnd|window_end|minute|startMinute|start_minute|endMinute|end_minute|createdAt|created_at|updatedAt|updated_at|checkedAt|checked_at|connectedAt|connected_at|generatedAt|generated_at|lastSampleAt|last_sample_at|lastTransitionAt|last_transition_at|lastConnectionStartedAt|last_connection_started_at|cycleStartAt|cycle_start_at|cycleEndAt|cycle_end_at|trackingSince|tracking_since|latestCheckedAt|latest_checked_at|lastSuccessAt|last_success_at|hour)$'
+          - regex: '^(latencyMs|latency_ms|probeLatencyMs|probe_latency_ms|latency_p50_ms|latency_p95_ms|availability_1h|availability_24h|mesh_availability_24h|connection_generation|current_connection_requests|requests_5m|connection_starts_5m|requests_1h|connection_starts_1h|trafficBytes|traffic_bytes|uplink_bytes|downlink_bytes|totalBytes|total_bytes|requests|connections|throughput)$'
+          - regex: '^(startedAt|started_at|finishedAt|finished_at)$'
+          - regex: '^(completedAt|completed_at|emittedAt|emitted_at)$'
+          - regex: '^(startAt|start_at|endAt|end_at)$'
+          - regex: '^(windowStartAt|window_start_at)$'
+          - regex: '^(windowEndAt|window_end_at)$'
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: state.nextEndpointId()
+            - pattern: state.nextEndpointTag()
+            - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextUserId()
+            - all:
+                - pattern: nextSubscriptionToken()
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                $OTHER_CONDITION ? fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR() :
+                fixtureCatalog.$THIRD_GROUP.$THIRD_ACCESSOR()
+            - pattern: 'null'
+            - all:
+                - pattern: seed.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: ensureEndpointRecord
+            - all:
+                - pattern: node.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          any:
+                            - pattern: buildNodeRuntimeListItem
+                            - pattern: buildNodeHistory
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildNodeRuntimeEventStream
+            - all:
+                - pattern: endpoint.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildUserAccessItem
+            - all:
+                - pattern: endpoint.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildNodeDeletePreviewEndpoint
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          any:
+                            - pattern: buildNodeDeletePreviewResponse
+                            - pattern: buildNodeEgressProbeRefreshResponse
+            - all:
+                - pattern: endpoint.endpoint_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureEndpointIdentifierResponse
+            - all:
+                - pattern: endpoint.endpoint_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserAccessItem
+            - all:
+                - pattern: endpoint.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserAccessItem
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserNodeWeightItem
+            - all:
+                - pattern: node.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildFixtureUserNodeWeightItem
+            - all:
+                - pattern: clusterInfo.node_id
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildStatusHelloResponse
+            - all:
+                - pattern: token
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildSubscriptionTokenResponse
+            - all:
+                - pattern: user.subscription_token
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
+            - pattern: catalogTimestampOffset($$$)

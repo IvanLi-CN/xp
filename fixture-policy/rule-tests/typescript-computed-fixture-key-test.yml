@@ -1,0 +1,49 @@
+id: fixture-policy-typescript-computed-fixture-key
+valid:
+  - |
+    const endpoint = {
+      kind: fixtureCatalog.endpoint.vlessKind(),
+      user_id: fixtureCatalog.identifier.userPrimary(),
+    };
+  - |
+    const users = {
+      [fixtureCatalog.identifier.userPrimary()]: [],
+    };
+invalid:
+  - |
+    const endpoint = {
+      ["kind"]: "vless_reality_vision_tcp",
+    };
+  - |
+    const user = {
+      ['user_id']: payload.user_id,
+    };
+  - |
+    const endpoint = {
+      [`kind`]: fixtureCatalog.endpoint.vlessKind(),
+    };
+  - |
+    const user = {
+      [`user_id`]: fixtureCatalog.identifier.userPrimary(),
+    };
+  - |
+    const endpoint = {
+      [kind]: fixtureCatalog.endpoint.vlessKind(),
+    };
+  - |
+    const user = {
+      [user_id]: fixtureCatalog.identifier.userPrimary(),
+    };
+  - |
+    const key = "kind";
+    const endpoint = {
+      [key]: payload.kind,
+    };
+  - |
+    const endpoint = {
+      ["k" + "ind"]: payload.kind,
+    };
+  - |
+    const endpoint = {
+      [name]: payload.kind,
+    };

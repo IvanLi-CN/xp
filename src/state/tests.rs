@@ -30,10 +30,10 @@ impl crate::inbound_ip_usage::GeoLookup for TestGeoLookup {
 fn test_init(tmp_dir: &Path) -> StoreInit {
     StoreInit {
         data_dir: tmp_dir.to_path_buf(),
-        bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
+        bootstrap_node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     }
 }
 
@@ -41,40 +41,75 @@ fn test_user(user_id: &str) -> User {
     User {
         user_id: user_id.to_string(),
         display_name: user_id.to_string(),
-        subscription_token: format!("sub_{user_id}"),
+        subscription_token: xp_test_fixtures::token_fixture512().to_owned(),
         credential_epoch: 0,
         priority_tier: UserPriorityTier::P2,
         quota_reset: UserQuotaReset::default(),
     }
 }
 
-fn test_node(node_id: &str) -> Node {
+fn test_node(_node_id: &str) -> Node {
     Node {
-        node_id: node_id.to_string(),
-        node_name: node_id.to_string(),
-        access_host: "localhost".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        node_name: xp_test_fixtures::label_node1().to_owned(),
+        access_host: xp_test_fixtures::host_fixture513().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     }
 }
 
-fn ss_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: node_id.to_string(),
-        tag: endpoint_id.to_string(),
-        kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-        port: 10_000,
-        meta: json!({}),
+fn ss_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
+    match endpoint_id {
+        "endpoint_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_endpoint1().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "endpoint_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_endpoint2().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_endpoint2().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "endpoint_3" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_endpoint3().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_endpoint3().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "ss_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_ss1().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        "ss_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_ss2().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_ss2().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 10_000,
+            meta: json!({}),
+        },
+        _ => panic!("unknown test SS endpoint {endpoint_id}"),
     }
 }
 
-fn vless_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
+fn vless_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "example.com:443".to_string(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::address_loopback_port39514().to_owned(),
+            server_names: xp_test_fixtures::host_list_edge31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -82,21 +117,32 @@ fn vless_endpoint(endpoint_id: &str, node_id: &str) -> Endpoint {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
-    Endpoint {
-        endpoint_id: endpoint_id.to_string(),
-        node_id: node_id.to_string(),
-        tag: endpoint_id.to_string(),
-        kind: EndpointKind::VlessRealityVisionTcp,
-        port: 443,
-        meta: serde_json::to_value(meta).unwrap(),
+    match endpoint_id {
+        "vless_1" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_vless1().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        },
+        "vless_2" => Endpoint {
+            endpoint_id: xp_test_fixtures::label_vless2().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::label_vless2().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::to_value(meta).unwrap(),
+        },
+        _ => panic!("unknown test VLESS endpoint {endpoint_id}"),
     }
 }
 
@@ -105,10 +151,10 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
     state.nodes.insert(
         "node_keep".to_string(),
         Node {
-            node_id: "node_keep".to_string(),
-            node_name: "keep".to_string(),
-            access_host: "keep.example.com".to_string(),
-            api_base_url: "https://keep.example.com".to_string(),
+            node_id: xp_test_fixtures::label_node_keep().to_owned(),
+            node_name: xp_test_fixtures::label_keep().to_owned(),
+            access_host: xp_test_fixtures::host_fixture516().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture517().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -116,9 +162,9 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_keep".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node_keep().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -140,12 +186,12 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
         EndpointProbeNodeSample {
             ok: true,
             skipped: false,
-            checked_at: "2026-03-11T11:05:00Z".to_string(),
-            latency_ms: Some(120),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t083900_z().to_owned(),
+            latency_ms: xp_test_fixtures::number_value22(),
             target_id: None,
             target_url: None,
             error: None,
-            config_hash: "cfg".to_string(),
+            config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
         },
     );
     bucket.by_node.insert(
@@ -153,12 +199,12 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
         EndpointProbeNodeSample {
             ok: true,
             skipped: false,
-            checked_at: "2026-03-11T11:06:00Z".to_string(),
-            latency_ms: Some(140),
+            checked_at: xp_test_fixtures::timestamp_at20240101_t084000_z().to_owned(),
+            latency_ms: xp_test_fixtures::number_value23(),
             target_id: None,
             target_url: None,
             error: None,
-            config_hash: "cfg".to_string(),
+            config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
         },
     );
     state
@@ -201,11 +247,11 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
         serde_json::to_vec_pretty(&serde_json::json!({
           "schema_version": 1,
           "nodes": {
-            "node_1": {
-              "node_id": "node_1",
-              "node_name": "node-1",
-              "public_domain": "example.com",
-              "api_base_url": "https://127.0.0.1:62416"
+            xp_test_fixtures::primary_node_id(): {
+              "node_id": xp_test_fixtures::primary_node_id(),
+              "node_name": xp_test_fixtures::primary_node_name(),
+              "public_domain": xp_test_fixtures::primary_host(),
+              "api_base_url": xp_test_fixtures::primary_api_url()
             }
           }
         }))
@@ -216,21 +262,21 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
     let store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: data_dir.to_path_buf(),
         bootstrap_node_id: None,
-        bootstrap_node_name: "node-1".to_string(),
+        bootstrap_node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
         bootstrap_access_host: "".to_string(),
-        bootstrap_api_base_url: "https://127.0.0.1:62416".to_string(),
+        bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
     })
     .unwrap();
-
     assert_eq!(store.state().schema_version, SCHEMA_VERSION);
-    let node = store.state().nodes.get("node_1").unwrap();
-    assert_eq!(node.access_host, "example.com");
-
+    let nodes = &store.state().nodes;
+    let node = nodes.get(xp_test_fixtures::primary_node_id()).unwrap();
+    assert_eq!(node.access_host, xp_test_fixtures::primary_host());
     let bytes = fs::read(&state_path).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved["schema_version"], SCHEMA_VERSION);
-    assert!(saved["nodes"]["node_1"].get("access_host").is_some());
-    assert!(saved["nodes"]["node_1"].get("public_domain").is_none());
+    let saved_node = &saved["nodes"][xp_test_fixtures::primary_node_id()];
+    assert!(saved_node.get("access_host").is_some());
+    assert!(saved_node.get("public_domain").is_none());
 }
 
 #[test]
@@ -270,12 +316,12 @@ fn load_or_init_persists_pruned_usage_memberships() {
         store.usage.memberships.insert(
             "stale_user::stale_endpoint".to_string(),
             MembershipUsage {
-                cycle_start_at: "2026-01-01T00:00:00Z".to_string(),
-                cycle_end_at: "2026-02-01T00:00:00Z".to_string(),
+                cycle_start_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                cycle_end_at: xp_test_fixtures::recent_timestamp().to_owned(),
                 used_bytes: 10,
                 last_uplink_total: 10,
                 last_downlink_total: 0,
-                last_seen_at: "2026-01-01T00:00:10Z".to_string(),
+                last_seen_at: xp_test_fixtures::timestamp_at20240101_t084100_z().to_owned(),
                 quota_banned: false,
                 quota_banned_at: None,
             },
@@ -314,10 +360,10 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
     state.nodes.insert(
         node_id.clone(),
         Node {
-            node_id: node_id.clone(),
-            node_name: "node-1".to_string(),
-            access_host: "".to_string(),
-            api_base_url: "https://127.0.0.1:62416".to_string(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+            access_host: xp_test_fixtures::label_empty().to_owned(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -325,9 +371,9 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
     state.endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
-            endpoint_id: endpoint_id.clone(),
-            node_id: node_id.clone(),
-            tag: "e1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            tag: xp_test_fixtures::label_endpoint2().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 31234,
             meta: json!({}),
@@ -338,7 +384,7 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
         User {
             user_id: user_id.clone(),
             display_name: "alice".to_string(),
-            subscription_token: "sub_1".to_string(),
+            subscription_token: xp_test_fixtures::label_sub1().to_owned(),
             credential_epoch: 0,
             priority_tier: UserPriorityTier::P2,
             quota_reset: UserQuotaReset::default(),
@@ -348,8 +394,8 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
         .node_user_endpoint_memberships
         .insert(NodeUserEndpointMembership {
             user_id: user_id.clone(),
-            node_id: node_id.clone(),
-            endpoint_id: endpoint_id.clone(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
         });
 
     let state_path = data_dir.join("state.json");
@@ -435,19 +481,19 @@ fn compat_noop_can_carry_node_egress_probe_state() {
     state.nodes.insert(
         "node-1".to_string(),
         Node {
-            node_id: "node-1".to_string(),
-            node_name: "Tokyo".to_string(),
-            access_host: "tokyo.example.com".to_string(),
-            api_base_url: "https://tokyo.example.com".to_string(),
+            node_id: xp_test_fixtures::node_id_fixture523().to_owned(),
+            node_name: xp_test_fixtures::label_tokyo().to_owned(),
+            access_host: xp_test_fixtures::host_fixture524().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture525().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
     );
     let probe = NodeEgressProbeState {
-        selected_public_ip: Some("203.0.113.8".to_string()),
+        selected_public_ip: Some(xp_test_fixtures::address_documentation192_0_2_127().to_owned()),
         subscription_region: NodeSubscriptionRegion::Taiwan,
-        checked_at: "2026-04-24T00:00:00Z".to_string(),
-        last_success_at: Some("2026-04-24T00:00:00Z".to_string()),
+        checked_at: xp_test_fixtures::timestamp_at20240101_t080800_z().to_owned(),
+        last_success_at: Some(xp_test_fixtures::timestamp_at20260424_t000000_z().to_owned()),
         ..NodeEgressProbeState::default()
     };
     let note = encode_node_egress_probe_compat_note("node-1", &probe).unwrap();
@@ -918,7 +964,7 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
     .unwrap();
 
     DesiredStateCommand::DeleteEndpoint {
-        endpoint_id: "ss_1".to_string(),
+        endpoint_id: xp_test_fixtures::label_ss1().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -947,17 +993,12 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
 fn upsert_vless_endpoint_manual_preserves_dest() {
     let mut state = PersistedState::empty();
 
-    let endpoint_id = "endpoint_1".to_string();
-    let node_id = "node_1".to_string();
+    let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "ignored.example.com:443".to_string(),
-            server_names: vec![
-                " b.example.com ".to_string(),
-                "a.example.com".to_string(),
-                "B.example.com".to_string(),
-            ],
+            dest: xp_test_fixtures::address_loopback_port39528().to_owned(),
+            server_names: xp_test_fixtures::host_list_edge_bfixture_test(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -965,18 +1006,18 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id,
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::label_vless_test().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -992,9 +1033,15 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
 
     assert_eq!(
         meta.reality.server_names,
-        vec!["b.example.com".to_string(), "a.example.com".to_string()]
+        vec![
+            "edge-b.fixture.test".to_string(),
+            "edge-a.fixture.test".to_string(),
+        ]
     );
-    assert_eq!(meta.reality.dest, "ignored.example.com:443");
+    assert_eq!(
+        meta.reality.dest,
+        xp_test_fixtures::address_loopback_port39528()
+    );
 }
 
 #[test]
@@ -1003,8 +1050,8 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: String::new(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::label_empty().to_owned(),
+            server_names: xp_test_fixtures::host_list_edge31(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -1012,18 +1059,18 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: "endpoint_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::label_vless_test().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1058,12 +1105,12 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         },
     ];
 
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: String::new(),
-            server_names: vec![],
+            dest: xp_test_fixtures::label_empty().to_owned(),
+            server_names: xp_test_fixtures::host_list_empty(),
             server_names_source: RealityServerNamesSource::Global,
             fingerprint: "chrome".to_string(),
         },
@@ -1071,18 +1118,18 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::label_vless_test().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1123,12 +1170,12 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         },
     ];
 
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "127.0.0.1:39043".to_string(),
-            server_names: vec![],
+            dest: xp_test_fixtures::address_loopback_port39531().to_owned(),
+            server_names: xp_test_fixtures::host_list_empty(),
             server_names_source: RealityServerNamesSource::Global,
             fingerprint: "chrome".to_string(),
         },
@@ -1136,18 +1183,18 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: true,
     };
 
     let endpoint = Endpoint {
-        endpoint_id: endpoint_id.clone(),
-        node_id: "node_1".to_string(),
-        tag: "vless-test".to_string(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::label_vless_test().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::to_value(meta).unwrap(),
@@ -1168,7 +1215,10 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
             "third.example.com".to_string()
         ]
     );
-    assert_eq!(meta.reality.dest, "127.0.0.1:39043");
+    assert_eq!(
+        meta.reality.dest,
+        xp_test_fixtures::address_loopback_port39531()
+    );
 }
 
 #[test]
@@ -1177,13 +1227,13 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
     let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
 
     let node_id = store.list_nodes()[0].node_id.clone();
-    let endpoint_id = "endpoint_1".to_string();
+    let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
     let kind = EndpointKind::VlessRealityVisionTcp;
 
     let meta = VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "example.com:443".to_string(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::address_loopback_port39514().to_owned(),
+            server_names: xp_test_fixtures::host_list_edge31(),
             server_names_source: Default::default(),
             fingerprint: "chrome".to_string(),
         },
@@ -1191,10 +1241,10 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
             private_key: "priv".to_string(),
             public_key: "pub".to_string(),
         },
-        short_ids: vec!["aaaaaaaaaaaaaaaa".to_string()],
-        active_short_id: "aaaaaaaaaaaaaaaa".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default: false,
     };
@@ -1204,9 +1254,9 @@ fn rotate_vless_reality_short_id_updates_meta_and_persists() {
     store.state_mut().endpoints.insert(
         endpoint_id.clone(),
         Endpoint {
-            endpoint_id: endpoint_id.clone(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
             node_id,
-            tag: endpoint_tag(&kind, &endpoint_id),
+            tag: xp_test_fixtures::label_ss2().to_owned(),
             kind,
             port: 443,
             meta: endpoint_meta,
@@ -1446,8 +1496,8 @@ fn record_inbound_ip_usage_samples_persists_minute_and_warning_state() {
                     membership_key: membership_key.clone(),
                     user_id: user.user_id,
                     node_id,
-                    endpoint_id: endpoint.endpoint_id,
-                    endpoint_tag: endpoint.tag,
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture533().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture534().to_owned(),
                     ips: vec!["203.0.113.7".to_string()],
                 }],
                 &resolver,
@@ -1500,17 +1550,17 @@ fn prune_and_clear_inbound_ip_usage_remove_stale_memberships() {
                 crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: valid_membership_key.clone(),
                     user_id: user.user_id,
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id.clone(),
-                    endpoint_tag: endpoint.tag.clone(),
+                    node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture456().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture535().to_owned(),
                     ips: vec!["203.0.113.7".to_string()],
                 },
                 crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: "stale-user::stale-endpoint".to_string(),
                     user_id: "stale-user".to_string(),
                     node_id,
-                    endpoint_id: "stale-endpoint".to_string(),
-                    endpoint_tag: "stale-tag".to_string(),
+                    endpoint_id: xp_test_fixtures::label_vless2().to_owned(),
+                    endpoint_tag: xp_test_fixtures::label_vless2().to_owned(),
                     ips: vec!["198.51.100.9".to_string()],
                 },
             ],
@@ -1570,10 +1620,10 @@ fn prune_and_clear_inbound_ip_usage_remove_stale_memberships() {
 fn desired_state_apply_upsert_node_inserts_node() {
     let mut state = PersistedState::empty();
     let node = Node {
-        node_id: "node_1".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "example.com".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture465().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1589,9 +1639,9 @@ fn desired_state_apply_upsert_node_inserts_node() {
 fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
     let mut state = PersistedState::empty();
     let endpoint = Endpoint {
-        endpoint_id: "ep_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "ss2022-ep_1".to_string(),
+        endpoint_id: xp_test_fixtures::endpoint_id_fixture538().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture539().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 443,
         meta: json!({"k":"v"}),
@@ -1605,7 +1655,7 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
     assert_eq!(state.endpoints.get(&endpoint.endpoint_id), Some(&endpoint));
 
     let out = DesiredStateCommand::DeleteEndpoint {
-        endpoint_id: endpoint.endpoint_id.clone(),
+        endpoint_id: xp_test_fixtures::endpoint_id_fixture538().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -1620,9 +1670,9 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
 fn desired_state_apply_rejects_invalid_port() {
     let mut state = PersistedState::empty();
     let endpoint = Endpoint {
-        endpoint_id: "ep_1".to_string(),
-        node_id: "node_1".to_string(),
-        tag: "ss2022-ep_1".to_string(),
+        endpoint_id: xp_test_fixtures::endpoint_id_fixture538().to_owned(),
+        node_id: xp_test_fixtures::label_node1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture539().to_owned(),
         kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
         port: 0,
         meta: json!({}),
@@ -1644,7 +1694,7 @@ fn desired_state_apply_user_create_reset_token_and_delete_are_deterministic() {
     let user = User {
         user_id: "user_1".to_string(),
         display_name: "alice".to_string(),
-        subscription_token: "sub_1".to_string(),
+        subscription_token: xp_test_fixtures::label_sub1().to_owned(),
         credential_epoch: 0,
         priority_tier: Default::default(),
         quota_reset: UserQuotaReset::default(),
@@ -1657,7 +1707,7 @@ fn desired_state_apply_user_create_reset_token_and_delete_are_deterministic() {
 
     let out = DesiredStateCommand::ResetUserSubscriptionToken {
         user_id: user.user_id.clone(),
-        subscription_token: "sub_2".to_string(),
+        subscription_token: xp_test_fixtures::label_sub2().to_owned(),
     }
     .apply(&mut state)
     .unwrap();
@@ -1699,13 +1749,13 @@ fn resolve_user_node_weight_uses_global_when_node_inherits() {
     .unwrap();
     DesiredStateCommand::SetUserNodeWeight {
         user_id: user.user_id.clone(),
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
         weight: 999,
     }
     .apply(store.state_mut())
     .unwrap();
     DesiredStateCommand::SetNodeWeightPolicy {
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
         inherit_global: true,
     }
     .apply(store.state_mut())
@@ -1728,7 +1778,7 @@ fn resolve_user_node_weight_uses_node_override_when_inherit_disabled() {
     .apply(store.state_mut())
     .unwrap();
     DesiredStateCommand::SetNodeWeightPolicy {
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
         inherit_global: false,
     }
     .apply(store.state_mut())
@@ -1739,7 +1789,7 @@ fn resolve_user_node_weight_uses_node_override_when_inherit_disabled() {
 
     DesiredStateCommand::SetUserNodeWeight {
         user_id: user.user_id.clone(),
-        node_id: node_id.clone(),
+        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
         weight: 999,
     }
     .apply(store.state_mut())
@@ -1755,7 +1805,7 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
         User {
             user_id: "user_1".to_string(),
             display_name: "alice".to_string(),
-            subscription_token: "sub_1".to_string(),
+            subscription_token: xp_test_fixtures::label_sub1().to_owned(),
             credential_epoch: 0,
             priority_tier: Default::default(),
             quota_reset: UserQuotaReset::default(),
@@ -1764,9 +1814,9 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -1775,7 +1825,7 @@ fn desired_state_apply_ensure_membership_is_idempotent() {
 
     let out = DesiredStateCommand::EnsureMembership {
         user_id: "user_1".to_string(),
-        endpoint_id: "endpoint_1".to_string(),
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
     };
     assert_eq!(
         out.apply(&mut state).unwrap(),
@@ -1875,9 +1925,9 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -1885,8 +1935,8 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
     );
 
     DesiredStateCommand::AppendEndpointProbeSamples {
-        hour: "2026-03-11T11:00:00Z".to_string(),
-        from_node_id: "node_2".to_string(),
+        hour: xp_test_fixtures::probe_hour().to_owned(),
+        from_node_id: xp_test_fixtures::node_id_fixture32().to_owned(),
         samples: Vec::new(),
     }
     .apply(&mut state)
@@ -1896,7 +1946,9 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
         state
             .endpoint_probe_participants_by_hour
             .get("2026-03-11T11:00:00Z"),
-        Some(&BTreeSet::from(["node_2".to_string()])),
+        Some(&BTreeSet::from([
+            xp_test_fixtures::node_id_fixture32().to_owned()
+        ])),
     );
     assert!(state.endpoint_probe_history.is_empty());
 }
@@ -1905,58 +1957,187 @@ fn desired_state_apply_append_endpoint_probe_samples_registers_participant_even_
 fn desired_state_apply_append_endpoint_probe_samples_prunes_participants_and_history() {
     let mut state = PersistedState::empty();
     state.endpoints.insert(
-        "endpoint_1".to_string(),
+        xp_test_fixtures::label_endpoint1().to_owned(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_1".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node1().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
         },
     );
 
-    for hour_idx in 0..25 {
-        let hour = format!("2026-03-{:02}T00:00:00Z", hour_idx + 1);
+    let sample = EndpointProbeAppendSample {
+        endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+        ok: true,
+        skipped: false,
+        checked_at: xp_test_fixtures::timestamp_at20260308_t003000_z().to_owned(),
+        latency_ms: Some(xp_test_fixtures::number_value22()),
+        target_id: None,
+        target_url: None,
+        error: None,
+        config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
+    };
+    let commands = [
         DesiredStateCommand::AppendEndpointProbeSamples {
-            hour: hour.clone(),
-            from_node_id: format!("node_{}", hour_idx + 1),
-            samples: vec![EndpointProbeAppendSample {
-                endpoint_id: "endpoint_1".to_string(),
-                ok: true,
-                skipped: false,
-                checked_at: format!("2026-03-{:02}T00:30:00Z", hour_idx + 1),
-                latency_ms: Some(100 + hour_idx as u32),
-                target_id: None,
-                target_url: None,
-                error: None,
-                config_hash: "cfg".to_string(),
-            }],
-        }
-        .apply(&mut state)
-        .unwrap();
+            hour: xp_test_fixtures::timestamp_at20240101_t000400000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture17().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t000500000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture32().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t000600000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture36().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t000700000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture56().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t000800000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture57().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t000900000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture63().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001000000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture69().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001100000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture70().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001200000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture72().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001300000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture73().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001400000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture77().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001500000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture93().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t001600000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture98().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t002100000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture106().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t002200000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture110().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t002300000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture113().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260308_t000000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture118().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260308_t000200_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture124().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260308_t000100_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture134().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260307_t010000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture145().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260308_t005900_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture149().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260308_t005800_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture153().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260131_t000000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture182().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20240101_t012100000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture187().to_owned(),
+            samples: vec![sample.clone()],
+        },
+        DesiredStateCommand::AppendEndpointProbeSamples {
+            hour: xp_test_fixtures::timestamp_at20260301_t000000_z().to_owned(),
+            from_node_id: xp_test_fixtures::node_id_fixture188().to_owned(),
+            samples: vec![sample],
+        },
+    ];
+    for command in commands {
+        command.apply(&mut state).unwrap();
     }
 
     let history = state
         .endpoint_probe_history
-        .get("endpoint_1")
+        .get(xp_test_fixtures::label_endpoint1())
         .expect("endpoint history");
     assert_eq!(history.hours.len(), ENDPOINT_PROBE_HOUR_BUCKET_LIMIT);
     assert_eq!(
         state.endpoint_probe_participants_by_hour.len(),
         ENDPOINT_PROBE_HOUR_BUCKET_LIMIT
     );
-    assert!(!history.hours.contains_key("2026-03-01T00:00:00Z"));
-    assert!(history.hours.contains_key("2026-03-25T00:00:00Z"));
+    assert!(
+        !history
+            .hours
+            .contains_key(xp_test_fixtures::timestamp_at20240101_t000400000_z())
+    );
+    assert!(
+        history
+            .hours
+            .contains_key(xp_test_fixtures::timestamp_at20260308_t000200_z())
+    );
     assert!(
         !state
             .endpoint_probe_participants_by_hour
-            .contains_key("2026-03-01T00:00:00Z")
+            .contains_key(xp_test_fixtures::timestamp_at20240101_t000400000_z())
     );
     assert!(
         state
             .endpoint_probe_participants_by_hour
-            .contains_key("2026-03-25T00:00:00Z")
+            .contains_key(xp_test_fixtures::timestamp_at20260308_t000200_z())
     );
 }
 
@@ -2001,12 +2182,12 @@ fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_sample
             EndpointProbeNodeSample {
                 ok: true,
                 skipped: false,
-                checked_at: "2026-03-11T11:10:00Z".to_string(),
-                latency_ms: Some(123),
+                checked_at: xp_test_fixtures::timestamp_at20240101_t090100_z().to_owned(),
+                latency_ms: xp_test_fixtures::number_value24(),
                 target_id: None,
                 target_url: None,
                 error: None,
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
     store
@@ -2023,12 +2204,12 @@ fn endpoint_probe_participants_for_hour_unions_participant_map_and_legacy_sample
             EndpointProbeNodeSample {
                 ok: false,
                 skipped: false,
-                checked_at: "2026-03-11T11:12:00Z".to_string(),
-                latency_ms: None,
+                checked_at: xp_test_fixtures::timestamp_at20240101_t090200_z().to_owned(),
+                latency_ms: xp_test_fixtures::none(),
                 target_id: None,
                 target_url: None,
                 error: Some("dial failed".to_string()),
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
 
@@ -2048,10 +2229,10 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.nodes.insert(
         "node_keep".to_string(),
         Node {
-            node_id: "node_keep".to_string(),
-            node_name: "keep".to_string(),
-            access_host: "keep.example.com".to_string(),
-            api_base_url: "https://keep.example.com".to_string(),
+            node_id: xp_test_fixtures::label_node_keep().to_owned(),
+            node_name: xp_test_fixtures::label_keep().to_owned(),
+            access_host: xp_test_fixtures::host_fixture516().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture517().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2059,10 +2240,10 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "drop".to_string(),
-            access_host: "drop.example.com".to_string(),
-            api_base_url: "https://drop.example.com".to_string(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            node_name: xp_test_fixtures::label_drop().to_owned(),
+            access_host: xp_test_fixtures::host_fixture544().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture545().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2070,9 +2251,9 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
     state.endpoints.insert(
         "endpoint_1".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_1".to_string(),
-            node_id: "node_keep".to_string(),
-            tag: "ss2022-endpoint_1".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
+            node_id: xp_test_fixtures::label_node_keep().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture518().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 443,
             meta: json!({}),
@@ -2095,17 +2276,17 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
             EndpointProbeNodeSample {
                 ok: true,
                 skipped: false,
-                checked_at: "2026-03-11T11:10:00Z".to_string(),
-                latency_ms: Some(123),
+                checked_at: xp_test_fixtures::timestamp_at20240101_t090100_z().to_owned(),
+                latency_ms: xp_test_fixtures::number_value24(),
                 target_id: None,
                 target_url: None,
                 error: None,
-                config_hash: "cfg".to_string(),
+                config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
             },
         );
 
     DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
     }
@@ -2127,10 +2308,10 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            node_name: xp_test_fixtures::label_node_drop().to_owned(),
+            access_host: xp_test_fixtures::host_fixture546().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2138,9 +2319,9 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
     state.endpoints.insert(
         "endpoint_drop".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_drop".to_string(),
-            node_id: "node_drop".to_string(),
-            tag: "endpoint-drop".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint_drop().to_owned(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            tag: xp_test_fixtures::label_endpoint_drop_variant2().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({}),
@@ -2152,7 +2333,7 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
         .or_default();
 
     let out = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_drop".to_string()],
     }
@@ -2177,10 +2358,10 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            node_name: xp_test_fixtures::label_node_drop().to_owned(),
+            access_host: xp_test_fixtures::host_fixture546().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -2188,9 +2369,9 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     state.endpoints.insert(
         "endpoint_new".to_string(),
         Endpoint {
-            endpoint_id: "endpoint_new".to_string(),
-            node_id: "node_drop".to_string(),
-            tag: "endpoint-new".to_string(),
+            endpoint_id: xp_test_fixtures::label_endpoint_new().to_owned(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            tag: xp_test_fixtures::label_endpoint_new_variant2().to_owned(),
             kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
             port: 8388,
             meta: serde_json::json!({}),
@@ -2198,7 +2379,7 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
     );
 
     let err = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
     }
@@ -2221,17 +2402,17 @@ fn desired_state_apply_delete_node_rejects_removed_preview_endpoint_set() {
     state.nodes.insert(
         "node_drop".to_string(),
         Node {
-            node_id: "node_drop".to_string(),
-            node_name: "node_drop".to_string(),
-            access_host: "node-drop.example.invalid".to_string(),
-            api_base_url: "https://node-drop.example.invalid".to_string(),
+            node_id: xp_test_fixtures::label_node_drop().to_owned(),
+            node_name: xp_test_fixtures::label_node_drop().to_owned(),
+            access_host: xp_test_fixtures::host_fixture546().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture547().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
     );
 
     let err = DesiredStateCommand::DeleteNode {
-        node_id: "node_drop".to_string(),
+        node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
     }

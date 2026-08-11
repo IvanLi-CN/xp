@@ -1,0 +1,80 @@
+id: fixture-policy-catalog-keys
+language: Json
+severity: error
+message: Fixture catalog keys must match the fixed schema.
+files:
+  - fixture-policy/catalog.json
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        not:
+          any:
+            - regex: '^"(hosts|addresses|urls|identifiers|timestamps|metrics|operations|fixtures)"$'
+            - regex: '^"(lists|subscription|endpoint|quota|user|reality|realityAlternate)"$'
+            - regex: '^"(realityKeys|vlessMeta|ssMeta|ssMetaAlternate|ssMetaEscaped)"$'
+            - regex: '^"realitySecondary"$'
+            - regex: '^"(shortIds|short_ids|reset|strings|numbers|stringLists|value|hostList)"$'
+            - regex: '^"(resetNode|resetNodeMidMonth|resetUnlimited)"$'
+            - regex: '^"(resetUnlimitedRequest|resetUserMidMonth)"$'
+            - regex: '^"(node|nodeId|nodeName|endpointId|endpointTag|token|cluster)"$'
+            - regex: '^"(service|host|timestamp|address|url|identifier|label)"$'
+            - regex: '^"fixture[A-Za-z0-9]+"$'
+            - regex: '^"t[0-9]{8}T[0-9]{6}"$'
+            - regex: '^"(loopback|loopback[0-9]+|loopbackPort[0-9]+)"$'
+            - regex: '^"documentation(?:192_0_2|198_51_100|203_0_113)_[0-9]+"$'
+            - regex: '^"(ulid[0-9A-Z]+|value[0-9]+(?:Point[0-9]+)?|edge[0-9]+|edgeBFixtureTest)"$'
+            - regex: '^"(?:https|tcp)[A-Za-z0-9]+"$'
+            - regex: '^"(publicPeerA|origin443)"$'
+            - regex: |-
+                (?x)^"(
+                  aardvark|alpha|beta|dashHost|dotHost|drop|e[1-4]|edgeAFixtureTest|
+                  empty|endpoint[1-3]|endpointDrop(?:Variant2)?|endpointMissing|
+                  endpointNew(?:Variant2)?|extraNode|fixtureDuplicate|hinet|hkl|japan|keep|
+                  mystery|n1|node[12]|node1Variant2|nodeA|nodeAFixtureTest(?:Variant2)?|
+                  nodeB|nodeBeta|nodeDrop|nodeKeep|nodeRemote|nodeUnreachable|nodebeta|
+                  onlyUs|osakaA|osakaB|peerA|peerAFixtureTest(?:Variant2)?|relayJapan|
+                  remoteA|sender|seoulA|singaporeA(?:Variant[23])?|ss[12]|ssE[24]|sub[12]|
+                  subTestToken|subUser1|target|tcpNode|tokyo|tokyoA(?:Variant[23])?|tokyoB|
+                  vless[12]|vlessE[13]|vlessTest|xpFixtureTest
+                )"$
+            - regex: '^"(nodeIds|endpointIds|userIds|tags|tokens|accessHosts|apiBases)"$'
+            - regex: '^"(primary|secondary|tertiary|serverPrimary|serverSecondary)"$'
+            - regex: '^"(primaryIpv4|secondaryIpv4|tertiaryIpv4|loopback)"$'
+            - regex: '^"(loopback39043|loopback49043|primaryApi|secondaryApi)"$'
+            - regex: '^"(tertiaryApi|canaryHttpsListener|canaryHttpsAlternate)"$'
+            - regex: '^"(canaryHttpLoopback|catchAllService|publicFallback|publicOrigin)"$'
+            - regex: '^"(nodePrimary|nodeSecondary|nodeTertiary|nodeNamePrimary)"$'
+            - regex: '^"(nodeNameSecondary|nodeNameTertiary|endpointPrimary)"$'
+            - regex: '^"(endpointSecondary|endpointTertiary|userPrimary|userSecondary)"$'
+            - regex: '^"(userTertiary|userQuaternary|userQuinary|tokenPrimary)"$'
+            - regex: '^"(tokenSecondary|tokenTertiary|tokenQuaternary|tokenQuinary)"$'
+            - regex: '^"(probeRunPrimary|probeRunSecondary|probeConfigPrimary|clusterPrimary)"$'
+            - regex: '^"(endpointTagPrimary|endpointTagSecondary|endpointTagTertiary)"$'
+            - regex: '^"(endpointTagMissing|earlier|baseline|recent|later)"$'
+            - regex: '^"(releasePrevious|releaseCurrent|releaseHttp|probeHour)"$'
+            - regex: '^"(probeLatest|date|latencyLow|latencyHigh|trafficBytes)"$'
+            - regex: '^"(availabilityLow|availabilityHigh|availabilityFull)"$'
+            - regex: '^"(vlessKind|ssKind|port443|port444|port445|port8443|port8388)"$'
+            - regex: '^"(port9443|port53842|port53843|port53844)"$'
+            - regex: '^"(activeShortId|serverPskB64|serverPskB64Alternate)"$'
+            - regex: '^"(serverPskB64Escaped|userPskB64)"$'
+            - regex: '^"(authority53844|authorityAlias|canaryH2c|limitBytes)"$'
+            - regex: '^"(usedBytes|remainingBytes)"$'
+            - regex: '^"(fiveGiB|tenGiB|elevenGiB|fifteenGiB|fourGiB|oneGiB)"$'
+            - regex: '^"(resetSource|resetSourceNode|credentialEpoch|priorityTierPrimary)"$'
+            - regex: '^"(priorityTierDefault|priorityTierCreated)"$'
+            - regex: '^"resetUserUnlimited"$'
+            - regex: '^"(rawUri|providerSystemUrl|mihomoMirrorBase|healthSeoulA)"$'
+            - regex: '^"(healthShared|healthEndpointNode|healthXpNode|healthSubscribed)"$'
+            - regex: '^"(clashLines|providerHost|providerPassword)"$'
+            - regex: '^"(dest|server_names|server_names_source|fingerprint|reality_keys)"$'
+            - regex: '^"(private_key|public_key|active_short_id|method|server_psk_b64)"$'
+            - regex: '^"(policy|day_of_month|tz_offset_minutes)"$'
+            - regex: '^"(primaryServerNames|secondaryServerNames|tertiaryServerNames)"$'
+            - regex: '^"emptyAuthorities"$'
+            - regex: '^"(loopbackServerNames|primaryAuthorities|tertiaryAuthorities)"$'
+            - regex: '^"(existingAuthoritiesPort443|existingAndHost119Port53844)"$'
+            - regex: '^"(host119Port53844|host126|host126Port443|host126Port53844)"$'
+            - regex: '^"(host130|host130Port443|host130Port8443)"$'

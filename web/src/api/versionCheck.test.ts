@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { VersionCheckResponseSchema, fetchVersionCheck } from "./versionCheck";
 
 const comparableResponse = {
 	current: { package: "0.1.0", release_tag: "v0.1.0" },
-	latest: { release_tag: "v0.2.0", published_at: "2026-01-31T00:00:00Z" },
+	latest: {
+		release_tag: "v0.2.0",
+		published_at: fixtureCatalog.timestamp.t20260131T000000(),
+	},
 	has_update: true,
-	checked_at: "2026-01-31T00:00:00Z",
+	checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 	compare_reason: "semver",
 	source: {
 		kind: "github-releases",
@@ -33,7 +37,7 @@ describe("VersionCheckResponseSchema", () => {
 			current: { package: "0.1.0", release_tag: "v0.1.0" },
 			latest: { release_tag: "main" },
 			has_update: null,
-			checked_at: "2026-01-31T00:00:00Z",
+			checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 			compare_reason: "uncomparable",
 			source: {
 				kind: "github-releases",

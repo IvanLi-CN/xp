@@ -1,0 +1,11 @@
+id: fixture-policy-rust-no-suppression
+valid:
+  - |
+    let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };
+invalid:
+  - |
+    // ast-grep-ignore: fixture-policy-rust-data-source
+    let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };
+  - |
+    /* ast-grep-ignore: fixture-policy-rust-data-source */
+    let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };

@@ -1,0 +1,18 @@
+id: fixture-policy-typescript-kind-user-id-shorthand
+snapshots:
+  ? |
+    const kind = payload.kind;
+    const fixture = { kind };
+  : labels:
+    - source: kind
+      style: primary
+      start: 45
+      end: 49
+  ? |
+    const user_id = payload.user_id;
+    const fixture = { user_id };
+  : labels:
+    - source: user_id
+      style: primary
+      start: 51
+      end: 58

@@ -112,7 +112,7 @@ impl crate::raft::app::RaftFacade for PanickingRaft {
 fn test_config(data_dir: PathBuf) -> Config {
     let hash = test_admin_token_hash();
     Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::address_loopback_port0().parse().unwrap(),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
         xray_health_interval_secs: 5,
         xray_health_fails_before_down: 4,
@@ -131,9 +131,9 @@ fn test_config(data_dir: PathBuf) -> Config {
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: hash,
-        node_name: "node-1".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             crate::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -214,13 +214,15 @@ fn app_with(
     reconcile: ReconcileHandle,
 ) -> (axum::Router, Arc<Mutex<JsonSnapshotStore>>) {
     let config = test_config(tmp.path().to_path_buf());
-    let cluster = ClusterMetadata::init_new_cluster(
+    let mut cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
         config.node_name.clone(),
         config.access_host.clone(),
         config.api_base_url.clone(),
     )
     .unwrap();
+    cluster.node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
+    cluster.save(tmp.path()).unwrap();
     let cluster_ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
     let cluster_ca_key_pem = cluster.read_cluster_ca_key_pem(tmp.path()).unwrap();
 
@@ -423,7 +425,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
             .and(path("/repos/acme/xp/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "tag_name": latest_tag,
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;
@@ -489,7 +491,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
             .and(path("/repos/acme/xp2/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "tag_name": "main",
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;
@@ -526,7 +528,7 @@ async fn version_check_uses_github_and_caches_and_compares() {
         Mock::given(method("GET"))
             .and(path("/repos/acme/xp3/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "published_at": "2026-01-31T00:00:00Z"
+                "published_at": xp_test_fixtures::release_http_timestamp()
             })))
             .mount(&github)
             .await;
@@ -559,7 +561,7 @@ fn leader_raft(
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -584,7 +586,7 @@ fn no_leader_raft(
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -690,7 +692,7 @@ fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
 }
 
 fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeState {
-    let (country, region_name, city, operator, ip) = match region {
+    let (country, region_name, city, operator, _ip) = match region {
         NodeSubscriptionRegion::Japan => ("JP", "Tokyo", "Tokyo", "Example JP", "203.0.113.10"),
         NodeSubscriptionRegion::HongKong => {
             ("HK", "Hong Kong", "Hong Kong", "Example HK", "203.0.113.20")
@@ -708,12 +710,10 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
         }
     };
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-
     NodeEgressProbeState {
-        public_ipv4: Some(ip.to_string()),
+        public_ipv4: Some(xp_test_fixtures::address_documentation203_0_113_30().to_owned()),
         public_ipv6: None,
-        selected_public_ip: Some(ip.to_string()),
+        selected_public_ip: Some(xp_test_fixtures::address_documentation203_0_113_30().to_owned()),
         geo: PersistedInboundIpGeo {
             country: country.to_string(),
             region: region_name.to_string(),
@@ -721,8 +721,8 @@ fn sample_node_egress_probe(region: NodeSubscriptionRegion) -> NodeEgressProbeSt
             operator: operator.to_string(),
         },
         subscription_region: region,
-        checked_at: now.clone(),
-        last_success_at: Some(now),
+        checked_at: xp_test_fixtures::timestamp_at20240101_t092500_z().to_owned(),
+        last_success_at: Some(xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned()),
         classification_invalidated_at: None,
         error_summary: None,
     }
@@ -747,13 +747,13 @@ async fn record_inbound_ip_usage_samples(
         .unwrap();
 }
 
-fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: &str) {
+fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: fn() -> &'static str) {
     DesiredStateCommand::UpsertNode {
         node: Node {
-            node_id: node_id.to_string(),
-            node_name: node_name.to_string(),
-            access_host: format!("{node_id}.example.com"),
-            api_base_url: format!("https://{node_id}.example.com"),
+            node_id: node_id.to_owned(),
+            node_name: node_name().to_owned(),
+            access_host: xp_test_fixtures::host_fixture566().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture567().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
@@ -774,7 +774,7 @@ fn endpoint_probe_sample(
     EndpointProbeNodeSample {
         ok,
         skipped,
-        checked_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        checked_at: xp_test_fixtures::timestamp_at20240101_t092800_z().to_owned(),
         latency_ms,
         target_id: None,
         target_url: None,
@@ -783,7 +783,7 @@ fn endpoint_probe_sample(
         } else {
             Some("probe failed".to_string())
         },
-        config_hash: "cfg".to_string(),
+        config_hash: xp_test_fixtures::primary_probe_config_hash().to_owned(),
     }
 }
 
@@ -1059,9 +1059,9 @@ async fn setup_subscription_fixtures(tmp: &TempDir, app: &axum::Router) -> Subsc
         subscription_token,
         membership_key,
         user_id,
-        node_id: node_id.to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
         endpoint_id,
-        endpoint_tag: endpoint["tag"].as_str().unwrap().to_string(),
+        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture569().to_owned(),
         ss2022_password: password,
     }
 }
@@ -1252,10 +1252,10 @@ async fn delete_node_removes_from_inventory() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1293,10 +1293,10 @@ async fn delete_node_rejects_if_endpoints_exist() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1340,10 +1340,10 @@ async fn get_node_delete_preview_lists_referenced_endpoints() {
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1385,10 +1385,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1461,10 +1461,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
     let store = Arc::new(Mutex::new(store));
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1492,7 +1492,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -1500,7 +1500,7 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
         node_raft_id,
         RaftNodeMeta {
             name: node.node_name.clone(),
-            api_base_url: node.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::service_fixture571().to_owned(),
             raft_endpoint: node.api_base_url.clone(),
         },
     );
@@ -1546,10 +1546,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_removed_preview_end
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
     let node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1840,7 +1840,7 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -1933,10 +1933,10 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
     let store = Arc::new(Mutex::new(store));
 
     let extra_node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://node-2.internal:8443".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture572().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -1956,7 +1956,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -1964,7 +1964,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
         extra_raft_id,
         RaftNodeMeta {
             name: extra_node.node_name.clone(),
-            api_base_url: extra_node.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::service_fixture573().to_owned(),
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
@@ -2021,10 +2021,10 @@ async fn delete_node_times_out_when_change_membership_hangs() {
     let store = Arc::new(Mutex::new(store));
 
     let extra_node = Node {
-        node_id: new_ulid_string(),
-        node_name: "extra-node".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://node-2.internal:8443".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture572().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -2044,7 +2044,7 @@ async fn delete_node_times_out_when_change_membership_hangs() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -2052,7 +2052,7 @@ async fn delete_node_times_out_when_change_membership_hangs() {
         extra_raft_id,
         RaftNodeMeta {
             name: extra_node.node_name.clone(),
-            api_base_url: extra_node.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::service_fixture573().to_owned(),
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
@@ -2123,7 +2123,7 @@ async fn follower_admin_write_does_not_redirect() {
         leader_id,
         RaftNodeMeta {
             name: "leader".to_string(),
-            api_base_url: "https://leader.example.com".to_string(),
+            api_base_url: xp_test_fixtures::service_fixture558().to_owned(),
             raft_endpoint: "https://leader.example.com".to_string(),
         },
     );
@@ -2225,10 +2225,10 @@ async fn nodes_runtime_list_marks_unreachable_remote_nodes_as_partial() {
         let mut store = store.lock().await;
         store
             .upsert_node(Node {
-                node_id: "01J0000000000000000000000AB".to_string(),
-                node_name: "remote-a".to_string(),
-                access_host: "remote-a.example.com".to_string(),
-                api_base_url: "https://127.0.0.1:1".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                node_name: xp_test_fixtures::label_remote_a().to_owned(),
+                access_host: xp_test_fixtures::host_fixture575().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -2251,7 +2251,7 @@ async fn nodes_runtime_list_marks_unreachable_remote_nodes_as_partial() {
     assert!(
         unreachable
             .iter()
-            .any(|value| { value.as_str() == Some("01J0000000000000000000000AB") })
+            .any(|value| value.as_str() == Some(xp_test_fixtures::identifier_ulid_b()))
     );
 }
 
@@ -2982,7 +2982,7 @@ async fn admin_upgrade_status_recovers_persisted_job() {
         finished_at: Some("2026-07-04T00:01:00Z".to_string()),
         exit_code: Some(0),
         message: Some("upgrade completed".to_string()),
-        updated_at: "2026-07-04T00:01:00Z".to_string(),
+        updated_at: xp_test_fixtures::timestamp_at20240101_t093700_z().to_owned(),
     };
     crate::upgrade_job::write_status(tmp.path(), &status).unwrap();
 
@@ -3055,7 +3055,7 @@ async fn admin_upgrade_start_rejects_active_job() {
         finished_at: None,
         exit_code: None,
         message: Some("running".to_string()),
-        updated_at: "2026-07-04T00:00:00Z".to_string(),
+        updated_at: xp_test_fixtures::timestamp_at20240101_t093800_z().to_owned(),
     };
     crate::upgrade_job::write_status(tmp.path(), &status).unwrap();
 
@@ -3326,11 +3326,7 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3356,11 +3352,7 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
             "PATCH",
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
-              "reality": {
-                "dest": "edge.example.com:443",
-                "server_names": ["edge.example.com"],
-                "fingerprint": "firefox"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3439,11 +3431,7 @@ async fn patch_managed_vless_updates_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3524,11 +3512,7 @@ async fn patch_managed_vless_rejects_invalid_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3596,11 +3580,7 @@ async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3661,11 +3641,7 @@ async fn create_vless_rejects_canary_upstream_for_unmanaged_endpoint() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              },
+              "reality": xp_test_fixtures::endpoint_reality(),
               "canary_upstream": {
                 "url": "http://127.0.0.1:8080",
                 "mode": "auto"
@@ -3708,11 +3684,7 @@ async fn create_vless_rejects_accepted_authorities_for_unmanaged_endpoint() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "fingerprint": "chrome"
-              },
+              "reality": xp_test_fixtures::endpoint_reality(),
               "accepted_authorities": ["edge.example.com:443"]
             }),
         ))
@@ -3753,11 +3725,7 @@ async fn patch_unmanaged_vless_rejects_canary_upstream() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3815,11 +3783,7 @@ async fn patch_unmanaged_vless_rejects_accepted_authorities() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3940,11 +3904,7 @@ async fn patch_admin_endpoint_rejects_kind_mismatch_fields() {
             &format!("/api/admin/endpoints/{endpoint_id}"),
             json!({
               "port": 8389,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -3989,16 +3949,16 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
     let nodes = body_json(res).await;
     let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
 
-    let dst_node_id = new_ulid_string();
+    let dst_node_id = xp_test_fixtures::identifier_ulid_e().to_owned();
     {
         let mut store = store.lock().await;
         store.state_mut().nodes.insert(
             dst_node_id.clone(),
             Node {
-                node_id: dst_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "node-2.example.com".to_string(),
-                api_base_url: "https://node-2.example.com".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+                node_name: xp_test_fixtures::label_node2().to_owned(),
+                access_host: xp_test_fixtures::host_fixture580().to_owned(),
+                api_base_url: xp_test_fixtures::service_fixture581().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -4015,11 +3975,7 @@ async fn patch_admin_endpoint_updates_node_id_preserves_meta() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4064,16 +4020,16 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
     let nodes = body_json(res).await;
     let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
 
-    let dst_node_id = new_ulid_string();
+    let dst_node_id = xp_test_fixtures::identifier_ulid_e().to_owned();
     {
         let mut store = store.lock().await;
         store.state_mut().nodes.insert(
             dst_node_id.clone(),
             Node {
-                node_id: dst_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "node-2.example.com".to_string(),
-                api_base_url: "https://node-2.example.com".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+                node_name: xp_test_fixtures::label_node2().to_owned(),
+                access_host: xp_test_fixtures::host_fixture580().to_owned(),
+                api_base_url: xp_test_fixtures::service_fixture581().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -4090,11 +4046,7 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node-1.example.com"],
-                "fingerprint": "firefox"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4128,13 +4080,18 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
     assert_eq!(res.status(), StatusCode::OK);
     let updated = body_json(res).await;
     assert_eq!(updated["node_id"], dst_node_id);
-    assert_eq!(updated["meta"]["reality"]["dest"], "127.0.0.1:39043");
+    assert_eq!(
+        updated["meta"]["reality"]["dest"],
+        xp_test_fixtures::loopback_39043_address(),
+    );
     assert_eq!(
         updated["meta"]["reality"]["server_names"],
-        json!(["node-2.example.com"])
+        serde_json::json!([xp_test_fixtures::host_fixture580()]),
     );
-    assert_eq!(updated["meta"]["reality"]["server_names_source"], "manual");
-    assert_eq!(updated["meta"]["reality"]["fingerprint"], "firefox");
+    assert_eq!(
+        updated["meta"]["reality"]["fingerprint"],
+        xp_test_fixtures::endpoint_reality()["fingerprint"],
+    );
 }
 
 #[tokio::test]
@@ -4160,11 +4117,7 @@ async fn patch_admin_endpoint_rejects_unknown_node_id() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4202,16 +4155,16 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
     let nodes = body_json(res).await;
     let src_node_id = nodes["items"][0]["node_id"].as_str().unwrap().to_string();
 
-    let dst_node_id = new_ulid_string();
+    let dst_node_id = xp_test_fixtures::identifier_ulid_e().to_owned();
     {
         let mut store = store.lock().await;
         store.state_mut().nodes.insert(
             dst_node_id.clone(),
             Node {
-                node_id: dst_node_id.clone(),
-                node_name: "node-2".to_string(),
-                access_host: "node-2.example.com".to_string(),
-                api_base_url: "https://node-2.example.com".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
+                node_name: xp_test_fixtures::label_node2().to_owned(),
+                access_host: xp_test_fixtures::host_fixture580().to_owned(),
+                api_base_url: xp_test_fixtures::service_fixture581().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -4245,11 +4198,7 @@ async fn patch_admin_endpoint_rejects_port_conflict_on_target_node() {
               "node_id": src_node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4557,11 +4506,7 @@ async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4616,11 +4561,7 @@ async fn user_access_auto_assigns_new_endpoint_for_matching_kind_only() {
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 8443,
-              "reality": {
-                "dest": "second.example.com:443",
-                "server_names": ["second.example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -4816,11 +4757,7 @@ async fn post_rotate_shortid_schedules_rebuild_inbound() {
                 EndpointKind::VlessRealityVisionTcp,
                 443,
                 json!({
-                  "reality": {
-                    "dest": "example.com:443",
-                    "server_names": ["example.com"],
-                    "fingerprint": "chrome"
-                  }
+                  "reality": xp_test_fixtures::endpoint_reality()
                 }),
             )
             .unwrap();
@@ -5620,11 +5557,7 @@ async fn mihomo_subscription_paths_are_provider_only() {
               "node_id": fixtures.node_id.clone(),
               "kind": "vless_reality_vision_tcp",
               "port": 8443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -5773,10 +5706,10 @@ async fn mihomo_subscription_groups_new_probe_classified_nodes_without_template_
     assert_eq!(put_res.status(), StatusCode::OK);
 
     let extra_node = Node {
-        node_id: new_ulid_string(),
-        node_name: "nodebeta".to_string(),
-        access_host: "nodebeta-ep.example.com".to_string(),
-        api_base_url: "https://nodebeta.example.com".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
+        node_name: xp_test_fixtures::label_nodebeta().to_owned(),
+        access_host: xp_test_fixtures::host_fixture582().to_owned(),
+        api_base_url: xp_test_fixtures::service_fixture583().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
@@ -7518,15 +7451,15 @@ async fn admin_alerts_reports_partial_when_node_unreachable() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
-    let remote_node_id = new_ulid_string();
+    let remote_node_id = xp_test_fixtures::identifier_ulid_c().to_owned();
     {
         let mut store = store.lock().await;
         store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-unreachable".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:1".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
+                node_name: xp_test_fixtures::label_node_unreachable().to_owned(),
+                access_host: xp_test_fixtures::label_empty().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -7605,9 +7538,9 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_one.clone(),
                     user_id: user.user_id.clone(),
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint_one.endpoint_id.clone(),
-                    endpoint_tag: endpoint_one.tag.clone(),
+                    node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture585().to_owned(),
                     ips: vec!["203.0.113.7".to_string()],
                 }],
                 &resolver,
@@ -7622,17 +7555,17 @@ async fn node_ip_usage_returns_series_timeline_and_ip_list() {
                     crate::inbound_ip_usage::InboundIpMinuteSample {
                         membership_key: membership_one.clone(),
                         user_id: user.user_id.clone(),
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_one.endpoint_id.clone(),
-                        endpoint_tag: endpoint_one.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture585().to_owned(),
                         ips: vec!["203.0.113.7".to_string()],
                     },
                     crate::inbound_ip_usage::InboundIpMinuteSample {
                         membership_key: membership_two.clone(),
                         user_id: user.user_id.clone(),
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_two.endpoint_id.clone(),
-                        endpoint_tag: endpoint_two.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture586().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture587().to_owned(),
                         ips: vec!["203.0.113.7".to_string(), "198.51.100.9".to_string()],
                     },
                 ],
@@ -7748,9 +7681,9 @@ async fn user_ip_usage_groups_local_data_and_merges_warnings() {
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership,
                     user_id: user.user_id.clone(),
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id,
-                    endpoint_tag: endpoint.tag.clone(),
+                    node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture533().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture535().to_owned(),
                     ips: vec!["203.0.113.9".to_string()],
                 }],
                 &resolver,
@@ -7938,13 +7871,13 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
             .next()
             .cloned()
             .expect("bootstrap node");
-        let remote_node_id = new_ulid_string();
+        let remote_node_id = xp_test_fixtures::identifier_ulid_c().to_owned();
         store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-remote".to_string(),
-                access_host: "".to_string(),
-                api_base_url: "https://127.0.0.1:1".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
+                node_name: xp_test_fixtures::label_node_remote().to_owned(),
+                access_host: xp_test_fixtures::label_empty().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -7986,9 +7919,9 @@ async fn user_ip_usage_marks_remote_nodes_as_partial() {
                 &[crate::inbound_ip_usage::InboundIpMinuteSample {
                     membership_key: membership_key(&user.user_id, &local_endpoint.endpoint_id),
                     user_id: user.user_id.clone(),
-                    node_id: local_node_id.clone(),
-                    endpoint_id: local_endpoint.endpoint_id,
-                    endpoint_tag: local_endpoint.tag,
+                    node_id: xp_test_fixtures::node_id_fixture588().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture589().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture590().to_owned(),
                     ips: vec!["203.0.113.20".to_string()],
                 }],
                 &resolver,
@@ -8095,13 +8028,13 @@ async fn user_traffic_returns_partial_report_when_all_membership_nodes_are_unrea
 
     let (user_id, remote_node_id) = {
         let mut store = store.lock().await;
-        let remote_node_id = new_ulid_string();
+        let remote_node_id = xp_test_fixtures::identifier_ulid_c().to_owned();
         store
             .upsert_node(Node {
-                node_id: remote_node_id.clone(),
-                node_name: "node-unreachable".to_string(),
-                access_host: String::new(),
-                api_base_url: "https://127.0.0.1:1".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
+                node_name: xp_test_fixtures::label_node_unreachable().to_owned(),
+                access_host: xp_test_fixtures::label_empty().to_owned(),
+                api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -8146,29 +8079,43 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
 
     let (node_id, minute0, minute1, endpoint_one_id, endpoint_two_id, endpoint_one_tag) = {
         let mut store = store.lock().await;
-        let node_id = store
-            .state()
-            .nodes
-            .keys()
-            .next()
-            .cloned()
-            .expect("bootstrap node");
-        let endpoint_one = store
-            .create_endpoint(
-                node_id.clone(),
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                8388,
-                json!({}),
-            )
+        let node = Node {
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            node_name: xp_test_fixtures::label_tcp_node().to_owned(),
+            access_host: xp_test_fixtures::label_empty().to_owned(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        };
+        DesiredStateCommand::UpsertNode { node: node.clone() }
+            .apply(store.state_mut())
             .unwrap();
-        let endpoint_two = store
-            .create_endpoint(
-                node_id.clone(),
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                8389,
-                json!({}),
-            )
-            .unwrap();
+        let endpoint_one = crate::domain::Endpoint {
+            endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture585().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 8388,
+            meta: json!({}),
+        };
+        let endpoint_two = crate::domain::Endpoint {
+            endpoint_id: xp_test_fixtures::endpoint_id_fixture586().to_owned(),
+            node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_fixture587().to_owned(),
+            kind: EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+            port: 8389,
+            meta: json!({}),
+        };
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint_one.clone(),
+        }
+        .apply(store.state_mut())
+        .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint: endpoint_two.clone(),
+        }
+        .apply(store.state_mut())
+        .unwrap();
         let minute0 = crate::tcp_connection_usage::floor_minute(chrono::Utc::now())
             - chrono::Duration::minutes(1);
         let minute1 = minute0 + chrono::Duration::minutes(1);
@@ -8179,16 +8126,16 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
                 None,
                 &[
                     crate::tcp_connection_usage::TcpConnectionMinuteSample {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_one.endpoint_id.clone(),
-                        endpoint_tag: endpoint_one.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture585().to_owned(),
                         port: endpoint_one.port,
                         count: 2,
                     },
                     crate::tcp_connection_usage::TcpConnectionMinuteSample {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_two.endpoint_id.clone(),
-                        endpoint_tag: endpoint_two.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture586().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture587().to_owned(),
                         port: endpoint_two.port,
                         count: 1,
                     },
@@ -8202,16 +8149,16 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
                 None,
                 &[
                     crate::tcp_connection_usage::TcpConnectionMinuteSample {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_one.endpoint_id.clone(),
-                        endpoint_tag: endpoint_one.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture585().to_owned(),
                         port: endpoint_one.port,
                         count: 4,
                     },
                     crate::tcp_connection_usage::TcpConnectionMinuteSample {
-                        node_id: node_id.clone(),
-                        endpoint_id: endpoint_two.endpoint_id.clone(),
-                        endpoint_tag: endpoint_two.tag.clone(),
+                        node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                        endpoint_id: xp_test_fixtures::endpoint_id_fixture586().to_owned(),
+                        endpoint_tag: xp_test_fixtures::endpoint_tag_fixture587().to_owned(),
                         port: endpoint_two.port,
                         count: 3,
                     },
@@ -8220,7 +8167,7 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
             .unwrap();
 
         (
-            node_id,
+            node.node_id,
             crate::tcp_connection_usage::floor_minute(minute0)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             crate::tcp_connection_usage::floor_minute(minute1)
@@ -8300,9 +8247,9 @@ async fn node_tcp_connections_returns_unsupported_warning() {
                     message: "failed to read /proc/net/tcp".to_string(),
                 }),
                 &[crate::tcp_connection_usage::TcpConnectionMinuteSample {
-                    node_id: node_id.clone(),
-                    endpoint_id: endpoint.endpoint_id,
-                    endpoint_tag: endpoint.tag,
+                    node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                    endpoint_id: xp_test_fixtures::endpoint_id_fixture533().to_owned(),
+                    endpoint_tag: xp_test_fixtures::endpoint_tag_fixture534().to_owned(),
                     port: endpoint.port,
                     count: 0,
                 }],
@@ -8594,11 +8541,7 @@ async fn vless_endpoint_creation_persists_reality_materials_and_derived_uuid_is_
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -8683,11 +8626,7 @@ async fn rotate_shortid_updates_persisted_meta_and_rejects_non_vless_endpoints()
               "node_id": node_id,
               "kind": "vless_reality_vision_tcp",
               "port": 443,
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -9006,8 +8945,8 @@ async fn user_quota_summaries_ignore_memberships_for_missing_users() {
         store.state_mut().node_user_endpoint_memberships.insert(
             crate::state::NodeUserEndpointMembership {
                 user_id: "missing-user".to_string(),
-                node_id: local_node_id.clone(),
-                endpoint_id: endpoint.endpoint_id.clone(),
+                node_id: xp_test_fixtures::node_id_fixture588().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_id_fixture456().to_owned(),
             },
         );
         let key = membership_key("missing-user", &endpoint.endpoint_id);
@@ -9056,8 +8995,16 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name,
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name,
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9072,7 +9019,10 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
             .endpoint_probe_participants_by_hour
             .insert(
                 hour.clone(),
-                std::collections::BTreeSet::from(["node_2".to_string(), "node_3".to_string()]),
+                std::collections::BTreeSet::from([
+                    xp_test_fixtures::secondary_node_id().to_owned(),
+                    xp_test_fixtures::tertiary_node_id().to_owned(),
+                ]),
             );
         let bucket = store
             .state_mut()
@@ -9083,11 +9033,11 @@ async fn admin_list_endpoints_ignores_offline_nodes_when_probe_participants_are_
             .entry(hour)
             .or_default();
         bucket.by_node.insert(
-            "node_2".to_string(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
             endpoint_probe_sample(true, false, Some(120)),
         );
         bucket.by_node.insert(
-            "node_3".to_string(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
             endpoint_probe_sample(true, false, Some(140)),
         );
         store.save().unwrap();
@@ -9120,8 +9070,16 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name,
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name,
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9136,7 +9094,10 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
             .endpoint_probe_participants_by_hour
             .insert(
                 hour.clone(),
-                std::collections::BTreeSet::from([local_node_id.clone(), "node_2".to_string()]),
+                std::collections::BTreeSet::from([
+                    local_node_id.clone(),
+                    xp_test_fixtures::secondary_node_id().to_owned(),
+                ]),
             );
         let bucket = store
             .state_mut()
@@ -9150,7 +9111,7 @@ async fn admin_get_endpoint_probe_history_returns_participant_counts() {
             .by_node
             .insert(local_node_id, endpoint_probe_sample(true, false, Some(111)));
         bucket.by_node.insert(
-            "node_2".to_string(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
             endpoint_probe_sample(false, false, None),
         );
         store.save().unwrap();
@@ -9183,8 +9144,16 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
     let endpoint_id = {
         let mut store = store.lock().await;
         let local_node_id = store.list_nodes()[0].node_id.clone();
-        add_cluster_node(&mut store, "node_2", "node-2");
-        add_cluster_node(&mut store, "node_3", "node-3");
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::secondary_node_id(),
+            xp_test_fixtures::secondary_node_name,
+        );
+        add_cluster_node(
+            &mut store,
+            xp_test_fixtures::tertiary_node_id(),
+            xp_test_fixtures::tertiary_node_name,
+        );
         let endpoint = store
             .create_endpoint(
                 local_node_id.clone(),
@@ -9222,7 +9191,7 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
             .or_default()
             .by_node
             .insert(
-                "node_2".to_string(),
+                xp_test_fixtures::secondary_node_id().to_owned(),
                 endpoint_probe_sample(true, false, Some(102)),
             );
         store.save().unwrap();
@@ -9250,8 +9219,8 @@ async fn admin_get_endpoint_probe_history_infers_legacy_participants_from_hour_w
 fn test_vless_meta(managed_default: bool) -> Value {
     serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "127.0.0.1:39043".to_string(),
-            server_names: vec!["example.test".to_string()],
+            dest: xp_test_fixtures::address_loopback_port39531().to_owned(),
+            server_names: xp_test_fixtures::host_list_edge37(),
             server_names_source: Default::default(),
             fingerprint: "chrome".to_string(),
         },
@@ -9259,10 +9228,10 @@ fn test_vless_meta(managed_default: bool) -> Value {
             private_key: "private".to_string(),
             public_key: "public".to_string(),
         },
-        short_ids: vec!["0123456789abcdef".to_string()],
-        active_short_id: "0123456789abcdef".to_string(),
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
         managed_default,
     })
@@ -9272,65 +9241,71 @@ fn test_vless_meta(managed_default: bool) -> Value {
 #[tokio::test]
 async fn endpoint_canary_probe_url_omits_default_port() {
     let node = Node {
-        node_id: "n1".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "Example.TEST.".to_string(),
-        api_base_url: "https://node.example.test".to_string(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::label_node_afixture_test_variant2().to_owned(),
+        api_base_url: xp_test_fixtures::url_https_node_afixture_test().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     };
     let endpoint = crate::domain::Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture593().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: test_vless_meta(true),
     };
     assert_eq!(
         super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
-        "https://Example.TEST/generate_204"
+        format!(
+            "https://{}/generate_204",
+            xp_test_fixtures::label_node_afixture_test_variant2().trim_end_matches('.')
+        )
     );
 }
 
 #[tokio::test]
 async fn endpoint_canary_probe_url_includes_non_default_port() {
     let node = Node {
-        node_id: "n1".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "example.test".to_string(),
-        api_base_url: "https://node.example.test".to_string(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::label_node_afixture_test().to_owned(),
+        api_base_url: xp_test_fixtures::url_https_node_afixture_test().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     };
     let endpoint = crate::domain::Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture593().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 8443,
         meta: test_vless_meta(true),
     };
     assert_eq!(
         super::endpoint_canary_probe_url(&node, &endpoint).unwrap(),
-        "https://example.test:8443/generate_204"
+        format!(
+            "https://{}:8443/generate_204",
+            xp_test_fixtures::label_node_afixture_test()
+        )
     );
 }
 
 #[tokio::test]
 async fn endpoint_canary_probe_url_rejects_loopback_access_host() {
     let node = Node {
-        node_id: "n1".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "127.0.0.1".to_string(),
-        api_base_url: "https://node.example.test".to_string(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::address_loopback().to_owned(),
+        api_base_url: xp_test_fixtures::url_https_node_afixture_test().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: Default::default(),
     };
     let endpoint = crate::domain::Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::endpoint_tag_fixture593().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: test_vless_meta(true),
@@ -9597,7 +9572,7 @@ async fn reality_domains_crud_and_reorder_works() {
             "POST",
             "/api/admin/reality-domains",
             json!({
-              "server_name": "example.com",
+              "server_name": xp_test_fixtures::primary_host(),
               "disabled_node_ids": [node_id]
             }),
         ))

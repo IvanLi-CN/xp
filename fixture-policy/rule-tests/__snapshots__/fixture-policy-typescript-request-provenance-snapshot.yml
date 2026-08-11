@@ -1,0 +1,47 @@
+id: fixture-policy-typescript-request-provenance
+snapshots:
+  ? |
+    const endpoint = { kind: payload.kind, port: payload.port };
+  : labels:
+    - source: 'kind: payload.kind'
+      style: primary
+      start: 19
+      end: 37
+    - source: kind
+      style: secondary
+      start: 19
+      end: 23
+    - source: payload.kind
+      style: secondary
+      start: 25
+      end: 37
+  ? |
+    const meta = { ...payload.reality };
+  : labels:
+    - source: '...payload.reality'
+      style: primary
+      start: 15
+      end: 33
+  ? |
+    const quotaReset = payload.quota_reset;
+    const user = { quota_reset: quotaReset };
+  : labels:
+    - source: const quotaReset = payload.quota_reset;
+      style: primary
+      start: 0
+      end: 39
+  ? |
+    endpoint.reality = payload.reality;
+  : labels:
+    - source: endpoint.reality = payload.reality
+      style: primary
+      start: 0
+      end: 34
+    - source: endpoint.reality
+      style: secondary
+      start: 0
+      end: 16
+    - source: payload.reality
+      style: secondary
+      start: 19
+      end: 34

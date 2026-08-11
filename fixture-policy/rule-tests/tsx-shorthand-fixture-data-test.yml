@@ -1,0 +1,23 @@
+id: fixture-policy-tsx-shorthand-data-source
+valid:
+  - |
+    const fixture = { tag: fixtureCatalog.identifier.endpointTagPrimary() };
+invalid:
+  - |
+    const tag = "unapproved";
+    const fixture = { tag };
+  - |
+    const last_synced_at = new Date().toISOString();
+    const fixture = { last_synced_at };
+  - |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  - |
+    const config_hash = "unapproved-config";
+    const fixture = { config_hash };
+  - |
+    const latest_checked_at = "2026-03-11T11:00:00Z";
+    const fixture = { latest_checked_at };
+  - |
+    const bootstrapApiBaseUrl = "https://unapproved.fixture.test";
+    const fixture = { bootstrapApiBaseUrl };

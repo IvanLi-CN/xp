@@ -1,0 +1,9 @@
+id: fixture-policy-typescript-storybook-catalog-origin
+valid:
+  - |
+    import { fixtureCatalog } from "./catalog";
+invalid:
+  - |
+    const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
+  - |
+    import { fixtureCatalog } from "./catalog-proxy";

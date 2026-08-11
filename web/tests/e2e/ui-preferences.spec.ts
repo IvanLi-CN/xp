@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 import { setupApiMocks } from "./helpers";
 
@@ -18,7 +19,9 @@ test("theme preference persists after reload", async ({ page }) => {
 		page.getByRole("heading", { name: "Users", exact: true }),
 	).toBeVisible();
 
-	await page.getByRole("link", { name: "user-1" }).click();
+	await page
+		.getByRole("link", { name: fixtureCatalog.identifier.userPrimary() })
+		.click();
 	await expect(
 		page.getByRole("heading", { name: "Demo user", exact: true }),
 	).toBeVisible();

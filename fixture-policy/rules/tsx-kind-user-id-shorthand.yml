@@ -1,0 +1,17 @@
+id: fixture-policy-tsx-kind-user-id-shorthand
+language: Tsx
+severity: error
+message: Fixture endpoint kinds and user IDs must use explicit catalog accessors.
+note: Do not pass kind or user_id through shorthand properties.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: shorthand_property_identifier
+    - regex: '^(kind|user_id)$'

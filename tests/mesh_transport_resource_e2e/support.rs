@@ -26,7 +26,7 @@ use xp::{
     internal_auth,
     protocol::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
-        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair, generate_short_id_16hex,
+        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
@@ -286,11 +286,10 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     .expect("load resource state");
     let mut rng = rand::rngs::OsRng;
     let reality_keypair = generate_reality_keypair(&mut rng);
-    let short_id = generate_short_id_16hex(&mut rng);
     let meta = serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
         reality: RealityConfig {
-            dest: "example.com:443".to_string(),
-            server_names: vec!["example.com".to_string()],
+            dest: xp_test_fixtures::primary_authority().to_owned(),
+            server_names: xp_test_fixtures::primary_server_names(),
             server_names_source: RealityServerNamesSource::Manual,
             fingerprint: "chrome".to_string(),
         },
@@ -298,10 +297,10 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
             private_key: reality_keypair.private_key,
             public_key: reality_keypair.public_key,
         },
-        short_ids: vec![short_id.clone()],
-        active_short_id: short_id,
-        canary_upstream: None,
-        accepted_authorities: Vec::new(),
+        short_ids: xp_test_fixtures::endpoint_short_ids(),
+        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+        canary_upstream: xp_test_fixtures::none(),
+        accepted_authorities: xp_test_fixtures::secondary_server_names(),
         mihomo_smux: MihomoSmuxConfig::default(),
         managed_default: true,
     })
@@ -310,7 +309,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
         DesiredStateCommand::UpsertNode {
             node: Node {
                 node_id: target.node_id.clone(),
-                node_name: format!("mesh-resource-peer-{index:02}"),
+                node_name: xp_test_fixtures::primary_node_name().to_owned(),
                 access_host: target.access_host.clone(),
                 api_base_url: "http://127.0.0.1:9".to_string(),
                 quota_limit_bytes: 0,

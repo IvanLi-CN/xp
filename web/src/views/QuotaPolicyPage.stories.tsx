@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
-const userIdA = "01JQUSER000000000000000000";
-const userIdB = "01JQUSER000000000000000001";
+const userIdA = fixtureCatalog.identifier.userPrimary();
+const userIdB = fixtureCatalog.identifier.userSecondary();
 
 const meta = {
 	title: "Pages/QuotaPolicyPage",
@@ -14,93 +15,81 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: "node-tokyo-a",
-						node_name: "Tokyo-A",
-						access_host: "tokyo-a.example.invalid",
-						api_base_url: "https://tokyo-a.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.nodeId.fixture145(),
+						node_name: fixtureCatalog.nodeName.fixture146(),
+						access_host: fixtureCatalog.host.fixture147(),
+						api_base_url: fixtureCatalog.service.fixture148(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 					{
-						node_id: "node-frankfurt-b",
-						node_name: "Frankfurt-B",
-						access_host: "frankfurt-b.example.invalid",
-						api_base_url: "https://frankfurt-b.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.nodeId.fixture149(),
+						node_name: fixtureCatalog.nodeName.fixture150(),
+						access_host: fixtureCatalog.host.fixture151(),
+						api_base_url: fixtureCatalog.service.fixture152(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 					{
-						node_id: "node-sydney-c",
-						node_name: "Sydney-C",
-						access_host: "sydney-c.example.invalid",
-						api_base_url: "https://sydney-c.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.nodeId.fixture153(),
+						node_name: fixtureCatalog.nodeName.fixture154(),
+						access_host: fixtureCatalog.host.fixture155(),
+						api_base_url: fixtureCatalog.service.fixture156(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 				endpoints: [
 					{
-						endpoint_id: "ep-tokyo-a-vless",
-						node_id: "node-tokyo-a",
-						tag: "tokyo-a-vless",
-						kind: "vless_reality_vision_tcp",
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture157(),
+						node_id: fixtureCatalog.nodeId.fixture145(),
+						tag: fixtureCatalog.endpointTag.fixture158(),
+						kind: fixtureCatalog.endpoint.vlessKind(),
+						port: fixtureCatalog.endpoint.port443(),
 						meta: {
 							reality: {
-								dest: "example.com:443",
-								server_names: ["example.com"],
+								dest: fixtureCatalog.address.loopbackPort39159(),
+								server_names: fixtureCatalog.hostList.edge9(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-tokyo-a-ss",
-						node_id: "node-tokyo-a",
-						tag: "tokyo-a-ss",
-						kind: "ss2022_2022_blake3_aes_128_gcm",
-						port: 8443,
+						endpoint_id: fixtureCatalog.endpointId.fixture160(),
+						node_id: fixtureCatalog.nodeId.fixture145(),
+						tag: fixtureCatalog.endpointTag.fixture161(),
+						kind: fixtureCatalog.endpoint.ssKind(),
+						port: fixtureCatalog.endpoint.port8443(),
 						meta: {
 							method: "2022-blake3-aes-128-gcm",
 						},
 					},
 					{
-						endpoint_id: "ep-frankfurt-b-vless",
-						node_id: "node-frankfurt-b",
-						tag: "frankfurt-b-vless",
-						kind: "vless_reality_vision_tcp",
-						port: 444,
+						endpoint_id: fixtureCatalog.endpointId.fixture162(),
+						node_id: fixtureCatalog.nodeId.fixture149(),
+						tag: fixtureCatalog.endpointTag.fixture163(),
+						kind: fixtureCatalog.endpoint.vlessKind(),
+						port: fixtureCatalog.endpoint.port444(),
 						meta: {
 							reality: {
-								dest: "example.org:443",
-								server_names: ["example.org"],
+								dest: fixtureCatalog.address.loopbackPort39164(),
+								server_names: fixtureCatalog.hostList.edge10(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
 						},
 					},
 					{
-						endpoint_id: "ep-sydney-c-vless",
-						node_id: "node-sydney-c",
-						tag: "sydney-c-vless",
-						kind: "vless_reality_vision_tcp",
-						port: 445,
+						endpoint_id: fixtureCatalog.endpointId.fixture165(),
+						node_id: fixtureCatalog.nodeId.fixture153(),
+						tag: fixtureCatalog.endpointTag.fixture166(),
+						kind: fixtureCatalog.endpoint.vlessKind(),
+						port: fixtureCatalog.endpoint.port445(),
 						meta: {
 							reality: {
-								dest: "example.net:443",
-								server_names: ["example.net"],
+								dest: fixtureCatalog.address.loopbackPort39167(),
+								server_names: fixtureCatalog.hostList.edge11(),
 								server_names_source: "manual",
 								fingerprint: "chrome",
 							},
@@ -111,55 +100,53 @@ const meta = {
 					{
 						user_id: userIdA,
 						display_name: "Ivan",
-						subscription_token: `sub_${userIdA}`,
+						subscription_token: fixtureCatalog.token.fixture168(),
 						credential_epoch: 0,
 						priority_tier: "p1",
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 480,
-						},
+						quota_reset: fixtureCatalog.quota.reset(),
 					},
 					{
 						user_id: userIdB,
 						display_name: "Koha",
-						subscription_token: `sub_${userIdB}`,
+						subscription_token: fixtureCatalog.token.fixture169(),
 						credential_epoch: 0,
 						priority_tier: "p2",
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 480,
-						},
+						quota_reset: fixtureCatalog.quota.reset(),
 					},
 				],
-				userNodeWeights: {
-					[userIdA]: [
-						{ node_id: "node-tokyo-a", weight: 6500 },
-						{ node_id: "node-frankfurt-b", weight: 5000 },
-						{ node_id: "node-sydney-c", weight: 2000 },
+				userNodeWeights: Object.fromEntries([
+					[
+						userIdA,
+						[
+							{ node_id: fixtureCatalog.nodeId.fixture145(), weight: 6500 },
+							{ node_id: fixtureCatalog.nodeId.fixture149(), weight: 5000 },
+							{ node_id: fixtureCatalog.nodeId.fixture153(), weight: 2000 },
+						],
 					],
-					[userIdB]: [
-						{ node_id: "node-tokyo-a", weight: 3500 },
-						{ node_id: "node-frankfurt-b", weight: 5000 },
-						{ node_id: "node-sydney-c", weight: 8000 },
+					[
+						userIdB,
+						[
+							{ node_id: fixtureCatalog.nodeId.fixture145(), weight: 3500 },
+							{ node_id: fixtureCatalog.nodeId.fixture149(), weight: 5000 },
+							{ node_id: fixtureCatalog.nodeId.fixture153(), weight: 8000 },
+						],
 					],
-				},
-				userGlobalWeights: {
-					[userIdA]: 6500,
-					[userIdB]: 3500,
-				},
+				]),
+				userGlobalWeights: Object.fromEntries([
+					[userIdA, 6500],
+					[userIdB, 3500],
+				]),
 				nodeWeightPolicies: {
-					"node-tokyo-a": {
-						node_id: "node-tokyo-a",
+					[fixtureCatalog.nodeId.fixture145()]: {
+						node_id: fixtureCatalog.nodeId.fixture145(),
 						inherit_global: false,
 					},
-					"node-frankfurt-b": {
-						node_id: "node-frankfurt-b",
+					[fixtureCatalog.nodeId.fixture149()]: {
+						node_id: fixtureCatalog.nodeId.fixture149(),
 						inherit_global: false,
 					},
-					"node-sydney-c": {
-						node_id: "node-sydney-c",
+					[fixtureCatalog.nodeId.fixture153()]: {
+						node_id: fixtureCatalog.nodeId.fixture153(),
 						inherit_global: false,
 					},
 				},

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { AdminNodeIpUsageResponse } from "../api/adminIpUsage";
 import type { AdminNodeTcpConnectionsResponse } from "../api/adminTcpConnections";
 import type { AdminNodeTrafficResponse } from "../api/adminTraffic";
+import type { NodeQuotaReset } from "../api/quotaReset";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	alignNodeIpUsageResponse,
 	alignNodeTcpConnectionsResponse,
@@ -11,46 +13,42 @@ import {
 } from "./timeWindowReports";
 
 const node = {
-	node_id: "node-1",
-	node_name: "Tokyo",
-	access_host: "tokyo.example.com",
-	api_base_url: "https://tokyo.example.com",
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly" as const,
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+	access_host: fixtureCatalog.host.primary(),
+	api_base_url: fixtureCatalog.url.primaryApi(),
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 };
 
 const trafficResponse: AdminNodeTrafficResponse = {
 	node,
 	traffic: {
 		window: "24h",
-		window_start_at: "2026-08-07T12:00:00Z",
-		window_end_at: "2026-08-08T12:00:00Z",
+		window_start_at: fixtureCatalog.timestamp.t20260807T120000(),
+		window_end_at: fixtureCatalog.timestamp.t20260808T120000(),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			uplink_bytes: 10,
-			downlink_bytes: 20,
-			total_bytes: 30,
+			uplink_bytes: fixtureCatalog.number.value10(),
+			downlink_bytes: fixtureCatalog.number.value20(),
+			total_bytes: fixtureCatalog.number.value30(),
 			complete: true,
 		},
 		current: [
 			{
-				start_at: "2026-08-08T11:55:00Z",
-				end_at: "2026-08-08T12:00:00Z",
-				uplink_bytes: 4,
-				downlink_bytes: 6,
-				total_bytes: 10,
+				start_at: fixtureCatalog.timestamp.t20260808T115500(),
+				end_at: fixtureCatalog.timestamp.t20260808T120000(),
+				uplink_bytes: fixtureCatalog.number.value4(),
+				downlink_bytes: fixtureCatalog.number.value6(),
+				total_bytes: fixtureCatalog.number.value10(),
 				complete: true,
 				is_current_day: false,
 			},
 		],
 		reference: [],
 		partial: false,
-		last_sample_at: "2026-08-08T12:00:00Z",
+		last_sample_at: fixtureCatalog.timestamp.t20260808T120000(),
 		warnings: [],
 	},
 };
@@ -94,20 +92,24 @@ describe("time window report alignment", () => {
 		const report: AdminNodeTcpConnectionsResponse = {
 			node,
 			window: "24h",
-			window_start: "2026-08-07T12:00:00Z",
-			window_end: "2026-08-08T12:00:00Z",
+			window_start: fixtureCatalog.timestamp.t20260807T120000(),
+			window_end: fixtureCatalog.timestamp.t20260808T120000(),
 			warnings: [],
 			endpoints: [
-				{ endpoint_id: "endpoint-1", endpoint_tag: "edge", port: 443 },
+				{
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
+					port: fixtureCatalog.endpoint.port443(),
+				},
 			],
 			per_endpoint_series: [
 				{
-					endpoint_id: "endpoint-1",
-					endpoint_tag: "edge",
-					port: 443,
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
+					port: fixtureCatalog.endpoint.port443(),
 					series: [
-						{ minute: "2026-08-08T12:00:00Z", count: 3 },
-						{ minute: "2026-08-08T12:08:00Z", count: 9 },
+						{ minute: fixtureCatalog.timestamp.t20260808T120000(), count: 3 },
+						{ minute: fixtureCatalog.timestamp.t20260808T120800(), count: 9 },
 					],
 				},
 			],
@@ -121,7 +123,7 @@ describe("time window report alignment", () => {
 
 		expect(aligned.window_end).toBe("2026-08-08T12:07:00.000Z");
 		expect(aligned.per_endpoint_series[0]?.series).toEqual([
-			{ minute: "2026-08-08T12:00:00Z", count: 3 },
+			{ minute: fixtureCatalog.timestamp.t20260808T120000(), count: 3 },
 		]);
 	});
 
@@ -130,33 +132,33 @@ describe("time window report alignment", () => {
 			node,
 			window: "24h",
 			geo_source: "country_is",
-			window_start: "2026-08-06T12:00:00Z",
-			window_end: "2026-08-07T12:00:00Z",
+			window_start: fixtureCatalog.timestamp.t20260806T120000(),
+			window_end: fixtureCatalog.timestamp.t20260807T120000(),
 			warnings: [],
 			unique_ip_series: [],
 			timeline: [
 				{
 					lane_key: "edge-a::203.0.113.1",
-					endpoint_id: "endpoint-a",
-					endpoint_tag: "edge-a",
-					ip: "203.0.113.1",
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					endpoint_tag: fixtureCatalog.identifier.endpointTagPrimary(),
+					ip: fixtureCatalog.address.primaryIpv4(),
 					minutes: 1_440,
 					segments: [
 						{
-							start_minute: "2026-08-07T11:58:00Z",
-							end_minute: "2026-08-07T12:02:00Z",
+							start_minute: fixtureCatalog.timestamp.t20260807T115800(),
+							end_minute: fixtureCatalog.timestamp.t20260807T120200(),
 						},
 					],
 				},
 			],
 			ips: [
 				{
-					ip: "203.0.113.1",
+					ip: fixtureCatalog.address.primaryIpv4(),
 					minutes: 1_440,
 					endpoint_tags: ["edge-a", "aged-out"],
 					region: "Test",
 					operator: "Example",
-					last_seen_at: "2026-08-07T12:02:00Z",
+					last_seen_at: fixtureCatalog.timestamp.t20260807T120200(),
 				},
 			],
 		};
@@ -173,15 +175,15 @@ describe("time window report alignment", () => {
 			...report.ips,
 			{
 				...report.ips[0],
-				ip: "203.0.113.2",
+				ip: fixtureCatalog.address.secondaryIpv4(),
 				endpoint_tags: ["outside-top-20"],
 			},
 		];
 		const unchanged = alignNodeIpUsageResponse(
 			{
 				...report,
-				window_start: "2026-08-07T12:01:00Z",
-				window_end: "2026-08-08T12:00:00Z",
+				window_start: fixtureCatalog.timestamp.t20260807T120100(),
+				window_end: fixtureCatalog.timestamp.t20260808T120000(),
 				ips: completeIps,
 			},
 			"24h",

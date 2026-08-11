@@ -1,0 +1,41 @@
+id: fixture-policy-typescript-storybook-fixture-data
+valid:
+  - 'const item = { access_host: fixtureCatalog.host.primary() };'
+  - |
+    const item = {
+      owner_node_id: fixtureCatalog.identifier.nodePrimary(),
+      bootstrap_access_host: fixtureCatalog.host.primary(),
+      bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
+      first_seen_at: fixtureCatalog.timestamp.recent(),
+    };
+  - |
+    function buildSeries() {
+      return { minute: minuteFromOffset(windowStart, minute) };
+    }
+invalid:
+  - |
+    const item = { access_host: "live.example" };
+  - |
+    const item = { node_name: "unapproved-node" };
+  - |
+    const unsafe = "live.example";
+    const item = { node_id: unsafe };
+  - |
+    const unsafe = "live.example";
+    const item = { access_host: unsafe };
+  - |
+    const unsafe = new Date().toISOString();
+    const item = { window_end: unsafe };
+  - |
+    const unsafe = "unapproved-endpoint";
+    const seed = { endpointId: unsafe };
+  - |
+    const item = { owner_node_id: "unapproved-node" };
+  - |
+    const item = { bootstrap_access_host: "live.example" };
+  - |
+    const item = { first_seen_at: new Date().toISOString() };
+  - |
+    const endpoint = { port: 8443 };
+  - |
+    const node = { quota_limit_bytes: 4096 };

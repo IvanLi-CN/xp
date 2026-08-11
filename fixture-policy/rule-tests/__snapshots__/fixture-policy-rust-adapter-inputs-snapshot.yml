@@ -1,0 +1,51 @@
+id: fixture-policy-rust-adapter-inputs
+snapshots:
+  ? |
+    let bytes = include_bytes!("fixture.bin");
+  : labels:
+    - source: include_bytes!("fixture.bin")
+      style: primary
+      start: 12
+      end: 41
+  ? |
+    let host = serde_json::from_reader(reader);
+  : labels:
+    - source: serde_json::from_reader(reader)
+      style: primary
+      start: 11
+      end: 42
+  ? |
+    let host = serde_json::from_str(source);
+  : labels:
+    - source: serde_json::from_str(source)
+      style: primary
+      start: 11
+      end: 39
+  ? |
+    let host = std::env::var("FIXTURE_HOST");
+  : labels:
+    - source: std::env::var("FIXTURE_HOST")
+      style: primary
+      start: 11
+      end: 40
+  ? |
+    let host = std::fs::read("fixture.json");
+  : labels:
+    - source: std::fs::read("fixture.json")
+      style: primary
+      start: 11
+      end: 40
+  ? |
+    let host = std::fs::read_to_string("fixture.json");
+  : labels:
+    - source: std::fs::read_to_string("fixture.json")
+      style: primary
+      start: 11
+      end: 50
+  ? |
+    let source = include_str!("fixture.json");
+  : labels:
+    - source: include_str!("fixture.json")
+      style: primary
+      start: 13
+      end: 41

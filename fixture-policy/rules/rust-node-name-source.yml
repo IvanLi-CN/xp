@@ -1,0 +1,59 @@
+id: fixture-policy-rust-node-name-source
+language: Rust
+severity: error
+message: Rust fixture node names must use xp_test_fixtures.
+note: Add the name to fixture-policy/catalog.json and the Rust adapter.
+files:
+  - tests/**/*.rs
+  - src/**/*_tests.rs
+  - src/**/tests.rs
+  - src/**/tests/**/*.rs
+  - src/**/test_fixtures.rs
+rule:
+  all:
+    - kind: field_initializer
+    - has:
+        field: field
+        regex: '^node_name$'
+    - has:
+        field: value
+        regex: '^.+$'
+    - not:
+        has:
+          field: value
+          any:
+            - pattern: xp_test_fixtures::$ACCESSOR()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_owned()
+            - pattern: xp_test_fixtures::$ACCESSOR().to_string()
+    - not:
+        all:
+          - has:
+              field: value
+              pattern: node_name().to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: node_with_api_base
+    - not:
+        all:
+          - has:
+              field: value
+              pattern: node_name().to_owned()
+          - inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: add_cluster_node
+    - not:
+        all:
+          - has:
+              field: value
+              pattern: cluster.node_name.clone()
+          - inside:
+              stopBy: end
+              pattern: Config { $$$ }

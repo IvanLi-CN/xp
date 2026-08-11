@@ -1,0 +1,69 @@
+id: fixture-policy-rust-subscription-node-helper-inputs
+valid:
+  - |
+    let fixture = node(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+    );
+  - |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+        xp_test_fixtures::subscription_api_loopback(),
+    );
+  - |
+    let fixture = node(fixture_node_n1(), fixture_slot_s670, fixture_host_example());
+  - |
+    let fixture = node_with_api_base(
+        fixture_node_n1(),
+        fixture_slot_s670,
+        fixture_host_example(),
+        fixture_api_loopback(),
+    );
+  - |
+    let endpoint = endpoint_ss(
+        "e1",
+        "n1",
+        "ss",
+        443,
+        xp_test_fixtures::endpoint_server_psk_b64(),
+    );
+  - |
+    let endpoint = endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64());
+  - |
+    let endpoint = endpoint_vless(
+      "e1", "n1", "vless", 8443, VlessFixtureMode::ManagedDefault,
+    );
+invalid:
+  - |
+    let fixture = node(
+        "unapproved-node",
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+    );
+  - |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        "unapproved.fixture.test",
+        xp_test_fixtures::subscription_api_loopback(),
+    );
+  - |
+    let fixture = node_with_api_base(
+        xp_test_fixtures::subscription_node_n1(),
+        xp_test_fixtures::slot_s670,
+        xp_test_fixtures::subscription_host_example(),
+        "https://unapproved.fixture.test",
+    );
+  - |
+    let endpoint = endpoint_ss("e1", "n1", "ss", 443, "unsafe-credential");
+  - |
+    let endpoint = endpoint_vless(
+      "e1",
+      "n1",
+      "vless",
+      8443,
+      serde_json::json!({ "reality": { "dest": "live.example:443" } }),
+    );

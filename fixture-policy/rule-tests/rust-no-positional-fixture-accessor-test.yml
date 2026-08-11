@@ -1,0 +1,6 @@
+id: fixture-policy-rust-no-positional-fixture-accessor
+valid:
+  - 'xp_test_fixtures::node_fixture_229()'
+invalid:
+  - 'xp_test_fixtures::slot_s229()'
+  - 'use xp_test_fixtures::slot_n4 as fixture_slot_n4;'

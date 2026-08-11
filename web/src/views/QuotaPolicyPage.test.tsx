@@ -7,6 +7,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminNodes, patchAdminNode } from "../api/adminNodes";
 import { fetchAdminQuotaPolicyGlobalWeightRows } from "../api/adminQuotaPolicyGlobalWeightRows";
@@ -70,11 +71,14 @@ function renderPage() {
 	);
 }
 
-async function openNodeTab(container: HTMLElement, nodeName = "tokyo-1") {
+async function openNodeTab(container: HTMLElement, nodeName?: string) {
+	const resolvedNodeName = nodeName ?? fixtureCatalog.nodeName.fixture33();
 	const tablist = await within(container).findByRole("tablist", {
 		name: "Weight configuration tabs",
 	});
-	const tab = within(tablist).getByText(nodeName, { selector: "button" });
+	const tab = within(tablist).getByText(resolvedNodeName, {
+		selector: "button",
+	});
 	fireEvent.click(tab);
 }
 
@@ -111,16 +115,12 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-1",
-				node_name: "tokyo-1",
-				api_base_url: "https://tokyo-1.example.com",
-				access_host: "tokyo-1.example.com",
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				api_base_url: fixtureCatalog.service.fixture34(),
+				access_host: fixtureCatalog.host.fixture35(),
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
@@ -128,28 +128,20 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminUsers).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
-				subscription_token: "sub-1",
+				subscription_token: fixtureCatalog.token.fixture204(),
 				credential_epoch: 0,
 				priority_tier: "p1",
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				},
+				quota_reset: fixtureCatalog.quota.reset(),
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
-				subscription_token: "sub-2",
+				subscription_token: fixtureCatalog.token.fixture205(),
 				credential_epoch: 0,
 				priority_tier: "p2",
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				},
+				quota_reset: fixtureCatalog.quota.reset(),
 			},
 		],
 	});
@@ -157,7 +149,7 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminQuotaPolicyNodeWeightRows).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
 				priority_tier: "p1",
 				endpoint_ids: ["ep-1"],
@@ -166,7 +158,7 @@ function setupDefaultMocks() {
 				source: "explicit",
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
 				priority_tier: "p2",
 				endpoint_ids: ["ep-2"],
@@ -179,7 +171,7 @@ function setupDefaultMocks() {
 	vi.mocked(fetchAdminQuotaPolicyGlobalWeightRows).mockResolvedValue({
 		items: [
 			{
-				user_id: "user-1",
+				user_id: fixtureCatalog.identifier.userPrimary(),
 				display_name: "Alice",
 				priority_tier: "p1",
 				stored_weight: 6000,
@@ -187,7 +179,7 @@ function setupDefaultMocks() {
 				source: "explicit",
 			},
 			{
-				user_id: "user-2",
+				user_id: fixtureCatalog.identifier.userSecondary(),
 				display_name: "Bob",
 				priority_tier: "p2",
 				stored_weight: 4000,
@@ -197,41 +189,33 @@ function setupDefaultMocks() {
 		],
 	});
 	vi.mocked(fetchAdminQuotaPolicyNodePolicy).mockResolvedValue({
-		node_id: "node-1",
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		inherit_global: false,
 	});
 
 	vi.mocked(putAdminUserNodeWeight).mockResolvedValue({
-		node_id: "node-1",
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		weight: 0,
 	});
 	vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
-		node_id: "node-1",
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		inherit_global: false,
 	});
 	vi.mocked(patchAdminNode).mockResolvedValue({
-		node_id: "node-1",
-		node_name: "tokyo-1",
-		api_base_url: "https://tokyo-1.example.com",
-		access_host: "tokyo-1.example.com",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		api_base_url: fixtureCatalog.service.fixture34(),
+		access_host: fixtureCatalog.host.fixture35(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
-		user_id: "user-1",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Alice",
-		subscription_token: "sub-1",
+		subscription_token: fixtureCatalog.token.fixture204(),
 		credential_epoch: 0,
 		priority_tier: "p1",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: 480,
-		},
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 }
 
@@ -277,9 +261,15 @@ describe("<QuotaPolicyPage />", () => {
 
 	it("keeps local draft on partial save failure and retries only failed rows", async () => {
 		vi.mocked(putAdminUserNodeWeight)
-			.mockResolvedValueOnce({ node_id: "node-1", weight: 6000 })
+			.mockResolvedValueOnce({
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				weight: 6000,
+			})
 			.mockRejectedValueOnce(new Error("boom"))
-			.mockResolvedValueOnce({ node_id: "node-1", weight: 4000 });
+			.mockResolvedValueOnce({
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				weight: 4000,
+			});
 
 		const originalInnerWidth = window.innerWidth;
 		Object.defineProperty(window, "innerWidth", {
@@ -323,7 +313,7 @@ describe("<QuotaPolicyPage />", () => {
 				expect(vi.mocked(putAdminUserNodeWeight)).toHaveBeenCalledTimes(3);
 			});
 			const thirdCall = vi.mocked(putAdminUserNodeWeight).mock.calls[2];
-			expect(thirdCall?.[1]).toBe("user-2");
+			expect(thirdCall?.[1]).toBe(fixtureCatalog.identifier.userSecondary());
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
 				configurable: true,
@@ -336,15 +326,15 @@ describe("<QuotaPolicyPage />", () => {
 	it("disables node editor in inherit mode and enables after turning inherit off", async () => {
 		vi.mocked(fetchAdminQuotaPolicyNodePolicy)
 			.mockResolvedValueOnce({
-				node_id: "node-1",
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: true,
 			})
 			.mockResolvedValue({
-				node_id: "node-1",
+				node_id: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: false,
 			});
 		vi.mocked(putAdminQuotaPolicyNodePolicy).mockResolvedValue({
-			node_id: "node-1",
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			inherit_global: false,
 		});
 
@@ -371,7 +361,7 @@ describe("<QuotaPolicyPage />", () => {
 			await waitFor(() => {
 				expect(vi.mocked(putAdminQuotaPolicyNodePolicy)).toHaveBeenCalledWith(
 					"admintoken",
-					"node-1",
+					fixtureCatalog.nodeId.fixture32(),
 					false,
 				);
 			});
@@ -572,16 +562,30 @@ describe("<QuotaPolicyPage />", () => {
 				"global-ratio-editor-table",
 			);
 			expect(within(globalTable).queryByText("Input (%)")).toBeNull();
-			expect(within(globalTable).queryByText("user-1")).toBeNull();
-			expect(within(globalTable).queryByText("user-2")).toBeNull();
+			expect(
+				within(globalTable).queryByText(
+					fixtureCatalog.identifier.userPrimary(),
+				),
+			).toBeNull();
+			expect(
+				within(globalTable).queryByText(
+					fixtureCatalog.identifier.userSecondary(),
+				),
+			).toBeNull();
 
 			await openNodeTab(view.container);
 			const nodeTable = await within(view.container).findByTestId(
 				"ratio-editor-table",
 			);
 			expect(within(nodeTable).queryByText("Input (%)")).toBeNull();
-			expect(within(nodeTable).queryByText("user-1")).toBeNull();
-			expect(within(nodeTable).queryByText("user-2")).toBeNull();
+			expect(
+				within(nodeTable).queryByText(fixtureCatalog.identifier.userPrimary()),
+			).toBeNull();
+			expect(
+				within(nodeTable).queryByText(
+					fixtureCatalog.identifier.userSecondary(),
+				),
+			).toBeNull();
 		} finally {
 			Object.defineProperty(window, "innerWidth", {
 				configurable: true,
@@ -600,54 +604,49 @@ describe("<QuotaPolicyPage />", () => {
 		});
 		try {
 			const view = renderPage();
+			const userId = fixtureCatalog.identifier.userPrimary();
+			const globalPercentTestId = `global-ratio-table-percent-${userId}`;
+			const nodePercentTestId = `ratio-table-percent-${userId}`;
 			await within(view.container).findByTestId("global-ratio-editor-table");
 
 			const globalDisplay = within(view.container).getByTestId(
-				"global-ratio-table-percent-user-1-display",
+				`${globalPercentTestId}-display`,
 			);
 			fireEvent.doubleClick(globalDisplay);
 			const globalInput = within(view.container).getByTestId(
-				"global-ratio-table-percent-user-1-input",
+				`${globalPercentTestId}-input`,
 			);
 			fireEvent.change(globalInput, { target: { value: "60" } });
 			fireEvent.keyDown(globalInput, { key: "Enter" });
 
 			await waitFor(() => {
 				expect(
-					within(view.container).queryByTestId(
-						"global-ratio-table-percent-user-1-input",
-					),
+					within(view.container).queryByTestId(`${globalPercentTestId}-input`),
 				).toBeNull();
 			});
 			expect(
-				within(view.container).getByTestId(
-					"global-ratio-table-percent-user-1-display",
-				),
+				within(view.container).getByTestId(`${globalPercentTestId}-display`),
 			).toHaveTextContent("60.00%");
 
 			await openNodeTab(view.container);
 			await within(view.container).findByTestId("ratio-editor-table");
 			const nodeDisplay = within(view.container).getByTestId(
-				"ratio-table-percent-user-1-display",
+				`${nodePercentTestId}-display`,
 			);
 			fireEvent.doubleClick(nodeDisplay);
 			const nodeInput = within(view.container).getByTestId(
-				"ratio-table-percent-user-1-input",
+				`${nodePercentTestId}-input`,
 			);
 			fireEvent.change(nodeInput, { target: { value: "70" } });
 			fireEvent.keyDown(nodeInput, { key: "Enter" });
 
 			await waitFor(() => {
 				expect(
-					within(view.container).queryByTestId(
-						"ratio-table-percent-user-1-input",
-					),
+					within(view.container).queryByTestId(`${nodePercentTestId}-input`),
 				).toBeNull();
 			});
 			expect(
-				within(view.container).getByTestId(
-					"ratio-table-percent-user-1-display",
-				),
+				within(view.container).getByTestId(`${nodePercentTestId}-display`),
 			).toHaveTextContent("70.00%");
 			expect(within(view.container).getByText("7000")).toBeInTheDocument();
 			expect(within(view.container).getByText("3000")).toBeInTheDocument();

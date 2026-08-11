@@ -1,0 +1,410 @@
+id: fixture-policy-typescript-data-source
+snapshots:
+  ? |
+    async function handleRequest(nextSubscriptionToken: () => string) {
+      return { subscription_token: nextSubscriptionToken() };
+    }
+  : labels:
+    - source: 'subscription_token: nextSubscriptionToken()'
+      style: primary
+      start: 79
+      end: 122
+    - source: subscription_token
+      style: secondary
+      start: 79
+      end: 97
+    - source: nextSubscriptionToken()
+      style: secondary
+      start: 99
+      end: 122
+  ? |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
+  : labels:
+    - source: 'short_ids: ["unapproved-short-id"]'
+      style: primary
+      start: 20
+      end: 54
+    - source: short_ids
+      style: secondary
+      start: 20
+      end: 29
+    - source: '["unapproved-short-id"]'
+      style: secondary
+      start: 31
+      end: 54
+  ? |
+    const fixture = { bootstrap_access_host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'bootstrap_access_host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 66
+    - source: bootstrap_access_host
+      style: secondary
+      start: 18
+      end: 39
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 41
+      end: 66
+  ? |
+    const fixture = { bootstrap_node_name: process.env.TEST_NODE_NAME };
+  : labels:
+    - source: 'bootstrap_node_name: process.env.TEST_NODE_NAME'
+      style: primary
+      start: 18
+      end: 65
+    - source: bootstrap_node_name
+      style: secondary
+      start: 18
+      end: 37
+    - source: process.env.TEST_NODE_NAME
+      style: secondary
+      start: 39
+      end: 65
+  ? |
+    const fixture = { config_hash: "unapproved-config" };
+  : labels:
+    - source: 'config_hash: "unapproved-config"'
+      style: primary
+      start: 18
+      end: 50
+    - source: config_hash
+      style: secondary
+      start: 18
+      end: 29
+    - source: '"unapproved-config"'
+      style: secondary
+      start: 31
+      end: 50
+  ? |
+    const fixture = { cycle_end_at: new Date().toISOString() };
+  : labels:
+    - source: 'cycle_end_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 56
+    - source: cycle_end_at
+      style: secondary
+      start: 18
+      end: 30
+    - source: new Date().toISOString()
+      style: secondary
+      start: 32
+      end: 56
+  ? |
+    const fixture = { emitted_at: new Date().toISOString() };
+  : labels:
+    - source: 'emitted_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 54
+    - source: emitted_at
+      style: secondary
+      start: 18
+      end: 28
+    - source: new Date().toISOString()
+      style: secondary
+      start: 30
+      end: 54
+  ? |
+    const fixture = { endpointId: `endpoint-${suffix}` };
+  : labels:
+    - source: 'endpointId: `endpoint-${suffix}`'
+      style: primary
+      start: 18
+      end: 50
+    - source: endpointId
+      style: secondary
+      start: 18
+      end: 28
+    - source: '`endpoint-${suffix}`'
+      style: secondary
+      start: 30
+      end: 50
+  ? |
+    const fixture = { first_seen_at: new Date().toISOString() };
+  : labels:
+    - source: 'first_seen_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 57
+    - source: first_seen_at
+      style: secondary
+      start: 18
+      end: 31
+    - source: new Date().toISOString()
+      style: secondary
+      start: 33
+      end: 57
+  ? |
+    const fixture = { host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 49
+    - source: host
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 24
+      end: 49
+  ? |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'hour: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 46
+    - source: hour
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 24
+      end: 46
+  ? |
+    const fixture = { ip: await fetch("https://input.fixture.test") };
+  : labels:
+    - source: 'ip: await fetch("https://input.fixture.test")'
+      style: primary
+      start: 18
+      end: 63
+    - source: ip
+      style: secondary
+      start: 18
+      end: 20
+    - source: await fetch("https://input.fixture.test")
+      style: secondary
+      start: 22
+      end: 63
+  ? |
+    const fixture = { last_success_at: new Date().toISOString() };
+  : labels:
+    - source: 'last_success_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 59
+    - source: last_success_at
+      style: secondary
+      start: 18
+      end: 33
+    - source: new Date().toISOString()
+      style: secondary
+      start: 35
+      end: 59
+  ? |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'latest_checked_at: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 59
+    - source: latest_checked_at
+      style: secondary
+      start: 18
+      end: 35
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 37
+      end: 59
+  ? |
+    const fixture = { node_id: payload.node_id };
+  : labels:
+    - source: 'node_id: payload.node_id'
+      style: primary
+      start: 18
+      end: 42
+    - source: node_id
+      style: secondary
+      start: 18
+      end: 25
+    - source: payload.node_id
+      style: secondary
+      start: 27
+      end: 42
+  ? |
+    const fixture = { owner_node_id: "unapproved-node" };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 50
+    - source: owner_node_id
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 33
+      end: 50
+  ? |
+    const fixture = { run_id: "unapproved-run" };
+  : labels:
+    - source: 'run_id: "unapproved-run"'
+      style: primary
+      start: 18
+      end: 42
+    - source: run_id
+      style: secondary
+      start: 18
+      end: 24
+    - source: '"unapproved-run"'
+      style: secondary
+      start: 26
+      end: 42
+  ? |
+    const fixture = { subscription_token: user.subscription_token };
+  : labels:
+    - source: 'subscription_token: user.subscription_token'
+      style: primary
+      start: 18
+      end: 61
+    - source: subscription_token
+      style: secondary
+      start: 18
+      end: 36
+    - source: user.subscription_token
+      style: secondary
+      start: 38
+      end: 61
+  ? |
+    const fixture = { timestamp: JSON.parse(raw) };
+  : labels:
+    - source: 'timestamp: JSON.parse(raw)'
+      style: primary
+      start: 18
+      end: 44
+  ? |
+    const fixture = { token: process.env.TEST_TOKEN };
+  : labels:
+    - source: 'token: process.env.TEST_TOKEN'
+      style: primary
+      start: 18
+      end: 47
+    - source: token
+      style: secondary
+      start: 18
+      end: 23
+    - source: process.env.TEST_TOKEN
+      style: secondary
+      start: 25
+      end: 47
+  ? |
+    const fixture = { total_bytes: 4096 };
+  : labels:
+    - source: 'total_bytes: 4096'
+      style: primary
+      start: 18
+      end: 35
+    - source: total_bytes
+      style: secondary
+      start: 18
+      end: 29
+    - source: '4096'
+      style: secondary
+      start: 31
+      end: 35
+  ? |
+    const fixture = { updated_at: JSON.parse(raw) };
+  : labels:
+    - source: 'updated_at: JSON.parse(raw)'
+      style: primary
+      start: 18
+      end: 45
+    - source: updated_at
+      style: secondary
+      start: 18
+      end: 28
+    - source: JSON.parse(raw)
+      style: secondary
+      start: 30
+      end: 45
+  ? |
+    const fixture = { user_id: process.env.TEST_USER_ID };
+  : labels:
+    - source: 'user_id: process.env.TEST_USER_ID'
+      style: primary
+      start: 18
+      end: 51
+    - source: user_id
+      style: secondary
+      start: 18
+      end: 25
+    - source: process.env.TEST_USER_ID
+      style: secondary
+      start: 27
+      end: 51
+  ? |
+    const fixture = { xray_api_addr: "127.0.0.1:10085" };
+  : labels:
+    - source: 'xray_api_addr: "127.0.0.1:10085"'
+      style: primary
+      start: 18
+      end: 50
+    - source: xray_api_addr
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"127.0.0.1:10085"'
+      style: secondary
+      start: 33
+      end: 50
+  ? |
+    function buildEndpointCreateMeta() {
+      return { token: derived };
+    }
+  : labels:
+    - source: 'token: derived'
+      style: primary
+      start: 48
+      end: 62
+    - source: token
+      style: secondary
+      start: 48
+      end: 53
+    - source: derived
+      style: secondary
+      start: 55
+      end: 62
+  ? |
+    function buildNodeHistory() {
+      return { token: node.node_id };
+    }
+  : labels:
+    - source: 'token: node.node_id'
+      style: primary
+      start: 41
+      end: 60
+    - source: token
+      style: secondary
+      start: 41
+      end: 46
+    - source: node.node_id
+      style: secondary
+      start: 48
+      end: 60
+  ? |
+    function buildNodeRuntimeListItem() {
+      return { node_id: process.env.TEST_NODE_ID };
+    }
+  : labels:
+    - source: 'node_id: process.env.TEST_NODE_ID'
+      style: primary
+      start: 49
+      end: 82
+    - source: node_id
+      style: secondary
+      start: 49
+      end: 56
+    - source: process.env.TEST_NODE_ID
+      style: secondary
+      start: 58
+      end: 82

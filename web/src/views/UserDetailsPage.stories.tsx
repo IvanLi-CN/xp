@@ -3,66 +3,61 @@ import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
-import { buildDenseUserIpUsageStories } from "../storybook/ipUsageStoryData";
+import { fixtureCatalog } from "../fixture-policy/catalog";
+import {
+	buildDenseUserIpUsageStories,
+	buildDuplicateNameUserIpUsageStories,
+} from "../storybook/ipUsageStoryData";
 
-const USER_ID_1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-const USER_ID_2 = "01HF7YAT01YVKWQ847J5T9EY84";
-const TOKYO_NODE_ID = "node-1";
-const OSAKA_NODE_ID = "node-2";
+const USER_ID_1 = fixtureCatalog.identifier.userPrimary();
+const USER_ID_2 = fixtureCatalog.identifier.userSecondary();
+const ACCESS_NODE_HINT = [
+	"Node all-select covers current endpoints on",
+	fixtureCatalog.identifier.nodeNameSecondary(),
+	"and",
+	fixtureCatalog.identifier.nodeNamePrimary(),
+	"only. Future endpoints still follow protocol all-select defaults.",
+].join(" ");
 
 const nodes: AdminNode[] = [
 	{
-		node_id: TOKYO_NODE_ID,
-		node_name: "tokyo-1",
-		access_host: "tokyo-1.example.com",
-		api_base_url: "https://tokyo-1.example.com",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+		access_host: fixtureCatalog.host.primary(),
+		api_base_url: fixtureCatalog.url.primaryApi(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 	{
-		node_id: OSAKA_NODE_ID,
-		node_name: "osaka-1",
-		access_host: "osaka-1.example.com",
-		api_base_url: "https://osaka-1.example.com",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		node_id: fixtureCatalog.identifier.nodeSecondary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		access_host: fixtureCatalog.host.secondary(),
+		api_base_url: fixtureCatalog.url.secondaryApi(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 ];
 
 const endpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: "endpoint-1",
-		node_id: TOKYO_NODE_ID,
-		tag: "edge-tokyo",
-		kind: "vless_reality_vision_tcp",
-		port: 443,
+		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		tag: fixtureCatalog.identifier.endpointTagPrimary(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {},
 	},
 	{
-		endpoint_id: "endpoint-2",
-		node_id: OSAKA_NODE_ID,
-		tag: "shadow-osaka",
-		kind: "ss2022_2022_blake3_aes_128_gcm",
-		port: 8443,
+		endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+		node_id: fixtureCatalog.identifier.nodeSecondary(),
+		tag: fixtureCatalog.identifier.endpointTagSecondary(),
+		kind: fixtureCatalog.endpoint.ssKind(),
+		port: fixtureCatalog.endpoint.port8443(),
 		meta: {},
 	},
 ];
 
-const userUsageReports = buildDenseUserIpUsageStories(
-	{
-		user_id: USER_ID_1,
-		display_name: "Alice",
-	},
-	nodes,
-);
+const userUsageReports = buildDenseUserIpUsageStories();
 
 const meta = {
 	title: "Pages/UserDetailsPage",
@@ -75,37 +70,40 @@ const meta = {
 			data: {
 				endpoints,
 				nodes,
-				userAccessByUserId: {
-					[USER_ID_1]: [
-						{
-							user_id: USER_ID_1,
-							endpoint_id: "endpoint-1",
-							node_id: TOKYO_NODE_ID,
-						},
-						{
-							user_id: USER_ID_1,
-							endpoint_id: "endpoint-2",
-							node_id: OSAKA_NODE_ID,
-						},
+				userAccessByUserId: Object.fromEntries([
+					[
+						USER_ID_1,
+						[
+							{
+								user_id: fixtureCatalog.identifier.userPrimary(),
+								endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+								node_id: fixtureCatalog.identifier.nodePrimary(),
+							},
+							{
+								user_id: fixtureCatalog.identifier.userPrimary(),
+								endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+								node_id: fixtureCatalog.identifier.nodeSecondary(),
+							},
+						],
 					],
-				},
+				]),
 				nodeQuotas: [
 					{
-						user_id: USER_ID_1,
-						node_id: TOKYO_NODE_ID,
-						quota_limit_bytes: 10 * 2 ** 30,
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 						quota_reset_source: "user",
 					},
 					{
-						user_id: USER_ID_1,
-						node_id: OSAKA_NODE_ID,
-						quota_limit_bytes: 5 * 2 ** 30,
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						node_id: fixtureCatalog.identifier.nodeSecondary(),
+						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
 						quota_reset_source: "node",
 					},
 				],
-				userIpUsageByUserId: {
-					[USER_ID_1]: userUsageReports,
-				},
+				userIpUsageByUserId: Object.fromEntries([
+					[USER_ID_1, userUsageReports],
+				]),
 			},
 		},
 	},
@@ -196,11 +194,7 @@ export const AccessTab: Story = {
 				"After Apply access, new VLESS and SS2022 endpoints will be assigned to this user automatically.",
 			),
 		).toBeInTheDocument();
-		await expect(
-			await canvas.findByText(
-				"Node all-select covers current endpoints on tokyo-1 and osaka-1 only. Future endpoints still follow protocol all-select defaults.",
-			),
-		).toBeInTheDocument();
+		await expect(await canvas.findByText(ACCESS_NODE_HINT)).toBeInTheDocument();
 	},
 };
 
@@ -241,13 +235,19 @@ export const UsageDetailsTab: Story = {
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo-1" }),
+			await canvas.findByRole("tab", {
+				name: fixtureCatalog.identifier.nodeNamePrimary(),
+			}),
 		).toHaveAttribute("aria-selected", "true");
 		await expect(
-			await canvas.findByText("Usage details · tokyo-1"),
+			await canvas.findByText(
+				`Usage details · ${fixtureCatalog.identifier.nodeNamePrimary()}`,
+			),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.57" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -258,66 +258,30 @@ export const UsageDetailsDuplicateNames: Story = {
 			data: {
 				nodes: [
 					{
-						node_id: "dup-node-a",
-						node_name: "tokyo",
-						access_host: "tokyo-a.example.com",
-						api_base_url: "https://tokyo-a.example.com",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.identifier.endpointPrimary(),
+						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+						access_host: fixtureCatalog.host.primary(),
+						api_base_url: fixtureCatalog.url.primaryApi(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 					{
-						node_id: "dup-node-b",
-						node_name: "tokyo",
-						access_host: "tokyo-b.example.com",
-						api_base_url: "https://tokyo-b.example.com",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.identifier.endpointSecondary(),
+						node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+						access_host: fixtureCatalog.host.secondary(),
+						api_base_url: fixtureCatalog.url.secondaryApi(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
-				userIpUsageByUserId: {
-					[USER_ID_1]: {
-						...buildDenseUserIpUsageStories(
-							{
-								user_id: USER_ID_1,
-								display_name: "Alice",
-							},
-							[
-								{
-									node_id: "dup-node-a",
-									node_name: "tokyo",
-									access_host: "tokyo-a.example.com",
-									api_base_url: "https://tokyo-a.example.com",
-									quota_limit_bytes: 0,
-									quota_reset: {
-										policy: "monthly",
-										day_of_month: 1,
-										tz_offset_minutes: null,
-									},
-								},
-								{
-									node_id: "dup-node-b",
-									node_name: "tokyo",
-									access_host: "tokyo-b.example.com",
-									api_base_url: "https://tokyo-b.example.com",
-									quota_limit_bytes: 0,
-									quota_reset: {
-										policy: "monthly",
-										day_of_month: 1,
-										tz_offset_minutes: null,
-									},
-								},
-							],
-						),
-					},
-				},
+				userIpUsageByUserId: Object.fromEntries([
+					[
+						USER_ID_1,
+						{
+							...buildDuplicateNameUserIpUsageStories(),
+						},
+					],
+				]),
 			},
 		},
 	},
@@ -327,10 +291,14 @@ export const UsageDetailsDuplicateNames: Story = {
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo · tokyo-a.example.com" }),
+			await canvas.findByRole("tab", {
+				name: `fixture-duplicate · ${fixtureCatalog.host.primary()}`,
+			}),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByRole("tab", { name: "tokyo · tokyo-b.example.com" }),
+			await canvas.findByRole("tab", {
+				name: `fixture-duplicate · ${fixtureCatalog.host.secondary()}`,
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -341,16 +309,24 @@ export const UsageDetailsTab7d: Story = {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Usage details" }),
 		);
-		await userEvent.click(await canvas.findByRole("tab", { name: "osaka-1" }));
+		await userEvent.click(
+			await canvas.findByRole("tab", {
+				name: fixtureCatalog.identifier.nodeNamePrimary(),
+			}),
+		);
 		await expect(
-			await canvas.findByRole("heading", { name: "Usage details · osaka-1" }),
+			await canvas.findByRole("heading", {
+				name: `Usage details · ${fixtureCatalog.identifier.nodeNamePrimary()}`,
+			}),
 		).toBeInTheDocument();
 		await userEvent.click(await canvas.findByRole("button", { name: "7d" }));
 		await expect(
 			await canvas.findByRole("button", { name: "7d" }),
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.99" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -365,7 +341,7 @@ export const MihomoProviderPreview: Story = {
 			await screen.findByText("Subscription preview"),
 		).toBeInTheDocument();
 		await expect(
-			await screen.findByText(/xp-system-generated/i),
+			await screen.findByText(fixtureCatalog.subscription.rawUri()),
 		).toBeInTheDocument();
 	},
 };

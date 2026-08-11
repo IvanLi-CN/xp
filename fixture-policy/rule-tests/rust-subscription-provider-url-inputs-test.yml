@@ -1,0 +1,35 @@
+id: fixture-policy-rust-subscription-provider-url-inputs
+valid:
+  - |
+    let yaml = build_mihomo_provider_yaml(
+      seed, &user, &memberships, &endpoints, &nodes, &profile,
+      xp_test_fixtures::subscription_provider_system_url(),
+    );
+  - |
+    let yaml = build_mihomo_provider_yaml_with_node_probes(
+      seed, &user, &memberships, &endpoints, &nodes, &probes, &profile,
+      xp_test_fixtures::subscription_provider_system_url(),
+    );
+  - |
+    let yaml = build_mihomo_provider_yaml_with_node_probes_mode(
+      seed, &user, &memberships, &endpoints, &nodes, &probes, &profile,
+      xp_test_fixtures::subscription_provider_system_url(), mode,
+      xp_test_fixtures::mihomo_mirror_base_url(),
+    );
+invalid:
+  - |
+    let yaml = build_mihomo_provider_yaml(
+      seed, &user, &memberships, &endpoints, &nodes, &profile,
+      "https://live.example/api/sub/token",
+    );
+  - |
+    let yaml = build_mihomo_provider_yaml_with_node_probes(
+      seed, &user, &memberships, &endpoints, &nodes, &probes, &profile,
+      request.subscription_url,
+    );
+  - |
+    let yaml = build_mihomo_provider_yaml_with_node_probes_mode(
+      seed, &user, &memberships, &endpoints, &nodes, &probes, &profile,
+      xp_test_fixtures::subscription_provider_system_url(), mode,
+      format!("https://{host}/api/mihomo/resources"),
+    );

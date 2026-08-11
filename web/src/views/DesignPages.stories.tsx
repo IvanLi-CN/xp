@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AlertsResponse } from "../api/adminAlerts";
 import type { AdminEndpoint } from "../api/adminEndpoints";
@@ -6,7 +7,6 @@ import type { AdminNode } from "../api/adminNodes";
 import type { AdminUserAccessItem } from "../api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../api/adminUserNodeQuotas";
 import type { AdminUser } from "../api/adminUsers";
-import type { NodeQuotaReset, UserQuotaReset } from "../api/quotaReset";
 
 function Empty() {
 	return <></>;
@@ -34,9 +34,9 @@ const DESIGN_ALERTS: AlertsResponse = {
 		{
 			type: "quota_banned_membership",
 			membership_key: "u_01HUSERAAAAAA::ep_01HENDPTAAAAAA",
-			user_id: "u_01HUSERAAAAAA",
-			endpoint_id: "ep_01HENDPTAAAAAA",
-			owner_node_id: "n1",
+			user_id: fixtureCatalog.identifier.userPrimary(),
+			endpoint_id: fixtureCatalog.endpointId.fixture240(),
+			owner_node_id: fixtureCatalog.nodeId.fixture241(),
 			quota_banned: true,
 			quota_banned_at: "2026-03-01T00:00:00Z",
 			message: "Quota enforced on owner node (membership is blocked).",
@@ -47,39 +47,28 @@ const DESIGN_ALERTS: AlertsResponse = {
 
 const DESIGN_NODES: AdminNode[] = [
 	{
-		node_id: "n1",
-		node_name: "tokyo-1",
-		access_host: "tokyo.example.com",
-		api_base_url: "https://n1:62416",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		node_id: fixtureCatalog.nodeId.fixture241(),
+		node_name: fixtureCatalog.nodeName.fixture33(),
+		access_host: fixtureCatalog.host.fixture137(),
+		api_base_url: fixtureCatalog.service.fixture242(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 	},
 	{
-		node_id: "n2",
-		node_name: "osaka-1",
-		access_host: "osaka.example.com",
-		api_base_url: "https://n2:62416",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 15,
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		node_id: fixtureCatalog.nodeId.fixture243(),
+		node_name: fixtureCatalog.nodeName.fixture37(),
+		access_host: fixtureCatalog.host.fixture244(),
+		api_base_url: fixtureCatalog.service.fixture245(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNodeMidMonth(),
 	},
 	{
-		node_id: "n3",
-		node_name: "nagoya-1",
-		access_host: "nagoya.example.com",
-		api_base_url: "https://n3:62416",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "unlimited",
-			tz_offset_minutes: null,
-		} satisfies NodeQuotaReset,
+		node_id: fixtureCatalog.nodeId.fixture246(),
+		node_name: fixtureCatalog.nodeName.fixture247(),
+		access_host: fixtureCatalog.host.fixture248(),
+		api_base_url: fixtureCatalog.service.fixture249(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 ];
 
@@ -87,91 +76,80 @@ const DESIGN_ENDPOINTS: Array<
 	AdminEndpoint & { short_ids?: string[]; active_short_id?: string }
 > = [
 	{
-		endpoint_id: "ep_01HENDPTAAAAAA",
-		node_id: "n1",
-		tag: "tokyo-vless",
-		kind: "vless_reality_vision_tcp",
-		port: 443,
+		endpoint_id: fixtureCatalog.endpointId.fixture240(),
+		node_id: fixtureCatalog.nodeId.fixture241(),
+		tag: fixtureCatalog.endpointTag.fixture139(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {
 			reality: {
-				dest: "127.0.0.1:39043",
-				server_names: ["tokyo.example.com"],
+				dest: fixtureCatalog.address.loopbackPort39002(),
+				server_names: fixtureCatalog.hostList.edge20(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
-			canary_upstream: {
-				url: "http://127.0.0.1:8080",
-				mode: "auto",
-			},
-			accepted_authorities: ["edge.example.com:443", "edge.example.test:443"],
+			canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+			accepted_authorities: fixtureCatalog.hostList.edge21(),
 			managed_default: true,
 		},
-		short_ids: ["2a3b4c", "5d6e7f"],
-		active_short_id: "2a3b4c",
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	},
 	{
-		endpoint_id: "ep_01HENDPTBBBBBB",
-		node_id: "n2",
-		tag: "osaka-ss",
-		kind: "ss2022_2022_blake3_aes_128_gcm",
-		port: 8443,
+		endpoint_id: fixtureCatalog.endpointId.fixture250(),
+		node_id: fixtureCatalog.nodeId.fixture243(),
+		tag: fixtureCatalog.endpointTag.fixture251(),
+		kind: fixtureCatalog.endpoint.ssKind(),
+		port: fixtureCatalog.endpoint.port8443(),
 		meta: {
 			method: "2022-blake3-aes-128-gcm",
 		},
-		short_ids: ["aa11bb"],
-		active_short_id: "aa11bb",
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	},
 ];
 
 const DESIGN_USERS: AdminUser[] = [
 	{
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Customer A",
-		subscription_token: "sub_9c1234d2",
+		subscription_token: fixtureCatalog.token.fixture252(),
 		credential_epoch: 0,
 		priority_tier: "p3",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 1,
-			tz_offset_minutes: 480,
-		} satisfies UserQuotaReset,
+		quota_reset: fixtureCatalog.quota.reset(),
 	},
 	{
-		user_id: "u_01HUSERBBBBBB",
+		user_id: fixtureCatalog.identifier.userSecondary(),
 		display_name: "Customer B",
-		subscription_token: "sub_af5678e9",
+		subscription_token: fixtureCatalog.token.fixture253(),
 		credential_epoch: 0,
 		priority_tier: "p3",
-		quota_reset: {
-			policy: "monthly",
-			day_of_month: 15,
-			tz_offset_minutes: 480,
-		} satisfies UserQuotaReset,
+		quota_reset: fixtureCatalog.quota.resetUserMidMonth(),
 	},
 ];
 
 const DESIGN_USER_ACCESS: Record<string, AdminUserAccessItem[]> = {
-	u_01HUSERAAAAAA: [
+	[fixtureCatalog.identifier.userPrimary()]: [
 		{
-			user_id: "u_01HUSERAAAAAA",
-			endpoint_id: "ep_01HENDPTAAAAAA",
-			node_id: "n1",
+			user_id: fixtureCatalog.identifier.userPrimary(),
+			endpoint_id: fixtureCatalog.endpointId.fixture240(),
+			node_id: fixtureCatalog.nodeId.fixture241(),
 		},
 	],
-	u_01HUSERBBBBBB: [
+	[fixtureCatalog.identifier.userSecondary()]: [
 		{
-			user_id: "u_01HUSERBBBBBB",
-			endpoint_id: "ep_01HENDPTBBBBBB",
-			node_id: "n2",
+			user_id: fixtureCatalog.identifier.userSecondary(),
+			endpoint_id: fixtureCatalog.endpointId.fixture250(),
+			node_id: fixtureCatalog.nodeId.fixture243(),
 		},
 	],
 };
 
 const DESIGN_NODE_QUOTAS: AdminUserNodeQuota[] = [
 	{
-		user_id: "u_01HUSERAAAAAA",
-		node_id: "n1",
-		quota_limit_bytes: 10 * 2 ** 30,
+		user_id: fixtureCatalog.identifier.userPrimary(),
+		node_id: fixtureCatalog.nodeId.fixture241(),
+		quota_limit_bytes: fixtureCatalog.quota.tenGiB(),
 		quota_reset_source: "user",
 	},
 ];
@@ -185,10 +163,10 @@ const DESIGN_MOCK_API = {
 	data: {
 		health: { status: "ok" as const },
 		clusterInfo: {
-			cluster_id: "cluster-alpha",
-			node_id: "n1",
+			cluster_id: fixtureCatalog.cluster.fixture53(),
+			node_id: fixtureCatalog.nodeId.fixture241(),
 			role: "leader" as const,
-			leader_api_base_url: "https://n1:62416",
+			leader_api_base_url: fixtureCatalog.service.fixture242(),
 			term: 42,
 			xp_version: "0.0.0",
 		},
@@ -236,10 +214,10 @@ export const DashboardUpdateAvailable: Story = {
 					current: { package: "0.1.0", release_tag: "v0.1.0" },
 					latest: {
 						release_tag: "v0.2.0",
-						published_at: "2026-01-31T00:00:00Z",
+						published_at: fixtureCatalog.timestamp.t20260131T000000(),
 					},
 					has_update: true,
-					checked_at: "2026-01-31T00:00:00Z",
+					checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 					compare_reason: "semver",
 					source: {
 						kind: "github-releases",

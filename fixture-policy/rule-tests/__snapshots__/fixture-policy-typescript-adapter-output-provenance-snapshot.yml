@@ -1,0 +1,161 @@
+id: fixture-policy-typescript-adapter-output-provenance
+snapshots:
+  ? |
+    const bad = (key: string) => catalog[key];
+  : labels:
+    - source: '(key: string) => catalog[key]'
+      style: primary
+      start: 12
+      end: 41
+    - source: '(key: string)'
+      style: secondary
+      start: 12
+      end: 25
+  ? |
+    const fixtureCatalog = {
+      host: { get primary() { return "live.example"; } },
+    };
+  : labels:
+    - source: get primary() { return "live.example"; }
+      style: primary
+      start: 35
+      end: 75
+  ? |
+    const fixtureCatalog = {
+      host: { primary() { return "live.example"; } },
+    };
+  : labels:
+    - source: primary() { return "live.example"; }
+      style: primary
+      start: 35
+      end: 71
+  ? |
+    const injectedHost = function () {
+      return "live.example";
+    };
+  : labels:
+    - source: |-
+        function () {
+          return "live.example";
+        }
+      style: primary
+      start: 21
+      end: 61
+  ? |
+    const make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });
+  : labels:
+    - source: const make = createStringAccessors;
+      style: primary
+      start: 0
+      end: 35
+  ? |
+    const primary = () => "live.example";
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 16
+      end: 36
+  ? |
+    const primary = () => (catalog.hosts.primary, "live.example");
+  : labels:
+    - source: () => (catalog.hosts.primary, "live.example")
+      style: primary
+      start: 16
+      end: 61
+  ? |
+    const primary = () => `live.${suffix}`;
+  : labels:
+    - source: () => `live.${suffix}`
+      style: primary
+      start: 16
+      end: 38
+  ? |
+    const slots = Object.fromEntries([
+      ["unsafe", () => "live.example"],
+    ]);
+  : labels:
+    - source: () => "live.example"
+      style: primary
+      start: 48
+      end: 68
+  ? |
+    const unsafe = (createStringAccessors)({ unsafe: "live.example" });
+  : labels:
+    - source: '(createStringAccessors)({ unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 66
+  ? |
+    const unsafe = createListAccessors({ unsafe: ["live.example"] });
+  : labels:
+    - source: 'createListAccessors({ unsafe: ["live.example"] })'
+      style: primary
+      start: 15
+      end: 64
+  ? |
+    const unsafe = createNumberAccessors({ unsafe: 4096 });
+  : labels:
+    - source: 'createNumberAccessors({ unsafe: 4096 })'
+      style: primary
+      start: 15
+      end: 54
+  ? |
+    const unsafe = createStringAccessors({ unsafe: "live.example" });
+  : labels:
+    - source: 'createStringAccessors({ unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 64
+  ? |
+    const unsafe = createStringAccessors.call(null, { unsafe: "live.example" });
+  : labels:
+    - source: 'createStringAccessors.call(null, { unsafe: "live.example" })'
+      style: primary
+      start: 15
+      end: 75
+  ? |
+    function createStringAccessors(_value: string, index: number) {
+      return [`s${index}`, () => "live.example"];
+    }
+  : labels:
+    - source: |-
+        function createStringAccessors(_value: string, index: number) {
+          return [`s${index}`, () => "live.example"];
+        }
+      style: primary
+      start: 0
+      end: 111
+  ? |
+    function injectedHost() {
+      return "live.example";
+    }
+  : labels:
+    - source: |-
+        function injectedHost() {
+          return "live.example";
+        }
+      style: primary
+      start: 0
+      end: 52
+  ? |
+    function stringSlotEntry(_value: string, index: number) {
+      return [`s${index}`, () => "live.example"];
+    }
+  : labels:
+    - source: |-
+        function stringSlotEntry(_value: string, index: number) {
+          return [`s${index}`, () => "live.example"];
+        }
+      style: primary
+      start: 0
+      end: 105
+  ? |
+    let make;
+    make = createStringAccessors;
+    const unsafe = make({ unsafe: "live.example" });
+  : labels:
+    - source: make = createStringAccessors
+      style: primary
+      start: 10
+      end: 38

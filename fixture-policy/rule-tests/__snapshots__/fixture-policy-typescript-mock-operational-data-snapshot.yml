@@ -1,0 +1,47 @@
+id: fixture-policy-typescript-mock-operational-data
+snapshots:
+  ? |
+    const endpoint = { port: 8443, public_domain: "live.example" };
+  : labels:
+    - source: 'port: 8443'
+      style: primary
+      start: 19
+      end: 29
+    - source: port
+      style: secondary
+      start: 19
+      end: 23
+    - source: '8443'
+      style: secondary
+      start: 25
+      end: 29
+  ? |
+    const endpoint = { port: payload.port, short_ids: request.short_ids };
+  : labels:
+    - source: 'port: payload.port'
+      style: primary
+      start: 19
+      end: 37
+    - source: port
+      style: secondary
+      start: 19
+      end: 23
+    - source: payload.port
+      style: secondary
+      start: 25
+      end: 37
+  ? |
+    const weight = { weight: payload.weight };
+  : labels:
+    - source: 'weight: payload.weight'
+      style: primary
+      start: 17
+      end: 39
+    - source: weight
+      style: secondary
+      start: 17
+      end: 23
+    - source: payload.weight
+      style: secondary
+      start: 25
+      end: 39

@@ -1,0 +1,142 @@
+id: fixture-policy-rust-inline-assignment-source
+snapshots:
+  ? |
+    mod tests {
+        fn updates_latency() {
+            fixture.latency_ms = std::env::var("TEST_LATENCY").unwrap();
+        }
+    }
+  : labels:
+    - source: fixture.latency_ms = std::env::var("TEST_LATENCY").unwrap()
+      style: primary
+      start: 47
+      end: 106
+    - source: |-
+        mod tests {
+            fn updates_latency() {
+                fixture.latency_ms = std::env::var("TEST_LATENCY").unwrap();
+            }
+        }
+      style: secondary
+      start: 0
+      end: 115
+    - source: fixture.latency_ms
+      style: secondary
+      start: 47
+      end: 65
+    - source: std::env::var("TEST_LATENCY").unwrap()
+      style: secondary
+      start: 68
+      end: 106
+  ? |
+    mod tests {
+        fn updates_mesh_target() {
+            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+        }
+    }
+  : labels:
+    - source: fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: primary
+      start: 51
+      end: 120
+    - source: |-
+        mod tests {
+            fn updates_mesh_target() {
+                fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+            }
+        }
+      style: secondary
+      start: 0
+      end: 129
+    - source: fixture.mesh_base_url
+      style: secondary
+      start: 51
+      end: 72
+    - source: Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: secondary
+      start: 75
+      end: 120
+  ? |
+    mod tests {
+        fn updates_node() {
+            fixture.node_id = "unapproved-node".to_owned();
+        }
+    }
+  : labels:
+    - source: fixture.node_id = "unapproved-node".to_owned()
+      style: primary
+      start: 44
+      end: 90
+    - source: |-
+        mod tests {
+            fn updates_node() {
+                fixture.node_id = "unapproved-node".to_owned();
+            }
+        }
+      style: secondary
+      start: 0
+      end: 99
+    - source: fixture.node_id
+      style: secondary
+      start: 44
+      end: 59
+    - source: '"unapproved-node".to_owned()'
+      style: secondary
+      start: 62
+      end: 90
+  ? |
+    mod tests {
+      fn updates_mesh_target() {
+        fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+      }
+    }
+  : labels:
+    - source: fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: primary
+      start: 45
+      end: 114
+    - source: |-
+        mod tests {
+          fn updates_mesh_target() {
+            fixture.mesh_base_url = Some(std::env::var("TEST_MESH_URL").unwrap());
+          }
+        }
+      style: secondary
+      start: 0
+      end: 121
+    - source: fixture.mesh_base_url
+      style: secondary
+      start: 45
+      end: 66
+    - source: Some(std::env::var("TEST_MESH_URL").unwrap())
+      style: secondary
+      start: 69
+      end: 114
+  ? |
+    mod tests {
+      fn updates_probe() {
+        fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned());
+      }
+    }
+  : labels:
+    - source: fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned())
+      style: primary
+      start: 39
+      end: 104
+    - source: |-
+        mod tests {
+          fn updates_probe() {
+            fixture.last_success_at = Some("2026-03-11T11:00:00Z".to_owned());
+          }
+        }
+      style: secondary
+      start: 0
+      end: 111
+    - source: fixture.last_success_at
+      style: secondary
+      start: 39
+      end: 62
+    - source: Some("2026-03-11T11:00:00Z".to_owned())
+      style: secondary
+      start: 65
+      end: 104

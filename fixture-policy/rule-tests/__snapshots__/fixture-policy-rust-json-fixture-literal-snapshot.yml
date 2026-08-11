@@ -1,0 +1,317 @@
+id: fixture-policy-rust-json-fixture-literal
+snapshots:
+  ? |
+    let host = request.hostname;
+    let ingress = json!({
+      "hostname": Some(host),
+    });
+  : labels:
+    - source: |-
+        json!({
+          "hostname": Some(host),
+        })
+      style: primary
+      start: 43
+      end: 79
+  ? |
+    let ingress = json!({
+      "hostname": "live.example",
+      "service": "https://live.example",
+    });
+  : labels:
+    - source: |-
+        json!({
+          "hostname": "live.example",
+          "service": "https://live.example",
+        })
+      style: primary
+      start: 14
+      end: 91
+  ? |
+    let ingress = json!({
+      "origin_url": match request.url {
+        value => value,
+      },
+    });
+  : labels:
+    - source: |-
+        json!({
+          "origin_url": match request.url {
+            value => value,
+          },
+        })
+      style: primary
+      start: 14
+      end: 85
+  ? |
+    let ingress = json!({
+      "service": format!("{}", external_service),
+    });
+  : labels:
+    - source: |-
+        json!({
+          "service": format!("{}", external_service),
+        })
+      style: primary
+      start: 14
+      end: 70
+  ? |
+    let ingress = json!({
+      "service": input.service,
+    });
+  : labels:
+    - source: |-
+        json!({
+          "service": input.service,
+        })
+      style: primary
+      start: 14
+      end: 52
+  ? |
+    let meta = json!({
+      "dest": Some(request.destination)
+    });
+  : labels:
+    - source: |-
+        json!({
+          "dest": Some(request.destination)
+        })
+      style: primary
+      start: 11
+      end: 57
+  ? |
+    let meta = json!({
+      "dest": format!("{}", request.destination)
+    });
+  : labels:
+    - source: |-
+        json!({
+          "dest": format!("{}", request.destination)
+        })
+      style: primary
+      start: 11
+      end: 66
+  ? |
+    let meta = json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": "live.example:443" }
+        })
+      style: primary
+      start: 11
+      end: 65
+  ? |
+    let meta = json!({
+      "reality": { "dest": Some(request.destination) }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": Some(request.destination) }
+        })
+      style: primary
+      start: 11
+      end: 72
+  ? |
+    let meta = json!({
+      "reality": { "dest": format!("{}", request.destination) }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": format!("{}", request.destination) }
+        })
+      style: primary
+      start: 11
+      end: 81
+  ? |
+    let meta = json!({
+      "reality": { "dest": request.destination }
+    });
+  : labels:
+    - source: |-
+        json!({
+          "reality": { "dest": request.destination }
+        })
+      style: primary
+      start: 11
+      end: 66
+  ? |
+    let meta = json!({
+      "server_names": [request.server_names]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "server_names": [request.server_names]
+        })
+      style: primary
+      start: 11
+      end: 62
+  ? |
+    let meta = json!({
+      "server_names": vec![request.server_names]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "server_names": vec![request.server_names]
+        })
+      style: primary
+      start: 11
+      end: 66
+  ? |
+    let meta = json!({
+      "short_ids": [payload.short_id]
+    });
+  : labels:
+    - source: |-
+        json!({
+          "short_ids": [payload.short_id]
+        })
+      style: primary
+      start: 11
+      end: 55
+  ? |
+    let meta = serde_json::json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  : labels:
+    - source: '"live.example:443"'
+      style: primary
+      start: 54
+      end: 72
+    - source: |-
+        serde_json::json!({
+          "reality": { "dest": "live.example:443" }
+        })
+      style: secondary
+      start: 11
+      end: 77
+  ? |
+    let meta = serde_json::json!({
+      "reality": { "dest": "node.fixture.test:443" },
+      "reality_keys": { "private_key": "private" },
+      "short_ids": ["0123456789abcdef"]
+    });
+  : labels:
+    - source: |-
+        serde_json::json!({
+          "reality": { "dest": "node.fixture.test:443" },
+          "reality_keys": { "private_key": "private" },
+          "short_ids": ["0123456789abcdef"]
+        })
+      style: primary
+      start: 11
+      end: 167
+  ? |
+    let meta = serde_json::json!({
+      "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+    });
+  : labels:
+    - source: |-
+        serde_json::json!({
+          "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+        })
+      style: primary
+      start: 11
+      end: 109
+  ? |
+    let published_at = "2026-01-20T00:00:00Z";
+    let release = json!({
+      "published_at": published_at
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": published_at
+        })
+      style: primary
+      start: 57
+      end: 98
+  ? |
+    let release = json ! ({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  : labels:
+    - source: |-
+        json ! ({
+          "published_at": "2026-01-20T00:00:00Z"
+        })
+      style: primary
+      start: 14
+      end: 67
+  ? |
+    let release = json!({
+      "browser_download_url": "https://github.com/live/download"
+    });
+  : labels:
+    - source: |-
+        json!({
+          "browser_download_url": "https://github.com/live/download"
+        })
+      style: primary
+      start: 14
+      end: 85
+  ? |
+    let release = json!({
+      "browser_download_url": std::env::var("LIVE_URL")
+    });
+  : labels:
+    - source: |-
+        json!({
+          "browser_download_url": std::env::var("LIVE_URL")
+        })
+      style: primary
+      start: 14
+      end: 76
+  ? |
+    let release = json!({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": "2026-01-20T00:00:00Z"
+        })
+      style: primary
+      start: 14
+      end: 65
+  ? |
+    let release = json!({
+      "published_at": format!("{}", "2026-01-20T00:00:00Z")
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": format!("{}", "2026-01-20T00:00:00Z")
+        })
+      style: primary
+      start: 14
+      end: 80
+  ? |
+    let release = json!({
+      "published_at": release_secret()
+    });
+  : labels:
+    - source: |-
+        json!({
+          "published_at": release_secret()
+        })
+      style: primary
+      start: 14
+      end: 59
+  ? |
+    let request = req_authed_json(
+      "POST",
+      "/api/admin/endpoints",
+      json!({ "service": request.service }),
+    );
+  : labels:
+    - source: 'json!({ "service": request.service })'
+      style: primary
+      start: 69
+      end: 106

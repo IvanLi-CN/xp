@@ -1,0 +1,118 @@
+id: fixture-policy-rust-subscription-node-helper-inputs
+language: Rust
+severity: error
+message: Subscription fixture inputs must be direct xp_test_fixtures accessors.
+note: Pass a zero-argument accessor from the approved Rust fixture adapter.
+files:
+  - src/subscription/*.rs
+  - src/subscription/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: call_expression
+        - pattern: node($NODE_ID, $NODE_NAME, $ACCESS_HOST)
+        - not:
+            inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: node
+        - not:
+            any:
+              - pattern: |
+                  node(
+                      xp_test_fixtures::$NODE_ID_ACCESSOR(),
+                      xp_test_fixtures::$NODE_NAME_ACCESSOR,
+                      xp_test_fixtures::$ACCESS_HOST_ACCESSOR(),
+                  )
+              - pattern: |
+                  node(
+                      xp_test_fixtures::$NODE_ID_ACCESSOR(),
+                      xp_test_fixtures::$NODE_NAME_ACCESSOR,
+                      xp_test_fixtures::$ACCESS_HOST_ACCESSOR(),
+                      )
+              - pattern: node($NODE_ID_ALIAS(), $NODE_NAME_ALIAS, $ACCESS_HOST_ALIAS())
+    - all:
+        - kind: call_expression
+        - pattern: node_with_api_base($NODE_ID, $NODE_NAME, $ACCESS_HOST, $API_BASE_URL)
+        - not:
+            inside:
+              stopBy: end
+              all:
+                - kind: function_item
+                - has:
+                    field: name
+                    pattern: node
+        - not:
+            any:
+              - pattern: |
+                  node_with_api_base(
+                      xp_test_fixtures::$NODE_ID_ACCESSOR(),
+                      xp_test_fixtures::$NODE_NAME_ACCESSOR,
+                      xp_test_fixtures::$ACCESS_HOST_ACCESSOR(),
+                      xp_test_fixtures::$API_BASE_URL_ACCESSOR(),
+                  )
+              - pattern: |
+                  node_with_api_base(
+                      xp_test_fixtures::$NODE_ID_ACCESSOR(),
+                      xp_test_fixtures::$NODE_NAME_ACCESSOR,
+                      xp_test_fixtures::$ACCESS_HOST_ACCESSOR(),
+                      xp_test_fixtures::$API_BASE_URL_ACCESSOR(),
+                  )
+              - pattern: |
+                  node_with_api_base(
+                      $NODE_ID_ALIAS(),
+                      $NODE_NAME_ALIAS,
+                      $ACCESS_HOST_ALIAS(),
+                      $API_BASE_URL_ALIAS(),
+                  )
+    - all:
+        - kind: call_expression
+        - pattern: endpoint_ss($ENDPOINT_ID, $NODE_ID, $TAG, $PORT, $PSK)
+        - not:
+            any:
+              - pattern: |
+                  endpoint_ss(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, xp_test_fixtures::$ACCESSOR()
+                  )
+              - pattern: |
+                  endpoint_ss(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, endpoint_server_psk_b64()
+                  )
+              - pattern: |
+                  endpoint_ss(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, endpoint_server_psk_b64_alternate()
+                  )
+              - pattern: |
+                  endpoint_ss(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, endpoint_server_psk_b64_escaped()
+                  )
+    - all:
+        - kind: call_expression
+        - pattern: endpoint_vless($ENDPOINT_ID, $NODE_ID, $TAG, $PORT, $MANAGED_DEFAULT)
+        - not:
+            any:
+              - pattern: |
+                  endpoint_vless(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, VlessFixtureMode::Standard
+                  )
+              - pattern: |
+                  endpoint_vless(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT, VlessFixtureMode::ManagedDefault
+                  )
+              - pattern: |
+                  endpoint_vless(
+                    $ENDPOINT_ID, $NODE_ID, $TAG, $PORT,
+                    VlessFixtureMode::ExplicitlyUnmanaged
+                  )
+constraints:
+  NODE_ID_ALIAS:
+    regex: '^fixture_node_n[123]$'
+  NODE_NAME_ALIAS:
+    regex: '^fixture_slot_s[0-9]+$'
+  ACCESS_HOST_ALIAS:
+    regex: '^fixture_host_[a-z_]+$'
+  API_BASE_URL_ALIAS:
+    regex: '^fixture_api_[a-z_]+$'

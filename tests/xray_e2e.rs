@@ -61,7 +61,7 @@ fn env_u16(key: &str) -> Result<u16, String> {
 
 fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
     Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::address_loopback_port0().parse().unwrap(),
         xray_api_addr,
         xray_health_interval_secs: 2,
         xray_health_fails_before_down: 3,
@@ -80,9 +80,9 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: test_admin_token_hash("testtoken"),
-        node_name: "node-1".to_string(),
-        access_host: "".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::label_empty().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         vless_canary_bind: SocketAddr::from((
             [127, 0, 0, 1],
             xp::config::DEFAULT_VLESS_CANARY_BIND_PORT,
@@ -143,7 +143,7 @@ async fn wait_for_remove_user(client: &mut xray::XrayClient, tag: &str, email: &
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let req = AlterInboundRequest {
-            tag: tag.to_string(),
+            tag: tag.to_owned(),
             operation: Some(xp::xray::builder::build_remove_user_operation(email)),
         };
         match client.alter_inbound(req).await {
@@ -165,7 +165,7 @@ async fn wait_for_remove_inbound(client: &mut xray::XrayClient, tag: &str) {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         let req = RemoveInboundRequest {
-            tag: tag.to_string(),
+            tag: tag.to_owned(),
         };
         match client.remove_inbound(req).await {
             Ok(_) => return,
@@ -303,7 +303,7 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -413,12 +413,8 @@ async fn xray_e2e_apply_endpoints_and_grants_via_reconcile() {
               "node_id": endpoint_ss["node_id"],
               "kind": "vless_reality_vision_tcp",
               "port": 31081,
-              "public_domain": "example.com",
-              "reality": {
-                "dest": "example.com:443",
-                "server_names": ["example.com"],
-                "fingerprint": "chrome"
-              }
+              "public_domain": xp_test_fixtures::primary_host(),
+              "reality": xp_test_fixtures::endpoint_reality()
             }),
         ))
         .await
@@ -513,7 +509,7 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         raft_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
             raft_endpoint: cluster.api_base_url.clone(),
         },
     );
@@ -611,8 +607,8 @@ async fn xray_e2e_quota_enforcement_ss2022() {
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap()
     };
-    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
     let endpoint_id_ss = endpoint_ss["endpoint_id"].as_str().unwrap().to_string();
+    let endpoint_tag_ss = endpoint_ss["tag"].as_str().unwrap().to_string();
 
     // Keep the distributable quota budget small to trigger a ban quickly, while respecting
     // the shared-quota buffer (>=256MiB).

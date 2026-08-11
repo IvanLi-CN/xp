@@ -1,0 +1,201 @@
+id: fixture-policy-rust-data-source
+snapshots:
+  ? |
+    let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
+  : labels:
+    - source: 'tag: "unapproved-tag".to_owned()'
+      style: primary
+      start: 30
+      end: 62
+    - source: tag
+      style: secondary
+      start: 30
+      end: 33
+  ? |
+    let fixture = Config {
+      mesh_base_url: Some(format!(
+        "https://{}",
+        std::env::var("TEST_HOST").unwrap(),
+      )),
+    };
+  : labels:
+    - source: |-
+        mesh_base_url: Some(format!(
+            "https://{}",
+            std::env::var("TEST_HOST").unwrap(),
+          ))
+      style: primary
+      start: 25
+      end: 117
+    - source: mesh_base_url
+      style: secondary
+      start: 25
+      end: 38
+  ? |
+    let fixture = Config { api_base_url: "http://127.0.0.2:9".to_string() };
+  : labels:
+    - source: 'api_base_url: "http://127.0.0.2:9".to_string()'
+      style: primary
+      start: 23
+      end: 69
+    - source: api_base_url
+      style: secondary
+      start: 23
+      end: 35
+  ? |
+    let fixture = Config { dest: format!("host.docker.internal:443") };
+  : labels:
+    - source: 'dest: format!("host.docker.internal:443")'
+      style: primary
+      start: 23
+      end: 64
+    - source: dest
+      style: secondary
+      start: 23
+      end: 27
+  ? |
+    let fixture = Config { node_id: "node-unapproved" };
+  : labels:
+    - source: 'node_id: "node-unapproved"'
+      style: primary
+      start: 23
+      end: 49
+    - source: node_id
+      style: secondary
+      start: 23
+      end: 30
+  ? |
+    let fixture = Config { public_base_url: "https://unapproved.invalid".to_owned() };
+  : labels:
+    - source: 'public_base_url: "https://unapproved.invalid".to_owned()'
+      style: primary
+      start: 23
+      end: 79
+    - source: public_base_url
+      style: secondary
+      start: 23
+      end: 38
+  ? |
+    let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };
+  : labels:
+    - source: 'public_ipv4: format!("192.0.2.{}", index)'
+      style: primary
+      start: 23
+      end: 64
+    - source: public_ipv4
+      style: secondary
+      start: 23
+      end: 34
+  ? |
+    let fixture = Config { timestamp: std::env::var("TEST_TIMESTAMP").unwrap() };
+  : labels:
+    - source: 'timestamp: std::env::var("TEST_TIMESTAMP").unwrap()'
+      style: primary
+      start: 23
+      end: 74
+    - source: timestamp
+      style: secondary
+      start: 23
+      end: 32
+  ? |
+    let fixture = EndpointMeta {
+      short_ids: vec!["unapproved-short-id".to_owned()],
+      active_short_id: "unapproved-short-id".to_owned(),
+    };
+  : labels:
+    - source: 'short_ids: vec!["unapproved-short-id".to_owned()]'
+      style: primary
+      start: 31
+      end: 80
+    - source: short_ids
+      style: secondary
+      start: 31
+      end: 40
+  ? |
+    let init = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+  : labels:
+    - source: 'bootstrap_node_name: "unapproved-node".to_owned()'
+      style: primary
+      start: 23
+      end: 72
+    - source: bootstrap_node_name
+      style: secondary
+      start: 23
+      end: 42
+  ? |
+    let payload = SignedPayload { cluster_id: "unapproved-cluster" };
+  : labels:
+    - source: 'cluster_id: "unapproved-cluster"'
+      style: primary
+      start: 30
+      end: 62
+    - source: cluster_id
+      style: secondary
+      start: 30
+      end: 40
+  ? |
+    let sample = EndpointProbeSample { config_hash: std::env::var("TEST_CONFIG_HASH").unwrap() };
+  : labels:
+    - source: 'config_hash: std::env::var("TEST_CONFIG_HASH").unwrap()'
+      style: primary
+      start: 35
+      end: 90
+    - source: config_hash
+      style: secondary
+      start: 35
+      end: 46
+  ? |
+    let sample = EndpointProbeSample { hour: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'hour: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 35
+      end: 74
+    - source: hour
+      style: secondary
+      start: 35
+      end: 39
+  ? |
+    let sample = Probe { first_seen_at: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'first_seen_at: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 21
+      end: 69
+    - source: first_seen_at
+      style: secondary
+      start: 21
+      end: 34
+  ? |
+    let sample = Probe { from_node_id: "unapproved-node".to_owned() };
+  : labels:
+    - source: 'from_node_id: "unapproved-node".to_owned()'
+      style: primary
+      start: 21
+      end: 63
+    - source: from_node_id
+      style: secondary
+      start: 21
+      end: 33
+  ? |
+    let sample = Probe { owner_node_id: "unapproved-node".to_owned() };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node".to_owned()'
+      style: primary
+      start: 21
+      end: 64
+    - source: owner_node_id
+      style: secondary
+      start: 21
+      end: 34
+  ? |
+    let sample = Probe { start_at: "2026-03-11T11:00:00Z".to_owned() };
+  : labels:
+    - source: 'start_at: "2026-03-11T11:00:00Z".to_owned()'
+      style: primary
+      start: 21
+      end: 64
+    - source: start_at
+      style: secondary
+      start: 21
+      end: 29

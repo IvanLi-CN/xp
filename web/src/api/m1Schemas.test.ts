@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	AdminEndpointRotateResponseSchema,
@@ -36,18 +37,18 @@ describe("ClusterInfoResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			ClusterInfoResponseSchema.parse({
-				cluster_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
+				cluster_id: fixtureCatalog.cluster.fixture95(),
+				node_id: fixtureCatalog.cluster.fixture95(),
 				role: "leader",
-				leader_api_base_url: "https://127.0.0.1:62416",
+				leader_api_base_url: fixtureCatalog.service.fixture96(),
 				term: 1,
 				xp_version: "0.0.0",
 			}),
 		).toEqual({
-			cluster_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
+			cluster_id: fixtureCatalog.cluster.fixture95(),
+			node_id: fixtureCatalog.cluster.fixture95(),
 			role: "leader",
-			leader_api_base_url: "https://127.0.0.1:62416",
+			leader_api_base_url: fixtureCatalog.service.fixture96(),
 			term: 1,
 			xp_version: "0.0.0",
 		});
@@ -56,8 +57,8 @@ describe("ClusterInfoResponseSchema", () => {
 	it("rejects missing fields declared by every pinned release", () => {
 		expect(() =>
 			ClusterInfoResponseSchema.parse({
-				cluster_id: "cluster",
-				node_id: "node",
+				cluster_id: fixtureCatalog.cluster.fixture97(),
+				node_id: fixtureCatalog.nodeId.fixture98(),
 				role: "leader",
 			}),
 		).toThrow();
@@ -70,32 +71,24 @@ describe("AdminNodesResponseSchema", () => {
 			AdminNodesResponseSchema.parse({
 				items: [
 					{
-						node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						node_name: "node-1",
-						api_base_url: "https://127.0.0.1:62416",
-						access_host: "",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.cluster.fixture95(),
+						node_name: fixtureCatalog.nodeId.fixture32(),
+						api_base_url: fixtureCatalog.service.fixture96(),
+						access_host: fixtureCatalog.host.fixture99(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.reset(),
 					},
 				],
 			}),
 		).toEqual({
 			items: [
 				{
-					node_id: "01HZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					node_name: "node-1",
-					api_base_url: "https://127.0.0.1:62416",
-					access_host: "",
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					node_id: fixtureCatalog.cluster.fixture95(),
+					node_name: fixtureCatalog.nodeId.fixture32(),
+					api_base_url: fixtureCatalog.service.fixture96(),
+					access_host: fixtureCatalog.host.fixture99(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.reset(),
 				},
 			],
 		});
@@ -106,19 +99,19 @@ describe("AdminEndpointSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminEndpointSchema.parse({
-				endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				tag: "vless-vision-01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				kind: "vless_reality_vision_tcp",
-				port: 443,
+				endpoint_id: fixtureCatalog.endpointId.fixture100(),
+				node_id: fixtureCatalog.endpointId.fixture100(),
+				tag: fixtureCatalog.endpointTag.fixture101(),
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				port: fixtureCatalog.endpoint.port443(),
 				meta: {},
 			}),
 		).toEqual({
-			endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			tag: "vless-vision-01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			kind: "vless_reality_vision_tcp",
-			port: 443,
+			endpoint_id: fixtureCatalog.endpointId.fixture100(),
+			node_id: fixtureCatalog.endpointId.fixture100(),
+			tag: fixtureCatalog.endpointTag.fixture101(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port443(),
 			meta: {},
 		});
 	});
@@ -130,11 +123,11 @@ describe("AdminEndpointsResponseSchema", () => {
 			AdminEndpointsResponseSchema.parse({
 				items: [
 					{
-						endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						tag: "vless-vision-01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-						kind: "vless_reality_vision_tcp",
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture100(),
+						node_id: fixtureCatalog.endpointId.fixture100(),
+						tag: fixtureCatalog.endpointTag.fixture101(),
+						kind: fixtureCatalog.endpoint.vlessKind(),
+						port: fixtureCatalog.endpoint.port443(),
 						meta: {},
 					},
 				],
@@ -142,11 +135,11 @@ describe("AdminEndpointsResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					node_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					tag: "vless-vision-01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-					kind: "vless_reality_vision_tcp",
-					port: 443,
+					endpoint_id: fixtureCatalog.endpointId.fixture100(),
+					node_id: fixtureCatalog.endpointId.fixture100(),
+					tag: fixtureCatalog.endpointTag.fixture101(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port443(),
 					meta: {},
 				},
 			],
@@ -158,14 +151,14 @@ describe("AdminEndpointRotateResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminEndpointRotateResponseSchema.parse({
-				endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-				active_short_id: "0123456789abcdef",
-				short_ids: ["0123456789abcdef", "0123456789abcdff"],
+				endpoint_id: fixtureCatalog.endpointId.fixture100(),
+				active_short_id: fixtureCatalog.endpoint.activeShortId(),
+				short_ids: fixtureCatalog.endpoint.shortIds(),
 			}),
 		).toEqual({
-			endpoint_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
-			active_short_id: "0123456789abcdef",
-			short_ids: ["0123456789abcdef", "0123456789abcdff"],
+			endpoint_id: fixtureCatalog.endpointId.fixture100(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
 	});
 });
@@ -176,32 +169,24 @@ describe("AdminUsersResponseSchema", () => {
 			AdminUsersResponseSchema.parse({
 				items: [
 					{
-						user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+						user_id: fixtureCatalog.endpointId.fixture100(),
 						display_name: "alice",
-						subscription_token: "sub_123",
+						subscription_token: fixtureCatalog.token.fixture102(),
 						credential_epoch: 0,
 						priority_tier: "p3",
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 480,
-						},
+						quota_reset: fixtureCatalog.quota.reset(),
 					},
 				],
 			}),
 		).toEqual({
 			items: [
 				{
-					user_id: "01JZXKQF2Z6C8W8E9Y5C8M0X8Q",
+					user_id: fixtureCatalog.endpointId.fixture100(),
 					display_name: "alice",
-					subscription_token: "sub_123",
+					subscription_token: fixtureCatalog.token.fixture102(),
 					credential_epoch: 0,
 					priority_tier: "p3",
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: 480,
-					},
+					quota_reset: fixtureCatalog.quota.reset(),
 				},
 			],
 		});
@@ -214,16 +199,16 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 			AdminQuotaPolicyNodeWeightRowsResponseSchema.parse({
 				items: [
 					{
-						user_id: "user-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
 						display_name: "alice",
 						priority_tier: "p1",
-						endpoint_ids: ["endpoint-1"],
+						endpoint_ids: [fixtureCatalog.endpointId.fixture40()],
 						stored_weight: 6000,
 						editor_weight: 6000,
 						source: "explicit",
 					},
 					{
-						user_id: "user-2",
+						user_id: fixtureCatalog.identifier.userSecondary(),
 						display_name: "bob",
 						priority_tier: "p2",
 						endpoint_ids: ["endpoint-2"],
@@ -235,16 +220,16 @@ describe("AdminQuotaPolicyNodeWeightRowsResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					user_id: "user-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "alice",
 					priority_tier: "p1",
-					endpoint_ids: ["endpoint-1"],
+					endpoint_ids: [fixtureCatalog.endpointId.fixture40()],
 					stored_weight: 6000,
 					editor_weight: 6000,
 					source: "explicit",
 				},
 				{
-					user_id: "user-2",
+					user_id: fixtureCatalog.identifier.userSecondary(),
 					display_name: "bob",
 					priority_tier: "p2",
 					endpoint_ids: ["endpoint-2"],
@@ -260,10 +245,10 @@ describe("AdminUserTokenResponseSchema", () => {
 	it("accepts expected shape", () => {
 		expect(
 			AdminUserTokenResponseSchema.parse({
-				subscription_token: "sub_123",
+				subscription_token: fixtureCatalog.token.fixture102(),
 			}),
 		).toEqual({
-			subscription_token: "sub_123",
+			subscription_token: fixtureCatalog.token.fixture102(),
 		});
 	});
 });
@@ -273,13 +258,13 @@ describe("AdminUserMihomoProfileSchema", () => {
 		expect(
 			AdminUserMihomoProfileSchema.parse({
 				mixin_yaml: "port: 0\n",
-				extra_proxies_yaml: "",
-				extra_proxy_providers_yaml: "",
+				extra_proxies_yaml: fixtureCatalog.string.none(),
+				extra_proxy_providers_yaml: fixtureCatalog.string.none(),
 			}),
 		).toEqual({
 			mixin_yaml: "port: 0\n",
-			extra_proxies_yaml: "",
-			extra_proxy_providers_yaml: "",
+			extra_proxies_yaml: fixtureCatalog.string.none(),
+			extra_proxy_providers_yaml: fixtureCatalog.string.none(),
 		});
 	});
 
@@ -287,8 +272,8 @@ describe("AdminUserMihomoProfileSchema", () => {
 		expect(() =>
 			AdminUserMihomoProfileSchema.parse({
 				template_yaml: "port: 7890\n",
-				extra_proxies_yaml: "",
-				extra_proxy_providers_yaml: "",
+				extra_proxies_yaml: fixtureCatalog.string.none(),
+				extra_proxy_providers_yaml: fixtureCatalog.string.none(),
 			}),
 		).toThrow();
 	});
@@ -300,9 +285,9 @@ describe("GetAdminUserAccessResponseSchema", () => {
 			GetAdminUserAccessResponseSchema.parse({
 				items: [
 					{
-						user_id: "user-1",
-						endpoint_id: "endpoint-1",
-						node_id: "node-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					},
 				],
 				auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
@@ -310,9 +295,9 @@ describe("GetAdminUserAccessResponseSchema", () => {
 		).toEqual({
 			items: [
 				{
-					user_id: "user-1",
-					endpoint_id: "endpoint-1",
-					node_id: "node-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
 				},
 			],
 			auto_assign_endpoint_kinds: ["vless_reality_vision_tcp"],
@@ -328,9 +313,9 @@ describe("PutAdminUserAccessResponseSchema", () => {
 				deleted: 2,
 				items: [
 					{
-						user_id: "user-1",
-						endpoint_id: "endpoint-1",
-						node_id: "node-1",
+						user_id: fixtureCatalog.identifier.userPrimary(),
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
 					},
 				],
 				auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],
@@ -340,9 +325,9 @@ describe("PutAdminUserAccessResponseSchema", () => {
 			deleted: 2,
 			items: [
 				{
-					user_id: "user-1",
-					endpoint_id: "endpoint-1",
-					node_id: "node-1",
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					node_id: fixtureCatalog.nodeId.fixture32(),
 				},
 			],
 			auto_assign_endpoint_kinds: ["ss2022_2022_blake3_aes_128_gcm"],

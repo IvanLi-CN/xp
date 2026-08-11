@@ -1,0 +1,26 @@
+id: fixture-policy-typescript-user-id-literal
+language: TypeScript
+severity: error
+message: Fixture user IDs must not use literals or external input.
+note: Use a fixtureCatalog identifier accessor or a catalog-backed state sanitizer.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        any:
+          - regex: '^user_id$'
+          - pattern: '["user_id"]'
+    - has:
+        field: value
+        any:
+          - kind: string
+          - regex: '^(process[.]env|JSON[.]parse|fetch\(|payload[.]|request[.]|body[.]|readJson\()'

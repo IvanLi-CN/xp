@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 test("demo user details follow the production user-management layout", async ({
 	page,
 }) => {
 	await page.goto("/demo/login");
 	await page.getByRole("button", { name: "Enter demo" }).click();
-	await page.goto("/demo/users/user-sato");
+	await page.goto(`/demo/users/${fixtureCatalog.identifier.userTertiary()}`);
 
 	await expect(
 		page.getByRole("heading", { name: "佐藤 未来", exact: true }),
@@ -45,8 +46,12 @@ test("demo user details follow the production user-management layout", async ({
 	await expect(page.getByRole("table")).toContainText("VLESS");
 
 	await page.getByRole("button", { name: "Quota status" }).click();
-	await expect(page.getByText("node-tokyo-1")).toBeVisible();
-	await expect(page.getByText("node-sgp-1")).toBeVisible();
+	await expect(
+		page.getByText(fixtureCatalog.identifier.nodePrimary()),
+	).toBeVisible();
+	await expect(
+		page.getByText(fixtureCatalog.identifier.nodeTertiary()),
+	).toBeVisible();
 
 	await page.getByRole("button", { name: "Usage details" }).click();
 	await expect(page.getByText(/Usage details ·/)).toBeVisible();

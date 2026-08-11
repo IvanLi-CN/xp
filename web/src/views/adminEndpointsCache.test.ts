@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AdminEndpointsResponse } from "../api/adminEndpoints";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { createQueryClient } from "../queryClient";
 import {
 	appendAdminEndpoint,
@@ -11,16 +12,23 @@ import {
 } from "./adminEndpointsCache";
 
 const endpoint = {
-	endpoint_id: "endpoint-1",
-	node_id: "node-1",
-	tag: "primary",
-	kind: "vless_reality_vision_tcp" as const,
-	port: 443,
+	endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	tag: fixtureCatalog.identifier.endpointTagPrimary(),
+	kind: fixtureCatalog.endpoint.vlessKind(),
+	port: fixtureCatalog.endpoint.port443(),
 	meta: {},
 };
 
 const cached: AdminEndpointsResponse = {
-	items: [endpoint, { ...endpoint, endpoint_id: "endpoint-2", tag: "backup" }],
+	items: [
+		endpoint,
+		{
+			...endpoint,
+			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+			tag: fixtureCatalog.identifier.endpointTagSecondary(),
+		},
+	],
 };
 
 describe("admin endpoint cache", () => {
@@ -28,15 +36,24 @@ describe("admin endpoint cache", () => {
 		expect(
 			appendAdminEndpoint(cached, {
 				...endpoint,
-				endpoint_id: "endpoint-3",
+				endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
 			})?.items.map((item) => item.endpoint_id),
-		).toEqual(["endpoint-1", "endpoint-2", "endpoint-3"]);
+		).toEqual([
+			fixtureCatalog.identifier.endpointPrimary(),
+			fixtureCatalog.identifier.endpointSecondary(),
+			fixtureCatalog.identifier.endpointTertiary(),
+		]);
 		expect(
-			replaceAdminEndpoint(cached, { ...endpoint, tag: "renamed" })?.items[0]
-				.tag,
-		).toBe("renamed");
+			replaceAdminEndpoint(cached, {
+				...endpoint,
+				tag: fixtureCatalog.identifier.endpointTagTertiary(),
+			})?.items[0].tag,
+		).toBe(fixtureCatalog.identifier.endpointTagTertiary());
 		expect(
-			removeAdminEndpoints(cached, ["endpoint-1", "endpoint-2"])?.items,
+			removeAdminEndpoints(cached, [
+				fixtureCatalog.identifier.endpointPrimary(),
+				fixtureCatalog.identifier.endpointSecondary(),
+			])?.items,
 		).toEqual([]);
 	});
 
@@ -45,41 +62,71 @@ describe("admin endpoint cache", () => {
 		queryClient.setQueryData(["adminNodes", "token"], {
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "Tokyo",
-					quota_limit_bytes: 0,
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 				},
 			],
 		});
 		queryClient.setQueryData(
-			["adminEndpoint", "token", "endpoint-1"],
+			["adminEndpoint", "token", fixtureCatalog.identifier.endpointPrimary()],
 			endpoint,
 		);
-		queryClient.setQueryData(["adminNode", "token", "node-1"], {
-			node_id: "node-1",
-		});
+		queryClient.setQueryData(
+			["adminNode", "token", fixtureCatalog.identifier.nodePrimary()],
+			{ node_id: fixtureCatalog.identifier.nodePrimary() },
+		);
 
-		syncNode(queryClient, "token", "node-1", { quota_limit_bytes: 1024 });
+		syncNode(queryClient, "token", fixtureCatalog.identifier.nodePrimary(), {
+			quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+		});
 		expect(
 			queryClient.getQueryData<{ items: Array<{ quota_limit_bytes: number }> }>(
 				["adminNodes", "token"],
 			)?.items[0].quota_limit_bytes,
-		).toBe(1024);
+		).toBe(fixtureCatalog.quota.limitBytes());
 
-		resourceListCache.remove(queryClient, "token", "endpoint-1");
+		resourceListCache.remove(
+			queryClient,
+			"token",
+			fixtureCatalog.identifier.endpointPrimary(),
+		);
 		expect(
-			queryClient.getQueryData(["adminEndpoint", "token", "endpoint-1"]),
+			queryClient.getQueryData([
+				"adminEndpoint",
+				"token",
+				fixtureCatalog.identifier.endpointPrimary(),
+			]),
 		).toBeUndefined();
-		queryClient.setQueryData(["adminEndpoint", "token", "endpoint-2"], {
+		queryClient.setQueryData(
+			["adminEndpoint", "token", fixtureCatalog.identifier.endpointSecondary()],
+			{
+				...endpoint,
+				endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+			},
+		);
+		resourceListCache.nodeDeleted(
+			queryClient,
+			"token",
+			fixtureCatalog.identifier.nodePrimary(),
+			[endpoint],
+		);
+		expect(
+			queryClient.getQueryData([
+				"adminNode",
+				"token",
+				fixtureCatalog.identifier.nodePrimary(),
+			]),
+		).toBeUndefined();
+		expect(
+			queryClient.getQueryData([
+				"adminEndpoint",
+				"token",
+				fixtureCatalog.identifier.endpointSecondary(),
+			]),
+		).toEqual({
 			...endpoint,
-			endpoint_id: "endpoint-2",
+			endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
 		});
-		resourceListCache.nodeDeleted(queryClient, "token", "node-1", [endpoint]);
-		expect(
-			queryClient.getQueryData(["adminNode", "token", "node-1"]),
-		).toBeUndefined();
-		expect(
-			queryClient.getQueryData(["adminEndpoint", "token", "endpoint-2"]),
-		).toEqual({ ...endpoint, endpoint_id: "endpoint-2" });
 	});
 });

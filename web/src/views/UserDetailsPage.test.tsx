@@ -7,6 +7,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
 import {
@@ -56,7 +57,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ userId: "u_01HUSERAAAAAA" }),
+		useParams: () => ({ userId: fixtureCatalog.identifier.userPrimary() }),
 	};
 });
 
@@ -116,27 +117,23 @@ function setupMocks(args?: {
 	};
 }) {
 	vi.mocked(fetchAdminUser).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
-		subscription_token: "subtoken",
+		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
-		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-tokyo",
-				node_name: "Tokyo",
-				api_base_url: "https://tokyo.example.com",
-				access_host: "tokyo.example.com",
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				node_name: fixtureCatalog.nodeName.fixture135(),
+				api_base_url: fixtureCatalog.service.fixture136(),
+				access_host: fixtureCatalog.host.fixture137(),
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
@@ -144,27 +141,27 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 		items: [
 			{
-				endpoint_id: "ep-vless",
-				node_id: "node-tokyo",
-				tag: "tokyo-vless",
-				kind: "vless_reality_vision_tcp",
-				port: 443,
+				endpoint_id: fixtureCatalog.endpointId.fixture138(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture139(),
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				port: fixtureCatalog.endpoint.port443(),
 				meta: {},
 			},
 			{
-				endpoint_id: "ep-ss",
-				node_id: "node-tokyo",
-				tag: "tokyo-ss",
-				kind: "ss2022_2022_blake3_aes_128_gcm",
-				port: 8443,
+				endpoint_id: fixtureCatalog.endpointId.fixture140(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture141(),
+				kind: fixtureCatalog.endpoint.ssKind(),
+				port: fixtureCatalog.endpoint.port8443(),
 				meta: {},
 			},
 			{
-				endpoint_id: "ep-ss-2",
-				node_id: "node-tokyo",
-				tag: "tokyo-ss-2",
-				kind: "ss2022_2022_blake3_aes_128_gcm",
-				port: 9443,
+				endpoint_id: fixtureCatalog.endpointId.fixture255(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				tag: fixtureCatalog.endpointTag.fixture256(),
+				kind: fixtureCatalog.endpoint.ssKind(),
+				port: fixtureCatalog.endpoint.port9443(),
 				meta: {},
 			},
 		],
@@ -178,9 +175,9 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminUserNodeQuotas).mockResolvedValue({
 		items: [
 			{
-				user_id: "u_01HUSERAAAAAA",
-				node_id: "node-tokyo",
-				quota_limit_bytes: 0,
+				user_id: fixtureCatalog.identifier.userPrimary(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 				quota_reset_source: "user",
 			},
 		],
@@ -191,9 +188,9 @@ function setupMocks(args?: {
 		unreachable_nodes: [],
 		items: [
 			{
-				user_id: "u_01HUSERAAAAAA",
-				node_id: "node-tokyo",
-				quota_limit_bytes: 1024,
+				user_id: fixtureCatalog.identifier.userPrimary(),
+				node_id: fixtureCatalog.nodeId.fixture134(),
+				quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 				used_bytes: 0,
 				remaining_bytes: 1024,
 				cycle_end_at: null,
@@ -207,7 +204,7 @@ function setupMocks(args?: {
 			args?.ipUsage ??
 			args?.userIpUsage ?? {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window,
@@ -217,48 +214,50 @@ function setupMocks(args?: {
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo.example.com",
-							access_host: "tokyo.example.com",
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							node_id: fixtureCatalog.nodeId.fixture134(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture136(),
+							access_host: fixtureCatalog.host.fixture137(),
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
-						window_end: "2026-03-08T00:02:00Z",
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
 						unique_ip_series: [
-							{ minute: "2026-03-08T00:00:00Z", count: 1 },
-							{ minute: "2026-03-08T00:01:00Z", count: 2 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000100(),
+								count: 2,
+							},
 						],
 						timeline: [
 							{
 								lane_key: "edge-tokyo|203.0.113.7",
-								endpoint_id: "endpoint-1",
-								endpoint_tag: "edge-tokyo",
-								ip: "203.0.113.7",
+								endpoint_id: fixtureCatalog.endpointId.fixture40(),
+								endpoint_tag: fixtureCatalog.endpointTag.fixture41(),
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 2,
 								segments: [
 									{
-										start_minute: "2026-03-08T00:00:00Z",
-										end_minute: "2026-03-08T00:01:00Z",
+										start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+										end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 									},
 								],
 							},
 						],
 						ips: [
 							{
-								ip: "203.0.113.7",
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 2,
-								endpoint_tags: ["edge-tokyo"],
+								endpoint_tags: [fixtureCatalog.endpointTag.fixture41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: "2026-03-08T00:01:00Z",
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 							},
 						],
 					},
@@ -273,18 +272,18 @@ function setupMocks(args?: {
 		auto_assign_endpoint_kinds: [],
 	});
 	vi.mocked(putAdminUserNodeQuota).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
-		node_id: "node-tokyo",
-		quota_limit_bytes: 0,
+		user_id: fixtureCatalog.identifier.userPrimary(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
 		quota_reset_source: "user",
 	});
 	vi.mocked(patchAdminUser).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		display_name: "Ivan",
-		subscription_token: "subtoken",
+		subscription_token: fixtureCatalog.token.fixture254(),
 		credential_epoch: 0,
 		priority_tier: "p2",
-		quota_reset: { policy: "monthly", day_of_month: 1, tz_offset_minutes: 480 },
+		quota_reset: fixtureCatalog.quota.reset(),
 	});
 	vi.mocked(deleteAdminUser).mockResolvedValue(undefined);
 	vi.mocked(fetchAdminUserMihomoProfile).mockResolvedValue(
@@ -300,10 +299,10 @@ function setupMocks(args?: {
 		extra_proxy_providers_yaml: "",
 	});
 	vi.mocked(resetAdminUserToken).mockResolvedValue({
-		subscription_token: "sub_new",
+		subscription_token: fixtureCatalog.token.fixture257(),
 	});
 	vi.mocked(resetAdminUserCredentials).mockResolvedValue({
-		user_id: "u_01HUSERAAAAAA",
+		user_id: fixtureCatalog.identifier.userPrimary(),
 		credential_epoch: 1,
 	});
 	vi.mocked(fetchSubscription).mockResolvedValue(
@@ -325,9 +324,9 @@ describe("<UserDetailsPage />", () => {
 		setupMocks({
 			access: [
 				{
-					user_id: "u_01HUSERAAAAAA",
-					endpoint_id: "ep-vless",
-					node_id: "node-tokyo",
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.endpointId.fixture138(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 				},
 			],
 		});
@@ -340,7 +339,9 @@ describe("<UserDetailsPage />", () => {
 		const accessTab = await screenByRole("button", "Access");
 		fireEvent.click(accessTab);
 
-		const checkbox = await screenByLabel("Toggle Tokyo VLESS");
+		const checkbox = await screenByLabel(
+			`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
+		);
 		expect(checkbox).toBeChecked();
 	});
 
@@ -352,7 +353,7 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(accessTab);
 
 		expect(await screenByText("Remaining: 0 MiB")).toBeTruthy();
-		expect(await queryByText("node-tokyo")).toBeNull();
+		expect(await queryByText(fixtureCatalog.nodeId.fixture134())).toBeNull();
 	});
 
 	it("applies selected endpoints via putAdminUserAccess", async () => {
@@ -360,17 +361,21 @@ describe("<UserDetailsPage />", () => {
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle Tokyo VLESS"));
+		fireEvent.click(
+			await screenByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
+			),
+		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: [
 						{
-							endpoint_id: "ep-vless",
+							endpoint_id: fixtureCatalog.endpointId.fixture138(),
 						},
 					],
 				},
@@ -397,11 +402,13 @@ describe("<UserDetailsPage />", () => {
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle row Tokyo"));
+		fireEvent.click(
+			await screenByLabel(`Toggle row ${fixtureCatalog.nodeName.fixture135()}`),
+		);
 
 		expect(
 			await screenByText(
-				"Node all-select covers current endpoints on Tokyo only. Future endpoints still follow protocol all-select defaults.",
+				`Node all-select covers current endpoints on ${fixtureCatalog.nodeName.fixture135()} only. Future endpoints still follow protocol all-select defaults.`,
 			),
 		).toBeTruthy();
 	});
@@ -410,22 +417,26 @@ describe("<UserDetailsPage />", () => {
 		setupMocks({
 			access: [
 				{
-					user_id: "u_01HUSERAAAAAA",
-					endpoint_id: "ep-vless",
-					node_id: "node-tokyo",
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					endpoint_id: fixtureCatalog.endpointId.fixture138(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
 				},
 			],
 		});
 		renderPage();
 
 		fireEvent.click(await screenByRole("button", "Access"));
-		fireEvent.click(await screenByLabel("Toggle Tokyo VLESS"));
+		fireEvent.click(
+			await screenByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} VLESS`,
+			),
+		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
 
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{ items: [] },
 			);
 		});
@@ -448,12 +459,12 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(await screenByRole("button", "Apply access"));
@@ -461,11 +472,11 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: "ep-ss" },
-						{ endpoint_id: "ep-ss-2" },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture140() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture255() },
 					]),
 				},
 			);
@@ -479,12 +490,14 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		const allToggle = await screenByLabel("Toggle all");
-		const rowToggle = await screenByLabel("Toggle row Tokyo");
+		const rowToggle = await screenByLabel(
+			`Toggle row ${fixtureCatalog.nodeName.fixture135()}`,
+		);
 		const columnToggle = await screenByLabel("Toggle SS2022");
 
 		expect(allToggle).not.toBeChecked();
@@ -501,10 +514,14 @@ describe("<UserDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("button", "Access"));
 
-		expect(await queryByLabel("Toggle Tokyo SS2022")).toBeNull();
+		expect(
+			await queryByLabel(
+				`Toggle ${fixtureCatalog.nodeName.fixture135()} SS2022`,
+			),
+		).toBeNull();
 		expect(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeTruthy();
 	});
@@ -516,18 +533,18 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 
@@ -536,11 +553,11 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserAccess).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					items: expect.arrayContaining([
-						{ endpoint_id: "ep-ss" },
-						{ endpoint_id: "ep-ss-2" },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture140() },
+						{ endpoint_id: fixtureCatalog.endpointId.fixture255() },
 					]),
 				},
 			);
@@ -563,7 +580,7 @@ describe("<UserDetailsPage />", () => {
 
 		const tree = await screenByRole(
 			"tree",
-			"Endpoint options for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+			`Endpoint options for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 		);
 		expect((tree.parentElement as HTMLElement | null)?.className).not.toContain(
 			"absolute",
@@ -577,28 +594,28 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Access"));
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle endpoint tree for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle all endpoints for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle all endpoints for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 		fireEvent.click(
 			await screenByLabel(
-				"Toggle endpoint tree for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Toggle endpoint tree for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		);
 
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture141()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 		expect(
 			await screenByLabel(
-				"Select endpoint tokyo-ss-2 for node-tokyo ss2022_2022_blake3_aes_128_gcm",
+				`Select endpoint ${fixtureCatalog.endpointTag.fixture256()} for ${fixtureCatalog.nodeId.fixture134()} ss2022_2022_blake3_aes_128_gcm`,
 			),
 		).toBeChecked();
 	});
@@ -622,7 +639,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "raw");
+			expect(fetchSubscription).toHaveBeenCalledWith(
+				fixtureCatalog.token.fixture254(),
+				"raw",
+			);
 		});
 		expect(await screenByText("Subscription preview")).toBeTruthy();
 	});
@@ -644,7 +664,10 @@ describe("<UserDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Fetch"));
 
 		await waitFor(() => {
-			expect(fetchSubscription).toHaveBeenCalledWith("subtoken", "mihomo");
+			expect(fetchSubscription).toHaveBeenCalledWith(
+				fixtureCatalog.token.fixture254(),
+				"mihomo",
+			);
 		});
 	});
 
@@ -668,7 +691,7 @@ describe("<UserDetailsPage />", () => {
 
 		await waitFor(() => {
 			expect(fetchSubscription).toHaveBeenCalledWith(
-				"subtoken",
+				fixtureCatalog.token.fixture254(),
 				"mihomo",
 				"mirror",
 			);
@@ -687,7 +710,7 @@ describe("<UserDetailsPage />", () => {
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: "port: 0\nproxy-groups: []\n",
 					extra_proxies_yaml: "",
@@ -723,7 +746,7 @@ rules: []
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: `port: 0
 rules: []
@@ -768,7 +791,7 @@ rules: []
 		await waitFor(() => {
 			expect(putAdminUserMihomoProfile).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				{
 					mixin_yaml: `port: 0
 rules: []
@@ -816,12 +839,12 @@ rules: []
 		setupMocks();
 		vi.mocked(fetchAdminUserNodeQuotaStatus).mockResolvedValueOnce({
 			partial: true,
-			unreachable_nodes: ["node-osaka"],
+			unreachable_nodes: [fixtureCatalog.nodeId.fixture258()],
 			items: [
 				{
-					user_id: "u_01HUSERAAAAAA",
-					node_id: "node-tokyo",
-					quota_limit_bytes: 1024,
+					user_id: fixtureCatalog.identifier.userPrimary(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
+					quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
 					used_bytes: 0,
 					remaining_bytes: 1024,
 					cycle_end_at: null,
@@ -833,14 +856,18 @@ rules: []
 
 		fireEvent.click(await screenByRole("button", "Quota status"));
 		expect(await screenByText("Quota status is partial.")).toBeTruthy();
-		expect(await screenByText("Unreachable nodes: node-osaka")).toBeTruthy();
+		expect(
+			await screenByText(
+				`Unreachable nodes: ${fixtureCatalog.nodeId.fixture258()}`,
+			),
+		).toBeTruthy();
 	});
 
 	it("renders usage details groups and refetches when the window changes", async () => {
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",
@@ -850,61 +877,63 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo.example.com",
-							access_host: "tokyo.example.com",
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							node_id: fixtureCatalog.nodeId.fixture134(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture136(),
+							access_host: fixtureCatalog.host.fixture137(),
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
-						window_end: "2026-03-08T00:02:00Z",
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+						],
 						timeline: [],
 						ips: [
 							{
-								ip: "203.0.113.7",
+								ip: fixtureCatalog.address.documentation192_0_2_30(),
 								minutes: 1,
-								endpoint_tags: ["edge-tokyo"],
+								endpoint_tags: [fixtureCatalog.endpointTag.fixture41()],
 								region: "Japan / Tokyo",
 								operator: "ExampleNet",
-								last_seen_at: "2026-03-08T00:00:00Z",
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000000(),
 							},
 						],
 					},
 					{
 						node: {
-							node_id: "node-osaka",
-							node_name: "Osaka",
-							api_base_url: "https://osaka.example.com",
-							access_host: "osaka.example.com",
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							node_id: fixtureCatalog.nodeId.fixture258(),
+							node_name: fixtureCatalog.nodeName.fixture259(),
+							api_base_url: fixtureCatalog.service.fixture260(),
+							access_host: fixtureCatalog.host.fixture244(),
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
-						window_end: "2026-03-08T00:02:00Z",
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+						],
 						timeline: [],
 						ips: [
 							{
-								ip: "198.51.100.9",
+								ip: fixtureCatalog.address.documentation192_0_2_143(),
 								minutes: 1,
 								endpoint_tags: ["edge-osaka"],
 								region: "Japan / Osaka",
 								operator: "CarrierNet",
-								last_seen_at: "2026-03-08T00:00:00Z",
+								last_seen_at: fixtureCatalog.timestamp.t20260308T000000(),
 							},
 						],
 					},
@@ -918,28 +947,40 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				"24h",
 				expect.any(AbortSignal),
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getByText("Usage details · Tokyo")).toBeInTheDocument();
+			expect(
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture135()}`,
+				),
+			).toBeInTheDocument();
 		});
-		expect(screen.getByRole("tab", { name: "Tokyo" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
-		expect(screen.queryByText("Usage details · Osaka")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture135() }),
+		).toHaveAttribute("aria-selected", "true");
+		expect(
+			screen.queryByText(
+				`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+			),
+		).not.toBeInTheDocument();
 
-		fireEvent.click(screen.getByRole("tab", { name: "Osaka" }));
-		await waitFor(() => {
-			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
-		});
-		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
-			"aria-selected",
-			"true",
+		fireEvent.click(
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
 		);
+		await waitFor(() => {
+			expect(
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+				),
+			).toBeInTheDocument();
+		});
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
+		).toHaveAttribute("aria-selected", "true");
 		expect(
 			screen.getByText("Geo enrichment uses the free country.is hosted API."),
 		).toBeInTheDocument();
@@ -948,26 +989,33 @@ rules: []
 		await waitFor(() => {
 			expect(fetchAdminUserIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"u_01HUSERAAAAAA",
+				fixtureCatalog.identifier.userPrimary(),
 				"7d",
 				expect.any(AbortSignal),
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getByText("Usage details · Osaka")).toBeInTheDocument();
+			expect(
+				screen.getByText(
+					`Usage details · ${fixtureCatalog.nodeName.fixture259()}`,
+				),
+			).toBeInTheDocument();
 		});
-		expect(screen.queryByText("Usage details · Tokyo")).not.toBeInTheDocument();
-		expect(screen.getByRole("tab", { name: "Osaka" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
+		expect(
+			screen.queryByText(
+				`Usage details · ${fixtureCatalog.nodeName.fixture135()}`,
+			),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("tab", { name: fixtureCatalog.nodeName.fixture259() }),
+		).toHaveAttribute("aria-selected", "true");
 	});
 
 	it("disambiguates usage detail node tabs when node names repeat", async () => {
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",
@@ -977,43 +1025,45 @@ rules: []
 				groups: [
 					{
 						node: {
-							node_id: "node-tokyo-a",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo-a.example.com",
-							access_host: "tokyo-a.example.com",
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							node_id: fixtureCatalog.nodeId.fixture145(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture261(),
+							access_host: fixtureCatalog.host.fixture262(),
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
-						window_end: "2026-03-08T00:02:00Z",
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+						],
 						timeline: [],
 						ips: [],
 					},
 					{
 						node: {
-							node_id: "node-tokyo-b",
-							node_name: "Tokyo",
-							api_base_url: "https://tokyo-b.example.com",
-							access_host: "tokyo-b.example.com",
-							quota_limit_bytes: 0,
-							quota_reset: {
-								policy: "monthly",
-								day_of_month: 1,
-								tz_offset_minutes: null,
-							},
+							node_id: fixtureCatalog.nodeId.fixture263(),
+							node_name: fixtureCatalog.nodeName.fixture135(),
+							api_base_url: fixtureCatalog.service.fixture264(),
+							access_host: fixtureCatalog.host.fixture265(),
+							quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+							quota_reset: fixtureCatalog.quota.resetNode(),
 						},
 						geo_source: "country_is",
-						window_start: "2026-03-08T00:00:00Z",
-						window_end: "2026-03-08T00:02:00Z",
+						window_start: fixtureCatalog.timestamp.t20260308T000000(),
+						window_end: fixtureCatalog.timestamp.t20260308T000200(),
 						warnings: [],
-						unique_ip_series: [{ minute: "2026-03-08T00:00:00Z", count: 1 }],
+						unique_ip_series: [
+							{
+								minute: fixtureCatalog.timestamp.t20260308T000000(),
+								count: 1,
+							},
+						],
 						timeline: [],
 						ips: [],
 					},
@@ -1026,11 +1076,15 @@ rules: []
 
 		await waitFor(() => {
 			expect(
-				screen.getByRole("tab", { name: "Tokyo · tokyo-a.example.com" }),
+				screen.getByRole("tab", {
+					name: `${fixtureCatalog.nodeName.fixture135()} · ${fixtureCatalog.host.fixture262()}`,
+				}),
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByRole("tab", { name: "Tokyo · tokyo-b.example.com" }),
+			screen.getByRole("tab", {
+				name: `${fixtureCatalog.nodeName.fixture135()} · ${fixtureCatalog.host.fixture265()}`,
+			}),
 		).toBeInTheDocument();
 	});
 
@@ -1038,12 +1092,12 @@ rules: []
 		setupMocks({
 			ipUsage: {
 				user: {
-					user_id: "u_01HUSERAAAAAA",
+					user_id: fixtureCatalog.identifier.userPrimary(),
 					display_name: "Ivan",
 				},
 				window: "24h",
 				partial: true,
-				unreachable_nodes: ["node-osaka"],
+				unreachable_nodes: [fixtureCatalog.nodeId.fixture258()],
 				warnings: [],
 				groups: [],
 			},
@@ -1057,7 +1111,9 @@ rules: []
 			).toBeInTheDocument();
 		});
 		expect(
-			screen.getByText("Unreachable nodes: node-osaka"),
+			screen.getByText(
+				`Unreachable nodes: ${fixtureCatalog.nodeId.fixture258()}`,
+			),
 		).toBeInTheDocument();
 		expect(screen.getByText("Usage details unavailable")).toBeInTheDocument();
 		expect(

@@ -1,0 +1,18 @@
+id: fixture-policy-tsx-computed-fixture-key
+language: Tsx
+severity: error
+message: Fixture endpoint kinds and user IDs must not use computed keys.
+note: Use a direct fixtureCatalog accessor or Object.fromEntries for map data.
+files:
+  - web/src/**/*.test.tsx
+  - web/src/**/*.spec.tsx
+  - web/tests/**/*.tsx
+  - web/src/**/*.stories.tsx
+  - web/.storybook/mocks/**/*.tsx
+  - web/src/storybook/**/*.tsx
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: computed_property_name
+    - not:
+        regex: "^\\[\\s*fixtureCatalog\\.[A-Za-z0-9_.$()]+\\s*\\]$"

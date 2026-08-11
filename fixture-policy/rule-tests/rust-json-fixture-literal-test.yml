@@ -1,0 +1,125 @@
+id: fixture-policy-rust-json-fixture-literal
+valid:
+  - |
+    let meta = serde_json::json!({
+      "reality": xp_test_fixtures::endpoint_vless_meta(),
+    });
+  - |
+    let meta = json!({
+      "dest": xp_test_fixtures::endpoint_authority_53844(),
+    });
+  - |
+    let ingress = json!({
+      "hostname": xp_test_fixtures::slot_s554(),
+      "service": xp_test_fixtures::primary_api_url(),
+    });
+  - |
+    let release = json!({
+      "published_at": xp_test_fixtures::release_current_timestamp(),
+    });
+  - |
+    async fn reality_domains_reject_invalid_server_names() {
+      let request = req_authed_json(
+        "POST",
+        "/api/admin/reality-domains",
+        json!({ "server_name": server_name }),
+      );
+    }
+invalid:
+  - |
+    let meta = json!({
+      "reality": { "dest": "live.example:443" }
+    });
+  - |
+    let meta = serde_json::json!({
+      "reality": {"dest": "live.example:443", "server_names": ["live.example"]}
+    });
+  - |
+    let meta = serde_json::json!({
+      "reality": { "dest": "node.fixture.test:443" },
+      "reality_keys": { "private_key": "private" },
+      "short_ids": ["0123456789abcdef"]
+    });
+  - |
+    let meta = json!({
+      "reality": { "dest": request.destination }
+    });
+  - |
+    let ingress = json!({
+      "hostname": "live.example",
+      "service": "https://live.example",
+    });
+  - |
+    let release = json!({
+      "published_at": "2026-01-20T00:00:00Z"
+    });
+  - |
+    let release = json!({
+      "browser_download_url": std::env::var("LIVE_URL")
+    });
+  - |
+    let published_at = "2026-01-20T00:00:00Z";
+    let release = json!({
+      "published_at": published_at
+    });
+  - |
+    let release = json!({
+      "published_at": format!("{}", "2026-01-20T00:00:00Z")
+    });
+  - |
+    let meta = json!({
+      "server_names": [request.server_names]
+    });
+  - |
+    let meta = json!({
+      "short_ids": [payload.short_id]
+    });
+  - |
+    let meta = json!({
+      "reality": { "dest": Some(request.destination) }
+    });
+  - |
+    let meta = json!({
+      "server_names": vec![request.server_names]
+    });
+  - |
+    let meta = json!({
+      "reality": { "dest": format!("{}", request.destination) }
+    });
+  - |
+    let host = request.hostname;
+    let ingress = json!({
+      "hostname": Some(host),
+    });
+  - |
+    let ingress = json!({
+      "service": input.service,
+    });
+  - |
+    let ingress = json!({
+      "origin_url": match request.url {
+        value => value,
+      },
+    });
+  - |
+    let ingress = json!({
+      "service": format!("{}", external_service),
+    });
+  - |
+    let request = req_authed_json(
+      "POST",
+      "/api/admin/endpoints",
+      json!({ "service": request.service }),
+    );
+  - |
+    let release = json!({
+      "published_at": release_secret()
+    });
+  - |
+    let release = json!({
+      "browser_download_url": "https://github.com/live/download"
+    });
+  - |
+    let release = json ! ({
+      "published_at": "2026-01-20T00:00:00Z"
+    });

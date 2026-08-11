@@ -1,0 +1,48 @@
+id: fixture-policy-rust-node-name-source
+snapshots:
+  ? |
+    let node = Node { node_name: "live-node".to_owned() };
+  : labels:
+    - source: 'node_name: "live-node".to_owned()'
+      style: primary
+      start: 18
+      end: 51
+    - source: node_name
+      style: secondary
+      start: 18
+      end: 27
+    - source: '"live-node".to_owned()'
+      style: secondary
+      start: 29
+      end: 51
+  ? |
+    let node = Node { node_name: std::env::var("TEST_NODE_NAME").unwrap() };
+  : labels:
+    - source: 'node_name: std::env::var("TEST_NODE_NAME").unwrap()'
+      style: primary
+      start: 18
+      end: 69
+    - source: node_name
+      style: secondary
+      start: 18
+      end: 27
+    - source: std::env::var("TEST_NODE_NAME").unwrap()
+      style: secondary
+      start: 29
+      end: 69
+  ? |
+    let unsafe_name = "live-node";
+    let node = Node { node_name: unsafe_name.to_owned() };
+  : labels:
+    - source: 'node_name: unsafe_name.to_owned()'
+      style: primary
+      start: 49
+      end: 82
+    - source: node_name
+      style: secondary
+      start: 49
+      end: 58
+    - source: unsafe_name.to_owned()
+      style: secondary
+      start: 60
+      end: 82

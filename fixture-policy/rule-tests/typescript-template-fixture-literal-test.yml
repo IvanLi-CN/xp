@@ -1,0 +1,7 @@
+id: fixture-policy-typescript-template-fixture-literal
+valid:
+  - |
+    const subscription = `server: ${fixtureCatalog.subscription.providerHost()}`;
+invalid:
+  - |
+    const subscription = `server: live.example.com\npassword: unsafe`;

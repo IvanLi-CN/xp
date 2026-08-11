@@ -1,0 +1,104 @@
+id: fixture-policy-rust-data-source
+valid:
+  - |
+    let fixture = Config { node_id: xp_test_fixtures::primary_node_id() };
+  - |
+    let fixture = EndpointMeta {
+      short_ids: xp_test_fixtures::endpoint_short_ids(),
+      active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+    };
+  - |
+    let call = Call::AddInbound { tag: request.tag.clone() };
+  - |
+    let request = ReconcileRequest::RemoveInbound { tag: observed_tag.clone() };
+  - |
+    let request = RemoveInboundRequest { tag: observed_tag.clone() };
+  - |
+    let state = PeerServerState {
+      cluster_id: cluster.cluster_id.clone(),
+      requests: requests.clone(),
+    };
+  - |
+    let node = Node {
+      node_id: target.node_id.clone(),
+      access_host: target.access_host.clone(),
+      api_base_url: "http://127.0.0.1:9".to_string(),
+    };
+  - |
+    let endpoint = Endpoint {
+      endpoint_id: xp::id::new_ulid_string(),
+      node_id: target.node_id.clone(),
+      tag: format!("vless-mesh-resource-{index:02}"),
+    };
+  - |
+    let reality = RealityConfig {
+      dest: format!("host.docker.internal:{}", canary.addr.port()),
+    };
+  - |
+    let target = MeshPeerTarget {
+      mesh_base_url: Some(format!(
+        "https://{}:{}",
+        xp_test_fixtures::loopback_address(),
+        proxy.addr.port(),
+      )),
+      public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+    };
+  - |
+    let target = MeshPeerTarget {
+      mesh_base_url: Some(format!("https://{addr}")),
+      public_base_url: format!("http://{}", server.addr),
+    };
+  - |
+    let request = xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest {
+      tag: endpoint.tag,
+    };
+  - |
+    let init = StoreInit {
+      bootstrap_node_id: None,
+      bootstrap_node_name: config.node_name.clone(),
+      bootstrap_access_host: config.access_host.clone(),
+      bootstrap_api_base_url: config.api_base_url.clone(),
+    };
+invalid:
+  - |
+    let sample = Probe { from_node_id: "unapproved-node".to_owned() };
+  - |
+    let fixture = Config { node_id: "node-unapproved" };
+  - |
+    let fixture = EndpointMeta {
+      short_ids: vec!["unapproved-short-id".to_owned()],
+      active_short_id: "unapproved-short-id".to_owned(),
+    };
+  - |
+    let fixture = Config { public_ipv4: format!("192.0.2.{}", index) };
+  - |
+    let fixture = Config { timestamp: std::env::var("TEST_TIMESTAMP").unwrap() };
+  - |
+    let fixture = Config { api_base_url: "http://127.0.0.2:9".to_string() };
+  - |
+    let fixture = Config { dest: format!("host.docker.internal:443") };
+  - |
+    let fixture = Config { public_base_url: "https://unapproved.invalid".to_owned() };
+  - |
+    let fixture = Config {
+      mesh_base_url: Some(format!(
+        "https://{}",
+        std::env::var("TEST_HOST").unwrap(),
+      )),
+    };
+  - |
+    let call = Call::AddInbound { tag: "unapproved-tag".to_owned() };
+  - |
+    let payload = SignedPayload { cluster_id: "unapproved-cluster" };
+  - |
+    let sample = EndpointProbeSample { hour: "2026-03-11T11:00:00Z".to_owned() };
+  - |
+    let sample = EndpointProbeSample { config_hash: std::env::var("TEST_CONFIG_HASH").unwrap() };
+  - |
+    let init = StoreInit { bootstrap_node_name: "unapproved-node".to_owned() };
+  - |
+    let sample = Probe { owner_node_id: "unapproved-node".to_owned() };
+  - |
+    let sample = Probe { first_seen_at: "2026-03-11T11:00:00Z".to_owned() };
+  - |
+    let sample = Probe { start_at: "2026-03-11T11:00:00Z".to_owned() };

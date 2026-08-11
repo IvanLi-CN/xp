@@ -1,0 +1,14 @@
+id: fixture-policy-catalog-string-values
+snapshots:
+  '{ "hosts": { "primary": "unapproved.fixture.test" } }':
+    labels:
+    - source: '"unapproved.fixture.test"'
+      style: primary
+      start: 24
+      end: 49
+  '{ "hosts": { "primary": "unapproved.invalid" } }':
+    labels:
+    - source: '"unapproved.invalid"'
+      style: primary
+      start: 24
+      end: 44

@@ -1,0 +1,290 @@
+id: fixture-policy-tsx-data-source
+snapshots:
+  ? |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
+  : labels:
+    - source: 'short_ids: ["unapproved-short-id"]'
+      style: primary
+      start: 20
+      end: 54
+    - source: short_ids
+      style: secondary
+      start: 20
+      end: 29
+    - source: '["unapproved-short-id"]'
+      style: secondary
+      start: 31
+      end: 54
+  ? |
+    const fixture = { bootstrap_api_base_url: "https://unapproved.fixture.test" };
+  : labels:
+    - source: 'bootstrap_api_base_url: "https://unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 75
+    - source: bootstrap_api_base_url
+      style: secondary
+      start: 18
+      end: 40
+    - source: '"https://unapproved.fixture.test"'
+      style: secondary
+      start: 42
+      end: 75
+  ? |
+    const fixture = { config_hash: "unapproved-config" };
+  : labels:
+    - source: 'config_hash: "unapproved-config"'
+      style: primary
+      start: 18
+      end: 50
+    - source: config_hash
+      style: secondary
+      start: 18
+      end: 29
+    - source: '"unapproved-config"'
+      style: secondary
+      start: 31
+      end: 50
+  ? |
+    const fixture = { end_at: new Date().toISOString() };
+  : labels:
+    - source: 'end_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 50
+    - source: end_at
+      style: secondary
+      start: 18
+      end: 24
+    - source: new Date().toISOString()
+      style: secondary
+      start: 26
+      end: 50
+  ? |
+    const fixture = { first_seen_at: new Date().toISOString() };
+  : labels:
+    - source: 'first_seen_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 57
+    - source: first_seen_at
+      style: secondary
+      start: 18
+      end: 31
+    - source: new Date().toISOString()
+      style: secondary
+      start: 33
+      end: 57
+  ? |
+    const fixture = { host: "unapproved.fixture.test" };
+  : labels:
+    - source: 'host: "unapproved.fixture.test"'
+      style: primary
+      start: 18
+      end: 49
+    - source: host
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"unapproved.fixture.test"'
+      style: secondary
+      start: 24
+      end: 49
+  ? |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'hour: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 46
+    - source: hour
+      style: secondary
+      start: 18
+      end: 22
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 24
+      end: 46
+  ? |
+    const fixture = { last_success_at: new Date().toISOString() };
+  : labels:
+    - source: 'last_success_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 59
+    - source: last_success_at
+      style: secondary
+      start: 18
+      end: 33
+    - source: new Date().toISOString()
+      style: secondary
+      start: 35
+      end: 59
+  ? |
+    const fixture = { last_synced_at: "2026-07-01T00:00:00Z" };
+  : labels:
+    - source: 'last_synced_at: "2026-07-01T00:00:00Z"'
+      style: primary
+      start: 18
+      end: 56
+    - source: last_synced_at
+      style: secondary
+      start: 18
+      end: 32
+    - source: '"2026-07-01T00:00:00Z"'
+      style: secondary
+      start: 34
+      end: 56
+  ? |
+    const fixture = { last_synced_at: new Date().toISOString() };
+  : labels:
+    - source: 'last_synced_at: new Date().toISOString()'
+      style: primary
+      start: 18
+      end: 58
+    - source: last_synced_at
+      style: secondary
+      start: 18
+      end: 32
+    - source: new Date().toISOString()
+      style: secondary
+      start: 34
+      end: 58
+  ? |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  : labels:
+    - source: 'latest_checked_at: "2026-03-11T11:00:00Z"'
+      style: primary
+      start: 18
+      end: 59
+    - source: latest_checked_at
+      style: secondary
+      start: 18
+      end: 35
+    - source: '"2026-03-11T11:00:00Z"'
+      style: secondary
+      start: 37
+      end: 59
+  ? |
+    const fixture = { node_name: "unapproved-node" };
+  : labels:
+    - source: 'node_name: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 46
+    - source: node_name
+      style: secondary
+      start: 18
+      end: 27
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 29
+      end: 46
+  ? |
+    const fixture = { owner_node_id: "unapproved-node" };
+  : labels:
+    - source: 'owner_node_id: "unapproved-node"'
+      style: primary
+      start: 18
+      end: 50
+    - source: owner_node_id
+      style: secondary
+      start: 18
+      end: 31
+    - source: '"unapproved-node"'
+      style: secondary
+      start: 33
+      end: 50
+  ? |
+    const fixture = { port: 443 };
+  : labels:
+    - source: 'port: 443'
+      style: primary
+      start: 18
+      end: 27
+    - source: port
+      style: secondary
+      start: 18
+      end: 22
+    - source: '443'
+      style: secondary
+      start: 24
+      end: 27
+  ? |
+    const fixture = { quota_limit_bytes: 4096 };
+  : labels:
+    - source: 'quota_limit_bytes: 4096'
+      style: primary
+      start: 18
+      end: 41
+    - source: quota_limit_bytes
+      style: secondary
+      start: 18
+      end: 35
+    - source: '4096'
+      style: secondary
+      start: 37
+      end: 41
+  ? |
+    const fixture = { quota_reset: { policy: "unlimited" } };
+  : labels:
+    - source: 'quota_reset: { policy: "unlimited" }'
+      style: primary
+      start: 18
+      end: 54
+    - source: quota_reset
+      style: secondary
+      start: 18
+      end: 29
+    - source: '{ policy: "unlimited" }'
+      style: secondary
+      start: 31
+      end: 54
+  ? |
+    const fixture = { run_id: "unapproved-run" };
+  : labels:
+    - source: 'run_id: "unapproved-run"'
+      style: primary
+      start: 18
+      end: 42
+    - source: run_id
+      style: secondary
+      start: 18
+      end: 24
+    - source: '"unapproved-run"'
+      style: secondary
+      start: 26
+      end: 42
+  ? |
+    const fixture = { total_bytes: 4096 };
+  : labels:
+    - source: 'total_bytes: 4096'
+      style: primary
+      start: 18
+      end: 35
+    - source: total_bytes
+      style: secondary
+      start: 18
+      end: 29
+    - source: '4096'
+      style: secondary
+      start: 31
+      end: 35
+  ? |
+    const fixture = { window_end: process.env.TEST_WINDOW_END };
+  : labels:
+    - source: 'window_end: process.env.TEST_WINDOW_END'
+      style: primary
+      start: 18
+      end: 57
+    - source: window_end
+      style: secondary
+      start: 18
+      end: 28
+    - source: process.env.TEST_WINDOW_END
+      style: secondary
+      start: 30
+      end: 57

@@ -166,8 +166,8 @@ mod tests {
     fn meta(name: &str) -> NodeMeta {
         NodeMeta {
             name: name.to_string(),
-            api_base_url: format!("https://{name}.example.com"),
-            raft_endpoint: format!("https://{name}.example.com"),
+            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
         }
     }
 

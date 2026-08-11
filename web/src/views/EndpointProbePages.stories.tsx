@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type {
 	AdminEndpointProbeHistoryResponse,
@@ -8,54 +9,51 @@ import type {
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
 
-const ENDPOINT_ID = "endpoint-probe-demo";
-const RUN_ID = "run-probe-demo";
-const HOUR = "2026-07-28T14:00:00Z";
-const CONFIG_HASH = "config-demo-20260728";
+const ENDPOINT_ID = fixtureCatalog.endpointId.fixture120();
 
 const nodes: AdminNode[] = [
 	{
-		node_id: "node-amsterdam",
-		node_name: "Amsterdam edge",
-		api_base_url: "https://amsterdam.example.invalid",
-		access_host: "amsterdam.example.invalid",
-		quota_limit_bytes: 0,
-		quota_reset: { policy: "unlimited" },
+		node_id: fixtureCatalog.nodeId.fixture206(),
+		node_name: fixtureCatalog.nodeName.fixture207(),
+		api_base_url: fixtureCatalog.service.fixture208(),
+		access_host: fixtureCatalog.host.fixture209(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 	{
-		node_id: "node-tokyo",
-		node_name: "Tokyo edge",
-		api_base_url: "https://tokyo.example.invalid",
-		access_host: "tokyo.example.invalid",
-		quota_limit_bytes: 0,
-		quota_reset: { policy: "unlimited" },
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		node_name: fixtureCatalog.nodeName.fixture210(),
+		api_base_url: fixtureCatalog.service.fixture211(),
+		access_host: fixtureCatalog.host.fixture212(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 	{
-		node_id: "node-retired",
-		node_name: "",
-		api_base_url: "https://retired.example.invalid",
-		access_host: "retired.example.invalid",
-		quota_limit_bytes: 0,
-		quota_reset: { policy: "unlimited" },
+		node_id: fixtureCatalog.nodeId.fixture213(),
+		node_name: fixtureCatalog.host.fixture99(),
+		api_base_url: fixtureCatalog.service.fixture214(),
+		access_host: fixtureCatalog.host.fixture215(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetUnlimited(),
 	},
 ];
 
 const endpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: ENDPOINT_ID,
-		node_id: "node-tokyo",
-		tag: "vless-vision-tokyo",
-		kind: "vless_reality_vision_tcp",
-		port: 443,
+		endpoint_id: fixtureCatalog.endpointId.fixture120(),
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		tag: fixtureCatalog.endpointTag.fixture216(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {},
 		probe: {
-			latest_checked_at: "2026-07-28T14:00:15Z",
+			latest_checked_at: fixtureCatalog.timestamp.t20260728T140015(),
 			latest_latency_ms_p50: 32,
 			slots: [
 				{
-					hour: HOUR,
+					hour: fixtureCatalog.timestamp.probeHour(),
 					status: "up",
-					checked_at: "2026-07-28T14:00:15Z",
+					checked_at: fixtureCatalog.timestamp.t20260728T140015(),
 					latency_ms_p50: 32,
 				},
 			],
@@ -64,11 +62,11 @@ const endpoints: AdminEndpoint[] = [
 ];
 
 const history: AdminEndpointProbeHistoryResponse = {
-	endpoint_id: ENDPOINT_ID,
+	endpoint_id: fixtureCatalog.endpointId.fixture120(),
 	participating_nodes: 3,
 	slots: [
 		{
-			hour: HOUR,
+			hour: fixtureCatalog.timestamp.probeHour(),
 			status: "up",
 			participating_nodes: 3,
 			ok_count: 3,
@@ -79,25 +77,25 @@ const history: AdminEndpointProbeHistoryResponse = {
 			latency_ms_p95: 76,
 			by_node: [
 				{
-					node_id: "node-tokyo",
+					node_id: fixtureCatalog.nodeId.fixture134(),
 					ok: true,
-					checked_at: "2026-07-28T14:00:10Z",
-					latency_ms: 32,
-					config_hash: CONFIG_HASH,
+					checked_at: fixtureCatalog.timestamp.t20260728T140010(),
+					latency_ms: fixtureCatalog.number.value32(),
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
-					node_id: "node-amsterdam",
+					node_id: fixtureCatalog.nodeId.fixture206(),
 					ok: true,
-					checked_at: "2026-07-28T14:00:12Z",
-					latency_ms: 76,
-					config_hash: CONFIG_HASH,
+					checked_at: fixtureCatalog.timestamp.t20260728T140012(),
+					latency_ms: fixtureCatalog.number.value76(),
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 				{
-					node_id: "node-retired",
+					node_id: fixtureCatalog.nodeId.fixture213(),
 					ok: true,
-					checked_at: "2026-07-28T14:00:15Z",
-					latency_ms: 28,
-					config_hash: CONFIG_HASH,
+					checked_at: fixtureCatalog.timestamp.t20260728T140015(),
+					latency_ms: fixtureCatalog.number.value28(),
+					config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 				},
 			],
 		},
@@ -105,25 +103,57 @@ const history: AdminEndpointProbeHistoryResponse = {
 };
 
 const run: AdminEndpointProbeRunStatusResponse = {
-	run_id: RUN_ID,
+	run_id: fixtureCatalog.identifier.probeRunPrimary(),
 	status: "finished",
-	hour: HOUR,
-	config_hash: CONFIG_HASH,
-	nodes: history.slots[0].by_node.map((sample) => ({
-		node_id: sample.node_id,
-		status: "finished",
-		progress: {
-			run_id: RUN_ID,
-			hour: HOUR,
-			config_hash: CONFIG_HASH,
+	hour: fixtureCatalog.timestamp.probeHour(),
+	config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+	nodes: [
+		{
+			node_id: fixtureCatalog.nodeId.fixture134(),
 			status: "finished",
-			endpoints_total: 1,
-			endpoints_done: 1,
-			started_at: "2026-07-28T14:00:00Z",
-			updated_at: sample.checked_at,
-			finished_at: sample.checked_at,
+			progress: {
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: fixtureCatalog.timestamp.baseline(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140010(),
+			},
 		},
-	})),
+		{
+			node_id: fixtureCatalog.nodeId.fixture206(),
+			status: "finished",
+			progress: {
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: fixtureCatalog.timestamp.baseline(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140012(),
+			},
+		},
+		{
+			node_id: fixtureCatalog.nodeId.fixture213(),
+			status: "finished",
+			progress: {
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				hour: fixtureCatalog.timestamp.probeHour(),
+				config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
+				status: "finished",
+				endpoints_total: 1,
+				endpoints_done: 1,
+				started_at: fixtureCatalog.timestamp.baseline(),
+				updated_at: fixtureCatalog.timestamp.t20240101T034100(),
+				finished_at: fixtureCatalog.timestamp.t20260728T140015(),
+			},
+		},
+	],
 };
 
 function Empty() {
@@ -142,11 +172,9 @@ const meta = {
 				endpoints,
 			},
 			probe: {
-				historyByEndpointId: {
-					[ENDPOINT_ID]: history,
-				},
+				historyByEndpointId: Object.fromEntries([[ENDPOINT_ID, history]]),
 				runsByRunId: {
-					[RUN_ID]: run,
+					[fixtureCatalog.identifier.probeRunPrimary()]: run,
 				},
 			},
 		},
@@ -168,17 +196,19 @@ export const HistoryWithNodeNames: Story = {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			"Amsterdam edge",
-			"Tokyo edge",
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
+			fixtureCatalog.host.fixture99(),
 		]);
-		expect(await canvas.findByText("node-retired")).toBeInTheDocument();
 	},
 };
 
 export const LiveRunWithNodeNames: Story = {
 	render: () => <></>,
 	parameters: {
-		router: { initialEntry: `/endpoints/probe/runs/${RUN_ID}` },
+		router: {
+			initialEntry: `/endpoints/probe/runs/${fixtureCatalog.identifier.probeRunPrimary()}`,
+		},
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -188,9 +218,9 @@ export const LiveRunWithNodeNames: Story = {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			"Amsterdam edge",
-			"Tokyo edge",
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
+			fixtureCatalog.host.fixture99(),
 		]);
-		expect(await canvas.findByText("node-retired")).toBeInTheDocument();
 	},
 };

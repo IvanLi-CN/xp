@@ -27,7 +27,7 @@ fn install_test_crypto_provider() {
 
 fn test_config(data_dir: PathBuf) -> Config {
     Config {
-        bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        bind: xp_test_fixtures::address_loopback_port0().parse().unwrap(),
         xray_api_addr: SocketAddr::from(([127, 0, 0, 1], 10085)),
         xray_health_interval_secs: 5,
         xray_health_fails_before_down: 4,
@@ -46,9 +46,9 @@ fn test_config(data_dir: PathBuf) -> Config {
         cloudflared_openrc_service: "cloudflared".to_string(),
         data_dir,
         admin_token_hash: "hash".to_string(),
-        node_name: "node-1".to_string(),
-        access_host: "example.com".to_string(),
-        api_base_url: "https://127.0.0.1:62416".to_string(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture465().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
         vless_canary_bind: SocketAddr::from(([127, 0, 0, 1], 39043)),
         vless_canary_acme_directory_url: LETS_ENCRYPT_PRODUCTION_URL.to_string(),
         vless_canary_acme_contact_email: String::new(),
@@ -95,13 +95,13 @@ fn persist_disabled_status_with_error_records_error() {
 fn ready_for_managed_vless_rejects_status_for_different_bind() {
     let tmp = tempdir().unwrap();
     let expected_bind: std::net::SocketAddr = "127.0.0.1:39043".parse().unwrap();
-    let stale_bind: std::net::SocketAddr = "127.0.0.1:49043".parse().unwrap();
+    let _stale_bind: std::net::SocketAddr = "127.0.0.1:49043".parse().unwrap();
 
     persist_status(
         tmp.path(),
         &VlessHttpsCanaryStatus {
             enabled: true,
-            bind: Some(stale_bind.to_string()),
+            bind: Some(xp_test_fixtures::address_loopback_port39466().to_owned()),
             acme_directory_url: Some(LETS_ENCRYPT_PRODUCTION_URL.to_string()),
             cert_not_after: Some("2030-01-01T00:00:00Z".to_string()),
             last_renewed_at: None,
@@ -386,38 +386,30 @@ async fn canary_proxy_client_allows_slow_streaming_response() {
 #[test]
 fn managed_vless_matching_keeps_unconfigured_upstream_diagnostic() {
     let endpoint = Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless-ep1".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::label_vless1().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
             "managed_default": true
         }),
     };
 
     let routed = matching_managed_vless_endpoint(
         endpoint,
-        "node.example.com",
+        xp_test_fixtures::primary_host(),
         &NormalizedAuthority {
-            host: "node.example.com".to_string(),
+            host: xp_test_fixtures::label_node_afixture_test().to_owned(),
             port: 53844,
         },
     )
     .unwrap();
-    assert_eq!(routed.endpoint_id, "ep1");
+    assert_eq!(routed.endpoint_id, xp_test_fixtures::label_vless1());
     assert!(routed.upstream.url.is_empty());
     assert_eq!(routed.upstream.mode, CanaryUpstreamMode::Auto);
 }
@@ -425,45 +417,42 @@ fn managed_vless_matching_keeps_unconfigured_upstream_diagnostic() {
 #[test]
 fn managed_vless_matching_requires_managed_default_flag_and_port() {
     let mut endpoint = Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless-ep1".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::label_vless1().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["edge.example.com:53844"],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_53844()],
             "canary_upstream": {
-                "url": "http://127.0.0.1:8080",
-                "mode": "h2c"
+                "url": xp_test_fixtures::canary_http_loopback_url(),
+                "mode": xp_test_fixtures::endpoint_canary_h2c()
             },
             "managed_default": false
         }),
     };
 
     let requested = NormalizedAuthority {
-        host: "edge.example.com".to_string(),
+        host: xp_test_fixtures::label_edge_afixture_test().to_owned(),
         port: 53844,
     };
     assert!(
-        matching_managed_vless_endpoint(endpoint.clone(), "node.example.com", &requested).is_none()
+        matching_managed_vless_endpoint(
+            endpoint.clone(),
+            xp_test_fixtures::primary_host(),
+            &requested
+        )
+        .is_none()
     );
     endpoint.meta["managed_default"] = serde_json::Value::Bool(true);
     assert!(
         matching_managed_vless_endpoint(
             endpoint.clone(),
-            "node.example.com",
+            xp_test_fixtures::primary_host(),
             &NormalizedAuthority {
                 host: "node.example.com".to_string(),
                 port: 443,
@@ -471,7 +460,9 @@ fn managed_vless_matching_requires_managed_default_flag_and_port() {
         )
         .is_none()
     );
-    let routed = matching_managed_vless_endpoint(endpoint, "node.example.com", &requested).unwrap();
+    let routed =
+        matching_managed_vless_endpoint(endpoint, xp_test_fixtures::primary_host(), &requested)
+            .unwrap();
     assert_eq!(routed.upstream.url, "http://127.0.0.1:8080");
     assert_eq!(routed.upstream.mode, CanaryUpstreamMode::H2c);
 }
@@ -479,27 +470,19 @@ fn managed_vless_matching_requires_managed_default_flag_and_port() {
 #[test]
 fn managed_vless_matching_accepts_alias_without_explicit_port_as_https_443() {
     let endpoint = Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless-ep1".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::label_vless1().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["Edge.Example.com."],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_alias()],
             "canary_upstream": {
-                "url": "http://127.0.0.1:8080",
+                "url": xp_test_fixtures::canary_http_loopback_url(),
                 "mode": "auto"
             },
             "managed_default": true
@@ -508,38 +491,30 @@ fn managed_vless_matching_accepts_alias_without_explicit_port_as_https_443() {
 
     let routed = matching_managed_vless_endpoint(
         endpoint,
-        "node.example.com",
+        xp_test_fixtures::primary_host(),
         &NormalizedAuthority {
-            host: "edge.example.com".to_string(),
+            host: xp_test_fixtures::label_edge_afixture_test().to_owned(),
             port: 443,
         },
     )
     .unwrap();
-    assert_eq!(routed.endpoint_id, "ep1");
+    assert_eq!(routed.endpoint_id, xp_test_fixtures::label_vless1());
 }
 
 #[test]
 fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
     let endpoint = Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless-ep1".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::label_vless1().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 53844,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
-            "accepted_authorities": ["edge.example.com:53844"],
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+            "accepted_authorities": [xp_test_fixtures::endpoint_authority_53844()],
             "managed_default": true
         }),
     };
@@ -547,7 +522,7 @@ fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
     assert!(
         matching_managed_vless_endpoint(
             endpoint,
-            "node.example.com",
+            xp_test_fixtures::primary_host(),
             &NormalizedAuthority {
                 host: "other.example.com".to_string(),
                 port: 53844,
@@ -560,38 +535,30 @@ fn managed_vless_matching_rejects_non_canonical_non_alias_authority() {
 #[test]
 fn managed_vless_matching_accepts_canonical_authority() {
     let endpoint = Endpoint {
-        endpoint_id: "ep1".to_string(),
-        node_id: "n1".to_string(),
-        tag: "vless-ep1".to_string(),
+        endpoint_id: xp_test_fixtures::label_vless1().to_owned(),
+        node_id: xp_test_fixtures::label_n1().to_owned(),
+        tag: xp_test_fixtures::label_vless1().to_owned(),
         kind: EndpointKind::VlessRealityVisionTcp,
         port: 443,
         meta: serde_json::json!({
-            "reality": {
-                "dest": "127.0.0.1:39043",
-                "server_names": ["node.example.com"],
-                "server_names_source": "manual",
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "private",
-                "public_key": "public"
-            },
-            "short_ids": ["aaaaaaaaaaaaaaaa"],
-            "active_short_id": "aaaaaaaaaaaaaaaa",
+            "reality": xp_test_fixtures::endpoint_reality(),
+            "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+            "short_ids": xp_test_fixtures::endpoint_short_ids(),
+            "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
             "managed_default": true
         }),
     };
 
     let routed = matching_managed_vless_endpoint(
         endpoint,
-        "Node.Example.com.",
+        "Node-A.Fixture.Test.",
         &NormalizedAuthority {
-            host: "node.example.com".to_string(),
+            host: xp_test_fixtures::label_node_afixture_test().to_owned(),
             port: 443,
         },
     )
     .unwrap();
-    assert_eq!(routed.endpoint_id, "ep1");
+    assert_eq!(routed.endpoint_id, xp_test_fixtures::label_vless1());
 }
 
 #[tokio::test]
@@ -676,18 +643,18 @@ async fn wait_until_ready_accepts_self_signed_canary_cert() {
 async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
     install_test_crypto_provider();
 
-    const CLUSTER_ID: &str = "01JTESTCLUSTERID00000000000000";
-    const SENDER_ID: &str = "01JTESTSENDER0000000000000000";
-    const TARGET_ID: &str = "01JTESTTARGET0000000000000000";
     const HEALTH_PATH: &str = "/api/admin/_internal/mesh/health?probe=a%2Fb";
 
-    let ca = generate_cluster_ca(CLUSTER_ID).unwrap();
+    let cluster_id = xp_test_fixtures::cluster_fixture476();
+    let sender_id = xp_test_fixtures::node_id_fixture472();
+    let target_id = xp_test_fixtures::node_id_fixture475();
+    let ca = generate_cluster_ca(cluster_id).unwrap();
     let request_uri: Uri = HEALTH_PATH.parse().unwrap();
     let context = RequestContext::now(
         InternalRoute::HealthV2,
-        CLUSTER_ID,
-        SENDER_ID,
-        TARGET_ID,
+        cluster_id,
+        sender_id,
+        target_id,
         "01JTESTREQUEST000000000000000",
     );
     let mut signed_headers = HeaderMap::new();
@@ -709,15 +676,15 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
         &request_uri,
         &signed_headers,
         &[],
-        CLUSTER_ID,
-        TARGET_ID,
+        cluster_id,
+        target_id,
     )
     .unwrap();
     let ack = internal_auth::sign_ack_v2(
         &ca.key_pem,
         &ca.cert_pem,
         &verified,
-        TARGET_ID,
+        target_id,
         StatusCode::OK.as_u16(),
     )
     .unwrap();
@@ -744,18 +711,18 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
     let tmp = tempdir().unwrap();
     let mut store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: tmp.path().join("store"),
-        bootstrap_node_id: Some(TARGET_ID.to_string()),
-        bootstrap_node_name: "target".to_string(),
-        bootstrap_access_host: "canary.example.com".to_string(),
-        bootstrap_api_base_url: "https://target.example.com".to_string(),
+        bootstrap_node_id: Some(xp_test_fixtures::node_id_fixture475().to_owned()),
+        bootstrap_node_name: xp_test_fixtures::label_target().to_owned(),
+        bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+        bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
     })
     .unwrap();
     store
         .upsert_node(Node {
-            node_id: SENDER_ID.to_string(),
-            node_name: "sender".to_string(),
-            access_host: "sender.example.com".to_string(),
-            api_base_url: "https://sender.example.com".to_string(),
+            node_id: xp_test_fixtures::node_id_fixture472().to_owned(),
+            node_name: xp_test_fixtures::label_sender().to_owned(),
+            access_host: xp_test_fixtures::host_fixture473().to_owned(),
+            api_base_url: xp_test_fixtures::service_fixture474().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         })
@@ -777,10 +744,10 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
     let canary_addr = canary_listener.local_addr().unwrap();
     let state = CanaryProxyState {
         store: Arc::new(tokio::sync::Mutex::new(store)),
-        node_id: TARGET_ID.to_string(),
+        node_id: xp_test_fixtures::node_id_fixture475().to_owned(),
         clients: Arc::new(CanaryProxyClients::new().unwrap()),
         mesh_auth: Some(CanaryMeshAuth {
-            cluster_id: CLUSTER_ID.to_string(),
+            cluster_id: xp_test_fixtures::cluster_fixture476().to_owned(),
             cluster_ca_key_pem: ca.key_pem.clone(),
             cluster_ca_cert_pem: ca.cert_pem.clone(),
             loopback_base_url: format!("http://{loopback_addr}"),
@@ -828,7 +795,7 @@ async fn signed_mesh_health_reaches_loopback_over_http1_and_http2() {
             &ca.key_pem,
             &ca.cert_pem,
             &verified,
-            TARGET_ID,
+            target_id,
             response.status().as_u16(),
             response_ack,
         )

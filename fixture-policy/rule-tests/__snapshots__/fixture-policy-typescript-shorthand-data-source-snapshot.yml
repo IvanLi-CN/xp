@@ -1,0 +1,66 @@
+id: fixture-policy-typescript-shorthand-data-source
+snapshots:
+  ? |
+    const bootstrap_access_host = "unapproved.fixture.test";
+    const fixture = { bootstrap_access_host };
+  : labels:
+    - source: bootstrap_access_host
+      style: primary
+      start: 75
+      end: 96
+  ? |
+    const cycle_end_at = new Date().toISOString();
+    const fixture = { cycle_end_at };
+  : labels:
+    - source: cycle_end_at
+      style: primary
+      start: 65
+      end: 77
+  ? |
+    const hour = "2026-03-11T11:00:00Z";
+    const fixture = { hour };
+  : labels:
+    - source: hour
+      style: primary
+      start: 55
+      end: 59
+  ? |
+    const kind = payload.kind;
+    const fixture = { kind };
+  : labels:
+    - source: kind
+      style: primary
+      start: 45
+      end: 49
+  ? |
+    const run_id = "unapproved-run";
+    const fixture = { run_id };
+  : labels:
+    - source: run_id
+      style: primary
+      start: 51
+      end: 57
+  ? |
+    const tag = "unapproved";
+    const fixture = { tag };
+  : labels:
+    - source: tag
+      style: primary
+      start: 44
+      end: 47
+  ? |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  : labels:
+    - source: total_bytes
+      style: primary
+      start: 44
+      end: 55
+  ? |
+    const user_id = payload.user_id;
+    const fixture = { user_id };
+  : labels:
+    - source: user_id
+      style: primary
+      start: 51
+      end: 58

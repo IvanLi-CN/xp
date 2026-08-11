@@ -1,0 +1,48 @@
+id: fixture-policy-rust-subscription-provider-url-inputs
+language: Rust
+severity: error
+message: Subscription provider URLs must be direct xp_test_fixtures accessors.
+note: Do not pass literals, interpolation, or request-derived values into subscription fixtures.
+files:
+  - src/subscription/tests.rs
+  - src/subscription/reality_tests.rs
+rule:
+  any:
+    - all:
+        - kind: call_expression
+        - pattern: |
+            build_mihomo_provider_yaml(
+              $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROFILE, $PROVIDER_URL
+            )
+        - not:
+            pattern: |
+              build_mihomo_provider_yaml(
+                $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROFILE,
+                xp_test_fixtures::$ACCESSOR()
+              )
+    - all:
+        - kind: call_expression
+        - pattern: |
+            build_mihomo_provider_yaml_with_node_probes(
+              $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROBES, $PROFILE, $PROVIDER_URL
+            )
+        - not:
+            pattern: |
+              build_mihomo_provider_yaml_with_node_probes(
+                $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROBES, $PROFILE,
+                xp_test_fixtures::$ACCESSOR()
+              )
+    - all:
+        - kind: call_expression
+        - pattern: |
+            build_mihomo_provider_yaml_with_node_probes_mode(
+              $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROBES, $PROFILE,
+              $PROVIDER_URL, $MODE, $MIRROR_URL
+            )
+        - not:
+            pattern: |
+              build_mihomo_provider_yaml_with_node_probes_mode(
+                $SEED, $USER, $MEMBERSHIPS, $ENDPOINTS, $NODES, $PROBES, $PROFILE,
+                xp_test_fixtures::$URL_ACCESSOR(), $MODE,
+                xp_test_fixtures::$MIRROR_ACCESSOR()
+              )

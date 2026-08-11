@@ -8,6 +8,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpoint, patchAdminEndpoint } from "../api/adminEndpoints";
 import { fetchAdminNodes } from "../api/adminNodes";
@@ -42,7 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			</a>
 		),
 		useNavigate: () => mockNavigate,
-		useParams: () => ({ endpointId: "endpoint-managed-vless" }),
+		useParams: () => ({ endpointId: fixtureCatalog.endpointId.fixture172() }),
 	};
 });
 
@@ -91,41 +92,31 @@ function setupMocks() {
 	vi.mocked(fetchAdminNodes).mockResolvedValue({
 		items: [
 			{
-				node_id: "node-1",
-				node_name: "tokyo-1",
-				access_host: "edge.example.test",
-				api_base_url: "https://tokyo-1.example.com",
-				quota_limit_bytes: 0,
-				quota_reset: {
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: null,
-				},
+				node_id: fixtureCatalog.nodeId.fixture32(),
+				node_name: fixtureCatalog.nodeName.fixture33(),
+				access_host: fixtureCatalog.host.fixture119(),
+				api_base_url: fixtureCatalog.service.fixture34(),
+				quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+				quota_reset: fixtureCatalog.quota.resetNode(),
 			},
 		],
 	});
 	vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-		endpoint_id: "endpoint-managed-vless",
-		node_id: "node-1",
-		tag: "managed-vless",
-		kind: "vless_reality_vision_tcp",
-		port: 53844,
+		endpoint_id: fixtureCatalog.endpointId.fixture172(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		tag: fixtureCatalog.endpointTag.fixture121(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port53844(),
 		meta: {
 			reality: {
-				dest: "127.0.0.1:39043",
-				server_names: ["edge.example.test"],
+				dest: fixtureCatalog.address.loopback39043(),
+				server_names: fixtureCatalog.hostList.edge5(),
 				server_names_source: "manual",
 				fingerprint: "chrome",
 			},
 			managed_default: true,
-			canary_upstream: {
-				url: "http://127.0.0.1:8080",
-				mode: "auto",
-			},
-			accepted_authorities: [
-				"endpoint.example.test:53844",
-				"edge.example.com:53844",
-			],
+			canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+			accepted_authorities: fixtureCatalog.hostList.edge12(),
 		},
 	});
 }
@@ -145,28 +136,21 @@ describe("EndpointDetailsPage", () => {
 
 	it("restores managed suggestions and keeps the managed patch payload stable", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "managed-vless",
-			kind: "vless_reality_vision_tcp",
-			port: 53844,
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {
 				reality: {
-					dest: "127.0.0.1:39043",
-					server_names: ["edge.example.test"],
+					dest: fixtureCatalog.address.loopback39043(),
+					server_names: fixtureCatalog.hostList.edge5(),
 					server_names_source: "manual",
 					fingerprint: "chrome",
 				},
 				managed_default: true,
-				canary_upstream: {
-					url: "https://tokyo-1.example.com",
-					mode: "auto",
-				},
-				accepted_authorities: [
-					"endpoint.example.test:53844",
-					"edge.example.com:53844",
-					"edge.example.test:53844",
-				],
+				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+				accepted_authorities: fixtureCatalog.hostList.edge13(),
 			},
 		});
 
@@ -194,10 +178,10 @@ describe("EndpointDetailsPage", () => {
 		fireEvent.click(
 			await within(
 				await screen.findByTestId("tag-input-suggestions"),
-			).findByText("edge.example.test:53844"),
+			).findByText(fixtureCatalog.authority.host119Port53844()[0]),
 		);
 		expect(
-			await screen.findByTitle("edge.example.test:53844"),
+			await screen.findByTitle(fixtureCatalog.authority.host119Port53844()[0]),
 		).toBeInTheDocument();
 
 		fireEvent.click(
@@ -207,18 +191,12 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
+				fixtureCatalog.endpointId.fixture172(),
 				{
-					port: 53844,
-					canary_upstream: {
-						url: "https://127.0.0.1:39043",
-						mode: "auto",
-					},
-					accepted_authorities: [
-						"endpoint.example.test:53844",
-						"edge.example.com:53844",
-						"edge.example.test:53844",
-					],
+					port: fixtureCatalog.endpoint.port53844(),
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+					accepted_authorities:
+						fixtureCatalog.authority.existingAndHost119Port53844(),
 				},
 			);
 		});
@@ -226,11 +204,11 @@ describe("EndpointDetailsPage", () => {
 
 	it("does not render or submit SMux settings for VLESS endpoints", async () => {
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "managed-vless",
-			kind: "vless_reality_vision_tcp",
-			port: 53844,
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 
@@ -244,27 +222,31 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
-				{ port: 53844 },
+				fixtureCatalog.endpointId.fixture172(),
+				{
+					port: fixtureCatalog.endpoint.port53844(),
+					accepted_authorities:
+						fixtureCatalog.authority.existingAuthoritiesPort443(),
+				},
 			);
 		});
 	});
 
 	it("does not render or submit SMux settings to a legacy endpoint API", async () => {
 		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "legacy-ss2022",
-			kind: "ss2022_2022_blake3_aes_128_gcm",
-			port: 53844,
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.ssKind(),
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 		vi.mocked(patchAdminEndpoint).mockResolvedValue({
-			endpoint_id: "endpoint-managed-vless",
-			node_id: "node-1",
-			tag: "legacy-ss2022",
-			kind: "ss2022_2022_blake3_aes_128_gcm",
-			port: 53844,
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.ssKind(),
+			port: fixtureCatalog.endpoint.port53844(),
 			meta: {},
 		});
 
@@ -283,8 +265,8 @@ describe("EndpointDetailsPage", () => {
 		await waitFor(() => {
 			expect(patchAdminEndpoint).toHaveBeenCalledWith(
 				"admintoken",
-				"endpoint-managed-vless",
-				{ port: 53844 },
+				fixtureCatalog.endpointId.fixture172(),
+				{ port: fixtureCatalog.endpoint.port53844() },
 			);
 		});
 	});
@@ -299,29 +281,25 @@ describe("EndpointDetailsPage", () => {
 			vi.mocked(fetchAdminNodes).mockResolvedValue({
 				items: [
 					{
-						node_id: "node-hinet",
-						node_name: "hinet",
-						access_host: "hinet-ep.707979.xyz",
-						api_base_url: "https://hinet-xp.707979.xyz",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.nodeId.fixture124(),
+						node_name: fixtureCatalog.nodeName.fixture125(),
+						access_host: fixtureCatalog.host.fixture126(),
+						api_base_url: fixtureCatalog.service.fixture127(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 				],
 			});
 			vi.mocked(fetchAdminEndpoint).mockResolvedValue({
-				endpoint_id: "endpoint-managed-vless",
-				node_id: "node-hinet",
-				tag: "managed-hinet",
-				kind: "vless_reality_vision_tcp",
-				port: 53844,
+				endpoint_id: fixtureCatalog.endpointId.fixture172(),
+				node_id: fixtureCatalog.nodeId.fixture124(),
+				tag: fixtureCatalog.endpointTag.fixture129(),
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				port: fixtureCatalog.endpoint.port53844(),
 				meta: {
 					reality: {
-						dest: "127.0.0.1:39043",
-						server_names: ["hinet-ep.707979.xyz"],
+						dest: fixtureCatalog.address.loopback39043(),
+						server_names: fixtureCatalog.hostList.edge7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
@@ -329,24 +307,21 @@ describe("EndpointDetailsPage", () => {
 				},
 			});
 			vi.mocked(patchAdminEndpoint).mockResolvedValue({
-				endpoint_id: "endpoint-managed-vless",
-				node_id: "node-hinet",
-				tag: "managed-hinet",
-				kind: "vless_reality_vision_tcp",
-				port: 53844,
+				endpoint_id: fixtureCatalog.endpointId.fixture172(),
+				node_id: fixtureCatalog.nodeId.fixture124(),
+				tag: fixtureCatalog.endpointTag.fixture129(),
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				port: fixtureCatalog.endpoint.port53844(),
 				meta: {
 					reality: {
-						dest: "127.0.0.1:39043",
-						server_names: ["hinet-ep.707979.xyz"],
+						dest: fixtureCatalog.address.loopback39043(),
+						server_names: fixtureCatalog.hostList.edge7(),
 						server_names_source: "manual",
 						fingerprint: "chrome",
 					},
 					managed_default: true,
-					canary_upstream: {
-						url: "https://127.0.0.1:39043",
-						mode: "auto",
-					},
-					accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+					accepted_authorities: fixtureCatalog.hostList.edge15(),
 				},
 			});
 
@@ -374,10 +349,12 @@ describe("EndpointDetailsPage", () => {
 			fireEvent.click(
 				await within(
 					await screen.findByTestId("tag-input-suggestions"),
-				).findByText("hinet-ep.707979.xyz:53844"),
+				).findByText(fixtureCatalog.authority.host126Port53844()[0]),
 			);
 			expect(
-				await screen.findByTitle("hinet-ep.707979.xyz:53844"),
+				await screen.findByTitle(
+					fixtureCatalog.authority.host126Port53844()[0],
+				),
 			).toBeInTheDocument();
 
 			fireEvent.click(
@@ -387,14 +364,11 @@ describe("EndpointDetailsPage", () => {
 			await waitFor(() => {
 				expect(patchAdminEndpoint).toHaveBeenCalledWith(
 					"admintoken",
-					"endpoint-managed-vless",
+					fixtureCatalog.endpointId.fixture172(),
 					{
-						port: 53844,
-						canary_upstream: {
-							url: "https://127.0.0.1:39043",
-							mode: "auto",
-						},
-						accepted_authorities: ["hinet-ep.707979.xyz:53844"],
+						port: fixtureCatalog.endpoint.port53844(),
+						canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
+						accepted_authorities: fixtureCatalog.authority.host126Port53844(),
 					},
 				);
 			});
@@ -408,16 +382,12 @@ describe("EndpointDetailsPage", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-1",
-					node_name: "tokyo-1",
-					access_host: "",
-					api_base_url: "not-a-url",
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					node_name: fixtureCatalog.nodeName.fixture33(),
+					access_host: fixtureCatalog.string.none(),
+					api_base_url: fixtureCatalog.service.fixture123(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetNode(),
 				},
 			],
 		});

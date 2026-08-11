@@ -1,0 +1,11 @@
+id: fixture-policy-typescript-operation-assignment-source
+valid:
+  - |
+    endpoint.port = fixtureCatalog.endpoint.port443();
+  - |
+    quota.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
+invalid:
+  - |
+    endpoint.port = 8443;
+  - |
+    quota.quota_reset = payload.quota_reset;

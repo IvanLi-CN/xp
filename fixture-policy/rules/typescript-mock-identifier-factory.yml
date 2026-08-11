@@ -1,0 +1,84 @@
+id: fixture-policy-typescript-mock-identifier-factory
+language: TypeScript
+severity: error
+message: Mock identifier factories must be created directly from fixtureCatalog.
+note: Do not replace per-mock synthetic identifier factories with arbitrary callbacks.
+files:
+  - web/.storybook/mocks/apiMock.ts
+rule:
+  any:
+    - all:
+        - kind: variable_declarator
+        - has:
+            field: name
+            pattern: nextEndpointId
+        - has:
+            field: value
+            not:
+              pattern: fixtureCatalog.identifier.createEndpointIdFactory()
+    - all:
+        - kind: variable_declarator
+        - has:
+            field: name
+            pattern: nextEndpointTag
+        - has:
+            field: value
+            not:
+              pattern: fixtureCatalog.identifier.createEndpointTagFactory()
+    - all:
+        - kind: variable_declarator
+        - has:
+            field: name
+            pattern: nextUserId
+        - has:
+            field: value
+            not:
+              pattern: fixtureCatalog.identifier.createUserIdFactory()
+    - all:
+        - kind: object
+        - has:
+            all:
+              - kind: pair
+              - has:
+                  field: key
+                  regex: '^nextEndpointId$'
+              - has:
+                  field: value
+                  not:
+                    pattern: nextEndpointId
+    - all:
+        - kind: object
+        - has:
+            all:
+              - kind: pair
+              - has:
+                  field: key
+                  regex: '^nextEndpointTag$'
+              - has:
+                  field: value
+                  not:
+                    pattern: nextEndpointTag
+    - all:
+        - kind: object
+        - has:
+            all:
+              - kind: pair
+              - has:
+                  field: key
+                  regex: '^nextSubscriptionToken$'
+              - has:
+                  field: value
+                  not:
+                    pattern: nextSubscriptionToken
+    - all:
+        - kind: object
+        - has:
+            all:
+              - kind: pair
+              - has:
+                  field: key
+                  regex: '^nextUserId$'
+              - has:
+                  field: value
+                  not:
+                    pattern: nextUserId

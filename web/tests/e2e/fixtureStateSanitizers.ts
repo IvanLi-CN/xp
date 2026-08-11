@@ -1,0 +1,341 @@
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+
+export type QuotaResetSource = "user" | "node";
+
+export type UserQuotaReset =
+	| { policy: "unlimited"; tz_offset_minutes: number }
+	| {
+			policy: "monthly";
+			day_of_month: number;
+			tz_offset_minutes: number;
+	  };
+
+export type NodeQuotaReset =
+	| { policy: "unlimited"; tz_offset_minutes?: number | null }
+	| {
+			policy: "monthly";
+			day_of_month: number;
+			tz_offset_minutes?: number | null;
+	  };
+
+export type AdminUser = {
+	user_id: string;
+	display_name: string;
+	subscription_token: string;
+	credential_epoch: number;
+	priority_tier: "p1" | "p2" | "p3";
+	quota_reset: UserQuotaReset;
+};
+
+export type AdminNode = {
+	node_id: string;
+	node_name: string;
+	api_base_url: string;
+	access_host: string;
+	quota_limit_bytes: number;
+	quota_reset: NodeQuotaReset;
+};
+
+export type AdminEndpoint = {
+	endpoint_id: string;
+	node_id: string;
+	tag: string;
+	kind: "vless_reality_vision_tcp" | "ss2022_2022_blake3_aes_128_gcm";
+	port: number;
+	meta: Record<string, unknown>;
+};
+
+export type AdminUserNodeQuota = {
+	user_id: string;
+	node_id: string;
+	quota_limit_bytes: number;
+	quota_reset_source: QuotaResetSource;
+};
+
+export function applyFixtureUserPatch(
+	user: AdminUser,
+	payload: Record<string, unknown>,
+): boolean {
+	const updated = { ...user };
+	if (typeof payload.display_name === "string") {
+		updated.display_name = payload.display_name;
+	}
+	if (payload.priority_tier === fixtureCatalog.user.priorityTierPrimary()) {
+		updated.priority_tier = fixtureCatalog.user.priorityTierPrimary();
+	} else if (
+		payload.priority_tier === fixtureCatalog.user.priorityTierCreated()
+	) {
+		updated.priority_tier = fixtureCatalog.user.priorityTierCreated();
+	} else if (
+		payload.priority_tier === fixtureCatalog.user.priorityTierDefault()
+	) {
+		updated.priority_tier = fixtureCatalog.user.priorityTierDefault();
+	} else if (payload.priority_tier !== undefined) {
+		return false;
+	}
+	if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.reset(),
+		)
+	) {
+		updated.quota_reset = fixtureCatalog.quota.reset() as UserQuotaReset;
+	} else if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.resetUserMidMonth(),
+		)
+	) {
+		updated.quota_reset =
+			fixtureCatalog.quota.resetUserMidMonth() as UserQuotaReset;
+	} else if (
+		matchesFixtureUserQuotaReset(
+			payload.quota_reset,
+			fixtureCatalog.quota.resetUserUnlimited(),
+		)
+	) {
+		updated.quota_reset =
+			fixtureCatalog.quota.resetUserUnlimited() as UserQuotaReset;
+	} else if (payload.quota_reset !== undefined) {
+		return false;
+	}
+	Object.assign(user, updated);
+	return true;
+}
+
+function matchesFixtureUserQuotaReset(
+	value: unknown,
+	expected: UserQuotaReset,
+): boolean {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	return (
+		candidate.policy === expected.policy &&
+		candidate.tz_offset_minutes === expected.tz_offset_minutes &&
+		(expected.policy === "unlimited" ||
+			candidate.day_of_month === expected.day_of_month)
+	);
+}
+
+export function normalizeFixtureNode(
+	node: AdminNode,
+	index: number,
+): AdminNode {
+	const normalized: AdminNode = {
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		node_name: fixtureCatalog.nodeName.fixture86(),
+		api_base_url: fixtureCatalog.service.fixture87(),
+		access_host: fixtureCatalog.host.fixture88(),
+		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+		quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
+	};
+	if (node.node_id === fixtureCatalog.identifier.nodePrimary()) {
+		normalized.node_id = fixtureCatalog.identifier.nodePrimary();
+		normalized.node_name = fixtureCatalog.identifier.nodePrimary();
+		normalized.api_base_url = fixtureCatalog.url.primaryApi();
+		normalized.access_host = fixtureCatalog.host.primary();
+	} else if (node.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+		normalized.node_name = fixtureCatalog.identifier.nodeSecondary();
+		normalized.api_base_url = fixtureCatalog.url.secondaryApi();
+		normalized.access_host = fixtureCatalog.host.secondary();
+	} else if (index > 0) {
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+		normalized.node_name = fixtureCatalog.nodeName.fixture37();
+		normalized.api_base_url = fixtureCatalog.service.fixture38();
+		normalized.access_host = fixtureCatalog.host.fixture39();
+	}
+	return normalized;
+}
+
+export function normalizeFixtureEndpoint(
+	endpoint: AdminEndpoint,
+	index: number,
+): AdminEndpoint {
+	const isShadowsocks = endpoint.kind === fixtureCatalog.endpoint.ssKind();
+	const normalized: AdminEndpoint = {
+		endpoint_id: fixtureCatalog.endpointId.fixture40(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
+		tag: fixtureCatalog.endpointTag.fixture89(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
+		meta: {
+			reality: fixtureCatalog.endpoint.reality(),
+			reality_keys: fixtureCatalog.endpoint.realityKeys(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			managed_default: true,
+		},
+	};
+	if (endpoint.endpoint_id === fixtureCatalog.identifier.endpointPrimary()) {
+		normalized.endpoint_id = fixtureCatalog.identifier.endpointPrimary();
+		normalized.node_id = fixtureCatalog.identifier.nodePrimary();
+		normalized.tag = fixtureCatalog.identifier.endpointTagPrimary();
+		normalized.meta = {
+			reality: fixtureCatalog.endpoint.realityAlternate(),
+			reality_keys: fixtureCatalog.endpoint.realityKeys(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			managed_default: true,
+		};
+	} else if (
+		endpoint.endpoint_id === fixtureCatalog.identifier.endpointSecondary()
+	) {
+		normalized.endpoint_id = fixtureCatalog.identifier.endpointSecondary();
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+		normalized.tag = fixtureCatalog.identifier.endpointTagSecondary();
+		normalized.port = fixtureCatalog.endpoint.port53844();
+		normalized.meta = {
+			reality: fixtureCatalog.endpoint.realitySecondary(),
+			reality_keys: fixtureCatalog.endpoint.realityKeys(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			managed_default: true,
+		};
+	} else if (index > 0) {
+		normalized.endpoint_id = fixtureCatalog.endpointId.fixture43();
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+		normalized.tag = fixtureCatalog.endpointTag.fixture44();
+	}
+	if (isShadowsocks) {
+		normalized.kind = fixtureCatalog.endpoint.ssKind();
+		normalized.port = fixtureCatalog.endpoint.port8443();
+		normalized.meta = {
+			server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
+		};
+	} else if (endpoint.port === fixtureCatalog.endpoint.port443()) {
+		normalized.port = fixtureCatalog.endpoint.port443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port444()) {
+		normalized.port = fixtureCatalog.endpoint.port444();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port445()) {
+		normalized.port = fixtureCatalog.endpoint.port445();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port8443()) {
+		normalized.port = fixtureCatalog.endpoint.port8443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port8388()) {
+		normalized.port = fixtureCatalog.endpoint.port8388();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port9443()) {
+		normalized.port = fixtureCatalog.endpoint.port9443();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53842()) {
+		normalized.port = fixtureCatalog.endpoint.port53842();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53843()) {
+		normalized.port = fixtureCatalog.endpoint.port53843();
+	} else if (endpoint.port === fixtureCatalog.endpoint.port53844()) {
+		normalized.port = fixtureCatalog.endpoint.port53844();
+	}
+	return normalized;
+}
+
+export function normalizeFixtureUser(
+	user: AdminUser,
+	index: number,
+): AdminUser {
+	const normalized: AdminUser = {
+		user_id: fixtureCatalog.identifier.userPrimary(),
+		display_name: user.display_name,
+		subscription_token: fixtureCatalog.identifier.tokenPrimary(),
+		credential_epoch: fixtureCatalog.user.credentialEpoch(),
+		priority_tier: fixtureCatalog.user.priorityTierDefault(),
+		quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
+	};
+	if (index === 1) {
+		normalized.user_id = fixtureCatalog.identifier.userSecondary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenSecondary();
+	} else if (index === 2) {
+		normalized.user_id = fixtureCatalog.identifier.userTertiary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenTertiary();
+	} else if (index === 3) {
+		normalized.user_id = fixtureCatalog.identifier.userQuaternary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenQuaternary();
+	} else if (index === 4) {
+		normalized.user_id = fixtureCatalog.identifier.userQuinary();
+		normalized.subscription_token = fixtureCatalog.identifier.tokenQuinary();
+	} else if (index > 4) {
+		throw new Error("synthetic user catalog exhausted");
+	}
+	return normalized;
+}
+
+export function normalizeFixtureQuota(
+	quota: AdminUserNodeQuota,
+): AdminUserNodeQuota {
+	const normalized: AdminUserNodeQuota = {
+		user_id: fixtureCatalog.identifier.userPrimary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
+		quota_reset_source: fixtureCatalog.quota.resetSource(),
+	};
+	if (quota.user_id === fixtureCatalog.identifier.userSecondary()) {
+		normalized.user_id = fixtureCatalog.identifier.userSecondary();
+	}
+	if (quota.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+		normalized.node_id = fixtureCatalog.identifier.nodeSecondary();
+	} else if (quota.node_id === fixtureCatalog.nodeId.fixture36()) {
+		normalized.node_id = fixtureCatalog.nodeId.fixture36();
+	} else if (quota.node_id === fixtureCatalog.nodeId.fixture63()) {
+		normalized.node_id = fixtureCatalog.nodeId.fixture63();
+	}
+	if (quota.quota_limit_bytes === fixtureCatalog.quota.fiveGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.fiveGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.tenGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.tenGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.oneGiB()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.oneGiB();
+	} else if (quota.quota_limit_bytes === fixtureCatalog.quota.usedBytes()) {
+		normalized.quota_limit_bytes = fixtureCatalog.quota.usedBytes();
+	}
+	if (quota.quota_reset_source === fixtureCatalog.quota.resetSourceNode()) {
+		normalized.quota_reset_source = fixtureCatalog.quota.resetSourceNode();
+	}
+	return normalized;
+}
+
+export function normalizeFixtureQuotaLimit(value: unknown): number | undefined {
+	if (value === fixtureCatalog.quota.usedBytes()) {
+		return fixtureCatalog.quota.usedBytes();
+	}
+	if (value === fixtureCatalog.quota.limitBytes()) {
+		return fixtureCatalog.quota.limitBytes();
+	}
+	if (value === fixtureCatalog.quota.oneGiB()) {
+		return fixtureCatalog.quota.oneGiB();
+	}
+	if (value === fixtureCatalog.quota.fiveGiB()) {
+		return fixtureCatalog.quota.fiveGiB();
+	}
+	if (value === fixtureCatalog.quota.tenGiB()) {
+		return fixtureCatalog.quota.tenGiB();
+	}
+	return undefined;
+}
+
+export function hasFixtureNodeQuotaReset(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const reset = fixtureCatalog.quota.reset();
+	const candidate = value as Record<string, unknown>;
+	return (
+		candidate.policy === reset.policy &&
+		candidate.day_of_month === reset.day_of_month &&
+		candidate.tz_offset_minutes === reset.tz_offset_minutes
+	);
+}
+
+export function buildFixtureUserAccessItem(
+	userId: string,
+	endpoint: AdminEndpoint,
+) {
+	return {
+		user_id: userId,
+		endpoint_id: endpoint.endpoint_id,
+		node_id: endpoint.node_id,
+	};
+}
+
+export function buildFixtureUserNodeWeightItem(
+	node: AdminNode,
+	weight: number,
+) {
+	return {
+		node_id: node.node_id,
+		weight,
+	};
+}

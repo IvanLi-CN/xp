@@ -1,0 +1,57 @@
+id: fixture-policy-typescript-mock-operational-data
+language: TypeScript
+severity: error
+message: Mock operational data must be a direct fixtureCatalog accessor call.
+note: Do not derive endpoints, credentials, IDs, quotas, or telemetry from literals or requests.
+files:
+  - web/.storybook/mocks/apiMock.ts
+  - web/.storybook/mocks/fixtureStateSanitizers.ts
+  - web/.storybook/mocks/staticFixtureMappings.ts
+  - web/tests/e2e/adminEndpointRouteMocks.ts
+  - web/tests/e2e/fixtureStateSanitizers.ts
+  - web/tests/e2e/helpers.ts
+rule:
+  all:
+    - kind: pair
+    - has:
+        field: key
+        any:
+          - regex: '^(port|public_domain|server_name|domain_id)$'
+          - regex: '^(short_ids|active_short_id|membership_key)$'
+          - regex: '^(method|fingerprint|vless_https_canary_bind)$'
+          - regex: '^(ip_geo_origin|admin_token_masked|lane_key)$'
+    - has:
+        field: value
+        not:
+          any:
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: state.nextEndpointId()
+            - pattern: state.nextEndpointTag()
+            - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextUserId()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()
+            - pattern: >-
+                $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
+                $OTHER_CONDITION ? fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR() :
+                fixtureCatalog.$THIRD_GROUP.$THIRD_ACCESSOR()
+            - pattern: 'null'
+            - all:
+                - pattern: seed.$FIELD
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: ensureEndpointRecord
+            - all:
+                - pattern: endpoint.port
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: buildNodeDeletePreviewEndpoint

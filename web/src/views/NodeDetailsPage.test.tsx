@@ -7,6 +7,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminNodeIpUsage } from "../api/adminIpUsage";
 import { fetchAdminNodeHistory } from "../api/adminNodeHistory";
@@ -31,7 +32,7 @@ const { mockNavigate, mockReadAdminToken, mockRouteParams } = vi.hoisted(
 	() => ({
 		mockNavigate: vi.fn(),
 		mockReadAdminToken: vi.fn(() => "admintoken"),
-		mockRouteParams: { nodeId: "node-tokyo" },
+		mockRouteParams: {} as { nodeId: string },
 	}),
 );
 
@@ -116,27 +117,23 @@ function setupMocks(args?: {
 	};
 }) {
 	const node = {
-		node_id: "node-tokyo",
-		node_name: "Tokyo",
-		api_base_url: "https://tokyo.example.com",
-		access_host: "tokyo.example.com",
-		quota_limit_bytes: 0,
-		quota_reset: {
-			policy: "monthly" as const,
-			day_of_month: 1,
-			tz_offset_minutes: null,
-		},
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		node_name: fixtureCatalog.nodeName.fixture135(),
+		api_base_url: fixtureCatalog.service.fixture136(),
+		access_host: fixtureCatalog.host.fixture137(),
+		quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+		quota_reset: fixtureCatalog.quota.resetNode(),
 		egress_probe: {
-			public_ipv4: "203.0.113.8",
+			public_ipv4: fixtureCatalog.address.documentation192_0_2_117(),
 			public_ipv6: "2001:db8::8",
-			selected_public_ip: "203.0.113.8",
+			selected_public_ip: fixtureCatalog.address.documentation192_0_2_117(),
 			country_code: "TW",
 			geo_region: "Taiwan",
 			geo_city: "Taipei",
 			geo_operator: "ExampleNet",
 			subscription_region: "taiwan" as const,
-			checked_at: "2026-03-08T00:59:00Z",
-			last_success_at: "2026-03-08T00:59:00Z",
+			checked_at: fixtureCatalog.timestamp.t20260308T005900(),
+			last_success_at: fixtureCatalog.timestamp.t20260308T005900(),
 			stale: false,
 			error_summary: null,
 		},
@@ -146,12 +143,12 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminNode).mockResolvedValue(node);
 	vi.mocked(patchAdminNode).mockResolvedValue(node);
 	vi.mocked(refreshAdminNodeEgressProbe).mockResolvedValue({
-		node_id: node.node_id,
+		node_id: fixtureCatalog.nodeId.fixture17(),
 		accepted: true,
 		egress_probe: refreshEgressProbe,
 	});
 	vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValue({
-		node_id: node.node_id,
+		node_id: fixtureCatalog.nodeId.fixture17(),
 		endpoints: [],
 	});
 	vi.mocked(deleteAdminNode).mockResolvedValue(undefined);
@@ -159,13 +156,13 @@ function setupMocks(args?: {
 		node,
 		summary: {
 			status: "up",
-			updated_at: "2026-03-08T00:59:00Z",
+			updated_at: fixtureCatalog.timestamp.t20260308T005900(),
 		},
 		components: [
 			{
 				component: "xp",
 				status: "up",
-				last_ok_at: "2026-03-08T00:59:00Z",
+				last_ok_at: fixtureCatalog.timestamp.t20260308T005900(),
 				last_fail_at: null,
 				down_since: null,
 				consecutive_failures: 0,
@@ -177,14 +174,14 @@ function setupMocks(args?: {
 		],
 		recent_slots: [
 			{
-				slot_start: "2026-03-08T00:30:00Z",
+				slot_start: fixtureCatalog.timestamp.t20260308T003000(),
 				status: "up",
 			},
 		],
 		events: [
 			{
 				event_id: "evt-1",
-				occurred_at: "2026-03-08T00:59:00Z",
+				occurred_at: fixtureCatalog.timestamp.t20260308T005900(),
 				component: "xp",
 				kind: "status_changed",
 				message: "xp is healthy",
@@ -196,15 +193,15 @@ function setupMocks(args?: {
 	vi.mocked(fetchAdminNodeHistory).mockResolvedValue({
 		node,
 		history: {
-			node_id: node.node_id,
-			last_synced_at: "2026-03-08T00:59:00Z",
+			node_id: fixtureCatalog.nodeId.fixture17(),
+			last_synced_at: fixtureCatalog.timestamp.t20260308T005900(),
 			last_sync_error: null,
 			daily_traffic: [
 				{
 					date: "2026-03-08",
-					uplink_bytes: 1048576,
-					downlink_bytes: 2097152,
-					updated_at: "2026-03-08T00:59:00Z",
+					uplink_bytes: fixtureCatalog.number.value3(),
+					downlink_bytes: fixtureCatalog.number.value4(),
+					updated_at: fixtureCatalog.timestamp.t20260308T005900(),
 				},
 			],
 			daily_component_status: [
@@ -214,7 +211,7 @@ function setupMocks(args?: {
 						{
 							component: "xray",
 							status: "down",
-							observed_at: "2026-03-08T00:59:00Z",
+							observed_at: fixtureCatalog.timestamp.t20260308T005900(),
 						},
 					],
 				},
@@ -222,7 +219,7 @@ function setupMocks(args?: {
 			component_status_events: [
 				{
 					event_id: "history-evt-1",
-					occurred_at: "2026-03-08T00:55:00Z",
+					occurred_at: fixtureCatalog.timestamp.t20260308T005500(),
 					component: "xray",
 					message: "xray status changed: up -> down",
 					from_status: "up",
@@ -240,37 +237,42 @@ function setupMocks(args?: {
 				node,
 				window,
 				geo_source: "country_is",
-				window_start:
-					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
-				window_end: "2026-03-08T00:59:00Z",
+				window_start: fixtureCatalog.timestamp.t20260307T010000(),
+				window_end: fixtureCatalog.timestamp.t20260308T005900(),
 				warnings: [],
 				unique_ip_series: [
-					{ minute: "2026-03-08T00:58:00Z", count: window === "24h" ? 1 : 3 },
-					{ minute: "2026-03-08T00:59:00Z", count: window === "24h" ? 2 : 4 },
+					{
+						minute: fixtureCatalog.timestamp.t20260308T005800(),
+						count: window === "24h" ? 1 : 3,
+					},
+					{
+						minute: fixtureCatalog.timestamp.t20260308T005900(),
+						count: window === "24h" ? 2 : 4,
+					},
 				],
 				timeline: [
 					{
 						lane_key: "tokyo-vless::203.0.113.7",
-						endpoint_id: "ep-vless",
-						endpoint_tag: "tokyo-vless",
-						ip: "203.0.113.7",
+						endpoint_id: fixtureCatalog.endpointId.fixture138(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture139(),
+						ip: fixtureCatalog.address.documentation192_0_2_30(),
 						minutes: window === "24h" ? 2 : 12,
 						segments: [
 							{
-								start_minute: "2026-03-08T00:58:00Z",
-								end_minute: "2026-03-08T00:59:00Z",
+								start_minute: fixtureCatalog.timestamp.t20260308T005800(),
+								end_minute: fixtureCatalog.timestamp.t20260308T005900(),
 							},
 						],
 					},
 				],
 				ips: [
 					{
-						ip: "203.0.113.7",
+						ip: fixtureCatalog.address.documentation192_0_2_30(),
 						minutes: window === "24h" ? 2 : 12,
-						endpoint_tags: ["tokyo-vless"],
+						endpoint_tags: [fixtureCatalog.endpointTag.fixture139()],
 						region: "Japan / Tokyo",
 						operator: "ExampleNet",
-						last_seen_at: "2026-03-08T00:59:00Z",
+						last_seen_at: fixtureCatalog.timestamp.t20260308T005900(),
 					},
 				],
 			},
@@ -280,49 +282,48 @@ function setupMocks(args?: {
 			args?.nodeTcpConnections ?? {
 				node,
 				window,
-				window_start:
-					window === "24h" ? "2026-03-07T01:00:00Z" : "2026-03-01T01:00:00Z",
-				window_end: "2026-03-08T00:59:00Z",
+				window_start: fixtureCatalog.timestamp.t20260307T010000(),
+				window_end: fixtureCatalog.timestamp.t20260308T005900(),
 				warnings: [],
 				endpoints: [
 					{
-						endpoint_id: "ep-vless",
-						endpoint_tag: "tokyo-vless",
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture138(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture139(),
+						port: fixtureCatalog.endpoint.port443(),
 					},
 					{
-						endpoint_id: "ep-ss",
-						endpoint_tag: "tokyo-ss",
-						port: 8388,
+						endpoint_id: fixtureCatalog.endpointId.fixture140(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture141(),
+						port: fixtureCatalog.endpoint.port8388(),
 					},
 				],
 				per_endpoint_series: [
 					{
-						endpoint_id: "ep-vless",
-						endpoint_tag: "tokyo-vless",
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture138(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture139(),
+						port: fixtureCatalog.endpoint.port443(),
 						series: [
 							{
-								minute: "2026-03-08T00:58:00Z",
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
 								count: window === "24h" ? 2 : 6,
 							},
 							{
-								minute: "2026-03-08T00:59:00Z",
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
 								count: window === "24h" ? 3 : 8,
 							},
 						],
 					},
 					{
-						endpoint_id: "ep-ss",
-						endpoint_tag: "tokyo-ss",
-						port: 8388,
+						endpoint_id: fixtureCatalog.endpointId.fixture140(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture141(),
+						port: fixtureCatalog.endpoint.port8388(),
 						series: [
 							{
-								minute: "2026-03-08T00:58:00Z",
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
 								count: window === "24h" ? 1 : 4,
 							},
 							{
-								minute: "2026-03-08T00:59:00Z",
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
 								count: window === "24h" ? 2 : 5,
 							},
 						],
@@ -337,7 +338,7 @@ describe("<NodeDetailsPage />", () => {
 		vi.resetAllMocks();
 		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
-		mockRouteParams.nodeId = "node-tokyo";
+		mockRouteParams.nodeId = fixtureCatalog.nodeId.fixture134();
 	});
 
 	afterEach(() => {
@@ -358,14 +359,17 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"24h",
 				expect.any(AbortSignal),
 			);
 		});
 
 		await waitFor(() => {
-			expect(screen.getAllByText("203.0.113.7").length).toBeGreaterThan(0);
+			expect(
+				screen.getAllByText(fixtureCatalog.address.documentation192_0_2_30())
+					.length,
+			).toBeGreaterThan(0);
 		});
 		expect(await screenByText("IP occupancy lanes")).toBeTruthy();
 
@@ -373,7 +377,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -393,21 +397,25 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeTcpConnections).toHaveBeenCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"24h",
 				expect.any(AbortSignal),
 			);
 		});
 
 		expect(await screenByText("TCP connection count")).toBeTruthy();
-		expect(await screenByText("tokyo-vless :443")).toBeTruthy();
-		expect(await screenByText("tokyo-ss :8388")).toBeTruthy();
+		expect(
+			await screenByText(`${fixtureCatalog.endpointTag.fixture139()} :443`),
+		).toBeTruthy();
+		expect(
+			await screenByText(`${fixtureCatalog.endpointTag.fixture141()} :8388`),
+		).toBeTruthy();
 
 		fireEvent.click(await screenByRole("button", "7d"));
 		await waitFor(() => {
 			expect(fetchAdminNodeTcpConnections).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -422,7 +430,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"24h",
 				expect.any(AbortSignal),
 			);
@@ -431,13 +439,13 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 				"7d",
 				expect.any(AbortSignal),
 			);
 		});
 
-		mockRouteParams.nodeId = "node-osaka";
+		mockRouteParams.nodeId = fixtureCatalog.nodeId.fixture145();
 		page.rerenderPage();
 
 		expect(await screenByRole("tab", "IP usage")).toHaveAttribute(
@@ -447,7 +455,7 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminNodeIpUsage).toHaveBeenLastCalledWith(
 				"admintoken",
-				"node-osaka",
+				fixtureCatalog.nodeId.fixture145(),
 				"7d",
 				expect.any(AbortSignal),
 			);
@@ -491,11 +499,13 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Save changes"));
 
 		await waitFor(() => {
-			expect(patchAdminNode).toHaveBeenCalledWith("admintoken", "node-tokyo", {
-				quota_reset: {
-					policy: "unlimited",
+			expect(patchAdminNode).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+				{
+					quota_reset: fixtureCatalog.quota.resetUnlimitedRequest(),
 				},
-			});
+			);
 		});
 		expect(
 			screen.queryByText("Reset day must be an integer between 1 and 31."),
@@ -505,16 +515,16 @@ describe("<NodeDetailsPage />", () => {
 	it("shows node egress probe details and refreshes on demand", async () => {
 		setupMocks({
 			refreshEgressProbe: {
-				public_ipv4: "198.51.100.9",
+				public_ipv4: fixtureCatalog.address.documentation192_0_2_143(),
 				public_ipv6: "2001:db8::9",
-				selected_public_ip: "198.51.100.9",
+				selected_public_ip: fixtureCatalog.address.documentation192_0_2_143(),
 				country_code: "US",
 				geo_region: "California",
 				geo_city: "San Jose",
 				geo_operator: "Example Transit",
 				subscription_region: "us",
-				checked_at: "2026-03-08T01:05:00Z",
-				last_success_at: "2026-03-08T01:05:00Z",
+				checked_at: fixtureCatalog.timestamp.t20260308T010500(),
+				last_success_at: fixtureCatalog.timestamp.t20260308T010500(),
 				stale: false,
 				error_summary: null,
 			},
@@ -524,7 +534,10 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("tab", "Node metadata"));
 		expect(await screenByText("Node egress probe")).toBeTruthy();
 		await waitFor(() => {
-			expect(screen.getAllByText("203.0.113.8").length).toBeGreaterThan(0);
+			expect(
+				screen.getAllByText(fixtureCatalog.address.documentation192_0_2_117())
+					.length,
+			).toBeGreaterThan(0);
 		});
 		expect(await screenByText("ExampleNet")).toBeTruthy();
 		await waitFor(() => {
@@ -535,11 +548,14 @@ describe("<NodeDetailsPage />", () => {
 		await waitFor(() => {
 			expect(refreshAdminNodeEgressProbe).toHaveBeenCalledWith(
 				"admintoken",
-				"node-tokyo",
+				fixtureCatalog.nodeId.fixture134(),
 			);
 		});
 		await waitFor(() => {
-			expect(screen.getAllByText("198.51.100.9").length).toBeGreaterThan(0);
+			expect(
+				screen.getAllByText(fixtureCatalog.address.documentation192_0_2_143())
+					.length,
+			).toBeGreaterThan(0);
 		});
 		expect(await screenByText("Example Transit")).toBeTruthy();
 		await waitFor(() => {
@@ -551,13 +567,13 @@ describe("<NodeDetailsPage />", () => {
 	it("previews endpoint cleanup before deleting a node", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValueOnce({
-			node_id: "node-tokyo",
+			node_id: fixtureCatalog.nodeId.fixture134(),
 			endpoints: [
 				{
-					endpoint_id: "endpoint-ss",
-					tag: "tokyo-ss",
-					kind: "ss2022_2022_blake3_aes_128_gcm",
-					port: 8388,
+					endpoint_id: fixtureCatalog.endpointId.fixture144(),
+					tag: fixtureCatalog.endpointTag.fixture141(),
+					kind: fixtureCatalog.endpoint.ssKind(),
+					port: fixtureCatalog.endpoint.port8388(),
 				},
 			],
 		});
@@ -567,13 +583,15 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Delete node"));
 
 		expect(await screenByText("Endpoints to delete: 1")).toBeTruthy();
-		expect(await screenByText("tokyo-ss")).toBeTruthy();
+		expect(
+			await screenByText(fixtureCatalog.endpointTag.fixture141()),
+		).toBeTruthy();
 		expect(await screenByText("SS2022")).toBeTruthy();
 		fireEvent.click(await screenByRole("button", "Cancel"));
 
 		expect(fetchAdminNodeDeletePreview).toHaveBeenCalledWith(
 			"admintoken",
-			"node-tokyo",
+			fixtureCatalog.nodeId.fixture134(),
 		);
 		expect(deleteAdminNode).not.toHaveBeenCalled();
 	});
@@ -581,22 +599,27 @@ describe("<NodeDetailsPage />", () => {
 	it("deletes node with endpoint cleanup after confirmation", async () => {
 		setupMocks();
 		vi.mocked(fetchAdminNodeDeletePreview).mockResolvedValueOnce({
-			node_id: "node-tokyo",
+			node_id: fixtureCatalog.nodeId.fixture134(),
 			endpoints: [
 				{
-					endpoint_id: "endpoint-ss",
-					tag: "tokyo-ss",
-					kind: "ss2022_2022_blake3_aes_128_gcm",
-					port: 8388,
+					endpoint_id: fixtureCatalog.endpointId.fixture144(),
+					tag: fixtureCatalog.endpointTag.fixture141(),
+					kind: fixtureCatalog.endpoint.ssKind(),
+					port: fixtureCatalog.endpoint.port8388(),
 				},
 			],
 		});
 		const { queryClient } = renderPage();
 		queryClient.setQueryData(["adminNodes", "admintoken"], {
-			items: [{ node_id: "node-tokyo" }],
+			items: [{ node_id: fixtureCatalog.nodeId.fixture134() }],
 		});
 		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
-			items: [{ endpoint_id: "endpoint-ss", node_id: "node-tokyo" }],
+			items: [
+				{
+					endpoint_id: fixtureCatalog.endpointId.fixture144(),
+					node_id: fixtureCatalog.nodeId.fixture134(),
+				},
+			],
 		});
 
 		fireEvent.click(await screenByRole("tab", "Danger zone"));
@@ -604,10 +627,14 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("button", "Delete node and endpoints"));
 
 		await waitFor(() => {
-			expect(deleteAdminNode).toHaveBeenCalledWith("admintoken", "node-tokyo", {
-				deleteEndpoints: true,
-				expectedEndpointIds: ["endpoint-ss"],
-			});
+			expect(deleteAdminNode).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+				{
+					deleteEndpoints: true,
+					expectedEndpointIds: [fixtureCatalog.endpointId.fixture144()],
+				},
+			);
 		});
 		expect(
 			queryClient.getQueryData<{ items: Array<{ node_id: string }> }>([
@@ -628,21 +655,17 @@ describe("<NodeDetailsPage />", () => {
 		setupMocks({
 			nodeIpUsage: {
 				node: {
-					node_id: "node-tokyo",
-					node_name: "Tokyo",
-					api_base_url: "https://tokyo.example.com",
-					access_host: "tokyo.example.com",
-					quota_limit_bytes: 0,
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 1,
-						tz_offset_minutes: null,
-					},
+					node_id: fixtureCatalog.nodeId.fixture134(),
+					node_name: fixtureCatalog.nodeName.fixture135(),
+					api_base_url: fixtureCatalog.service.fixture136(),
+					access_host: fixtureCatalog.host.fixture137(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetNode(),
 				},
 				window: "24h",
 				geo_source: "country_is",
-				window_start: "2026-03-07T01:00:00Z",
-				window_end: "2026-03-08T00:59:00Z",
+				window_start: fixtureCatalog.timestamp.t20260307T010000(),
+				window_end: fixtureCatalog.timestamp.t20260308T005900(),
 				warnings: [
 					{
 						code: "online_stats_unavailable",

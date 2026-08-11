@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
 import { fetchClusterInfo } from "../api/clusterInfo";
@@ -40,20 +41,20 @@ function renderPage() {
 function setupMocks() {
 	vi.mocked(fetchHealth).mockResolvedValue({ status: "ok" });
 	vi.mocked(fetchClusterInfo).mockResolvedValue({
-		cluster_id: "cluster-alpha",
-		node_id: "node-1",
+		cluster_id: fixtureCatalog.cluster.fixture53(),
+		node_id: fixtureCatalog.nodeId.fixture32(),
 		role: "leader",
-		leader_api_base_url: "https://node-1.example.com",
+		leader_api_base_url: fixtureCatalog.service.fixture178(),
 		term: 7,
 		xp_version: "0.2.0",
 	});
 	vi.mocked(fetchAdminConfig).mockResolvedValue({
-		bind: "127.0.0.1:62416",
-		xray_api_addr: "127.0.0.1:10085",
+		bind: fixtureCatalog.address.loopbackPort39058(),
+		xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 		data_dir: "./data",
-		node_name: "node-1",
-		access_host: "edge.example.com",
-		api_base_url: "https://api.example.com",
+		node_name: fixtureCatalog.nodeId.fixture32(),
+		access_host: fixtureCatalog.host.fixture266(),
+		api_base_url: fixtureCatalog.service.fixture267(),
 		vless_https_canary_bind: "127.0.0.1:39043",
 		quota_poll_interval_secs: 10,
 		quota_auto_unban: true,

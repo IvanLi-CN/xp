@@ -1,0 +1,66 @@
+id: fixture-policy-tsx-shorthand-data-source
+snapshots:
+  ? |
+    const bootstrapApiBaseUrl = "https://unapproved.fixture.test";
+    const fixture = { bootstrapApiBaseUrl };
+  : labels:
+    - source: bootstrapApiBaseUrl
+      style: primary
+      start: 81
+      end: 100
+  ? |
+    const config_hash = "unapproved-config";
+    const fixture = { config_hash };
+  : labels:
+    - source: config_hash
+      style: primary
+      start: 59
+      end: 70
+  ? |
+    const kind = payload.kind;
+    const fixture = { kind };
+  : labels:
+    - source: kind
+      style: primary
+      start: 45
+      end: 49
+  ? |
+    const last_synced_at = new Date().toISOString();
+    const fixture = { last_synced_at };
+  : labels:
+    - source: last_synced_at
+      style: primary
+      start: 67
+      end: 81
+  ? |
+    const latest_checked_at = "2026-03-11T11:00:00Z";
+    const fixture = { latest_checked_at };
+  : labels:
+    - source: latest_checked_at
+      style: primary
+      start: 68
+      end: 85
+  ? |
+    const tag = "unapproved";
+    const fixture = { tag };
+  : labels:
+    - source: tag
+      style: primary
+      start: 44
+      end: 47
+  ? |
+    const total_bytes = 4096;
+    const fixture = { total_bytes };
+  : labels:
+    - source: total_bytes
+      style: primary
+      start: 44
+      end: 55
+  ? |
+    const user_id = payload.user_id;
+    const fixture = { user_id };
+  : labels:
+    - source: user_id
+      style: primary
+      start: 51
+      end: 58

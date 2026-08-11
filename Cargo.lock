@@ -5737,8 +5737,17 @@ dependencies = [
  "wiremock",
  "x25519-dalek",
  "x509-parser",
+ "xp-test-fixtures",
  "yaml-edit",
  "zip",
+]
+
+[[package]]
+name = "xp-test-fixtures"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

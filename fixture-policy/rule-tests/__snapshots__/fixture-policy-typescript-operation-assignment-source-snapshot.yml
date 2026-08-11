@@ -1,0 +1,32 @@
+id: fixture-policy-typescript-operation-assignment-source
+snapshots:
+  ? |
+    endpoint.port = 8443;
+  : labels:
+    - source: endpoint.port = 8443
+      style: primary
+      start: 0
+      end: 20
+    - source: endpoint.port
+      style: secondary
+      start: 0
+      end: 13
+    - source: '8443'
+      style: secondary
+      start: 16
+      end: 20
+  ? |
+    quota.quota_reset = payload.quota_reset;
+  : labels:
+    - source: quota.quota_reset = payload.quota_reset
+      style: primary
+      start: 0
+      end: 39
+    - source: quota.quota_reset
+      style: secondary
+      start: 0
+      end: 17
+    - source: payload.quota_reset
+      style: secondary
+      start: 20
+      end: 39

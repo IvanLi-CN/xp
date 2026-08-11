@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import { fetchAdminEndpointProbeRunStatus } from "../api/adminEndpointProbes";
 import { fetchAdminEndpoints } from "../api/adminEndpoints";
@@ -39,7 +40,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 			);
 		},
 		useNavigate: () => vi.fn(),
-		useParams: () => ({ runId: "run-1" }),
+		useParams: () => ({
+			runId: fixtureCatalog.identifier.probeRunPrimary(),
+		}),
 	};
 });
 
@@ -85,53 +88,53 @@ describe("<EndpointProbeRunPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.mocked(fetchAdminEndpointProbeRunStatus).mockResolvedValue({
-			run_id: "run-1",
+			run_id: fixtureCatalog.identifier.probeRunPrimary(),
 			status: "finished",
-			hour: "2026-03-11T11:00:00Z",
-			config_hash: "cfg-hash",
+			hour: fixtureCatalog.timestamp.probeHour(),
+			config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 			nodes: [
 				{
-					node_id: "node-a",
+					node_id: fixtureCatalog.nodeId.fixture106(),
 					status: "finished",
 					progress: {
-						run_id: "run-1",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunPrimary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "finished",
 						endpoints_total: 1,
 						endpoints_done: 1,
-						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:10Z",
-						finished_at: "2026-03-11T11:00:10Z",
+						started_at: fixtureCatalog.timestamp.baseline(),
+						updated_at: fixtureCatalog.timestamp.t20260311T110010(),
+						finished_at: fixtureCatalog.timestamp.t20260311T110010(),
 					},
 				},
 				{
-					node_id: "node-b",
+					node_id: fixtureCatalog.nodeId.fixture110(),
 					status: "finished",
 					progress: {
-						run_id: "run-1",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunPrimary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "finished",
 						endpoints_total: 1,
 						endpoints_done: 1,
-						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:11Z",
-						finished_at: "2026-03-11T11:00:11Z",
+						started_at: fixtureCatalog.timestamp.baseline(),
+						updated_at: fixtureCatalog.timestamp.t20260311T110011(),
+						finished_at: fixtureCatalog.timestamp.t20260311T110011(),
 					},
 				},
 				{
-					node_id: "node-c",
+					node_id: fixtureCatalog.nodeId.fixture224(),
 					status: "busy",
 					current: {
-						run_id: "run-elsewhere",
-						hour: "2026-03-11T11:00:00Z",
-						config_hash: "cfg-hash",
+						run_id: fixtureCatalog.identifier.probeRunSecondary(),
+						hour: fixtureCatalog.timestamp.probeHour(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 						status: "running",
 						endpoints_total: 1,
 						endpoints_done: 0,
-						started_at: "2026-03-11T11:00:00Z",
-						updated_at: "2026-03-11T11:00:05Z",
+						started_at: fixtureCatalog.timestamp.baseline(),
+						updated_at: fixtureCatalog.timestamp.t20260311T110005(),
 					},
 				},
 			],
@@ -139,20 +142,20 @@ describe("<EndpointProbeRunPage />", () => {
 		vi.mocked(fetchAdminEndpoints).mockResolvedValue({
 			items: [
 				{
-					endpoint_id: "endpoint-1",
-					node_id: "node-a",
-					tag: "endpoint-1",
-					kind: "ss2022_2022_blake3_aes_128_gcm",
-					port: 443,
+					endpoint_id: fixtureCatalog.endpointId.fixture40(),
+					node_id: fixtureCatalog.nodeId.fixture106(),
+					tag: fixtureCatalog.endpointId.fixture40(),
+					kind: fixtureCatalog.endpoint.ssKind(),
+					port: fixtureCatalog.endpoint.port443(),
 					meta: {},
 					probe: {
-						latest_checked_at: "2026-03-11T11:00:11Z",
+						latest_checked_at: fixtureCatalog.timestamp.t20260311T110011(),
 						latest_latency_ms_p50: 120,
 						slots: [
 							{
-								hour: "2026-03-11T11:00:00Z",
+								hour: fixtureCatalog.timestamp.probeHour(),
 								status: "missing",
-								checked_at: "2026-03-11T11:00:11Z",
+								checked_at: fixtureCatalog.timestamp.t20260311T110011(),
 								latency_ms_p50: 120,
 							},
 						],
@@ -163,28 +166,28 @@ describe("<EndpointProbeRunPage />", () => {
 		vi.mocked(fetchAdminNodes).mockResolvedValue({
 			items: [
 				{
-					node_id: "node-a",
-					node_name: "Tokyo edge",
-					api_base_url: "https://tokyo.example.invalid",
-					access_host: "tokyo.example.invalid",
-					quota_limit_bytes: 0,
-					quota_reset: { policy: "unlimited" },
+					node_id: fixtureCatalog.nodeId.fixture106(),
+					node_name: fixtureCatalog.nodeName.fixture210(),
+					api_base_url: fixtureCatalog.service.fixture211(),
+					access_host: fixtureCatalog.host.fixture212(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetUnlimited(),
 				},
 				{
-					node_id: "node-b",
-					node_name: "Amsterdam edge",
-					api_base_url: "https://amsterdam.example.invalid",
-					access_host: "amsterdam.example.invalid",
-					quota_limit_bytes: 0,
-					quota_reset: { policy: "unlimited" },
+					node_id: fixtureCatalog.nodeId.fixture110(),
+					node_name: fixtureCatalog.nodeName.fixture207(),
+					api_base_url: fixtureCatalog.service.fixture208(),
+					access_host: fixtureCatalog.host.fixture209(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetUnlimited(),
 				},
 				{
-					node_id: "node-c",
-					node_name: "Singapore edge",
-					api_base_url: "https://singapore.example.invalid",
-					access_host: "singapore.example.invalid",
-					quota_limit_bytes: 0,
-					quota_reset: { policy: "unlimited" },
+					node_id: fixtureCatalog.nodeId.fixture224(),
+					node_name: fixtureCatalog.nodeName.fixture226(),
+					api_base_url: fixtureCatalog.service.fixture227(),
+					access_host: fixtureCatalog.host.fixture228(),
+					quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+					quota_reset: fixtureCatalog.quota.resetUnlimited(),
 				},
 			],
 		});
@@ -193,30 +196,30 @@ describe("<EndpointProbeRunPage />", () => {
 			onMessage?.({
 				event: "sample",
 				data: JSON.stringify({
-					node_id: "node-a",
-					run_id: "run-1",
-					hour: "2026-03-11T11:00:00Z",
+					node_id: fixtureCatalog.nodeId.fixture106(),
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
+					hour: fixtureCatalog.timestamp.probeHour(),
 					sample: {
-						endpoint_id: "endpoint-1",
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						ok: true,
-						checked_at: "2026-03-11T11:00:10Z",
-						latency_ms: 110,
-						config_hash: "cfg-hash",
+						checked_at: fixtureCatalog.timestamp.t20260311T110010(),
+						latency_ms: fixtureCatalog.number.value110(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 					},
 				}),
 			});
 			onMessage?.({
 				event: "sample",
 				data: JSON.stringify({
-					node_id: "node-b",
-					run_id: "run-1",
-					hour: "2026-03-11T11:00:00Z",
+					node_id: fixtureCatalog.nodeId.fixture110(),
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
+					hour: fixtureCatalog.timestamp.probeHour(),
 					sample: {
-						endpoint_id: "endpoint-1",
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						ok: true,
-						checked_at: "2026-03-11T11:00:11Z",
-						latency_ms: 120,
-						config_hash: "cfg-hash",
+						checked_at: fixtureCatalog.timestamp.t20260311T110011(),
+						latency_ms: fixtureCatalog.number.value120(),
+						config_hash: fixtureCatalog.identifier.probeConfigPrimary(),
 					},
 				}),
 			});
@@ -230,14 +233,15 @@ describe("<EndpointProbeRunPage />", () => {
 		await waitFor(() => {
 			expect(fetchAdminEndpointProbeRunStatus).toHaveBeenCalledWith(
 				"admintoken",
-				"run-1",
+				fixtureCatalog.identifier.probeRunPrimary(),
 				expect.any(AbortSignal),
 			);
 		});
 
-		expect((await screen.findAllByText("endpoint-1")).length).toBeGreaterThan(
-			0,
-		);
+		expect(
+			(await screen.findAllByText(fixtureCatalog.endpointId.fixture40()))
+				.length,
+		).toBeGreaterThan(0);
 		expect(await screen.findByText("Up")).toBeInTheDocument();
 		expect(screen.queryByText("Missing")).toBeNull();
 	});
@@ -249,14 +253,14 @@ describe("<EndpointProbeRunPage />", () => {
 			name: /Open node details:/i,
 		});
 		expect(links.map((link) => link.textContent)).toEqual([
-			"Amsterdam edge",
-			"Singapore edge",
-			"Tokyo edge",
+			fixtureCatalog.nodeName.fixture207(),
+			fixtureCatalog.nodeName.fixture210(),
+			fixtureCatalog.nodeName.fixture226(),
 		]);
 		expect(links.map((link) => link.getAttribute("href"))).toEqual([
-			"/nodes/node-b",
-			"/nodes/node-c",
-			"/nodes/node-a",
+			`/nodes/${fixtureCatalog.nodeId.fixture110()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture106()}`,
+			`/nodes/${fixtureCatalog.nodeId.fixture224()}`,
 		]);
 	});
 
@@ -266,7 +270,9 @@ describe("<EndpointProbeRunPage />", () => {
 		);
 		renderPage();
 
-		expect(await screen.findByText("node-a")).toBeInTheDocument();
+		expect(
+			await screen.findByText(fixtureCatalog.nodeId.fixture106()),
+		).toBeInTheDocument();
 		expect(screen.queryByText("Failed to load probe status")).toBeNull();
 	});
 });

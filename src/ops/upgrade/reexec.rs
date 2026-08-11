@@ -338,7 +338,10 @@ mod tests {
         std::fs::create_dir_all(&upgrade_dir).unwrap();
         let request = crate::upgrade_job::UpgradeRequest {
             target_tag: "v0.2.0".to_string(),
-            repo: None,
+            // Other integration tests can temporarily install a root-controlled
+            // repository in the process environment. This test exercises the
+            // status-write failure path, so keep its request valid in either state.
+            repo: std::env::var("XP_OPS_GITHUB_REPO").ok(),
             requested_at: "2026-08-08T00:00:00Z".to_string(),
         };
         std::fs::write(

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, userEvent, within } from "@storybook/test";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import type { AdminNodesRuntimeResponse } from "../api/adminNodeRuntime";
 import { BackendApiError } from "../api/backendError";
@@ -15,13 +16,13 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 	unreachable_nodes: [],
 	items: [
 		{
-			node_id: "01J000000000000000000000001",
-			node_name: "node-a",
-			api_base_url: "https://node-a.example.invalid",
-			access_host: "node-a.example.invalid",
+			node_id: fixtureCatalog.story.nodesPagePrimaryNodeId(),
+			node_name: fixtureCatalog.story.nodesPagePrimaryNodeName(),
+			api_base_url: fixtureCatalog.story.nodesPagePrimaryApiBaseUrl(),
+			access_host: fixtureCatalog.story.nodesPagePrimaryAccessHost(),
 			summary: {
 				status: "up",
-				updated_at: "2026-07-30T06:00:00.000Z",
+				updated_at: fixtureCatalog.timestamp.t20240101T035200(),
 			},
 			components: [
 				{
@@ -34,7 +35,7 @@ const cachedNodesRuntime: AdminNodesRuntimeResponse = {
 			],
 			recent_slots: [
 				{
-					slot_start: "2026-07-30T06:00:00.000Z",
+					slot_start: fixtureCatalog.timestamp.t20240101T035200(),
 					status: "up",
 				},
 			],
@@ -119,28 +120,20 @@ const meta = {
 			data: {
 				nodes: [
 					{
-						node_id: "01J000000000000000000000001",
-						node_name: "node-a",
-						access_host: "node-a.example.invalid",
-						api_base_url: "https://node-a.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.story.nodesPagePrimaryNodeId(),
+						node_name: fixtureCatalog.story.nodesPagePrimaryNodeName(),
+						access_host: fixtureCatalog.story.nodesPagePrimaryAccessHost(),
+						api_base_url: fixtureCatalog.story.nodesPagePrimaryApiBaseUrl(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNode(),
 					},
 					{
-						node_id: "01J000000000000000000000002",
-						node_name: "node-b",
-						access_host: "node-b.example.invalid",
-						api_base_url: "https://node-b.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 15,
-							tz_offset_minutes: null,
-						},
+						node_id: fixtureCatalog.story.nodesPageSecondaryNodeId(),
+						node_name: fixtureCatalog.story.nodesPageSecondaryNodeName(),
+						access_host: fixtureCatalog.story.nodesPageSecondaryAccessHost(),
+						api_base_url: fixtureCatalog.story.nodesPageSecondaryApiBaseUrl(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.resetNodeMidMonth(),
 					},
 				],
 			},
@@ -248,6 +241,8 @@ export const CachedUnauthorizedInventory: Story = {
 			"href",
 			expect.stringContaining("/login?redirect="),
 		);
-		await expect(canvas.getByText("node-a")).toBeInTheDocument();
+		await expect(
+			canvas.getByText(fixtureCatalog.story.nodesPagePrimaryNodeName()),
+		).toBeInTheDocument();
 	},
 };

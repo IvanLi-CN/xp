@@ -3,31 +3,28 @@ import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type { AdminNode } from "../api/adminNodes";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
 
 const node: AdminNode = {
-	node_id: "01J000000000000000000000001",
-	node_name: "node-a",
-	access_host: "node-a.example.invalid",
-	api_base_url: "https://node-a.example.invalid",
-	quota_limit_bytes: 0,
-	quota_reset: {
-		policy: "monthly",
-		day_of_month: 1,
-		tz_offset_minutes: null,
-	},
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+	access_host: fixtureCatalog.host.primary(),
+	api_base_url: fixtureCatalog.url.primaryApi(),
+	quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+	quota_reset: fixtureCatalog.quota.resetNode(),
 	egress_probe: {
-		public_ipv4: "203.0.113.8",
+		public_ipv4: fixtureCatalog.address.tertiaryIpv4(),
 		public_ipv6: "2001:db8::8",
-		selected_public_ip: "203.0.113.8",
+		selected_public_ip: fixtureCatalog.address.tertiaryIpv4(),
 		country_code: "TW",
 		geo_region: "Taiwan",
 		geo_city: "Taipei",
 		geo_operator: "ExampleNet",
 		subscription_region: "taiwan",
-		checked_at: "2026-03-08T00:59:00Z",
-		last_success_at: "2026-03-08T00:59:00Z",
+		checked_at: fixtureCatalog.timestamp.recent(),
+		last_success_at: fixtureCatalog.timestamp.recent(),
 		stale: false,
 		error_summary: null,
 	},
@@ -35,30 +32,30 @@ const node: AdminNode = {
 
 const nodeEndpoints: AdminEndpoint[] = [
 	{
-		endpoint_id: "01J00000000000000000000E01",
-		node_id: node.node_id,
-		tag: "node-a-ss",
-		kind: "ss2022_2022_blake3_aes_128_gcm",
-		port: 8388,
+		endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		tag: fixtureCatalog.identifier.endpointTagPrimary(),
+		kind: fixtureCatalog.endpoint.ssKind(),
+		port: fixtureCatalog.endpoint.port8388(),
 		meta: {},
 	},
 	{
-		endpoint_id: "01J00000000000000000000E02",
-		node_id: node.node_id,
-		tag: "node-a-reality",
-		kind: "vless_reality_vision_tcp",
-		port: 443,
+		endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		tag: fixtureCatalog.identifier.endpointTagSecondary(),
+		kind: fixtureCatalog.endpoint.vlessKind(),
+		port: fixtureCatalog.endpoint.port443(),
 		meta: {
-			dest: "www.cloudflare.com:443",
-			server_names: ["node-a.example.invalid"],
+			dest: fixtureCatalog.address.loopback49043(),
+			server_names: fixtureCatalog.list.primaryServerNames(),
 			server_names_source: "manual",
 			fingerprint: "chrome",
 		},
 	},
 ];
 
-const ipUsageReports = buildDenseNodeIpUsageStories(node);
-const tcpConnectionReports = buildDenseNodeTcpConnectionStories(node);
+const ipUsageReports = buildDenseNodeIpUsageStories();
+const tcpConnectionReports = buildDenseNodeTcpConnectionStories();
 
 const meta = {
 	title: "Pages/NodeDetailsPage",
@@ -70,12 +67,12 @@ const meta = {
 		mockApi: {
 			data: {
 				nodes: [node],
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
 			},
 		},
 	},
@@ -100,10 +97,9 @@ export const IpUsageTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "IP usage" }));
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.88" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "203.0.113.55" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -117,7 +113,9 @@ export const IpUsageTab7d: Story = {
 			await canvas.findByRole("button", { name: "7d" }),
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
-			await canvas.findByRole("button", { name: "198.51.100.88" }),
+			await canvas.findByRole("button", {
+				name: fixtureCatalog.address.secondaryIpv4(),
+			}),
 		).toBeInTheDocument();
 	},
 };
@@ -135,7 +133,9 @@ export const TcpConnectionsTab: Story = {
 			await canvas.findByText(/Connections per minute/i),
 		).toBeInTheDocument();
 		await expect(
-			await canvas.findByText(/node-a-edge-a :443/i),
+			await canvas.findByText(
+				new RegExp(`${fixtureCatalog.identifier.endpointTagPrimary()} :443`),
+			),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(/Combined across selected endpoints/i),
@@ -168,7 +168,9 @@ export const MetadataEgressProbe: Story = {
 		await expect(
 			await canvas.findByText("Node egress probe"),
 		).toBeInTheDocument();
-		await expect(await canvas.findAllByText("203.0.113.8")).toHaveLength(2);
+		await expect(
+			await canvas.findAllByText(fixtureCatalog.address.tertiaryIpv4()),
+		).toHaveLength(2);
 		await expect(await canvas.findByText("ExampleNet")).toBeInTheDocument();
 	},
 };
@@ -179,12 +181,12 @@ export const DeleteWithEndpointCleanup: Story = {
 			data: {
 				nodes: [node],
 				endpoints: nodeEndpoints,
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
 			},
 		},
 	},
@@ -199,8 +201,12 @@ export const DeleteWithEndpointCleanup: Story = {
 		await expect(
 			await screen.findByText("Endpoints to delete: 2"),
 		).toBeVisible();
-		await expect(await screen.findByText("node-a-ss")).toBeVisible();
-		await expect(await screen.findByText("node-a-reality")).toBeVisible();
+		await expect(
+			await screen.findByText(fixtureCatalog.identifier.endpointTagPrimary()),
+		).toBeVisible();
+		await expect(
+			await screen.findByText(fixtureCatalog.identifier.endpointTagSecondary()),
+		).toBeVisible();
 		await expect(
 			await screen.findByRole("button", {
 				name: "Delete node and endpoints",
@@ -217,59 +223,62 @@ export const RuntimeHistoryFallback: Story = {
 		mockApi: {
 			data: {
 				nodes: [node],
-				nodeIpUsageByNodeId: {
-					[node.node_id]: ipUsageReports,
-				},
-				nodeTcpConnectionsByNodeId: {
-					[node.node_id]: tcpConnectionReports,
-				},
-				nodeHistoryByNodeId: {
-					[node.node_id]: {
-						node_id: node.node_id,
-						last_synced_at: "2026-05-20T08:00:00Z",
-						last_sync_error: "request timeout while syncing node history",
-						daily_traffic: [
-							{
-								date: "2026-05-20",
-								uplink_bytes: 1536 * 2 ** 20,
-								downlink_bytes: 4096 * 2 ** 20,
-								updated_at: "2026-05-20T08:00:00Z",
-							},
-						],
-						daily_component_status: [
-							{
-								date: "2026-05-20",
-								components: [
-									{
-										component: "xp",
-										status: "up",
-										observed_at: "2026-05-20T08:00:00Z",
-									},
-									{
-										component: "xray",
-										status: "down",
-										observed_at: "2026-05-20T08:00:00Z",
-									},
-									{
-										component: "cloudflared",
-										status: "up",
-										observed_at: "2026-05-20T08:00:00Z",
-									},
-								],
-							},
-						],
-						component_status_events: [
-							{
-								event_id: "fallback-event-1",
-								occurred_at: "2026-05-20T07:42:00Z",
-								component: "xray",
-								message: "xray status changed: up -> down",
-								from_status: "up",
-								to_status: "down",
-							},
-						],
-					},
-				},
+				nodeIpUsageByNodeId: Object.fromEntries([
+					[node.node_id, ipUsageReports],
+				]),
+				nodeTcpConnectionsByNodeId: Object.fromEntries([
+					[node.node_id, tcpConnectionReports],
+				]),
+				nodeHistoryByNodeId: Object.fromEntries([
+					[
+						node.node_id,
+						{
+							node_id: fixtureCatalog.identifier.nodePrimary(),
+							last_synced_at: fixtureCatalog.timestamp.baseline(),
+							last_sync_error: "request timeout while syncing node history",
+							daily_traffic: [
+								{
+									date: "2026-05-20",
+									uplink_bytes: fixtureCatalog.number.value3(),
+									downlink_bytes: fixtureCatalog.number.value4(),
+									updated_at: fixtureCatalog.timestamp.baseline(),
+								},
+							],
+							daily_component_status: [
+								{
+									date: "2026-05-20",
+									components: [
+										{
+											component: "xp",
+											status: "up",
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
+										},
+										{
+											component: "xray",
+											status: "down",
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
+										},
+										{
+											component: "cloudflared",
+											status: "up",
+											observed_at: fixtureCatalog.timestamp.t20260520T080000(),
+										},
+									],
+								},
+							],
+							component_status_events: [
+								{
+									event_id: "fallback-event-1",
+									occurred_at: fixtureCatalog.timestamp.t20260520T074200(),
+									component: "xray",
+									message: "xray status changed: up -> down",
+									from_status: "up",
+									to_status: "down",
+								},
+							],
+						},
+					],
+				]),
 			},
 			failNodeRuntimeNodeIds: [node.node_id],
 		},

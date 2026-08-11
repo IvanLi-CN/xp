@@ -1,29 +1,30 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { AdminMeshPeerSchema } from "./adminMesh";
 
 function peerFixture() {
 	return {
-		node_id: "peer-a",
-		node_name: "alpha",
-		api_base_url: "https://alpha.example.test",
-		mesh_url: "https://alpha.example.test:443",
+		node_id: fixtureCatalog.identifier.nodePrimary(),
+		node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+		api_base_url: fixtureCatalog.url.primaryApi(),
+		mesh_url: fixtureCatalog.url.primaryApi(),
 		mesh_capability: "enabled",
 		mesh_reason: "mesh_available",
 		current_path: "mesh",
 		quality: "good",
 		stale: false,
 		breaker: "closed",
-		last_sample_at: "2026-08-08T10:00:00Z",
-		last_transition_at: "2026-08-08T09:00:00Z",
-		availability_1h: 1,
-		availability_24h: 1,
-		mesh_availability_24h: 1,
-		latency_p50_ms: 20,
-		latency_p95_ms: 30,
+		last_sample_at: fixtureCatalog.timestamp.recent(),
+		last_transition_at: fixtureCatalog.timestamp.baseline(),
+		availability_1h: fixtureCatalog.metric.availabilityFull(),
+		availability_24h: fixtureCatalog.metric.availabilityFull(),
+		mesh_availability_24h: fixtureCatalog.metric.availabilityFull(),
+		latency_p50_ms: fixtureCatalog.number.value20(),
+		latency_p95_ms: fixtureCatalog.number.value30(),
 		buckets: [
 			{
-				minute: "2026-08-08T10:00:00Z",
+				minute: fixtureCatalog.timestamp.recent(),
 				mesh_success: 1,
 				mesh_failure: 0,
 				public_success: 0,
@@ -31,7 +32,7 @@ function peerFixture() {
 				fallback_success: 0,
 				end_to_end_success: 1,
 				end_to_end_failure: 0,
-				latency_samples_ms: [20],
+				latency_samples_ms: [fixtureCatalog.number.value20()],
 			},
 		],
 	};
@@ -52,13 +53,13 @@ describe("AdminMeshPeerSchema", () => {
 			mesh_transport: {
 				protocol: "h2",
 				health: "healthy",
-				connection_generation: 4,
-				current_connection_requests: 32,
-				requests_5m: 32,
-				connection_starts_5m: 1,
-				requests_1h: 400,
-				connection_starts_1h: 2,
-				last_connection_started_at: "2026-08-08T09:58:00Z",
+				connection_generation: fixtureCatalog.number.value4(),
+				current_connection_requests: fixtureCatalog.number.value32(),
+				requests_5m: fixtureCatalog.number.value32(),
+				connection_starts_5m: fixtureCatalog.number.value1(),
+				requests_1h: fixtureCatalog.number.value200(),
+				connection_starts_1h: fixtureCatalog.number.value2(),
+				last_connection_started_at: fixtureCatalog.timestamp.recent(),
 			},
 		});
 

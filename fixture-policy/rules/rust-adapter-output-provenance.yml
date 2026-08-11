@@ -1,0 +1,73 @@
+id: fixture-policy-rust-adapter-output-provenance
+language: Rust
+severity: error
+message: Rust fixture adapter accessors must derive values directly from the checked-in catalog.
+files:
+  - test-fixtures/src/**/*.rs
+rule:
+  any:
+    - all:
+        - kind: function_item
+        - regex: '^fn catalog\('
+        - not:
+            pattern: |
+              fn catalog() -> &'static Catalog {
+                static CATALOG: OnceLock<Catalog> = OnceLock::new();
+                CATALOG.get_or_init(|| {
+                  serde_json::from_str(include_str!("../../fixture-policy/catalog.json"))
+                    .expect("fixture catalog is valid")
+                })
+              }
+    - all:
+        - kind: function_item
+        - regex: '^fn '
+        - not:
+            regex: '^fn catalog\('
+    - all:
+        - kind: function_item
+        - regex: '^pub(?:\([^)]*\))?\s+fn [A-Za-z_][A-Za-z0-9_]*(?:<[^>{}]*>)?\([^)]*[^ )][^)]*\)'
+    - kind: const_item
+    - all:
+        - kind: static_item
+        - not:
+            regex: '^static CATALOG: OnceLock<Catalog>'
+    - all:
+        - kind: function_item
+        - regex: '^pub(?:\([^)]*\))?\s+fn '
+        - not:
+            any:
+              - pattern: |
+                  pub fn none<$TYPE>() -> Option<$TYPE> {
+                    None
+                  }
+              - has:
+                  field: body
+                  any:
+                    - regex: '^\{\s*(?:&?catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[(?:"[^"]+"|[0-9]+)\])+(?:\.clone\(\))?(?:\s+as\s+f64)?|Some\(catalog\(\)(?:[.][A-Za-z_][A-Za-z0-9_]*|\[(?:"[^"]+"|[0-9]+)\])+(?:\s+as\s+u32)?\))\s*\}$'
+                    - regex: '^\{\s*serde_json::from_value\(catalog\(\)\.fixtures\.numbers\["value"\]\["[A-Za-z0-9]+"\]\.clone\(\)\)\s*\.expect\("fixture numeric value is valid"\)\s*\}$'
+    - all:
+        - kind: string_literal
+        - inside:
+            stopBy: end
+            all:
+              - kind: function_item
+              - regex: '^pub(?:\([^)]*\))?\s+fn '
+        - not:
+            inside:
+              stopBy: end
+              pattern: serde_json::from_value($VALUE).expect($MESSAGE)
+        - not:
+            inside:
+              stopBy: end
+              pattern: catalog().fixtures.$GROUP[$CATEGORY][$KEY]
+    - all:
+        - kind: integer_literal
+        - inside:
+            stopBy: end
+            all:
+              - kind: function_item
+              - regex: '^pub(?:\([^)]*\))?\s+fn '
+        - not:
+            inside:
+              stopBy: end
+              pattern: catalog().$GROUP.$FIELD[$INDEX]

@@ -1,0 +1,17 @@
+id: fixture-policy-typescript-kind-user-id-shorthand
+language: TypeScript
+severity: error
+message: Fixture endpoint kinds and user IDs must use explicit catalog accessors.
+note: Do not pass kind or user_id through shorthand properties.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: shorthand_property_identifier
+    - regex: '^(kind|user_id)$'

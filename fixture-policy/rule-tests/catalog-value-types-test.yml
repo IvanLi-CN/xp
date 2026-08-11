@@ -1,0 +1,27 @@
+id: fixture-policy-catalog-value-types
+valid:
+  - '{ "metrics": { "latencyLow": 12 } }'
+  - '{ "hosts": { "primary": "node-a.fixture.test" } }'
+  - '{ "lists": { "primaryServerNames": ["edge-a.fixture.test"] } }'
+  - '{ "lists": { "loopbackServerNames": ["127.0.0.1"] } }'
+  - '{ "urls": { "publicFallback": "http://127.0.0.1:9" } }'
+  - '{ "identifiers": { "endpointTagMissing": "endpoint-tag-fixture-missing" } }'
+  - '{ "timestamps": { "date": "2024-01-01" } }'
+  - |
+    {
+      "identifiers": { "probeRunSecondary": "run-fixture-b" },
+      "timestamps": { "probeHour": "2026-03-11T11:00:00Z" }
+    }
+  - '{ "fixtures": { "strings": { "nodeId": { "fixture229": "node-fixture-229" } } } }'
+invalid:
+  - '{ "metrics": true }'
+  - '{ "latencyLow": "12" }'
+  - '{ "primary": 12 }'
+  - '{ "primaryServerNames": "edge-a.fixture.test" }'
+  - '{ "operations": true }'
+  - '{ "operations": { "endpoint": { "vlessKind": { "invalid": true } } } }'
+  - '{ "operations": { "endpoint": { "port443": "443" } } }'
+  - '{ "operations": { "endpoint": { "reality": "not-an-object" } } }'
+  - '{ "operations": { "endpoint": { "shortIds": "not-an-array" } } }'
+  - '{ "operations": { "quota": { "reset": [] } } }'
+  - '{ "operations": { "subscription": { "clashLines": "not-an-array" } } }'

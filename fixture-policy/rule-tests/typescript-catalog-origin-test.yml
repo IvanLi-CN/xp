@@ -1,0 +1,37 @@
+id: fixture-policy-typescript-catalog-origin
+valid:
+  - |
+    import { fixtureCatalog } from "../fixture-policy/catalog";
+  - |
+    import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+invalid:
+  - |
+    const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
+  - |
+    import { fixtureCatalog } from "./fixture-input";
+  - |
+    import { fixtureCatalog } from "../fixture-policy/catalog-proxy";
+  - |
+    import { fixtureCatalog } from "./catalog";
+  - |
+    import * as fixtureCatalog from "./fixture-input";
+  - |
+    import fixtureCatalog from "./fixture-input";
+  - |
+    import { value as fixtureCatalog } from "./fixture-input";
+  - |
+    const build = (fixtureCatalog: unknown) => fixtureCatalog;
+  - |
+    try { work(); } catch (fixtureCatalog) { consume(fixtureCatalog); }
+  - |
+    class fixtureCatalog {}
+  - |
+    const { fixtureCatalog } = source;
+  - |
+    const { source: fixtureCatalog } = source;
+  - |
+    const [fixtureCatalog] = source;
+  - |
+    const [other, fixtureCatalog] = source;
+  - |
+    const { nested: { fixtureCatalog } } = source;

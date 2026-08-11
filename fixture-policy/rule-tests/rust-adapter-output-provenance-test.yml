@@ -1,0 +1,59 @@
+id: fixture-policy-rust-adapter-output-provenance
+valid:
+  - |
+    fn catalog() -> &'static Catalog {
+        static CATALOG: OnceLock<Catalog> = OnceLock::new();
+        CATALOG.get_or_init(|| {
+            serde_json::from_str(include_str!("../../fixture-policy/catalog.json"))
+                .expect("fixture catalog is valid")
+        })
+    }
+  - |
+    pub fn primary() -> &'static str {
+        &catalog().hosts.primary
+    }
+  - |
+    pub fn number_value1<T: DeserializeOwned>() -> T {
+        serde_json::from_value(catalog().fixtures.numbers["value"]["value1"].clone())
+            .expect("fixture numeric value is valid")
+    }
+  - |
+    pub fn none<T>() -> Option<T> {
+        None
+    }
+invalid:
+  - |
+    pub fn injected_host() -> &'static str {
+        "unapproved.fixture.test"
+    }
+  - |
+    pub fn injected_metric() -> u64 {
+        4096
+    }
+  - |
+    const LIVE: &str = "live.example";
+  - |
+    fn helper() -> &'static str {
+        "live.example"
+    }
+  - |
+    fn catalog() -> &'static Catalog {
+        unimplemented!()
+    }
+  - |
+    pub fn injected_host() -> &'static str {
+        let _ = catalog();
+        LIVE
+    }
+  - |
+    pub fn indexed_host(index: usize) -> &'static str {
+        &catalog().subscription.tags[index]
+    }
+  - |
+    pub(crate) fn injected() -> &'static str {
+        "live.example"
+    }
+  - |
+    pub(super) fn injected() -> &'static str {
+        "live.example"
+    }

@@ -1,0 +1,82 @@
+id: fixture-policy-typescript-assignment-source
+language: TypeScript
+severity: error
+message: Fixture operational field assignments must use a direct fixtureCatalog accessor call.
+note: Add a safe synthetic value to fixture-policy/catalog.json and expose it through the adapter.
+files:
+  - web/src/**/*.test.ts
+  - web/src/**/*.spec.ts
+  - web/tests/**/*.ts
+  - web/src/**/*.stories.ts
+  - web/.storybook/mocks/**/*.ts
+  - web/src/storybook/**/*.ts
+  - web/src/demo/fixtures.ts
+rule:
+  all:
+    - kind: assignment_expression
+    - has:
+        field: left
+        any:
+          - pattern: $OBJECT.$FIELD
+          - pattern: '$OBJECT["$FIELD"]'
+          - pattern: "$OBJECT['$FIELD']"
+    - has:
+        field: right
+        not:
+          any:
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
+            - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: state.nextEndpointId()
+            - pattern: state.nextEndpointTag()
+            - pattern: state.nextSubscriptionToken()
+            - pattern: state.nextUserId()
+            - all:
+                - pattern: nextSubscriptionToken()
+                - inside:
+                    stopBy: end
+                    all:
+                      - kind: function_declaration
+                      - has:
+                          field: name
+                          pattern: setupApiMocks
+            - pattern: 'null'
+constraints:
+  FIELD:
+    any:
+      - regex: '^(accessHost|access_host|apiBaseUrl|api_base_url|host|hostname)$'
+      - regex: '^(serverNames|server_names|acceptedAuthorities|accepted_authorities)$'
+      - regex: '^(canaryUpstreamUrl|canary_upstream_url|canary_upstream)$'
+      - regex: '^(nodeId|node_id|nodeName|node_name|ownerNodeId|owner_node_id)$'
+      - regex: '^(bootstrapNodeId|bootstrap_node_id|bootstrapNodeName|bootstrap_node_name)$'
+      - regex: '^(bootstrapAccessHost|bootstrap_access_host|bootstrapApiBaseUrl|bootstrap_api_base_url)$'
+      - regex: '^(endpointId|endpoint_id|endpointTag|endpoint_tag)$'
+      - regex: '^(subscriptionToken|subscription_token|token|secret|password)$'
+      - regex: '^(priorityTier|priority_tier|quotaReset|quota_reset)$'
+      - regex: '^(ip|public_ipv4|selected_public_ip|dest|destination|xray_api_addr|tag|bind)$'
+      - regex: '^(cluster_id|leader_api_base_url|mesh_url|meshBaseUrl|mesh_base_url)$'
+      - regex: '^(publicBaseUrl|public_base_url|publicOrigin|runId|run_id|configHash|config_hash)$'
+      - regex: '^(firstSeenAt|first_seen_at|lastSeenAt|last_seen_at)$'
+      - regex: '^(lastProbeAt|last_probe_at|lastSyncedAt|last_synced_at)$'
+      - regex: '^(lastOkAt|last_ok_at|lastFailAt|last_fail_at)$'
+      - regex: '^(downSince|down_since|lastRestartAt|last_restart_at)$'
+      - regex: '^(lastRestartFailAt|last_restart_fail_at|slotStart|slot_start)$'
+      - regex: '^(observedAt|observed_at|occurredAt|occurred_at)$'
+      - regex: '^(windowStart|window_start|windowEnd|window_end)$'
+      - regex: '^(minute|startMinute|start_minute|endMinute|end_minute)$'
+      - regex: '^(createdAt|created_at|updatedAt|updated_at|checkedAt|checked_at)$'
+      - regex: '^(connectedAt|connected_at|generatedAt|generated_at)$'
+      - regex: '^(lastSampleAt|last_sample_at|lastTransitionAt|last_transition_at)$'
+      - regex: '^(lastConnectionStartedAt|last_connection_started_at)$'
+      - regex: '^(cycleStartAt|cycle_start_at|cycleEndAt|cycle_end_at)$'
+      - regex: '^(trackingSince|tracking_since|latestCheckedAt|latest_checked_at)$'
+      - regex: '^(lastSuccessAt|last_success_at|hour)$'
+      - regex: '^(startedAt|started_at|finishedAt|finished_at)$'
+      - regex: '^(completedAt|completed_at|emittedAt|emitted_at)$'
+      - regex: '^(startAt|start_at|endAt|end_at)$'
+      - regex: '^(windowStartAt|window_start_at|windowEndAt|window_end_at)$'
+      - regex: '^(latencyMs|latency_ms|probeLatencyMs|probe_latency_ms)$'
+      - regex: '^(latency_p50_ms|latency_p95_ms|availability_1h|availability_24h)$'
+      - regex: '^(mesh_availability_24h|connection_generation|current_connection_requests)$'
+      - regex: '^(requests_5m|connection_starts_5m|requests_1h|connection_starts_1h)$'
+      - regex: '^(trafficBytes|traffic_bytes|uplink_bytes|downlink_bytes)$'
+      - regex: '^(totalBytes|total_bytes|requests|connections|throughput)$'

@@ -1,0 +1,16 @@
+id: fixture-policy-typescript-storybook-catalog-origin
+snapshots:
+  ? |
+    const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };
+  : labels:
+    - source: 'const fixtureCatalog = { host: { primary: () => "unapproved.fixture.test" } };'
+      style: primary
+      start: 0
+      end: 78
+  ? |
+    import { fixtureCatalog } from "./catalog-proxy";
+  : labels:
+    - source: import { fixtureCatalog } from "./catalog-proxy";
+      style: primary
+      start: 0
+      end: 49

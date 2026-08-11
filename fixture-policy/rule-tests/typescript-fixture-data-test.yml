@@ -1,0 +1,128 @@
+id: fixture-policy-typescript-data-source
+valid:
+  - |
+    function buildNodeRuntimeListItem(node) {
+      return {
+        node_id: node.node_id,
+        node_name: node.node_name,
+        api_base_url: node.api_base_url,
+        access_host: node.access_host,
+      };
+    }
+  - |
+    function buildNodeRuntimeEventStream(node) {
+      return { node_id: node.node_id };
+    }
+  - |
+    function buildFixtureEndpointIdentifierResponse(endpoint) {
+      return { endpoint_id: endpoint.endpoint_id };
+    }
+  - |
+    function buildNodeDeletePreviewEndpoint(endpoint) {
+      return {
+        endpoint_id: endpoint.endpoint_id,
+        tag: endpoint.tag,
+        kind: endpoint.kind,
+        port: endpoint.port,
+      };
+    }
+  - |
+    function buildFixtureUserNodeWeightItem(node, weight) {
+      return { node_id: node.node_id, weight };
+    }
+  - |
+    const fixture = { host: fixtureCatalog.host.primary() };
+  - |
+    const fixture = { nodeId: fixtureCatalog.identifier.nodePrimary() };
+  - |
+    const fixture = { endpoint_id: state.nextEndpointId() };
+  - |
+    const fixture = { subscription_token: state.nextSubscriptionToken() };
+  - |
+    function setupApiMocks() {
+      const fixture = { subscription_token: nextSubscriptionToken() };
+      return fixture;
+    }
+  - |
+    const fixture = { node_name: fixtureCatalog.identifier.nodeNamePrimary() };
+  - |
+    const fixture = {
+      short_ids: fixtureCatalog.endpoint.shortIds(),
+      active_short_id: fixtureCatalog.endpoint.activeShortId(),
+    };
+  - |
+    const fixture = { started_at: fixtureCatalog.timestamp.baseline() };
+  - |
+    const fixture = {
+      owner_node_id: fixtureCatalog.identifier.nodePrimary(),
+      bootstrap_node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+      bootstrap_access_host: fixtureCatalog.host.primary(),
+      bootstrap_api_base_url: fixtureCatalog.url.primaryApi(),
+      first_seen_at: fixtureCatalog.timestamp.recent(),
+    };
+  - |
+    const fixture = { finished_at: null };
+  - |
+    const fixture = {
+      last_fail_at: down
+        ? fixtureCatalog.timestamp.recent()
+        : fixtureCatalog.optional.none(),
+    };
+  - |
+    const fixture = {
+      host: primary
+        ? fixtureCatalog.host.primary()
+        : secondary
+          ? fixtureCatalog.host.secondary()
+          : fixtureCatalog.host.tertiary(),
+    };
+invalid:
+  - |
+    const fixture = { host: "unapproved.fixture.test" };
+  - |
+    const fixture = { endpointId: `endpoint-${suffix}` };
+  - |
+    const fixture = { token: process.env.TEST_TOKEN };
+  - |
+    const fixture = { updated_at: JSON.parse(raw) };
+  - |
+    const fixture = { emitted_at: new Date().toISOString() };
+  - |
+    const fixture = { total_bytes: 4096 };
+  - |
+    const fixture = { cycle_end_at: new Date().toISOString() };
+  - |
+    const fixture = { ip: await fetch("https://input.fixture.test") };
+  - |
+    const fixture = { xray_api_addr: "127.0.0.1:10085" };
+  - |
+    const fixture = { node_id: payload.node_id };
+  - |
+    async function handleRequest(nextSubscriptionToken: () => string) {
+      return { subscription_token: nextSubscriptionToken() };
+    }
+  - |
+    const fixture = { owner_node_id: "unapproved-node" };
+  - |
+    const fixture = { bootstrap_node_name: process.env.TEST_NODE_NAME };
+  - |
+    const fixture = { bootstrap_access_host: "unapproved.fixture.test" };
+  - |
+    const fixture = { first_seen_at: new Date().toISOString() };
+  - |
+    const fixture = { subscription_token: user.subscription_token };
+  - |
+    const fixture = {
+      short_ids: ["unapproved-short-id"],
+      active_short_id: "unapproved-short-id",
+    };
+  - |
+    const fixture = { run_id: "unapproved-run" };
+  - |
+    const fixture = { config_hash: "unapproved-config" };
+  - |
+    const fixture = { hour: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { latest_checked_at: "2026-03-11T11:00:00Z" };
+  - |
+    const fixture = { last_success_at: new Date().toISOString() };

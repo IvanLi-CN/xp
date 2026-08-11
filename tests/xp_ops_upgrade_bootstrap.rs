@@ -51,7 +51,7 @@ mod linux {
         let release = serde_json::json!({
             "tag_name": target_tag.clone(),
             "prerelease": false,
-            "published_at": "2026-01-20T00:00:00Z",
+            "published_at": xp_test_fixtures::release_current_timestamp(),
             "assets": [
                 { "name": xp_asset.clone(), "browser_download_url": xp_url },
                 { "name": xp_ops_asset.clone(), "browser_download_url": xp_ops_url },

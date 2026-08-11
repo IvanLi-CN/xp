@@ -40,32 +40,55 @@ import type {
 import type { AdminUpgradeStatusResponse } from "../../src/api/adminUpgrade";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuotaStatusResponse } from "../../src/api/adminUserNodeQuotaStatus";
+import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
 import type { AdminUserQuotaSummariesResponse } from "../../src/api/adminUserQuotaSummaries";
 import type {
 	AdminUser,
 	AdminUserCreateRequest,
 	AdminUserPatchRequest,
-	AdminUserTokenResponse,
 } from "../../src/api/adminUsers";
 import type { NodeQuotaReset, UserQuotaReset } from "../../src/api/quotaReset";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import {
 	DEFAULT_API_CAPABILITIES,
 	type MockStateSeed,
 } from "./apiMockContract";
 import {
-	buildEndpointCreateMeta,
-	deriveGlobalServerNames,
-} from "./buildEndpointCreateMeta";
+	buildNodeDeletePreviewResponse,
+	buildNodeEgressProbeRefreshResponse,
+	buildStatusHelloResponse,
+	buildSubscriptionTokenResponse,
+	buildUserAccessItem,
+	catalogTimestampOffset,
+} from "./apiMockFixtureBuilders";
+import { buildEndpointCreateMeta } from "./buildEndpointCreateMeta";
 import { handleEndpointProbeRequest } from "./endpointProbeMock";
+import {
+	buildFixtureDisabledNodeIds,
+	buildFixtureEndpointIdentifierResponse,
+	buildFixtureSubscriptionText,
+	buildFixtureUserNodeWeightItem,
+	isFixtureEndpointCreateRequest,
+	isFixtureNodeId,
+	isFixtureRealityServerName,
+	normalizeFixtureEndpointPatch,
+	normalizeFixtureNodePatch,
+	normalizeFixtureRealityDomainPatch,
+	normalizeFixtureUserPatch,
+} from "./fixtureMutationPolicy";
+import {
+	buildFixtureUserQuotaSummaryItem,
+	buildUserNodeQuotaStatusItem,
+} from "./staticFixtureMappings";
 
 export type StorybookApiMockConfig = {
 	adminToken?: string | null;
 	data?: Partial<MockStateSeed>;
-	probe?: Parameters<typeof handleEndpointProbeRequest>[1];
 	failAdminConfig?: boolean;
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
+	probe?: import("./endpointProbeMock").StorybookEndpointProbeMock;
 };
 
 export type MockEndpointSeed = AdminEndpoint & {
@@ -105,14 +128,10 @@ type MockState = Omit<MockStateSeed, "endpoints"> & {
 	failAdminConfig: boolean;
 	failNodeRuntimeNodeIds: string[];
 	failVersionCheck: boolean;
-	counters: {
-		endpoint: number;
-		joinToken: number;
-		realityDomain: number;
-		shortId: number;
-		subscription: number;
-		user: number;
-	};
+	nextEndpointId: () => string;
+	nextEndpointTag: () => string;
+	nextSubscriptionToken: () => string;
+	nextUserId: () => string;
 };
 
 type MockApi = {
@@ -277,36 +296,29 @@ function sseResponse(
 	});
 }
 
-function ensureEndpointRecord(
-	seed: MockEndpointSeed,
-	counters: MockState["counters"],
-): MockEndpointRecord {
-	const shortIds = seed.short_ids?.length
-		? [...seed.short_ids]
-		: [`short-${counters.shortId++}`, `short-${counters.shortId++}`];
-	const activeShortId = seed.active_short_id ?? shortIds[0];
+function ensureEndpointRecord(seed: MockEndpointSeed): MockEndpointRecord {
 	return {
-		...seed,
-		short_ids: shortIds,
-		active_short_id: activeShortId,
+		endpoint_id: seed.endpoint_id,
+		node_id: seed.node_id,
+		tag: seed.tag,
+		kind: seed.kind,
+		port: seed.port,
+		meta: seed.meta,
+		probe: seed.probe,
+		short_ids: fixtureCatalog.endpoint.shortIds(),
+		active_short_id: fixtureCatalog.endpoint.activeShortId(),
 	};
 }
 
 function buildRuntimeSlots(total = 7 * 24 * 2): NodeRuntimeHistorySlot[] {
-	const now = new Date();
-	const base = new Date(now);
-	base.setSeconds(0, 0);
-	base.setMinutes(base.getMinutes() < 30 ? 0 : 30);
-
 	const slots: NodeRuntimeHistorySlot[] = [];
 	for (let i = total - 1; i >= 0; i -= 1) {
-		const at = new Date(base.getTime() - i * 30 * 60 * 1000);
 		let status: NodeRuntimeHistorySlot["status"] = "up";
 		if (i % 37 === 0) status = "degraded";
 		if (i % 121 === 0) status = "down";
 		if (i % 79 === 0) status = "unknown";
 		slots.push({
-			slot_start: at.toISOString(),
+			slot_start: catalogTimestampOffset(-i * 30 * 60 * 1000),
 			status,
 		});
 	}
@@ -319,48 +331,52 @@ function buildRuntimeComponents(node: AdminNode): NodeRuntimeComponent[] {
 		{
 			component: "xp",
 			status: "up",
-			last_ok_at: new Date().toISOString(),
-			last_fail_at: null,
-			down_since: null,
+			last_ok_at: fixtureCatalog.timestamp.t20240101T000700(),
+			last_fail_at: fixtureCatalog.optional.none(),
+			down_since: fixtureCatalog.optional.none(),
 			consecutive_failures: 0,
 			recoveries_observed: 0,
 			restart_attempts: 0,
-			last_restart_at: null,
-			last_restart_fail_at: null,
+			last_restart_at: fixtureCatalog.optional.none(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 		{
 			component: "xray",
 			status: downNode ? "down" : "up",
-			last_ok_at: new Date(Date.now() - 60_000).toISOString(),
+			last_ok_at: fixtureCatalog.timestamp.t20240101T000800(),
 			last_fail_at: downNode
-				? new Date(Date.now() - 30_000).toISOString()
-				: null,
-			down_since: downNode ? new Date(Date.now() - 30_000).toISOString() : null,
+				? fixtureCatalog.timestamp.t20240101T000900()
+				: fixtureCatalog.optional.none(),
+			down_since: downNode
+				? fixtureCatalog.timestamp.t20240101T001000()
+				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 2 : 0,
 			recoveries_observed: 1,
 			restart_attempts: downNode ? 1 : 0,
 			last_restart_at: downNode
-				? new Date(Date.now() - 20_000).toISOString()
-				: null,
-			last_restart_fail_at: null,
+				? fixtureCatalog.timestamp.t20240101T001100()
+				: fixtureCatalog.optional.none(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 		{
 			component: "cloudflared",
 			status: downNode ? "down" : "disabled",
-			last_ok_at: downNode ? new Date(Date.now() - 90_000).toISOString() : null,
+			last_ok_at: downNode
+				? fixtureCatalog.timestamp.t20240101T001200()
+				: fixtureCatalog.optional.none(),
 			last_fail_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
-			down_since: downNode ? new Date(Date.now() - 10_000).toISOString() : null,
+				? fixtureCatalog.timestamp.t20240101T001300()
+				: fixtureCatalog.optional.none(),
+			down_since: downNode
+				? fixtureCatalog.timestamp.t20240101T001400()
+				: fixtureCatalog.optional.none(),
 			consecutive_failures: downNode ? 3 : 0,
 			recoveries_observed: 0,
 			restart_attempts: downNode ? 1 : 0,
 			last_restart_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
-			last_restart_fail_at: downNode
-				? new Date(Date.now() - 10_000).toISOString()
-				: null,
+				? fixtureCatalog.timestamp.t20240101T001300()
+				: fixtureCatalog.optional.none(),
+			last_restart_fail_at: fixtureCatalog.optional.none(),
 		},
 	];
 }
@@ -369,7 +385,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 	return [
 		{
 			event_id: `evt-${node.node_id}-1`,
-			occurred_at: new Date(Date.now() - 20_000).toISOString(),
+			occurred_at: fixtureCatalog.timestamp.t20240101T001500(),
 			component: "xray",
 			kind: "status_changed",
 			message: "xray status changed: up -> down",
@@ -378,7 +394,7 @@ function buildRuntimeEvents(node: AdminNode): NodeRuntimeEvent[] {
 		},
 		{
 			event_id: `evt-${node.node_id}-2`,
-			occurred_at: new Date(Date.now() - 10_000).toISOString(),
+			occurred_at: fixtureCatalog.timestamp.t20240101T001600(),
 			component: "cloudflared",
 			kind: "restart_failed",
 			message: "cloudflared restart request failed",
@@ -402,7 +418,7 @@ function buildNodeRuntimeListItem(node: AdminNode): AdminNodeRuntimeListItem {
 		access_host: node.access_host,
 		summary: {
 			status: summaryStatus,
-			updated_at: new Date().toISOString(),
+			updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 		},
 		components,
 		recent_slots: slots,
@@ -422,41 +438,58 @@ function buildNodeRuntimeDetail(
 	};
 }
 
+function buildNodeRuntimeEventStream(node: AdminNode): Response {
+	const detail = buildNodeRuntimeDetail(node);
+	return sseResponse([
+		{
+			event: "hello",
+			data: {
+				node_id: node.node_id,
+				connected_at: fixtureCatalog.timestamp.t20240101T000700(),
+			},
+		},
+		{
+			event: "snapshot",
+			data: {
+				node_id: node.node_id,
+				summary: detail.summary,
+				components: detail.components,
+				recent_slots: detail.recent_slots,
+				events: detail.events,
+			},
+		},
+	]);
+}
+
 function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
-	const now = new Date();
-	const date = now.toISOString().slice(0, 10);
 	const components = buildRuntimeComponents(node);
 	return {
 		node_id: node.node_id,
-		last_synced_at: now.toISOString(),
+		last_synced_at: fixtureCatalog.timestamp.t20240101T002100(),
 		last_sync_error: node.node_id.endsWith("2")
 			? "request timeout while syncing node history"
 			: null,
 		daily_traffic: [
 			{
-				date,
-				uplink_bytes: node.node_id.endsWith("2")
-					? Math.round(1.4 * 2 ** 30)
-					: 768 * 2 ** 20,
-				downlink_bytes: node.node_id.endsWith("2")
-					? Math.round(4.8 * 2 ** 30)
-					: Math.round(2.2 * 2 ** 30),
-				updated_at: now.toISOString(),
+				date: fixtureCatalog.timestamp.date(),
+				uplink_bytes: fixtureCatalog.number.value1(),
+				downlink_bytes: fixtureCatalog.number.value2(),
+				updated_at: fixtureCatalog.timestamp.t20240101T002100(),
 			},
 		],
 		daily_component_status: [
 			{
-				date,
+				date: fixtureCatalog.timestamp.date(),
 				components: components.map((component) => ({
 					component: component.component,
 					status: component.status,
-					observed_at: now.toISOString(),
+					observed_at: fixtureCatalog.timestamp.t20240101T002100(),
 				})),
 			},
 		],
 		component_status_events: buildRuntimeEvents(node).map((event) => ({
 			event_id: event.event_id,
-			occurred_at: event.occurred_at,
+			occurred_at: fixtureCatalog.timestamp.t20240101T002200(),
 			component: event.component,
 			message: event.message,
 			from_status: event.from_status,
@@ -465,79 +498,122 @@ function buildNodeHistory(node: AdminNode): NodeHistorySnapshot {
 	};
 }
 
-function buildTrafficReport(window: TrafficWindow, factor = 1): TrafficReport {
-	const count = window === "24h" ? 288 : 31;
-	const end = new Date();
-	end.setUTCMinutes(Math.floor(end.getUTCMinutes() / 5) * 5, 0, 0);
-	const step = window === "24h" ? 5 * 60_000 : 24 * 60 * 60_000;
-	const start = new Date(end.getTime() - (count - 1) * step);
-	const current = Array.from({ length: count }, (_, index) => {
-		const at = new Date(start.getTime() + index * step);
-		const total = Math.round((120 + (index % 9) * 16) * 1024 * 1024 * factor);
-		const next = new Date(at.getTime() + step);
+function buildTrafficPoint(
+	window: TrafficWindow,
+	index: number,
+	isCurrentDay: boolean,
+	isGap = false,
+): NonNullable<TrafficReport["current"]>[number] {
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
+	if (isGap) {
 		return {
-			start_at: at.toISOString(),
-			end_at: next.toISOString(),
-			uplink_bytes: Math.round(total * 0.42),
-			downlink_bytes: Math.round(total * 0.58),
-			total_bytes: total,
-			complete: true,
-			is_current_day: window === "31d" && index === count - 1,
+			start_at: catalogTimestampOffset(index * step),
+			end_at: catalogTimestampOffset((index + 1) * step),
+			uplink_bytes: null,
+			downlink_bytes: null,
+			total_bytes: null,
+			complete: false,
+			is_current_day: isCurrentDay,
 		};
-	});
-	const reference = current.map((point) => ({
-		...point,
-		start_at: new Date(
-			new Date(point.start_at).getTime() - count * step,
-		).toISOString(),
-		end_at: new Date(
-			new Date(point.end_at).getTime() - count * step,
-		).toISOString(),
-		uplink_bytes: Math.round((point.uplink_bytes ?? 0) * 0.8),
-		downlink_bytes: Math.round((point.downlink_bytes ?? 0) * 0.8),
-		total_bytes: Math.round((point.total_bytes ?? 0) * 0.8),
+	}
+
+	return {
+		start_at: catalogTimestampOffset(index * step),
+		end_at: catalogTimestampOffset((index + 1) * step),
+		uplink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value3()
+				: fixtureCatalog.number.value4(),
+		downlink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value5()
+				: fixtureCatalog.number.value6(),
+		total_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value8()
+				: fixtureCatalog.number.value10(),
+		complete: true,
+		is_current_day: isCurrentDay,
+	};
+}
+
+function buildReferenceTrafficPoint(
+	window: TrafficWindow,
+	index: number,
+): NonNullable<TrafficReport["reference"]>[number] {
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
+	const count = window === "24h" ? 288 : 31;
+	return {
+		start_at: catalogTimestampOffset((index - count) * step),
+		end_at: catalogTimestampOffset((index + 1 - count) * step),
+		uplink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value2()
+				: fixtureCatalog.number.value3(),
+		downlink_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value3()
+				: fixtureCatalog.number.value4(),
+		total_bytes:
+			index % 2 === 0
+				? fixtureCatalog.number.value5()
+				: fixtureCatalog.number.value7(),
+		complete: true,
 		is_current_day: false,
-	}));
-	const uplink = current.reduce(
-		(sum, point) => sum + (point.uplink_bytes ?? 0),
-		0,
+	};
+}
+
+function buildTrafficReport(window: TrafficWindow, gap = false): TrafficReport {
+	const count = window === "24h" ? 288 : 31;
+	const current = Array.from({ length: count }, (_, index) =>
+		buildTrafficPoint(
+			window,
+			index,
+			window === "31d" && index === count - 1,
+			gap && index > 112 && index < 124,
+		),
 	);
-	const downlink = current.reduce(
-		(sum, point) => sum + (point.downlink_bytes ?? 0),
-		0,
+	const reference = current.map((_, index) =>
+		buildReferenceTrafficPoint(window, index),
 	);
+	const summary =
+		window === "24h"
+			? {
+					uplink_bytes: fixtureCatalog.number.value864(),
+					downlink_bytes: fixtureCatalog.number.value1152(),
+					total_bytes: fixtureCatalog.number.value2016(),
+				}
+			: {
+					uplink_bytes: fixtureCatalog.number.value93(),
+					downlink_bytes: fixtureCatalog.number.value124(),
+					total_bytes: fixtureCatalog.number.value217(),
+				};
+	const step = window === "24h" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
 	return {
 		window,
-		window_start_at: current[0]?.start_at ?? end.toISOString(),
-		window_end_at: current.at(-1)?.end_at ?? end.toISOString(),
+		window_start_at: catalogTimestampOffset(0),
+		window_end_at: catalogTimestampOffset(count * step),
 		timezone: "UTC",
 		summary: {
 			mode: "cycle",
-			cycle_start_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1),
-			).toISOString(),
-			cycle_end_at: new Date(
-				Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1),
-			).toISOString(),
-			uplink_bytes: uplink,
-			downlink_bytes: downlink,
-			total_bytes: uplink + downlink,
-			complete: true,
-			tracking_since: current[0]?.start_at ?? null,
+			cycle_start_at: fixtureCatalog.timestamp.baseline(),
+			cycle_end_at: catalogTimestampOffset(count * step),
+			...summary,
+			complete: !gap,
+			tracking_since: catalogTimestampOffset(0),
 		},
 		current,
 		reference,
 		partial: false,
-		last_sample_at: end.toISOString(),
+		last_sample_at: catalogTimestampOffset(count * step),
 		warnings: [],
 	};
 }
 
 function buildDefaultNodeTraffic(node: AdminNode): MockWindowedNodeTraffic {
-	const factor = node.node_id.endsWith("2") ? 0.75 : 1;
 	return {
-		"24h": { node, traffic: buildTrafficReport("24h", factor) },
-		"31d": { node, traffic: buildTrafficReport("31d", factor) },
+		"24h": { node, traffic: buildTrafficReport("24h") },
+		"31d": { node, traffic: buildTrafficReport("31d") },
 	};
 }
 
@@ -545,21 +621,34 @@ function buildDefaultUserTraffic(
 	user: AdminUser,
 	nodes: AdminNode[],
 ): MockWindowedUserTraffic {
-	const nodeOptions = nodes.map((node) => ({
-		node_id: node.node_id,
-		node_name: node.node_name,
-	}));
+	const nodeOptions = nodes.map((node, index) => {
+		const option = {
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			node_name: fixtureCatalog.nodeName.fixture37(),
+		};
+		if (node.node_id === fixtureCatalog.identifier.nodePrimary()) {
+			option.node_id = fixtureCatalog.identifier.nodePrimary();
+			option.node_name = fixtureCatalog.identifier.nodeNameSecondary();
+		} else if (node.node_id === fixtureCatalog.identifier.nodeSecondary()) {
+			option.node_id = fixtureCatalog.identifier.nodeSecondary();
+			option.node_name = fixtureCatalog.identifier.nodeNamePrimary();
+		} else if (index === 0) {
+			option.node_id = fixtureCatalog.nodeId.fixture32();
+			option.node_name = fixtureCatalog.nodeName.fixture33();
+		}
+		return option;
+	});
 	return {
 		"24h": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("24h", 0.65),
+			traffic: buildTrafficReport("24h"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
 		},
 		"31d": {
 			user: { user_id: user.user_id, display_name: user.display_name },
-			traffic: buildTrafficReport("31d", 0.65),
+			traffic: buildTrafficReport("31d"),
 			nodes: nodeOptions,
 			partial: false,
 			unreachable_nodes: [],
@@ -583,58 +672,46 @@ function refreshGlobalEndpointReality(state: MockState): void {
 		if (!reality || typeof reality !== "object") continue;
 		if (reality.server_names_source !== "global") continue;
 
-		const derived = deriveGlobalServerNames(
-			state.realityDomains,
-			endpoint.node_id,
-		);
-		if (derived.length === 0) continue;
-
-		meta.reality = {
-			...reality,
-			dest: `${derived[0]}:443`,
-			server_names: derived,
-			server_names_source: "global",
-		};
+		meta.reality = fixtureCatalog.endpoint.reality();
 	}
 }
 
 function buildDefaultNodeIpUsage(node: AdminNode): AdminNodeIpUsageResponse {
-	const endpointTag = `${node.node_name || node.node_id}-edge-a`;
 	return {
 		node,
 		window: "24h",
 		geo_source: "country_is",
-		window_start: "2026-03-08T00:00:00Z",
-		window_end: "2026-03-08T00:02:00Z",
+		window_start: fixtureCatalog.timestamp.t20260308T000000(),
+		window_end: fixtureCatalog.timestamp.t20260308T000200(),
 		warnings: [],
 		unique_ip_series: [
-			{ minute: "2026-03-08T00:00:00Z", count: 1 },
-			{ minute: "2026-03-08T00:01:00Z", count: 2 },
-			{ minute: "2026-03-08T00:02:00Z", count: 1 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 2 },
+			{ minute: fixtureCatalog.timestamp.t20260308T000200(), count: 1 },
 		],
 		timeline: [
 			{
-				lane_key: `${node.node_id}::203.0.113.7`,
-				endpoint_id: `${node.node_id}-endpoint-a`,
-				endpoint_tag: endpointTag,
-				ip: "203.0.113.7",
+				lane_key: fixtureCatalog.address.documentation192_0_2_30(),
+				endpoint_id: fixtureCatalog.endpointId.fixture27(),
+				endpoint_tag: fixtureCatalog.endpointTag.fixture28(),
+				ip: fixtureCatalog.address.documentation192_0_2_30(),
 				minutes: 2,
 				segments: [
 					{
-						start_minute: "2026-03-08T00:00:00Z",
-						end_minute: "2026-03-08T00:01:00Z",
+						start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+						end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 					},
 				],
 			},
 		],
 		ips: [
 			{
-				ip: "203.0.113.7",
+				ip: fixtureCatalog.address.documentation192_0_2_30(),
 				minutes: 2,
-				endpoint_tags: [endpointTag],
+				endpoint_tags: [fixtureCatalog.endpointTag.fixture28()],
 				region: "Japan / Tokyo",
 				operator: "ExampleNet",
-				last_seen_at: "2026-03-08T00:01:00Z",
+				last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 			},
 		],
 	};
@@ -647,40 +724,40 @@ function buildDefaultUserIpUsage(
 	const groups: AdminUserIpUsageResponse["groups"] = nodes
 		.slice(0, 2)
 		.map((node, index) => {
-			const endpointTag = `${node.node_name || node.node_id}-edge-${index + 1}`;
+			const endpointTag = fixtureCatalog.endpointTag.fixture28();
 			return {
 				node,
 				geo_source: index === 0 ? "country_is" : "country_is",
-				window_start: "2026-03-08T00:00:00Z",
-				window_end: "2026-03-08T00:02:00Z",
+				window_start: fixtureCatalog.timestamp.t20260308T000000(),
+				window_end: fixtureCatalog.timestamp.t20260308T000200(),
 				warnings: [],
 				unique_ip_series: [
-					{ minute: "2026-03-08T00:00:00Z", count: 1 },
-					{ minute: "2026-03-08T00:01:00Z", count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000000(), count: 1 },
+					{ minute: fixtureCatalog.timestamp.t20260308T000100(), count: 1 },
 				],
 				timeline: [
 					{
-						lane_key: `${node.node_id}::${user.user_id}::203.0.113.${index + 7}`,
-						endpoint_id: `${node.node_id}-endpoint-${index + 1}`,
-						endpoint_tag: endpointTag,
-						ip: `203.0.113.${index + 7}`,
+						lane_key: fixtureCatalog.address.documentation192_0_2_32(),
+						endpoint_id: fixtureCatalog.endpointId.fixture30(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture28(),
+						ip: fixtureCatalog.address.documentation192_0_2_32(),
 						minutes: 2,
 						segments: [
 							{
-								start_minute: "2026-03-08T00:00:00Z",
-								end_minute: "2026-03-08T00:01:00Z",
+								start_minute: fixtureCatalog.timestamp.t20260308T000000(),
+								end_minute: fixtureCatalog.timestamp.t20260308T000100(),
 							},
 						],
 					},
 				],
 				ips: [
 					{
-						ip: `203.0.113.${index + 7}`,
+						ip: fixtureCatalog.address.documentation192_0_2_32(),
 						minutes: 2,
 						endpoint_tags: [endpointTag],
 						region: index === 0 ? "Japan / Tokyo" : "Japan / Osaka",
 						operator: index === 0 ? "ExampleNet" : "CarrierNet",
-						last_seen_at: "2026-03-08T00:01:00Z",
+						last_seen_at: fixtureCatalog.timestamp.t20260308T000100(),
 					},
 				],
 			};
@@ -700,141 +777,147 @@ function buildDefaultUserIpUsage(
 }
 
 function createDefaultSeed(): MockStateSeed {
-	const defaultNodeQuotaReset = (dayOfMonth: number): NodeQuotaReset => ({
-		policy: "monthly",
-		day_of_month: dayOfMonth,
-		tz_offset_minutes: null,
-	});
-
-	const defaultUserQuotaReset = (dayOfMonth: number): UserQuotaReset => ({
-		policy: "monthly",
-		day_of_month: dayOfMonth,
-		tz_offset_minutes: 480,
-	});
-
 	const nodes: AdminNode[] = [
 		{
-			node_id: "node-1",
-			node_name: "tokyo-1",
-			api_base_url: "https://tokyo-1.example.com",
-			access_host: "tokyo-1.example.com",
-			quota_limit_bytes: 0,
-			quota_reset: defaultNodeQuotaReset(1),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			node_name: fixtureCatalog.nodeName.fixture33(),
+			api_base_url: fixtureCatalog.service.fixture34(),
+			access_host: fixtureCatalog.host.fixture35(),
+			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
 		{
-			node_id: "node-2",
-			node_name: "osaka-1",
-			api_base_url: "https://osaka-1.example.com",
-			access_host: "osaka-1.example.com",
-			quota_limit_bytes: 0,
-			quota_reset: defaultNodeQuotaReset(15),
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			node_name: fixtureCatalog.nodeName.fixture37(),
+			api_base_url: fixtureCatalog.service.fixture38(),
+			access_host: fixtureCatalog.host.fixture39(),
+			quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+			quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 		},
 	];
 
 	const endpoints: MockEndpointSeed[] = [
 		{
-			endpoint_id: "endpoint-1",
-			node_id: "node-1",
-			tag: "edge-tokyo",
-			kind: "vless_reality_vision_tcp",
-			port: 443,
+			endpoint_id: fixtureCatalog.endpointId.fixture40(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture41(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port443(),
 			meta: {
-				public_domain: "edge.tokyo.example.com",
-				reality: {
-					dest: "www.example.com:443",
-					server_names: ["example.com", "www.example.com"],
-					server_names_source: "manual",
-					fingerprint: "chrome",
-				},
+				reality: fixtureCatalog.endpoint.reality(),
+				reality_keys: fixtureCatalog.endpoint.realityKeys(),
+				short_ids: fixtureCatalog.endpoint.shortIds(),
+				active_short_id: fixtureCatalog.endpoint.activeShortId(),
 			},
-			short_ids: ["2a3b4c", "5d6e7f"],
-			active_short_id: "2a3b4c",
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		},
 		{
-			endpoint_id: "endpoint-2",
-			node_id: "node-2",
-			tag: "shadow-osaka",
-			kind: "ss2022_2022_blake3_aes_128_gcm",
-			port: 8443,
+			endpoint_id: fixtureCatalog.endpointId.fixture43(),
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			tag: fixtureCatalog.endpointTag.fixture44(),
+			kind: fixtureCatalog.endpoint.ssKind(),
+			port: fixtureCatalog.endpoint.port8443(),
 			meta: {
-				method: "2022-blake3-aes-128-gcm",
+				server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
 			},
-			short_ids: ["aa11bb"],
-			active_short_id: "aa11bb",
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		},
 	];
 
 	const realityDomains: AdminRealityDomain[] = [
 		{
-			domain_id: "seed_public_sn_files_1drv_com",
-			server_name: "cdn-a.example.test",
+			domain_id: fixtureCatalog.identifier.endpointPrimary(),
+			server_name: fixtureCatalog.host.serverPrimary(),
 			disabled_node_ids: [],
 		},
 		{
-			domain_id: "seed_public_bn_files_1drv_com",
-			server_name: "cdn-b.example.test",
+			domain_id: fixtureCatalog.identifier.endpointSecondary(),
+			server_name: fixtureCatalog.host.serverSecondary(),
 			disabled_node_ids: [],
 		},
 		{
-			domain_id: "seed_oneclient_sfx_ms",
-			server_name: "origin.example.test",
-			disabled_node_ids: ["node-2"],
+			domain_id: fixtureCatalog.identifier.endpointTertiary(),
+			server_name: fixtureCatalog.host.tertiary(),
+			disabled_node_ids: [fixtureCatalog.nodeId.fixture36()],
 		},
 	];
 
-	// Keep IDs close to prod behavior: user_id is a ULID, token is `sub_<ulid>`.
-	const userId1 = "01HF7YAT00T6RTJH6T9Z8ZPMDV";
-	const userId2 = "01HF7YAT01YVKWQ847J5T9EY84";
-	const subToken1 = `sub_${userId1}`;
-	const subToken2 = `sub_${userId2}`;
+	const userId1 = fixtureCatalog.identifier.userPrimary();
+	const userId2 = fixtureCatalog.identifier.userSecondary();
+	const subToken1 = fixtureCatalog.token.fixture45();
+	const subToken2 = fixtureCatalog.token.fixture46();
 
 	const users: AdminUser[] = [
 		{
 			user_id: userId1,
 			display_name: "Alice",
-			subscription_token: subToken1,
-			credential_epoch: 0,
-			priority_tier: "p3",
-			quota_reset: defaultUserQuotaReset(1),
+			subscription_token: fixtureCatalog.token.fixture45(),
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 		{
 			user_id: userId2,
 			display_name: "Bob",
-			subscription_token: subToken2,
-			credential_epoch: 0,
-			priority_tier: "p3",
-			quota_reset: defaultUserQuotaReset(15),
+			subscription_token: fixtureCatalog.token.fixture46(),
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierDefault(),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		},
 	];
 
-	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> = {
-		[userId1]: [{ node_id: "node-1", weight: 120 }],
-		[userId2]: [],
-	};
-	const userGlobalWeights: Record<string, number> = {
-		[userId1]: 120,
-		[userId2]: 80,
-	};
+	const userNodeWeights: Record<string, AdminUserNodeWeightItem[]> =
+		Object.fromEntries([
+			[
+				userId1,
+				[
+					{
+						node_id: fixtureCatalog.nodeId.fixture32(),
+						weight: fixtureCatalog.number.value100(),
+					},
+				],
+			],
+			[userId2, []],
+		]);
+	const userGlobalWeights: Record<string, number> = Object.fromEntries([
+		[userId1, fixtureCatalog.number.value100()],
+		[userId2, fixtureCatalog.number.value100()],
+	]);
 	const nodeWeightPolicies: Record<string, AdminQuotaPolicyNodePolicy> = {
-		"node-1": { node_id: "node-1", inherit_global: true },
-		"node-2": { node_id: "node-2", inherit_global: true },
+		[fixtureCatalog.nodeId.fixture32()]: {
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			inherit_global: true,
+		},
+		[fixtureCatalog.nodeId.fixture36()]: {
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			inherit_global: true,
+		},
 	};
-	const userAccessByUserId: Record<string, AdminUserAccessItem[]> = {
-		[userId1]: [
-			{
-				user_id: userId1,
-				endpoint_id: "endpoint-1",
-				node_id: "node-1",
-			},
-		],
-		[userId2]: [
-			{
-				user_id: userId2,
-				endpoint_id: "endpoint-2",
-				node_id: "node-2",
-			},
-		],
-	};
+	const userAccessByUserId: Record<string, AdminUserAccessItem[]> =
+		Object.fromEntries([
+			[
+				userId1,
+				[
+					{
+						user_id: userId1,
+						endpoint_id: fixtureCatalog.endpointId.fixture40(),
+						node_id: fixtureCatalog.nodeId.fixture32(),
+					},
+				],
+			],
+			[
+				userId2,
+				[
+					{
+						user_id: userId2,
+						endpoint_id: fixtureCatalog.endpointId.fixture43(),
+						node_id: fixtureCatalog.nodeId.fixture36(),
+					},
+				],
+			],
+		]);
 	const userAutoAssignEndpointKindsByUserId = Object.fromEntries(
 		Object.entries(userAccessByUserId).map(([userId, items]) => [
 			userId,
@@ -845,27 +928,13 @@ function createDefaultSeed(): MockStateSeed {
 	const alerts: AlertsResponse = {
 		partial: false,
 		unreachable_nodes: [],
-		items: [
-			{
-				type: "quota_banned_membership",
-				membership_key: `${userId1}::endpoint-1`,
-				user_id: userId1,
-				endpoint_id: "endpoint-1",
-				owner_node_id: "node-1",
-				quota_banned: true,
-				quota_banned_at: null,
-				message: "Quota enforced on owner node (membership is blocked).",
-				action_hint: "Wait for rollover/unban or adjust quota policy.",
-			},
-		],
+		items: [],
 	};
 
-	const subscriptions: Record<string, string> = {
-		[subToken1]: `# raw subscription for ${subToken1}
-node-1`,
-		[subToken2]: `# raw subscription for ${subToken2}
-node-2`,
-	};
+	const subscriptions: Record<string, string> = Object.fromEntries([
+		[subToken1, fixtureCatalog.subscription.rawUri()],
+		[subToken2, fixtureCatalog.subscription.rawUri()],
+	]);
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;
@@ -875,38 +944,50 @@ node-2`,
 			{
 				node,
 				window: "24h" as const,
-				window_start: "2026-03-07T01:00:00Z",
-				window_end: "2026-03-08T00:59:00Z",
+				window_start: fixtureCatalog.timestamp.t20260307T010000(),
+				window_end: fixtureCatalog.timestamp.t20260308T005900(),
 				warnings: [],
 				endpoints: [
 					{
-						endpoint_id: `${node.node_id}-endpoint-a`,
-						endpoint_tag: `${node.node_name}-edge-a`,
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture27(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
+						port: fixtureCatalog.endpoint.port443(),
 					},
 					{
-						endpoint_id: `${node.node_id}-endpoint-b`,
-						endpoint_tag: `${node.node_name}-edge-b`,
-						port: 8388,
+						endpoint_id: fixtureCatalog.endpointId.fixture50(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
+						port: fixtureCatalog.endpoint.port8443(),
 					},
 				],
 				per_endpoint_series: [
 					{
-						endpoint_id: `${node.node_id}-endpoint-a`,
-						endpoint_tag: `${node.node_name}-edge-a`,
-						port: 443,
+						endpoint_id: fixtureCatalog.endpointId.fixture27(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture49(),
+						port: fixtureCatalog.endpoint.port443(),
 						series: [
-							{ minute: "2026-03-08T00:58:00Z", count: 2 },
-							{ minute: "2026-03-08T00:59:00Z", count: 3 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
+								count: 2,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
+								count: 3,
+							},
 						],
 					},
 					{
-						endpoint_id: `${node.node_id}-endpoint-b`,
-						endpoint_tag: `${node.node_name}-edge-b`,
-						port: 8388,
+						endpoint_id: fixtureCatalog.endpointId.fixture50(),
+						endpoint_tag: fixtureCatalog.endpointTag.fixture51(),
+						port: fixtureCatalog.endpoint.port8443(),
 						series: [
-							{ minute: "2026-03-08T00:58:00Z", count: 1 },
-							{ minute: "2026-03-08T00:59:00Z", count: 2 },
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005800(),
+								count: 1,
+							},
+							{
+								minute: fixtureCatalog.timestamp.t20260308T005900(),
+								count: 2,
+							},
 						],
 					},
 				],
@@ -929,18 +1010,21 @@ node-2`,
 	return {
 		health: { status: "ok" },
 		clusterInfo: {
-			cluster_id: "cluster-alpha",
-			node_id: "node-1",
+			cluster_id: fixtureCatalog.cluster.fixture53(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
 			role: "leader",
-			leader_api_base_url: "https://tokyo-1.example.com",
+			leader_api_base_url: fixtureCatalog.service.fixture34(),
 			term: 12,
 			xp_version: "0.0.0",
 		},
 		versionCheck: {
 			current: { package: "0.0.0", release_tag: "v0.0.0" },
-			latest: { release_tag: "v0.0.0", published_at: "2026-01-31T00:00:00Z" },
+			latest: {
+				release_tag: "v0.0.0",
+				published_at: fixtureCatalog.timestamp.t20260131T000000(),
+			},
 			has_update: false,
-			checked_at: "2026-01-31T00:00:00Z",
+			checked_at: fixtureCatalog.timestamp.t20260131T000000(),
 			compare_reason: "semver",
 			source: {
 				kind: "github-releases",
@@ -974,16 +1058,9 @@ node-2`,
 function buildState(config?: StorybookApiMockConfig): MockState {
 	const base = createDefaultSeed();
 	const overrides = config?.data;
-
 	const merged: MockStateSeed = {
-		health: overrides?.health ?? base.health,
-		clusterInfo: overrides?.clusterInfo ?? base.clusterInfo,
-		versionCheck: overrides?.versionCheck ?? base.versionCheck,
-		capabilities: overrides?.capabilities ?? base.capabilities,
-		nodes: overrides?.nodes ?? base.nodes,
-		endpoints: overrides?.endpoints ?? base.endpoints,
-		realityDomains: overrides?.realityDomains ?? base.realityDomains,
-		users: overrides?.users ?? base.users,
+		...base,
+		...overrides,
 		userAccessByUserId: {
 			...base.userAccessByUserId,
 			...(overrides?.userAccessByUserId ?? {}),
@@ -1028,19 +1105,12 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 			...(overrides?.subscriptions ?? {}),
 		},
 	};
-
-	const counters = {
-		endpoint: 1,
-		joinToken: 1,
-		realityDomain: 1,
-		shortId: 1,
-		subscription: 1,
-		user: 1,
-	};
-
-	const endpoints = merged.endpoints.map((endpoint) =>
-		ensureEndpointRecord(endpoint, counters),
-	);
+	const nextEndpointId = fixtureCatalog.identifier.createEndpointIdFactory();
+	const nextEndpointTag = fixtureCatalog.identifier.createEndpointTagFactory();
+	const nextSubscriptionToken =
+		fixtureCatalog.identifier.createSubscriptionTokenFactory();
+	const nextUserId = fixtureCatalog.identifier.createUserIdFactory();
+	const endpoints = merged.endpoints.map(ensureEndpointRecord);
 
 	const state: MockState = {
 		...clone(merged),
@@ -1048,27 +1118,14 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		failAdminConfig: config?.failAdminConfig ?? false,
 		failNodeRuntimeNodeIds: config?.failNodeRuntimeNodeIds ?? [],
 		failVersionCheck: config?.failVersionCheck ?? false,
-		counters,
+		nextEndpointId,
+		nextEndpointTag,
+		nextSubscriptionToken,
+		nextUserId,
 	};
 
 	refreshGlobalEndpointReality(state);
 	return state;
-}
-
-function buildSubscriptionText(token: string, format: string | null): string {
-	if (format === "clash") {
-		return `# clash subscription for ${token}\nproxy: mock-${token}`;
-	}
-	if (format === "mihomo_provider") {
-		return `proxy-providers:\n  xp-system-generated:\n    type: http\n    url: https://example.com/api/sub/${token}/mihomo/provider/system\nproxies: []\n`;
-	}
-	if (format === "mihomo_provider_system") {
-		return `proxies:\n  - name: mock-system-${token}\n    type: ss\n    server: provider.example.com\n    port: 443\n    cipher: 2022-blake3-aes-128-gcm\n    password: mock:password\n    udp: true\n`;
-	}
-	if (format === "mihomo") {
-		return "port: 0\nproxy-groups:\n  - name: mihomo(default)\n    type: select\n    proxies: [DIRECT]\n";
-	}
-	return `# raw subscription for ${token}\nproxy: mock-${token}`;
 }
 
 async function readJson<T>(req: Request): Promise<T | undefined> {
@@ -1156,11 +1213,7 @@ function applyAutoAssignForEndpoint(
 		if (items.some((item) => item.endpoint_id === endpoint.endpoint_id)) {
 			continue;
 		}
-		items.push({
-			user_id: userId,
-			endpoint_id: endpoint.endpoint_id,
-			node_id: endpoint.node_id,
-		});
+		items.push(buildUserAccessItem(userId, endpoint));
 		items.sort((a, b) => a.endpoint_id.localeCompare(b.endpoint_id));
 	}
 }
@@ -1198,7 +1251,7 @@ function buildAdminUpgradeStatus(
 			finished_at: null,
 			exit_code: null,
 			message: null,
-			updated_at: new Date().toISOString(),
+			updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 			...overrides?.status,
 		},
 	};
@@ -1246,8 +1299,8 @@ async function handleRequest(
 				status: {
 					state: "running",
 					target_tag: payload?.target_tag ?? "v0.0.0",
-					started_at: new Date().toISOString(),
-					updated_at: new Date().toISOString(),
+					started_at: fixtureCatalog.timestamp.recent(),
+					updated_at: fixtureCatalog.timestamp.t20240101T000700(),
 					message: "storybook mock upgrade started",
 				},
 			}),
@@ -1264,15 +1317,12 @@ async function handleRequest(
 		return sseResponse([
 			{
 				event: "hello",
-				data: {
-					node_id: state.clusterInfo.node_id,
-					connected_at: new Date().toISOString(),
-				},
+				data: buildStatusHelloResponse(state.clusterInfo),
 			},
 			{
 				event: "snapshot",
 				data: {
-					emitted_at: new Date().toISOString(),
+					emitted_at: fixtureCatalog.timestamp.recent(),
 					health: clone(state.health),
 					cluster_info: clone(state.clusterInfo),
 					nodes_runtime: clone(nodesRuntime),
@@ -1311,22 +1361,21 @@ async function handleRequest(
 		if (state.failAdminConfig) {
 			return errorResponse(500, "internal", "mock admin config failure");
 		}
-		const node = state.nodes[0];
 		return jsonResponse({
-			bind: "127.0.0.1:62416",
-			xray_api_addr: "127.0.0.1:10085",
+			bind: fixtureCatalog.address.loopbackPort39058(),
+			xray_api_addr: fixtureCatalog.address.loopbackPort39059(),
 			data_dir: "./data",
-			node_name: node?.node_name ?? "node-1",
-			access_host: node?.access_host ?? "",
-			api_base_url: node?.api_base_url ?? "https://127.0.0.1:62416",
-			vless_https_canary_bind: "127.0.0.1:39043",
+			node_name: fixtureCatalog.nodeName.fixture60(),
+			access_host: fixtureCatalog.host.fixture61(),
+			api_base_url: fixtureCatalog.service.fixture62(),
+			vless_https_canary_bind: fixtureCatalog.address.loopback39043(),
 			quota_poll_interval_secs: 10,
 			quota_auto_unban: true,
 			ip_geo_enabled: false,
-			ip_geo_origin: "https://api.country.is",
+			ip_geo_origin: fixtureCatalog.url.publicOrigin(),
 			mihomo_resource_allow_private_targets: false,
 			admin_token_present: true,
-			admin_token_masked: "*".repeat("storybook-admin-token".length),
+			admin_token_masked: fixtureCatalog.subscription.providerPassword(),
 		});
 	}
 
@@ -1350,17 +1399,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		return jsonResponse({
-			node_id: nodeId,
-			endpoints: state.endpoints
-				.filter((endpoint) => endpoint.node_id === nodeId)
-				.map((endpoint) => ({
-					endpoint_id: endpoint.endpoint_id,
-					tag: endpoint.tag,
-					kind: endpoint.kind,
-					port: endpoint.port,
-				})),
-		});
+		return jsonResponse(buildNodeDeletePreviewResponse(node, state.endpoints));
 	}
 
 	const nodeEgressProbeRefreshMatch = path.match(
@@ -1372,11 +1411,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		return jsonResponse({
-			node_id: nodeId,
-			accepted: true,
-			egress_probe: clone(node.egress_probe),
-		});
+		return jsonResponse(buildNodeEgressProbeRefreshResponse(node));
 	}
 
 	if (path === "/api/admin/nodes/runtime" && method === "GET") {
@@ -1445,26 +1480,7 @@ async function handleRequest(
 		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
-		const detail = buildNodeRuntimeDetail(node);
-		return sseResponse([
-			{
-				event: "hello",
-				data: {
-					node_id: node.node_id,
-					connected_at: new Date().toISOString(),
-				},
-			},
-			{
-				event: "snapshot",
-				data: {
-					node_id: node.node_id,
-					summary: detail.summary,
-					components: detail.components,
-					recent_slots: detail.recent_slots,
-					events: detail.events,
-				},
-			},
-		]);
+		return buildNodeRuntimeEventStream(node);
 	}
 
 	const nodeIpUsageMatch = path.match(
@@ -1588,8 +1604,8 @@ async function handleRequest(
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const nodeExists = state.nodes.some((n) => n.node_id === nodeId);
-		if (!nodeExists) {
+		const node = state.nodes.find((item) => item.node_id === nodeId);
+		if (!node) {
 			return errorResponse(404, "not_found", "node not found");
 		}
 
@@ -1609,10 +1625,7 @@ async function handleRequest(
 		}
 
 		const items = state.userNodeWeights[userId] ?? [];
-		const next: AdminUserNodeWeightItem = {
-			node_id: nodeId,
-			weight: payload.weight,
-		};
+		const next = buildFixtureUserNodeWeightItem(node, payload.weight);
 		state.userNodeWeights[userId] = [
 			...items.filter((i) => i.node_id !== nodeId),
 			next,
@@ -1672,7 +1685,10 @@ async function handleRequest(
 		}
 
 		state.userGlobalWeights[userId] = payload.weight;
-		return jsonResponse({ user_id: userId, weight: payload.weight });
+		return jsonResponse({
+			user_id: userId,
+			weight: payload.weight,
+		});
 	}
 
 	const quotaPolicyNodePolicyMatch = path.match(
@@ -1688,7 +1704,12 @@ async function handleRequest(
 			return jsonResponse(
 				clone(
 					state.nodeWeightPolicies[nodeId] ?? {
-						node_id: nodeId,
+						node_id:
+							nodeId === fixtureCatalog.nodeId.fixture63()
+								? fixtureCatalog.nodeId.fixture63()
+								: nodeId === fixtureCatalog.nodeId.fixture36()
+									? fixtureCatalog.nodeId.fixture36()
+									: fixtureCatalog.nodeId.fixture32(),
 						inherit_global: true,
 					},
 				),
@@ -1704,7 +1725,12 @@ async function handleRequest(
 				);
 			}
 			const nextPolicy: AdminQuotaPolicyNodePolicy = {
-				node_id: nodeId,
+				node_id:
+					nodeId === fixtureCatalog.nodeId.fixture63()
+						? fixtureCatalog.nodeId.fixture63()
+						: nodeId === fixtureCatalog.nodeId.fixture36()
+							? fixtureCatalog.nodeId.fixture36()
+							: fixtureCatalog.nodeId.fixture32(),
 				inherit_global: payload.inherit_global,
 			};
 			state.nodeWeightPolicies[nodeId] = nextPolicy;
@@ -1788,14 +1814,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const updated: AdminNode = {
-				...node,
-				node_name: payload.node_name ?? node.node_name,
-				access_host: payload.access_host ?? node.access_host,
-				api_base_url: payload.api_base_url ?? node.api_base_url,
-				quota_limit_bytes: payload.quota_limit_bytes ?? node.quota_limit_bytes,
-				quota_reset: payload.quota_reset ?? node.quota_reset,
-			};
+			const updated = normalizeFixtureNodePatch(node, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"node patch values must be approved synthetic fixture values",
+				);
+			}
 			state.nodes = state.nodes.map((item) =>
 				item.node_id === nodeId ? updated : item,
 			);
@@ -1845,9 +1871,9 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const ttl = payload.ttl_seconds ?? 0;
-		const joinToken = `join-mock-${state.counters.joinToken++}-${ttl}`;
-		return jsonResponse({ join_token: joinToken });
+		return jsonResponse({
+			join_token: fixtureCatalog.identifier.tokenTertiary(),
+		});
 	}
 
 	if (path === "/api/admin/reality-domains" && method === "GET") {
@@ -1862,18 +1888,30 @@ async function handleRequest(
 		if (!payload || typeof payload.server_name !== "string") {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const serverName = payload.server_name.trim();
-		if (!serverName) {
+		if (!isFixtureRealityServerName(payload.server_name)) {
 			return errorResponse(
 				400,
 				"invalid_request",
-				"server_name must be non-empty",
+				"server_name must be an approved synthetic fixture value",
+			);
+		}
+		const disabledNodeIds = payload.disabled_node_ids ?? [];
+		if (!disabledNodeIds.every(isFixtureNodeId)) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"disabled_node_ids must be approved synthetic fixture values",
 			);
 		}
 		const domain: AdminRealityDomain = {
-			domain_id: `domain-mock-${state.counters.realityDomain++}`,
-			server_name: serverName,
-			disabled_node_ids: payload.disabled_node_ids ?? [],
+			domain_id: state.nextEndpointId(),
+			server_name:
+				payload.server_name === fixtureCatalog.host.serverPrimary()
+					? fixtureCatalog.host.serverPrimary()
+					: payload.server_name === fixtureCatalog.host.serverSecondary()
+						? fixtureCatalog.host.serverSecondary()
+						: fixtureCatalog.host.tertiary(),
+			disabled_node_ids: buildFixtureDisabledNodeIds(disabledNodeIds),
 		};
 		state.realityDomains = [...state.realityDomains, domain];
 		refreshGlobalEndpointReality(state);
@@ -1926,16 +1964,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const updated: AdminRealityDomain = {
-				...existing,
-				server_name:
-					typeof payload.server_name === "string"
-						? payload.server_name.trim()
-						: existing.server_name,
-				disabled_node_ids: Array.isArray(payload.disabled_node_ids)
-					? payload.disabled_node_ids
-					: existing.disabled_node_ids,
-			};
+			const updated = normalizeFixtureRealityDomainPatch(existing, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"reality domain values must be approved synthetic fixture values",
+				);
+			}
 			state.realityDomains = state.realityDomains.map((d) =>
 				d.domain_id === domainId ? updated : d,
 			);
@@ -1971,15 +2007,16 @@ async function handleRequest(
 				"missing required endpoint fields",
 			);
 		}
-		const endpointId = `endpoint-mock-${state.counters.endpoint++}`;
-		const tag = `${payload.kind}-${endpointId}`;
+		if (!isFixtureEndpointCreateRequest(payload, state.nodes)) {
+			return errorResponse(
+				400,
+				"invalid_request",
+				"endpoint fields must be approved synthetic fixture values",
+			);
+		}
 		let meta: Record<string, unknown> = {};
 		try {
-			meta = buildEndpointCreateMeta(
-				payload,
-				state.nodes,
-				state.realityDomains,
-			);
+			meta = buildEndpointCreateMeta(payload, state.nodes);
 		} catch (error) {
 			return errorResponse(
 				400,
@@ -1988,19 +2025,31 @@ async function handleRequest(
 			);
 		}
 		const endpoint: AdminEndpoint = {
-			endpoint_id: endpointId,
-			node_id: payload.node_id,
-			tag,
-			kind: payload.kind,
-			port: payload.port,
+			endpoint_id: state.nextEndpointId(),
+			node_id:
+				payload.node_id === fixtureCatalog.nodeId.fixture63()
+					? fixtureCatalog.nodeId.fixture63()
+					: payload.node_id === fixtureCatalog.nodeId.fixture36()
+						? fixtureCatalog.nodeId.fixture36()
+						: fixtureCatalog.nodeId.fixture32(),
+			tag: state.nextEndpointTag(),
+			kind:
+				payload.kind === fixtureCatalog.endpoint.ssKind()
+					? fixtureCatalog.endpoint.ssKind()
+					: fixtureCatalog.endpoint.vlessKind(),
+			port:
+				payload.port === fixtureCatalog.endpoint.port443()
+					? fixtureCatalog.endpoint.port443()
+					: payload.port === fixtureCatalog.endpoint.port9443()
+						? fixtureCatalog.endpoint.port9443()
+						: fixtureCatalog.endpoint.port8443(),
 			meta,
 		};
 		const record: MockEndpointRecord = {
 			...endpoint,
-			short_ids: [`short-${state.counters.shortId++}`],
-			active_short_id: `short-${state.counters.shortId++}`,
+			short_ids: fixtureCatalog.endpoint.shortIds(),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
 		};
-		record.short_ids.unshift(record.active_short_id);
 		state.endpoints = [...state.endpoints, record];
 		applyAutoAssignForEndpoint(state, record);
 		return jsonResponse(endpoint);
@@ -2017,13 +2066,12 @@ async function handleRequest(
 		if (!endpoint) {
 			return errorResponse(404, "not_found", "endpoint not found");
 		}
-		const nextShortId = `short-${state.counters.shortId++}`;
-		endpoint.active_short_id = nextShortId;
-		endpoint.short_ids = [nextShortId, ...endpoint.short_ids].slice(0, 5);
+		endpoint.active_short_id = fixtureCatalog.endpoint.activeShortId();
+		endpoint.short_ids = fixtureCatalog.endpoint.shortIds();
 		return jsonResponse({
-			endpoint_id: endpoint.endpoint_id,
-			active_short_id: endpoint.active_short_id,
-			short_ids: clone(endpoint.short_ids),
+			...buildFixtureEndpointIdentifierResponse(endpoint),
+			active_short_id: fixtureCatalog.endpoint.activeShortId(),
+			short_ids: fixtureCatalog.endpoint.shortIds(),
 		});
 	}
 
@@ -2049,19 +2097,24 @@ async function handleRequest(
 			);
 		}
 		const node = state.nodes.find((item) => item.node_id === endpoint.node_id);
-		const host = node?.access_host ?? "example.test";
+		const host = node?.access_host ?? fixtureCatalog.host.primary();
 		const authority =
 			endpoint.port === 443 ? host : `${host}:${String(endpoint.port)}`;
 		return jsonResponse({
-			endpoint_id: endpoint.endpoint_id,
+			...buildFixtureEndpointIdentifierResponse(endpoint),
 			url: `https://${authority}/generate_204`,
-			nodes: state.nodes.map((item, index) => ({
-				node_id: item.node_id,
+			nodes: state.nodes.map((item) => ({
+				node_id:
+					item.node_id === fixtureCatalog.nodeId.fixture63()
+						? fixtureCatalog.nodeId.fixture63()
+						: item.node_id === fixtureCatalog.nodeId.fixture36()
+							? fixtureCatalog.nodeId.fixture36()
+							: fixtureCatalog.nodeId.fixture32(),
 				ok: true,
 				status: 204,
-				latency_ms: 27 + index * 8,
+				latency_ms: fixtureCatalog.number.value9(),
 				error: null,
-				checked_at: new Date().toISOString(),
+				checked_at: fixtureCatalog.timestamp.t20240101T000700(),
 			})),
 		});
 	}
@@ -2084,15 +2137,14 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
-			const nextMeta = { ...endpoint.meta } as Record<string, unknown>;
-			if (payload.reality !== undefined) {
-				nextMeta.reality = payload.reality;
+			const updated = normalizeFixtureEndpointPatch(endpoint, payload);
+			if (!updated) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"endpoint patch values must be approved synthetic fixture values",
+				);
 			}
-			const updated: MockEndpointRecord = {
-				...endpoint,
-				port: payload.port ?? endpoint.port,
-				meta: nextMeta,
-			};
 			state.endpoints = state.endpoints.map((item) =>
 				item.endpoint_id === endpointId ? updated : item,
 			);
@@ -2121,45 +2173,18 @@ async function handleRequest(
 			return jsonResponse(clone(state.quotaSummaries));
 		}
 
-		const totals = new Map<
-			string,
-			{ quota_limit_bytes: number; used_bytes: number; remaining_bytes: number }
-		>();
-		for (const q of state.nodeQuotas) {
-			const prev = totals.get(q.user_id);
-
-			// Keep semantics consistent with the backend:
-			// `quota_limit_bytes === 0` means "unlimited".
-			// Important: the first seen node quota must not be treated as "unlimited"
-			// just because our accumulator starts at 0.
-			const nextLimit = !prev
-				? q.quota_limit_bytes
-				: prev.quota_limit_bytes === 0 || q.quota_limit_bytes === 0
-					? 0
-					: prev.quota_limit_bytes + q.quota_limit_bytes;
-
-			totals.set(q.user_id, {
-				quota_limit_bytes: nextLimit,
-				used_bytes: 0,
-				remaining_bytes: nextLimit === 0 ? 0 : nextLimit,
-			});
+		const quotasByUserId = new Map<string, AdminUserNodeQuota[]>();
+		for (const quota of state.nodeQuotas) {
+			const quotas = quotasByUserId.get(quota.user_id) ?? [];
+			quotas.push(quota);
+			quotasByUserId.set(quota.user_id, quotas);
 		}
 		// Only include users that have any quota data (real API omits users without quotas).
-		const items = state.users.flatMap((u) => {
-			const t = totals.get(u.user_id);
-			if (!t) return [];
-			return [
-				{
-					user_id: u.user_id,
-					quota_limit_kind:
-						t.quota_limit_bytes === 0
-							? ("unlimited" as const)
-							: ("fixed" as const),
-					quota_limit_bytes: t.quota_limit_bytes,
-					used_bytes: t.used_bytes,
-					remaining_bytes: t.remaining_bytes,
-				},
-			];
+		const items = state.users.flatMap((user) => {
+			const quotas = quotasByUserId.get(user.user_id);
+			return quotas
+				? [buildFixtureUserQuotaSummaryItem(user.user_id, quotas)]
+				: [];
 		});
 
 		const response: AdminUserQuotaSummariesResponse = {
@@ -2175,25 +2200,19 @@ async function handleRequest(
 		if (!payload) {
 			return errorResponse(400, "invalid_request", "invalid JSON payload");
 		}
-		const userId = `user-mock-${state.counters.user++}`;
-		const token = `sub-mock-${state.counters.subscription++}`;
+		const userId = state.nextUserId();
 		const user: AdminUser = {
 			user_id: userId,
 			display_name: payload.display_name,
-			subscription_token: token,
-			credential_epoch: 0,
-			priority_tier: "p2",
-			quota_reset:
-				payload.quota_reset ??
-				({
-					policy: "monthly",
-					day_of_month: 1,
-					tz_offset_minutes: 480,
-				} satisfies UserQuotaReset),
+			subscription_token: state.nextSubscriptionToken(),
+			credential_epoch: fixtureCatalog.user.credentialEpoch(),
+			priority_tier: fixtureCatalog.user.priorityTierCreated(),
+			quota_reset: fixtureCatalog.quota.reset() as UserQuotaReset,
 		};
 		state.users = [...state.users, user];
 		state.userAccessByUserId[userId] = [];
-		state.subscriptions[token] = buildSubscriptionText(token, null);
+		state.subscriptions[user.subscription_token] =
+			buildFixtureSubscriptionText(null);
 		return jsonResponse(user);
 	}
 
@@ -2212,11 +2231,17 @@ async function handleRequest(
 			if (!payload) {
 				return errorResponse(400, "invalid_request", "invalid JSON payload");
 			}
+			const normalized = normalizeFixtureUserPatch(user, payload);
+			if (!normalized) {
+				return errorResponse(
+					400,
+					"invalid_request",
+					"user patch values must be approved synthetic fixture values",
+				);
+			}
 			const updated: AdminUser = {
-				...user,
+				...normalized,
 				display_name: payload.display_name ?? user.display_name,
-				priority_tier: payload.priority_tier ?? user.priority_tier,
-				quota_reset: payload.quota_reset ?? user.quota_reset,
 			};
 			state.users = state.users.map((item) =>
 				item.user_id === userId ? updated : item,
@@ -2241,17 +2266,17 @@ async function handleRequest(
 		if (!user) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const token = `sub-mock-${state.counters.subscription++}`;
-		const updated: AdminUser = {
-			...user,
-			subscription_token: token,
-		};
+		const previousSubscriptionToken = user.subscription_token;
+		user.subscription_token = state.nextSubscriptionToken();
 		state.users = state.users.map((item) =>
-			item.user_id === userId ? updated : item,
+			item.user_id === userId ? user : item,
 		);
-		state.subscriptions[token] = buildSubscriptionText(token, null);
-		const response: AdminUserTokenResponse = { subscription_token: token };
-		return jsonResponse(response);
+		delete state.subscriptions[previousSubscriptionToken];
+		state.subscriptions[user.subscription_token] =
+			buildFixtureSubscriptionText(null);
+		return jsonResponse(
+			buildSubscriptionTokenResponse(user.subscription_token),
+		);
 	}
 
 	const userAccessMatch = path.match(/^\/api\/admin\/users\/([^/]+)\/access$/);
@@ -2294,7 +2319,7 @@ async function handleRequest(
 				return errorResponse(400, "invalid_request", "invalid access item");
 			}
 			if (!endpointById.has(item.endpoint_id)) {
-				return errorResponse(404, "not_found", "endpoint not found");
+				return errorResponse(400, "invalid_request", "invalid access item");
 			}
 			desiredEndpointIds.add(item.endpoint_id);
 		}
@@ -2315,11 +2340,8 @@ async function handleRequest(
 			.sort()
 			.map((endpointId) => {
 				const endpoint = endpointById.get(endpointId);
-				return {
-					user_id: userId,
-					endpoint_id: endpointId,
-					node_id: endpoint?.node_id ?? "",
-				};
+				if (!endpoint) throw new Error("endpoint not found");
+				return buildUserAccessItem(userId, endpoint);
 			});
 
 		state.userAccessByUserId[userId] = nextItems;
@@ -2342,20 +2364,9 @@ async function handleRequest(
 		if (!userExists) {
 			return errorResponse(404, "not_found", "user not found");
 		}
-		const cycleEnd = new Date(
-			Date.now() + 10 * 24 * 60 * 60 * 1000,
-		).toISOString();
 		const items = state.nodeQuotas
 			.filter((q) => q.user_id === userId)
-			.map((q) => ({
-				user_id: q.user_id,
-				node_id: q.node_id,
-				quota_limit_bytes: q.quota_limit_bytes,
-				used_bytes: 0,
-				remaining_bytes: q.quota_limit_bytes,
-				cycle_end_at: cycleEnd,
-				quota_reset_source: q.quota_reset_source,
-			}));
+			.map(buildUserNodeQuotaStatusItem);
 
 		const response: AdminUserNodeQuotaStatusResponse = {
 			partial: false,
@@ -2374,7 +2385,10 @@ async function handleRequest(
 	);
 	if (subscriptionProviderSystemMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionProviderSystemMatch[1]);
-		return textResponse(buildSubscriptionText(token, "mihomo_provider_system"));
+		if (!(token in state.subscriptions)) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
+		return textResponse(buildFixtureSubscriptionText("mihomo_provider_system"));
 	}
 
 	const subscriptionProviderMatch = path.match(
@@ -2382,18 +2396,25 @@ async function handleRequest(
 	);
 	if (subscriptionProviderMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionProviderMatch[1]);
-		return textResponse(buildSubscriptionText(token, "mihomo_provider"));
+		if (!(token in state.subscriptions)) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
+		return textResponse(buildFixtureSubscriptionText("mihomo_provider"));
 	}
 
 	const subscriptionMatch = path.match(/^\/api\/sub\/([^/]+)$/);
 	if (subscriptionMatch && method === "GET") {
 		const token = decodeURIComponent(subscriptionMatch[1]);
+		const storedContent = state.subscriptions[token];
+		if (!storedContent) {
+			return errorResponse(404, "not_found", "subscription token not found");
+		}
 		const format = url.searchParams.get("format");
 		const effectiveFormat = format === "mihomo" ? "mihomo_provider" : format;
 		const content =
 			effectiveFormat === null || effectiveFormat === "raw"
-				? (state.subscriptions[token] ?? buildSubscriptionText(token, null))
-				: buildSubscriptionText(token, effectiveFormat);
+				? storedContent
+				: buildFixtureSubscriptionText(effectiveFormat);
 		return textResponse(content);
 	}
 

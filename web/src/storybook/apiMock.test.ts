@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { NodeQuotaReset } from "../api/quotaReset";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
-import { createMockApi } from "../../.storybook/mocks/apiMock";
+import {
+	type MockEndpointSeed,
+	createMockApi,
+} from "../../.storybook/mocks/apiMock";
 
 const baseUrl = "http://localhost";
 
@@ -27,17 +32,13 @@ describe("storybook api mock", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					display_name: "New User",
-					quota_reset: {
-						policy: "monthly",
-						day_of_month: 7,
-						tz_offset_minutes: 480,
-					},
+					quota_reset: fixtureCatalog.quota.reset(),
 				}),
 			}),
 		);
 		expect(createRes.ok).toBe(true);
 		const created = (await createRes.json()) as { user_id: string };
-		expect(created.user_id).toContain("user-mock-");
+		expect(created.user_id).toBe(fixtureCatalog.identifier.userTertiary());
 
 		const patchRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${created.user_id}`, {
@@ -69,6 +70,70 @@ describe("storybook api mock", () => {
 		expect(listDataAfter.items.length).toBe(initialCount);
 	});
 
+	it("keeps created and reset subscription tokens backed by their text", async () => {
+		const mock = createMockApi();
+		const firstCreateRes = await mock.handle(
+			jsonRequest("/api/admin/users", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ display_name: "First fixture user" }),
+			}),
+		);
+		const secondCreateRes = await mock.handle(
+			jsonRequest("/api/admin/users", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ display_name: "Second fixture user" }),
+			}),
+		);
+		expect(firstCreateRes.ok).toBe(true);
+		expect(secondCreateRes.ok).toBe(true);
+
+		const firstUser = (await firstCreateRes.json()) as {
+			user_id: string;
+			subscription_token: string;
+		};
+		const secondUser = (await secondCreateRes.json()) as {
+			subscription_token: string;
+		};
+		expect(firstUser.subscription_token).not.toBe(
+			secondUser.subscription_token,
+		);
+
+		for (const token of [
+			firstUser.subscription_token,
+			secondUser.subscription_token,
+		]) {
+			const subscriptionRes = await mock.handle(
+				jsonRequest(`/api/sub/${encodeURIComponent(token)}`, { method: "GET" }),
+			);
+			expect(subscriptionRes.ok).toBe(true);
+			expect(await subscriptionRes.text()).toBe(
+				fixtureCatalog.subscription.rawUri(),
+			);
+		}
+
+		const resetRes = await mock.handle(
+			jsonRequest(`/api/admin/users/${firstUser.user_id}/reset-token`, {
+				method: "POST",
+			}),
+		);
+		expect(resetRes.ok).toBe(true);
+		const reset = (await resetRes.json()) as { subscription_token: string };
+		expect(reset.subscription_token).not.toBe(firstUser.subscription_token);
+		expect(reset.subscription_token).not.toBe(secondUser.subscription_token);
+
+		const resetSubscriptionRes = await mock.handle(
+			jsonRequest(`/api/sub/${encodeURIComponent(reset.subscription_token)}`, {
+				method: "GET",
+			}),
+		);
+		expect(resetSubscriptionRes.ok).toBe(true);
+		expect(await resetSubscriptionRes.text()).toBe(
+			fixtureCatalog.subscription.rawUri(),
+		);
+	});
+
 	it("supports user access hard-cut replace", async () => {
 		const mock = createMockApi();
 
@@ -79,7 +144,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listRes = await mock.handle(
@@ -104,7 +170,7 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						},
 					],
 				}),
@@ -119,7 +185,9 @@ describe("storybook api mock", () => {
 		};
 		expect(replaced.created + replaced.deleted).toBeGreaterThanOrEqual(0);
 		expect(replaced.items).toHaveLength(1);
-		expect(replaced.items[0]?.endpoint_id).toBe("endpoint-1");
+		expect(replaced.items[0]?.endpoint_id).toBe(
+			fixtureCatalog.endpointId.fixture40(),
+		);
 		expect(replaced.items[0]?.user_id).toBe(userId);
 		expect(replaced.items[0]?.node_id.length).toBeGreaterThan(0);
 		expect(replaced.auto_assign_endpoint_kinds).toEqual([
@@ -168,7 +236,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
@@ -178,9 +247,9 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						},
-						{ endpoint_id: "" },
+						{ endpoint_id: fixtureCatalog.host.fixture99() },
 					],
 				}),
 			}),
@@ -201,7 +270,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const replaceRes = await mock.handle(
@@ -211,10 +281,10 @@ describe("storybook api mock", () => {
 				body: JSON.stringify({
 					items: [
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						},
 						{
-							endpoint_id: "endpoint-1",
+							endpoint_id: fixtureCatalog.endpointId.fixture40(),
 						},
 					],
 				}),
@@ -226,7 +296,9 @@ describe("storybook api mock", () => {
 			auto_assign_endpoint_kinds: string[];
 		};
 		expect(
-			payload.items.filter((i) => i.endpoint_id === "endpoint-1"),
+			payload.items.filter(
+				(i) => i.endpoint_id === fixtureCatalog.endpointId.fixture40(),
+			),
 		).toHaveLength(1);
 		expect(payload.auto_assign_endpoint_kinds).toEqual([
 			"vless_reality_vision_tcp",
@@ -242,8 +314,10 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const vlessUserId = usersData.items[0]?.user_id ?? "";
-		const ssUserId = usersData.items[1]?.user_id ?? "";
+		const vlessUserId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
+		const ssUserId =
+			usersData.items[1]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(vlessUserId.length).toBeGreaterThan(0);
 		expect(ssUserId.length).toBeGreaterThan(0);
 
@@ -252,14 +326,11 @@ describe("storybook api mock", () => {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					node_id: "node-1",
-					kind: "vless_reality_vision_tcp",
-					port: 9443,
-					canary_upstream: {
-						url: "http://127.0.0.1:8080",
-						mode: "auto",
-					},
-					accepted_authorities: ["EDGE.EXAMPLE.COM."],
+					node_id: fixtureCatalog.nodeId.fixture32(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port9443(),
+					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
+					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				}),
 			}),
 		);
@@ -274,12 +345,14 @@ describe("storybook api mock", () => {
 		};
 		expect(createdEndpoint.meta.managed_default).toBe(true);
 		expect(createdEndpoint.meta.reality.server_names).toEqual([
-			"tokyo-1.example.com",
+			fixtureCatalog.host.fixture35(),
 		]);
-		expect(createdEndpoint.meta.reality.dest).toBe("127.0.0.1:39043");
-		expect(createdEndpoint.meta.accepted_authorities).toEqual([
-			"edge.example.com:443",
-		]);
+		expect(createdEndpoint.meta.reality.dest).toBe(
+			fixtureCatalog.address.loopback39043(),
+		);
+		expect(createdEndpoint.meta.accepted_authorities).toEqual(
+			fixtureCatalog.authority.edgeExamplePort443(),
+		);
 
 		const vlessAccessRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${vlessUserId}/access`, { method: "GET" }),
@@ -289,10 +362,12 @@ describe("storybook api mock", () => {
 			items: Array<{ endpoint_id: string }>;
 			auto_assign_endpoint_kinds: string[];
 		};
-		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual([
-			"endpoint-1",
-			createdEndpoint.endpoint_id,
-		]);
+		expect(vlessAccess.items.map((item) => item.endpoint_id).sort()).toEqual(
+			[
+				fixtureCatalog.endpointId.fixture40(),
+				createdEndpoint.endpoint_id,
+			].sort(),
+		);
 		expect(vlessAccess.auto_assign_endpoint_kinds).toEqual([
 			"vless_reality_vision_tcp",
 		]);
@@ -306,7 +381,7 @@ describe("storybook api mock", () => {
 			auto_assign_endpoint_kinds: string[];
 		};
 		expect(ssAccess.items.map((item) => item.endpoint_id)).toEqual([
-			"endpoint-2",
+			fixtureCatalog.endpointId.fixture43(),
 		]);
 		expect(ssAccess.auto_assign_endpoint_kinds).toEqual([
 			"ss2022_2022_blake3_aes_128_gcm",
@@ -334,7 +409,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.host.fixture99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const subRes = await mock.handle(
@@ -346,7 +422,7 @@ describe("storybook api mock", () => {
 		expect(subRes.ok).toBe(true);
 		expect(subRes.headers.get("content-type")).toContain("text/plain");
 		const text = await subRes.text();
-		expect(text).toContain(token);
+		expect(text).toBe(fixtureCatalog.subscription.rawUri());
 	});
 
 	it("rejects removed admin config patch route", async () => {
@@ -380,7 +456,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.host.fixture99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const providerRes = await mock.handle(
@@ -390,7 +467,7 @@ describe("storybook api mock", () => {
 			}),
 		);
 		expect(providerRes.ok).toBe(true);
-		expect(await providerRes.text()).toContain("xp-system-generated");
+		expect(await providerRes.text()).toBe(fixtureCatalog.subscription.rawUri());
 
 		const providerSystemRes = await mock.handle(
 			jsonRequest(
@@ -402,7 +479,9 @@ describe("storybook api mock", () => {
 			),
 		);
 		expect(providerSystemRes.ok).toBe(true);
-		expect(await providerSystemRes.text()).toContain("mock-system");
+		expect(await providerSystemRes.text()).toBe(
+			fixtureCatalog.subscription.clash(),
+		);
 	});
 
 	it("returns not found for removed mihomo legacy route", async () => {
@@ -414,7 +493,8 @@ describe("storybook api mock", () => {
 		const usersData = (await usersRes.json()) as {
 			items: Array<{ subscription_token: string }>;
 		};
-		const token = usersData.items[0]?.subscription_token ?? "";
+		const token =
+			usersData.items[0]?.subscription_token ?? fixtureCatalog.host.fixture99();
 		expect(token.length).toBeGreaterThan(0);
 
 		const legacyRes = await mock.handle(
@@ -456,7 +536,7 @@ describe("storybook api mock", () => {
 					source_kind: "url",
 					source: "http://127.0.0.1:8080/raw",
 					level: "credentials",
-					source_format: "auto",
+					source_format: fixtureCatalog.service.fixture112(),
 				}),
 			}),
 		);
@@ -475,7 +555,8 @@ describe("storybook api mock", () => {
 		const usersData = (await listUsers.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = usersData.items[0]?.user_id ?? "";
+		const userId =
+			usersData.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const listNodes = await mock.handle(
@@ -485,7 +566,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[1]?.node_id ?? fixtureCatalog.nodeId.fixture36();
 
 		const listRes = await mock.handle(
 			jsonRequest(`/api/admin/users/${userId}/node-weights`, { method: "GET" }),
@@ -531,7 +613,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[0]?.node_id ?? fixtureCatalog.nodeId.fixture32();
 
 		const rowsRes = await mock.handle(
 			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/weight-rows`, {
@@ -584,7 +667,7 @@ describe("storybook api mock", () => {
 		const nodes = (await nodesRes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodes.items[0]?.node_id ?? "node-1";
+		const nodeId = nodes.items[0]?.node_id ?? fixtureCatalog.nodeId.fixture32();
 
 		const nodeUsageRes = await mock.handle(
 			jsonRequest(`/api/admin/nodes/${nodeId}/ip-usage?window=7d`, {
@@ -606,7 +689,7 @@ describe("storybook api mock", () => {
 		const users = (await usersRes.json()) as {
 			items: Array<{ user_id: string }>;
 		};
-		const userId = users.items[0]?.user_id ?? "";
+		const userId = users.items[0]?.user_id ?? fixtureCatalog.host.fixture99();
 		expect(userId.length).toBeGreaterThan(0);
 
 		const userUsageRes = await mock.handle(
@@ -626,27 +709,24 @@ describe("storybook api mock", () => {
 			data: {
 				nodes: [
 					{
-						node_id: "node-egress-1",
-						node_name: "node-egress-1",
-						access_host: "node-egress-1.example.invalid",
-						api_base_url: "https://node-egress-1.example.invalid",
-						quota_limit_bytes: 0,
-						quota_reset: {
-							policy: "monthly",
-							day_of_month: 1,
-							tz_offset_minutes: 0,
-						},
+						node_id: fixtureCatalog.nodeId.fixture63(),
+						node_name: fixtureCatalog.nodeId.fixture63(),
+						access_host: fixtureCatalog.host.fixture114(),
+						api_base_url: fixtureCatalog.service.fixture115(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
 						egress_probe: {
-							public_ipv4: "203.0.113.8",
+							public_ipv4: fixtureCatalog.address.documentation192_0_2_117(),
 							public_ipv6: "2001:db8::8",
-							selected_public_ip: "203.0.113.8",
+							selected_public_ip:
+								fixtureCatalog.address.documentation192_0_2_117(),
 							country_code: "TW",
 							geo_region: "Taiwan",
 							geo_city: "Taipei",
 							geo_operator: "ExampleNet",
 							subscription_region: "taiwan",
-							checked_at: "2026-04-24T00:00:00Z",
-							last_success_at: "2026-04-24T00:00:00Z",
+							checked_at: fixtureCatalog.timestamp.t20260424T000000(),
+							last_success_at: fixtureCatalog.timestamp.t20260424T000000(),
 							stale: false,
 							error_summary: null,
 						},
@@ -665,7 +745,7 @@ describe("storybook api mock", () => {
 				egress_probe?: { subscription_region: string };
 			}>;
 		};
-		const nodeId = nodes.items[0]?.node_id ?? "node-egress-1";
+		const nodeId = nodes.items[0]?.node_id ?? fixtureCatalog.nodeId.fixture63();
 
 		const refreshRes = await mock.handle(
 			jsonRequest(`/api/admin/nodes/${nodeId}/egress-probe/refresh`, {
@@ -681,6 +761,127 @@ describe("storybook api mock", () => {
 		expect(payload.node_id).toBe(nodeId);
 		expect(payload.accepted).toBe(true);
 		expect(payload.egress_probe?.subscription_region).toBeTruthy();
+	});
+
+	it("keeps runtime event node identities aligned with configured nodes", async () => {
+		const nodeId = fixtureCatalog.nodeId.fixture63();
+		const mock = createMockApi({
+			data: {
+				nodes: [
+					{
+						node_id: fixtureCatalog.nodeId.fixture63(),
+						node_name: fixtureCatalog.nodeId.fixture63(),
+						access_host: fixtureCatalog.host.fixture114(),
+						api_base_url: fixtureCatalog.service.fixture115(),
+						quota_limit_bytes: fixtureCatalog.quota.usedBytes(),
+						quota_reset: fixtureCatalog.quota.reset() as NodeQuotaReset,
+					},
+				],
+			},
+		});
+
+		const response = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/runtime/events`, {
+				method: "GET",
+			}),
+		);
+		expect(response.ok).toBe(true);
+		const payloads = (await response.text())
+			.trim()
+			.split("\n\n")
+			.map((event) => {
+				const dataLine = event
+					.split("\n")
+					.find((line) => line.startsWith("data: "));
+				if (!dataLine) throw new Error("runtime event is missing data");
+				return JSON.parse(dataLine.slice("data: ".length)) as {
+					node_id: string;
+				};
+			});
+		expect(payloads.map((payload) => payload.node_id)).toEqual([
+			nodeId,
+			nodeId,
+		]);
+	});
+
+	it("keeps runtime slots and traffic points distinct", async () => {
+		const mock = createMockApi();
+		const nodesRes = await mock.handle(
+			jsonRequest("/api/admin/nodes", { method: "GET" }),
+		);
+		const nodes = (await nodesRes.json()) as {
+			items: Array<{ node_id: string }>;
+		};
+		const nodeId =
+			nodes.items[0]?.node_id ?? fixtureCatalog.identifier.nodePrimary();
+
+		const runtimeRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/runtime`, { method: "GET" }),
+		);
+		expect(runtimeRes.ok).toBe(true);
+		const runtime = (await runtimeRes.json()) as {
+			recent_slots: Array<{ slot_start: string }>;
+		};
+		expect(
+			new Set(runtime.recent_slots.map((slot) => slot.slot_start)).size,
+		).toBe(runtime.recent_slots.length);
+
+		const trafficRes = await mock.handle(
+			jsonRequest(`/api/admin/nodes/${nodeId}/traffic?window=24h`, {
+				method: "GET",
+			}),
+		);
+		expect(trafficRes.ok).toBe(true);
+		const traffic = (await trafficRes.json()) as {
+			traffic: {
+				current: Array<{ start_at: string; total_bytes: number | null }>;
+			};
+		};
+		expect(
+			new Set(traffic.traffic.current.map((point) => point.start_at)).size,
+		).toBe(traffic.traffic.current.length);
+		expect(
+			new Set(traffic.traffic.current.map((point) => point.total_bytes)).size,
+		).toBeGreaterThan(1);
+	});
+
+	it("sanitizes configured quotas without losing approved identities", async () => {
+		const mock = createMockApi({
+			data: {
+				nodeQuotas: [
+					{
+						user_id: fixtureCatalog.identifier.userSecondary(),
+						node_id: fixtureCatalog.identifier.nodeSecondary(),
+						quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
+						quota_reset_source: fixtureCatalog.quota.resetSource(),
+					},
+				],
+			},
+		});
+
+		const response = await mock.handle(
+			jsonRequest(
+				`/api/admin/users/${fixtureCatalog.identifier.userSecondary()}/node-quotas`,
+				{ method: "GET" },
+			),
+		);
+		expect(response.ok).toBe(true);
+		const payload = (await response.json()) as {
+			items: Array<{
+				user_id: string;
+				node_id: string;
+				quota_limit_bytes: number;
+				quota_reset_source: string;
+			}>;
+		};
+		expect(payload.items).toEqual([
+			{
+				user_id: fixtureCatalog.identifier.userSecondary(),
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				quota_limit_bytes: fixtureCatalog.quota.fiveGiB(),
+				quota_reset_source: fixtureCatalog.quota.resetSource(),
+			},
+		]);
 	});
 
 	it("supports quota policy global weight rows and node inherit policy", async () => {
@@ -731,7 +932,8 @@ describe("storybook api mock", () => {
 		const nodesData = (await listNodes.json()) as {
 			items: Array<{ node_id: string }>;
 		};
-		const nodeId = nodesData.items[0]?.node_id ?? "node-1";
+		const nodeId =
+			nodesData.items[0]?.node_id ?? fixtureCatalog.nodeId.fixture32();
 
 		const policyRes = await mock.handle(
 			jsonRequest(`/api/admin/quota-policy/nodes/${nodeId}/policy`, {
@@ -761,5 +963,34 @@ describe("storybook api mock", () => {
 			inherit_global: boolean;
 		};
 		expect(policyAfter.inherit_global).toBe(false);
+	});
+
+	it("drops unmodeled endpoint fields from configured records", async () => {
+		const mock = createMockApi({
+			data: {
+				endpoints: [
+					{
+						endpoint_id: fixtureCatalog.identifier.endpointTertiary(),
+						node_id: fixtureCatalog.identifier.nodeTertiary(),
+						tag: fixtureCatalog.identifier.endpointTagTertiary(),
+						kind: fixtureCatalog.endpoint.ssKind(),
+						port: fixtureCatalog.endpoint.port9443(),
+						meta: {
+							server_psk_b64: fixtureCatalog.endpoint.serverPskB64(),
+						},
+						public_domain: fixtureCatalog.host.tertiary(),
+					} as unknown as MockEndpointSeed,
+				],
+			},
+		});
+
+		const endpointsRes = await mock.handle(
+			jsonRequest("/api/admin/endpoints", { method: "GET" }),
+		);
+		expect(endpointsRes.ok).toBe(true);
+		const data = (await endpointsRes.json()) as {
+			items: Array<{ public_domain?: string }>;
+		};
+		expect(data.items[0]).not.toHaveProperty("public_domain");
 	});
 });
