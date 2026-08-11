@@ -50,7 +50,7 @@ pub enum VlessRealityTransport {
 }
 
 impl VlessRealityTransport {
-    fn is_vision_tcp(&self) -> bool {
+    pub(crate) fn is_vision_tcp(&self) -> bool {
         matches!(self, Self::VisionTcp)
     }
 }

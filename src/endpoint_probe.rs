@@ -957,17 +957,18 @@ async fn probe_vless_reality(
 fn vless_probe_transport_settings(
     transport: VlessRealityTransport,
 ) -> (&'static str, &'static str, Option<serde_json::Value>) {
-    match transport {
-        VlessRealityTransport::VisionTcp => ("xtls-rprx-vision", "tcp", None),
-        VlessRealityTransport::Xhttp => (
-            "",
-            "xhttp",
-            Some(serde_json::json!({
-                "path": VLESS_XHTTP_PATH,
-                "mode": "stream-one"
-            })),
-        ),
+    if transport.is_vision_tcp() {
+        return ("xtls-rprx-vision", "tcp", None);
     }
+
+    (
+        "",
+        "xhttp",
+        Some(serde_json::json!({
+            "path": VLESS_XHTTP_PATH,
+            "mode": "stream-one"
+        })),
+    )
 }
 
 async fn probe_ss2022(
