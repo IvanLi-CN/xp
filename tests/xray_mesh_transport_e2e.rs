@@ -295,6 +295,7 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
             canary_upstream: xp_test_fixtures::none(),
             accepted_authorities: xp_test_fixtures::secondary_server_names(),
             mihomo_smux: MihomoSmuxConfig::default(),
+            transport: Default::default(),
             managed_default: true,
         })
         .expect("serialize endpoint metadata"),

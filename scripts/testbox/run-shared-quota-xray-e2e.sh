@@ -370,10 +370,13 @@ cd "$REMOTE_RUN"
 export RUST_TEST_THREADS=1
 export XP_E2E_XRAY_MODE=external
 export XP_E2E_XRAY_API_ADDR="127.0.0.1:$XP_E2E_XRAY_API_PORT"
+XP_E2E_MIHOMO_BIN="$("$REMOTE_RUN/scripts/e2e/install-mihomo-v1.19.29.sh")"
+export XP_E2E_MIHOMO_BIN
 
 if [ "$ONLY_MESH_RESOURCE" != "1" ]; then
   cargo test --test xray_e2e -- --ignored
   cargo test --test xray_mesh_transport_e2e -- --ignored
+  cargo test --test xray_vless_xhttp_e2e -- --ignored
   cargo test --test shared_quota_xray_e2e -- --ignored
 fi
 
@@ -381,12 +384,13 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   mkdir -p "$REMOTE_RESOURCE_BASELINE/web"
   rm -rf "$REMOTE_RESOURCE_BASELINE/web/dist"
   cp -a "$REMOTE_RUN/web/dist" "$REMOTE_RESOURCE_BASELINE/web/dist"
-  resource_target="$REMOTE_RUN/target-resource"
-  CARGO_TARGET_DIR="$resource_target" cargo build --release --bin xp
-  cp "$resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
-  CARGO_TARGET_DIR="$resource_target" \
+  candidate_resource_target="$REMOTE_RUN/target-resource-candidate"
+  baseline_resource_target="$REMOTE_RUN/target-resource-baseline"
+  CARGO_TARGET_DIR="$candidate_resource_target" cargo build --release --bin xp
+  cp "$candidate_resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
+  CARGO_TARGET_DIR="$baseline_resource_target" \
     cargo build --release --bin xp --manifest-path "$REMOTE_RESOURCE_BASELINE/Cargo.toml"
-  cp "$resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
+  cp "$baseline_resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
   xray_container="$(docker ps -q \
     --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=xray")"
@@ -401,7 +405,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
     XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
     XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
-    CARGO_TARGET_DIR="$resource_target" \
+    CARGO_TARGET_DIR="$candidate_resource_target" \
     cargo test --release --test mesh_transport_resource_e2e -- --ignored --nocapture
 fi
 REMOTE
@@ -409,5 +413,5 @@ REMOTE
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   echo "OK: Mesh transport resource workload on $TESTBOX"
 else
-  echo "OK: xray_e2e + xray_mesh_transport_e2e + shared_quota_xray_e2e on $TESTBOX"
+  echo "OK: xray_e2e + xray_mesh_transport_e2e + xray_vless_xhttp_e2e + shared_quota_xray_e2e on $TESTBOX"
 fi

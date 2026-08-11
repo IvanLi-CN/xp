@@ -35,6 +35,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.users",
             "admin.endpoints",
             "admin.endpoint-mihomo-smux",
+            "admin.endpoint-vless-xhttp",
             "admin.alerts",
             "admin.config",
             "admin.quota-policy",
@@ -68,6 +69,11 @@ mod tests {
             response
                 .capabilities
                 .contains(&"admin.endpoint-mihomo-smux")
+        );
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.endpoint-vless-xhttp")
         );
         assert!(response.capabilities.contains(&"admin.status-events"));
         assert!(

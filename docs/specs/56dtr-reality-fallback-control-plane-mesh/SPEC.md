@@ -71,8 +71,9 @@
 - 进程启动时只构造一份 Mesh transport bundle，并注入 Raft、leader forwarding、node
   history、定时与手动 probes、runtime、alerts、quota、traffic、IP usage、TCP history、
   endpoint probes 和 SSE fan-out；请求 handler 不得读取证书或创建短生命周期 client。
-- Mesh client 固定使用 HTTP/2 prior knowledge，每个 origin 最多保留一条 idle connection，
-  pool idle timeout 固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
+- Mesh client 固定使用 HTTP/2 prior knowledge 与自适应 H2 flow-control window；后者仅在活动大流量时
+  扩张，避免为每个 peer 常驻预留大快照缓冲。每个 origin 最多保留一条 idle connection，pool idle timeout
+  固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
 - 公网 direct 与可选 relay 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
   fallback。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理。
 - 同一 target 的顺序请求、并发 fan-out、Raft burst、8 MiB snapshot 与长驻 SSE 必须复用同一

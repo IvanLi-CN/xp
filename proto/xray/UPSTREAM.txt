@@ -17,3 +17,8 @@ Vendored proto files:
 - transport/internet/config.proto
 - transport/internet/reality/config.proto
 - transport/internet/tcp/config.proto
+
+Additional vendored proto provenance:
+- transport/internet/splithttp/config.proto
+  Tag: v26.3.27
+  Revision: d2758a023cd7f4174a5a5fa4ff66e487d4342ba0

@@ -22,6 +22,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 mod managed_vless_create;
 mod mihomo_smux;
+mod vless_xhttp;
 use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
     cluster_metadata::ClusterMetadata,
@@ -9233,6 +9234,7 @@ fn test_vless_meta(managed_default: bool) -> Value {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default,
     })
     .unwrap()

@@ -447,6 +447,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             canary_upstream: None,
             accepted_authorities: Vec::new(),
             mihomo_smux: Default::default(),
+            transport: crate::protocol::VlessRealityTransport::Xhttp,
             managed_default: true,
         };
         Ok(Endpoint {

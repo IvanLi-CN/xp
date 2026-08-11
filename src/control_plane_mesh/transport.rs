@@ -4,8 +4,6 @@ use super::{MeshAwareHttpClient, MeshProxyStateHandle, apply_optional_proxy};
 
 pub const MESH_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const MESH_POOL_MAX_IDLE_PER_HOST: usize = 1;
-const MESH_H2_INITIAL_STREAM_WINDOW_SIZE: u32 = 65_535;
-const MESH_H2_INITIAL_CONNECTION_WINDOW_SIZE: u32 = 65_535;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeshTransportPolicy {
@@ -37,8 +35,8 @@ fn strict_mesh_client(
 ) -> anyhow::Result<reqwest::Client> {
     Ok(builder
         .http2_prior_knowledge()
-        .http2_initial_stream_window_size(MESH_H2_INITIAL_STREAM_WINDOW_SIZE)
-        .http2_initial_connection_window_size(MESH_H2_INITIAL_CONNECTION_WINDOW_SIZE)
+        // Let an active Raft snapshot make progress without reserving a large window per peer.
+        .http2_adaptive_window(true)
         .pool_max_idle_per_host(MESH_POOL_MAX_IDLE_PER_HOST)
         .pool_idle_timeout(policy.pool_idle_timeout)
         .build()?)

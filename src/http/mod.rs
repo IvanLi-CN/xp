@@ -4469,9 +4469,11 @@ async fn admin_create_endpoint(
             canary_upstream,
             accepted_authorities,
             mihomo_smux,
+            transport,
         } => {
             let mihomo_smux = mihomo_smux.unwrap_or_default();
             mihomo_smux.validate().map_err(ApiError::invalid_request)?;
+            let transport = transport.unwrap_or(crate::protocol::VlessRealityTransport::Xhttp);
             let store = state.store.lock().await;
             if let Some(reality) = reality {
                 if canary_upstream.is_some() {
@@ -4488,7 +4490,7 @@ async fn admin_create_endpoint(
                     node_id,
                     crate::domain::EndpointKind::VlessRealityVisionTcp,
                     port,
-                    json!({ "reality": reality, "mihomo_smux": mihomo_smux }),
+                    json!({ "reality": reality, "mihomo_smux": mihomo_smux, "transport": transport }),
                 )?
             } else {
                 let node = store.get_node(&node_id).ok_or_else(|| {
@@ -4524,6 +4526,7 @@ async fn admin_create_endpoint(
                             ))
                         })?;
                 meta.mihomo_smux = mihomo_smux;
+                meta.transport = transport;
                 endpoint.meta =
                     serde_json::to_value(meta).map_err(|e| ApiError::internal(e.to_string()))?;
                 endpoint
@@ -5798,6 +5801,7 @@ async fn admin_patch_endpoint(
         EndpointKind::VlessRealityVisionTcp => {
             let had_mihomo_smux = endpoint.meta.get("mihomo_smux").is_some();
             let mihomo_smux_was_omitted = req.mihomo_smux.is_none();
+            let transport_was_omitted = req.transport.is_none();
             let mut meta: VlessRealityVisionTcpEndpointMeta =
                 serde_json::from_value(endpoint.meta.clone())
                     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -5852,6 +5856,12 @@ async fn admin_patch_endpoint(
                 mihomo_smux.validate().map_err(ApiError::invalid_request)?;
                 meta.mihomo_smux = mihomo_smux;
             }
+            if let Some(transport) = req.transport {
+                let Some(transport) = transport else {
+                    return Err(ApiError::invalid_request("transport cannot be null"));
+                };
+                meta.transport = transport;
+            }
             if meta.managed_default {
                 let desired_node = nodes
                     .iter()
@@ -5873,8 +5883,23 @@ async fn admin_patch_endpoint(
                     .expect("serialized VLESS metadata is an object")
                     .remove("mihomo_smux");
             }
+            if transport_was_omitted {
+                let object = endpoint
+                    .meta
+                    .as_object_mut()
+                    .expect("serialized VLESS metadata is an object");
+                if object.get("transport") == Some(&serde_json::Value::String("vision_tcp".into()))
+                {
+                    object.remove("transport");
+                }
+            }
         }
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => {
+            if req.transport.is_some() {
+                return Err(ApiError::invalid_request(
+                    "transport is only supported for vless endpoints",
+                ));
+            }
             if req.reality.is_some() {
                 return Err(ApiError::invalid_request(
                     "ss2022 endpoints only support port updates",

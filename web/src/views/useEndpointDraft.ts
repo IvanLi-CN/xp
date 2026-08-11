@@ -1,10 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
 	type AdminEndpoint,
 	type MihomoSmuxConfig,
+	type VlessRealityTransport,
 	parseMihomoSmuxConfig,
+	parseVlessRealityTransport,
 } from "../api/adminEndpoints";
 import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { normalizeAcceptedAuthority } from "../utils/acceptedAuthority";
@@ -76,15 +78,26 @@ export function useEndpointDraft(
 	draft: EndpointDraftState,
 	setters: EndpointDraftSetters,
 ) {
+	const [vlessTransport, setVlessTransport] =
+		useState<VlessRealityTransport>("vision_tcp");
 	const settersRef = useRef(setters);
 	settersRef.current = setters;
 	const discard = useCallback(() => {
-		if (endpoint) hydrateEndpointDraft(endpoint, settersRef.current);
+		if (!endpoint) return;
+		hydrateEndpointDraft(endpoint, settersRef.current);
+		setVlessTransport(
+			endpoint.kind === "vless_reality_vision_tcp"
+				? parseVlessRealityTransport(endpoint.meta.transport)
+				: "vision_tcp",
+		);
 	}, [endpoint]);
 
 	useEffect(() => {
 		discard();
 	}, [discard]);
+	const vlessTransportChanged =
+		endpoint?.kind === "vless_reality_vision_tcp" &&
+		vlessTransport !== parseVlessRealityTransport(endpoint.meta.transport);
 
 	const isDirty = useMemo(() => {
 		if (!endpoint || draft.port !== String(endpoint.port))
@@ -107,6 +120,7 @@ export function useEndpointDraft(
 				.map(normalizeRealityServerName)
 				.filter((value) => value.length > 0);
 			return (
+				vlessTransportChanged ||
 				draft.realityDest.trim() !== snapshot.realityDest ||
 				(draft.realityFingerprint.trim() || "chrome") !==
 					snapshot.realityFingerprint ||
@@ -117,13 +131,20 @@ export function useEndpointDraft(
 			.map(normalizeAcceptedAuthority)
 			.filter((value) => value.length > 0);
 		return (
+			vlessTransportChanged ||
 			draft.upstreamUrl.trim() !== snapshot.canaryUpstreamUrl ||
 			draft.upstreamMode !== snapshot.canaryUpstreamMode ||
 			!authoritySetsEqual(authorities, snapshot.acceptedAuthorities)
 		);
-	}, [draft, endpoint]);
+	}, [draft, endpoint, vlessTransportChanged]);
 
-	return { discard, isDirty };
+	return {
+		discard,
+		isDirty,
+		vlessTransport,
+		setVlessTransport,
+		vlessTransportChanged,
+	};
 }
 
 export function useEndpointDraftNavigation(

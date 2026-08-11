@@ -55,6 +55,10 @@ pub mod xray {
                 tonic::include_proto!("xray.transport.internet.reality");
             }
 
+            pub mod splithttp {
+                tonic::include_proto!("xray.transport.internet.splithttp");
+            }
+
             pub mod tcp {
                 tonic::include_proto!("xray.transport.internet.tcp");
             }

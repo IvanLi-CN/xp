@@ -39,6 +39,21 @@ pub const MIHOMO_SMUX_DEFAULT_MAX_CONNECTIONS: u16 = 4;
 pub const MIHOMO_SMUX_DEFAULT_MIN_STREAMS: u16 = 4;
 pub const MIHOMO_SMUX_MAX_CONNECTIONS_MAX: u16 = 16;
 pub const MIHOMO_SMUX_MIN_STREAMS_MAX: u16 = 64;
+pub const VLESS_XHTTP_PATH: &str = "/xp-xhttp";
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VlessRealityTransport {
+    #[default]
+    VisionTcp,
+    Xhttp,
+}
+
+impl VlessRealityTransport {
+    fn is_vision_tcp(&self) -> bool {
+        matches!(self, Self::VisionTcp)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MihomoSmuxConfig {
@@ -97,6 +112,8 @@ pub struct VlessRealityVisionTcpEndpointMeta {
     pub accepted_authorities: Vec<String>,
     #[serde(default)]
     pub mihomo_smux: MihomoSmuxConfig,
+    #[serde(default, skip_serializing_if = "VlessRealityTransport::is_vision_tcp")]
+    pub transport: VlessRealityTransport,
     #[serde(default)]
     pub managed_default: bool,
 }

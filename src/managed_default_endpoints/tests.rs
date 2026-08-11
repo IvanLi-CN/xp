@@ -150,6 +150,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
                 xp_test_fixtures::host_list_edge31()
             );
             assert_eq!(endpoint.port, 30445);
+            assert!(endpoint.meta.get("transport").is_none());
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -198,6 +199,10 @@ async fn missing_managed_vless_bootstraps_at_explicit_port() {
                 serde_json::from_value(endpoint.meta.clone()).unwrap();
             assert_eq!(endpoint.port, 30445);
             assert!(meta.managed_default);
+            assert_eq!(
+                meta.transport,
+                crate::protocol::VlessRealityTransport::Xhttp
+            );
         }
         other => panic!("unexpected command: {other:?}"),
     }

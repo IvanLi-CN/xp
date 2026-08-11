@@ -46,6 +46,7 @@ async fn create_managed_vless_derives_reality_and_accepts_canary_fields() {
     assert_eq!(res.status(), StatusCode::OK);
     let created = body_json(res).await;
     assert_eq!(created["meta"]["managed_default"], true);
+    assert_eq!(created["meta"]["transport"], "xhttp");
     assert_eq!(created["meta"]["reality"]["dest"], "127.0.0.1:39043");
     assert_eq!(
         created["meta"]["reality"]["server_names"],

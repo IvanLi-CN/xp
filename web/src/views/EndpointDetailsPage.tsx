@@ -8,6 +8,7 @@ import {
 	runAdminEndpointProbeRun,
 } from "../api/adminEndpointProbes";
 import {
+	type AdminEndpointPatchRequest,
 	DEFAULT_MIHOMO_SMUX_CONFIG,
 	type MihomoSmuxConfig,
 	deleteAdminEndpoint,
@@ -21,6 +22,7 @@ import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EndpointMihomoSmuxSettings } from "../components/EndpointMihomoSmuxSettings";
+import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
@@ -90,6 +92,7 @@ export function EndpointDetailsPage() {
 	const nodesCapability = useApiCapability("admin.nodes");
 	const probesCapability = useApiCapability("admin.node-probes");
 	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
+	const vlessXhttpCapability = useApiCapability("admin.endpoint-vless-xhttp");
 	const inputClass = inputControlClass(prefs.density);
 	const selectClass = selectControlClass(prefs.density);
 	const endpointQuery = useQuery({
@@ -122,34 +125,35 @@ export function EndpointDetailsPage() {
 	} | null>(null);
 	const [confirmRotateOpen, setConfirmRotateOpen] = useState(false);
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-	const { discard: discardEndpointDraft, isDirty: endpointDirty } =
-		useEndpointDraft(
-			endpointQuery.data,
-			{
-				port,
-				realityDest,
-				realityServerNamesManual,
-				realityFingerprint,
-				upstreamUrl,
-				upstreamMode,
-				acceptedAuthorities,
-				mihomoSmux,
-				mihomoSmuxMaxConnections,
-				mihomoSmuxMinStreams,
-			},
-			{
-				setPort,
-				setRealityDest,
-				setRealityServerNamesManual,
-				setRealityFingerprint,
-				setUpstreamUrl,
-				setUpstreamMode,
-				setAcceptedAuthorities,
-				setMihomoSmux,
-				setMihomoSmuxMaxConnections,
-				setMihomoSmuxMinStreams,
-			},
-		);
+	const endpointDraft = useEndpointDraft(
+		endpointQuery.data,
+		{
+			port,
+			realityDest,
+			realityServerNamesManual,
+			realityFingerprint,
+			upstreamUrl,
+			upstreamMode,
+			acceptedAuthorities,
+			mihomoSmux,
+			mihomoSmuxMaxConnections,
+			mihomoSmuxMinStreams,
+		},
+		{
+			setPort,
+			setRealityDest,
+			setRealityServerNamesManual,
+			setRealityFingerprint,
+			setUpstreamUrl,
+			setUpstreamMode,
+			setAcceptedAuthorities,
+			setMihomoSmux,
+			setMihomoSmuxMaxConnections,
+			setMihomoSmuxMinStreams,
+		},
+	);
+	const transportChanged =
+		vlessXhttpCapability.available && endpointDraft.vlessTransportChanged;
 	const patchMutation = useMutation({
 		mutationFn: async () => {
 			const endpoint = endpointQuery.data;
@@ -158,18 +162,7 @@ export function EndpointDetailsPage() {
 			if (!Number.isFinite(portNumber) || portNumber <= 0) {
 				throw new Error("Please enter a valid port.");
 			}
-			const payload: {
-				port?: number;
-				reality?: {
-					dest: string;
-					server_names: string[];
-					server_names_source: "manual" | "global";
-					fingerprint: string;
-				};
-				canary_upstream?: { url: string; mode: CanaryUpstreamMode } | null;
-				accepted_authorities?: string[] | null;
-				mihomo_smux?: MihomoSmuxConfig;
-			} = { port: portNumber };
+			const payload: AdminEndpointPatchRequest = { port: portNumber };
 			if (endpoint.kind === "ss2022_2022_blake3_aes_128_gcm") {
 				const changedMihomoSmux = changedMihomoSmuxConfig(
 					mihomoSmuxCapability.available,
@@ -181,6 +174,7 @@ export function EndpointDetailsPage() {
 				if (changedMihomoSmux) payload.mihomo_smux = changedMihomoSmux;
 			}
 			if (endpoint.kind === "vless_reality_vision_tcp") {
+				if (transportChanged) payload.transport = endpointDraft.vlessTransport;
 				const metaSnapshot = parseVlessMeta(endpoint.meta);
 				if (!metaSnapshot.managedDefault) {
 					const fingerprintValue = realityFingerprint.trim() || "chrome";
@@ -260,7 +254,6 @@ export function EndpointDetailsPage() {
 			pushToast({ variant: "error", message: formatBackendError(error) });
 		},
 	});
-
 	const rotateMutation = useMutation({
 		mutationFn: () => rotateAdminEndpointShortId(adminToken, endpointId),
 		onSuccess: (data) => {
@@ -289,9 +282,9 @@ export function EndpointDetailsPage() {
 
 	useEndpointDraftNavigation(
 		endpointId,
-		endpointDirty,
+		endpointDraft.isDirty,
 		patchMutation,
-		discardEndpointDraft,
+		endpointDraft.discard,
 	);
 
 	const probeRunMutation = useMutation({
@@ -628,7 +621,14 @@ export function EndpointDetailsPage() {
 										The inbound listen port on this node.
 									</p>
 								</div>
-
+								<EndpointVlessTransportSettings
+									visible={Boolean(vlessMeta) && vlessXhttpCapability.available}
+									value={endpointDraft.vlessTransport}
+									onValueChange={endpointDraft.setVlessTransport}
+									disabled={patchMutation.isPending || runtime.isReadOnly}
+									existing
+									changed={transportChanged}
+								/>
 								{vlessMeta && !vlessMeta.managedDefault ? (
 									<>
 										<div className="xp-field-stack">

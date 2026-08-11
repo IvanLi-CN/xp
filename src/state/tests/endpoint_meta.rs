@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::protocol::VlessRealityTransport;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -22,6 +23,7 @@ fn upsert_vless_endpoint_manual_accepts_tcp_prefixed_dest() {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: false,
     };
     let endpoint = Endpoint {
@@ -43,4 +45,26 @@ fn upsert_vless_endpoint_manual_accepts_tcp_prefixed_dest() {
         meta.reality.dest,
         xp_test_fixtures::url_tcp_origin_fixture_test443()
     );
+    assert_eq!(meta.transport, VlessRealityTransport::VisionTcp);
+    assert!(saved.meta.get("transport").is_none());
+}
+
+#[test]
+fn build_new_vless_endpoint_meta_defaults_to_xhttp() {
+    let value = build_endpoint_meta(
+        &EndpointKind::VlessRealityVisionTcp,
+        serde_json::json!({
+            "reality": {
+                "dest": xp_test_fixtures::url_tcp_origin_fixture_test443(),
+                "server_names": xp_test_fixtures::host_list_edge34(),
+                "server_names_source": "manual",
+                "fingerprint": "chrome"
+            }
+        }),
+    )
+    .unwrap();
+
+    let meta: VlessRealityVisionTcpEndpointMeta = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(meta.transport, VlessRealityTransport::Xhttp);
+    assert_eq!(value["transport"], "xhttp");
 }

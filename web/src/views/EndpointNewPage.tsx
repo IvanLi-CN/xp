@@ -8,6 +8,7 @@ import { fetchAdminConfig } from "../api/adminConfig";
 import {
 	type AdminEndpointsResponse,
 	DEFAULT_MIHOMO_SMUX_CONFIG,
+	type VlessRealityTransport,
 	createAdminEndpoint,
 	fetchAdminEndpoints,
 } from "../api/adminEndpoints";
@@ -16,6 +17,7 @@ import { isBackendApiError } from "../api/backendError";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
+import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { TagInput } from "../components/TagInput";
@@ -60,7 +62,7 @@ import { resourceListCache } from "./adminEndpointsCache";
 const kindOptions = [
 	{
 		value: "vless_reality_vision_tcp" as const,
-		label: "VLESS Reality Vision TCP",
+		label: "VLESS Reality",
 	},
 	{
 		value: "ss2022_2022_blake3_aes_128_gcm" as const,
@@ -84,6 +86,7 @@ const endpointSchema = z.object({
 	canaryUpstreamUrl: z.string(),
 	canaryUpstreamMode: z.enum(["auto", "http1", "h2c"]),
 	acceptedAuthorities: z.array(z.string()),
+	transport: z.enum(["vision_tcp", "xhttp"]),
 	mihomoSmuxEnabled: z.boolean(),
 	mihomoSmuxMaxConnections: z.coerce
 		.number()
@@ -110,6 +113,7 @@ export function EndpointNewPage() {
 	const nodesCapability = useApiCapability("admin.nodes");
 	const configCapability = useApiCapability("admin.config");
 	const mihomoSmuxCapability = useApiCapability("admin.endpoint-mihomo-smux");
+	const vlessXhttpCapability = useApiCapability("admin.endpoint-vless-xhttp");
 
 	const nodesQuery = useQuery({
 		queryKey: ["adminNodes", adminToken],
@@ -135,6 +139,7 @@ export function EndpointNewPage() {
 			canaryUpstreamUrl: "",
 			canaryUpstreamMode: "auto",
 			acceptedAuthorities: [],
+			transport: "xhttp",
 			mihomoSmuxEnabled: DEFAULT_MIHOMO_SMUX_CONFIG.enabled,
 			mihomoSmuxMaxConnections: DEFAULT_MIHOMO_SMUX_CONFIG.max_connections,
 			mihomoSmuxMinStreams: DEFAULT_MIHOMO_SMUX_CONFIG.min_streams,
@@ -145,6 +150,7 @@ export function EndpointNewPage() {
 	const kind = form.watch("kind");
 	const nodeId = form.watch("nodeId");
 	const port = form.watch("port") as number | string | undefined;
+	const transport = form.watch("transport") as VlessRealityTransport;
 	const mihomoSmuxEnabled = form.watch("mihomoSmuxEnabled");
 	const resetMihomoSmuxFields = () => {
 		form.resetField("mihomoSmuxEnabled");
@@ -204,6 +210,9 @@ export function EndpointNewPage() {
 					kind: values.kind,
 					node_id: values.nodeId,
 					port: values.port,
+					...(vlessXhttpCapability.available
+						? { transport: values.transport }
+						: {}),
 					canary_upstream: canaryUpstreamUrl
 						? {
 								url: canaryUpstreamUrl,
@@ -582,6 +591,17 @@ export function EndpointNewPage() {
 												</FormItem>
 											)}
 										/>
+										{vlessXhttpCapability.available ? (
+											<EndpointVlessTransportSettings
+												value={transport}
+												disabled={createMutation.isPending}
+												onValueChange={(value) =>
+													form.setValue("transport", value, {
+														shouldDirty: true,
+													})
+												}
+											/>
+										) : null}
 									</div>
 								) : null}
 

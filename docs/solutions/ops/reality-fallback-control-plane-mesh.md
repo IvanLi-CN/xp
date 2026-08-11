@@ -33,6 +33,14 @@ outcome question.
   `fallback_active`. A successful signed Mesh acknowledgement records `mesh_available`.
 - The status API treats `mesh_capability` and `mesh_reason` as additive fields. Older snapshots may
   omit them; clients display `unknown` rather than rejecting the snapshot.
+- Build the strict Mesh client once per process. Keep it HTTP/2-only with one idle connection per
+  origin and a bounded idle timeout; public direct and relay fallback use separate compatibility
+  clients. This limits steady-state control-plane sockets without forcing the public fallback onto
+  a stricter transport contract.
+- Use the HTTP/2 adaptive flow-control window for Mesh instead of reserving a
+  large fixed window for every peer. An active Raft snapshot then gets enough
+  credit to share a connection with a long-lived stream, while idle peers do
+  not retain a snapshot-sized resident buffer.
 
 ## Operational Consequences
 
@@ -70,3 +78,6 @@ outcome question.
   assert that percent encoding and query ordering remain unchanged because internal-auth v2 signs
   those bytes. If the HTTP client would normalize those bytes, reject the request instead of
   forwarding a URI that no longer matches the authenticated canonical value.
+- In a candidate-versus-baseline resource comparison, use separate Cargo target directories. A
+  shared target can reuse a candidate build script or generated artifact under the baseline source,
+  making PSS, CPU, and connection comparisons invalid before the workload begins.

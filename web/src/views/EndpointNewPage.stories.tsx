@@ -57,6 +57,15 @@ export const ManagedDefaultFieldsVisible: Story = {
 				name: "Show access host suggestions",
 			}),
 		).toBeInTheDocument();
+		await userEvent.click(await canvas.findByText("Advanced: VLESS transport"));
+		await expect(
+			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
+		).toBeChecked();
+		await expect(
+			await canvas.findByText(
+				"Recommended. Mihomo YAML uses one reusable HTTP/2 connection after pool warm-up.",
+			),
+		).toBeInTheDocument();
 		await expect(canvas.queryByLabelText("dest")).toBeNull();
 		await expect(canvas.queryByLabelText("serverNames")).toBeNull();
 	},

@@ -38,6 +38,7 @@ const meta = {
 								fingerprint: "chrome",
 							},
 							managed_default: true,
+							transport: "xhttp",
 							canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 							accepted_authorities: fixtureCatalog.hostList.edge6(),
 						},
@@ -84,6 +85,28 @@ export const ManagedDefaultAliases: Story = {
 			await canvas.findByText(
 				"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL.",
 			),
+		).toBeInTheDocument();
+	},
+};
+
+export const VlessXhttpTransport: Story = {
+	tags: ["coverage-ui", "endpoint-vless-xhttp"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByText("Advanced: VLESS transport"));
+		await expect(
+			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
+		).toBeChecked();
+		await expect(
+			await canvas.findByText(
+				"Recommended. Mihomo YAML uses one reusable HTTP/2 connection after pool warm-up.",
+			),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/Raw URI includes Mihomo-specific XMUX settings/),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(/Changing this mode rebuilds the inbound/),
 		).toBeInTheDocument();
 	},
 };
