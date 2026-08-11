@@ -136,27 +136,26 @@ describe("<AppResourceNavigation />", () => {
 	it("marks only endpoints on the current hosting node with a special icon", () => {
 		const queryClient = createQueryClient();
 		const localNodeId = fixtureCatalog.identifier.nodePrimary();
-		const remoteNodeId = fixtureCatalog.identifier.nodeSecondary();
 		const localEndpointId = fixtureCatalog.identifier.endpointPrimary();
 		const remoteEndpointId = fixtureCatalog.identifier.endpointSecondary();
-		const localEndpointName = "tokyo-reality-443";
-		const remoteEndpointName = "osaka-ss-8443";
+		const localEndpointName = fixtureCatalog.identifier.endpointTagPrimary();
+		const remoteEndpointName = fixtureCatalog.identifier.endpointTagSecondary();
 		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
 			items: [
 				{
-					endpoint_id: localEndpointId,
-					node_id: localNodeId,
-					tag: localEndpointName,
-					kind: "vless_reality_vision_tcp",
-					port: 443,
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					tag: fixtureCatalog.identifier.endpointTagPrimary(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port443(),
 					meta: {},
 				},
 				{
-					endpoint_id: remoteEndpointId,
-					node_id: remoteNodeId,
-					tag: remoteEndpointName,
-					kind: "ss2022_2022_blake3_aes_128_gcm",
-					port: 8443,
+					endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					tag: fixtureCatalog.identifier.endpointTagSecondary(),
+					kind: fixtureCatalog.endpoint.ssKind(),
+					port: fixtureCatalog.endpoint.port8443(),
 					meta: {},
 				},
 			],
