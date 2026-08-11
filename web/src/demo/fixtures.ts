@@ -503,7 +503,7 @@ export function createDemoState(scenarioId: DemoScenarioId): DemoState {
 			session: null,
 			localNodeId: DEMO_LOCAL_NODE_ID,
 			nodes: nodes.map((node) =>
-				node.id === "node-sgp-1"
+				node.id === fixtureCatalog.identifier.nodeTertiary()
 					? {
 							...node,
 							name: "singapore-edge-with-an-intentionally-long-hostname",
