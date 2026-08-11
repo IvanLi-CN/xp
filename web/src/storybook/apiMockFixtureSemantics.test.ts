@@ -125,6 +125,7 @@ describe("storybook fixture semantics", () => {
 					node_id: fixtureCatalog.nodeId.fixture32(),
 					kind: fixtureCatalog.endpoint.vlessKind(),
 					port: fixtureCatalog.endpoint.port9443(),
+					transport: "vision_tcp",
 					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				}),
@@ -133,6 +134,7 @@ describe("storybook fixture semantics", () => {
 		expect(response.ok).toBe(true);
 		expect(await response.json()).toMatchObject({
 			meta: {
+				transport: "vision_tcp",
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 			},
@@ -158,6 +160,7 @@ describe("storybook fixture semantics", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					port: fixtureCatalog.endpoint.port9443(),
+					transport: "vision_tcp",
 					canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 					accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 				}),
@@ -167,6 +170,7 @@ describe("storybook fixture semantics", () => {
 		expect(await updateResponse.json()).toMatchObject({
 			port: fixtureCatalog.endpoint.port9443(),
 			meta: {
+				transport: "vision_tcp",
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 			},
