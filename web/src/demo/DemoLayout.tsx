@@ -259,24 +259,43 @@ function DemoShell({ children }: { children: ReactNode }) {
 										leadingIcon: {
 											name: isLocalNode
 												? "tabler:server-bolt"
-												: "tabler:server",
+												: "tabler:server-2",
 											tone: isLocalNode ? "primary" : "muted",
 										} as const,
 									};
 								})
 							: resourceId === "endpoints"
-								? state.endpoints.map((endpoint) => ({
-										id: endpoint.id,
-										label: endpoint.name || "Untitled endpoint",
-										href: `/demo/endpoints/${encodeURIComponent(endpoint.id)}`,
-										ariaLabel: `Endpoint ${endpoint.name || "untitled"} (${endpoint.id})`,
-									}))
+								? state.endpoints.map((endpoint) => {
+										const isLocalEndpoint =
+											endpoint.nodeId === state.localNodeId;
+										const endpointName = endpoint.name || "Untitled endpoint";
+										return {
+											id: endpoint.id,
+											label: endpointName,
+											href: `/demo/endpoints/${encodeURIComponent(endpoint.id)}`,
+											ariaLabel: `${
+												isLocalEndpoint
+													? "Endpoint on current hosting node"
+													: "Endpoint"
+											} ${endpointName} (${endpoint.id})`,
+											leadingIcon: {
+												name: isLocalEndpoint
+													? "tabler:plug-connected"
+													: "tabler:link",
+												tone: isLocalEndpoint ? "primary" : "muted",
+											} as const,
+										};
+									})
 								: resourceId === "users"
 									? state.users.map((user) => ({
 											id: user.id,
 											label: user.displayName || "Unnamed user",
 											href: `/demo/users/${encodeURIComponent(user.id)}`,
 											ariaLabel: `User ${user.displayName || "unnamed"} (${user.id})`,
+											leadingIcon: {
+												name: "tabler:user-circle",
+												tone: "muted",
+											} as const,
 										}))
 									: undefined;
 					return {

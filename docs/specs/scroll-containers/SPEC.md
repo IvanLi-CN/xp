@@ -75,6 +75,7 @@
   `w-0 min-w-full` 等等价约束，保证 `scrollWidth <= clientWidth`，而不是依赖裁切掩盖横向溢出。
 - 滚动条尺寸与拇指长度由真实内容和 Radix 原语计算；鼠标滚轮、触控滚动与拖拽拇指必须作用于同一个 viewport。
 - 内容量未溢出时，不应以占位轨道、伪拇指或额外留白暗示可滚动。
+- 资源导航子项以自然内容高度呈现，最多显示十个 32px 行；不足十项不得预留空白，只有第十一项及以后才形成受限的纵向滚动区。
 - 名称在自身 `overflow-hidden` viewport 内通过 transform 展示被隐藏内容，不构成 `ScrollArea`
   的横向滚动能力；该位移不得改变连续内容列宽度、外层 `scrollWidth` 或纵向 scrollbar 行为。
 
@@ -96,6 +97,10 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 - Given 一个内容未溢出的 `ScrollArea` 面板，
   When 在 light 或 dark 主题查看，
   Then 页面不通过伪滚动条、额外占位或局部浏览器 scrollbar CSS 表示可滚动。
+
+- Given 一个资源导航二级列表，
+  When 它包含一到十个对象，
+  Then 它只占对象行的自然高度；第十一项出现后才显示最多十行的可滚动 viewport。
 
 - Given 一个需要横向检查代码或表格列的表面，
   When 其内容超出宽度，
@@ -136,24 +141,24 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 Evidence target: `ui_demo`.
 
 PR: include
-The active capsule stays inside the viewport; cyan server-bolt identifies the hosting node.
-![Desktop resource navigation](./assets/resource-navigation-desktop-motion.png)
+Desktop `/demo`: the current web host uses cyan `server-bolt`, while ordinary
+nodes use the distinct `server-2` silhouette.
+![Desktop resource navigation node icons](./assets/resource-navigation-node-icons.png)
 
 PR: include
-Reduced motion keeps the name stationary and shows the project Tooltip on the right.
-![Reduced-motion resource name tooltip](./assets/resource-navigation-reduced-motion-tooltip.png)
+Desktop `/demo`: current-hosting-node endpoint uses cyan `plug-connected`;
+other endpoint children use `link`, both distinct from the `plug` resource category icon.
+![Desktop resource navigation endpoint icons](./assets/resource-navigation-endpoint-icons.png)
 
 PR: include
-Mobile Sheet with the active capsule fully visible inside the same bounded vertical ScrollArea.
-![Mobile resource navigation sheet](./assets/resource-navigation-mobile-sheet.png)
-
-PR: include
-Light-theme check for the selected capsule, node identity icons, and long-name fade treatment.
-![Light-theme resource navigation](./assets/resource-navigation-light.png)
+Desktop `/demo`: user children use `user-circle`, remain contained within the
+ten-row viewport, and retain the selected capsule.
+![Desktop resource navigation user icons](./assets/resource-navigation-user-icons.png)
 
 ## Related PRs
 
 - [#244](https://github.com/IvanLi-CN/xp/pull/244)
+- [#246](https://github.com/IvanLi-CN/xp/pull/246)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

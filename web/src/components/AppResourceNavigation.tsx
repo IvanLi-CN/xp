@@ -109,7 +109,7 @@ export function AppResourceNavigation({
 						href: `/nodes/${encodeURIComponent(node.node_id)}`,
 						ariaLabel: `${identityLabel} ${nodeName} (${node.node_id})`,
 						leadingIcon: {
-							name: isLocalNode ? "tabler:server-bolt" : "tabler:server",
+							name: isLocalNode ? "tabler:server-bolt" : "tabler:server-2",
 							tone: isLocalNode ? "primary" : "muted",
 						} as const,
 					};
@@ -131,12 +131,22 @@ export function AppResourceNavigation({
 						: void adminNodes.refetch(),
 			},
 			endpoints: {
-				children: (adminEndpoints.data?.items ?? []).map((endpoint) => ({
-					id: endpoint.endpoint_id,
-					label: endpoint.tag || "Untitled endpoint",
-					href: `/endpoints/${encodeURIComponent(endpoint.endpoint_id)}`,
-					ariaLabel: `Endpoint ${endpoint.tag || "untitled"} (${endpoint.endpoint_id})`,
-				})),
+				children: (adminEndpoints.data?.items ?? []).map((endpoint) => {
+					const isLocalEndpoint = endpoint.node_id === localNodeId;
+					const endpointName = endpoint.tag || "Untitled endpoint";
+					return {
+						id: endpoint.endpoint_id,
+						label: endpointName,
+						href: `/endpoints/${encodeURIComponent(endpoint.endpoint_id)}`,
+						ariaLabel: `${
+							isLocalEndpoint ? "Endpoint on current hosting node" : "Endpoint"
+						} ${endpointName} (${endpoint.endpoint_id})`,
+						leadingIcon: {
+							name: isLocalEndpoint ? "tabler:plug-connected" : "tabler:link",
+							tone: isLocalEndpoint ? "primary" : "muted",
+						} as const,
+					};
+				}),
 				isLoading:
 					adminEndpoints.isLoading ||
 					(endpointsRequested && compatibilityPending),
@@ -160,6 +170,10 @@ export function AppResourceNavigation({
 					label: user.display_name || "Unnamed user",
 					href: `/users/${encodeURIComponent(user.user_id)}`,
 					ariaLabel: `User ${user.display_name || "unnamed"} (${user.user_id})`,
+					leadingIcon: {
+						name: "tabler:user-circle",
+						tone: "muted",
+					} as const,
 				})),
 				isLoading:
 					adminUsers.isLoading || (usersRequested && compatibilityPending),

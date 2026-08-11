@@ -21,8 +21,19 @@ const nodeGroups = [
 	},
 ];
 
+const endpointGroups = [
+	{
+		title: "Nav",
+		items: [{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" }],
+	},
+];
+
 function formatNodeLabel(nodeName: string, nodeId: string) {
 	return `${nodeName} (${nodeId})`;
+}
+
+function formatEndpointLabel(endpointName: string, endpointId: string) {
+	return `${endpointName} (${endpointId})`;
 }
 
 describe("<AppResourceNavigation />", () => {
@@ -117,8 +128,77 @@ describe("<AppResourceNavigation />", () => {
 		expect(currentNode).toHaveAttribute("data-leading-icon-tone", "primary");
 		expect(ordinaryNode).toHaveAttribute(
 			"data-leading-icon-name",
-			"tabler:server",
+			"tabler:server-2",
 		);
 		expect(ordinaryNode).toHaveAttribute("data-leading-icon-tone", "muted");
+	});
+
+	it("marks only endpoints on the current hosting node with a special icon", () => {
+		const queryClient = createQueryClient();
+		const localNodeId = fixtureCatalog.identifier.nodePrimary();
+		const localEndpointId = fixtureCatalog.identifier.endpointPrimary();
+		const remoteEndpointId = fixtureCatalog.identifier.endpointSecondary();
+		const localEndpointName = fixtureCatalog.identifier.endpointTagPrimary();
+		const remoteEndpointName = fixtureCatalog.identifier.endpointTagSecondary();
+		queryClient.setQueryData(["adminEndpoints", "admintoken"], {
+			items: [
+				{
+					endpoint_id: fixtureCatalog.identifier.endpointPrimary(),
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					tag: fixtureCatalog.identifier.endpointTagPrimary(),
+					kind: fixtureCatalog.endpoint.vlessKind(),
+					port: fixtureCatalog.endpoint.port443(),
+					meta: {},
+				},
+				{
+					endpoint_id: fixtureCatalog.identifier.endpointSecondary(),
+					node_id: fixtureCatalog.identifier.nodeSecondary(),
+					tag: fixtureCatalog.identifier.endpointTagSecondary(),
+					kind: fixtureCatalog.endpoint.ssKind(),
+					port: fixtureCatalog.endpoint.port8443(),
+					meta: {},
+				},
+			],
+		});
+		const compatibility = resolveApiCompatibility({
+			capabilities: ["admin.endpoints"],
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<AppResourceNavigation
+					adminToken="admintoken"
+					compatibility={compatibility}
+					compatibilityError={null}
+					compatibilityPending={false}
+					groups={endpointGroups}
+					localNodeId={localNodeId}
+					pathname={`/endpoints/${remoteEndpointId}`}
+					onNavigate={vi.fn()}
+					onResourceNavigate={vi.fn()}
+					onRetryCompatibility={vi.fn()}
+				/>
+			</QueryClientProvider>,
+		);
+
+		const localEndpoint = screen.getByRole("link", {
+			name: `Endpoint on current hosting node ${formatEndpointLabel(
+				localEndpointName,
+				localEndpointId,
+			)}`,
+		});
+		const remoteEndpoint = screen.getByRole("link", {
+			name: `Endpoint ${formatEndpointLabel(remoteEndpointName, remoteEndpointId)}`,
+		});
+		expect(localEndpoint).toHaveAttribute(
+			"data-leading-icon-name",
+			"tabler:plug-connected",
+		);
+		expect(localEndpoint).toHaveAttribute("data-leading-icon-tone", "primary");
+		expect(remoteEndpoint).toHaveAttribute(
+			"data-leading-icon-name",
+			"tabler:link",
+		);
+		expect(remoteEndpoint).toHaveAttribute("data-leading-icon-tone", "muted");
 	});
 });

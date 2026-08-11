@@ -75,13 +75,14 @@ function isRouteMatch(pathname: string, href: string) {
 }
 
 function defaultExpanded(groups: ResourceNavigationGroup[], pathname: string) {
-	return Object.fromEntries(
-		groups.flatMap((group) =>
-			group.items
-				.filter((item) => item.children !== undefined)
-				.map((item) => [item.id, pathname.startsWith(`${item.href}/`)]),
-		),
-	) as Record<string, boolean>;
+	return (
+		groups
+			.flatMap((group) => group.items)
+			.find(
+				(item) =>
+					item.children !== undefined && pathname.startsWith(`${item.href}/`),
+			)?.id ?? null
+	);
 }
 
 function subscribeToReducedMotion(onChange: () => void) {
@@ -124,7 +125,7 @@ export function ResourceNavigation({
 	const systemPrefersReducedMotion = usePrefersReducedMotion();
 	const prefersReducedMotion =
 		reducedMotionOverride ?? systemPrefersReducedMotion;
-	const [expanded, setExpanded] = useState(() =>
+	const [expandedResourceId, setExpandedResourceId] = useState(() =>
 		defaultExpanded(groups, pathname),
 	);
 	const groupsRef = useRef(groups);
@@ -133,7 +134,7 @@ export function ResourceNavigation({
 	const disclosureIdPrefix = useId().replaceAll(":", "");
 
 	useEffect(() => {
-		setExpanded(defaultExpanded(groupsRef.current, pathname));
+		setExpandedResourceId(defaultExpanded(groupsRef.current, pathname));
 	}, [pathname]);
 
 	useEffect(() => {
@@ -143,7 +144,7 @@ export function ResourceNavigation({
 				(item) =>
 					item.children !== undefined && isRouteMatch(pathname, item.href),
 			);
-		if (!activeItem || !expanded[activeItem.id]) return;
+		if (!activeItem || expandedResourceId !== activeItem.id) return;
 		const frame = window.requestAnimationFrame(() => {
 			activeChildRef.current?.scrollIntoView({
 				block: "nearest",
@@ -152,7 +153,7 @@ export function ResourceNavigation({
 			});
 		});
 		return () => window.cancelAnimationFrame(frame);
-	}, [expanded, groups, pathname]);
+	}, [expandedResourceId, groups, pathname]);
 
 	function followLink(
 		event: MouseEvent<HTMLAnchorElement>,
@@ -174,11 +175,12 @@ export function ResourceNavigation({
 	}
 
 	function toggleItem(item: ResourceNavigationItem) {
-		const nextValue = !expanded[item.id];
-		setExpanded((current) => {
-			return { ...current, [item.id]: nextValue };
-		});
-		if (nextValue) onResourceRequested?.(item.id);
+		const nextExpandedResourceId =
+			expandedResourceId === item.id ? null : item.id;
+		setExpandedResourceId(nextExpandedResourceId);
+		if (nextExpandedResourceId !== null) {
+			onResourceRequested?.(nextExpandedResourceId);
+		}
 	}
 
 	return (
@@ -198,7 +200,7 @@ export function ResourceNavigation({
 										item.children?.every(
 											(child) => child.leadingIcon !== undefined,
 										);
-									const isExpanded = expanded[item.id] ?? false;
+									const isExpanded = expandedResourceId === item.id;
 									const isActive = isRouteMatch(pathname, item.href);
 									const panelId = `${disclosureIdPrefix}-${item.id}-children`;
 									return (
@@ -286,7 +288,7 @@ export function ResourceNavigation({
 													) : (
 														<ScrollArea
 															data-testid={`resource-list-${item.id}`}
-															className="h-[20rem]"
+															className="max-h-[20rem] [&_[data-radix-scroll-area-viewport]]:max-h-[20rem]"
 														>
 															<ul className="w-0 min-w-full pr-1">
 																{item.children?.map((child) => {

@@ -61,7 +61,7 @@ const groups: ResourceNavigationGroup[] = [
 						href: "/nodes/node-osaka-1",
 						ariaLabel: "Node osaka-1 (node-osaka-1)",
 						leadingIcon: {
-							name: "tabler:server",
+							name: "tabler:server-2",
 							tone: "muted",
 						},
 					},
@@ -74,10 +74,25 @@ const groups: ResourceNavigationGroup[] = [
 				icon: "tabler:plug",
 				children: [
 					{
+						id: "endpoint-tokyo",
+						label: "tokyo-reality-443",
+						href: "/endpoints/endpoint-tokyo",
+						ariaLabel:
+							"Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+						leadingIcon: {
+							name: "tabler:plug-connected",
+							tone: "primary",
+						},
+					},
+					{
 						id: "endpoint-sgp",
 						label: LONG_ENDPOINT,
 						href: "/endpoints/endpoint-sgp",
 						ariaLabel: `Endpoint ${LONG_ENDPOINT} (endpoint-sgp)`,
+						leadingIcon: {
+							name: "tabler:link",
+							tone: "muted",
+						},
 					},
 				],
 			},
@@ -86,7 +101,13 @@ const groups: ResourceNavigationGroup[] = [
 				label: "Users",
 				href: "/users",
 				icon: "tabler:users",
-				children: users,
+				children: users.map((user) => ({
+					...user,
+					leadingIcon: {
+						name: "tabler:user-circle",
+						tone: "muted",
+					} as const,
+				})),
 			},
 		],
 	},
@@ -134,10 +155,53 @@ export const IndexCollapsed: Story = {
 		await userEvent.click(canvas.getByRole("button", { name: "Expand Users" }));
 		await expect(canvas.getByText(LONG_USER)).toBeInTheDocument();
 		const resourceList = canvas.getByTestId("resource-list-users");
-		await expect(resourceList).toHaveClass("h-[20rem]");
+		await expect(resourceList).toHaveClass("max-h-[20rem]");
+		const viewport = resourceList.querySelector<HTMLElement>(
+			"[data-radix-scroll-area-viewport]",
+		);
+		if (!viewport) throw new Error("Resource viewport is missing.");
+		await waitFor(() => {
+			expect(viewport.clientHeight).toBe(320);
+			expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight);
+		});
+	},
+};
+
+export const ShortListNaturalHeight: Story = {
+	args: {
+		pathname: "/nodes/node-tokyo-1",
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const resourceList = canvas.getByTestId("resource-list-nodes");
+		await expect(resourceList).toHaveClass("max-h-[20rem]");
+		await expect(resourceList).not.toHaveClass("h-[20rem]");
+		await waitFor(() => {
+			expect(resourceList.getBoundingClientRect().height).toBeGreaterThan(0);
+			expect(resourceList.getBoundingClientRect().height).toBeLessThan(320);
+		});
+	},
+};
+
+export const ExclusiveExpansion: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button", { name: "Expand Nodes" }));
+		await expect(canvas.getByText("tokyo-1")).toBeInTheDocument();
+
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand Endpoints" }),
+		);
+		await expect(canvas.queryByText("tokyo-1")).toBeNull();
+		await expect(canvas.getByText(LONG_ENDPOINT)).toBeInTheDocument();
 		await expect(
-			resourceList.querySelector("[data-radix-scroll-area-viewport]"),
-		).toBeInTheDocument();
+			canvas.getByRole("button", { name: "Expand Nodes" }),
+		).toHaveAttribute("aria-expanded", "false");
+
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Collapse Endpoints" }),
+		);
+		await expect(canvas.queryByText(LONG_ENDPOINT)).toBeNull();
 	},
 };
 
@@ -166,7 +230,7 @@ export const ActiveObjectCapsule: Story = {
 	},
 };
 
-export const HostingNodeIdentity: Story = {
+export const ObjectIconIdentity: Story = {
 	args: {
 		pathname: "/nodes/node-tokyo-1",
 	},
@@ -179,7 +243,31 @@ export const HostingNodeIdentity: Story = {
 		).toHaveAttribute("data-leading-icon-tone", "primary");
 		await expect(
 			canvas.getByRole("link", { name: "Node osaka-1 (node-osaka-1)" }),
-		).toHaveAttribute("data-leading-icon-tone", "muted");
+		).toHaveAttribute("data-leading-icon-name", "tabler:server-2");
+
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand Endpoints" }),
+		);
+		await expect(
+			canvas.getByRole("link", {
+				name: "Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+			}),
+		).toHaveAttribute("data-leading-icon-name", "tabler:plug-connected");
+		await expect(
+			canvas.getByRole("link", {
+				name: "Endpoint on current hosting node tokyo-reality-443 (endpoint-tokyo)",
+			}),
+		).toHaveAttribute("data-leading-icon-tone", "primary");
+		await expect(
+			canvas.getByRole("link", {
+				name: `Endpoint ${LONG_ENDPOINT} (endpoint-sgp)`,
+			}),
+		).toHaveAttribute("data-leading-icon-name", "tabler:link");
+
+		await userEvent.click(canvas.getByRole("button", { name: "Expand Users" }));
+		await expect(
+			canvas.getByRole("link", { name: "User 01 (user-01)" }),
+		).toHaveAttribute("data-leading-icon-name", "tabler:user-circle");
 	},
 };
 
