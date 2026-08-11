@@ -12,9 +12,9 @@
 
 - `web/src/components/ui/scroll-area.tsx` 使用 Radix 的 root、viewport、vertical scrollbar 和真实 thumb。
 - `web/src/components/ui/scroll-area.stories.tsx` 提供长列表状态，供 light/dark 主题下人工检查滚动条外观。
-- `web/src/components/ResourceNavigation.tsx` 的对象二级导航以固定十行高度采用
+- `web/src/components/ResourceNavigation.tsx` 的对象二级导航以自然内容高度、最多十行采用
   `ScrollArea`；连续内容列通过 `w-0 min-w-full` 固定在 viewport 宽度内，活动对象沿用最近边界、
-  无动画的 viewport 定位。
+  无动画的 viewport 定位，资源组以单组手风琴方式展开。
 - `web/src/components/ResourceNavigationChildLink.tsx` 将长名称位移限制在名称自身的 overflow
   viewport，不扩展 `ScrollArea` 的横向能力；reduced motion 下改用项目 Tooltip。
 - `web/src/components/ResourceNavigation.stories.tsx` 覆盖长名称、完整选中胶囊、外层无横向

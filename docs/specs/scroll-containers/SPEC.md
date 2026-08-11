@@ -75,6 +75,7 @@
   `w-0 min-w-full` 等等价约束，保证 `scrollWidth <= clientWidth`，而不是依赖裁切掩盖横向溢出。
 - 滚动条尺寸与拇指长度由真实内容和 Radix 原语计算；鼠标滚轮、触控滚动与拖拽拇指必须作用于同一个 viewport。
 - 内容量未溢出时，不应以占位轨道、伪拇指或额外留白暗示可滚动。
+- 资源导航子项以自然内容高度呈现，最多显示十个 32px 行；不足十项不得预留空白，只有第十一项及以后才形成受限的纵向滚动区。
 - 名称在自身 `overflow-hidden` viewport 内通过 transform 展示被隐藏内容，不构成 `ScrollArea`
   的横向滚动能力；该位移不得改变连续内容列宽度、外层 `scrollWidth` 或纵向 scrollbar 行为。
 
@@ -96,6 +97,10 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 - Given 一个内容未溢出的 `ScrollArea` 面板，
   When 在 light 或 dark 主题查看，
   Then 页面不通过伪滚动条、额外占位或局部浏览器 scrollbar CSS 表示可滚动。
+
+- Given 一个资源导航二级列表，
+  When 它包含一到十个对象，
+  Then 它只占对象行的自然高度；第十一项出现后才显示最多十行的可滚动 viewport。
 
 - Given 一个需要横向检查代码或表格列的表面，
   When 其内容超出宽度，
