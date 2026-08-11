@@ -141,20 +141,19 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 Evidence target: `ui_demo`.
 
 PR: include
-The active capsule stays inside the viewport; cyan server-bolt identifies the hosting node.
-![Desktop resource navigation](./assets/resource-navigation-desktop-motion.png)
+Desktop `/demo` with three nodes: the child list uses its natural three-row height
+and leaves no reserved blank area.
+![Desktop resource navigation natural height](./assets/resource-navigation-natural-height.png)
 
 PR: include
-Reduced motion keeps the name stationary and shows the project Tooltip on the right.
-![Reduced-motion resource name tooltip](./assets/resource-navigation-reduced-motion-tooltip.png)
+Desktop `/demo` with 28 users: the list is capped at ten 32px rows and exposes
+the real vertical scrollbar.
+![Desktop resource navigation bounded list](./assets/resource-navigation-bounded-list.png)
 
 PR: include
-Mobile Sheet with the active capsule fully visible inside the same bounded vertical ScrollArea.
-![Mobile resource navigation sheet](./assets/resource-navigation-mobile-sheet.png)
-
-PR: include
-Light-theme check for the selected capsule, node identity icons, and long-name fade treatment.
-![Light-theme resource navigation](./assets/resource-navigation-light.png)
+Mobile `/demo` at `393x852`: the Sheet has one expanded resource group and its
+long user list remains bounded.
+![Mobile resource navigation accordion](./assets/resource-navigation-mobile-accordion.png)
 
 ## Related PRs
 
