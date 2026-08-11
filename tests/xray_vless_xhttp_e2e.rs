@@ -378,14 +378,44 @@ fn render_mihomo_config(endpoint: &Endpoint, external_port: u16, socks_port: u16
     serde_yaml::to_string(&root).expect("serialize Mihomo E2E config")
 }
 
-async fn fetch(client: &reqwest::Client, url: &str) {
+async fn fetch(client: &reqwest::Client, url: &str) -> Result<(), String> {
     let response = client
         .get(url)
         .send()
         .await
-        .expect("request through Mihomo XHTTP proxy");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    assert_eq!(response.text().await.expect("response body"), RESPONSE_BODY);
+        .map_err(|error| format!("request through Mihomo XHTTP proxy: {error}"))?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(format!("unexpected response status: {}", response.status()));
+    }
+    let response_body = response
+        .text()
+        .await
+        .map_err(|error| format!("read response body: {error}"))?;
+    if response_body != RESPONSE_BODY {
+        return Err(format!("unexpected response body: {response_body}"));
+    }
+    Ok(())
+}
+
+async fn wait_for_xhttp_client_ready(client: &reqwest::Client, url: &str, mihomo: &MihomoProcess) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last_error = None;
+    loop {
+        match fetch(client, url).await {
+            Ok(()) => return,
+            Err(error) if Instant::now() < deadline => {
+                last_error = Some(error);
+                sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => {
+                panic!(
+                    "Mihomo XHTTP client did not become ready: {error}; previous error: {}; {}",
+                    last_error.unwrap_or_default(),
+                    mihomo.logs()
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -467,12 +497,17 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
         target.addr.port()
     );
 
-    fetch(&client, &target_url).await;
+    wait_for_xhttp_client_ready(&client, &target_url, &mihomo).await;
     for _ in 0..32 {
-        fetch(&client, &target_url).await;
+        fetch(&client, &target_url)
+            .await
+            .expect("sequential request through Mihomo XHTTP proxy");
     }
     let concurrent = join_all((0..64).map(|_| fetch(&client, &target_url))).await;
     assert_eq!(concurrent.len(), 64);
+    for result in concurrent {
+        result.expect("concurrent request through Mihomo XHTTP proxy");
+    }
     assert_eq!(
         proxy.accepts.load(Ordering::SeqCst),
         1,
@@ -481,7 +516,9 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
     assert_eq!(proxy.active.load(Ordering::SeqCst), 1);
 
     proxy.disconnect_all().await;
-    fetch(&client, &target_url).await;
+    fetch(&client, &target_url)
+        .await
+        .expect("request after forced XHTTP transport disconnect");
     assert_eq!(
         proxy.accepts.load(Ordering::SeqCst),
         2,
