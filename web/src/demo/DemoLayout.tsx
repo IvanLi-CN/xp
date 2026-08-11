@@ -259,7 +259,7 @@ function DemoShell({ children }: { children: ReactNode }) {
 										leadingIcon: {
 											name: isLocalNode
 												? "tabler:server-bolt"
-												: "tabler:server",
+												: "tabler:server-2",
 											tone: isLocalNode ? "primary" : "muted",
 										} as const,
 									};
@@ -270,6 +270,10 @@ function DemoShell({ children }: { children: ReactNode }) {
 										label: endpoint.name || "Untitled endpoint",
 										href: `/demo/endpoints/${encodeURIComponent(endpoint.id)}`,
 										ariaLabel: `Endpoint ${endpoint.name || "untitled"} (${endpoint.id})`,
+										leadingIcon: {
+											name: "tabler:link",
+											tone: "muted",
+										} as const,
 									}))
 								: resourceId === "users"
 									? state.users.map((user) => ({
@@ -277,6 +281,10 @@ function DemoShell({ children }: { children: ReactNode }) {
 											label: user.displayName || "Unnamed user",
 											href: `/demo/users/${encodeURIComponent(user.id)}`,
 											ariaLabel: `User ${user.displayName || "unnamed"} (${user.id})`,
+											leadingIcon: {
+												name: "tabler:user-circle",
+												tone: "muted",
+											} as const,
 										}))
 									: undefined;
 					return {

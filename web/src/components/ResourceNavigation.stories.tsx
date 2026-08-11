@@ -61,7 +61,7 @@ const groups: ResourceNavigationGroup[] = [
 						href: "/nodes/node-osaka-1",
 						ariaLabel: "Node osaka-1 (node-osaka-1)",
 						leadingIcon: {
-							name: "tabler:server",
+							name: "tabler:server-2",
 							tone: "muted",
 						},
 					},
@@ -78,6 +78,10 @@ const groups: ResourceNavigationGroup[] = [
 						label: LONG_ENDPOINT,
 						href: "/endpoints/endpoint-sgp",
 						ariaLabel: `Endpoint ${LONG_ENDPOINT} (endpoint-sgp)`,
+						leadingIcon: {
+							name: "tabler:link",
+							tone: "muted",
+						},
 					},
 				],
 			},
@@ -86,7 +90,13 @@ const groups: ResourceNavigationGroup[] = [
 				label: "Users",
 				href: "/users",
 				icon: "tabler:users",
-				children: users,
+				children: users.map((user) => ({
+					...user,
+					leadingIcon: {
+						name: "tabler:user-circle",
+						tone: "muted",
+					} as const,
+				})),
 			},
 		],
 	},
@@ -209,7 +219,7 @@ export const ActiveObjectCapsule: Story = {
 	},
 };
 
-export const HostingNodeIdentity: Story = {
+export const ObjectIconIdentity: Story = {
 	args: {
 		pathname: "/nodes/node-tokyo-1",
 	},
@@ -222,7 +232,21 @@ export const HostingNodeIdentity: Story = {
 		).toHaveAttribute("data-leading-icon-tone", "primary");
 		await expect(
 			canvas.getByRole("link", { name: "Node osaka-1 (node-osaka-1)" }),
-		).toHaveAttribute("data-leading-icon-tone", "muted");
+		).toHaveAttribute("data-leading-icon-name", "tabler:server-2");
+
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand Endpoints" }),
+		);
+		await expect(
+			canvas.getByRole("link", {
+				name: `Endpoint ${LONG_ENDPOINT} (endpoint-sgp)`,
+			}),
+		).toHaveAttribute("data-leading-icon-name", "tabler:link");
+
+		await userEvent.click(canvas.getByRole("button", { name: "Expand Users" }));
+		await expect(
+			canvas.getByRole("link", { name: "User 01 (user-01)" }),
+		).toHaveAttribute("data-leading-icon-name", "tabler:user-circle");
 	},
 };
 

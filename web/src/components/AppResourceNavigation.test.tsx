@@ -117,7 +117,7 @@ describe("<AppResourceNavigation />", () => {
 		expect(currentNode).toHaveAttribute("data-leading-icon-tone", "primary");
 		expect(ordinaryNode).toHaveAttribute(
 			"data-leading-icon-name",
-			"tabler:server",
+			"tabler:server-2",
 		);
 		expect(ordinaryNode).toHaveAttribute("data-leading-icon-tone", "muted");
 	});

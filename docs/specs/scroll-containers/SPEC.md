@@ -141,23 +141,24 @@ None。该规范不改变后端接口，也不扩展 `ScrollArea` 的公开 Type
 Evidence target: `ui_demo`.
 
 PR: include
-Desktop `/demo` with three nodes: the child list uses its natural three-row height
-and leaves no reserved blank area.
-![Desktop resource navigation natural height](./assets/resource-navigation-natural-height.png)
+Desktop `/demo`: the current web host uses cyan `server-bolt`, while ordinary
+nodes use the distinct `server-2` silhouette.
+![Desktop resource navigation node icons](./assets/resource-navigation-node-icons.png)
 
 PR: include
-Desktop `/demo` with 28 users: the list is capped at ten 32px rows and exposes
-the real vertical scrollbar.
-![Desktop resource navigation bounded list](./assets/resource-navigation-bounded-list.png)
+Desktop `/demo`: endpoint children use `link`, distinct from the `plug` resource
+category icon.
+![Desktop resource navigation endpoint icons](./assets/resource-navigation-endpoint-icons.png)
 
 PR: include
-Mobile `/demo` at `393x852`: the Sheet has one expanded resource group and its
-long user list remains bounded.
-![Mobile resource navigation accordion](./assets/resource-navigation-mobile-accordion.png)
+Desktop `/demo`: user children use `user-circle`, remain contained within the
+ten-row viewport, and retain the selected capsule.
+![Desktop resource navigation user icons](./assets/resource-navigation-user-icons.png)
 
 ## Related PRs
 
 - [#244](https://github.com/IvanLi-CN/xp/pull/244)
+- [#246](https://github.com/IvanLi-CN/xp/pull/246)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

@@ -193,6 +193,16 @@ function nowIso() {
 
 function normalizeState(value: DemoState): DemoState {
 	const defaults = createDemoState(value.scenarioId ?? "normal");
+	const requestedLocalNodeId = value.localNodeId ?? defaults.localNodeId;
+	const fallbackLocalNodeId =
+		value.nodes.find((node) => node.id === defaults.localNodeId)?.id ??
+		value.nodes[0]?.id ??
+		defaults.localNodeId;
+	const localNodeId = value.nodes.some(
+		(node) => node.id === requestedLocalNodeId,
+	)
+		? requestedLocalNodeId
+		: fallbackLocalNodeId;
 	const endpointMembership = new Map<string, Set<string>>();
 	for (const endpoint of value.endpoints) {
 		endpointMembership.set(endpoint.id, new Set());
@@ -209,7 +219,7 @@ function normalizeState(value: DemoState): DemoState {
 	return {
 		...value,
 		session: isDemoSession(value.session) ? value.session : null,
-		localNodeId: value.localNodeId ?? defaults.localNodeId,
+		localNodeId,
 		users: value.users.map((user) => ({
 			...user,
 			mihomoMixinYaml: user.mihomoMixinYaml ?? "",

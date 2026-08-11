@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { createDemoState } from "./fixtures";
 import {
 	DemoProvider,
 	clearDemoFallbackState,
@@ -19,6 +20,7 @@ function DemoHarness() {
 	return (
 		<div>
 			<p data-testid="role">{state.session?.role ?? "none"}</p>
+			<p data-testid="local-node">{state.localNodeId}</p>
 			<button
 				type="button"
 				onClick={() =>
@@ -95,5 +97,30 @@ describe("demo store", () => {
 		});
 
 		expect(hasDemoSession()).toBe(false);
+	});
+
+	it("migrates a stored local node ID that no longer exists", () => {
+		const staleState = {
+			...createDemoState("large"),
+			localNodeId: "node-tokyo-1",
+		};
+		Object.defineProperty(globalThis, "localStorage", {
+			value: {
+				getItem: () => JSON.stringify(staleState),
+				setItem: () => {},
+				removeItem: () => {},
+			},
+			configurable: true,
+		});
+
+		render(
+			<DemoProvider>
+				<DemoHarness />
+			</DemoProvider>,
+		);
+
+		expect(screen.getByTestId("local-node")).toHaveTextContent(
+			staleState.nodes[0]?.id ?? "",
+		);
 	});
 });

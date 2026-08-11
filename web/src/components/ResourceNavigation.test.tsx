@@ -27,6 +27,10 @@ const groups: ResourceNavigationGroup[] = [
 						label: "Node 01",
 						href: "/nodes/node-01",
 						ariaLabel: "Node 01 (node-01)",
+						leadingIcon: {
+							name: "tabler:server-2",
+							tone: "muted",
+						},
 					},
 				],
 			},
@@ -41,6 +45,10 @@ const groups: ResourceNavigationGroup[] = [
 						label: "Endpoint 01",
 						href: "/endpoints/endpoint-01",
 						ariaLabel: "Endpoint 01 (endpoint-01)",
+						leadingIcon: {
+							name: "tabler:link",
+							tone: "muted",
+						},
 					},
 				],
 			},
@@ -56,6 +64,10 @@ const groups: ResourceNavigationGroup[] = [
 						label: `User ${number}`,
 						href: `/users/user-${number}`,
 						ariaLabel: `User ${number} (user-${number})`,
+						leadingIcon: {
+							name: "tabler:user-circle",
+							tone: "muted",
+						},
 					};
 				}),
 			},
@@ -117,12 +129,18 @@ describe("<ResourceNavigation />", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Expand Nodes" }));
 		expect(screen.getByText("Node 01")).toBeInTheDocument();
 		expect(
+			screen.getByRole("link", { name: "Node 01 (node-01)" }),
+		).toHaveAttribute("data-leading-icon-name", "tabler:server-2");
+		expect(
 			screen.getByRole("button", { name: "Collapse Nodes" }),
 		).toHaveAttribute("aria-expanded", "true");
 
 		fireEvent.click(screen.getByRole("button", { name: "Expand Endpoints" }));
 		expect(screen.queryByText("Node 01")).toBeNull();
 		expect(screen.getByText("Endpoint 01")).toBeInTheDocument();
+		expect(
+			screen.getByRole("link", { name: "Endpoint 01 (endpoint-01)" }),
+		).toHaveAttribute("data-leading-icon-name", "tabler:link");
 		expect(
 			screen.getByRole("button", { name: "Expand Nodes" }),
 		).toHaveAttribute("aria-expanded", "false");
@@ -163,6 +181,10 @@ describe("<ResourceNavigation />", () => {
 		expect(activeUser).toHaveClass("rounded-full");
 		expect(activeUser).toHaveAttribute("aria-current", "page");
 		expect(activeUser).not.toHaveAttribute("title");
+		expect(activeUser).toHaveAttribute(
+			"data-leading-icon-name",
+			"tabler:user-circle",
+		);
 		await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
 
 		fireEvent.click(activeUser);

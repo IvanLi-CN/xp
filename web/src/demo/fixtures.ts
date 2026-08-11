@@ -91,7 +91,7 @@ const baseNodes: DemoNode[] = [
 	},
 ];
 
-const DEMO_LOCAL_NODE_ID = "node-tokyo-1";
+const DEMO_LOCAL_NODE_ID = fixtureCatalog.identifier.nodePrimary();
 
 const baseEndpoints: DemoEndpoint[] = [
 	{

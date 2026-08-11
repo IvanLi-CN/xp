@@ -17,6 +17,8 @@
   无动画的 viewport 定位，资源组以单组手风琴方式展开。
 - `web/src/components/ResourceNavigationChildLink.tsx` 将长名称位移限制在名称自身的 overflow
   viewport，不扩展 `ScrollArea` 的横向能力；reduced motion 下改用项目 Tooltip。
+- 资源导航的分类与子项保持不同的图标轮廓：普通节点使用 `server-2`，当前托管节点使用
+  `server-bolt`，接入点使用 `link`，用户使用 `user-circle`；leading icon 取代对象子项的额外缩进。
 - `web/src/components/ResourceNavigation.stories.tsx` 覆盖长名称、完整选中胶囊、外层无横向
   overflow 及 reduced-motion fallback。
 - 历史原生 `overflow-*` 面板不要求纯文档变更后的立即迁移；新增或实质改造时应按 `SPEC.md` 采用该组件。

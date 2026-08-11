@@ -109,7 +109,7 @@ export function AppResourceNavigation({
 						href: `/nodes/${encodeURIComponent(node.node_id)}`,
 						ariaLabel: `${identityLabel} ${nodeName} (${node.node_id})`,
 						leadingIcon: {
-							name: isLocalNode ? "tabler:server-bolt" : "tabler:server",
+							name: isLocalNode ? "tabler:server-bolt" : "tabler:server-2",
 							tone: isLocalNode ? "primary" : "muted",
 						} as const,
 					};
@@ -136,6 +136,10 @@ export function AppResourceNavigation({
 					label: endpoint.tag || "Untitled endpoint",
 					href: `/endpoints/${encodeURIComponent(endpoint.endpoint_id)}`,
 					ariaLabel: `Endpoint ${endpoint.tag || "untitled"} (${endpoint.endpoint_id})`,
+					leadingIcon: {
+						name: "tabler:link",
+						tone: "muted",
+					} as const,
 				})),
 				isLoading:
 					adminEndpoints.isLoading ||
@@ -160,6 +164,10 @@ export function AppResourceNavigation({
 					label: user.display_name || "Unnamed user",
 					href: `/users/${encodeURIComponent(user.user_id)}`,
 					ariaLabel: `User ${user.display_name || "unnamed"} (${user.user_id})`,
+					leadingIcon: {
+						name: "tabler:user-circle",
+						tone: "muted",
+					} as const,
 				})),
 				isLoading:
 					adminUsers.isLoading || (usersRequested && compatibilityPending),
