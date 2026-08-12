@@ -148,7 +148,7 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 ## Visual Evidence
 
 PR: none
-evidence_bind_ref: c8700e79412f4bb388acf80a8aa0be8882e8a233 + local compact-form changes
+evidence_bind_ref: 8802298cfa3d4f8c26a006c51efbadd5777cd6e5
 
 source_type: storybook_canvas
 target_program: mock-only
@@ -160,7 +160,7 @@ capture_scope: browser-viewport
 margin_policy: trim_only
 evidence_surface: page
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: The creation form uses one compact label rail and keeps explanatory text behind
 help icons. XHTTP/XMUX is selected by default and Create endpoint remains visible.
 
@@ -176,7 +176,7 @@ capture_scope: browser-viewport
 margin_policy: trim_only
 evidence_surface: page
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: The editing form uses one shared label rail: port, transport mode, and canary
 upstream controls begin on the same desktop column. Changing Vision TCP replaces the ordinary
 transport help icon with one warning tooltip beside the label before Save changes.
@@ -193,7 +193,7 @@ capture_scope: element
 margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: The flattened transport advanced setting shares the form label rail and keeps its
 segmented control on the same row without a nested card.
 
@@ -209,7 +209,7 @@ capture_scope: element
 margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: The mobile control keeps both options readable without horizontal overflow. The
 transport-impact explanation replaces the ordinary help icon in the same label position.
 
