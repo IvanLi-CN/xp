@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { MihomoSmuxConfig } from "../api/adminEndpoints";
+import { InlineHelpTooltip } from "./InlineHelpTooltip";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 
@@ -37,15 +38,11 @@ export function EndpointMihomoSmuxSettings({
 	const controlsDisabled = disabled || !config.enabled;
 
 	return (
-		<details className="rounded-xl border border-border/70 bg-muted/35">
-			<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+		<details className="border-t border-border/70 pt-3">
+			<summary className="cursor-pointer list-none text-sm font-medium">
 				高级设置：SS2022 连接复用 (SMux)
 			</summary>
-			<div className="space-y-4 border-t border-border/70 px-4 py-4">
-				<p className="text-xs text-muted-foreground">
-					仅写入 SS2022 Mihomo YAML，要求 Mihomo &gt;= v1.19.29。URI
-					不包含此设置。
-				</p>
+			<div className="space-y-3 pt-3">
 				<div className="flex items-center gap-2">
 					<Checkbox
 						id="mihomo-smux-enabled"
@@ -64,9 +61,13 @@ export function EndpointMihomoSmuxSettings({
 					>
 						启用 SMux
 					</label>
+					<InlineHelpTooltip label="About SS2022 SMux">
+						Only emitted in SS2022 Mihomo YAML and requires Mihomo v1.19.29 or
+						later. URI output does not include this setting.
+					</InlineHelpTooltip>
 				</div>
-				<div className="grid gap-4 md:grid-cols-2">
-					<div className="xp-field-stack">
+				<div className="grid gap-3 md:grid-cols-2">
+					<div className="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-3">
 						<label
 							className="text-sm font-medium"
 							htmlFor="mihomo-smux-max-connections"
@@ -83,9 +84,8 @@ export function EndpointMihomoSmuxSettings({
 							disabled={controlsDisabled}
 							onChange={(event) => onMaxConnectionsChange(event.target.value)}
 						/>
-						<p className="text-xs opacity-70">1-16 条连接。</p>
 					</div>
-					<div className="xp-field-stack">
+					<div className="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-3">
 						<label
 							className="text-sm font-medium"
 							htmlFor="mihomo-smux-min-streams"
@@ -102,7 +102,6 @@ export function EndpointMihomoSmuxSettings({
 							disabled={controlsDisabled}
 							onChange={(event) => onMinStreamsChange(event.target.value)}
 						/>
-						<p className="text-xs opacity-70">1-64 个并发流。</p>
 					</div>
 				</div>
 				<div className="flex items-center gap-2">

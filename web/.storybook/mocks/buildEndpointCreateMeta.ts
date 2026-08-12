@@ -67,12 +67,16 @@ export function buildEndpointCreateMeta(
 	if (payload.kind !== fixtureCatalog.endpoint.vlessKind()) {
 		return {};
 	}
+	const transport = payload.transport ?? "xhttp";
 
 	if (payload.reality) {
 		if (
 			matchesFixtureValue(payload.reality, fixtureCatalog.endpoint.reality())
 		) {
-			return { reality: fixtureCatalog.endpoint.reality() };
+			return {
+				reality: fixtureCatalog.endpoint.reality(),
+				transport,
+			};
 		}
 		if (
 			matchesFixtureValue(
@@ -80,7 +84,10 @@ export function buildEndpointCreateMeta(
 				fixtureCatalog.endpoint.realityAlternate(),
 			)
 		) {
-			return { reality: fixtureCatalog.endpoint.realityAlternate() };
+			return {
+				reality: fixtureCatalog.endpoint.realityAlternate(),
+				transport,
+			};
 		}
 		throw new Error("reality must be an approved synthetic fixture value");
 	}
@@ -93,6 +100,7 @@ export function buildEndpointCreateMeta(
 				? fixtureCatalog.endpoint.realityAlternate()
 				: fixtureCatalog.endpoint.reality(),
 		managed_default: true,
+		transport,
 	};
 	applyFixtureCanaryUpstream(meta, payload.canary_upstream);
 	applyFixtureAuthorities(meta, payload.accepted_authorities);

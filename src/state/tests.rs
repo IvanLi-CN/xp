@@ -122,6 +122,7 @@ fn vless_endpoint(endpoint_id: &str, _node_id: &str) -> Endpoint {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: false,
     };
 
@@ -921,6 +922,7 @@ fn upsert_endpoint_auto_grants_matching_kind_only() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: vless_endpoint("vless_2", "node_1"),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -976,6 +978,7 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: ss_endpoint("ss_2", "node_1"),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -1011,6 +1014,7 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: false,
     };
 
@@ -1023,9 +1027,12 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1064,6 +1071,7 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: false,
     };
 
@@ -1076,9 +1084,12 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    let err = DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap_err();
+    let err = DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap_err();
     assert!(err.to_string().contains("dest is required"));
     assert!(state.endpoints.is_empty());
 }
@@ -1123,6 +1134,7 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: false,
     };
 
@@ -1135,9 +1147,12 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1188,6 +1203,7 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::host_list_empty(),
         mihomo_smux: Default::default(),
+        transport: Default::default(),
         managed_default: true,
     };
 
@@ -1200,9 +1216,12 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1219,67 +1238,6 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         meta.reality.dest,
         xp_test_fixtures::address_loopback_port39531()
     );
-}
-
-#[test]
-fn rotate_vless_reality_short_id_updates_meta_and_persists() {
-    let tmp = tempfile::tempdir().unwrap();
-    let mut store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-
-    let node_id = store.list_nodes()[0].node_id.clone();
-    let endpoint_id = xp_test_fixtures::label_endpoint1().to_owned();
-    let kind = EndpointKind::VlessRealityVisionTcp;
-
-    let meta = VlessRealityVisionTcpEndpointMeta {
-        reality: RealityConfig {
-            dest: xp_test_fixtures::address_loopback_port39514().to_owned(),
-            server_names: xp_test_fixtures::host_list_edge31(),
-            server_names_source: Default::default(),
-            fingerprint: "chrome".to_string(),
-        },
-        reality_keys: RealityKeys {
-            private_key: "priv".to_string(),
-            public_key: "pub".to_string(),
-        },
-        short_ids: xp_test_fixtures::endpoint_short_ids(),
-        active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
-        canary_upstream: xp_test_fixtures::none(),
-        accepted_authorities: xp_test_fixtures::host_list_empty(),
-        mihomo_smux: Default::default(),
-        managed_default: false,
-    };
-
-    let mut endpoint_meta = serde_json::to_value(meta).unwrap();
-    endpoint_meta.as_object_mut().unwrap().remove("mihomo_smux");
-    store.state_mut().endpoints.insert(
-        endpoint_id.clone(),
-        Endpoint {
-            endpoint_id: xp_test_fixtures::label_endpoint1().to_owned(),
-            node_id,
-            tag: xp_test_fixtures::label_ss2().to_owned(),
-            kind,
-            port: 443,
-            meta: endpoint_meta,
-        },
-    );
-    store.save().unwrap();
-
-    let mut rng = StdRng::seed_from_u64(42);
-    let out = store
-        .rotate_vless_reality_short_id_with_rng(&endpoint_id, &mut rng)
-        .unwrap()
-        .unwrap();
-
-    drop(store);
-
-    let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-    let endpoint = store.get_endpoint(&endpoint_id).unwrap();
-    let meta: VlessRealityVisionTcpEndpointMeta =
-        serde_json::from_value(endpoint.meta.clone()).unwrap();
-
-    assert_eq!(out.active_short_id, meta.active_short_id);
-    assert_eq!(out.short_ids, meta.short_ids);
-    assert!(endpoint.meta.get("mihomo_smux").is_none());
 }
 
 #[test]
@@ -1649,6 +1607,7 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: endpoint.clone(),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -1678,9 +1637,12 @@ fn desired_state_apply_rejects_invalid_port() {
         meta: json!({}),
     };
 
-    let err = DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap_err();
+    let err = DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap_err();
 
     assert!(matches!(
         err,

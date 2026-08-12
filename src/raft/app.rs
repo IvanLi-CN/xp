@@ -17,6 +17,8 @@ use crate::{
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+const CONDITIONAL_ENDPOINT_UPDATE_CAPABILITY: &str = "admin.endpoint-conditional-update";
+
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(msg) = payload.downcast_ref::<&str>() {
         return (*msg).to_string();
@@ -622,6 +624,18 @@ async fn forward_client_write(
     peer: &MeshPeerTarget,
     cmd: &DesiredStateCommand,
 ) -> anyhow::Result<ClientResponse> {
+    if command_requires_conditional_endpoint_update(cmd)
+        && !leader_supports_conditional_endpoint_update(client, peer)
+            .await
+            .unwrap_or(false)
+    {
+        return Ok(ClientResponse::Err {
+            status: 409,
+            code: "coordinated_upgrade_required".to_string(),
+            message: "endpoint PATCH requires a leader that supports conditional endpoint updates"
+                .to_string(),
+        });
+    }
     let body = serde_json::to_vec(cmd)?;
     let response = send_forwarded_mesh_request(
         client,
@@ -644,6 +658,51 @@ async fn forward_client_write(
         .await
         .context("parse forward client_write response")?;
     Ok(response)
+}
+
+fn command_requires_conditional_endpoint_update(cmd: &DesiredStateCommand) -> bool {
+    matches!(
+        cmd,
+        DesiredStateCommand::UpsertEndpoint {
+            expected: Some(_),
+            ..
+        }
+    )
+}
+
+#[derive(Deserialize)]
+struct CapabilitiesResponse {
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+async fn leader_supports_conditional_endpoint_update(
+    client: &MeshAwareHttpClient,
+    peer: &MeshPeerTarget,
+) -> anyhow::Result<bool> {
+    let url = format!(
+        "{}/api/capabilities",
+        peer.public_base_url.trim_end_matches('/')
+    );
+    let response = tokio::time::timeout(Duration::from_secs(5), client.direct().get(url).send())
+        .await
+        .map_err(|_| anyhow::anyhow!("leader capability request timed out"))??;
+    if !response.status().is_success() {
+        return Ok(false);
+    }
+    let capabilities = response
+        .json::<CapabilitiesResponse>()
+        .await
+        .context("parse leader capabilities")?;
+    Ok(capabilities_support_conditional_endpoint_update(
+        &capabilities.capabilities,
+    ))
+}
+
+fn capabilities_support_conditional_endpoint_update(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == CONDITIONAL_ENDPOINT_UPDATE_CAPABILITY)
 }
 
 /// A test-only Raft facade that applies desired-state commands directly to the local store.
@@ -791,13 +850,13 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
-            DomainError::NodeInUse { .. } | DomainError::NodeEndpointSetChanged { .. } => {
-                ClientResponse::Err {
-                    status: 409,
-                    code: "conflict".to_string(),
-                    message: domain.to_string(),
-                }
-            }
+            DomainError::NodeInUse { .. }
+            | DomainError::NodeEndpointSetChanged { .. }
+            | DomainError::EndpointChanged { .. } => ClientResponse::Err {
+                status: 409,
+                code: "conflict".to_string(),
+                message: domain.to_string(),
+            },
             DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
@@ -818,74 +877,5 @@ fn map_store_error(err: StoreError) -> ClientResponse {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{path::Path, sync::Arc};
-
-    use serde_json::json;
-    use tokio::sync::{Mutex, watch};
-
-    use super::*;
-    use crate::{
-        domain::EndpointKind,
-        state::{JsonSnapshotStore, StoreInit, membership_key},
-    };
-
-    fn test_store_init(tmp_dir: &Path) -> StoreInit {
-        StoreInit {
-            data_dir: tmp_dir.to_path_buf(),
-            bootstrap_node_id: None,
-            bootstrap_node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
-            bootstrap_access_host: xp_test_fixtures::label_empty().to_owned(),
-            bootstrap_api_base_url: xp_test_fixtures::subscription_api_loopback_https().to_owned(),
-        }
-    }
-
-    #[tokio::test]
-    async fn replace_user_access_clears_usage_for_removed_memberships_local_raft() {
-        let tmp = tempfile::tempdir().unwrap();
-        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
-        let node_id = store.list_nodes()[0].node_id.clone();
-        let user = store.create_user("alice".to_string(), None).unwrap();
-        let endpoint = store
-            .create_endpoint(
-                node_id,
-                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
-                8388,
-                json!({}),
-            )
-            .unwrap();
-        let membership = membership_key(&user.user_id, &endpoint.endpoint_id);
-
-        DesiredStateCommand::ReplaceUserAccess {
-            user_id: user.user_id.clone(),
-            endpoint_ids: vec![endpoint.endpoint_id.clone()],
-        }
-        .apply(store.state_mut())
-        .unwrap();
-        store.save().unwrap();
-
-        store
-            .set_quota_banned(&membership, "2025-12-18T00:00:00Z".to_string())
-            .unwrap();
-        assert!(store.get_membership_usage(&membership).is_some());
-
-        let store = Arc::new(Mutex::new(store));
-        let (_tx, metrics) = watch::channel(openraft::RaftMetrics::new_initial(0));
-        let raft = LocalRaft::new(store.clone(), metrics);
-
-        raft.client_write(DesiredStateCommand::ReplaceUserAccess {
-            user_id: user.user_id.clone(),
-            endpoint_ids: Vec::new(),
-        })
-        .await
-        .unwrap();
-
-        assert!(
-            store
-                .lock()
-                .await
-                .get_membership_usage(&membership)
-                .is_none()
-        );
-    }
-}
+#[path = "app/tests.rs"]
+mod tests;

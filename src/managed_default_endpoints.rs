@@ -358,7 +358,11 @@ where
                 kind.label(),
                 endpoint.endpoint_id
             );
-            write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
+            write_command(DesiredStateCommand::UpsertEndpoint {
+                endpoint: next,
+                expected: None,
+            })
+            .await?;
         }
         return Ok((Some(endpoint.endpoint_id.clone()), Some(*source)));
     }
@@ -378,7 +382,11 @@ where
                 kind.label(),
                 endpoint.endpoint_id
             );
-            write_command(DesiredStateCommand::UpsertEndpoint { endpoint: next }).await?;
+            write_command(DesiredStateCommand::UpsertEndpoint {
+                endpoint: next,
+                expected: None,
+            })
+            .await?;
         } else {
             eprintln!(
                 "{log_label}: adopting existing managed default {} endpoint {}",
@@ -401,7 +409,11 @@ where
             kind.label(),
             endpoint_id
         );
-        write_command(DesiredStateCommand::UpsertEndpoint { endpoint }).await?;
+        write_command(DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        })
+        .await?;
         return Ok((Some(endpoint_id), Some(*source)));
     }
 
@@ -447,6 +459,7 @@ impl ManagedEndpointSpec for DefaultVlessEndpointSpec {
             canary_upstream: None,
             accepted_authorities: Vec::new(),
             mihomo_smux: Default::default(),
+            transport: crate::protocol::VlessRealityTransport::Xhttp,
             managed_default: true,
         };
         Ok(Endpoint {

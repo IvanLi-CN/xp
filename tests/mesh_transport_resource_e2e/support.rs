@@ -302,6 +302,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
         canary_upstream: xp_test_fixtures::none(),
         accepted_authorities: xp_test_fixtures::secondary_server_names(),
         mihomo_smux: MihomoSmuxConfig::default(),
+        transport: Default::default(),
         managed_default: true,
     })
     .expect("serialize managed endpoint metadata");
@@ -327,6 +328,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
                 port: target.port,
                 meta: meta.clone(),
             },
+            expected: None,
         }
         .apply(store.state_mut())
         .expect("insert resource peer endpoint");

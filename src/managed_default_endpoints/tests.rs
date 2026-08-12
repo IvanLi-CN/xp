@@ -140,7 +140,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
 
     assert_eq!(writes.len(), 1);
     match &writes[0] {
-        DesiredStateCommand::UpsertEndpoint { endpoint } => {
+        DesiredStateCommand::UpsertEndpoint { endpoint, .. } => {
             let meta: VlessRealityVisionTcpEndpointMeta =
                 serde_json::from_value(endpoint.meta.clone()).unwrap();
             assert!(meta.managed_default);
@@ -150,6 +150,7 @@ async fn explicit_vless_spec_adopts_single_legacy_vless_and_rewrites_canary_dest
                 xp_test_fixtures::host_list_edge31()
             );
             assert_eq!(endpoint.port, 30445);
+            assert!(endpoint.meta.get("transport").is_none());
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -193,11 +194,15 @@ async fn missing_managed_vless_bootstraps_at_explicit_port() {
 
     assert_eq!(writes.len(), 1);
     match &writes[0] {
-        DesiredStateCommand::UpsertEndpoint { endpoint } => {
+        DesiredStateCommand::UpsertEndpoint { endpoint, .. } => {
             let meta: VlessRealityVisionTcpEndpointMeta =
                 serde_json::from_value(endpoint.meta.clone()).unwrap();
             assert_eq!(endpoint.port, 30445);
             assert!(meta.managed_default);
+            assert_eq!(
+                meta.transport,
+                crate::protocol::VlessRealityTransport::Xhttp
+            );
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -277,7 +282,7 @@ async fn existing_managed_vless_preserves_cluster_port_when_bootstrap_port_is_st
     let upserted = writes
         .iter()
         .find_map(|command| match command {
-            DesiredStateCommand::UpsertEndpoint { endpoint } => Some(endpoint),
+            DesiredStateCommand::UpsertEndpoint { endpoint, .. } => Some(endpoint),
             _ => None,
         })
         .expect("managed VLESS reconcile should refresh derived fields");

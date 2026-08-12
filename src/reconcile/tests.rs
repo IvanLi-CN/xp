@@ -20,6 +20,8 @@ use crate::{
     },
 };
 
+mod vless_xhttp;
+
 const TEST_CLUSTER_CA_KEY_PEM: &str = "xp-test-cluster-ca-key";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

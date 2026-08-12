@@ -4,7 +4,8 @@ use crate::{
     domain::{Endpoint, EndpointKind},
     protocol::{
         SS2022_METHOD_2022_BLAKE3_AES_128_GCM, SS2022_PSK_LEN_BYTES_AES_128, Ss2022EndpointMeta,
-        VlessRealityVisionTcpEndpointMeta, validate_short_id,
+        VLESS_XHTTP_PATH, VlessRealityTransport, VlessRealityVisionTcpEndpointMeta,
+        validate_short_id,
     },
     xray::proto::xray,
 };
@@ -18,6 +19,7 @@ const TYPE_SS2022_MULTIUSER_SERVER_CONFIG: &str =
     "xray.proxy.shadowsocks_2022.MultiUserServerConfig";
 const TYPE_SS2022_ACCOUNT: &str = "xray.proxy.shadowsocks_2022.Account";
 const TYPE_TCP_TRANSPORT_CONFIG: &str = "xray.transport.internet.tcp.Config";
+const TYPE_SPLITHTTP_TRANSPORT_CONFIG: &str = "xray.transport.internet.splithttp.Config";
 const TYPE_REALITY_SECURITY_CONFIG: &str = "xray.transport.internet.reality.Config";
 
 // In Xray-core, TypedMessage.Type is set to `message.ProtoReflect().Descriptor().FullName()`.
@@ -131,6 +133,18 @@ fn tcp_transport_settings() -> xray::transport::internet::TransportConfig {
     }
 }
 
+fn xhttp_transport_settings() -> xray::transport::internet::TransportConfig {
+    let xhttp = xray::transport::internet::splithttp::Config {
+        path: VLESS_XHTTP_PATH.to_string(),
+        mode: "stream-one".to_string(),
+        ..Default::default()
+    };
+    xray::transport::internet::TransportConfig {
+        protocol_name: "splithttp".to_string(),
+        settings: Some(to_typed_message(TYPE_SPLITHTTP_TRANSPORT_CONFIG, &xhttp)),
+    }
+}
+
 fn business_inbound_socket_settings() -> xray::transport::internet::SocketConfig {
     xray::transport::internet::SocketConfig {
         tcp_keep_alive_interval: 30,
@@ -223,10 +237,14 @@ pub fn build_add_user_operation(
                 kind: endpoint.kind.clone(),
                 reason: "missing vless_uuid".to_string(),
             })?;
+            let meta = parse_vless_meta(endpoint)?;
 
             let account = xray::proxy::vless::Account {
                 id: uuid.to_string(),
-                flow: "xtls-rprx-vision".to_string(),
+                flow: match meta.transport {
+                    VlessRealityTransport::VisionTcp => "xtls-rprx-vision".to_string(),
+                    VlessRealityTransport::Xhttp => String::new(),
+                },
                 encryption: "none".to_string(),
                 xor_mode: 0,
                 seconds: 0,
@@ -310,6 +328,7 @@ pub fn build_add_inbound_request(
 
             let dest = normalize_reality_dest_for_xray(&meta.reality.dest);
             let fingerprint = normalize_reality_fingerprint(&meta.reality.fingerprint);
+            let transport = meta.transport;
 
             let reality = xray::transport::internet::reality::Config {
                 show: false,
@@ -335,11 +354,20 @@ pub fn build_add_inbound_request(
                 master_key_log: String::new(),
             };
 
+            let (protocol_name, transport_settings) = match transport {
+                VlessRealityTransport::VisionTcp => {
+                    ("tcp".to_string(), vec![tcp_transport_settings()])
+                }
+                VlessRealityTransport::Xhttp => {
+                    ("splithttp".to_string(), vec![xhttp_transport_settings()])
+                }
+            };
+
             let stream_settings = xray::transport::internet::StreamConfig {
                 address: None,
                 port: 0,
-                protocol_name: "tcp".to_string(),
-                transport_settings: vec![tcp_transport_settings()],
+                protocol_name,
+                transport_settings,
                 security_type: TYPE_REALITY_SECURITY_CONFIG.to_string(),
                 security_settings: vec![to_typed_message(TYPE_REALITY_SECURITY_CONFIG, &reality)],
                 socket_settings: Some(business_inbound_socket_settings()),
@@ -504,6 +532,35 @@ mod tests {
     }
 
     #[test]
+    fn build_add_user_operation_vless_xhttp_clears_vision_flow() {
+        let endpoint = Endpoint {
+            endpoint_id: xp_test_fixtures::label_e1().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::label_vless_e1().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+                "transport": "xhttp"
+            }),
+        };
+
+        let tm = build_add_user_operation(
+            &endpoint,
+            "m:u1::e1",
+            Some("66ad4540-b58c-4ad2-9926-ea63445a9b57"),
+            None,
+        )
+        .unwrap();
+        let op: xray::app::proxyman::command::AddUserOperation = decode_typed(&tm);
+        let account: xray::proxy::vless::Account = decode_typed(&op.user.unwrap().account.unwrap());
+        assert_eq!(account.flow, "");
+    }
+
+    #[test]
     fn build_add_user_operation_ss2022_extracts_user_psk_from_password() {
         let endpoint = Endpoint {
             endpoint_id: xp_test_fixtures::label_e2().to_owned(),
@@ -589,6 +646,41 @@ mod tests {
         let proxy: xray::proxy::vless::inbound::Config = decode_typed(&proxy_tm);
         assert_eq!(proxy.clients.len(), 0);
         assert_eq!(proxy.decryption, "none");
+    }
+
+    #[test]
+    fn build_add_inbound_request_vless_xhttp_uses_splithttp_transport() {
+        let endpoint = Endpoint {
+            endpoint_id: xp_test_fixtures::label_e3().to_owned(),
+            node_id: xp_test_fixtures::subscription_node_n1().to_owned(),
+            tag: xp_test_fixtures::label_vless_e3().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 443,
+            meta: serde_json::json!({
+                "reality": xp_test_fixtures::endpoint_reality(),
+                "reality_keys": xp_test_fixtures::endpoint_reality_keys(),
+                "short_ids": xp_test_fixtures::endpoint_short_ids(),
+                "active_short_id": xp_test_fixtures::endpoint_active_short_id(),
+                "transport": "xhttp"
+            }),
+        };
+
+        let req = build_add_inbound_request(&endpoint).unwrap();
+        let inbound = req.inbound.unwrap();
+        let receiver: xray::app::proxyman::ReceiverConfig =
+            decode_typed(&inbound.receiver_settings.unwrap());
+        let stream = receiver.stream_settings.unwrap();
+        assert_eq!(stream.protocol_name, "splithttp");
+        assert_eq!(stream.security_type, TYPE_REALITY_SECURITY_CONFIG);
+        assert_eq!(stream.transport_settings.len(), 1);
+
+        let transport = &stream.transport_settings[0];
+        assert_eq!(transport.protocol_name, "splithttp");
+        let settings = transport.settings.as_ref().unwrap();
+        assert_eq!(settings.r#type, TYPE_SPLITHTTP_TRANSPORT_CONFIG);
+        let xhttp: xray::transport::internet::splithttp::Config = decode_typed(settings);
+        assert_eq!(xhttp.path, VLESS_XHTTP_PATH);
+        assert_eq!(xhttp.mode, "stream-one");
     }
 
     #[test]

@@ -463,7 +463,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
                     let rebuild_inbound = match &cmd {
-                        DesiredStateCommand::UpsertEndpoint { endpoint } => store
+                        DesiredStateCommand::UpsertEndpoint { endpoint, .. } => store
                             .get_endpoint(&endpoint.endpoint_id)
                             .filter(|existing| {
                                 existing.port != endpoint.port || existing.meta != endpoint.meta

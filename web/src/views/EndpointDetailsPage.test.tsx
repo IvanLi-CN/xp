@@ -67,11 +67,15 @@ vi.mock("../components/auth", async (importOriginal) => {
 
 function renderPage({
 	smuxSupported = true,
-}: { smuxSupported?: boolean } = {}) {
+	xhttpSupported = true,
+}: { smuxSupported?: boolean; xhttpSupported?: boolean } = {}) {
 	const queryClient = createQueryClient();
 	const compatibility = resolveApiCompatibility({
 		capabilities: [
-			...API_CAPABILITIES,
+			...API_CAPABILITIES.filter(
+				(capability) => capability !== "admin.endpoint-vless-xhttp",
+			),
+			...(xhttpSupported ? ["admin.endpoint-vless-xhttp"] : []),
 			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
 		],
 	});
@@ -197,6 +201,131 @@ describe("EndpointDetailsPage", () => {
 					canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 					accepted_authorities:
 						fixtureCatalog.authority.existingAndHost119Port53844(),
+				},
+			);
+		});
+	});
+
+	it("falls back missing legacy transport metadata and patches an XHTTP switch", async () => {
+		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
+			meta: {
+				reality: {
+					dest: fixtureCatalog.address.loopback39043(),
+					server_names: fixtureCatalog.hostList.edge5(),
+					server_names_source: "manual",
+					fingerprint: "chrome",
+				},
+				managed_default: false,
+			},
+		});
+		vi.mocked(patchAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
+			meta: { transport: "xhttp" },
+		});
+
+		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		expect(
+			await screen.findByRole("radio", { name: "Vision TCP" }),
+		).toBeChecked();
+		fireEvent.click(await screen.findByRole("radio", { name: "XHTTP / XMUX" }));
+		expect(
+			await screen.findByRole("button", { name: "Transport change impact" }),
+		).toBeInTheDocument();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Save changes" }),
+		);
+
+		await waitFor(() => {
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.endpointId.fixture172(),
+				{
+					port: fixtureCatalog.endpoint.port53844(),
+					transport: "xhttp",
+				},
+			);
+		});
+	});
+
+	it("switches XHTTP back to Vision TCP and keeps the choice after an API error", async () => {
+		vi.mocked(fetchAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture172(),
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			tag: fixtureCatalog.endpointTag.fixture121(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port53844(),
+			meta: {
+				reality: {
+					dest: fixtureCatalog.address.loopback39043(),
+					server_names: fixtureCatalog.hostList.edge5(),
+					server_names_source: "manual",
+					fingerprint: "chrome",
+				},
+				managed_default: false,
+				transport: "xhttp",
+			},
+		});
+		vi.mocked(patchAdminEndpoint).mockRejectedValue(
+			new Error("409 inbound rebuild rejected"),
+		);
+
+		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		expect(
+			await screen.findByRole("radio", { name: "XHTTP / XMUX" }),
+		).toBeChecked();
+		fireEvent.click(await screen.findByRole("radio", { name: "Vision TCP" }));
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Save changes" }),
+		);
+
+		await waitFor(() => {
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.endpointId.fixture172(),
+				{
+					port: fixtureCatalog.endpoint.port53844(),
+					transport: "vision_tcp",
+				},
+			);
+		});
+		expect(
+			await screen.findByText("409 inbound rebuild rejected"),
+		).toBeVisible();
+		expect(
+			await screen.findByRole("radio", { name: "Vision TCP" }),
+		).toBeChecked();
+	});
+
+	it("hides VLESS transport controls when the API capability is unavailable", async () => {
+		renderPage({ xhttpSupported: false });
+
+		expect(await screen.findByLabelText("port")).toBeInTheDocument();
+		expect(
+			screen.queryByText("Advanced: VLESS transport"),
+		).not.toBeInTheDocument();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Save changes" }),
+		);
+
+		await waitFor(() => {
+			expect(patchAdminEndpoint).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.endpointId.fixture172(),
+				{
+					port: fixtureCatalog.endpoint.port53844(),
+					accepted_authorities:
+						fixtureCatalog.authority.existingAuthoritiesPort443(),
 				},
 			);
 		});

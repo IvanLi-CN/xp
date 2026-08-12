@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "proto/xray/proxy/vless/inbound/config.proto",
         "proto/xray/transport/internet/config.proto",
         "proto/xray/transport/internet/reality/config.proto",
+        "proto/xray/transport/internet/splithttp/config.proto",
         "proto/xray/transport/internet/tcp/config.proto",
     ];
 

@@ -63,5 +63,5 @@ jobs:
 
       - name: xray gRPC e2e
         env:
-          XRAY_DOCKER_TAG: 25.12.8
+          XRAY_DOCKER_TAG: 26.3.27
         run: scripts/e2e/run-local-xray-e2e.sh

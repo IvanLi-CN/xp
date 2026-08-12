@@ -9,6 +9,17 @@ export const AdminEndpointKindSchema = z.enum([
 
 export type AdminEndpointKind = z.infer<typeof AdminEndpointKindSchema>;
 
+export const VlessRealityTransportSchema = z.enum(["vision_tcp", "xhttp"]);
+
+export type VlessRealityTransport = z.infer<typeof VlessRealityTransportSchema>;
+
+export function parseVlessRealityTransport(
+	value: unknown,
+): VlessRealityTransport {
+	const parsed = VlessRealityTransportSchema.safeParse(value);
+	return parsed.success ? parsed.data : "vision_tcp";
+}
+
 export const EndpointProbeStatusSchema = z.enum([
 	"missing",
 	"up",
@@ -121,6 +132,7 @@ export type AdminEndpointCreateRequest =
 			canary_upstream?: never;
 			accepted_authorities?: never;
 			mihomo_smux?: MihomoSmuxConfig;
+			transport?: VlessRealityTransport;
 	  }
 	| {
 			kind: "vless_reality_vision_tcp";
@@ -130,6 +142,7 @@ export type AdminEndpointCreateRequest =
 			canary_upstream?: CanaryUpstreamConfig | null;
 			accepted_authorities?: string[] | null;
 			mihomo_smux?: MihomoSmuxConfig;
+			transport?: VlessRealityTransport;
 	  }
 	| {
 			kind: "ss2022_2022_blake3_aes_128_gcm";
@@ -144,6 +157,7 @@ export type AdminEndpointPatchRequest = {
 	canary_upstream?: CanaryUpstreamConfig | null;
 	accepted_authorities?: string[] | null;
 	mihomo_smux?: MihomoSmuxConfig;
+	transport?: VlessRealityTransport;
 };
 
 export async function fetchAdminEndpoints(

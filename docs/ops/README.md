@@ -561,6 +561,28 @@ ss -tn state established '( sport = :443 or sport = :8443 )' || true
 head -n 5 /proc/net/tcp
 ```
 
+## VLESS transport migration (XHTTP/XMUX)
+
+New VLESS Reality endpoints use XHTTP/XMUX to let Mihomo reuse one HTTP/2 TCP transport after the
+pool is warm. Existing endpoints deliberately remain on Vision/TCP until an administrator changes
+that endpoint's **Advanced: VLESS transport** setting; an XP upgrade alone does not change the
+wire transport of existing subscribers.
+
+Before changing an endpoint, upgrade the node to a release that bundles Xray `v26.3.27` or newer
+and confirm every affected client runs Mihomo `v1.19.29` or newer. Change one endpoint at a time:
+
+1. Select **XHTTP / XMUX** and save. XP removes and rebuilds that endpoint's Xray inbound, so
+   active connections on that endpoint are interrupted briefly.
+2. Re-render and refresh the affected YAML subscriptions. The new profile carries `network: xhttp`
+   and fixed low-resource XMUX settings; an old Vision/TCP profile cannot connect to the rebuilt
+   inbound.
+3. Observe new connection samples after the historical chart window has rolled forward. The TCP
+   chart still combines business traffic and Mesh traffic, so use the endpoint's new steady-state
+   samples rather than an old 24-hour peak as the migration verdict.
+
+To roll back, select **Vision TCP**, save, and refresh the same clients again. Do not switch every
+endpoint simultaneously: verify one subscriber path first, then proceed endpoint by endpoint.
+
 ## Data directory layout (`XP_DATA_DIR`)
 
 The runtime persists its identity, raft state, and snapshots under `XP_DATA_DIR`. This layout matches the code in:

@@ -78,7 +78,13 @@ async fn upsert_endpoint_change_requests_rebuild_inbound() {
     };
     endpoint.port = 8443;
 
-    let entry = build_entry(DesiredStateCommand::UpsertEndpoint { endpoint }, 1);
+    let entry = build_entry(
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        },
+        1,
+    );
     state_machine.apply(vec![entry]).await.unwrap();
 
     let mut requests = Vec::new();

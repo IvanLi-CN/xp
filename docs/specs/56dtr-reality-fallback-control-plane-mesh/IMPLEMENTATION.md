@@ -58,10 +58,12 @@
 - The 50-peer resource comparison records XP anonymous and total PSS separately. Anonymous PSS has
   an 18 MiB absolute ceiling; XP total PSS and the isolated XP-plus-Xray stack each have a 1 MiB
   regression ceiling against the locked baseline. File-backed executable pages remain included in
-  total PSS. The separate full managed-stack 64 MiB target remains outside this topic's contract.
+  total PSS. Candidate and baseline use separate Cargo target directories so build scripts and
+  release artifacts cannot cross-contaminate the comparison. The separate full managed-stack 64 MiB
+  target remains outside this topic's contract.
 - The locked 15-minute comparison completed with 50 persistent H2 connections: TLS accepts fell
-  from 905 to 50, XP total PSS from 31,620 KiB to 25,565 KiB, XP anonymous PSS from 17,540 KiB to
-  12,484 KiB, the isolated stack from 56,716 KiB to 50,661 KiB, and XP CPU ticks from 1,415 to 243.
+  from 921 to 50, XP total PSS from 30,660 KiB to 24,469 KiB, XP anonymous PSS from 17,624 KiB to
+  12,464 KiB, the isolated stack from 53,564 KiB to 47,337 KiB, and XP CPU ticks from 1,378 to 218.
   Every candidate peer remained at one active connection with a peak of one and no non-H2 request.
 - Rustls 0.23 uses the ring provider for both the server and Mesh client. Keeping one provider
   removes the unused AWS-LC implementation from the release binary while preserving TLS 1.2/1.3

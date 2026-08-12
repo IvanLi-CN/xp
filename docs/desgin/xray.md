@@ -103,12 +103,18 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 
 ## 3.1 业务入站的 stale TCP reclaim 默认
 
-- `xp` 通过 AddInbound 动态创建的业务 listener（当前仅 `VlessRealityVisionTcp` 与 `Ss2022_2022Blake3Aes128Gcm`）会固定下发：
+- `xp` 通过 AddInbound 动态创建的业务 listener（当前仅 VLESS Reality 与 `Ss2022_2022Blake3Aes128Gcm`）会固定下发：
   - `tcp_keep_alive_idle=300`
   - `tcp_keep_alive_interval=30`
   - `tcp_user_timeout=10000`
 - 该 `socket_settings` 只作用于业务 inbound。
 - 静态控制面 listener（`api`、`mesh-proxy`）保持现状，不增加 `sockopt`。
+
+VLESS Reality 的 metadata `transport` 决定业务 transport：历史缺失值为
+`vision_tcp`（TCP + `xtls-rprx-vision`）；新建或显式切换的 `xhttp` 使用 Xray
+`splithttp` + Reality，固定 path `/xp-xhttp`、`mode=stream-one`，且 VLESS user flow
+为空。两种模式不能在同一 inbound 端口并行，transport 变化会触发该 inbound 重建并重放用户。
+XHTTP 是客户端 YAML 的连接复用能力，不能通过 Xray `connIdle` 或顶层 Mihomo `smux` 替代。
 
 ## 4. 动态下发：Endpoint 与 Grant 如何落到 Xray
 

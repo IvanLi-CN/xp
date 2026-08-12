@@ -30,11 +30,37 @@ proxies:
       padding: false
       statistic: false
       only-tcp: true
+  - name: xp-vless-xhttp
+    type: vless
+    server: xhttp.example.test
+    port: 443
+    uuid: 8a4f3617-6e5e-4a6f-8ba6-7cbbce1f79ed
+    network: xhttp
+    udp: true
+    tls: true
+    alpn:
+      - h2
+    servername: www.example.test
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: 0123456789abcdef
+    xhttp-opts:
+      path: /xp-xhttp
+      mode: stream-one
+      reuse-settings:
+        max-connections: "1"
+        max-concurrency: "0"
+        c-max-reuse-times: "0"
+        h-max-request-times: "0"
+        h-max-reusable-secs: "0"
+        h-keep-alive-period: -1
 proxy-groups:
   - name: Proxy
     type: select
     proxies:
       - xp-vless-reality
       - xp-ss2022-smux
+      - xp-vless-xhttp
 rules:
   - MATCH,Proxy

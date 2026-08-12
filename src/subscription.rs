@@ -9,7 +9,7 @@ use crate::{
     managed_default_endpoints::managed_default_vless_endpoint,
     protocol::{
         MihomoSmuxConfig, SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
-        ss2022_password,
+        VLESS_XHTTP_PATH, VlessRealityTransport, ss2022_password,
     },
     state::{
         NodeEgressProbeState, NodeSubscriptionRegion, NodeUserEndpointMembership, UserMihomoProfile,
@@ -19,6 +19,7 @@ use crate::{
 mod clash_proxy;
 use clash_proxy::{
     ClashProxy, ClashRealityOpts, ClashSsProxy, ClashVlessProxy, mihomo_smux_config,
+    mihomo_vless_transport_config, mihomo_xhttp_share_extra_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4977,22 +4978,25 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         endpoint_id: endpoint.endpoint_id.clone(),
                     });
                 }
+                let transport = mihomo_vless_transport_config(meta.transport);
                 let proxy = ClashProxy::Vless(ClashVlessProxy {
                     name: format!("{prefix}-reality"),
                     proxy_type: "vless".to_string(),
                     server: node.access_host.clone(),
                     port: endpoint.port,
                     uuid: vless_uuid.clone(),
-                    network: "tcp".to_string(),
+                    network: transport.network.to_string(),
                     udp: true,
                     tls: true,
-                    flow: "xtls-rprx-vision".to_string(),
+                    flow: transport.flow.to_string(),
+                    alpn: transport.alpn,
                     servername: sni.to_string(),
                     client_fingerprint: meta.reality.fingerprint,
                     reality_opts: ClashRealityOpts {
                         public_key: meta.reality_keys.public_key,
                         short_id: sid.to_string(),
                     },
+                    xhttp_opts: transport.xhttp_opts,
                     dialer_proxy: None,
                 });
                 out.push(serde_yaml::to_value(proxy).map_err(|e| {
@@ -5018,22 +5022,25 @@ fn build_mihomo_generated_proxies<R: RngCore + ?Sized>(
                         endpoint_id: endpoint.endpoint_id.clone(),
                     });
                 }
+                let transport = mihomo_vless_transport_config(meta.transport);
                 let chain = ClashProxy::Vless(ClashVlessProxy {
                     name: format!("{prefix}-reality-chain"),
                     proxy_type: "vless".to_string(),
                     server: node.access_host.clone(),
                     port: endpoint.port,
                     uuid: vless_uuid.clone(),
-                    network: "tcp".to_string(),
+                    network: transport.network.to_string(),
                     udp: true,
                     tls: true,
-                    flow: "xtls-rprx-vision".to_string(),
+                    flow: transport.flow.to_string(),
+                    alpn: transport.alpn,
                     servername: sni.to_string(),
                     client_fingerprint: meta.reality.fingerprint,
                     reality_opts: ClashRealityOpts {
                         public_key: meta.reality_keys.public_key,
                         short_id: sid.to_string(),
                     },
+                    xhttp_opts: transport.xhttp_opts,
                     dialer_proxy: Some(relay_group_name.clone()),
                 });
                 out.push(serde_yaml::to_value(chain).map_err(|e| {
@@ -5212,27 +5219,56 @@ fn build_items_with_rng<R: RngCore + ?Sized>(
                 let pbk_q = percent_encode_rfc3986(pbk);
                 let sid_q = percent_encode_rfc3986(sid);
 
-                let uri = format!(
-                    "vless://{}@{}:{}?encryption=none&security=reality&type=tcp&sni={}&fp={}&pbk={}&sid={}&flow=xtls-rprx-vision#{}",
-                    vless_uuid, host, port, sni_q, fp_q, pbk_q, sid_q, name_encoded
-                );
+                let uri = match meta.transport {
+                    VlessRealityTransport::VisionTcp => format!(
+                        concat!(
+                            "vless://{}@{}:{}?encryption=none&security=reality&type=tcp",
+                            "&sni={}&fp={}&pbk={}&sid={}&flow=xtls-rprx-vision#{}"
+                        ),
+                        vless_uuid, host, port, sni_q, fp_q, pbk_q, sid_q, name_encoded
+                    ),
+                    VlessRealityTransport::Xhttp => {
+                        let path_q = percent_encode_rfc3986(VLESS_XHTTP_PATH);
+                        let extra_q = percent_encode_rfc3986(&mihomo_xhttp_share_extra_json());
+                        format!(
+                            concat!(
+                                "vless://{}@{}:{}?encryption=none&security=reality&type=xhttp",
+                                "&sni={}&fp={}&pbk={}&sid={}&alpn=h2&path={}",
+                                "&mode=stream-one&extra={}#{}"
+                            ),
+                            vless_uuid,
+                            host,
+                            port,
+                            sni_q,
+                            fp_q,
+                            pbk_q,
+                            sid_q,
+                            path_q,
+                            extra_q,
+                            name_encoded
+                        )
+                    }
+                };
 
+                let transport = mihomo_vless_transport_config(meta.transport);
                 let proxy = ClashProxy::Vless(ClashVlessProxy {
                     name: name.clone(),
                     proxy_type: "vless".to_string(),
                     server: host.to_string(),
                     port,
                     uuid: vless_uuid.clone(),
-                    network: "tcp".to_string(),
+                    network: transport.network.to_string(),
                     udp: true,
                     tls: true,
-                    flow: "xtls-rprx-vision".to_string(),
+                    flow: transport.flow.to_string(),
+                    alpn: transport.alpn,
                     servername: sni.to_string(),
                     client_fingerprint: fp.to_string(),
                     reality_opts: ClashRealityOpts {
                         public_key: pbk.to_string(),
                         short_id: sid.to_string(),
                     },
+                    xhttp_opts: transport.xhttp_opts,
                     dialer_proxy: None,
                 });
 

@@ -5212,6 +5212,7 @@ rules: []
 }
 
 mod mihomo_smux;
+mod vless_xhttp;
 
 #[test]
 fn build_mihomo_yaml_flattens_and_removes_template_helper_reference_blocks() {

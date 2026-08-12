@@ -33,6 +33,18 @@ type Story = StoryObj<typeof meta>;
 
 export const ManagedDefaultFieldsVisible: Story = {
 	tags: ["coverage-ui", "managed-vless-autocomplete"],
+	parameters: {
+		viewport: {
+			defaultViewport: "endpointFormDesktop",
+			viewports: {
+				endpointFormDesktop: {
+					name: "Endpoint form desktop (1280x900)",
+					styles: { height: "900px", width: "1280px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -57,6 +69,18 @@ export const ManagedDefaultFieldsVisible: Story = {
 				name: "Show access host suggestions",
 			}),
 		).toBeInTheDocument();
+		await userEvent.click(await canvas.findByText("Advanced: VLESS transport"));
+		await expect(
+			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
+		).toBeChecked();
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "About VLESS transport" }),
+		);
+		await expect(
+			await within(document.body).findByText(
+				/reusable HTTP\/2 transport connections/,
+			),
+		).toBeInTheDocument();
 		await expect(canvas.queryByLabelText("dest")).toBeNull();
 		await expect(canvas.queryByLabelText("serverNames")).toBeNull();
 	},
@@ -77,8 +101,11 @@ export const MihomoSmuxDefaults: Story = {
 		);
 		await expect(await canvas.findByLabelText("启用 SMux")).toBeChecked();
 		await expect(await canvas.findByLabelText("最大物理连接数")).toHaveValue(4);
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "About SS2022 SMux" }),
+		);
 		await expect(
-			await canvas.findByText(/Mihomo >= v1.19.29/),
+			await within(document.body).findByText(/要求 Mihomo >= v1.19.29/),
 		).toBeInTheDocument();
 	},
 };

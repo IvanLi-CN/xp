@@ -425,5 +425,15 @@ export function normalizeFixtureEndpointPatch<T extends AdminEndpoint>(
 			meta: { ...updated.meta, mihomo_smux: mihomoSmux },
 		};
 	}
+	if (payload.transport !== undefined) {
+		if (updated.kind !== fixtureCatalog.endpoint.vlessKind()) return undefined;
+		updated = {
+			...updated,
+			meta: {
+				...updated.meta,
+				transport: payload.transport,
+			},
+		};
+	}
 	return updated;
 }

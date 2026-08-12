@@ -11,6 +11,7 @@ export const API_CAPABILITIES = [
 	"admin.nodes",
 	"admin.users",
 	"admin.endpoints",
+	"admin.endpoint-vless-xhttp",
 	"admin.alerts",
 	"admin.config",
 	"admin.quota-policy",
@@ -24,7 +25,6 @@ export const API_CAPABILITIES = [
 	"admin.mihomo-tools",
 	"admin.mihomo-resource-policy",
 ] as const;
-
 export const API_CAPABILITIES_PATH = "/api/capabilities";
 export type ApiCapability = (typeof API_CAPABILITIES)[number] | (string & {});
 export type ReleaseInventory = {

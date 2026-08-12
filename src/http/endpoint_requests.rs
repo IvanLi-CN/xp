@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
-use crate::protocol::{CanaryUpstreamConfig, MihomoSmuxConfig, RealityServerNamesSource};
+use crate::protocol::{
+    CanaryUpstreamConfig, MihomoSmuxConfig, RealityServerNamesSource, VlessRealityTransport,
+};
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 pub(super) struct RealityConfig {
@@ -58,6 +60,17 @@ where
     Ok(Some(Option::<MihomoSmuxConfig>::deserialize(deserializer)?))
 }
 
+fn deserialize_optional_vless_transport<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<VlessRealityTransport>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<VlessRealityTransport>::deserialize(
+        deserializer,
+    )?))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum CreateEndpointRequest {
@@ -72,6 +85,8 @@ pub(super) enum CreateEndpointRequest {
         accepted_authorities: Option<Vec<String>>,
         #[serde(default)]
         mihomo_smux: Option<MihomoSmuxConfig>,
+        #[serde(default)]
+        transport: Option<VlessRealityTransport>,
     },
     #[serde(rename = "ss2022_2022_blake3_aes_128_gcm")]
     Ss2022_2022Blake3Aes128Gcm {
@@ -99,4 +114,6 @@ pub(super) struct PatchEndpointRequest {
     pub(super) accepted_authorities: Option<Option<Vec<String>>>,
     #[serde(default, deserialize_with = "deserialize_optional_mihomo_smux")]
     pub(super) mihomo_smux: Option<Option<MihomoSmuxConfig>>,
+    #[serde(default, deserialize_with = "deserialize_optional_vless_transport")]
+    pub(super) transport: Option<Option<VlessRealityTransport>>,
 }

@@ -144,6 +144,25 @@ MVP 建议输出“可直接导入”的最小 YAML：
 - Raw/Base64 的 VLESS 与 Shadowsocks URI 不携带 SMux。SMux 是 SS2022 Mihomo YAML
   proxy 行为，不是 URI 的标准协商字段。
 
+### 5.5 VLESS XHTTP/XMUX 连接复用
+
+- VLESS Reality 新建接入点默认使用 `network: xhttp`、`alpn: [h2]` 与固定
+  `xhttp-opts.path: /xp-xhttp`、`mode: stream-one`。这是 Mihomo XMUX 与 Xray
+  SplitHTTP 的共同传输，不是顶层 `smux`。
+- XHTTP YAML 的复用合同固定为每个接入点最多一条物理连接：
+  `max-connections: "1"`、`max-concurrency: "0"`、
+  `c-max-reuse-times: "0"`、`h-max-request-times: "0"`、
+  `h-max-reusable-secs: "0"`、`h-keep-alive-period: -1`。负数关闭 Mihomo 默认的
+  HTTP/2 PING；连接池完成预热后，
+  并发代理流共享同一 HTTP/2 TCP；客户端首次冷启动的建连竞态不改变该稳态合同。
+- XHTTP 覆盖 Clash、Mihomo provider 主配置引用的 system payload、VLESS 直连与链式条目。
+  XHTTP 接入点的 Raw/Base64 URI 使用 `type=xhttp` 与 Mihomo v1.19.29 能识别的
+  `extra.xmux` share-link 参数；legacy Vision/TCP URI 保持原样。
+- `Mihomo >= v1.19.29` 与随 XP 发布的 `Xray >= v26.3.27` 是 XHTTP 最低兼容基线。旧客户端
+  应升级，或在接入点高级设置中回退为 Vision/TCP 后刷新订阅。
+- 历史 VLESS metadata 缺少 `transport` 时仍输出 Vision/TCP；管理员显式切换后服务端会重建
+  inbound，必须刷新客户端 YAML/URI。详见 `../specs/endpoint-vless-xhttp-reuse/SPEC.md`。
+
 ## 6. Mihomo 混入配置输出（`format=mihomo`）
 
 ### 6.1 混入配置来源

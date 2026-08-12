@@ -26,8 +26,8 @@ use crate::{
     domain::{Endpoint, EndpointKind, User, UserQuotaReset},
     id::new_ulid_string,
     protocol::{
-        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta,
-        VlessRealityVisionTcpEndpointMeta, ss2022_password,
+        SS2022_METHOD_2022_BLAKE3_AES_128_GCM, Ss2022EndpointMeta, VLESS_XHTTP_PATH,
+        VlessRealityTransport, VlessRealityVisionTcpEndpointMeta, ss2022_password,
     },
     raft::app::RaftFacade,
     raft::types::ClientResponse,
@@ -918,6 +918,23 @@ async fn probe_vless_reality(
         });
     }
 
+    let (flow, network, xhttp_settings) = vless_probe_transport_settings(meta.transport);
+    let mut stream_settings = serde_json::json!({
+        "network": network,
+        "security": "reality",
+        "realitySettings": {
+            "show": false,
+            "fingerprint": meta.reality.fingerprint,
+            "serverName": server_name,
+            "publicKey": public_key,
+            "shortId": short_id,
+            "spiderX": "/"
+        }
+    });
+    if let Some(xhttp_settings) = xhttp_settings {
+        stream_settings["xhttpSettings"] = xhttp_settings;
+    }
+
     let outbound = serde_json::json!({
         "protocol": "vless",
         "settings": {
@@ -926,26 +943,32 @@ async fn probe_vless_reality(
                 "port": endpoint.port,
                 "users": [{
                     "id": uuid,
-                    "flow": "xtls-rprx-vision",
+                    "flow": flow,
                     "encryption": "none"
                 }]
             }]
         },
-        "streamSettings": {
-            "network": "tcp",
-            "security": "reality",
-            "realitySettings": {
-                "show": false,
-                "fingerprint": meta.reality.fingerprint,
-                "serverName": server_name,
-                "publicKey": public_key,
-                "shortId": short_id,
-                "spiderX": "/"
-            }
-        }
+        "streamSettings": stream_settings
     });
 
     probe_via_xray_socks(run_id, outbound).await
+}
+
+fn vless_probe_transport_settings(
+    transport: VlessRealityTransport,
+) -> (&'static str, &'static str, Option<serde_json::Value>) {
+    if transport.is_vision_tcp() {
+        return ("xtls-rprx-vision", "tcp", None);
+    }
+
+    (
+        "",
+        "xhttp",
+        Some(serde_json::json!({
+            "path": VLESS_XHTTP_PATH,
+            "mode": "stream-one"
+        })),
+    )
 }
 
 async fn probe_ss2022(
@@ -1205,40 +1228,5 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-mod private_tmp_tests {
-    use super::{create_private_dir, write_private_file};
-
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    #[test]
-    fn probe_temp_files_are_not_world_readable() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("xp-probe-perm-test");
-
-        create_private_dir(&dir).expect("create private dir");
-
-        #[cfg(unix)]
-        {
-            let mode = std::fs::metadata(&dir)
-                .expect("dir meta")
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(mode, 0o700, "dir mode should be 0700");
-        }
-
-        let file = dir.join("config.json");
-        write_private_file(&file, b"{}").expect("write private file");
-
-        #[cfg(unix)]
-        {
-            let mode = std::fs::metadata(&file)
-                .expect("file meta")
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(mode, 0o600, "file mode should be 0600");
-        }
-    }
-}
+#[path = "endpoint_probe/tests.rs"]
+mod tests;

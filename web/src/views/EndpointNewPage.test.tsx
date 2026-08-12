@@ -61,11 +61,15 @@ vi.mock("../components/auth", async (importOriginal) => {
 
 function renderPage({
 	smuxSupported = true,
-}: { smuxSupported?: boolean } = {}) {
+	xhttpSupported = true,
+}: { smuxSupported?: boolean; xhttpSupported?: boolean } = {}) {
 	const queryClient = createQueryClient();
 	const compatibility = resolveApiCompatibility({
 		capabilities: [
-			...API_CAPABILITIES,
+			...API_CAPABILITIES.filter(
+				(capability) => capability !== "admin.endpoint-vless-xhttp",
+			),
+			...(xhttpSupported ? ["admin.endpoint-vless-xhttp"] : []),
 			...(smuxSupported ? ["admin.endpoint-mihomo-smux"] : []),
 		],
 	});
@@ -158,6 +162,13 @@ describe("EndpointNewPage", () => {
 		});
 
 		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		expect(
+			await screen.findByRole("radio", { name: "XHTTP / XMUX" }),
+		).toBeChecked();
+		expect(
+			await screen.findByRole("button", { name: "About VLESS transport" }),
+		).toBeInTheDocument();
 
 		fireEvent.change(await screen.findByLabelText("canaryUpstreamUrl"), {
 			target: { value: " http://127.0.0.1:8080 " },
@@ -175,6 +186,7 @@ describe("EndpointNewPage", () => {
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: fixtureCatalog.endpoint.port443(),
+				transport: "xhttp",
 				canary_upstream: fixtureCatalog.canaryUpstream.httpLoopback(),
 				accepted_authorities: fixtureCatalog.authority.edgeExamplePort443(),
 			});
@@ -211,6 +223,37 @@ describe("EndpointNewPage", () => {
 				"This server does not support per-endpoint Mihomo SMux settings.",
 			),
 		).toBeNull();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Create endpoint" }),
+		);
+
+		await waitFor(() => {
+			expect(createAdminEndpoint).toHaveBeenCalledWith("admintoken", {
+				kind: fixtureCatalog.endpoint.vlessKind(),
+				node_id: fixtureCatalog.nodeId.fixture182(),
+				port: fixtureCatalog.endpoint.port443(),
+				transport: "xhttp",
+				canary_upstream: fixtureCatalog.optional.undefined(),
+				accepted_authorities: fixtureCatalog.optional.undefined(),
+			});
+		});
+	});
+
+	it("hides VLESS transport and omits its field for a legacy endpoint API", async () => {
+		vi.mocked(createAdminEndpoint).mockResolvedValue({
+			endpoint_id: fixtureCatalog.endpointId.fixture105(),
+			node_id: fixtureCatalog.nodeId.fixture182(),
+			tag: fixtureCatalog.endpointId.fixture105(),
+			kind: fixtureCatalog.endpoint.vlessKind(),
+			port: fixtureCatalog.endpoint.port443(),
+			meta: { managed_default: true },
+		});
+
+		renderPage({ xhttpSupported: false });
+
+		expect(
+			screen.queryByText("Advanced: VLESS transport"),
+		).not.toBeInTheDocument();
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Create endpoint" }),
 		);
@@ -277,6 +320,7 @@ describe("EndpointNewPage", () => {
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: fixtureCatalog.endpoint.port443(),
+				transport: "xhttp",
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host130Port443(),
 			});
@@ -393,6 +437,7 @@ describe("EndpointNewPage", () => {
 					kind: fixtureCatalog.endpoint.vlessKind(),
 					node_id: fixtureCatalog.nodeId.fixture182(),
 					port: fixtureCatalog.endpoint.port8443(),
+					transport: "xhttp",
 					accepted_authorities: fixtureCatalog.authority.host130Port8443(),
 				});
 			});
@@ -482,6 +527,7 @@ describe("EndpointNewPage", () => {
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.nodeId.fixture124(),
 				port: fixtureCatalog.endpoint.port443(),
+				transport: "xhttp",
 				canary_upstream: fixtureCatalog.canaryUpstream.httpsListener(),
 				accepted_authorities: fixtureCatalog.authority.host126Port443(),
 			});
@@ -494,6 +540,8 @@ describe("EndpointNewPage", () => {
 		);
 
 		renderPage();
+		fireEvent.click(await screen.findByText("Advanced: VLESS transport"));
+		fireEvent.click(await screen.findByRole("radio", { name: "Vision TCP" }));
 
 		fireEvent.change(await screen.findByLabelText("canaryUpstreamUrl"), {
 			target: { value: "http://127.0.0.1:8080" },
@@ -505,6 +553,13 @@ describe("EndpointNewPage", () => {
 		expect(
 			await screen.findByText("400 invalid_request: invalid canary upstream"),
 		).toBeInTheDocument();
+		expect(
+			await screen.findByRole("radio", { name: "Vision TCP" }),
+		).toBeChecked();
+		expect(createAdminEndpoint).toHaveBeenCalledWith(
+			"admintoken",
+			expect.objectContaining({ transport: "vision_tcp" }),
+		);
 		expect(createAdminEndpoint).toHaveBeenCalledTimes(1);
 	});
 
@@ -572,7 +627,7 @@ describe("EndpointNewPage", () => {
 		});
 		fireEvent.click(await screen.findByLabelText("Kind"));
 		fireEvent.click(
-			await screen.findByRole("option", { name: "VLESS Reality Vision TCP" }),
+			await screen.findByRole("option", { name: "VLESS Reality" }),
 		);
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Create endpoint" }),
@@ -583,6 +638,7 @@ describe("EndpointNewPage", () => {
 				kind: fixtureCatalog.endpoint.vlessKind(),
 				node_id: fixtureCatalog.nodeId.fixture182(),
 				port: fixtureCatalog.endpoint.port443(),
+				transport: "xhttp",
 				canary_upstream: fixtureCatalog.optional.undefined(),
 				accepted_authorities: fixtureCatalog.optional.undefined(),
 			});

@@ -2,12 +2,29 @@
 set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+XP_E2E_COMPOSE_PROJECT="${XP_E2E_COMPOSE_PROJECT:-xp-e2e}"
+export XP_E2E_COMPOSE_PROJECT
+XP_E2E_COMPOSE_OVERRIDE_FILE="${XP_E2E_COMPOSE_OVERRIDE_FILE:-}"
+export XP_E2E_COMPOSE_OVERRIDE_FILE
+
+if [ -z "${XP_E2E_MIHOMO_BIN:-}" ]; then
+  XP_E2E_MIHOMO_BIN="$($SCRIPT_DIR/install-mihomo-v1.19.29.sh)"
+fi
+export XP_E2E_MIHOMO_BIN
 
 compose() {
   if docker compose version >/dev/null 2>&1; then
-    docker compose -f "$SCRIPT_DIR/docker-compose.xray.yml" "$@"
+    if [ -n "$XP_E2E_COMPOSE_OVERRIDE_FILE" ]; then
+      docker compose -p "$XP_E2E_COMPOSE_PROJECT" -f "$SCRIPT_DIR/docker-compose.xray.yml" -f "$XP_E2E_COMPOSE_OVERRIDE_FILE" "$@"
+    else
+      docker compose -p "$XP_E2E_COMPOSE_PROJECT" -f "$SCRIPT_DIR/docker-compose.xray.yml" "$@"
+    fi
   else
-    docker-compose -f "$SCRIPT_DIR/docker-compose.xray.yml" "$@"
+    if [ -n "$XP_E2E_COMPOSE_OVERRIDE_FILE" ]; then
+      docker-compose -p "$XP_E2E_COMPOSE_PROJECT" -f "$SCRIPT_DIR/docker-compose.xray.yml" -f "$XP_E2E_COMPOSE_OVERRIDE_FILE" "$@"
+    else
+      docker-compose -p "$XP_E2E_COMPOSE_PROJECT" -f "$SCRIPT_DIR/docker-compose.xray.yml" "$@"
+    fi
   fi
 }
 
@@ -123,6 +140,12 @@ XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
 XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
 cargo test --test xray_mesh_transport_e2e -- --ignored
+
+XP_E2E_XRAY_MODE=external \
+XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
+XP_E2E_VLESS_PORT="${XP_E2E_VLESS_PORT}" \
+XP_E2E_MIHOMO_BIN="${XP_E2E_MIHOMO_BIN}" \
+cargo test --test xray_vless_xhttp_e2e -- --ignored
 
 XP_E2E_XRAY_MODE=external \
 XP_E2E_XRAY_API_ADDR="127.0.0.1:${XP_E2E_XRAY_API_PORT}" \
