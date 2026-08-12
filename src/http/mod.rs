@@ -5764,6 +5764,7 @@ async fn admin_patch_endpoint(
             .ok_or_else(|| ApiError::not_found(format!("endpoint not found: {endpoint_id}")))?;
         (endpoint, store.list_nodes(), store.list_endpoints())
     };
+    let expected = endpoint.clone();
 
     let desired_node_id = match req.node_id {
         None => endpoint.node_id.clone(),
@@ -5932,8 +5933,9 @@ async fn admin_patch_endpoint(
 
     let _ = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertEndpoint {
+        crate::state::DesiredStateCommand::ReplaceEndpointIfUnchanged {
             endpoint: endpoint.clone(),
+            expected,
         },
     )
     .await?;

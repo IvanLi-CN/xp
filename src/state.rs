@@ -1816,6 +1816,10 @@ pub enum DesiredStateCommand {
     UpsertEndpoint {
         endpoint: Endpoint,
     },
+    ReplaceEndpointIfUnchanged {
+        endpoint: Endpoint,
+        expected: Endpoint,
+    },
     DeleteEndpoint {
         endpoint_id: String,
     },
@@ -1953,6 +1957,10 @@ enum DesiredStateCommandCompat {
     UpsertEndpoint {
         endpoint: Endpoint,
     },
+    ReplaceEndpointIfUnchanged {
+        endpoint: Endpoint,
+        expected: Endpoint,
+    },
     DeleteEndpoint {
         endpoint_id: String,
     },
@@ -2086,6 +2094,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             },
             DesiredStateCommandCompat::UpsertEndpoint { endpoint } => {
                 Self::UpsertEndpoint { endpoint }
+            }
+            DesiredStateCommandCompat::ReplaceEndpointIfUnchanged { endpoint, expected } => {
+                Self::ReplaceEndpointIfUnchanged { endpoint, expected }
             }
             DesiredStateCommandCompat::DeleteEndpoint { endpoint_id } => {
                 Self::DeleteEndpoint { endpoint_id }
@@ -2610,6 +2621,17 @@ impl DesiredStateCommand {
                     .insert(endpoint.endpoint_id.clone(), endpoint);
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::ReplaceEndpointIfUnchanged { endpoint, expected } => {
+                (state.endpoints.get(&endpoint.endpoint_id) == Some(expected))
+                    .then_some(())
+                    .ok_or_else(|| DomainError::EndpointChanged {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    })?;
+                Self::UpsertEndpoint {
+                    endpoint: endpoint.clone(),
+                }
+                .apply(state)
             }
             Self::DeleteEndpoint { endpoint_id } => {
                 let deleted = state.endpoints.remove(endpoint_id).is_some();

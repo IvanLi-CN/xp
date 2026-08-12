@@ -743,6 +743,7 @@ impl RaftFacade for LocalRaft {
                         .map_err(anyhow::Error::new)?;
                 }
                 DesiredStateCommand::UpsertEndpoint { .. }
+                | DesiredStateCommand::ReplaceEndpointIfUnchanged { .. }
                 | DesiredStateCommand::UpsertNode { .. } => {
                     store
                         .prune_tcp_connection_usage_endpoints()
@@ -791,13 +792,13 @@ fn map_store_error(err: StoreError) -> ClientResponse {
                 code: "not_found".to_string(),
                 message: domain.to_string(),
             },
-            DomainError::NodeInUse { .. } | DomainError::NodeEndpointSetChanged { .. } => {
-                ClientResponse::Err {
-                    status: 409,
-                    code: "conflict".to_string(),
-                    message: domain.to_string(),
-                }
-            }
+            DomainError::NodeInUse { .. }
+            | DomainError::NodeEndpointSetChanged { .. }
+            | DomainError::EndpointChanged { .. } => ClientResponse::Err {
+                status: 409,
+                code: "conflict".to_string(),
+                message: domain.to_string(),
+            },
             DomainError::RealityDomainNameConflict { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
@@ -826,7 +827,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::EndpointKind,
+        domain::{Endpoint, EndpointKind},
         state::{JsonSnapshotStore, StoreInit, membership_key},
     };
 
@@ -887,5 +888,45 @@ mod tests {
                 .get_membership_usage(&membership)
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn replace_endpoint_if_unchanged_returns_conflict_for_stale_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+        let node_id = store.list_nodes()[0].node_id.clone();
+        let endpoint = store
+            .create_endpoint(
+                node_id,
+                EndpointKind::Ss2022_2022Blake3Aes128Gcm,
+                8388,
+                json!({}),
+            )
+            .unwrap();
+        let expected = endpoint.clone();
+        let mut updated = endpoint;
+        updated.port = 8443;
+        DesiredStateCommand::UpsertEndpoint { endpoint: updated }
+            .apply(store.state_mut())
+            .unwrap();
+
+        let store = Arc::new(Mutex::new(store));
+        let (_tx, metrics) = watch::channel(openraft::RaftMetrics::new_initial(0));
+        let raft = LocalRaft::new(store, metrics);
+        let response = raft
+            .client_write(DesiredStateCommand::ReplaceEndpointIfUnchanged {
+                endpoint: Endpoint {
+                    port: 9443,
+                    ..expected.clone()
+                },
+                expected,
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            response,
+            ClientResponse::Err { status: 409, ref code, .. } if code == "conflict"
+        ));
     }
 }

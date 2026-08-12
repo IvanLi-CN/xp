@@ -64,6 +64,8 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - API 必须广告 `admin.endpoint-vless-xhttp` capability。新 Web 仅在 capability 存在时展示并
   发送 transport；旧 Web 忽略新 metadata，新 Web 对旧 API 隐藏控件。
 - transport PATCH 为 `null`、未知枚举或用于 SS2022 时必须返回明确的 `400`。
+- 接入点 PATCH 必须拒绝陈旧快照并返回 `409 conflict`，不得让端口等无关字段的旧编辑覆盖
+  已保存的 transport 切换。
 - transport 变化必须进入 inbound hash 并触发 Xray inbound 重建及用户重放；仅订阅字段变化仍
   不得重建 inbound。
 - 详情页必须说明切换会重建 inbound，且客户端必须刷新 YAML 订阅。

@@ -12,7 +12,8 @@ use crate::{
     },
     id::is_ulid_string,
     protocol::{
-        RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
+        RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityTransport,
+        VlessRealityVisionTcpEndpointMeta,
     },
 };
 
@@ -1608,6 +1609,50 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
         DesiredStateApplyResult::EndpointDeleted { deleted: true }
     );
     assert!(!state.endpoints.contains_key(&endpoint.endpoint_id));
+}
+
+#[test]
+fn desired_state_apply_replace_endpoint_if_unchanged_rejects_stale_snapshot() {
+    let mut state = PersistedState::empty();
+    let endpoint = vless_endpoint("vless_1", "node_1");
+
+    DesiredStateCommand::UpsertEndpoint { endpoint }
+        .apply(&mut state)
+        .unwrap();
+    let expected = state
+        .endpoints
+        .get(xp_test_fixtures::label_vless1())
+        .cloned()
+        .unwrap();
+
+    let mut xhttp_endpoint = expected.clone();
+    let mut meta: VlessRealityVisionTcpEndpointMeta =
+        serde_json::from_value(xhttp_endpoint.meta.clone()).unwrap();
+    meta.transport = VlessRealityTransport::Xhttp;
+    xhttp_endpoint.meta = serde_json::to_value(meta).unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint: xhttp_endpoint.clone(),
+    }
+    .apply(&mut state)
+    .unwrap();
+
+    let mut stale_port_update = expected.clone();
+    stale_port_update.port = 8443;
+    let err = DesiredStateCommand::ReplaceEndpointIfUnchanged {
+        endpoint: stale_port_update,
+        expected,
+    }
+    .apply(&mut state)
+    .unwrap_err();
+
+    assert!(matches!(
+        err,
+        StoreError::Domain(DomainError::EndpointChanged { .. })
+    ));
+    assert_eq!(
+        state.endpoints.get(xp_test_fixtures::label_vless1()),
+        Some(&xhttp_endpoint)
+    );
 }
 
 #[test]

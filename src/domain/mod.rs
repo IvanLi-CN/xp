@@ -25,6 +25,9 @@ pub enum DomainError {
     MissingEndpoint {
         endpoint_id: String,
     },
+    EndpointChanged {
+        endpoint_id: String,
+    },
     NodeInUse {
         node_id: String,
         endpoint_id: String,
@@ -69,7 +72,9 @@ impl DomainError {
             | Self::MissingNode { .. }
             | Self::MissingEndpoint { .. } => "invalid_request",
             Self::RealityDomainNotFound { .. } => "not_found",
-            Self::NodeInUse { .. } | Self::NodeEndpointSetChanged { .. } => "conflict",
+            Self::NodeInUse { .. }
+            | Self::NodeEndpointSetChanged { .. }
+            | Self::EndpointChanged { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
             | Self::InvalidAcceptedAuthority { .. }
@@ -96,6 +101,10 @@ impl std::fmt::Display for DomainError {
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
+            Self::EndpointChanged { endpoint_id } => write!(
+                f,
+                "endpoint changed since the edit started: endpoint_id={endpoint_id}"
+            ),
             Self::NodeInUse {
                 node_id,
                 endpoint_id,
