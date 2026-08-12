@@ -1514,6 +1514,7 @@ async fn raft_write(
                 "invalid_request" => "invalid_request",
                 "not_found" => "not_found",
                 "conflict" => "conflict",
+                "coordinated_upgrade_required" => "coordinated_upgrade_required",
                 "unauthorized" => "unauthorized",
                 _ => "internal",
             };
@@ -4564,6 +4565,7 @@ async fn admin_create_endpoint(
         &state,
         crate::state::DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint.clone(),
+            expected: None,
         },
     )
     .await?;
@@ -5933,9 +5935,9 @@ async fn admin_patch_endpoint(
 
     let _ = raft_write(
         &state,
-        crate::state::DesiredStateCommand::ReplaceEndpointIfUnchanged {
+        crate::state::DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint.clone(),
-            expected,
+            expected: Some(expected),
         },
     )
     .await?;

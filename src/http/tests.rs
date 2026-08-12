@@ -3342,9 +3342,12 @@ async fn patch_managed_vless_rejects_reality_and_updates_canary_upstream() {
         let mut meta = endpoint.meta.clone();
         meta["managed_default"] = Value::Bool(true);
         endpoint.meta = meta;
-        DesiredStateCommand::UpsertEndpoint { endpoint }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
     }
 
     let res = app
@@ -3447,9 +3450,12 @@ async fn patch_managed_vless_updates_accepted_authorities() {
         let mut meta = endpoint.meta.clone();
         meta["managed_default"] = Value::Bool(true);
         endpoint.meta = meta;
-        DesiredStateCommand::UpsertEndpoint { endpoint }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
     }
 
     let res = app
@@ -3528,9 +3534,12 @@ async fn patch_managed_vless_rejects_invalid_accepted_authorities() {
         let mut meta = endpoint.meta.clone();
         meta["managed_default"] = Value::Bool(true);
         endpoint.meta = meta;
-        DesiredStateCommand::UpsertEndpoint { endpoint }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
     }
 
     let res = app
@@ -3596,9 +3605,12 @@ async fn patch_managed_vless_rejects_canary_upstream_with_path_or_query() {
         let mut meta = endpoint.meta.clone();
         meta["managed_default"] = Value::Bool(true);
         endpoint.meta = meta;
-        DesiredStateCommand::UpsertEndpoint { endpoint }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
     }
 
     for url in ["http://127.0.0.1:8080/app", "http://127.0.0.1:8080?fixed=1"] {
@@ -4062,9 +4074,12 @@ async fn patch_managed_vless_endpoint_node_move_recomputes_reality_contract() {
         let mut meta = endpoint.meta.clone();
         meta["managed_default"] = Value::Bool(true);
         endpoint.meta = meta;
-        DesiredStateCommand::UpsertEndpoint { endpoint }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertEndpoint {
+            endpoint,
+            expected: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
     }
 
     let res = app
@@ -8109,11 +8124,13 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
         };
         DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint_one.clone(),
+            expected: None,
         }
         .apply(store.state_mut())
         .unwrap();
         DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint_two.clone(),
+            expected: None,
         }
         .apply(store.state_mut())
         .unwrap();

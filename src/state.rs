@@ -1815,10 +1815,13 @@ pub enum DesiredStateCommand {
     },
     UpsertEndpoint {
         endpoint: Endpoint,
-    },
-    ReplaceEndpointIfUnchanged {
-        endpoint: Endpoint,
-        expected: Endpoint,
+        /// Optional compare-and-swap guard used by current nodes for admin PATCH.
+        ///
+        /// This remains an additive field on the existing command so older nodes
+        /// deserialize it as the historical unconditional upsert during a rolling
+        /// upgrade instead of rejecting a replicated command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected: Option<Endpoint>,
     },
     DeleteEndpoint {
         endpoint_id: String,
@@ -1956,10 +1959,8 @@ enum DesiredStateCommandCompat {
     },
     UpsertEndpoint {
         endpoint: Endpoint,
-    },
-    ReplaceEndpointIfUnchanged {
-        endpoint: Endpoint,
-        expected: Endpoint,
+        #[serde(default)]
+        expected: Option<Endpoint>,
     },
     DeleteEndpoint {
         endpoint_id: String,
@@ -2092,11 +2093,8 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 delete_endpoints,
                 expected_endpoint_ids,
             },
-            DesiredStateCommandCompat::UpsertEndpoint { endpoint } => {
-                Self::UpsertEndpoint { endpoint }
-            }
-            DesiredStateCommandCompat::ReplaceEndpointIfUnchanged { endpoint, expected } => {
-                Self::ReplaceEndpointIfUnchanged { endpoint, expected }
+            DesiredStateCommandCompat::UpsertEndpoint { endpoint, expected } => {
+                Self::UpsertEndpoint { endpoint, expected }
             }
             DesiredStateCommandCompat::DeleteEndpoint { endpoint_id } => {
                 Self::DeleteEndpoint { endpoint_id }
@@ -2522,7 +2520,15 @@ impl DesiredStateCommand {
                         .collect(),
                 })
             }
-            Self::UpsertEndpoint { endpoint } => {
+            Self::UpsertEndpoint { endpoint, expected } => {
+                if let Some(expected) = expected
+                    && state.endpoints.get(&endpoint.endpoint_id) != Some(expected)
+                {
+                    return Err(DomainError::EndpointChanged {
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    }
+                    .into());
+                }
                 validate_port(endpoint.port)?;
 
                 let mut endpoint = endpoint.clone();
@@ -2621,17 +2627,6 @@ impl DesiredStateCommand {
                     .insert(endpoint.endpoint_id.clone(), endpoint);
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::Applied)
-            }
-            Self::ReplaceEndpointIfUnchanged { endpoint, expected } => {
-                (state.endpoints.get(&endpoint.endpoint_id) == Some(expected))
-                    .then_some(())
-                    .ok_or_else(|| DomainError::EndpointChanged {
-                        endpoint_id: endpoint.endpoint_id.clone(),
-                    })?;
-                Self::UpsertEndpoint {
-                    endpoint: endpoint.clone(),
-                }
-                .apply(state)
             }
             Self::DeleteEndpoint { endpoint_id } => {
                 let deleted = state.endpoints.remove(endpoint_id).is_some();
@@ -4023,6 +4018,7 @@ impl JsonSnapshotStore {
         let endpoint = self.build_endpoint(node_id, kind, port, meta)?;
         DesiredStateCommand::UpsertEndpoint {
             endpoint: endpoint.clone(),
+            expected: None,
         }
         .apply(&mut self.state)?;
         self.save()?;
@@ -4246,7 +4242,10 @@ impl JsonSnapshotStore {
         endpoint.meta = serialize_vless_meta_preserving_smux(meta, had_mihomo_smux)?;
 
         Ok(Some((
-            DesiredStateCommand::UpsertEndpoint { endpoint },
+            DesiredStateCommand::UpsertEndpoint {
+                endpoint,
+                expected: None,
+            },
             out,
         )))
     }

@@ -12,9 +12,12 @@ fn upsert_vless_endpoint_preserves_missing_legacy_optional_fields() {
         .remove("mihomo_smux");
     endpoint.meta.as_object_mut().unwrap().remove("transport");
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     assert!(
         state

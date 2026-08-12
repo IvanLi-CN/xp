@@ -571,7 +571,9 @@ Traffic storage 由节点本地 `${XP_DATA_DIR}/node_history_cache.json` 提供�
 返回：Endpoint（略，字段同创建返回）。
 
 并发保护：服务端仅在接入点仍与本次 PATCH 读取时的快照一致时写入。若另一项修改已先
-生效，返回 `409 conflict`；客户端应重新读取端点后再提交，避免旧页面覆盖较新的设置。
+生效，返回 `409 conflict`；客户端应重新读取端点后再提交，避免旧页面覆盖较新的设置。若
+请求转发到未声明 `admin.endpoint-conditional-update` 的滚动升级 leader，返回
+`409 coordinated_upgrade_required`，不会退化为无条件覆盖。
 
 ### 3.5 删除端点（管理员）
 

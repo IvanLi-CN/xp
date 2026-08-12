@@ -66,6 +66,9 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 - transport PATCH 为 `null`、未知枚举或用于 SS2022 时必须返回明确的 `400`。
 - 接入点 PATCH 必须拒绝陈旧快照并返回 `409 conflict`，不得让端口等无关字段的旧编辑覆盖
   已保存的 transport 切换。
+- 条件 PATCH 在既有 `upsert_endpoint` 命令中使用可选快照字段，保证旧节点仍可反序列化
+  Raft 日志；转发到未声明 `admin.endpoint-conditional-update` 的 leader 时必须返回
+  `409 coordinated_upgrade_required`，不得退化为无条件覆盖。
 - transport 变化必须进入 inbound hash 并触发 Xray inbound 重建及用户重放；仅订阅字段变化仍
   不得重建 inbound。
 - 详情页必须说明切换会重建 inbound，且客户端必须刷新 YAML 订阅。

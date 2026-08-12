@@ -12,8 +12,7 @@ use crate::{
     },
     id::is_ulid_string,
     protocol::{
-        RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityTransport,
-        VlessRealityVisionTcpEndpointMeta,
+        RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
     },
 };
 
@@ -923,6 +922,7 @@ fn upsert_endpoint_auto_grants_matching_kind_only() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: vless_endpoint("vless_2", "node_1"),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -978,6 +978,7 @@ fn delete_last_endpoint_preserves_auto_kind_for_future_endpoint() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: ss_endpoint("ss_2", "node_1"),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -1026,9 +1027,12 @@ fn upsert_vless_endpoint_manual_preserves_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1080,9 +1084,12 @@ fn upsert_vless_endpoint_manual_rejects_invalid_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    let err = DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap_err();
+    let err = DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap_err();
     assert!(err.to_string().contains("dest is required"));
     assert!(state.endpoints.is_empty());
 }
@@ -1140,9 +1147,12 @@ fn upsert_vless_endpoint_global_derives_server_names_and_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1206,9 +1216,12 @@ fn upsert_managed_default_vless_global_preserves_canary_dest() {
         meta: serde_json::to_value(meta).unwrap(),
     };
 
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     let saved = state.endpoints.get(&endpoint_id).unwrap();
     let meta: VlessRealityVisionTcpEndpointMeta =
@@ -1594,6 +1607,7 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
 
     DesiredStateCommand::UpsertEndpoint {
         endpoint: endpoint.clone(),
+        expected: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -1612,50 +1626,6 @@ fn desired_state_apply_endpoint_create_and_delete_are_deterministic() {
 }
 
 #[test]
-fn desired_state_apply_replace_endpoint_if_unchanged_rejects_stale_snapshot() {
-    let mut state = PersistedState::empty();
-    let endpoint = vless_endpoint("vless_1", "node_1");
-
-    DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap();
-    let expected = state
-        .endpoints
-        .get(xp_test_fixtures::label_vless1())
-        .cloned()
-        .unwrap();
-
-    let mut xhttp_endpoint = expected.clone();
-    let mut meta: VlessRealityVisionTcpEndpointMeta =
-        serde_json::from_value(xhttp_endpoint.meta.clone()).unwrap();
-    meta.transport = VlessRealityTransport::Xhttp;
-    xhttp_endpoint.meta = serde_json::to_value(meta).unwrap();
-    DesiredStateCommand::UpsertEndpoint {
-        endpoint: xhttp_endpoint.clone(),
-    }
-    .apply(&mut state)
-    .unwrap();
-
-    let mut stale_port_update = expected.clone();
-    stale_port_update.port = 8443;
-    let err = DesiredStateCommand::ReplaceEndpointIfUnchanged {
-        endpoint: stale_port_update,
-        expected,
-    }
-    .apply(&mut state)
-    .unwrap_err();
-
-    assert!(matches!(
-        err,
-        StoreError::Domain(DomainError::EndpointChanged { .. })
-    ));
-    assert_eq!(
-        state.endpoints.get(xp_test_fixtures::label_vless1()),
-        Some(&xhttp_endpoint)
-    );
-}
-
-#[test]
 fn desired_state_apply_rejects_invalid_port() {
     let mut state = PersistedState::empty();
     let endpoint = Endpoint {
@@ -1667,9 +1637,12 @@ fn desired_state_apply_rejects_invalid_port() {
         meta: json!({}),
     };
 
-    let err = DesiredStateCommand::UpsertEndpoint { endpoint }
-        .apply(&mut state)
-        .unwrap_err();
+    let err = DesiredStateCommand::UpsertEndpoint {
+        endpoint,
+        expected: None,
+    }
+    .apply(&mut state)
+    .unwrap_err();
 
     assert!(matches!(
         err,
