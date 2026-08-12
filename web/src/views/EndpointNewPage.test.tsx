@@ -167,9 +167,7 @@ describe("EndpointNewPage", () => {
 			await screen.findByRole("radio", { name: "XHTTP / XMUX" }),
 		).toBeChecked();
 		expect(
-			await screen.findByText(
-				"Recommended. Mihomo YAML uses one reusable HTTP/2 connection after pool warm-up.",
-			),
+			await screen.findByRole("button", { name: "About VLESS transport" }),
 		).toBeInTheDocument();
 
 		fireEvent.change(await screen.findByLabelText("canaryUpstreamUrl"), {

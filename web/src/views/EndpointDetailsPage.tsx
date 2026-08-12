@@ -23,6 +23,7 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EndpointMihomoSmuxSettings } from "../components/EndpointMihomoSmuxSettings";
 import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
+import { InlineHelpTooltip } from "../components/InlineHelpTooltip";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
@@ -79,6 +80,13 @@ import {
 	useEndpointDraft,
 	useEndpointDraftNavigation,
 } from "./useEndpointDraft";
+
+const FORM_ROW_CLASS =
+	"grid gap-2 md:grid-cols-[13rem_minmax(0,1fr)] md:items-center md:gap-x-3";
+const CANARY_PROBE_NODE_CLASS = [
+	"flex flex-col gap-1 rounded-lg border border-border/70 bg-background/60 px-3 py-2",
+	"sm:flex-row sm:items-center sm:justify-between",
+].join(" ");
 
 export function EndpointDetailsPage() {
 	const { endpointId } = useParams({ from: "/app/endpoints/$endpointId" });
@@ -606,8 +614,13 @@ export function EndpointDetailsPage() {
 									: "SS2022 settings"}
 							</h3>
 							<div className="grid gap-4">
-								<div className="xp-field-stack">
-									<span className="text-sm font-medium font-mono">port</span>
+								<div className={FORM_ROW_CLASS}>
+									<div className="flex items-center gap-1">
+										<span className="text-sm font-medium font-mono">port</span>
+										<InlineHelpTooltip label="About port">
+											The inbound listen port on this node.
+										</InlineHelpTooltip>
+									</div>
 									<Input
 										aria-label="port"
 										type="number"
@@ -617,9 +630,6 @@ export function EndpointDetailsPage() {
 										disabled={patchMutation.isPending || runtime.isReadOnly}
 										onChange={(event) => setPort(event.target.value)}
 									/>
-									<p className="text-xs opacity-70">
-										The inbound listen port on this node.
-									</p>
 								</div>
 								<EndpointVlessTransportSettings
 									visible={Boolean(vlessMeta) && vlessXhttpCapability.available}
@@ -631,11 +641,15 @@ export function EndpointDetailsPage() {
 								/>
 								{vlessMeta && !vlessMeta.managedDefault ? (
 									<>
-										<div className="xp-field-stack">
-											<div className="flex items-center justify-between gap-2">
+										<div className={FORM_ROW_CLASS}>
+											<div className="flex items-center gap-1">
 												<span className="text-sm font-medium font-mono">
 													dest
 												</span>
+												<InlineHelpTooltip label="About REALITY destination">
+													REALITY destination origin. Destination is stored
+													separately from the SNI list.
+												</InlineHelpTooltip>
 											</div>
 											<Input
 												aria-label="dest"
@@ -646,12 +660,7 @@ export function EndpointDetailsPage() {
 												disabled={patchMutation.isPending || runtime.isReadOnly}
 												onChange={(event) => setRealityDest(event.target.value)}
 											/>
-											<p className="text-xs opacity-70">
-												REALITY destination origin. Destination is stored
-												separately from the SNI list.
-											</p>
 										</div>
-
 										<TagInput
 											label="serverNames"
 											value={realityServerNamesManual}
@@ -662,18 +671,24 @@ export function EndpointDetailsPage() {
 											validateTag={validateRealityServerName}
 											suggestions={realityServerNameSuggestions}
 											suggestionLabel="Show destination suggestion"
-											helperText="Camouflage domains (TLS SNI). Use the destination suggestion only when it should also be a serverName."
+											compact
+											tooltipText={
+												"Camouflage domains (TLS SNI). Use the destination suggestion only when it should also be a serverName."
+											}
 										/>
-										<details className="rounded-xl border border-border/70 bg-muted/35">
-											<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+										<details className="border-t border-border/70 pt-3">
+											<summary className="cursor-pointer list-none text-sm font-medium">
 												Advanced (optional)
 											</summary>
-											<div className="space-y-4 border-t border-border/70 px-4 py-4">
-												<div className="xp-field-stack">
-													<div className="flex items-center justify-between gap-2">
+											<div className="pt-3">
+												<div className={FORM_ROW_CLASS}>
+													<div className="flex items-center gap-1">
 														<span className="text-sm font-medium font-mono">
 															fingerprint
 														</span>
+														<InlineHelpTooltip label="About REALITY fingerprint">
+															Defaults to chrome.
+														</InlineHelpTooltip>
 													</div>
 													<Input
 														type="text"
@@ -687,74 +702,65 @@ export function EndpointDetailsPage() {
 															setRealityFingerprint(event.target.value)
 														}
 													/>
-													<p className="text-xs opacity-70">
-														Defaults to{" "}
-														<span className="font-mono">chrome</span>.
-													</p>
 												</div>
 											</div>
 										</details>
 									</>
 								) : null}
-
 								{vlessMeta?.managedDefault ? (
-									<div className="space-y-4">
-										<div className="grid gap-4 md:grid-cols-[1fr_180px]">
-											<div className="xp-field-stack">
+									<div className="space-y-3">
+										<div className={FORM_ROW_CLASS}>
+											<div className="flex items-center gap-1">
 												<span className="text-sm font-medium font-mono">
 													canaryUpstreamUrl
 												</span>
-												<AutocompleteInput
-													aria-label="canary upstream url"
-													type="url"
-													className={inputClass}
-													value={upstreamUrl}
-													placeholder="http://127.0.0.1:8080"
-													disabled={
-														patchMutation.isPending || runtime.isReadOnly
-													}
-													suggestions={managedCanaryUpstreamSuggestions}
-													suggestionLabel="Show XP HTTPS listener suggestions"
-													onChange={(event) =>
-														setUpstreamUrl(event.target.value)
-													}
-													onSuggestionSelect={setUpstreamUrl}
-												/>
-												<p className="text-xs opacity-70">
+												<InlineHelpTooltip label="About canary upstream URL">
 													Requests other than GET/HEAD /generate_204 are proxied
 													to this origin.
-												</p>
+												</InlineHelpTooltip>
 											</div>
-											<div className="xp-field-stack">
+											<AutocompleteInput
+												aria-label="canary upstream url"
+												type="url"
+												className={inputClass}
+												value={upstreamUrl}
+												placeholder="http://127.0.0.1:8080"
+												disabled={patchMutation.isPending || runtime.isReadOnly}
+												suggestions={managedCanaryUpstreamSuggestions}
+												suggestionLabel="Show XP HTTPS listener suggestions"
+												onChange={(event) => setUpstreamUrl(event.target.value)}
+												onSuggestionSelect={setUpstreamUrl}
+											/>
+										</div>
+										<div className={FORM_ROW_CLASS}>
+											<div className="flex items-center gap-1">
 												<span className="text-sm font-medium font-mono">
 													mode
 												</span>
-												<Select
-													value={upstreamMode}
-													onValueChange={(value) =>
-														setUpstreamMode(value as CanaryUpstreamMode)
-													}
-													disabled={
-														patchMutation.isPending || runtime.isReadOnly
-													}
-												>
-													<SelectTrigger
-														className={selectClass}
-														aria-label="canary upstream mode"
-													>
-														<SelectValue />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="auto">auto</SelectItem>
-														<SelectItem value="http1">http1</SelectItem>
-														<SelectItem value="h2c">h2c</SelectItem>
-													</SelectContent>
-												</Select>
-												<p className="text-xs opacity-70">
+												<InlineHelpTooltip label="About canary upstream mode">
 													Use an origin URL only. WebSocket uses HTTP/1.1
 													upstream; h2c is for non-upgrade HTTP.
-												</p>
+												</InlineHelpTooltip>
 											</div>
+											<Select
+												value={upstreamMode}
+												onValueChange={(value) =>
+													setUpstreamMode(value as CanaryUpstreamMode)
+												}
+												disabled={patchMutation.isPending || runtime.isReadOnly}
+											>
+												<SelectTrigger
+													className={selectClass}
+													aria-label="canary upstream mode"
+												>
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="auto">auto</SelectItem>
+													<SelectItem value="http1">http1</SelectItem>
+													<SelectItem value="h2c">h2c</SelectItem>
+												</SelectContent>
+											</Select>
 										</div>
 										<TagInput
 											label="accepted host[:port]"
@@ -775,11 +781,13 @@ export function EndpointDetailsPage() {
 											allowPrimary={false}
 											suggestions={managedAcceptedAuthoritySuggestions}
 											suggestionLabel="Show access host suggestions"
-											helperText="Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL."
+											compact
+											tooltipText={
+												"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL."
+											}
 										/>
 									</div>
 								) : null}
-
 								{endpointQuery.data?.kind ===
 								"ss2022_2022_blake3_aes_128_gcm" ? (
 									<EndpointMihomoSmuxSettings
@@ -796,7 +804,6 @@ export function EndpointDetailsPage() {
 								) : null}
 							</div>
 						</div>
-
 						<div className="xp-card-actions justify-end">
 							<Button
 								loading={patchMutation.isPending}
@@ -813,118 +820,111 @@ export function EndpointDetailsPage() {
 			<div className="xp-card">
 				<div className="xp-card-body space-y-4">
 					<h2 className="xp-card-title">Probe</h2>
-					<div className="grid gap-4">
-						<div className="rounded-xl border border-border/70 bg-muted/25 px-4 py-4">
-							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-								<div className="space-y-1">
-									<h3 className="text-sm font-semibold">Proxy path</h3>
-									<p className="text-sm text-muted-foreground">
-										Run a cluster-wide probe for all endpoints. Results are
-										stored hourly and shown in the endpoint list.
-									</p>
-								</div>
-								<Button
-									variant="secondary"
-									loading={probeRunMutation.isPending}
-									disabled={runtime.isReadOnly || probesCapability.unavailable}
-									onClick={() => probeRunMutation.mutate()}
-								>
-									Test now
-								</Button>
+					<div className="divide-y divide-border/70">
+						<div className="flex flex-col gap-3 pb-4 md:flex-row md:items-center md:justify-between">
+							<div className="space-y-1">
+								<h3 className="text-sm font-semibold">Proxy path</h3>
+								<p className="text-sm text-muted-foreground">
+									Run a cluster-wide probe for all endpoints. Results are stored
+									hourly and shown in the endpoint list.
+								</p>
 							</div>
+							<Button
+								variant="secondary"
+								loading={probeRunMutation.isPending}
+								disabled={runtime.isReadOnly || probesCapability.unavailable}
+								onClick={() => probeRunMutation.mutate()}
+							>
+								Test now
+							</Button>
 						</div>
 
 						{vlessMeta?.managedDefault ? (
-							<div className="rounded-xl border border-border/70 bg-muted/25 px-4 py-4">
-								<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-									<div className="space-y-2">
-										<div className="space-y-1">
-											<h3 className="text-sm font-semibold">
-												Canary /generate_204
-											</h3>
-											<p className="text-sm text-muted-foreground">
-												Test ordinary HTTPS access to the managed VLESS
-												fallback. This checks DNS, public ingress, TLS, and xp
-												canary without touching upstream.
-											</p>
-										</div>
-										{currentCanaryProbeResult ? (
-											<div className="space-y-3 text-xs">
-												<p className="break-all font-mono">
-													{currentCanaryProbeResult.url}
-												</p>
-												<div className="flex flex-wrap items-center gap-2">
-													{(() => {
-														const okCount =
-															currentCanaryProbeResult.nodes.filter(
-																(node) => node.ok,
-															).length;
-														const totalCount =
-															currentCanaryProbeResult.nodes.length;
-														return (
-															<Badge
-																variant={
-																	totalCount > 0 && okCount === totalCount
-																		? "default"
-																		: "destructive"
-																}
-															>
-																{okCount} / {totalCount} nodes OK
-															</Badge>
-														);
-													})()}
-												</div>
-												<div className="space-y-2">
-													{currentCanaryProbeResult.nodes.map((node) => (
-														<div
-															key={node.node_id}
-															className="flex flex-col gap-1 rounded-lg border border-border/70 bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-														>
-															<div className="flex min-w-0 flex-wrap items-center gap-2">
-																<span className="font-mono text-muted-foreground">
-																	{node.node_id}
-																</span>
-																<Badge
-																	variant={node.ok ? "default" : "destructive"}
-																>
-																	{node.ok ? "204 OK" : "failed"}
-																</Badge>
-																{node.status ? (
-																	<span className="font-mono text-muted-foreground">
-																		status={node.status}
-																	</span>
-																) : null}
-															</div>
-															<div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
-																<span className="text-muted-foreground">
-																	{node.latency_ms} ms
-																</span>
-																{node.error ? (
-																	<span className="break-all text-destructive">
-																		{node.error}
-																	</span>
-																) : null}
-															</div>
-														</div>
-													))}
-												</div>
-												{currentCanaryProbeResult.nodes.length === 0 ? (
-													<Badge variant="destructive">no nodes returned</Badge>
-												) : null}
-											</div>
-										) : null}
+							<div className="flex flex-col gap-3 py-4 md:flex-row md:items-start md:justify-between">
+								<div className="space-y-2">
+									<div className="space-y-1">
+										<h3 className="text-sm font-semibold">
+											Canary /generate_204
+										</h3>
+										<p className="text-sm text-muted-foreground">
+											Test ordinary HTTPS access to the managed VLESS fallback.
+											This checks DNS, public ingress, TLS, and xp canary
+											without touching upstream.
+										</p>
 									</div>
-									<Button
-										variant="secondary"
-										loading={canaryProbeMutation.isPending}
-										disabled={
-											runtime.isReadOnly || probesCapability.unavailable
-										}
-										onClick={() => canaryProbeMutation.mutate()}
-									>
-										Test canary
-									</Button>
+									{currentCanaryProbeResult ? (
+										<div className="space-y-3 text-xs">
+											<p className="break-all font-mono">
+												{currentCanaryProbeResult.url}
+											</p>
+											<div className="flex flex-wrap items-center gap-2">
+												{(() => {
+													const okCount = currentCanaryProbeResult.nodes.filter(
+														(node) => node.ok,
+													).length;
+													const totalCount =
+														currentCanaryProbeResult.nodes.length;
+													return (
+														<Badge
+															variant={
+																totalCount > 0 && okCount === totalCount
+																	? "default"
+																	: "destructive"
+															}
+														>
+															{okCount} / {totalCount} nodes OK
+														</Badge>
+													);
+												})()}
+											</div>
+											<div className="space-y-2">
+												{currentCanaryProbeResult.nodes.map((node) => (
+													<div
+														key={node.node_id}
+														className={CANARY_PROBE_NODE_CLASS}
+													>
+														<div className="flex min-w-0 flex-wrap items-center gap-2">
+															<span className="font-mono text-muted-foreground">
+																{node.node_id}
+															</span>
+															<Badge
+																variant={node.ok ? "default" : "destructive"}
+															>
+																{node.ok ? "204 OK" : "failed"}
+															</Badge>
+															{node.status ? (
+																<span className="font-mono text-muted-foreground">
+																	status={node.status}
+																</span>
+															) : null}
+														</div>
+														<div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+															<span className="text-muted-foreground">
+																{node.latency_ms} ms
+															</span>
+															{node.error ? (
+																<span className="break-all text-destructive">
+																	{node.error}
+																</span>
+															) : null}
+														</div>
+													</div>
+												))}
+											</div>
+											{currentCanaryProbeResult.nodes.length === 0 ? (
+												<Badge variant="destructive">no nodes returned</Badge>
+											) : null}
+										</div>
+									) : null}
 								</div>
+								<Button
+									variant="secondary"
+									loading={canaryProbeMutation.isPending}
+									disabled={runtime.isReadOnly || probesCapability.unavailable}
+									onClick={() => canaryProbeMutation.mutate()}
+								>
+									Test canary
+								</Button>
 							</div>
 						) : null}
 					</div>

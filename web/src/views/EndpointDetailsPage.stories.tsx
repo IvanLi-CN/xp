@@ -81,9 +81,14 @@ export const ManagedDefaultAliases: Story = {
 		await expect(
 			await canvas.findAllByText(fixtureCatalog.hostList.edge6()[1]),
 		).toHaveLength(2);
+		await userEvent.hover(
+			await canvas.findByRole("button", {
+				name: "About accepted host[:port]",
+			}),
+		);
 		await expect(
-			await canvas.findByText(
-				"Accept additional ordinary HTTPS Host headers for camouflage routing. Omit port to use HTTPS default 443. This does not change REALITY serverNames or the canonical /generate_204 URL.",
+			await within(document.body).findByText(
+				/Accept additional ordinary HTTPS Host headers/,
 			),
 		).toBeInTheDocument();
 	},
@@ -91,22 +96,42 @@ export const ManagedDefaultAliases: Story = {
 
 export const VlessXhttpTransport: Story = {
 	tags: ["coverage-ui", "endpoint-vless-xhttp"],
+	parameters: {
+		viewport: {
+			defaultViewport: "endpointFormDesktop",
+			viewports: {
+				endpointFormDesktop: {
+					name: "Endpoint form desktop (1280x900)",
+					styles: { height: "900px", width: "1280px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByText("Advanced: VLESS transport"));
 		await expect(
 			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
 		).toBeChecked();
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "About VLESS transport" }),
+		);
 		await expect(
-			await canvas.findByText(
-				"Recommended. Mihomo YAML uses one reusable HTTP/2 connection after pool warm-up.",
+			await within(document.body).findByText(
+				/reusable HTTP\/2 transport connections/,
 			),
 		).toBeInTheDocument();
+		await userEvent.click(
+			await canvas.findByRole("radio", { name: "Vision TCP" }),
+		);
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "Transport change impact" }),
+		);
 		await expect(
-			await canvas.findByText(/Raw URI includes Mihomo-specific XMUX settings/),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByText(/Changing this mode rebuilds the inbound/),
+			await within(document.body).findByText(
+				/Changing this mode rebuilds the inbound/,
+			),
 		).toBeInTheDocument();
 	},
 };
@@ -136,8 +161,11 @@ export const MihomoSmuxDefaults: Story = {
 		);
 		await expect(await canvas.findByLabelText("启用 SMux")).toBeChecked();
 		await expect(await canvas.findByLabelText("最大物理连接数")).toHaveValue(4);
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "About SS2022 SMux" }),
+		);
 		await expect(
-			await canvas.findByText(/Mihomo >= v1.19.29/),
+			await within(document.body).findByText(/Mihomo v1.19.29 or later/),
 		).toBeInTheDocument();
 	},
 };

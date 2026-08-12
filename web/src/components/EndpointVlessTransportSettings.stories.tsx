@@ -23,18 +23,24 @@ function SettingsStory({
 
 	return (
 		<div
-			className={cn(
-				"mx-auto w-full max-w-[520px] border-2 border-[#94bfc4] bg-[#cfe9ec] p-8",
-				"dark:border-[#28565a] dark:bg-[#172728]",
-			)}
+			className="mx-auto w-full max-w-[568px] bg-background p-4 sm:p-6"
+			data-testid="vless-transport-evidence-frame"
 		>
-			<EndpointVlessTransportSettings
-				disabled={disabled}
-				existing={existing}
-				onValueChange={setValue}
-				value={value}
-				visible={visible}
-			/>
+			<div
+				className={cn(
+					"mx-auto w-full max-w-[520px] border-2 border-[#94bfc4] bg-[#cfe9ec] p-8",
+					"dark:border-[#28565a] dark:bg-[#172728]",
+				)}
+			>
+				<EndpointVlessTransportSettings
+					changed={existing && value !== initialValue}
+					disabled={disabled}
+					existing={existing}
+					onValueChange={setValue}
+					value={value}
+					visible={visible}
+				/>
+			</div>
 		</div>
 	);
 }
@@ -67,14 +73,31 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultXhttp: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "vlessTransportDesktop",
+			viewports: {
+				vlessTransportDesktop: {
+					name: "VLESS transport desktop (1280x900)",
+					styles: { height: "900px", width: "1280px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByText("Advanced: VLESS transport"));
 		await expect(
 			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
 		).toBeChecked();
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "About VLESS transport" }),
+		);
 		await expect(
-			await canvas.findByText(/one reusable HTTP\/2 connection/),
+			await within(document.body).findByText(
+				/reusable HTTP\/2 transport connections/,
+			),
 		).toBeInTheDocument();
 	},
 };
@@ -90,8 +113,13 @@ export const ExistingVisionTcp: Story = {
 		await userEvent.click(
 			await canvas.findByRole("radio", { name: "XHTTP / XMUX" }),
 		);
+		await userEvent.hover(
+			await canvas.findByRole("button", { name: "Transport change impact" }),
+		);
 		await expect(
-			await canvas.findByText(/Changing this mode rebuilds the inbound/),
+			await within(document.body).findByText(
+				/Changing this mode rebuilds the inbound/,
+			),
 		).toBeInTheDocument();
 	},
 };

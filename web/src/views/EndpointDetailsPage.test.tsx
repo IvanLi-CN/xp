@@ -239,7 +239,7 @@ describe("EndpointDetailsPage", () => {
 		).toBeChecked();
 		fireEvent.click(await screen.findByRole("radio", { name: "XHTTP / XMUX" }));
 		expect(
-			await screen.findByText(/Changing this mode rebuilds the inbound/),
+			await screen.findByRole("button", { name: "Transport change impact" }),
 		).toBeInTheDocument();
 		fireEvent.click(
 			await screen.findByRole("button", { name: "Save changes" }),

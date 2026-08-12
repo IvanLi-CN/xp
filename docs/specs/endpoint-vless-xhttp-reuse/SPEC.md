@@ -148,6 +148,40 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 ## Visual Evidence
 
 PR: none
+evidence_bind_ref: c8700e79412f4bb388acf80a8aa0be8882e8a233 + local compact-form changes
+
+source_type: storybook_canvas
+target_program: mock-only
+story_id_or_title: Pages/EndpointNewPage/ManagedDefaultFieldsVisible
+state: create VLESS endpoint with default XHTTP/XMUX
+requested_viewport: 1280x900
+viewport_strategy: storybook-viewport
+capture_scope: browser-viewport
+margin_policy: trim_only
+evidence_surface: page
+sensitive_exclusion: N/A
+submission_gate: pending-owner-approval
+evidence_note: The creation form uses one compact label rail and keeps explanatory text behind
+help icons. XHTTP/XMUX is selected by default and Create endpoint remains visible.
+
+![Create VLESS endpoint with XHTTP](./assets/endpoint-create-xhttp.png)
+
+source_type: storybook_canvas
+target_program: mock-only
+story_id_or_title: Pages/EndpointDetailsPage/VlessXhttpTransport
+state: edit an existing VLESS endpoint from Vision TCP to XHTTP/XMUX
+requested_viewport: 1280x900
+viewport_strategy: storybook-viewport
+capture_scope: browser-viewport
+margin_policy: trim_only
+evidence_surface: page
+sensitive_exclusion: N/A
+submission_gate: pending-owner-approval
+evidence_note: The editing form uses one shared label rail: port, transport mode, and canary
+upstream controls begin on the same desktop column. Changing Vision TCP replaces the ordinary
+transport help icon with one warning tooltip beside the label before Save changes.
+
+![Edit VLESS endpoint with XHTTP](./assets/endpoint-edit-xhttp.png)
 
 source_type: storybook_canvas
 target_program: mock-only
@@ -159,8 +193,9 @@ capture_scope: element
 margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
-submission_gate: approved
-evidence_note: XHTTP/XMUX is selected by default and its reusable HTTP/2 behavior is visible.
+submission_gate: pending-owner-approval
+evidence_note: The flattened transport advanced setting shares the form label rail and keeps its
+segmented control on the same row without a nested card.
 
 ![VLESS XHTTP desktop](./assets/vless-xhttp-desktop.png)
 
@@ -174,8 +209,9 @@ capture_scope: element
 margin_policy: require_margin
 evidence_surface: component
 sensitive_exclusion: N/A
-submission_gate: approved
-evidence_note: The mobile control keeps both options readable and shows the inbound-rebuild warning.
+submission_gate: pending-owner-approval
+evidence_note: The mobile control keeps both options readable without horizontal overflow. The
+transport-impact explanation replaces the ordinary help icon in the same label position.
 
 ![VLESS XHTTP mobile](./assets/vless-xhttp-mobile.png)
 

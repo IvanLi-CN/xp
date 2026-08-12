@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "./Button";
 import { Icon } from "./Icon";
+import { InlineHelpTooltip } from "./InlineHelpTooltip";
 import { badgeClass } from "./ui-helpers";
 import {
 	Command,
@@ -26,8 +27,10 @@ type TagInputProps = {
 	onChange: (next: string[]) => void;
 	placeholder?: string;
 	helperText?: string;
+	tooltipText?: string;
 	disabled?: boolean;
 	inputClass?: string;
+	compact?: boolean;
 	validateTag?: (value: string) => string | null;
 	allowPrimary?: boolean;
 	suggestions?: string[];
@@ -67,8 +70,10 @@ export function TagInput({
 	onChange,
 	placeholder,
 	helperText,
+	tooltipText,
 	disabled = false,
 	inputClass = "xp-input",
+	compact = false,
 	validateTag = defaultValidateTag,
 	allowPrimary = true,
 	suggestions = [],
@@ -93,6 +98,7 @@ export function TagInput({
 		[value],
 	);
 	const primary = allowPrimary ? (tags[0] ?? "") : "";
+	const hasHelperText = Boolean(helperText || primary);
 	const visibleSuggestions = suggestions.filter((suggestion) => {
 		const normalized = normalizeToken(suggestion);
 		if (!normalized) return false;
@@ -161,13 +167,26 @@ export function TagInput({
 	}
 
 	return (
-		<div className="space-y-2">
-			<label
-				className="block cursor-pointer font-mono text-sm font-medium text-foreground"
-				htmlFor={inputId}
-			>
-				{label}
-			</label>
+		<div
+			className={cn(
+				"space-y-2",
+				compact &&
+					"md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-x-3 md:space-y-0",
+			)}
+		>
+			<div className={cn("flex items-center gap-1", compact && "md:pt-2.5")}>
+				<label
+					className="block cursor-pointer font-mono text-sm font-medium text-foreground"
+					htmlFor={inputId}
+				>
+					{label}
+				</label>
+				{tooltipText ? (
+					<InlineHelpTooltip label={`About ${label}`}>
+						{tooltipText}
+					</InlineHelpTooltip>
+				) : null}
+			</div>
 
 			<div className="space-y-2">
 				<Popover open={open && hasSuggestions} onOpenChange={setOpen}>
@@ -267,7 +286,13 @@ export function TagInput({
 									aria-label={label}
 									aria-invalid={error ? true : undefined}
 									aria-describedby={
-										error ? `${helperTextId} ${errorTextId}` : helperTextId
+										error
+											? hasHelperText
+												? `${helperTextId} ${errorTextId}`
+												: errorTextId
+											: hasHelperText
+												? helperTextId
+												: undefined
 									}
 									aria-autocomplete={
 										suggestions.length > 0 ? "list" : undefined
@@ -411,14 +436,16 @@ export function TagInput({
 					</PopoverContent>
 				</Popover>
 
-				<p className="text-xs text-muted-foreground" id={helperTextId}>
-					{helperText ? helperText : null}
-					{primary ? (
-						<span className="ml-2 font-mono opacity-70">
-							(primary={primary})
-						</span>
-					) : null}
-				</p>
+				{hasHelperText ? (
+					<p className="text-xs text-muted-foreground" id={helperTextId}>
+						{helperText ? helperText : null}
+						{primary ? (
+							<span className="ml-2 font-mono opacity-70">
+								(primary={primary})
+							</span>
+						) : null}
+					</p>
+				) : null}
 
 				{error ? (
 					<p className="text-xs text-destructive" role="alert" id={errorTextId}>

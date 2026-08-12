@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import type { VlessRealityTransport } from "../api/adminEndpoints";
 import { cn } from "../lib/utils";
+import { InlineHelpTooltip } from "./InlineHelpTooltip";
 
 const TRANSPORT_OPTIONS: ReadonlyArray<{
 	value: VlessRealityTransport;
@@ -10,6 +11,20 @@ const TRANSPORT_OPTIONS: ReadonlyArray<{
 	{ value: "xhttp", label: "XHTTP / XMUX" },
 	{ value: "vision_tcp", label: "Vision TCP" },
 ];
+
+const TRANSPORT_FORM_ROW_CLASS =
+	"grid gap-2 pt-3 md:grid-cols-[13rem_minmax(0,1fr)] md:items-center md:gap-x-3";
+const TRANSPORT_WARNING_BUTTON_CLASS = [
+	"inline-flex size-7 shrink-0 items-center justify-center rounded-md",
+	"text-warning hover:bg-warning/15 focus-visible:outline-none",
+	"focus-visible:ring-[3px] focus-visible:ring-warning/30",
+].join(" ");
+const XHTTP_HELP_TEXT = [
+	"XHTTP/XMUX keeps reusable HTTP/2 transport connections after warm-up.",
+	"Mihomo YAML is the recommended subscription format; the raw URI includes its XMUX settings.",
+].join(" ");
+const TRANSPORT_CHANGE_HELP_TEXT =
+	"Changing this mode rebuilds the inbound. Refresh client YAML subscriptions after saving.";
 
 type EndpointVlessTransportSettingsProps = {
 	value: VlessRealityTransport;
@@ -30,15 +45,39 @@ export function EndpointVlessTransportSettings({
 }: EndpointVlessTransportSettingsProps) {
 	const id = useId();
 	if (!visible) return null;
+	const helpText =
+		value === "xhttp"
+			? XHTTP_HELP_TEXT
+			: "Vision TCP uses one proxied TCP stream for each external connection.";
+	const changedTransport = existing && changed;
+	const tooltipText = changedTransport
+		? `${helpText} ${TRANSPORT_CHANGE_HELP_TEXT}`
+		: helpText;
 
 	return (
-		<details className="rounded-xl border border-border/70 bg-muted/35">
-			<summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+		<details className="border-t border-border/70 pt-3">
+			<summary className="cursor-pointer list-none text-sm font-medium">
 				Advanced: VLESS transport
 			</summary>
-			<div className="space-y-3 border-t border-border/70 px-4 py-4">
-				<fieldset className="min-w-0 space-y-2">
-					<legend className="text-sm font-medium">Transport mode</legend>
+			<div className={TRANSPORT_FORM_ROW_CLASS}>
+				<div className="flex items-center gap-1">
+					<span className="text-sm font-medium">Transport mode</span>
+					<InlineHelpTooltip
+						className={
+							changedTransport ? TRANSPORT_WARNING_BUTTON_CLASS : undefined
+						}
+						label={
+							changedTransport
+								? "Transport change impact"
+								: "About VLESS transport"
+						}
+						contentClassName="max-w-56"
+						side="top"
+					>
+						{tooltipText}
+					</InlineHelpTooltip>
+				</div>
+				<fieldset className="min-w-0">
 					<div
 						aria-label="VLESS transport"
 						className={cn(
@@ -82,29 +121,6 @@ export function EndpointVlessTransportSettings({
 						})}
 					</div>
 				</fieldset>
-
-				<p aria-live="polite" className="text-xs text-muted-foreground">
-					{value === "xhttp"
-						? "Recommended. Mihomo YAML uses one reusable HTTP/2 connection after pool warm-up."
-						: "One proxied TCP stream per external connection."}
-				</p>
-				{value === "xhttp" ? (
-					<p className="text-xs text-muted-foreground">
-						Raw URI includes Mihomo-specific XMUX settings; YAML remains the
-						recommended subscription format.
-					</p>
-				) : null}
-				{existing ? (
-					<p
-						className={cn(
-							"text-xs text-muted-foreground",
-							changed && "font-medium text-foreground",
-						)}
-					>
-						Changing this mode rebuilds the inbound. Clients must refresh YAML
-						subscriptions after saving.
-					</p>
-				) : null}
 			</div>
 		</details>
 	);

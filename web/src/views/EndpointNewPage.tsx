@@ -18,6 +18,7 @@ import { useApiCapability } from "../api/useApiCompatibility";
 import { AutocompleteInput } from "../components/AutocompleteInput";
 import { Button } from "../components/Button";
 import { EndpointVlessTransportSettings } from "../components/EndpointVlessTransportSettings";
+import { InlineHelpTooltip } from "../components/InlineHelpTooltip";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { TagInput } from "../components/TagInput";
@@ -33,7 +34,6 @@ import { Checkbox } from "../components/ui/checkbox";
 import {
 	Form,
 	FormControl,
-	FormDescription,
 	FormField,
 	FormItem,
 	FormLabel,
@@ -69,6 +69,9 @@ const kindOptions = [
 		label: "SS2022 BLAKE3 AES-128-GCM",
 	},
 ];
+
+const FORM_ROW_CLASS =
+	"grid gap-2 md:grid-cols-[13rem_minmax(0,1fr)] md:items-center md:gap-x-3";
 
 function formatErrorMessage(error: unknown): string {
 	if (isBackendApiError(error)) {
@@ -399,12 +402,12 @@ export function EndpointNewPage() {
 								}
 							})}
 						>
-							<div className="grid gap-4 md:grid-cols-2">
+							<div className="space-y-3">
 								<FormField
 									control={form.control}
 									name="kind"
 									render={({ field }) => (
-										<FormItem>
+										<FormItem className={FORM_ROW_CLASS}>
 											<FormLabel>Kind</FormLabel>
 											<Select
 												value={field.value}
@@ -428,7 +431,7 @@ export function EndpointNewPage() {
 													))}
 												</SelectContent>
 											</Select>
-											<FormMessage />
+											<FormMessage className="md:col-start-2" />
 										</FormItem>
 									)}
 								/>
@@ -437,8 +440,13 @@ export function EndpointNewPage() {
 									control={form.control}
 									name="nodeId"
 									render={({ field }) => (
-										<FormItem>
-											<FormLabel>Node</FormLabel>
+										<FormItem className={FORM_ROW_CLASS}>
+											<div className="flex items-center gap-1">
+												<FormLabel>Node</FormLabel>
+												<InlineHelpTooltip label="About endpoint node">
+													Endpoints are created on the selected node.
+												</InlineHelpTooltip>
+											</div>
 											<Select
 												value={field.value}
 												onValueChange={field.onChange}
@@ -456,10 +464,7 @@ export function EndpointNewPage() {
 													))}
 												</SelectContent>
 											</Select>
-											<FormDescription>
-												Endpoints are created on the selected node.
-											</FormDescription>
-											<FormMessage />
+											<FormMessage className="md:col-start-2" />
 										</FormItem>
 									)}
 								/>
@@ -476,8 +481,13 @@ export function EndpointNewPage() {
 									control={form.control}
 									name="port"
 									render={({ field }) => (
-										<FormItem>
-											<FormLabel className="font-mono">port</FormLabel>
+										<FormItem className={FORM_ROW_CLASS}>
+											<div className="flex items-center gap-1">
+												<FormLabel className="font-mono">port</FormLabel>
+												<InlineHelpTooltip label="About port">
+													The inbound listen port on this node.
+												</InlineHelpTooltip>
+											</div>
 											<FormControl>
 												<Input
 													type="number"
@@ -496,25 +506,28 @@ export function EndpointNewPage() {
 													}
 												/>
 											</FormControl>
-											<FormDescription>
-												The inbound listen port on this node.
-											</FormDescription>
-											<FormMessage />
+											<FormMessage className="md:col-start-2" />
 										</FormItem>
 									)}
 								/>
 
 								{kind === "vless_reality_vision_tcp" ? (
 									<div className="space-y-4">
-										<div className="grid gap-4 md:grid-cols-[1fr_180px]">
+										<div className="space-y-3">
 											<FormField
 												control={form.control}
 												name="canaryUpstreamUrl"
 												render={({ field }) => (
-													<FormItem>
-														<FormLabel className="font-mono">
-															canaryUpstreamUrl
-														</FormLabel>
+													<FormItem className={FORM_ROW_CLASS}>
+														<div className="flex items-center gap-1">
+															<FormLabel className="font-mono">
+																canaryUpstreamUrl
+															</FormLabel>
+															<InlineHelpTooltip label="About canary upstream URL">
+																Requests other than GET/HEAD /generate_204 are
+																proxied to this origin.
+															</InlineHelpTooltip>
+														</div>
 														<FormControl>
 															<AutocompleteInput
 																{...field}
@@ -525,11 +538,7 @@ export function EndpointNewPage() {
 																onSuggestionSelect={field.onChange}
 															/>
 														</FormControl>
-														<FormDescription>
-															Requests other than GET/HEAD /generate_204 are
-															proxied to this origin.
-														</FormDescription>
-														<FormMessage />
+														<FormMessage className="md:col-start-2" />
 													</FormItem>
 												)}
 											/>
@@ -537,8 +546,13 @@ export function EndpointNewPage() {
 												control={form.control}
 												name="canaryUpstreamMode"
 												render={({ field }) => (
-													<FormItem>
-														<FormLabel className="font-mono">mode</FormLabel>
+													<FormItem className={FORM_ROW_CLASS}>
+														<div className="flex items-center gap-1">
+															<FormLabel className="font-mono">mode</FormLabel>
+															<InlineHelpTooltip label="About canary upstream mode">
+																{MANAGED_VLESS_MODE_HELPER_TEXT}
+															</InlineHelpTooltip>
+														</div>
 														<Select
 															value={field.value}
 															onValueChange={field.onChange}
@@ -554,10 +568,7 @@ export function EndpointNewPage() {
 																<SelectItem value="h2c">h2c</SelectItem>
 															</SelectContent>
 														</Select>
-														<FormDescription>
-															{MANAGED_VLESS_MODE_HELPER_TEXT}
-														</FormDescription>
-														<FormMessage />
+														<FormMessage className="md:col-start-2" />
 													</FormItem>
 												)}
 											/>
@@ -582,7 +593,8 @@ export function EndpointNewPage() {
 															allowPrimary={false}
 															suggestions={acceptedAuthoritySuggestions}
 															suggestionLabel="Show access host suggestions"
-															helperText={
+															compact
+															tooltipText={
 																MANAGED_VLESS_ACCEPTED_HOST_HELPER_TEXT
 															}
 														/>
@@ -607,15 +619,11 @@ export function EndpointNewPage() {
 
 								{kind === "ss2022_2022_blake3_aes_128_gcm" ? (
 									mihomoSmuxCapability.available ? (
-										<details className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+										<details className="border-t border-border/70 pt-3">
 											<summary className="cursor-pointer text-sm font-medium">
 												高级设置：SS2022 连接复用 (SMux)
 											</summary>
-											<div className="mt-4 space-y-4">
-												<p className="text-xs text-muted-foreground">
-													仅写入 SS2022 YAML 订阅，要求 Mihomo &gt;= v1.19.29。
-													URI 不包含此设置。
-												</p>
+											<div className="space-y-3 pt-3">
 												<div className="flex items-center gap-2">
 													<Checkbox
 														id="mihomo-smux-enabled"
@@ -637,9 +645,13 @@ export function EndpointNewPage() {
 													>
 														启用 SMux
 													</label>
+													<InlineHelpTooltip label="About SS2022 SMux">
+														仅写入 SS2022 Mihomo YAML，要求 Mihomo &gt;=
+														v1.19.29。URI 不包含此设置。
+													</InlineHelpTooltip>
 												</div>
-												<div className="grid gap-4 md:grid-cols-2">
-													<div className="space-y-2">
+												<div className="grid gap-3 md:grid-cols-2">
+													<div className="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-3">
 														<label
 															className="text-sm font-medium"
 															htmlFor="mihomo-smux-max-connections"
@@ -656,9 +668,6 @@ export function EndpointNewPage() {
 															}
 															{...form.register("mihomoSmuxMaxConnections")}
 														/>
-														<p className="text-xs text-muted-foreground">
-															1-16 条连接。
-														</p>
 														{form.formState.errors.mihomoSmuxMaxConnections
 															?.message ? (
 															<p className="text-xs text-destructive">
@@ -669,7 +678,7 @@ export function EndpointNewPage() {
 															</p>
 														) : null}
 													</div>
-													<div className="space-y-2">
+													<div className="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-3">
 														<label
 															className="text-sm font-medium"
 															htmlFor="mihomo-smux-min-streams"
@@ -686,9 +695,6 @@ export function EndpointNewPage() {
 															}
 															{...form.register("mihomoSmuxMinStreams")}
 														/>
-														<p className="text-xs text-muted-foreground">
-															1-64 个并发流。
-														</p>
 														{form.formState.errors.mihomoSmuxMinStreams
 															?.message ? (
 															<p className="text-xs text-destructive">
