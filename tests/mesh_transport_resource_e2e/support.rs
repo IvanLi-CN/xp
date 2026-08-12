@@ -328,6 +328,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
                 port: target.port,
                 meta: meta.clone(),
             },
+            expected: None,
         }
         .apply(store.state_mut())
         .expect("insert resource peer endpoint");
