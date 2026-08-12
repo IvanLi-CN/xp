@@ -152,7 +152,6 @@ VLESS XHTTP over Reality，并由 Mihomo XMUX 在一个 HTTP/2 transport 上承�
 
 ## Visual Evidence
 
-PR: none
 evidence_bind_ref: 8802298cfa3d4f8c26a006c51efbadd5777cd6e5
 
 source_type: storybook_canvas
@@ -169,6 +168,7 @@ submission_gate: approved
 evidence_note: The creation form uses one compact label rail and keeps explanatory text behind
 help icons. XHTTP/XMUX is selected by default and Create endpoint remains visible.
 
+PR: include
 ![Create VLESS endpoint with XHTTP](./assets/endpoint-create-xhttp.png)
 
 source_type: storybook_canvas
@@ -186,6 +186,7 @@ evidence_note: The editing form uses one shared label rail: port, transport mode
 upstream controls begin on the same desktop column. Changing Vision TCP replaces the ordinary
 transport help icon with one warning tooltip beside the label before Save changes.
 
+PR: include
 ![Edit VLESS endpoint with XHTTP](./assets/endpoint-edit-xhttp.png)
 
 source_type: storybook_canvas
