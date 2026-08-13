@@ -43,6 +43,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .compile_protos(&protos, &[proto_root])?;
 
+    let history_sync_proto = "proto/history_sync.proto";
+    println!("cargo:rerun-if-changed={history_sync_proto}");
+    tonic_prost_build::configure()
+        .build_client(false)
+        .build_server(false)
+        .compile_protos(&[history_sync_proto], &["proto"])?;
+
     embed_web_dist()?;
 
     Ok(())
