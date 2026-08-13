@@ -4,9 +4,9 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use axum::{
     body::Body,
-    http::{Request, StatusCode, header},
+    http::{Method, Request, StatusCode, Uri, header},
 };
-use base64::Engine as _;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
@@ -29,6 +29,7 @@ use crate::{
     config::Config,
     ddns::{DdnsHealthHandle, DdnsStatus},
     domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
+    history_sync::{CanonicalSegment, Cursor, SyncRecord},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
@@ -43,7 +44,11 @@ use crate::{
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{
         DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, NodeEgressProbeState,
-        NodeSubscriptionRegion, StoreInit, membership_key,
+        NodeSubscriptionRegion, StoreInit,
+        history_repository::identity::{
+            Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
+        },
+        membership_key,
     },
     xray_supervisor::XrayHealthHandle,
 };
@@ -1173,6 +1178,129 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2&page_size=10",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["completeness"], "local_only");
+    assert!(body["coverage"].is_object());
+    assert!(body["watermarks"].is_array());
+    assert!(body["gaps"].is_array());
+    assert_eq!(body["clock_skew_seconds"], 0);
+    assert_eq!(body["records"], json!([]));
+
+    let invalid = app
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/history-repository?start_unix_seconds=2&end_unix_seconds=1&page_size=1001",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn internal_repository_sync_persists_signed_segment_for_admin_query() {
+    let tmp = tempfile::tempdir().unwrap();
+    let router = app(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[37; 32]);
+    let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap();
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from(cluster.node_id.clone()).unwrap(),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).unwrap(),
+        X25519PublicKey::from_bytes([38; 32]).unwrap(),
+    )
+    .unwrap();
+    let segment = CanonicalSegment::new(
+        cluster.cluster_id.clone(),
+        Cursor::new(cluster.node_id.clone(), 1, "runtime", 0).unwrap(),
+        vec![SyncRecord::new(
+            cluster.node_id.clone(),
+            cluster.node_id.clone(),
+            "runtime.v1",
+            1,
+            b"record".to_vec(),
+            b"payload".to_vec(),
+            false,
+        )],
+        None,
+        now,
+        now,
+    )
+    .unwrap()
+    .sign(&signing_key)
+    .unwrap();
+    let body = json!({
+        "identity": identity,
+        "wire_base64": URL_SAFE_NO_PAD.encode(segment.wire_bytes().unwrap()),
+    })
+    .to_string();
+    let uri: Uri = "/api/admin/_internal/history-repository/sync"
+        .parse()
+        .unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["acknowledgement"]["sequence"], 0);
+
+    let query_path = format!(
+        "/api/admin/history-repository?start_unix_seconds={now}\
+         &end_unix_seconds={now}&page_size=10"
+    );
+    let queried = router
+        .oneshot(req_authed("GET", &query_path))
+        .await
+        .unwrap();
+    assert_eq!(queried.status(), StatusCode::OK);
+    let body = body_json(queried).await;
+    assert_eq!(body["completeness"], "complete");
+    assert_eq!(body["repository"], cluster.node_id);
+    assert_eq!(body["watermarks"][0]["sequence"], 0);
+    assert_eq!(body["records"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]

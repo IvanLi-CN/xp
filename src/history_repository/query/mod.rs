@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 const MAX_QUERY_PAGE_SIZE: usize = 1_000;
+const MAX_QUERY_RANGE_SECONDS: u64 = 2 * 365 * 24 * 60 * 60;
 const MAX_QUERY_CANDIDATES: usize = 64;
 const MAX_QUERY_WATERMARKS: usize = 256;
 const MAX_QUERY_GAPS: usize = 256;
@@ -14,6 +15,7 @@ const MAX_QUERY_GAPS: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QueryError {
     InvalidRange,
+    RangeTooLarge,
     PageSizeOutOfBounds,
     InvalidIdentifier,
     CandidateLimitExceeded,
@@ -28,7 +30,7 @@ impl std::fmt::Display for QueryError {
 
 impl std::error::Error for QueryError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct QueryRange {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
@@ -39,6 +41,9 @@ impl QueryRange {
         if start_unix_seconds > end_unix_seconds {
             return Err(QueryError::InvalidRange);
         }
+        if end_unix_seconds.saturating_sub(start_unix_seconds) > MAX_QUERY_RANGE_SECONDS {
+            return Err(QueryError::RangeTooLarge);
+        }
         Ok(Self {
             start_unix_seconds,
             end_unix_seconds,
@@ -48,6 +53,14 @@ impl QueryRange {
     fn covers(self, requested: Self) -> bool {
         self.start_unix_seconds <= requested.start_unix_seconds
             && self.end_unix_seconds >= requested.end_unix_seconds
+    }
+
+    pub(crate) fn start_unix_seconds(self) -> u64 {
+        self.start_unix_seconds
+    }
+
+    pub(crate) fn end_unix_seconds(self) -> u64 {
+        self.end_unix_seconds
     }
 
     fn shared_seconds(self, other: Self, requested: Self) -> u64 {
@@ -95,7 +108,7 @@ impl HistoryQuery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct QueryCoverage {
     observed: QueryRange,
     received: QueryRange,
@@ -115,7 +128,7 @@ impl QueryCoverage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct StreamWatermark {
     source_node_id: String,
     source_epoch: u64,
@@ -145,9 +158,21 @@ impl StreamWatermark {
     pub(crate) fn sequence(&self) -> u64 {
         self.sequence
     }
+
+    pub(crate) fn source_node_id(&self) -> &str {
+        &self.source_node_id
+    }
+
+    pub(crate) fn source_epoch(&self) -> u64 {
+        self.source_epoch
+    }
+
+    pub(crate) fn stream(&self) -> &str {
+        &self.stream
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct QueryGap {
     range: QueryRange,
     permanent: bool,
@@ -178,6 +203,7 @@ impl QueryGap {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CandidateState {
     Ready,
+    Local,
     Unavailable,
     Unready,
 }
@@ -222,6 +248,28 @@ impl QueryCandidate {
         Self::not_ready(repository_id, CandidateState::Unavailable)
     }
 
+    pub(crate) fn local(
+        coverage: QueryCoverage,
+        watermarks: impl IntoIterator<Item = StreamWatermark>,
+        gaps: impl IntoIterator<Item = QueryGap>,
+        clock_skew_seconds: i64,
+    ) -> Result<Self, QueryError> {
+        let mut watermarks = bounded_metadata(watermarks, MAX_QUERY_WATERMARKS)?;
+        let mut gaps = bounded_metadata(gaps, MAX_QUERY_GAPS)?;
+        watermarks.sort_by(|left, right| watermark_key(left).cmp(&watermark_key(right)));
+        watermarks.dedup_by(|left, right| watermark_key(left) == watermark_key(right));
+        gaps.sort_by_key(|gap| gap.range);
+        gaps.dedup();
+        Ok(Self {
+            repository_id: String::new(),
+            state: CandidateState::Local,
+            coverage: Some(coverage),
+            watermarks,
+            gaps,
+            clock_skew_seconds,
+        })
+    }
+
     pub(crate) fn unready(repository_id: impl Into<String>) -> Self {
         Self::not_ready(repository_id, CandidateState::Unready)
     }
@@ -260,8 +308,9 @@ pub(crate) enum Completeness {
     LocalOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct QueryPlan {
+    #[serde(rename = "repository")]
     repository_id: Option<String>,
     completeness: Completeness,
     coverage: Option<QueryCoverage>,
@@ -309,9 +358,14 @@ impl QuerySelector {
         candidates: impl IntoIterator<Item = QueryCandidate>,
     ) -> Result<QueryPlan, QueryError> {
         let mut selected = None;
+        let mut local = None;
         for (index, candidate) in candidates.into_iter().enumerate() {
             if index == MAX_QUERY_CANDIDATES {
                 return Err(QueryError::CandidateLimitExceeded);
+            }
+            if candidate.state == CandidateState::Local {
+                local = Some(candidate);
+                continue;
             }
             if candidate.state == CandidateState::Ready
                 && selected.as_ref().is_none_or(|current| {
@@ -331,6 +385,17 @@ impl QuerySelector {
                 } else {
                     Completeness::Partial
                 },
+                coverage: candidate.coverage,
+                watermarks: candidate.watermarks,
+                gaps: candidate.gaps,
+                clock_skew_seconds: candidate.clock_skew_seconds,
+                page_size: request.page_size,
+            });
+        }
+        if let Some(candidate) = local {
+            return Ok(QueryPlan {
+                repository_id: None,
+                completeness: Completeness::LocalOnly,
                 coverage: candidate.coverage,
                 watermarks: candidate.watermarks,
                 gaps: candidate.gaps,

@@ -1,13 +1,16 @@
+use serde::{Deserialize, Serialize};
+
 const DAY_SECONDS: u64 = 24 * 60 * 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum RetentionResolution {
     Minute,
     FiveMinutes,
     Hour,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct RepositoryRetentionPolicy {
     minute_retention_seconds: u64,
     five_minute_retention_seconds: u64,

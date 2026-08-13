@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
+
 use super::ReplicaError;
 
 pub(crate) const ANTI_ENTROPY_INTERVAL_SECONDS: u64 = 5 * 60;
@@ -281,11 +283,46 @@ impl ReplicaConvergence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ReplicaRecordKey {
+    source_node_id: String,
+    source_epoch: u64,
+    stream: String,
+    subject_node_id: String,
+    observer_node_id: String,
     schema_id: String,
     schema_version: u32,
     record_key: Vec<u8>,
+}
+
+impl ReplicaRecordKey {
+    pub(crate) fn source_node_id(&self) -> &str {
+        &self.source_node_id
+    }
+
+    pub(crate) fn source_epoch(&self) -> u64 {
+        self.source_epoch
+    }
+
+    pub(crate) fn stream(&self) -> &str {
+        &self.stream
+    }
+
+    pub(crate) fn subject_node_id(&self) -> &str {
+        &self.subject_node_id
+    }
+
+    pub(crate) fn observer_node_id(&self) -> &str {
+        &self.observer_node_id
+    }
+
+    pub(crate) fn schema(&self) -> (&str, u32) {
+        (&self.schema_id, self.schema_version)
+    }
+
+    pub(crate) fn record_key(&self) -> &[u8] {
+        &self.record_key
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,18 +333,30 @@ pub(crate) struct ReplicaRecord {
 
 impl ReplicaRecord {
     pub(crate) fn new(
+        cursor: &ReplicaCursor,
+        subject_node_id: impl Into<String>,
+        observer_node_id: impl Into<String>,
         schema_id: impl Into<String>,
         schema_version: u32,
         record_key: Vec<u8>,
         payload: Vec<u8>,
     ) -> Result<Self, ReplicaError> {
+        let subject_node_id = subject_node_id.into();
+        let observer_node_id = observer_node_id.into();
         let schema_id = schema_id.into();
+        validate_identifier(&subject_node_id)?;
+        validate_identifier(&observer_node_id)?;
         validate_identifier(&schema_id)?;
         if record_key.len().saturating_add(payload.len()) > MAX_RECORD_BYTES {
             return Err(ReplicaError::RecordTooLarge);
         }
         Ok(Self {
             key: ReplicaRecordKey {
+                source_node_id: cursor.source_node_id.clone(),
+                source_epoch: cursor.source_epoch,
+                stream: cursor.stream.clone(),
+                subject_node_id,
+                observer_node_id,
                 schema_id,
                 schema_version,
                 record_key,
@@ -321,17 +370,35 @@ impl ReplicaRecord {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TombstoneState {
     expires_at: u64,
     ready_repositories: BTreeSet<String>,
     acknowledgements: BTreeSet<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct TombstoneLedger {
     horizon_seconds: u64,
     entries: BTreeMap<ReplicaRecordKey, TombstoneState>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct TombstoneLedgerCheckpoint {
+    horizon_seconds: u64,
+    entries: Vec<TombstoneCheckpointEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TombstoneCheckpointEntry {
+    key: ReplicaRecordKey,
+    state: TombstoneState,
+}
+
+impl Default for TombstoneLedger {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 impl TombstoneLedger {
@@ -396,24 +463,64 @@ impl TombstoneLedger {
         !self.entries.contains_key(key)
     }
 
-    pub(crate) fn expire(&mut self, now_unix_seconds: u64) -> usize {
-        let before = self.entries.len();
-        self.entries.retain(|_, state| {
-            now_unix_seconds < state.expires_at
-                || !state.ready_repositories.is_subset(&state.acknowledgements)
-        });
-        before - self.entries.len()
+    pub(crate) fn expire(&mut self, now_unix_seconds: u64) -> Vec<ReplicaRecordKey> {
+        let expired = self
+            .entries
+            .iter()
+            .filter(|(_, state)| {
+                now_unix_seconds >= state.expires_at
+                    && state.ready_repositories.is_subset(&state.acknowledgements)
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in &expired {
+            self.entries.remove(key);
+        }
+        expired
+    }
+
+    pub(crate) fn checkpoint(&self) -> TombstoneLedgerCheckpoint {
+        TombstoneLedgerCheckpoint {
+            horizon_seconds: self.horizon_seconds,
+            entries: self
+                .entries
+                .iter()
+                .map(|(key, state)| TombstoneCheckpointEntry {
+                    key: key.clone(),
+                    state: state.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn from_checkpoint(
+        checkpoint: TombstoneLedgerCheckpoint,
+    ) -> Result<Self, ReplicaError> {
+        if checkpoint.entries.len() > MAX_TOMBSTONES {
+            return Err(ReplicaError::TombstoneBacklogFull);
+        }
+        let mut entries = BTreeMap::new();
+        for entry in checkpoint.entries {
+            if entries.insert(entry.key, entry.state).is_some() {
+                return Err(ReplicaError::TombstoneBacklogFull);
+            }
+        }
+        Ok(Self {
+            horizon_seconds: checkpoint.horizon_seconds,
+            entries,
+        })
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct StreamForkGuard {
     streams: BTreeMap<(String, String), StreamForkState>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StreamForkState {
     epoch: u64,
+    next_sequence: u64,
     hashes: BTreeMap<u64, [u8; 32]>,
     quarantined: bool,
 }
@@ -430,6 +537,7 @@ impl StreamForkGuard {
         }
         let state = self.streams.entry(key).or_insert_with(|| StreamForkState {
             epoch: cursor.source_epoch,
+            next_sequence: cursor.sequence,
             hashes: BTreeMap::new(),
             quarantined: false,
         });
@@ -451,7 +559,21 @@ impl StreamForkGuard {
                 next_epoch: state.epoch.saturating_add(1),
             });
         }
+        if cursor.sequence > state.next_sequence {
+            return Err(ReplicaError::CursorGap {
+                expected_sequence: state.next_sequence,
+                received_sequence: cursor.sequence,
+            });
+        }
+        if cursor.sequence < state.next_sequence && !state.hashes.contains_key(&cursor.sequence) {
+            return Err(ReplicaError::StaleSequence {
+                next_sequence: state.next_sequence,
+            });
+        }
         state.hashes.insert(cursor.sequence, payload_hash);
+        if cursor.sequence == state.next_sequence {
+            state.next_sequence = state.next_sequence.saturating_add(1);
+        }
         if state.hashes.len() > MAX_FORK_HASHES_PER_STREAM {
             state.hashes.pop_first();
         }
@@ -481,6 +603,7 @@ impl StreamForkGuard {
             key,
             StreamForkState {
                 epoch,
+                next_sequence: 0,
                 hashes: BTreeMap::new(),
                 quarantined: false,
             },
@@ -511,7 +634,7 @@ impl ReplicaFreshness {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UnknownSchemaBuffer {
     byte_limit: usize,
     bytes_used: usize,

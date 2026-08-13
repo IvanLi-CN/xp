@@ -18,8 +18,9 @@ pub(crate) use path::{
 #[allow(unused_imports)]
 pub(crate) use protocol::{
     Acceptance, Acknowledgement, CanonicalSegment, Cursor, CursorAvailability, CursorGap,
-    EncodedResponse, PayloadEncoding, ProtocolError, SchemaCatalog, SegmentReceiver, SignedSegment,
-    SyncRecord, cursor_availability, prioritize_tombstones,
+    EncodedResponse, MAX_RESPONSE_WIRE_BYTES, PayloadEncoding, ProtocolError, SchemaCatalog,
+    SegmentReceiver, SegmentReceiverCheckpoint, SignedSegment, SyncRecord, cursor_availability,
+    prioritize_tombstones,
 };
 #[allow(unused_imports)]
 pub(crate) use relay::{

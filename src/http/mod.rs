@@ -96,6 +96,7 @@ use crate::{
     state::{
         DesiredStateCommand, JsonSnapshotStore, NodeEgressProbeState, NodeSubscriptionRegion,
         StoreError,
+        history_repository::{HistoryStorage, replica::RepositoryReplicaRuntime},
     },
     subscription,
     tcp_connection_usage::{
@@ -111,6 +112,7 @@ use crate::{
 };
 
 mod capabilities;
+mod history_repository;
 mod version_check;
 mod web_assets;
 
@@ -123,6 +125,7 @@ use version_check::{VersionCheckCache, api_version_check};
 pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
+    pub(crate) repository_replica: Arc<Mutex<RepositoryReplicaRuntime>>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
     pub cloudflared_health: CloudflaredHealthHandle,
@@ -953,9 +956,19 @@ pub fn build_router_with_mesh_telemetry(
 
     let raft = crate::raft::app::PanicBoundaryRaft::wrap(raft);
 
+    let repository_storage = HistoryStorage::open(&config.data_dir);
+    let repository_replica = RepositoryReplicaRuntime::load(repository_storage.clone())
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                error = %error,
+                "repository replica checkpoint is unusable; waiting for a safe rebuild"
+            );
+            RepositoryReplicaRuntime::empty(repository_storage)
+        });
     let app_state = AppState {
         config: Arc::new(config),
         store,
+        repository_replica: Arc::new(Mutex::new(repository_replica)),
         reconcile,
         xray_health,
         cloudflared_health,
@@ -1009,6 +1022,10 @@ pub fn build_router_with_mesh_telemetry(
             get(admin_internal_get_user_node_quota_status),
         )
         .route("/_internal/alerts", get(admin_internal_get_alerts))
+        .route(
+            "/_internal/history-repository/sync",
+            post(history_repository::admin_internal_receive_history_repository_segment),
+        )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
         .route(
@@ -1224,6 +1241,10 @@ pub fn build_router_with_mesh_telemetry(
                 .delete(admin_internal_clear_local_user_traffic),
         )
         .route("/alerts", get(admin_get_alerts))
+        .route(
+            "/history-repository",
+            get(history_repository::admin_query_history_repository),
+        )
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
 
     let api = Router::new()

@@ -27,6 +27,7 @@ fn healthiest_complete_repository_wins_with_coverage_watermark_and_skew() {
 #[test]
 fn partial_and_local_only_results_expose_explicit_gaps_without_unbounded_exports() {
     assert!(HistoryQuery::new(0, 10, 1_001).is_err());
+    assert!(HistoryQuery::new(0, 2 * 365 * 24 * 60 * 60 + 1, 1).is_err());
     let request = HistoryQuery::new(100, 200, 32).expect("bounded query");
     let gap = QueryGap::new(120, 130, true).expect("permanent gap");
     let partial =
@@ -35,16 +36,34 @@ fn partial_and_local_only_results_expose_explicit_gaps_without_unbounded_exports
     assert!(partial.gaps()[0].permanent());
     assert_eq!(partial.page_size(), 32);
 
+    let local_candidate = QueryCandidate::local(
+        QueryCoverage::new(
+            QueryRange::new(180, 200).expect("local observed"),
+            QueryRange::new(180, 200).expect("local received"),
+        ),
+        [StreamWatermark::new("source-a", 1, "traffic", 200).expect("local watermark")],
+        [QueryGap::new(100, 179, true).expect("local gap")],
+        4,
+    )
+    .expect("local candidate");
     let local = QuerySelector::select(
         &request,
         [
             QueryCandidate::unavailable("repo-a"),
             QueryCandidate::unready("repo-b"),
+            local_candidate,
         ],
     )
     .expect("local plan");
     assert_eq!(local.completeness(), Completeness::LocalOnly);
     assert_eq!(local.repository_id(), None);
+    assert_eq!(
+        local.coverage().expect("local coverage").received(),
+        QueryRange::new(180, 200).expect("range")
+    );
+    assert_eq!(local.watermarks()[0].sequence(), 200);
+    assert!(local.gaps()[0].permanent());
+    assert_eq!(local.clock_skew_seconds(), 4);
 }
 
 #[test]

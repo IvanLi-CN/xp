@@ -80,22 +80,43 @@ fn identical_repository_summaries_eventually_converge_without_hiding_gaps() {
 
 #[test]
 fn tombstones_do_not_resurrect_and_only_expire_after_horizon_and_ready_acks() {
-    let record = ReplicaRecord::new("known", 1, b"subject".to_vec(), b"payload".to_vec())
-        .expect("bounded record");
+    let stream_a = ReplicaCursor::new("source-a", 1, "traffic", 0).expect("stream a");
+    let stream_b = ReplicaCursor::new("source-b", 1, "traffic", 0).expect("stream b");
+    let record = ReplicaRecord::new(
+        &stream_a,
+        "subject-a",
+        "observer-a",
+        "known",
+        1,
+        b"subject".to_vec(),
+        b"payload".to_vec(),
+    )
+    .expect("bounded record");
+    let independent_record = ReplicaRecord::new(
+        &stream_b,
+        "subject-a",
+        "observer-a",
+        "known",
+        1,
+        b"subject".to_vec(),
+        b"payload".to_vec(),
+    )
+    .expect("independent record");
     let mut tombstones = TombstoneLedger::new(100);
     tombstones
         .tombstone(record.key(), 10, ["repo-a", "repo-b"])
         .expect("tombstone");
     assert!(!tombstones.allows(&record.key()));
+    assert!(tombstones.allows(&independent_record.key()));
     tombstones
         .acknowledge(record.key(), "repo-a")
         .expect("ack a");
-    assert_eq!(tombstones.expire(110), 0);
+    assert!(tombstones.expire(110).is_empty());
     tombstones
         .acknowledge(record.key(), "repo-b")
         .expect("ack b");
-    assert_eq!(tombstones.expire(109), 0);
-    assert_eq!(tombstones.expire(110), 1);
+    assert!(tombstones.expire(109).is_empty());
+    assert_eq!(tombstones.expire(110).len(), 1);
     assert!(tombstones.allows(&record.key()));
 }
 
@@ -104,6 +125,17 @@ fn fork_unknown_schema_and_stale_replicas_fail_closed_until_rebuilt() {
     let mut forks = StreamForkGuard::default();
     let cursor = ReplicaCursor::new("source-a", 7, "traffic", 9).expect("cursor");
     assert!(forks.observe(&cursor, [1; 32]).is_ok());
+    let missing = ReplicaCursor::new("source-a", 7, "traffic", 11).expect("missing cursor");
+    assert!(matches!(
+        forks.observe(&missing, [3; 32]),
+        Err(super::ReplicaError::CursorGap {
+            expected_sequence: 10,
+            received_sequence: 11,
+        })
+    ));
+    let next = ReplicaCursor::new("source-a", 7, "traffic", 10).expect("next cursor");
+    assert!(forks.observe(&next, [3; 32]).is_ok());
+    assert!(forks.observe(&missing, [4; 32]).is_ok());
     assert!(matches!(
         forks.observe(&cursor, [2; 32]),
         Err(super::ReplicaError::ForkQuarantined { next_epoch: 8 })

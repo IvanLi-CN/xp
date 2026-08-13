@@ -5,6 +5,7 @@
 mod anti_entropy;
 mod rendezvous;
 mod retention;
+mod runtime;
 
 #[allow(unused_imports)]
 pub(crate) use anti_entropy::*;
@@ -12,6 +13,8 @@ pub(crate) use anti_entropy::*;
 pub(crate) use rendezvous::*;
 #[allow(unused_imports)]
 pub(crate) use retention::*;
+#[allow(unused_imports)]
+pub(crate) use runtime::*;
 
 #[cfg(test)]
 mod tests;
@@ -28,8 +31,19 @@ pub(crate) enum ReplicaError {
     StreamBacklogFull,
     TombstoneBacklogFull,
     TombstoneMissing,
-    EpochNotAdvanced { minimum_epoch: u64 },
-    ForkQuarantined { next_epoch: u64 },
+    CursorGap {
+        expected_sequence: u64,
+        received_sequence: u64,
+    },
+    StaleSequence {
+        next_sequence: u64,
+    },
+    EpochNotAdvanced {
+        minimum_epoch: u64,
+    },
+    ForkQuarantined {
+        next_epoch: u64,
+    },
     UnknownSchemaBacklogFull,
 }
 
