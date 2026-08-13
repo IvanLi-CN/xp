@@ -1,14 +1,14 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
+
+use crate::state::history_repository::{HistoryStorage, MESH_TELEMETRY_KEY};
 
 const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
@@ -146,7 +146,7 @@ pub struct MeshTelemetrySample {
 
 #[derive(Clone)]
 pub struct MeshTelemetryHandle {
-    path: Arc<PathBuf>,
+    history_storage: HistoryStorage,
     state: Arc<Mutex<PersistedTelemetry>>,
     connections: MeshConnectionTrackers,
     probe_gate: Arc<Semaphore>,
@@ -154,9 +154,11 @@ pub struct MeshTelemetryHandle {
 
 impl MeshTelemetryHandle {
     pub fn load(data_dir: &Path) -> anyhow::Result<Self> {
-        let path = data_dir.join("mesh").join("telemetry.json");
-        let state = if path.exists() {
-            let bytes = fs::read(&path)?;
+        let history_storage = HistoryStorage::open(data_dir);
+        let state = if let Some(bytes) = history_storage
+            .read(MESH_TELEMETRY_KEY)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        {
             let parsed: PersistedTelemetry = serde_json::from_slice(&bytes)?;
             if parsed.schema_version != TELEMETRY_SCHEMA_VERSION {
                 anyhow::bail!(
@@ -170,7 +172,7 @@ impl MeshTelemetryHandle {
             PersistedTelemetry::default()
         };
         Ok(Self {
-            path: Arc::new(path),
+            history_storage,
             state: Arc::new(Mutex::new(state)),
             connections: MeshConnectionTrackers::default(),
             probe_gate: Arc::new(Semaphore::new(4)),
@@ -264,7 +266,7 @@ impl MeshTelemetryHandle {
             }
         }
         state.revision += 1;
-        persist(&self.path, &state)
+        persist(&self.history_storage, &state)
     }
 
     pub async fn set_breaker(
@@ -298,7 +300,7 @@ impl MeshTelemetryHandle {
                 );
             }
             state.revision += 1;
-            persist(&self.path, &state)?;
+            persist(&self.history_storage, &state)?;
         }
         Ok(())
     }
@@ -325,7 +327,7 @@ impl MeshTelemetryHandle {
         peer.last_mesh_reason = Some(reason);
         peer.last_mesh_target = mesh_target;
         state.revision += 1;
-        persist(&self.path, &state)
+        persist(&self.history_storage, &state)
     }
 
     /// Records a final request failure after an earlier transport sample. This keeps path-attempt
@@ -350,7 +352,7 @@ impl MeshTelemetryHandle {
         peer.last_sample_at = Some(timestamp(now));
         ensure_bucket(peer, now).end_to_end_failure += 1;
         state.revision += 1;
-        persist(&self.path, &state)
+        persist(&self.history_storage, &state)
     }
 
     pub async fn record_event(
@@ -370,7 +372,7 @@ impl MeshTelemetryHandle {
             },
         );
         state.revision += 1;
-        persist(&self.path, &state)
+        persist(&self.history_storage, &state)
     }
 }
 
@@ -543,24 +545,17 @@ fn timestamp(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-fn persist(path: &Path, state: &PersistedTelemetry) -> anyhow::Result<()> {
-    let parent = path.parent().expect("mesh telemetry path has parent");
-    fs::create_dir_all(parent)?;
+fn persist(storage: &HistoryStorage, state: &PersistedTelemetry) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec_pretty(state)?;
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-    }
-    fs::rename(temporary, path)?;
-    Ok(())
+    storage
+        .write(MESH_TELEMETRY_KEY, &bytes)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
+    use std::{fs, net::SocketAddr};
 
     fn h2_sample(fingerprint: MeshConnectionFingerprint) -> MeshTelemetrySample {
         MeshTelemetrySample {
@@ -641,7 +636,13 @@ mod tests {
         assert_eq!(peer.buckets[0].mesh_h2_requests, 3);
         assert_eq!(peer.buckets[0].mesh_connection_starts, 2);
 
-        let persisted = fs::read_to_string(temp.path().join("mesh/telemetry.json")).unwrap();
+        let persisted = String::from_utf8(
+            HistoryStorage::open(temp.path())
+                .read(MESH_TELEMETRY_KEY)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
         assert!(!persisted.contains("127.0.0.1"));
         assert!(!persisted.contains("41000"));
         assert!(!persisted.contains("41001"));
