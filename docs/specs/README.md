@@ -116,3 +116,4 @@
 | XHTTP/XMUX           | active    | complete        | `endpoint-vless-xhttp-reuse` | -          |
 | Fixture 数据策略门禁 | active    | 已实现          | `fixture-policy-gate`        | -          |
 | Web 滚动容器         | active    | 组件基线已明确  | `scroll-containers`          | -          |
+| 集群长期历史数据仓库 | active    | bootstrap       | cluster-history-repositories | -          |
