@@ -1,7 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{self, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -24,7 +22,11 @@ use crate::{
         LocalNodeRuntimeSnapshot, NodeRuntimeEventKind, NodeRuntimeHandle, RuntimeComponent,
         RuntimeStatus,
     },
-    state::{JsonSnapshotStore, membership_xray_email},
+    state::{
+        JsonSnapshotStore,
+        history_repository::{HistoryStorage, NODE_HISTORY_KEY},
+        membership_xray_email,
+    },
     xray,
 };
 
@@ -424,7 +426,7 @@ impl PersistedNodeHistoryCache {
 #[derive(Clone)]
 pub struct NodeHistoryHandle {
     inner: Arc<RwLock<PersistedNodeHistoryCache>>,
-    persistence_path: Arc<PathBuf>,
+    history_storage: HistoryStorage,
     persistence_lock: Arc<Mutex<()>>,
 }
 
@@ -434,11 +436,13 @@ impl NodeHistoryHandle {
     }
 
     fn new(persistence_path: PathBuf) -> Self {
+        let data_dir = persistence_path.parent().unwrap_or_else(|| Path::new("."));
+        let history_storage = HistoryStorage::open(data_dir);
         let cache =
-            load_history_cache(&persistence_path).unwrap_or_else(PersistedNodeHistoryCache::empty);
+            load_history_cache(&history_storage).unwrap_or_else(PersistedNodeHistoryCache::empty);
         Self {
             inner: Arc::new(RwLock::new(cache)),
-            persistence_path: Arc::new(persistence_path),
+            history_storage,
             persistence_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -722,10 +726,9 @@ impl NodeHistoryHandle {
     async fn persist(&self) {
         let _guard = self.persistence_lock.lock().await;
         let state = self.inner.read().await.clone();
-        if let Err(err) = persist_history_cache(&self.persistence_path, &state) {
+        if let Err(err) = persist_history_cache(&self.history_storage, &state) {
             warn!(
                 error = %err,
-                path = %self.persistence_path.display(),
                 "persist node history cache"
             );
         }
@@ -2146,8 +2149,8 @@ async fn sync_remote_node_histories(
     }
 }
 
-fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {
-    let bytes = fs::read(path).ok()?;
+fn load_history_cache(storage: &HistoryStorage) -> Option<PersistedNodeHistoryCache> {
+    let bytes = storage.read(NODE_HISTORY_KEY).ok()??;
     let mut cache: PersistedNodeHistoryCache = serde_json::from_slice(&bytes).ok()?;
     if cache.schema_version == 1 {
         cache.schema_version = HISTORY_SCHEMA_VERSION;
@@ -2157,23 +2160,14 @@ fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {
     Some(cache)
 }
 
-fn persist_history_cache(path: &Path, cache: &PersistedNodeHistoryCache) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+fn persist_history_cache(
+    storage: &HistoryStorage,
+    cache: &PersistedNodeHistoryCache,
+) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec_pretty(cache)?;
-    write_atomic(path, &bytes)
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp_path = path.with_extension("tmp");
-    {
-        let mut f = fs::File::create(&tmp_path)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    fs::rename(tmp_path, path)?;
-    Ok(())
+    storage
+        .write(NODE_HISTORY_KEY, &bytes)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn rfc3339(at: DateTime<Utc>) -> String {
@@ -2190,6 +2184,7 @@ mod tests {
     use crate::node_runtime::{
         ComponentRuntimeStatus, NodeRuntimeEvent, NodeRuntimeSummary, RuntimeSummaryStatus,
     };
+    use std::fs;
 
     fn component(component: RuntimeComponent, status: RuntimeStatus) -> ComponentRuntimeStatus {
         ComponentRuntimeStatus {
