@@ -1,10 +1,13 @@
 use ed25519_dalek::SigningKey;
 
 use super::{RepositoryRepairBatch, RepositoryReplicaRuntime, StoredSegment};
-use crate::state::history_repository::{
-    HistoryStorage,
-    identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
-    replica::ReplicaWork,
+use crate::{
+    history_sync::{CanonicalSegment, Cursor, SyncRecord},
+    state::history_repository::{
+        HistoryStorage,
+        identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+        replica::ReplicaWork,
+    },
 };
 
 fn identity() -> RepositoryNodeIdentity {
@@ -72,6 +75,64 @@ fn repair_batch_accepts_a_pre_gap_metadata_payload() {
         .expect("legacy repair payload remains readable");
     assert!(batch.segments.is_empty());
     assert!(batch.gaps.is_empty());
+}
+
+#[test]
+fn active_tombstone_acknowledgements_retry_after_restart_until_delivered() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let tombstone = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "runtime", 0).expect("cursor"),
+        vec![SyncRecord::new(
+            "subject-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"dead".to_vec(),
+            b"sample".to_vec(),
+            true,
+        )],
+        None,
+        10,
+        11,
+    )
+    .expect("segment")
+    .sign(&signing_key)
+    .expect("signature");
+    let ready = vec!["repo-a".to_owned(), "repo-b".to_owned()];
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire_from_repository(
+            "cluster-a",
+            &identity(),
+            &tombstone.wire_bytes().expect("wire"),
+            100,
+            &ready,
+            "repo-a",
+        )
+        .expect("tombstone");
+
+    let failed_delivery = runtime
+        .tombstone_acknowledgement_page("repo-a")
+        .expect("pending acknowledgement");
+    assert_eq!(failed_delivery.acknowledgements().len(), 1);
+    let pending_key = failed_delivery.acknowledgements()[0].key.clone();
+
+    let mut restored = load(temporary.path());
+    let retry = restored
+        .tombstone_acknowledgement_page("repo-a")
+        .expect("restart preserves pending acknowledgement");
+    assert_eq!(retry.acknowledgements().len(), 1);
+    assert_eq!(retry.acknowledgements()[0].key, pending_key);
+
+    restored
+        .record_tombstone_acknowledgement_delivery(retry.next_cursor())
+        .expect("record complete fanout");
+    let replay = load(temporary.path())
+        .tombstone_acknowledgement_page("repo-a")
+        .expect("active tombstones continue to cover new ready peers");
+    assert_eq!(replay.acknowledgements().len(), 1);
 }
 
 #[test]

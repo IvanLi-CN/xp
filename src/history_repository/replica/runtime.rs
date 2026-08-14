@@ -23,8 +23,8 @@ use crate::{
 };
 
 use super::{
-    ReplicaCursor, ReplicaError, ReplicaFreshness, ReplicaRecord, TombstoneLedger,
-    TombstoneLedgerCheckpoint,
+    ReplicaCursor, ReplicaError, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey,
+    TombstoneLedger, TombstoneLedgerCheckpoint,
 };
 
 const MAX_REPOSITORY_RECORDS: usize = 16_384;
@@ -199,6 +199,8 @@ struct RepositoryReplicaSnapshot {
     #[serde(default)]
     source_last_received_unix_seconds: BTreeMap<String, u64>,
     #[serde(default)]
+    tombstone_acknowledgement_cursor: Option<ReplicaRecordKey>,
+    #[serde(default)]
     #[serde(rename = "relay_segment_offsets")]
     relay_segment_cursors: BTreeMap<String, RelaySegmentCursor>,
     #[serde(default)]
@@ -224,6 +226,7 @@ impl Default for RepositoryReplicaSnapshot {
             last_dynamic_relay_attempt_unix_seconds: None,
             collector_failure_cycles: BTreeMap::new(),
             source_last_received_unix_seconds: BTreeMap::new(),
+            tombstone_acknowledgement_cursor: None,
             relay_segment_cursors: BTreeMap::new(),
             replication_peer_offset: 0,
             deep_verified_peer_ids: BTreeSet::new(),

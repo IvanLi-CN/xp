@@ -49,7 +49,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let work = {
+    let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
         runtime.reconcile_ready_repositories(&ready_repository_ids)?;
@@ -59,8 +59,34 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             &state.cluster.node_id,
             &known_source_node_ids,
         )?;
-        runtime.replication_work(now)
+        (
+            runtime.replication_work(now),
+            runtime.tombstone_acknowledgement_page(&state.cluster.node_id)?,
+        )
     };
+    if !tombstone_acknowledgements.acknowledgements().is_empty() {
+        match propagate_tombstone_acknowledgements(
+            state,
+            &ready_repository_ids,
+            tombstone_acknowledgements.acknowledgements().to_vec(),
+        )
+        .await
+        {
+            Ok(()) => {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .record_tombstone_acknowledgement_delivery(
+                        tombstone_acknowledgements.next_cursor(),
+                    )?;
+            }
+            Err(error) => tracing::debug!(
+                error = %error,
+                "history repository tombstone acknowledgement retry failed"
+            ),
+        }
+    }
     if !work.is_anti_entropy() {
         return Ok(());
     }

@@ -9,13 +9,15 @@ use super::{
     RepositoryTombstoneAcknowledgement, StoredGap,
 };
 use crate::state::history_repository::replica::{
-    AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaWork, rendezvous_collectors,
+    AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaRecordKey, ReplicaWork,
+    rendezvous_collectors,
 };
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
 const MAX_REPAIR_GAPS: usize = 64;
 const MAX_RELAY_TARGETS: usize = 64;
 const MAX_COLLECTION_SOURCES: usize = 4_096;
+const MAX_TOMBSTONE_ACKNOWLEDGEMENTS_PER_CYCLE: usize = 64;
 const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,22 @@ impl RelayRepairPage {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct TombstoneAcknowledgementPage {
+    acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
+    next_cursor: Option<ReplicaRecordKey>,
+}
+
+impl TombstoneAcknowledgementPage {
+    pub(crate) fn acknowledgements(&self) -> &[RepositoryTombstoneAcknowledgement] {
+        &self.acknowledgements
+    }
+
+    pub(crate) fn next_cursor(&self) -> Option<&ReplicaRecordKey> {
+        self.next_cursor.as_ref()
+    }
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn prepare_for_replication(
         &mut self,
@@ -117,6 +135,36 @@ impl RepositoryReplicaRuntime {
         self.snapshot
             .relay_segment_cursors
             .retain(|repository_id, _| ready_repositories.contains(repository_id));
+        self.persist_control_state()
+    }
+
+    pub(crate) fn tombstone_acknowledgement_page(
+        &self,
+        local_repository_id: &str,
+    ) -> Result<TombstoneAcknowledgementPage, RepositoryRuntimeError> {
+        let keys = self.tombstones.acknowledgement_keys_for(
+            local_repository_id,
+            self.snapshot.tombstone_acknowledgement_cursor.as_ref(),
+            MAX_TOMBSTONE_ACKNOWLEDGEMENTS_PER_CYCLE,
+        )?;
+        let next_cursor = keys.last().cloned();
+        Ok(TombstoneAcknowledgementPage {
+            acknowledgements: keys
+                .into_iter()
+                .map(|key| RepositoryTombstoneAcknowledgement {
+                    key,
+                    repository_id: local_repository_id.to_owned(),
+                })
+                .collect(),
+            next_cursor,
+        })
+    }
+
+    pub(crate) fn record_tombstone_acknowledgement_delivery(
+        &mut self,
+        next_cursor: Option<&ReplicaRecordKey>,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.snapshot.tombstone_acknowledgement_cursor = next_cursor.cloned();
         self.persist_control_state()
     }
 

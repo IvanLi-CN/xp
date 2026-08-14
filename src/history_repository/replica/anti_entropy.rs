@@ -463,6 +463,38 @@ impl TombstoneLedger {
         !self.entries.contains_key(key)
     }
 
+    pub(crate) fn acknowledgement_keys_for(
+        &self,
+        repository_id: &str,
+        after: Option<&ReplicaRecordKey>,
+        limit: usize,
+    ) -> Result<Vec<ReplicaRecordKey>, ReplicaError> {
+        validate_identifier(repository_id)?;
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut keys = self
+            .entries
+            .iter()
+            .filter(|(key, state)| {
+                state.acknowledgements.contains(repository_id)
+                    && after.is_none_or(|cursor| *key > cursor)
+            })
+            .take(limit)
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        if keys.is_empty() && after.is_some() {
+            keys = self
+                .entries
+                .iter()
+                .filter(|(_, state)| state.acknowledgements.contains(repository_id))
+                .take(limit)
+                .map(|(key, _)| key.clone())
+                .collect();
+        }
+        Ok(keys)
+    }
+
     pub(crate) fn expire(&mut self, now_unix_seconds: u64) -> Vec<ReplicaRecordKey> {
         let expired = self
             .entries
