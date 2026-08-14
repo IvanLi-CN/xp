@@ -77,6 +77,8 @@ Mount all three of these paths:
 They persist:
 
 - cluster metadata / raft state / certificates
+- the local `history.sqlite3` repository replica database, including its WAL and incremental
+  release state
 - VLESS HTTPS canary ACME account key / cert / key under `/var/lib/xp/data/vless-https-canary`
 - `cloudflared` credentials and config
 - Cloudflare Tunnel settings (`settings.json`)

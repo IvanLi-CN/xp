@@ -20,6 +20,7 @@ pub(crate) enum QueryError {
     InvalidIdentifier,
     CandidateLimitExceeded,
     MetadataLimitExceeded,
+    InvalidPageCursor,
 }
 
 impl std::fmt::Display for QueryError {
@@ -82,6 +83,7 @@ impl QueryRange {
 pub(crate) struct HistoryQuery {
     range: QueryRange,
     page_size: usize,
+    page_cursor: usize,
 }
 
 impl HistoryQuery {
@@ -96,7 +98,19 @@ impl HistoryQuery {
         Ok(Self {
             range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
             page_size,
+            page_cursor: 0,
         })
+    }
+
+    pub(crate) fn with_page_cursor(mut self, cursor: Option<&str>) -> Result<Self, QueryError> {
+        let Some(cursor) = cursor else {
+            return Ok(self);
+        };
+        if cursor.is_empty() || !cursor.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(QueryError::InvalidPageCursor);
+        }
+        self.page_cursor = cursor.parse().map_err(|_| QueryError::InvalidPageCursor)?;
+        Ok(self)
     }
 
     pub(crate) fn range(&self) -> QueryRange {
@@ -105,6 +119,20 @@ impl HistoryQuery {
 
     pub(crate) fn page_size(&self) -> usize {
         self.page_size
+    }
+
+    pub(crate) fn page_offset(&self) -> Result<usize, QueryError> {
+        Ok(self.page_cursor)
+    }
+
+    pub(crate) fn next_page_cursor(&self, returned_records: usize) -> Result<String, QueryError> {
+        if returned_records == 0 {
+            return Err(QueryError::InvalidPageCursor);
+        }
+        self.page_cursor
+            .checked_add(returned_records)
+            .ok_or(QueryError::InvalidPageCursor)
+            .map(|cursor| cursor.to_string())
     }
 }
 

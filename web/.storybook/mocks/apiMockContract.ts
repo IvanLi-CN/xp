@@ -61,6 +61,8 @@ export const DEFAULT_API_CAPABILITIES = {
 	capabilities: [
 		...API_CAPABILITIES,
 		"admin.endpoint-mihomo-smux",
+		"admin.history-repositories",
+		"admin.repository-history",
 	] satisfies ApiCapability[],
 	fingerprint: Object.fromEntries(
 		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [

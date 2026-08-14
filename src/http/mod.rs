@@ -1013,6 +1013,10 @@ pub fn build_router_with_mesh_telemetry(
             get(history_repository::admin_internal_history_repository_summary),
         )
         .route(
+            "/_internal/history-repository/status",
+            get(history_repository::admin_internal_history_repository_status),
+        )
+        .route(
             "/_internal/history-repository/repair",
             post(history_repository::admin_internal_history_repository_repair),
         )
@@ -1247,6 +1251,11 @@ pub fn build_router_with_mesh_telemetry(
                 .delete(admin_internal_clear_local_user_traffic),
         )
         .route("/alerts", get(admin_get_alerts))
+        .route(
+            "/history-repositories",
+            get(history_repository::admin_list_history_repositories)
+                .put(history_repository::admin_replace_history_repository_membership),
+        )
         .route(
             "/history-repository",
             get(history_repository::admin_query_history_repository),

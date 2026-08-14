@@ -40,6 +40,7 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
 
 async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+    sync_local_repository_capacity(state, now).await?;
     let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
     let known_source_node_ids = known_history_source_node_ids(state).await;
     if !ready_repository_ids
@@ -166,6 +167,43 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             .await
             .record_replication_completed(now, completed_work)?;
     }
+    Ok(())
+}
+
+async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
+    let capacity = state
+        .repository_replica
+        .lock()
+        .await
+        .runtime_status(now)?
+        .capacity()
+        .clone();
+    let Some(mut membership) = ({
+        let store = state.store.lock().await;
+        store.state().repository_membership.clone()
+    }) else {
+        return Ok(());
+    };
+    let node_id = crate::state::history_repository::identity::RepositoryNodeId::try_from(
+        state.cluster.node_id.clone(),
+    )?;
+    let Some(member) = membership.repository(&node_id) else {
+        return Ok(());
+    };
+    if member.capacity() == &capacity {
+        return Ok(());
+    }
+    membership.record_capacity(
+        &node_id,
+        capacity.used_bytes(),
+        capacity.filesystem_available_bytes(),
+    )?;
+    super::super::raft_write(
+        state,
+        crate::state::DesiredStateCommand::ReplaceRepositoryMembership { membership },
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("write local history repository capacity to Raft"))?;
     Ok(())
 }
 

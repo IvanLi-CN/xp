@@ -14,8 +14,8 @@ use crate::{
             HistoryStorage,
             control::{HistoryWriteAvailability, RepositoryCapacity},
             query::{
-                HistoryQuery, QueryCandidate, QueryCoverage, QueryError, QueryGap, QueryPlan,
-                QueryRange, QuerySelector,
+                HistoryQuery, QueryCandidate, QueryCoverage, QueryGap, QueryPlan, QueryRange,
+                QuerySelector,
             },
         },
         history_storage::REPOSITORY_REPLICA_KEY,
@@ -23,9 +23,15 @@ use crate::{
 };
 
 use super::{
-    ReplicaCursor, ReplicaError, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey,
-    TombstoneLedger, TombstoneLedgerCheckpoint,
+    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
+    TombstoneLedgerCheckpoint,
 };
+
+mod error;
+mod status;
+
+pub(crate) use error::RepositoryRuntimeError;
+pub(crate) use status::RepositoryRuntimeStatus;
 
 const MAX_REPOSITORY_RECORDS: usize = 16_384;
 const MAX_REPOSITORY_SEGMENTS: usize = 1_024;
@@ -40,43 +46,6 @@ const KNOWN_SCHEMAS: [(&str, u32); 6] = [
     ("ip_usage.v1", 1),
     ("tombstone.v1", 1),
 ];
-
-#[derive(Debug)]
-pub(crate) enum RepositoryRuntimeError {
-    Protocol(ProtocolError),
-    Replica(ReplicaError),
-    Query(QueryError),
-    Storage(String),
-    ClusterBindingMismatch,
-    WriteStopped(HistoryWriteAvailability),
-    StateLimitExceeded,
-}
-
-impl std::fmt::Display for RepositoryRuntimeError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "history repository runtime error: {self:?}")
-    }
-}
-
-impl std::error::Error for RepositoryRuntimeError {}
-
-impl From<ProtocolError> for RepositoryRuntimeError {
-    fn from(value: ProtocolError) -> Self {
-        Self::Protocol(value)
-    }
-}
-
-impl From<ReplicaError> for RepositoryRuntimeError {
-    fn from(value: ReplicaError) -> Self {
-        Self::Replica(value)
-    }
-}
-
-impl From<QueryError> for RepositoryRuntimeError {
-    fn from(value: QueryError) -> Self {
-        Self::Query(value)
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RepositorySyncReceipt {
@@ -143,6 +112,8 @@ pub(crate) struct RepositoryHistoryQueryResponse {
     plan: QueryPlan,
     records: Vec<RepositoryHistoryRecord>,
     records_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_page_cursor: Option<String>,
 }
 
 impl RepositoryHistoryQueryResponse {
@@ -515,15 +486,16 @@ impl RepositoryReplicaRuntime {
             )?);
         }
         let plan = QuerySelector::select(&query, candidates)?;
-        let (records, records_truncated) = if plan.repository_id().is_some() {
-            self.records_for(&query)
+        let (records, records_truncated, next_page_cursor) = if plan.repository_id().is_some() {
+            self.records_for(&query)?
         } else {
-            Default::default()
+            (Vec::new(), false, None)
         };
         Ok(RepositoryHistoryQueryResponse {
             plan,
             records,
             records_truncated,
+            next_page_cursor,
         })
     }
 
@@ -560,6 +532,33 @@ impl RepositoryReplicaRuntime {
             plan,
             records: Vec::new(),
             records_truncated: false,
+            next_page_cursor: None,
+        })
+    }
+
+    pub(crate) fn runtime_status(
+        &mut self,
+        now_unix_seconds: u64,
+    ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
+        self.prepare_for_replication(now_unix_seconds)?;
+        self.refresh_capacity()?;
+        Ok(RepositoryRuntimeStatus {
+            storage_mode: if self.storage.is_sqlite() {
+                "sqlite".to_owned()
+            } else {
+                "degraded_json".to_owned()
+            },
+            capacity: self.snapshot.capacity.clone(),
+            record_count: self.snapshot.records.len(),
+            segment_count: self.snapshot.segments.len(),
+            gap_count: self.snapshot.gaps.len(),
+            history_truncated: self.snapshot.history_truncated,
+            last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
+            last_anti_entropy_unix_seconds: self.snapshot.last_anti_entropy_unix_seconds,
+            last_deep_verification_unix_seconds: self.snapshot.last_deep_verification_unix_seconds,
+            last_dynamic_relay_attempt_unix_seconds: self
+                .snapshot
+                .last_dynamic_relay_attempt_unix_seconds,
         })
     }
 
@@ -740,14 +739,22 @@ impl RepositoryReplicaRuntime {
         ))
     }
 
-    fn records_for(&self, query: &HistoryQuery) -> (Vec<RepositoryHistoryRecord>, bool) {
+    fn records_for(
+        &self,
+        query: &HistoryQuery,
+    ) -> Result<(Vec<RepositoryHistoryRecord>, bool, Option<String>), RepositoryRuntimeError> {
         let mut records = Vec::with_capacity(query.page_size());
         let mut response_bytes = 0usize;
         let mut truncated = false;
+        let mut remaining_skip = query.page_offset()?;
         for record in self.snapshot.records.iter().filter(|record| {
             let (start, end) = retention::record_time_range(record);
             start <= query.range().end_unix_seconds() && query.range().start_unix_seconds() <= end
         }) {
+            if remaining_skip > 0 {
+                remaining_skip -= 1;
+                continue;
+            }
             let next_bytes = record
                 .payload
                 .len()
@@ -762,7 +769,10 @@ impl RepositoryReplicaRuntime {
             response_bytes = response_bytes.saturating_add(next_bytes);
             records.push(record.clone().into());
         }
-        (records, truncated)
+        let next_page_cursor = truncated
+            .then(|| query.next_page_cursor(records.len()))
+            .transpose()?;
+        Ok((records, truncated, next_page_cursor))
     }
 
     fn refresh_capacity(&mut self) -> Result<(), RepositoryRuntimeError> {

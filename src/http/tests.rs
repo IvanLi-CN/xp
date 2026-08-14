@@ -1200,6 +1200,7 @@ async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
     assert_eq!(body["records"], json!([]));
 
     let invalid = app
+        .clone()
         .oneshot(req_authed(
             "GET",
             "/api/admin/history-repository?start_unix_seconds=2&end_unix_seconds=1&page_size=1001",
@@ -1207,6 +1208,78 @@ async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_cursor = app
+        .oneshot(req_authed(
+            "GET",
+            concat!(
+                "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2",
+                "&page_size=10&page_cursor=not-a-cursor",
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn repository_membership_is_raft_backed_and_reports_local_runtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let nodes = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(nodes.status(), StatusCode::OK);
+    let node_id = body_json(nodes).await["items"][0]["node_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[39; 32]);
+    let membership = json!({
+        "members": [{
+            "identity": {
+                "node_id": node_id,
+                "ed25519_public_key": URL_SAFE_NO_PAD
+                    .encode(signing_key.verifying_key().to_bytes()),
+                "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([40; 32]),
+            },
+            "lifecycle": "syncing",
+            "replica_converged": false,
+            "capacity": {
+                "quota_bytes": 10 * 1024 * 1024 * 1024_u64,
+                "used_bytes": 0,
+                "filesystem_available_bytes": u64::MAX,
+            },
+        }],
+    });
+    let updated = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/history-repositories",
+            membership,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(updated).await["members"][0]["identity"]["node_id"],
+        node_id
+    );
+
+    let status = app
+        .oneshot(req_authed("GET", "/api/admin/history-repositories"))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let status = body_json(status).await;
+    assert_eq!(status["configured"], true);
+    assert_eq!(status["partial"], false);
+    assert_eq!(status["items"][0]["member"]["lifecycle"], "syncing");
+    assert!(status["items"][0]["runtime"].is_object());
 }
 
 #[tokio::test]

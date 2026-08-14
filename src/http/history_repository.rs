@@ -5,17 +5,19 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::{
     history_sync::MAX_RESPONSE_WIRE_BYTES,
     http::{ApiError, ApiJson, AppState, InternalSignatureAuth},
     state::history_repository::{
+        control::{RepositoryMember, RepositoryMembership},
         identity::RepositoryNodeIdentity,
         query::{HistoryQuery, QueryCandidate, QuerySelector},
         replica::{
             LocalQueryMetadata, RepositoryHistoryQueryResponse, RepositoryRepairBatch,
-            RepositoryReplicaSummary, RepositoryRuntimeError, RepositorySyncReceipt,
-            RepositoryTombstoneAcknowledgement,
+            RepositoryReplicaSummary, RepositoryRuntimeError, RepositoryRuntimeStatus,
+            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement,
         },
     },
 };
@@ -35,6 +37,28 @@ pub(super) struct RepositoryHistoryQuery {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
     page_size: usize,
+    #[serde(default)]
+    page_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ReplaceRepositoryMembershipRequest {
+    members: Vec<RepositoryMember>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct AdminHistoryRepositoriesResponse {
+    configured: bool,
+    partial: bool,
+    unreachable_node_ids: Vec<String>,
+    items: Vec<AdminHistoryRepositoryItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminHistoryRepositoryItem {
+    member: RepositoryMember,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime: Option<RepositoryRuntimeStatus>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +186,19 @@ pub(super) async fn admin_internal_history_repository_summary(
     Ok(Json(summary))
 }
 
+pub(super) async fn admin_internal_history_repository_status(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<RepositoryRuntimeStatus>, ApiError> {
+    let Some(Extension(internal)) = internal else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    if internal.verified.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    Ok(Json(local_repository_runtime_status(&state).await?))
+}
+
 pub(super) async fn admin_internal_history_repository_repair(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -200,6 +237,7 @@ pub(super) async fn admin_internal_query_history_repository(
         request.end_unix_seconds,
         request.page_size,
     )
+    .and_then(|query| query.with_page_cursor(request.page_cursor.as_deref()))
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
     let mut runtime = state.repository_replica.lock().await;
@@ -359,6 +397,7 @@ pub(super) async fn admin_query_history_repository(
         request.end_unix_seconds,
         request.page_size,
     )
+    .and_then(|query| query.with_page_cursor(request.page_cursor.as_deref()))
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
     let (ready_repository_ids, peers) = worker::ready_repository_peers(&state)
@@ -390,6 +429,7 @@ pub(super) async fn admin_query_history_repository(
         start_unix_seconds: request.start_unix_seconds,
         end_unix_seconds: request.end_unix_seconds,
         page_size: request.page_size,
+        page_cursor: request.page_cursor.clone(),
     })
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let mut responses = vec![local_response];
@@ -447,6 +487,102 @@ pub(super) async fn admin_query_history_repository(
             .ok_or_else(|| ApiError::internal("local history response is unavailable"))?,
     };
     Ok(Json(response))
+}
+
+pub(super) async fn admin_list_history_repositories(
+    Extension(state): Extension<AppState>,
+) -> Result<Json<AdminHistoryRepositoriesResponse>, ApiError> {
+    let (membership, nodes) = {
+        let store = state.store.lock().await;
+        (
+            store.state().repository_membership.clone(),
+            store.list_nodes(),
+        )
+    };
+    let Some(membership) = membership else {
+        return Ok(Json(AdminHistoryRepositoriesResponse {
+            configured: false,
+            partial: false,
+            unreachable_node_ids: Vec::new(),
+            items: Vec::new(),
+        }));
+    };
+
+    let nodes = nodes
+        .into_iter()
+        .map(|node| (node.node_id.clone(), node))
+        .collect::<BTreeMap<_, _>>();
+    let local_node_id = state.cluster.node_id.clone();
+    let client = state.mesh_client.clone();
+    let mut partial = false;
+    let mut unreachable_node_ids = Vec::new();
+    let mut items = Vec::with_capacity(membership.members().len());
+
+    for member in membership.members() {
+        let node_id = member.node_id().as_str().to_owned();
+        let runtime = if node_id == local_node_id {
+            Some(local_repository_runtime_status(&state).await?)
+        } else if let Some(node) = nodes.get(&node_id) {
+            match super::mesh::send_mesh_internal_read(
+                &state,
+                &client,
+                node,
+                "/api/admin/_internal/history-repository/status".to_owned(),
+                std::time::Duration::from_secs(5),
+            )
+            .await
+            {
+                Ok(response) if response.status().is_success() => {
+                    response.json::<RepositoryRuntimeStatus>().await.ok()
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if runtime.is_none() {
+            partial = true;
+            unreachable_node_ids.push(node_id);
+        }
+        items.push(AdminHistoryRepositoryItem {
+            member: member.clone(),
+            runtime,
+        });
+    }
+
+    Ok(Json(AdminHistoryRepositoriesResponse {
+        configured: true,
+        partial,
+        unreachable_node_ids,
+        items,
+    }))
+}
+
+pub(super) async fn admin_replace_history_repository_membership(
+    Extension(state): Extension<AppState>,
+    ApiJson(request): ApiJson<ReplaceRepositoryMembershipRequest>,
+) -> Result<Json<RepositoryMembership>, ApiError> {
+    let membership = RepositoryMembership::new(request.members)
+        .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+    super::raft_write(
+        &state,
+        crate::state::DesiredStateCommand::ReplaceRepositoryMembership {
+            membership: membership.clone(),
+        },
+    )
+    .await?;
+    Ok(Json(membership))
+}
+
+pub(crate) async fn local_repository_runtime_status(
+    state: &AppState,
+) -> Result<RepositoryRuntimeStatus, ApiError> {
+    state
+        .repository_replica
+        .lock()
+        .await
+        .runtime_status(u64::try_from(Utc::now().timestamp()).unwrap_or_default())
+        .map_err(repository_error)
 }
 
 fn repository_error(error: RepositoryRuntimeError) -> ApiError {

@@ -3,11 +3,11 @@ import { useMemo, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
-import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { CopyButton } from "../components/CopyButton";
+import { HistoryRepositoriesPanel } from "../components/HistoryRepositoriesPanel";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
@@ -25,15 +25,8 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
+import { formatBackendError } from "../utils/formatBackendError";
 import { highlightShell } from "../utils/highlightShell";
-
-function formatErrorMessage(error: unknown): string {
-	if (isBackendApiError(error)) {
-		const code = error.code ? ` ${error.code}` : "";
-		return `${error.status}${code}: ${error.message}`;
-	}
-	return String(error);
-}
 
 export function NodesPage() {
 	const [adminToken] = useState(() => readAdminToken());
@@ -64,7 +57,6 @@ export function NodesPage() {
 		["adminNodesRuntime", adminToken],
 		nodesQuery,
 	);
-
 	const joinCommand = useMemo(() => {
 		return joinToken ? `xp join --token ${joinToken}` : "";
 	}, [joinToken]);
@@ -130,7 +122,7 @@ export function NodesPage() {
 			});
 			setJoinToken(response.join_token);
 		} catch (error) {
-			const message = formatErrorMessage(error);
+			const message = formatBackendError(error);
 			setJoinTokenError(message);
 			pushToast({
 				variant: "error",
@@ -188,7 +180,7 @@ export function NodesPage() {
 				<PageState
 					variant="error"
 					title="Failed to load nodes"
-					description={formatErrorMessage(nodesState.error)}
+					description={formatBackendError(nodesState.error)}
 					error={nodesState.error}
 					action={
 						<Button
@@ -391,6 +383,8 @@ export function NodesPage() {
 					{nodesContent}
 				</div>
 			</div>
+
+			<HistoryRepositoriesPanel adminToken={adminToken} />
 		</div>
 	);
 }

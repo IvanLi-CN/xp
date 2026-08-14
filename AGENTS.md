@@ -36,6 +36,11 @@
   target image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.
+- Cluster history repositories persist their replica state in `${XP_DATA_DIR}/history.sqlite3` on
+  each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
+  sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then an
+  in-memory dynamic relay only after both fail. No static Mesh proxy environment or compatibility
+  path exists.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.
