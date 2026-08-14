@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use axum::http::Method;
 use serde::de::DeserializeOwned;
+use sha2::{Digest as _, Sha256};
 use tokio::time::MissedTickBehavior;
 
 use crate::{
     control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath, peer_target_from_node},
-    history_sync::RelayFrame,
+    history_sync::{RelayFrame, RelayKeypair},
     internal_auth::InternalRoute,
-    state::history_repository::identity::RepositoryNodeId,
     state::history_repository::replica::{
         RepositoryReplicaSummary, RepositoryTombstoneAcknowledgement,
     },
@@ -23,6 +23,7 @@ use super::{
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
 const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
+const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     tokio::spawn(async move {
@@ -63,18 +64,9 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .take(MAX_REPOSITORY_PEERS_PER_CYCLE)
     {
-        let collects_source = state.repository_replica.lock().await.collects_source(
-            &peer.node_id,
-            &ready_repository_ids,
-            &state.cluster.node_id,
-        )?;
-        if !collects_source {
-            continue;
-        }
-        let succeeded = match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
+        match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
             Ok(()) => {
                 synchronized = true;
-                true
             }
             Err(error) => {
                 tracing::debug!(
@@ -97,25 +89,13 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                             error = %relay_error,
                             "history repository dynamic relay was unavailable"
                         );
-                        false
                     }
                     Ok(()) => {
                         synchronized = true;
-                        true
                     }
                 }
             }
-        };
-        state
-            .repository_replica
-            .lock()
-            .await
-            .record_collection_cycle(
-                &peer.node_id,
-                &ready_repository_ids,
-                &state.cluster.node_id,
-                succeeded,
-            )?;
+        }
     }
     if synchronized || peers.len() == 1 {
         state
@@ -138,13 +118,14 @@ async fn replicate_peer_via_dynamic_relay(
         .iter()
         .find(|peer| peer.node_id != state.cluster.node_id && peer.node_id != target.node_id)
         .ok_or_else(|| anyhow::anyhow!("no independent ready repository can relay"))?;
-    let target_public_key = ready_relay_public_key(state, &target.node_id).await?;
-    let (keypair, batch) = {
+    let keypair = cluster_relay_keypair(state, &state.cluster.node_id)?;
+    let target_public_key = cluster_relay_keypair(state, &target.node_id)?.public_key();
+    let batch = {
         let mut runtime = state.repository_replica.lock().await;
         if !runtime.begin_dynamic_relay_attempt(now)? {
             anyhow::bail!("hourly jittered dynamic relay attempt is not due");
         }
-        (runtime.relay_keypair()?, runtime.relay_batch())
+        runtime.relay_batch()
     };
     if batch.segments.is_empty() {
         return Ok(());
@@ -174,21 +155,37 @@ async fn replicate_peer_via_dynamic_relay(
     Ok(())
 }
 
-pub(super) async fn ready_relay_public_key(
+pub(super) fn cluster_relay_keypair(
     state: &AppState,
     node_id: &str,
-) -> anyhow::Result<[u8; 32]> {
-    let node_id = RepositoryNodeId::try_from(node_id.to_owned())?;
-    let store = state.store.lock().await;
-    let membership = store
-        .state()
-        .repository_membership
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("history repository membership is not configured"))?;
-    let member = membership
-        .repository(&node_id)
-        .ok_or_else(|| anyhow::anyhow!("relay target is not in repository membership"))?;
-    Ok(*member.identity().x25519_relay_public_key().as_bytes())
+) -> anyhow::Result<RelayKeypair> {
+    if node_id.is_empty() {
+        anyhow::bail!("relay node id is empty");
+    }
+    let cluster_ca_key = state
+        .cluster_ca_key_pem
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("cluster CA key is not available"))?;
+    Ok(relay_keypair_from_cluster_material(
+        &state.cluster.cluster_id,
+        node_id,
+        cluster_ca_key,
+    ))
+}
+
+fn relay_keypair_from_cluster_material(
+    cluster_id: &str,
+    node_id: &str,
+    cluster_ca_key: &str,
+) -> RelayKeypair {
+    let mut hasher = Sha256::new();
+    hasher.update(CLUSTER_RELAY_KEY_CONTEXT);
+    hasher.update(cluster_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(node_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(cluster_ca_key.as_bytes());
+    RelayKeypair::from_private_key(hasher.finalize().into())
 }
 
 async fn replicate_peer(
@@ -356,4 +353,36 @@ where
         "both peer-direct repository paths failed: {}",
         last_error.expect("both direct paths were attempted")
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RelayFrame, relay_keypair_from_cluster_material};
+
+    #[test]
+    fn dynamic_relay_keys_are_deterministic_per_cluster_and_recipient() {
+        let sender = relay_keypair_from_cluster_material("cluster-a", "repository-a", "ca-key");
+        let recipient = relay_keypair_from_cluster_material("cluster-a", "repository-b", "ca-key");
+        let frame = RelayFrame::seal(
+            sender,
+            recipient.public_key(),
+            [3; 12],
+            b"repair batch",
+            b"repository-b",
+        )
+        .expect("seal relay frame");
+        assert_eq!(
+            frame
+                .open(
+                    relay_keypair_from_cluster_material("cluster-a", "repository-b", "ca-key"),
+                    b"repository-b",
+                )
+                .expect("open relay frame"),
+            b"repair batch"
+        );
+        assert_ne!(
+            recipient.public_key(),
+            relay_keypair_from_cluster_material("cluster-a", "repository-c", "ca-key").public_key()
+        );
+    }
 }

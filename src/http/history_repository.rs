@@ -87,6 +87,21 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             "repository segment sender is not ready",
         ));
     }
+    let collects_source = state
+        .repository_replica
+        .lock()
+        .await
+        .collects_source(
+            request.identity.node_id().as_str(),
+            &ready_repository_ids,
+            &state.cluster.node_id,
+        )
+        .map_err(repository_error)?;
+    if !collects_source {
+        return Err(ApiError::conflict(
+            "repository is not the current rendezvous collector for this source",
+        ));
+    }
     if request.wire_base64.len() > MAX_HISTORY_SYNC_BASE64_BYTES {
         return Err(ApiError::invalid_request(
             "repository segment exceeds wire limit",
@@ -106,6 +121,17 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
             &ready_repository_ids,
             &state.cluster.node_id,
+        )
+        .map_err(repository_error)?;
+    state
+        .repository_replica
+        .lock()
+        .await
+        .record_collection_cycle(
+            request.identity.node_id().as_str(),
+            &ready_repository_ids,
+            &state.cluster.node_id,
+            true,
         )
         .map_err(repository_error)?;
     Ok(Json(receipt))
@@ -247,31 +273,16 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     {
         return Err(ApiError::unauthorized("relay source is not ready"));
     }
-    let source_public_key = worker::ready_relay_public_key(&state, &request.source_repository_id)
-        .await
+    let keypair = worker::cluster_relay_keypair(&state, &state.cluster.node_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let plaintext = request
+        .frame
+        .open(keypair, request.target_repository_id.as_bytes())
         .map_err(|error| ApiError::unauthorized(error.to_string()))?;
-    if request.frame.sender_public_key() != source_public_key {
-        return Err(ApiError::unauthorized(
-            "relay frame sender does not match the claimed repository source",
-        ));
-    }
-    let batch = {
-        let mut runtime = state.repository_replica.lock().await;
-        let keypair = runtime.relay_keypair().map_err(repository_error)?;
-        let plaintext = request
-            .frame
-            .open(keypair, request.target_repository_id.as_bytes())
-            .map_err(|error| ApiError::unauthorized(error.to_string()))?;
-        serde_json::from_slice::<RepositoryRepairBatch>(&plaintext)
-            .map_err(|_| ApiError::invalid_request("relay payload is malformed"))?
-    };
+    let batch = serde_json::from_slice::<RepositoryRepairBatch>(&plaintext)
+        .map_err(|_| ApiError::invalid_request("relay payload is malformed"))?;
     let mut acknowledgements = Vec::new();
     for segment in batch.segments {
-        if segment.identity.node_id().as_str() != request.source_repository_id {
-            return Err(ApiError::unauthorized(
-                "relay segment identity does not match the claimed repository source",
-            ));
-        }
         let receipt = state
             .repository_replica
             .lock()

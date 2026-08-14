@@ -191,8 +191,6 @@ struct RepositoryReplicaSnapshot {
     #[serde(default)]
     last_deep_verification_unix_seconds: Option<u64>,
     #[serde(default)]
-    relay_private_key: Option<[u8; 32]>,
-    #[serde(default)]
     last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
     collector_failure_cycles: BTreeMap<String, u8>,
@@ -211,7 +209,6 @@ impl Default for RepositoryReplicaSnapshot {
             last_verified_unix_seconds: None,
             last_anti_entropy_unix_seconds: None,
             last_deep_verification_unix_seconds: None,
-            relay_private_key: None,
             last_dynamic_relay_attempt_unix_seconds: None,
             collector_failure_cycles: BTreeMap::new(),
         }
@@ -537,19 +534,6 @@ impl RepositoryReplicaRuntime {
             .allows_control_plane_operations()
     }
 
-    pub(crate) fn relay_keypair(
-        &mut self,
-    ) -> Result<crate::history_sync::RelayKeypair, RepositoryRuntimeError> {
-        let private_key = *self
-            .snapshot
-            .relay_private_key
-            .get_or_insert_with(rand::random::<[u8; 32]>);
-        self.persist_control_state()?;
-        Ok(crate::history_sync::RelayKeypair::from_private_key(
-            private_key,
-        ))
-    }
-
     pub(crate) fn begin_dynamic_relay_attempt(
         &mut self,
         now_unix_seconds: u64,
@@ -742,13 +726,13 @@ impl RepositoryReplicaRuntime {
             .snapshot
             .records
             .iter()
-            .map(|record| record.observed_at_unix_seconds)
+            .map(|record| retention::record_time_range(record).0)
             .min()?;
         let end = self
             .snapshot
             .records
             .iter()
-            .map(|record| record.observed_at_unix_seconds)
+            .map(|record| retention::record_time_range(record).1)
             .max()?;
         let range = QueryRange::new(start, end).expect("record timestamps are ordered");
         Some(QueryCoverage::new(range, range))
@@ -759,8 +743,8 @@ impl RepositoryReplicaRuntime {
         let mut response_bytes = 0usize;
         let mut truncated = false;
         for record in self.snapshot.records.iter().filter(|record| {
-            record.observed_at_unix_seconds >= query.range().start_unix_seconds()
-                && record.observed_at_unix_seconds <= query.range().end_unix_seconds()
+            let (start, end) = retention::record_time_range(record);
+            start <= query.range().end_unix_seconds() && query.range().start_unix_seconds() <= end
         }) {
             let next_bytes = record
                 .payload

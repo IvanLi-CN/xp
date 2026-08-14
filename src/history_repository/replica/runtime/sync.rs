@@ -159,12 +159,8 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        let gaps_converged = self
-            .snapshot
-            .gaps
-            .iter()
-            .map(gap_summary)
-            .eq(remote.gaps.iter().cloned());
+        let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
+            == canonical_gaps(remote.gaps.iter().cloned());
         let converged = (if deep_verification {
             self.partition_summaries()? == remote.partitions
         } else {
@@ -268,13 +264,13 @@ impl RepositoryReplicaRuntime {
     fn partition_summaries(
         &self,
     ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
-        let mut summaries = self
+        let mut segments = self
             .snapshot
             .segments
             .iter()
             .map(partition_summary)
             .collect::<Result<Vec<_>, _>>()?;
-        summaries.sort_by(|left, right| {
+        segments.sort_by(|left, right| {
             (
                 &left.source_node_id,
                 left.source_epoch,
@@ -290,6 +286,19 @@ impl RepositoryReplicaRuntime {
                     right.first_sequence,
                 ))
         });
+        let mut summaries = Vec::<RepositoryPartitionSummary>::new();
+        for segment in segments {
+            if let Some(summary) = summaries.last_mut()
+                && same_partition(summary, &segment)
+            {
+                summary.first_sequence = summary.first_sequence.min(segment.first_sequence);
+                summary.last_sequence = summary.last_sequence.max(segment.last_sequence);
+                summary.hash = combine_partition_hash(summary.hash, segment.hash);
+                summary.record_count = summary.record_count.saturating_add(segment.record_count);
+            } else {
+                summaries.push(segment);
+            }
+        }
         Ok(summaries)
     }
 }
@@ -301,30 +310,35 @@ fn partition_summary(
     let canonical = segment.canonical();
     let first = canonical.first_cursor();
     let last = canonical.last_cursor();
-    let mut partition_hash = sha2::Sha256::new();
-    use sha2::Digest as _;
-    partition_hash.update(first.source_node_id().as_bytes());
-    partition_hash.update(first.source_epoch().to_be_bytes());
-    partition_hash.update(first.stream().as_bytes());
-    partition_hash.update(first.sequence().to_be_bytes());
-    partition_hash.update(last.sequence().to_be_bytes());
-    let partition_hash = partition_hash.finalize();
     Ok(RepositoryPartitionSummary {
         source_node_id: first.source_node_id().to_owned(),
         source_epoch: first.source_epoch(),
         stream: first.stream().to_owned(),
-        partition: u32::from_be_bytes([
-            partition_hash[0],
-            partition_hash[1],
-            partition_hash[2],
-            partition_hash[3],
-        ]),
+        partition: u32::try_from(canonical.closed_at_unix_seconds() / (24 * 60 * 60))
+            .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
         first_sequence: first.sequence(),
         last_sequence: last.sequence(),
         hash: segment.segment_hash()?,
         record_count: u64::try_from(canonical.records().len())
             .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
     })
+}
+
+fn same_partition(left: &RepositoryPartitionSummary, right: &RepositoryPartitionSummary) -> bool {
+    left.source_node_id == right.source_node_id
+        && left.source_epoch == right.source_epoch
+        && left.stream == right.stream
+        && left.partition == right.partition
+}
+
+fn combine_partition_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
+    use sha2::Digest as _;
+
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"xp-history-repository-partition-v1\0");
+    hasher.update(left);
+    hasher.update(right);
+    hasher.finalize().into()
 }
 
 fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
@@ -338,4 +352,22 @@ fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
         end_unix_seconds: gap.end_unix_seconds,
         permanent: gap.permanent,
     }
+}
+
+fn canonical_gaps(
+    gaps: impl IntoIterator<Item = RepositoryReplicaGap>,
+) -> Vec<RepositoryReplicaGap> {
+    let mut gaps = gaps.into_iter().collect::<Vec<_>>();
+    gaps.sort_by_key(|gap| {
+        (
+            gap.source_node_id.clone(),
+            gap.source_epoch,
+            gap.stream.clone(),
+            gap.first_sequence,
+            gap.last_sequence,
+            gap.permanent,
+        )
+    });
+    gaps.dedup();
+    gaps
 }

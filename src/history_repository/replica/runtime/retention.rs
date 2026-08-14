@@ -110,6 +110,20 @@ impl RetentionBucket {
     }
 }
 
+pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
+    aggregate_payload(record)
+        .and_then(|payload| {
+            (payload.bucket_start_unix_seconds <= payload.bucket_end_unix_seconds).then_some((
+                payload.bucket_start_unix_seconds,
+                payload.bucket_end_unix_seconds,
+            ))
+        })
+        .unwrap_or((
+            record.observed_at_unix_seconds,
+            record.observed_at_unix_seconds,
+        ))
+}
+
 fn retention_identifier(
     record: &StoredRecord,
     preserves_minute_detail: bool,
@@ -146,6 +160,10 @@ impl RetainedRecord {
 struct RetentionAggregatePayload {
     algorithm: String,
     resolution: String,
+    #[serde(default)]
+    bucket_start_unix_seconds: u64,
+    #[serde(default)]
+    bucket_end_unix_seconds: u64,
     record_count: u64,
     first_sequence: u64,
     last_sequence: u64,
@@ -158,6 +176,8 @@ struct RetentionAggregatePayload {
 struct RetentionAggregate {
     first: StoredRecord,
     resolution: super::super::RetentionResolution,
+    bucket_start_unix_seconds: u64,
+    bucket_end_unix_seconds: u64,
     cluster_id: Option<String>,
     record_count: u64,
     first_sequence: u64,
@@ -174,11 +194,15 @@ impl RetentionAggregate {
         cluster_id: Option<&str>,
     ) -> Self {
         let contribution = aggregate_contribution(&record);
+        let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
+            bucket_time_range(record.observed_at_unix_seconds, resolution);
         Self {
             first_sequence: contribution.first_sequence,
             last_sequence: contribution.last_sequence,
             first: record,
             resolution,
+            bucket_start_unix_seconds,
+            bucket_end_unix_seconds,
             cluster_id: cluster_id.map(ToOwned::to_owned),
             record_count: contribution.record_count,
             payload_hash: contribution.payload_hash,
@@ -189,6 +213,12 @@ impl RetentionAggregate {
 
     fn add(&mut self, record: StoredRecord) {
         let contribution = aggregate_contribution(&record);
+        let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
+            bucket_time_range(record.observed_at_unix_seconds, self.resolution);
+        self.bucket_start_unix_seconds = self
+            .bucket_start_unix_seconds
+            .min(bucket_start_unix_seconds);
+        self.bucket_end_unix_seconds = self.bucket_end_unix_seconds.max(bucket_end_unix_seconds);
         self.first_sequence = self.first_sequence.min(contribution.first_sequence);
         self.last_sequence = self.last_sequence.max(contribution.last_sequence);
         self.record_count = self.record_count.saturating_add(contribution.record_count);
@@ -225,9 +255,17 @@ impl RetentionAggregate {
                 )
             })
         });
+        record.record_key = aggregate_record_key(
+            &record,
+            resolution,
+            self.bucket_start_unix_seconds,
+            anonymized_identifier.as_deref(),
+        );
         let payload = RetentionAggregatePayload {
             algorithm: "sha256".to_owned(),
             resolution: resolution.to_owned(),
+            bucket_start_unix_seconds: self.bucket_start_unix_seconds,
+            bucket_end_unix_seconds: self.bucket_end_unix_seconds,
             record_count: self.record_count,
             first_sequence: self.first_sequence,
             last_sequence: self.last_sequence,
@@ -236,7 +274,6 @@ impl RetentionAggregate {
             anonymized_identifier,
         };
         record.sequence = self.last_sequence;
-        record.record_key = aggregate_record_key(&record, resolution);
         record.payload = serde_json::to_vec(&payload).expect("retention aggregate is serializable");
         record
     }
@@ -252,23 +289,18 @@ struct AggregateContribution {
 }
 
 fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
-    let parsed = serde_json::from_slice::<RetentionAggregatePayload>(&record.payload)
-        .ok()
-        .and_then(|payload| {
-            let hash = hex::decode(&payload.payload_sha256).ok()?;
-            let payload_hash: [u8; 32] = hash.try_into().ok()?;
-            (payload.algorithm == "sha256"
-                && payload.record_count > 0
-                && payload.first_sequence <= payload.last_sequence)
-                .then_some(AggregateContribution {
-                    record_count: payload.record_count,
-                    first_sequence: payload.first_sequence,
-                    last_sequence: payload.last_sequence,
-                    payload_hash,
-                    complete: payload.complete,
-                    anonymized_identifier: payload.anonymized_identifier,
-                })
-        });
+    let parsed = aggregate_payload(record).and_then(|payload| {
+        let hash = hex::decode(&payload.payload_sha256).ok()?;
+        let payload_hash: [u8; 32] = hash.try_into().ok()?;
+        Some(AggregateContribution {
+            record_count: payload.record_count,
+            first_sequence: payload.first_sequence,
+            last_sequence: payload.last_sequence,
+            payload_hash,
+            complete: payload.complete,
+            anonymized_identifier: payload.anonymized_identifier,
+        })
+    });
     parsed.unwrap_or_else(|| AggregateContribution {
         record_count: 1,
         first_sequence: record.sequence,
@@ -277,6 +309,27 @@ fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
         complete: true,
         anonymized_identifier: None,
     })
+}
+
+fn aggregate_payload(record: &StoredRecord) -> Option<RetentionAggregatePayload> {
+    let payload = serde_json::from_slice::<RetentionAggregatePayload>(&record.payload).ok()?;
+    (payload.algorithm == "sha256"
+        && payload.record_count > 0
+        && payload.first_sequence <= payload.last_sequence)
+        .then_some(payload)
+}
+
+fn bucket_time_range(
+    observed_at_unix_seconds: u64,
+    resolution: super::super::RetentionResolution,
+) -> (u64, u64) {
+    let seconds = match resolution {
+        super::super::RetentionResolution::Minute => 60,
+        super::super::RetentionResolution::FiveMinutes => 5 * 60,
+        super::super::RetentionResolution::Hour => 60 * 60,
+    };
+    let start = observed_at_unix_seconds / seconds * seconds;
+    (start, start.saturating_add(seconds.saturating_sub(1)))
 }
 
 fn record_payload_hash(record: &StoredRecord) -> [u8; 32] {
@@ -293,7 +346,12 @@ fn combine_aggregate_hashes(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn aggregate_record_key(record: &StoredRecord, resolution: &str) -> Vec<u8> {
+fn aggregate_record_key(
+    record: &StoredRecord,
+    resolution: &str,
+    bucket_start: u64,
+    anonymized_identifier: Option<&str>,
+) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(b"xp-history-repository-aggregate-v1\0");
     hasher.update(record.source_node_id.as_bytes());
@@ -301,7 +359,10 @@ fn aggregate_record_key(record: &StoredRecord, resolution: &str) -> Vec<u8> {
     hasher.update(record.stream.as_bytes());
     hasher.update(record.schema_id.as_bytes());
     hasher.update(resolution.as_bytes());
-    hasher.update(record.observed_at_unix_seconds.to_be_bytes());
+    hasher.update(bucket_start.to_be_bytes());
+    if let Some(anonymized_identifier) = anonymized_identifier {
+        hasher.update(anonymized_identifier.as_bytes());
+    }
     hasher.finalize().to_vec()
 }
 

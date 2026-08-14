@@ -108,6 +108,47 @@ fn two_repositories_repair_a_partition_to_the_same_segment_set() {
 }
 
 #[test]
+fn daily_deep_verification_summarizes_source_stream_ranges() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment_at(&key, 0, vec![record(b"one", false)], None, 100, 100);
+    let second = segment_at(
+        &key,
+        1,
+        vec![record(b"two", false)],
+        Some(first.segment_hash().expect("first hash")),
+        101,
+        101,
+    );
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            101,
+        )
+        .expect("first segment");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &second.wire_bytes().expect("second wire"),
+            102,
+        )
+        .expect("second segment");
+
+    let summary = serde_json::to_value(runtime.replication_summary().expect("summary"))
+        .expect("serialized summary");
+    let partitions = summary["partitions"].as_array().expect("partitions");
+    assert_eq!(partitions.len(), 1);
+    assert_eq!(partitions[0]["first_sequence"], 0);
+    assert_eq!(partitions[0]["last_sequence"], 1);
+    assert_eq!(partitions[0]["record_count"], 2);
+}
+
+#[test]
 fn tombstone_expiry_waits_for_every_ready_repository_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
@@ -197,6 +238,12 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     let payload = String::from_utf8(response.records[0].payload.clone()).expect("JSON aggregate");
     assert!(payload.contains("anonymized_identifier"));
     assert!(!payload.contains("192.0.2.99"));
+    let payload: serde_json::Value = serde_json::from_str(&payload).expect("aggregate JSON");
+    assert_eq!(payload["bucket_start_unix_seconds"], 900);
+    assert_eq!(payload["bucket_end_unix_seconds"], 1_199);
+    let coverage = response.plan().coverage().expect("repository coverage");
+    assert_eq!(coverage.observed().start_unix_seconds(), 900);
+    assert_eq!(coverage.observed().end_unix_seconds(), 1_199);
 }
 
 #[test]
@@ -250,6 +297,12 @@ fn repository_retention_keeps_distinct_anonymized_ip_aggregates() {
         })
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(identifiers.len(), 2);
+    let keys = response
+        .records
+        .iter()
+        .map(|record| record.record_key.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(keys.len(), 2);
 }
 
 #[test]
@@ -426,15 +479,10 @@ fn repository_retention_marks_aggregates_incomplete_for_permanent_gaps() {
 }
 
 #[test]
-fn dynamic_relay_keys_and_hourly_attempt_gate_survive_repository_restart() {
+fn dynamic_relay_hourly_attempt_gate_survives_repository_restart() {
     let first = tempfile::tempdir().expect("first repository");
-    let second = tempfile::tempdir().expect("second repository");
     let mut sender = load(first.path());
-    let mut recipient = load(second.path());
     sender.snapshot.cluster_id = Some("cluster-a".to_owned());
-    recipient.snapshot.cluster_id = Some("cluster-a".to_owned());
-    let sender_key = sender.relay_keypair().expect("sender relay key");
-    let recipient_key = recipient.relay_keypair().expect("recipient relay key");
     assert!(
         sender
             .begin_dynamic_relay_attempt(10_000)
@@ -445,20 +493,11 @@ fn dynamic_relay_keys_and_hourly_attempt_gate_survive_repository_restart() {
             .begin_dynamic_relay_attempt(10_001)
             .expect("relay attempt is rate limited")
     );
-
-    let frame = crate::history_sync::RelayFrame::seal(
-        sender_key,
-        recipient_key.public_key(),
-        [9; 12],
-        b"bounded repair batch",
-        b"repo-b",
-    )
-    .expect("seal frame");
-    let mut restored = load(second.path());
-    let restored_key = restored.relay_keypair().expect("restored relay key");
-    assert_eq!(
-        frame.open(restored_key, b"repo-b").expect("open frame"),
-        b"bounded repair batch"
+    let mut restored = load(first.path());
+    assert!(
+        !restored
+            .begin_dynamic_relay_attempt(10_001)
+            .expect("relay attempt stays rate limited after restart")
     );
 }
 
