@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
 import type { AdminHistoryRepositoriesResponse } from "../api/adminHistoryRepositories";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	RepositoryQueryQuality,
 	RepositoryStatusSummary,
@@ -14,7 +15,7 @@ const healthy: AdminHistoryRepositoriesResponse = {
 		{
 			member: {
 				identity: {
-					node_id: "01K2REPOSITORY0000000000001",
+					node_id: fixtureCatalog.nodeId.fixture17(),
 					ed25519_public_key: "fixture",
 					x25519_relay_public_key: "fixture",
 				},
@@ -102,7 +103,7 @@ export const RemoteUnavailable: Story = {
 						...healthy.items[0].member,
 						identity: {
 							...healthy.items[0].member.identity,
-							node_id: "01K2REPOSITORY0000000000002",
+							node_id: fixtureCatalog.nodeId.fixture32(),
 						},
 					},
 				},

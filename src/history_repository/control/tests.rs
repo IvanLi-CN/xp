@@ -230,7 +230,7 @@ fn runtime_patch_does_not_restore_a_member_removed_by_administration() {
 
     crate::state::DesiredStateCommand::UpdateRepositoryMemberRuntime(
         RepositoryMemberRuntimePatch {
-            node_id: "node-b".to_owned(),
+            node_id: xp_test_fixtures::node_id_fixture17().to_owned(),
             update: RepositoryMemberRuntimeUpdate::Capacity {
                 used_bytes: 42,
                 filesystem_available_bytes: 512 * 1024 * 1024,
@@ -246,7 +246,10 @@ fn runtime_patch_does_not_restore_a_member_removed_by_administration() {
     assert_eq!(membership.members().len(), 1);
     assert!(
         membership
-            .repository(&RepositoryNodeId::try_from("node-b".to_owned()).expect("node id"))
+            .repository(
+                &RepositoryNodeId::try_from(xp_test_fixtures::node_id_fixture17().to_owned())
+                    .expect("node id"),
+            )
             .is_none()
     );
 }

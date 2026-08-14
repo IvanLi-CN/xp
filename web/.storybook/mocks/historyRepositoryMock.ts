@@ -1,12 +1,12 @@
 import type { AdminHistoryRepositoriesResponse } from "../../src/api/adminHistoryRepositories";
 import type { AdminNode } from "../../src/api/adminNodes";
 import type { AdminRepositoryHistory } from "../../src/api/adminRepositoryHistory";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 export function buildHistoryRepositories(
 	nodes: AdminNode[],
 ): AdminHistoryRepositoriesResponse {
-	const node = nodes[0];
-	if (!node) {
+	if (!nodes[0]) {
 		return {
 			configured: false,
 			partial: false,
@@ -22,7 +22,7 @@ export function buildHistoryRepositories(
 			{
 				member: {
 					identity: {
-						node_id: node.node_id,
+						node_id: fixtureCatalog.nodeId.fixture17(),
 						ed25519_public_key: "storybook-ed25519",
 						x25519_relay_public_key: "storybook-x25519",
 					},
@@ -61,7 +61,7 @@ export function buildRepositoryHistory(
 	nodes: AdminNode[],
 ): AdminRepositoryHistory {
 	return {
-		repository: nodes[0]?.node_id ?? null,
+		repository: nodes[0] ? fixtureCatalog.nodeId.fixture17() : null,
 		completeness: "complete",
 		coverage: {
 			observed: {
@@ -75,7 +75,9 @@ export function buildRepositoryHistory(
 		},
 		watermarks: [
 			{
-				source_node_id: nodes[0]?.node_id ?? "storybook-node",
+				source_node_id: nodes[0]
+					? fixtureCatalog.nodeId.fixture17()
+					: fixtureCatalog.nodeId.fixture32(),
 				source_epoch: 1,
 				stream: "traffic",
 				sequence: 4_096,
