@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
 
 use crate::{
-    history_sync::MAX_RESPONSE_WIRE_BYTES,
+    history_sync::{MAX_RESPONSE_WIRE_BYTES, PayloadEncoding},
     http::{ApiError, ApiJson, AppState, InternalSignatureAuth},
     state::history_repository::{
         control::{
@@ -51,6 +51,20 @@ pub(super) struct RepositoryHistoryQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct RepositoryInitialBackfillQuery {
+    #[serde(default)]
+    page_cursor: Option<String>,
+    #[serde(default)]
+    page_size: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct RepositorySummaryQuery {
+    #[serde(default)]
+    after_segment_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplaceRepositoryMembershipRequest {
     node_ids: Vec<String>,
@@ -75,8 +89,68 @@ struct AdminHistoryRepositoryItem {
 pub(super) struct RepositorySyncRequest {
     identity: RepositoryNodeIdentity,
     wire_base64: String,
+    canonical_len: usize,
+    #[serde(default)]
+    wire_encoding: RepositorySyncWireEncoding,
     #[serde(default)]
     gaps: Vec<RepositoryReplicaGap>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum RepositorySyncWireEncoding {
+    #[default]
+    Identity,
+    Zstd,
+}
+
+impl RepositorySyncRequest {
+    pub(super) fn with_wire(
+        identity: RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: Vec<RepositoryReplicaGap>,
+    ) -> Result<Self, anyhow::Error> {
+        let canonical_len = wire.len();
+        let (payload_encoding, encoded) = crate::history_sync::encode_payload(wire.to_vec())?;
+        Ok(Self {
+            identity,
+            wire_base64: URL_SAFE_NO_PAD.encode(encoded),
+            canonical_len,
+            wire_encoding: payload_encoding.into(),
+            gaps,
+        })
+    }
+
+    fn decode_wire(&self) -> Result<Vec<u8>, ApiError> {
+        if self.wire_base64.len() > MAX_HISTORY_SYNC_BASE64_BYTES {
+            return Err(ApiError::invalid_request(
+                "repository segment exceeds wire limit",
+            ));
+        }
+        let encoded = URL_SAFE_NO_PAD
+            .decode(&self.wire_base64)
+            .map_err(|_| ApiError::invalid_request("repository segment is not base64url"))?;
+        crate::history_sync::decode_payload(self.wire_encoding.into(), &encoded, self.canonical_len)
+            .map_err(|_| ApiError::invalid_request("repository segment encoding is invalid"))
+    }
+}
+
+impl From<PayloadEncoding> for RepositorySyncWireEncoding {
+    fn from(value: PayloadEncoding) -> Self {
+        match value {
+            PayloadEncoding::Identity => Self::Identity,
+            PayloadEncoding::ZstandardLevel1 => Self::Zstd,
+        }
+    }
+}
+
+impl From<RepositorySyncWireEncoding> for PayloadEncoding {
+    fn from(value: RepositorySyncWireEncoding) -> Self {
+        match value {
+            RepositorySyncWireEncoding::Identity => Self::Identity,
+            RepositorySyncWireEncoding::Zstd => Self::ZstandardLevel1,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,14 +206,7 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             "repository is not a rendezvous collector for this source",
         ));
     }
-    if request.wire_base64.len() > MAX_HISTORY_SYNC_BASE64_BYTES {
-        return Err(ApiError::invalid_request(
-            "repository segment exceeds wire limit",
-        ));
-    }
-    let wire = URL_SAFE_NO_PAD
-        .decode(request.wire_base64)
-        .map_err(|_| ApiError::invalid_request("repository segment is not base64url"))?;
+    let wire = request.decode_wire()?;
     if !source_gaps_match_identity(&request.gaps, request.identity.node_id().as_str()) {
         return Err(ApiError::invalid_request(
             "history source gaps do not match the authenticated source",
@@ -174,7 +241,26 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             true,
         )
         .map_err(repository_error)?;
+    worker::propagate_tombstone_acknowledgements(
+        &state,
+        &ready_repository_ids,
+        receipt.tombstone_acknowledgements().to_vec(),
+    )
+    .await
+    .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(Json(receipt))
+}
+
+pub(super) async fn admin_internal_initial_history_repository_backfill(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    Query(query): Query<RepositoryInitialBackfillQuery>,
+) -> Result<Json<worker::RepositoryInitialBackfillPage>, ApiError> {
+    ensure_cluster_sender(&state, internal).await?;
+    worker::initial_backfill_page(&state, query.page_cursor.as_deref(), query.page_size)
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::invalid_request(error.to_string()))
 }
 
 fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_id: &str) -> bool {
@@ -233,13 +319,23 @@ fn relay_frame_matches_source(
 pub(super) async fn admin_internal_history_repository_summary(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
+    Query(query): Query<RepositorySummaryQuery>,
 ) -> Result<Json<RepositoryReplicaSummary>, ApiError> {
     ensure_syncing_or_ready_repository_sender(&state, internal).await?;
+    if query
+        .after_segment_id
+        .as_deref()
+        .is_some_and(|id| id.len() != 64 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        return Err(ApiError::invalid_request(
+            "invalid repository summary cursor",
+        ));
+    }
     let summary = state
         .repository_replica
         .lock()
         .await
-        .replication_summary()
+        .replication_summary_after(query.after_segment_id.as_deref())
         .map_err(repository_error)?;
     Ok(Json(summary))
 }
@@ -349,7 +445,7 @@ pub(super) async fn admin_internal_forward_history_repository_relay(
         frame: request.frame,
     })
     .map_err(|error| ApiError::internal(error.to_string()))?;
-    worker::repository_direct_request::<serde_json::Value>(
+    worker::repository_mesh_request::<serde_json::Value>(
         &state,
         target,
         axum::http::Method::POST,
@@ -945,5 +1041,80 @@ mod tests {
         .expect("relay frame");
         assert!(relay_frame_matches_source(&frame, source));
         assert!(!relay_frame_matches_source(&frame, other_source));
+    }
+
+    #[test]
+    fn sync_wire_uses_identity_below_threshold_and_zstd_only_when_smaller() {
+        let small = vec![7_u8; 4 * 1024 - 1];
+        let (payload_encoding, encoded) =
+            crate::history_sync::encode_payload(small.clone()).expect("small wire");
+        let encoding = RepositorySyncWireEncoding::from(payload_encoding);
+        assert_eq!(encoding, RepositorySyncWireEncoding::Identity);
+        assert_eq!(encoded, small);
+
+        let compressible = vec![0_u8; 4 * 1024 * 2];
+        let (payload_encoding, encoded) =
+            crate::history_sync::encode_payload(compressible.clone()).expect("compressible wire");
+        let encoding = RepositorySyncWireEncoding::from(payload_encoding);
+        assert_eq!(encoding, RepositorySyncWireEncoding::Zstd);
+        assert!(encoded.len() < compressible.len());
+        assert_eq!(
+            crate::history_sync::decode_payload(payload_encoding, &encoded, compressible.len())
+                .expect("bounded decode"),
+            compressible
+        );
+
+        let mut state = 0x9e37_79b9_u32;
+        let incompressible = (0..4 * 1024 * 2)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                u8::try_from(state & 0xff).expect("byte")
+            })
+            .collect::<Vec<_>>();
+        let (payload_encoding, _) =
+            crate::history_sync::encode_payload(incompressible).expect("raw wire");
+        let encoding = RepositorySyncWireEncoding::from(payload_encoding);
+        assert_eq!(encoding, RepositorySyncWireEncoding::Identity);
+    }
+
+    #[test]
+    fn sync_wire_allows_bounded_canonical_expansion_and_rejects_over_one_mib() {
+        let mut state = 0x9e37_79b9_u32;
+        let block = (0..1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                u8::try_from(state & 0xff).expect("byte")
+            })
+            .collect::<Vec<_>>();
+        let expanded = block.repeat(300);
+        assert!(expanded.len() > MAX_RESPONSE_WIRE_BYTES);
+        let compressed = zstd::stream::encode_all(std::io::Cursor::new(&expanded), 1)
+            .expect("compressed canonical payload");
+        assert!(compressed.len() <= MAX_RESPONSE_WIRE_BYTES);
+        assert_eq!(
+            crate::history_sync::decode_payload(
+                PayloadEncoding::ZstandardLevel1,
+                &compressed,
+                expanded.len(),
+            )
+            .expect("bounded canonical decode"),
+            expanded
+        );
+
+        let over_limit = block.repeat(1025);
+        let over_limit = zstd::stream::encode_all(std::io::Cursor::new(&over_limit), 1)
+            .expect("compressed test payload");
+        assert!(
+            crate::history_sync::decode_payload(
+                PayloadEncoding::ZstandardLevel1,
+                &over_limit,
+                1024 * 1024 + 1,
+            )
+            .is_err()
+        );
     }
 }

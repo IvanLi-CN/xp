@@ -198,7 +198,15 @@ fn repository_retention_is_tiered_without_changing_ordinary_node_windows() {
         Some(RetentionResolution::FiveMinutes)
     );
     assert_eq!(
-        retention.resolution_for_age(97 * 24 * 60 * 60 + 1),
+        retention.resolution_for_age((7 + 90) * 24 * 60 * 60),
+        Some(RetentionResolution::FiveMinutes)
+    );
+    assert_eq!(
+        retention.resolution_for_age((7 + 90) * 24 * 60 * 60 + 1),
+        Some(RetentionResolution::Hour)
+    );
+    assert_eq!(
+        retention.resolution_for_age(2 * 365 * 24 * 60 * 60),
         Some(RetentionResolution::Hour)
     );
     assert_eq!(

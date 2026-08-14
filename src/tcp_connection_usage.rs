@@ -190,6 +190,39 @@ impl PersistedTcpConnectionUsage {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
 
+    /// Repository bootstrap uses the persisted per-minute series instead of replacing history
+    /// with a single current connection summary.
+    pub fn repository_samples_for_node(
+        &self,
+        node_id: &str,
+    ) -> Vec<TcpConnectionUsageEndpointSeries> {
+        let Some(latest) = self.latest_minute_dt() else {
+            return Vec::new();
+        };
+        self.endpoints
+            .values()
+            .filter(|endpoint| endpoint.node_id == node_id)
+            .map(|endpoint| TcpConnectionUsageEndpointSeries {
+                endpoint_id: endpoint.endpoint_id.clone(),
+                endpoint_tag: endpoint.endpoint_tag.clone(),
+                port: endpoint.port,
+                series: (0..MINUTES_WINDOW)
+                    .map(|index| TcpConnectionUsageSeriesPoint {
+                        minute: rfc3339_minute(
+                            latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
+                        ),
+                        count: endpoint
+                            .counts
+                            .get(index)
+                            .copied()
+                            .unwrap_or_default()
+                            .into(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
     pub fn normalize(
         &mut self,
         allowed_endpoints: &BTreeMap<String, TcpConnectionEndpointView>,

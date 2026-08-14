@@ -179,3 +179,103 @@ async fn repository_relay_bypasses_collector_gate_only_for_ready_repository_sour
         .expect("ordinary source relay response");
     assert_eq!(ordinary_response.status(), StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
+    let tmp = tempfile::tempdir().expect("temporary directory");
+    let config = test_config(tmp.path().to_path_buf());
+    let mut cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .expect("cluster");
+    cluster.node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
+    cluster.save(tmp.path()).expect("save cluster");
+    let peer_id = xp_test_fixtures::secondary_node_id().to_owned();
+    let history = crate::node_history::NodeHistoryHandle::from_config(&config);
+    history
+        .replace_node_snapshot(
+            chrono::Utc::now(),
+            &cluster.node_id,
+            crate::node_history::NodeHistorySnapshot {
+                node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                last_synced_at: Some("2026-08-14T00:00:00Z".to_owned()),
+                last_sync_error: None,
+                daily_traffic: vec![crate::node_history::NodeHistoryDailyTraffic {
+                    date: "2026-08-14".to_owned(),
+                    uplink_bytes: 42,
+                    downlink_bytes: 24,
+                    updated_at: "2026-08-14T00:00:00Z".to_owned(),
+                }],
+                daily_component_status: Vec::new(),
+                component_status_events: Vec::new(),
+                traffic: None,
+                user_traffic_users: Vec::new(),
+            },
+        )
+        .await;
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(test_store_init(&config, Some(cluster.node_id.clone())))
+            .expect("store"),
+    ));
+    {
+        let mut store = store.lock().await;
+        add_cluster_node(&mut store, &peer_id, xp_test_fixtures::secondary_node_name);
+    }
+    let router = build_app_with_cluster_store_and_raft(
+        config.clone(),
+        cluster.clone(),
+        store.clone(),
+        leader_raft(store, &cluster),
+        ReconcileHandle::noop(),
+    );
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).expect("cluster CA");
+    let ca_key = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .expect("cluster CA key")
+        .expect("private cluster CA key");
+    let uri: Uri = "/api/admin/_internal/history-repository/initial-backfill"
+        .parse()
+        .expect("backfill URI");
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &peer_id,
+        &cluster.node_id,
+        new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key,
+        &ca_pem,
+        &Method::GET,
+        &uri,
+        None,
+        b"",
+        &context,
+        &mut headers,
+    )
+    .expect("sign peer history request");
+    let mut request = Request::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .body(Body::empty())
+        .expect("peer history request");
+    request.headers_mut().extend(headers);
+
+    let response = router
+        .oneshot(request)
+        .await
+        .expect("peer history response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = body_json(response).await;
+    assert!(
+        page["records"]
+            .as_array()
+            .expect("backfill records")
+            .iter()
+            .any(|record| record["subject_node_id"] == cluster.node_id)
+    );
+}

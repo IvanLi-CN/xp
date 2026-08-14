@@ -33,9 +33,11 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let identity = identity();
     let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
     runtime.snapshot.segments = (0_u8..128)
         .map(|sequence| StoredSegment {
-            id: format!("segment-{sequence}"),
+            id: format!("segment-{sequence:03}"),
+            closed_at_unix_seconds: u64::from(sequence),
             identity: identity.clone(),
             wire: vec![sequence],
         })
@@ -56,7 +58,8 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
         .snapshot
         .segments
         .extend((128_u8..192).map(|sequence| StoredSegment {
-            id: format!("segment-{sequence}"),
+            id: format!("segment-{sequence:03}"),
+            closed_at_unix_seconds: u64::from(sequence),
             identity: identity.clone(),
             wire: vec![sequence],
         }));
@@ -78,9 +81,11 @@ fn relay_repair_pages_by_frame_budget_and_advances_through_large_backlog() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let identity = identity();
     let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
     runtime.snapshot.segments = (0_u8..4)
         .map(|sequence| StoredSegment {
             id: format!("large-segment-{sequence}"),
+            closed_at_unix_seconds: u64::from(sequence),
             identity: identity.clone(),
             wire: {
                 let mut state = u32::from(sequence).saturating_add(1);
@@ -252,6 +257,116 @@ fn local_source_outbox_survives_restart_until_the_primary_acknowledges_it() {
         .expect("read third pending source segment")
         .expect("third source segment");
     assert_eq!(source_record_key(&third), b"runtime:102");
+}
+
+#[test]
+fn source_tombstone_acknowledgements_use_the_tombstone_cursor_stream() {
+    let source_dir = tempfile::tempdir().expect("source directory");
+    let collector_dir = tempfile::tempdir().expect("collector directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let ready = vec!["repo-a".to_owned(), "repo-b".to_owned()];
+    let tombstone = SyncRecord::new(
+        "node-a",
+        "node-a",
+        "traffic.v1",
+        1,
+        b"node-history:node:node-a:".to_vec(),
+        b"deleted".to_vec(),
+        true,
+    );
+    let mut source = load(source_dir.path());
+    let queued = source
+        .queue_local_source_segments_for_repositories(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![tombstone],
+            100,
+            &ready,
+        )
+        .expect("queue tombstone");
+    let mut collector = load(collector_dir.path());
+    let receipt = collector
+        .receive_wire_from_repository(
+            "cluster-a",
+            &source_identity,
+            &queued[0].wire,
+            100,
+            &ready,
+            "repo-a",
+        )
+        .expect("collector accepts tombstone");
+    let acknowledgement = receipt.tombstone_acknowledgements()[0].clone();
+    source
+        .acknowledge_tombstones(&[acknowledgement.clone()])
+        .expect("source accepts collector acknowledgement");
+    assert!(!source.tombstones.fully_acknowledged(&acknowledgement.key));
+
+    let mut second = acknowledgement;
+    second.repository_id = "repo-b".to_owned();
+    source
+        .acknowledge_tombstones(&[second.clone()])
+        .expect("source accepts second acknowledgement");
+    assert!(source.tombstones.fully_acknowledged(&second.key));
+}
+
+#[test]
+fn source_epoch_rotates_when_the_replica_snapshot_is_lost_but_sqlite_remains() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let storage = HistoryStorage::open(temporary.path());
+    let mut source = RepositoryReplicaRuntime::load(storage.clone()).expect("first runtime");
+    let first = source
+        .queue_local_source_segments(
+            "cluster-a",
+            source_identity.clone(),
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"node-history:node:node-a:100".to_vec(),
+                b"first".to_vec(),
+                false,
+            )],
+            100,
+        )
+        .expect("first source segment");
+    let first_epoch = SignedSegment::from_wire(&first[0].wire)
+        .expect("first wire")
+        .canonical()
+        .first_cursor()
+        .source_epoch();
+    storage
+        .write(crate::state::history_storage::REPOSITORY_REPLICA_KEY, b"{}")
+        .expect("simulate replica snapshot loss");
+    let mut restored = RepositoryReplicaRuntime::load(storage).expect("restored runtime");
+    let next = restored
+        .queue_local_source_segments(
+            "cluster-a",
+            source_identity,
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"node-history:node:node-a:101".to_vec(),
+                b"second".to_vec(),
+                false,
+            )],
+            101,
+        )
+        .expect("rotated source segment");
+    let next_epoch = SignedSegment::from_wire(&next[0].wire)
+        .expect("next wire")
+        .canonical()
+        .first_cursor()
+        .source_epoch();
+    assert_eq!(next_epoch, first_epoch.saturating_add(1));
 }
 
 fn source_record_key(segment: &super::RepositoryReplicaSegment) -> Vec<u8> {

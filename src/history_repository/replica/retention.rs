@@ -28,6 +28,14 @@ impl Default for RepositoryRetentionPolicy {
 }
 
 impl RepositoryRetentionPolicy {
+    pub(crate) fn minute_retention_seconds(self) -> u64 {
+        self.minute_retention_seconds
+    }
+
+    pub(crate) fn five_minute_retention_seconds(self) -> u64 {
+        self.five_minute_retention_seconds
+    }
+
     pub(crate) fn max_age_seconds(self) -> u64 {
         self.max_retention_seconds
     }

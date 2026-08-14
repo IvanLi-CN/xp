@@ -93,6 +93,28 @@ pub struct NodeHistorySnapshot {
     pub user_traffic_users: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryHistoryDeletionMarker {
+    pub schema_id: String,
+    pub record_key: Vec<u8>,
+    kind: RepositoryHistoryDeletionKind,
+}
+
+impl RepositoryHistoryDeletionMarker {
+    pub fn target_node_id(&self) -> Option<&str> {
+        match &self.kind {
+            RepositoryHistoryDeletionKind::Node(node_id) => Some(node_id),
+            RepositoryHistoryDeletionKind::User(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RepositoryHistoryDeletionKind {
+    Node(String),
+    User(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeTrafficBucket {
     pub start_at: String,
@@ -453,6 +475,84 @@ impl NodeHistoryHandle {
             .nodes
             .get(node_id)
             .map(PersistedNodeHistoryRecord::snapshot)
+    }
+
+    /// Pending cleanup is durable local deletion intent. Repository sources turn these markers
+    /// into signed tombstones before publishing later records, and keep retrying until the
+    /// repository tombstone ledger has fanned acknowledgements out.
+    pub async fn repository_deletion_markers(
+        &self,
+        destination_node_id: &str,
+    ) -> Vec<RepositoryHistoryDeletionMarker> {
+        let state = self.inner.read().await;
+        let node_ids = state
+            .pending_node_history_cleanup
+            .get(destination_node_id)
+            .into_iter()
+            .flat_map(|nodes| nodes.iter())
+            .chain(state.deleted_nodes.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut markers = node_ids
+            .into_iter()
+            .flat_map(|node_id| {
+                [
+                    "runtime.v1",
+                    "path_health.v1",
+                    "traffic.v1",
+                    "connections.v1",
+                    "ip_usage.v1",
+                ]
+                .into_iter()
+                .map(move |schema_id| RepositoryHistoryDeletionMarker {
+                    schema_id: schema_id.to_owned(),
+                    record_key: format!("node-history:node:{node_id}:").into_bytes(),
+                    kind: RepositoryHistoryDeletionKind::Node(node_id.clone()),
+                })
+            })
+            .collect::<Vec<_>>();
+        markers.extend(
+            state
+                .pending_user_traffic_cleanup
+                .get(destination_node_id)
+                .into_iter()
+                .flat_map(|users| users.iter())
+                .chain(state.deleted_users.iter())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|user_id| RepositoryHistoryDeletionMarker {
+                    schema_id: "traffic.v1".to_owned(),
+                    record_key: format!("node-history:user:{user_id}:").into_bytes(),
+                    kind: RepositoryHistoryDeletionKind::User(user_id.to_string()),
+                }),
+        );
+        markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
+        markers
+    }
+
+    pub async fn complete_repository_deletion_marker(
+        &self,
+        destination_node_id: &str,
+        marker: &RepositoryHistoryDeletionMarker,
+    ) {
+        match &marker.kind {
+            RepositoryHistoryDeletionKind::Node(node_id) => {
+                self.complete_node_history_cleanup(destination_node_id, node_id)
+                    .await;
+                let changed = self.inner.write().await.deleted_nodes.remove(node_id);
+                if changed {
+                    self.persist().await;
+                }
+            }
+            RepositoryHistoryDeletionKind::User(user_id) => {
+                self.complete_user_traffic_cleanup(destination_node_id, user_id)
+                    .await;
+                let changed = self.inner.write().await.deleted_users.remove(user_id);
+                if changed {
+                    self.persist().await;
+                }
+            }
+        }
     }
 
     pub async fn record_local_sample(

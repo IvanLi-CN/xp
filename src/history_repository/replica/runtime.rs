@@ -18,7 +18,10 @@ use crate::{
                 QuerySelector,
             },
         },
-        history_storage::REPOSITORY_REPLICA_KEY,
+        history_storage::{
+            REPOSITORY_REPLICA_KEY, RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
+            RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
+        },
     },
 };
 
@@ -32,13 +35,19 @@ use source::LocalSourceState;
 mod error;
 mod status;
 
+pub(crate) use backfill::RepositoryTieredBackfillRecord;
 pub(crate) use error::RepositoryRuntimeError;
+pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
 pub(crate) use status::RepositoryRuntimeStatus;
 pub(crate) use sync::RepositoryReplicaGap;
 
-const MAX_REPOSITORY_RECORDS: usize = 16_384;
-const MAX_REPOSITORY_SEGMENTS: usize = 1_024;
 const MAX_RUNTIME_STATE_BYTES: usize = 16 * 1024 * 1024;
+// A continuation is persisted in the 16 MiB control snapshot. Keep its bounded per-bucket
+// aggregate state comfortably below that limit even when source records approach their payload
+// budget.
+const RETENTION_COMPACTION_PAGE_SIZE: usize = 256;
+const RETENTION_COMPACTION_BUCKET_LOOKAHEAD: usize = 32;
+const REPLICATION_SEGMENT_PAGE_SIZE: usize = 256;
 const MAX_QUERY_RESPONSE_BYTES: usize = 256 * 1024;
 const TOMBSTONE_HORIZON_SECONDS: u64 = 2 * 365 * 24 * 60 * 60;
 const KNOWN_SCHEMAS: [(&str, u32); 6] = [
@@ -50,7 +59,7 @@ const KNOWN_SCHEMAS: [(&str, u32); 6] = [
     ("tombstone.v1", 1),
 ];
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositorySyncReceipt {
     acknowledgement: RepositoryWatermark,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +88,7 @@ impl RepositoryTombstoneAcknowledgement {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryWatermark {
     source_node_id: String,
     source_epoch: u64,
@@ -87,7 +96,7 @@ pub(crate) struct RepositoryWatermark {
     sequence: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryGap {
     requested: RepositoryWatermark,
     earliest_available: RepositoryWatermark,
@@ -156,6 +165,9 @@ struct RepositoryReplicaSnapshot {
     records: Vec<StoredRecord>,
     #[serde(default)]
     segments: Vec<StoredSegment>,
+    /// Versioned marker for history held in the SQLite row store instead of this control blob.
+    #[serde(default)]
+    external_history: bool,
     #[serde(default)]
     gaps: Vec<StoredGap>,
     #[serde(default)]
@@ -187,6 +199,19 @@ struct RepositoryReplicaSnapshot {
     replication_peer_offset: usize,
     #[serde(default)]
     deep_verified_peer_ids: BTreeSet<String>,
+    #[serde(default)]
+    local_history_backfill_completed: bool,
+    #[serde(default)]
+    local_history_backfill_cursor: Option<String>,
+    /// Peer imports are checkpointed outside the raw history rows. A failed first-repository
+    /// catch-up can therefore resume the signed import chain rather than replaying page zero
+    /// with a forked cursor.
+    #[serde(default)]
+    initial_peer_backfills: BTreeMap<String, InitialPeerBackfillCheckpoint>,
+    #[serde(default)]
+    retention_compaction_cursor: Option<RetentionCompactionCursor>,
+    #[serde(default)]
+    retention_compaction_continuation: Option<RetentionCompactionContinuation>,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -197,6 +222,7 @@ impl Default for RepositoryReplicaSnapshot {
             tombstones: TombstoneLedger::new(TOMBSTONE_HORIZON_SECONDS).checkpoint(),
             records: Vec::new(),
             segments: Vec::new(),
+            external_history: false,
             gaps: Vec::new(),
             history_truncated: false,
             capacity: RepositoryCapacity::default(),
@@ -212,12 +238,17 @@ impl Default for RepositoryReplicaSnapshot {
             relay_segment_cursors: BTreeMap::new(),
             replication_peer_offset: 0,
             deep_verified_peer_ids: BTreeSet::new(),
+            local_history_backfill_completed: false,
+            local_history_backfill_cursor: None,
+            initial_peer_backfills: BTreeMap::new(),
+            retention_compaction_cursor: None,
+            retention_compaction_continuation: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredRecord {
+pub(crate) struct StoredRecord {
     observed_at_unix_seconds: u64,
     #[serde(default)]
     received_at_unix_seconds: u64,
@@ -235,8 +266,10 @@ struct StoredRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredSegment {
+pub(crate) struct StoredSegment {
     id: String,
+    #[serde(default)]
+    closed_at_unix_seconds: u64,
     identity: RepositoryNodeIdentity,
     wire: Vec<u8>,
 }
@@ -263,6 +296,61 @@ struct StoredGap {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
     permanent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RetentionCompactionCursor {
+    observed_start_unix_seconds: u64,
+    source_node_id: String,
+    source_epoch: u64,
+    stream: String,
+    sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RetentionCompactionContinuation {
+    #[serde(default)]
+    aggregates: Vec<StoredRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    aggregate: Option<StoredRecord>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct InitialPeerBackfillCheckpoint {
+    #[serde(default)]
+    pub(crate) page_cursor: Option<String>,
+    #[serde(default)]
+    pub(crate) stream_state: BTreeMap<String, (u64, Option<[u8; 32]>)>,
+    #[serde(default)]
+    pub(crate) saw_history: bool,
+    #[serde(default)]
+    pub(crate) completed: bool,
+    #[serde(default)]
+    pub(crate) epoch: u64,
+}
+
+impl From<&RetentionCompactionCursor> for RepositoryHistoryCompactionCursor {
+    fn from(cursor: &RetentionCompactionCursor) -> Self {
+        Self {
+            observed_start_unix_seconds: cursor.observed_start_unix_seconds,
+            source_node_id: cursor.source_node_id.clone(),
+            source_epoch: cursor.source_epoch,
+            stream: cursor.stream.clone(),
+            sequence: cursor.sequence,
+        }
+    }
+}
+
+impl From<&RepositoryHistoryRecordRow> for RetentionCompactionCursor {
+    fn from(row: &RepositoryHistoryRecordRow) -> Self {
+        Self {
+            observed_start_unix_seconds: row.observed_start_unix_seconds,
+            source_node_id: row.source_node_id.clone(),
+            source_epoch: row.source_epoch,
+            stream: row.stream.clone(),
+            sequence: row.sequence,
+        }
+    }
 }
 
 pub(crate) struct RepositoryReplicaRuntime {
@@ -302,14 +390,16 @@ impl RepositoryReplicaRuntime {
             _ => None,
         };
         let tombstones = TombstoneLedger::from_checkpoint(snapshot.tombstones.clone())?;
-        Ok(Self {
+        let mut runtime = Self {
             storage,
             snapshot,
             receiver,
             tombstones,
             #[cfg(test)]
             capacity_override: None,
-        })
+        };
+        runtime.migrate_history_to_sqlite()?;
+        Ok(runtime)
     }
 
     pub(crate) fn empty(storage: HistoryStorage) -> Self {
@@ -321,115 +411,6 @@ impl RepositoryReplicaRuntime {
             #[cfg(test)]
             capacity_override: None,
         }
-    }
-
-    pub(crate) fn receive_wire(
-        &mut self,
-        cluster_id: &str,
-        identity: &RepositoryNodeIdentity,
-        wire: &[u8],
-        now_unix_seconds: u64,
-    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.receive_wire_from_repository(
-            cluster_id,
-            identity,
-            wire,
-            now_unix_seconds,
-            &["local".to_owned()],
-            "local",
-        )
-    }
-
-    pub(crate) fn receive_wire_from_repository(
-        &mut self,
-        cluster_id: &str,
-        identity: &RepositoryNodeIdentity,
-        wire: &[u8],
-        now_unix_seconds: u64,
-        ready_repositories: &[String],
-        local_repository_id: &str,
-    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.rebuild_if_stale(now_unix_seconds)?;
-        self.refresh_capacity()?;
-        let availability = self.snapshot.capacity.history_write_availability();
-        if !availability.allows_history_writes() {
-            return Err(RepositoryRuntimeError::WriteStopped(availability));
-        }
-        let segment = SignedSegment::from_wire(wire)?;
-        self.bind_cluster(cluster_id)?;
-        self.ensure_receiver()?;
-        let previous_receiver = self
-            .receiver
-            .as_ref()
-            .expect("receiver initialized")
-            .checkpoint()?;
-        let previous_snapshot = self.snapshot.clone();
-        self.tombstones
-            .reconcile_ready_repositories(ready_repositories)?;
-        let expired_tombstones = self.expire_tombstones(now_unix_seconds)?;
-        let acceptance = self
-            .receiver
-            .as_mut()
-            .expect("receiver initialized")
-            .accept(&segment, identity);
-        let acceptance = match acceptance {
-            Ok(acceptance) => acceptance,
-            Err(error) => {
-                let records_gap = matches!(
-                    error,
-                    ProtocolError::SequenceGap { .. }
-                        | ProtocolError::EpochGap { .. }
-                        | ProtocolError::ForkDetected { .. }
-                );
-                if records_gap {
-                    self.record_gap(
-                        segment.canonical(),
-                        matches!(
-                            error,
-                            ProtocolError::EpochGap { .. } | ProtocolError::ForkDetected { .. }
-                        ),
-                    );
-                }
-                if records_gap || expired_tombstones {
-                    self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
-                }
-                return Err(error.into());
-            }
-        };
-        if matches!(acceptance, Acceptance::Duplicate { .. }) {
-            self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
-            return Ok(sync_receipt(acceptance, availability, Vec::new()));
-        }
-
-        if acceptance.gap().is_some() {
-            self.record_gap(segment.canonical(), true);
-        }
-        let tombstone_acknowledgements = match self.append_known_records(
-            segment.canonical(),
-            now_unix_seconds,
-            ready_repositories,
-            local_repository_id,
-        ) {
-            Ok(acknowledgements) => acknowledgements,
-            Err(error) => {
-                self.restore(&previous_receiver, previous_snapshot)?;
-                return Err(error);
-            }
-        };
-        if let Err(error) = self.store_segment(identity, wire) {
-            self.restore(&previous_receiver, previous_snapshot)?;
-            return Err(error);
-        }
-        self.clear_repaired_gaps(segment.canonical());
-        self.record_source_received(segment.canonical(), now_unix_seconds)?;
-        self.prune_retention(now_unix_seconds);
-        self.snapshot.last_verified_unix_seconds = Some(now_unix_seconds);
-        self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
-        Ok(sync_receipt(
-            acceptance,
-            availability,
-            tombstone_acknowledgements,
-        ))
     }
 
     pub(crate) fn query(
@@ -460,7 +441,7 @@ impl RepositoryReplicaRuntime {
             local.clock_skew_seconds,
         )?;
         let mut candidates = vec![local_candidate];
-        if let Some(coverage) = self.repository_coverage(query.subject_node_id()) {
+        if let Some(coverage) = self.repository_coverage(query.subject_node_id())? {
             let watermarks = self
                 .receiver
                 .as_ref()
@@ -482,9 +463,7 @@ impl RepositoryReplicaRuntime {
                     QueryGap::new(gap.start_unix_seconds, gap.end_unix_seconds, gap.permanent)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            if let Some((start, end)) =
-                retention::incomplete_aggregate_gap(self.matching_records(query.subject_node_id()))
-            {
+            if let Some((start, end)) = self.incomplete_aggregate_gap(&query)? {
                 gaps.push(QueryGap::new(start, end, true)?);
             }
             if self.snapshot.history_truncated {
@@ -566,8 +545,20 @@ impl RepositoryReplicaRuntime {
                 "degraded_json".to_owned()
             },
             capacity: self.snapshot.capacity.clone(),
-            record_count: self.snapshot.records.len(),
-            segment_count: self.snapshot.segments.len(),
+            record_count: if self.uses_sqlite_history() {
+                self.storage
+                    .repository_history_record_count()
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            } else {
+                self.snapshot.records.len()
+            },
+            segment_count: if self.uses_sqlite_history() {
+                self.storage
+                    .repository_history_segment_count()
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            } else {
+                self.snapshot.segments.len()
+            },
             gap_count: self.snapshot.gaps.len(),
             history_truncated: self.snapshot.history_truncated,
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
@@ -588,6 +579,127 @@ impl RepositoryReplicaRuntime {
             .capacity
             .history_write_availability()
             .allows_control_plane_operations()
+    }
+
+    pub(crate) fn local_history_backfill_completed(&self) -> bool {
+        self.snapshot.local_history_backfill_completed
+    }
+
+    pub(crate) fn local_history_backfill_cursor(&self) -> Option<&str> {
+        self.snapshot.local_history_backfill_cursor.as_deref()
+    }
+
+    pub(crate) fn checkpoint_local_history_backfill(
+        &mut self,
+        page_cursor: Option<String>,
+        completed: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.snapshot.local_history_backfill_cursor = page_cursor;
+        self.snapshot.local_history_backfill_completed = completed;
+        self.persist_control_state()
+    }
+
+    pub(crate) fn mark_local_history_backfill_completed(
+        &mut self,
+    ) -> Result<(), RepositoryRuntimeError> {
+        self.checkpoint_local_history_backfill(None, true)
+    }
+
+    pub(crate) fn initial_peer_backfill_checkpoint(
+        &self,
+        peer_node_id: &str,
+    ) -> Option<InitialPeerBackfillCheckpoint> {
+        self.snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .cloned()
+    }
+
+    pub(crate) fn update_initial_peer_backfill_checkpoint(
+        &mut self,
+        peer_node_id: &str,
+        page_cursor: Option<String>,
+        stream_state: BTreeMap<String, (u64, Option<[u8; 32]>)>,
+        saw_history: bool,
+        completed: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let epoch = self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .map(|checkpoint| checkpoint.epoch)
+            .unwrap_or_default();
+        self.snapshot.initial_peer_backfills.insert(
+            peer_node_id.to_owned(),
+            InitialPeerBackfillCheckpoint {
+                page_cursor,
+                stream_state,
+                saw_history,
+                completed,
+                epoch,
+            },
+        );
+        self.persist_control_state()
+    }
+
+    /// Restarts a peer export after its source-side immutable export lease expires. The import
+    /// epoch is intentionally preserved: already accepted segments are replayed as duplicates,
+    /// then the receiver resumes at the first previously unseen segment without creating a
+    /// second representation of the same historical rows.
+    pub(crate) fn restart_initial_peer_backfill(
+        &mut self,
+        peer_node_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let epoch = self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .map(|checkpoint| checkpoint.epoch)
+            .unwrap_or_default();
+        self.snapshot.initial_peer_backfills.insert(
+            peer_node_id.to_owned(),
+            InitialPeerBackfillCheckpoint {
+                epoch,
+                ..InitialPeerBackfillCheckpoint::default()
+            },
+        );
+        self.persist_control_state()
+    }
+
+    pub(crate) fn initial_peer_backfill_epoch(
+        &mut self,
+        cluster_id: &str,
+        source_node_id: &str,
+        peer_node_id: &str,
+    ) -> Result<u64, RepositoryRuntimeError> {
+        if let Some(epoch) = self
+            .snapshot
+            .initial_peer_backfills
+            .get(peer_node_id)
+            .map(|checkpoint| checkpoint.epoch)
+            .filter(|epoch| *epoch != 0)
+        {
+            return Ok(epoch);
+        }
+        let allocator_node_id = format!("{source_node_id}:initial-backfill:{peer_node_id}");
+        let epoch = self
+            .storage
+            .allocate_repository_source_epoch(
+                cluster_id,
+                &allocator_node_id,
+                crate::state::history_repository::replica::source_epoch(
+                    cluster_id,
+                    &allocator_node_id,
+                ),
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.snapshot
+            .initial_peer_backfills
+            .entry(peer_node_id.to_owned())
+            .or_default()
+            .epoch = epoch;
+        self.persist_control_state()?;
+        Ok(epoch)
     }
 
     pub(crate) fn begin_dynamic_relay_attempt(
@@ -628,136 +740,6 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
-    fn bind_cluster(&mut self, cluster_id: &str) -> Result<(), RepositoryRuntimeError> {
-        match self.snapshot.cluster_id.as_deref() {
-            Some(existing) if existing != cluster_id => {
-                Err(RepositoryRuntimeError::ClusterBindingMismatch)
-            }
-            Some(_) => Ok(()),
-            None => {
-                self.snapshot.cluster_id = Some(cluster_id.to_owned());
-                Ok(())
-            }
-        }
-    }
-
-    fn ensure_receiver(&mut self) -> Result<(), RepositoryRuntimeError> {
-        if self.receiver.is_none() {
-            let cluster_id = self
-                .snapshot
-                .cluster_id
-                .clone()
-                .ok_or(RepositoryRuntimeError::ClusterBindingMismatch)?;
-            self.receiver = Some(SegmentReceiver::for_cluster(cluster_id, known_schemas()));
-        }
-        Ok(())
-    }
-
-    fn append_known_records(
-        &mut self,
-        segment: &crate::history_sync::CanonicalSegment,
-        now_unix_seconds: u64,
-        ready_repositories: &[String],
-        local_repository_id: &str,
-    ) -> Result<Vec<RepositoryTombstoneAcknowledgement>, RepositoryRuntimeError> {
-        let mut acknowledgements = Vec::new();
-        for (offset, record) in segment.records().iter().enumerate() {
-            if !is_known_schema(record) {
-                continue;
-            }
-            let sequence = segment
-                .first_cursor()
-                .sequence()
-                .checked_add(
-                    u64::try_from(offset)
-                        .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
-                )
-                .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-            let cursor = ReplicaCursor::new(
-                segment.first_cursor().source_node_id(),
-                segment.first_cursor().source_epoch(),
-                segment.first_cursor().stream(),
-                sequence,
-            )?;
-            let (schema_id, schema_version) = record.schema();
-            let replica_record = ReplicaRecord::new(
-                &cursor,
-                record.subject_node_id(),
-                record.observer_node_id(),
-                schema_id,
-                schema_version,
-                record.record_key().to_vec(),
-                record.payload_bytes().to_vec(),
-            )?;
-            let key = replica_record.key();
-            if record.is_tombstone() {
-                self.tombstones
-                    .tombstone(key, now_unix_seconds, ready_repositories)?;
-                self.tombstones
-                    .acknowledge(replica_record.key(), local_repository_id)?;
-                acknowledgements.push(RepositoryTombstoneAcknowledgement {
-                    key: replica_record.key(),
-                    repository_id: local_repository_id.to_owned(),
-                });
-            } else if !self.tombstones.allows(&key) {
-                return Err(RepositoryRuntimeError::Protocol(
-                    ProtocolError::ResurrectionPrevented,
-                ));
-            }
-            self.evict_oldest_record_if_needed();
-            self.snapshot.records.push(StoredRecord::from_record(
-                segment.closed_at_unix_seconds(),
-                now_unix_seconds,
-                &cursor,
-                record,
-            ));
-        }
-        Ok(acknowledgements)
-    }
-
-    fn clear_repaired_gaps(&mut self, segment: &crate::history_sync::CanonicalSegment) {
-        self.snapshot.gaps.retain(|gap| {
-            gap.permanent
-                || gap.source_node_id != segment.first_cursor().source_node_id()
-                || gap.source_epoch != segment.first_cursor().source_epoch()
-                || gap.stream != segment.first_cursor().stream()
-                || segment.first_cursor().sequence() > gap.first_sequence
-                || segment.last_cursor().sequence() < gap.last_sequence
-        });
-    }
-
-    fn prune_retention(&mut self, now_unix_seconds: u64) {
-        retention::prune_records(
-            &mut self.snapshot.records,
-            &self.snapshot.gaps,
-            now_unix_seconds,
-            self.snapshot.cluster_id.as_deref(),
-        );
-    }
-
-    fn repository_coverage(&self, subject_node_id: Option<&str>) -> Option<QueryCoverage> {
-        let observed_start = self
-            .matching_records(subject_node_id)
-            .map(|record| retention::record_time_range(record).0)
-            .min()?;
-        let observed_end = self
-            .matching_records(subject_node_id)
-            .map(|record| retention::record_time_range(record).1)
-            .max()?;
-        let received_start = self
-            .matching_records(subject_node_id)
-            .map(record_received_at)
-            .min()?;
-        let received_end = self
-            .matching_records(subject_node_id)
-            .map(record_received_at)
-            .max()?;
-        Some(QueryCoverage::new(
-            QueryRange::new(observed_start, observed_end).expect("record timestamps are ordered"),
-            QueryRange::new(received_start, received_end).expect("record timestamps are ordered"),
-        ))
-    }
-
     fn refresh_capacity(&mut self) -> Result<(), RepositoryRuntimeError> {
         #[cfg(test)]
         let capacity = self.capacity_override;
@@ -766,7 +748,13 @@ impl RepositoryReplicaRuntime {
         let (used_bytes, available) = match capacity {
             Some(capacity) => capacity,
             None => (
-                self.serialized_snapshot_len()?,
+                if self.uses_sqlite_history() {
+                    self.storage
+                        .repository_history_used_bytes()
+                        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+                } else {
+                    self.serialized_snapshot_len()?
+                },
                 self.storage
                     .available_bytes()
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
@@ -777,190 +765,30 @@ impl RepositoryReplicaRuntime {
             .record_usage(used_bytes, available)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
-
-    fn persist_or_restore(
-        &mut self,
-        previous_receiver: &SegmentReceiverCheckpoint,
-        previous_snapshot: &RepositoryReplicaSnapshot,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.snapshot.receiver = Some(
-            self.receiver
-                .as_ref()
-                .expect("receiver initialized")
-                .checkpoint()?,
-        );
-        self.snapshot.tombstones = self.tombstones.checkpoint();
-        let mut bytes = serde_json::to_vec(&self.snapshot)
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        while bytes.len() > MAX_RUNTIME_STATE_BYTES && self.evict_oldest_record() {
-            bytes = serde_json::to_vec(&self.snapshot)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        }
-        while bytes.len() > MAX_RUNTIME_STATE_BYTES && self.evict_oldest_segment() {
-            bytes = serde_json::to_vec(&self.snapshot)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        }
-        if bytes.len() > MAX_RUNTIME_STATE_BYTES {
-            self.restore(previous_receiver, previous_snapshot.clone())?;
-            return Err(RepositoryRuntimeError::StateLimitExceeded);
-        }
-        if let Err(error) = self.storage.write(REPOSITORY_REPLICA_KEY, &bytes) {
-            self.restore(previous_receiver, previous_snapshot.clone())?;
-            return Err(RepositoryRuntimeError::Storage(error.to_string()));
-        }
-        Ok(())
-    }
-
-    fn restore(
-        &mut self,
-        previous_receiver: &SegmentReceiverCheckpoint,
-        previous_snapshot: RepositoryReplicaSnapshot,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let cluster_id = self
-            .snapshot
-            .cluster_id
-            .clone()
-            .ok_or(RepositoryRuntimeError::ClusterBindingMismatch)?;
-        self.receiver = Some(SegmentReceiver::from_checkpoint(
-            cluster_id,
-            known_schemas(),
-            previous_receiver.clone(),
-        )?);
-        self.snapshot = previous_snapshot;
-        self.tombstones = TombstoneLedger::from_checkpoint(self.snapshot.tombstones.clone())?;
-        Ok(())
-    }
-
-    fn rebuild_if_stale(&mut self, now_unix_seconds: u64) -> Result<(), RepositoryRuntimeError> {
-        let Some(last_verified) = self.snapshot.last_verified_unix_seconds else {
-            return Ok(());
-        };
-        if !ReplicaFreshness::new(last_verified, TOMBSTONE_HORIZON_SECONDS)
-            .requires_rebuild(now_unix_seconds)
-        {
-            return Ok(());
-        }
-        let cluster_id = self.snapshot.cluster_id.clone();
-        self.snapshot = RepositoryReplicaSnapshot {
-            cluster_id: cluster_id.clone(),
-            ..RepositoryReplicaSnapshot::default()
-        };
-        self.tombstones = TombstoneLedger::new(TOMBSTONE_HORIZON_SECONDS);
-        self.receiver =
-            cluster_id.map(|cluster_id| SegmentReceiver::for_cluster(cluster_id, known_schemas()));
-        Ok(())
-    }
-
-    fn expire_tombstones(&mut self, now_unix_seconds: u64) -> Result<bool, RepositoryRuntimeError> {
-        let expired = self.tombstones.expire(now_unix_seconds);
-        let removed_tombstones = !expired.is_empty();
-        for key in expired {
-            let cursor = Cursor::new(key.source_node_id(), key.source_epoch(), key.stream(), 0)?;
-            let (schema_id, schema_version) = key.schema();
-            let record = SyncRecord::new(
-                key.subject_node_id(),
-                key.observer_node_id(),
-                schema_id,
-                schema_version,
-                key.record_key().to_vec(),
-                Vec::new(),
-                true,
-            );
-            if let Some(receiver) = self.receiver.as_mut() {
-                receiver.forget_tombstone(&cursor, &record);
-            }
-            self.snapshot
-                .records
-                .retain(|record| !record.matches_key(&key));
-        }
-        Ok(removed_tombstones)
-    }
-
-    fn serialized_snapshot_len(&self) -> Result<u64, RepositoryRuntimeError> {
-        serde_json::to_vec(&self.snapshot)
-            .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-    }
 }
 
-fn record_received_at(record: &StoredRecord) -> u64 {
-    if record.received_at_unix_seconds == 0 {
-        record.observed_at_unix_seconds
-    } else {
-        record.received_at_unix_seconds
-    }
-}
-
-impl StoredRecord {
-    fn from_record(
-        observed_at_unix_seconds: u64,
-        received_at_unix_seconds: u64,
-        cursor: &ReplicaCursor,
-        record: &SyncRecord,
-    ) -> Self {
-        let (schema_id, schema_version) = record.schema();
-        Self {
-            observed_at_unix_seconds,
-            received_at_unix_seconds,
-            source_node_id: cursor.source_node_id().to_owned(),
-            source_epoch: cursor.source_epoch(),
-            stream: cursor.stream().to_owned(),
-            sequence: cursor.sequence(),
-            subject_node_id: record.subject_node_id().to_owned(),
-            observer_node_id: record.observer_node_id().to_owned(),
-            schema_id: schema_id.to_owned(),
-            schema_version,
-            record_key: record.record_key().to_vec(),
-            payload: record.payload_bytes().to_vec(),
-            tombstone: record.is_tombstone(),
-        }
-    }
-
-    fn matches_key(&self, key: &super::ReplicaRecordKey) -> bool {
-        let (schema_id, schema_version) = key.schema();
-        self.source_node_id == key.source_node_id()
-            && self.source_epoch == key.source_epoch()
-            && self.stream == key.stream()
-            && self.subject_node_id == key.subject_node_id()
-            && self.observer_node_id == key.observer_node_id()
-            && self.schema_id == schema_id
-            && self.schema_version == schema_version
-            && self.record_key == key.record_key()
-            && self.tombstone
-    }
-}
-
-impl From<StoredRecord> for RepositoryHistoryRecord {
-    fn from(record: StoredRecord) -> Self {
-        Self {
-            observed_at_unix_seconds: record.observed_at_unix_seconds,
-            source_node_id: record.source_node_id,
-            source_epoch: record.source_epoch,
-            stream: record.stream,
-            sequence: record.sequence,
-            subject_node_id: record.subject_node_id,
-            observer_node_id: record.observer_node_id,
-            schema_id: record.schema_id,
-            schema_version: record.schema_version,
-            record_key: record.record_key,
-            payload: record.payload,
-            tombstone: record.tombstone,
-        }
-    }
-}
-
+mod backfill;
+#[cfg(test)]
+#[path = "runtime/backfill_order_tests.rs"]
+mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;
+#[cfg(test)]
+#[path = "runtime/legacy_cursor_tests.rs"]
+mod legacy_cursor_tests;
 mod paths;
 mod query;
+mod receive;
 mod retention;
-mod source;
+pub(crate) mod source;
+mod storage;
 mod sync;
 use helpers::{
     is_known_schema, known_schemas, serialized_response_overhead, sync_receipt,
     watermark_from_cursor,
 };
+pub(crate) use source::source_epoch;
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
 
 #[cfg(test)]
@@ -969,6 +797,14 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runtime/retention_tests.rs"]
+mod retention_tests;
+
+#[cfg(test)]
+#[path = "runtime/repair_tests.rs"]
+mod repair_tests;
 
 #[cfg(test)]
 #[path = "runtime/query_budget_tests.rs"]

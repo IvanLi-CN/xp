@@ -49,6 +49,44 @@ pub(crate) async fn all_cluster_peers(state: &AppState) -> Vec<MeshPeerTarget> {
         .collect()
 }
 
+pub(crate) async fn eligible_mesh_relay_peers(state: &AppState) -> Vec<MeshPeerTarget> {
+    all_cluster_peers(state)
+        .await
+        .into_iter()
+        .filter(|peer| peer.mesh_base_url.is_some())
+        .collect()
+}
+
+/// Dynamic relay is an authenticated Mesh-only transport. It deliberately does not participate
+/// in the source-to-repository direct-path selector, whose Reality Mesh and Tunnel paths are
+/// equal alternatives and must both fail before this call is reachable.
+pub(crate) async fn repository_mesh_request<T>(
+    state: &AppState,
+    peer: &MeshPeerTarget,
+    method: Method,
+    path_and_query: &str,
+    body: Vec<u8>,
+) -> Result<T, RepositoryDirectError>
+where
+    T: DeserializeOwned,
+{
+    if peer.mesh_base_url.is_none() {
+        return Err(RepositoryDirectError::Application(anyhow::anyhow!(
+            "relay peer has no eligible Mesh endpoint"
+        )));
+    }
+    send_repository_request_on_path(
+        state,
+        peer,
+        PeerDirectPath::RealityMesh,
+        method,
+        path_and_query,
+        body,
+        false,
+    )
+    .await
+}
+
 pub(crate) async fn repository_direct_request<T>(
     state: &AppState,
     peer: &MeshPeerTarget,

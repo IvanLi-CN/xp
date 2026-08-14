@@ -200,6 +200,38 @@ impl PersistedInboundIpUsage {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
 
+    /// Repository bootstrap consumes the complete persisted minute window rather than a latest
+    /// summary so coverage starts at the actual retained history boundary.
+    pub fn repository_samples_for_node(&self, node_id: &str) -> Vec<InboundIpUsageSeriesPoint> {
+        let Some(latest) = self.latest_minute_dt() else {
+            return Vec::new();
+        };
+        (0..MINUTES_WINDOW)
+            .map(|index| {
+                let count = self
+                    .memberships
+                    .values()
+                    .filter(|membership| membership.node_id == node_id)
+                    .flat_map(|membership| membership.ips.iter())
+                    .filter(|(_, record)| {
+                        extract_window_flags(&record.bitmap, index, 1)
+                            .first()
+                            .copied()
+                            .unwrap_or(false)
+                    })
+                    .count()
+                    .try_into()
+                    .unwrap_or(u32::MAX);
+                InboundIpUsageSeriesPoint {
+                    minute: rfc3339_minute(
+                        latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
+                    ),
+                    count,
+                }
+            })
+            .collect()
+    }
+
     fn collect_known_geo_by_ip_surviving_shift(
         &self,
         shift: usize,

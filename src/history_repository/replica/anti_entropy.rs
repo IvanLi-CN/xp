@@ -288,6 +288,8 @@ pub(crate) struct ReplicaRecordKey {
     source_node_id: String,
     source_epoch: u64,
     stream: String,
+    #[serde(default)]
+    sequence: u64,
     subject_node_id: String,
     observer_node_id: String,
     schema_id: String,
@@ -306,6 +308,10 @@ impl ReplicaRecordKey {
 
     pub(crate) fn stream(&self) -> &str {
         &self.stream
+    }
+
+    pub(crate) fn sequence(&self) -> u64 {
+        self.sequence
     }
 
     pub(crate) fn subject_node_id(&self) -> &str {
@@ -355,6 +361,7 @@ impl ReplicaRecord {
                 source_node_id: cursor.source_node_id.clone(),
                 source_epoch: cursor.source_epoch,
                 stream: cursor.stream.clone(),
+                sequence: cursor.sequence,
                 subject_node_id,
                 observer_node_id,
                 schema_id,
@@ -372,6 +379,8 @@ impl ReplicaRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TombstoneState {
+    #[serde(default)]
+    created_at: u64,
     expires_at: u64,
     ready_repositories: BTreeSet<String>,
     acknowledgements: BTreeSet<String>,
@@ -432,9 +441,17 @@ impl TombstoneLedger {
         if !self.entries.contains_key(&key) && self.entries.len() == MAX_TOMBSTONES {
             return Err(ReplicaError::TombstoneBacklogFull);
         }
+        if let Some(state) = self.entries.get_mut(&key) {
+            state.expires_at = state
+                .expires_at
+                .max(now_unix_seconds.saturating_add(self.horizon_seconds));
+            state.ready_repositories.extend(repositories);
+            return Ok(());
+        }
         self.entries.insert(
             key,
             TombstoneState {
+                created_at: now_unix_seconds,
                 expires_at: now_unix_seconds.saturating_add(self.horizon_seconds),
                 ready_repositories: repositories,
                 acknowledgements: BTreeSet::new(),
@@ -460,7 +477,26 @@ impl TombstoneLedger {
     }
 
     pub(crate) fn allows(&self, key: &ReplicaRecordKey) -> bool {
-        !self.entries.contains_key(key)
+        !self.entries.keys().any(|tombstone| {
+            // Tombstones are emitted on their own stream, but they only apply to the
+            // producer epoch that emitted them. Do not let an identical record from another
+            // source become collateral damage.
+            tombstone.source_node_id == key.source_node_id
+                && tombstone.source_epoch == key.source_epoch
+                && tombstone.subject_node_id == key.subject_node_id
+                && tombstone.observer_node_id == key.observer_node_id
+                && tombstone.schema_id == key.schema_id
+                && tombstone.schema_version == key.schema_version
+                && (tombstone.record_key == key.record_key
+                    || (tombstone.record_key.ends_with(b":")
+                        && key.record_key.starts_with(&tombstone.record_key)))
+        })
+    }
+
+    pub(crate) fn fully_acknowledged(&self, key: &ReplicaRecordKey) -> bool {
+        self.entries
+            .get(key)
+            .is_some_and(|state| state.ready_repositories.is_subset(&state.acknowledgements))
     }
 
     pub(crate) fn acknowledgement_keys_for(

@@ -11,6 +11,8 @@ mod path;
 mod protocol;
 mod relay;
 
+pub(crate) use encoding::{decode as decode_payload, encode as encode_payload};
+
 #[allow(unused_imports)]
 pub(crate) use path::{
     DirectPath, DirectPathHealth, PathDecision, PathSelector, PathSelectorCheckpoint,
