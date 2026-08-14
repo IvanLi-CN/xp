@@ -431,9 +431,17 @@ fn rendezvous_collector_failover_is_persisted_after_three_primary_cycles() {
         .insert("source-a".to_owned(), 100);
     for now in [400, 700, 1_000] {
         runtime
-            .record_stale_collection_cycles(now, &ready, &standby)
+            .record_stale_collection_cycles(
+                now,
+                &ready,
+                assignment.primary(),
+                &["source-a".to_owned()],
+            )
             .expect("record stale primary cycle");
     }
+    runtime
+        .record_collection_cycle("source-a", &ready, &standby, true)
+        .expect("standby success does not clear primary failure state");
     let restored = load(temporary.path());
     assert!(
         restored

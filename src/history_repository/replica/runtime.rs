@@ -198,6 +198,8 @@ struct RepositoryReplicaSnapshot {
     collector_failure_cycles: BTreeMap<String, u8>,
     #[serde(default)]
     source_last_received_unix_seconds: BTreeMap<String, u64>,
+    #[serde(default)]
+    relay_segment_offsets: BTreeMap<String, usize>,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -217,6 +219,7 @@ impl Default for RepositoryReplicaSnapshot {
             last_dynamic_relay_attempt_unix_seconds: None,
             collector_failure_cycles: BTreeMap::new(),
             source_last_received_unix_seconds: BTreeMap::new(),
+            relay_segment_offsets: BTreeMap::new(),
         }
     }
 }
@@ -943,3 +946,7 @@ pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSummary};
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runtime/sync_tests.rs"]
+mod sync_tests;

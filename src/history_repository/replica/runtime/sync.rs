@@ -13,6 +13,8 @@ use crate::state::history_repository::replica::{
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
 const MAX_REPAIR_GAPS: usize = 64;
+const MAX_RELAY_TARGETS: usize = 64;
+const MAX_COLLECTION_SOURCES: usize = 4_096;
 const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ pub(crate) struct RepositoryReplicaSegment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryRepairBatch {
     pub(crate) segments: Vec<RepositoryReplicaSegment>,
+    #[serde(default)]
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
 }
 
@@ -97,6 +100,9 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(), RepositoryRuntimeError> {
         self.tombstones
             .reconcile_ready_repositories(ready_repositories)?;
+        self.snapshot
+            .relay_segment_offsets
+            .retain(|repository_id, _| ready_repositories.contains(repository_id));
         self.persist_control_state()
     }
 
@@ -116,10 +122,13 @@ impl RepositoryReplicaRuntime {
         &mut self,
         source_node_id: &str,
         ready_repositories: &[String],
-        _local_repository_id: &str,
+        local_repository_id: &str,
         succeeded: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        let _ = rendezvous_collectors(source_node_id, ready_repositories)?;
+        let assignment = rendezvous_collectors(source_node_id, ready_repositories)?;
+        if assignment.primary() != local_repository_id {
+            return Ok(());
+        }
         let mut selector =
             CollectorSelector::from_failure_cycles(self.snapshot.collector_failure_cycles.clone());
         selector.record_primary_cycle(source_node_id, succeeded)?;
@@ -132,15 +141,26 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
         ready_repositories: &[String],
         local_repository_id: &str,
+        known_source_node_ids: &[String],
     ) -> Result<(), RepositoryRuntimeError> {
-        let stale_sources = self
+        let mut sources = self
             .snapshot
             .source_last_received_unix_seconds
-            .iter()
-            .filter(|(_, last_received)| {
-                now_unix_seconds.saturating_sub(**last_received) >= COLLECTION_STALE_SECONDS
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        sources.extend(known_source_node_ids.iter().cloned());
+        let stale_sources = sources
+            .into_iter()
+            .take(MAX_COLLECTION_SOURCES)
+            .filter(|source| {
+                self.snapshot
+                    .source_last_received_unix_seconds
+                    .get(source)
+                    .is_none_or(|last_received| {
+                        now_unix_seconds.saturating_sub(*last_received) >= COLLECTION_STALE_SECONDS
+                    })
             })
-            .map(|(source, _)| source.clone())
             .collect::<Vec<_>>();
         for source_node_id in stale_sources {
             self.record_collection_cycle(
@@ -250,13 +270,27 @@ impl RepositoryReplicaRuntime {
         })
     }
 
-    pub(crate) fn relay_batch(&self) -> RepositoryRepairBatch {
-        RepositoryRepairBatch {
+    pub(crate) fn relay_batch(
+        &self,
+        target_repository_id: &str,
+    ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
+        let segment_count = self.snapshot.segments.len();
+        let offset = self
+            .snapshot
+            .relay_segment_offsets
+            .get(target_repository_id)
+            .copied()
+            .unwrap_or_default();
+        Ok(RepositoryRepairBatch {
             segments: self
                 .snapshot
                 .segments
                 .iter()
-                .rev()
+                .skip(if segment_count == 0 {
+                    0
+                } else {
+                    offset % segment_count
+                })
                 .take(MAX_REPAIR_SEGMENTS)
                 .cloned()
                 .map(|segment| RepositoryReplicaSegment {
@@ -265,7 +299,37 @@ impl RepositoryReplicaRuntime {
                 })
                 .collect(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+        })
+    }
+
+    pub(crate) fn record_relay_batch_delivered(
+        &mut self,
+        target_repository_id: &str,
+        delivered_segments: usize,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let segment_count = self.snapshot.segments.len();
+        if delivered_segments == 0 || segment_count == 0 {
+            return Ok(());
         }
+        if !self
+            .snapshot
+            .relay_segment_offsets
+            .contains_key(target_repository_id)
+            && self.snapshot.relay_segment_offsets.len() == MAX_RELAY_TARGETS
+        {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
+        let offset = self
+            .snapshot
+            .relay_segment_offsets
+            .get(target_repository_id)
+            .copied()
+            .unwrap_or_default();
+        self.snapshot.relay_segment_offsets.insert(
+            target_repository_id.to_owned(),
+            offset.saturating_add(delivered_segments) % segment_count,
+        );
+        self.persist_control_state()
     }
 
     pub(crate) fn merge_replica_gaps(
