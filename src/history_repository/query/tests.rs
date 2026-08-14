@@ -78,6 +78,21 @@ fn pagination_cursor_is_a_bounded_absolute_record_offset() {
 }
 
 #[test]
+fn subject_node_filter_is_bounded_and_validated() {
+    let query = HistoryQuery::new(100, 200, 32)
+        .expect("bounded query")
+        .with_subject_node_id(Some("node-a"))
+        .expect("subject node id");
+    assert_eq!(query.subject_node_id(), Some("node-a"));
+    assert!(
+        HistoryQuery::new(100, 200, 32)
+            .expect("bounded query")
+            .with_subject_node_id(Some(""))
+            .is_err()
+    );
+}
+
+#[test]
 fn selection_prefers_requested_coverage_over_a_gap_free_but_short_repository() {
     let request = HistoryQuery::new(100, 200, 32).expect("bounded query");
     let short = QueryCandidate::ready(

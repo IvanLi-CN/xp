@@ -20,6 +20,8 @@ use tower::util::ServiceExt;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+#[path = "tests/history_repository.rs"]
+mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
 mod vless_xhttp;
@@ -29,7 +31,7 @@ use crate::{
     config::Config,
     ddns::{DdnsHealthHandle, DdnsStatus},
     domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
-    history_sync::{CanonicalSegment, Cursor, SyncRecord},
+    history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
@@ -45,8 +47,12 @@ use crate::{
     state::{
         DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, NodeEgressProbeState,
         NodeSubscriptionRegion, StoreInit,
-        history_repository::identity::{
-            Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
+        history_repository::{
+            control::{RepositoryCapacity, RepositoryMember, RepositoryMembership},
+            identity::{
+                Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
+            },
+            replica::rendezvous_collectors,
         },
         membership_key,
     },
@@ -1210,6 +1216,7 @@ async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 
     let invalid_cursor = app
+        .clone()
         .oneshot(req_authed(
             "GET",
             concat!(
@@ -1220,6 +1227,18 @@ async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
         .await
         .unwrap();
     assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_subject = app
+        .oneshot(req_authed(
+            "GET",
+            concat!(
+                "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2",
+                "&page_size=10&subject_node_id=",
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_subject.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1237,23 +1256,8 @@ async fn repository_membership_is_raft_backed_and_reports_local_runtime() {
         .as_str()
         .unwrap()
         .to_owned();
-    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[39; 32]);
     let membership = json!({
-        "members": [{
-            "identity": {
-                "node_id": node_id,
-                "ed25519_public_key": URL_SAFE_NO_PAD
-                    .encode(signing_key.verifying_key().to_bytes()),
-                "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([40; 32]),
-            },
-            "lifecycle": "syncing",
-            "replica_converged": false,
-            "capacity": {
-                "quota_bytes": 10 * 1024 * 1024 * 1024_u64,
-                "used_bytes": 0,
-                "filesystem_available_bytes": u64::MAX,
-            },
-        }],
+        "node_ids": [node_id],
     });
     let updated = app
         .clone()
@@ -1270,6 +1274,22 @@ async fn repository_membership_is_raft_backed_and_reports_local_runtime() {
         node_id
     );
 
+    let forged_ready = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/history-repositories",
+            json!({
+                "node_ids": [node_id],
+                "lifecycle": "ready",
+                "catch_up_completed_at": 1,
+                "ready_at": 301,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forged_ready.status(), StatusCode::BAD_REQUEST);
+
     let status = app
         .oneshot(req_authed("GET", "/api/admin/history-repositories"))
         .await
@@ -1283,7 +1303,7 @@ async fn repository_membership_is_raft_backed_and_reports_local_runtime() {
 }
 
 #[tokio::test]
-async fn internal_repository_sync_requires_raft_ready_membership() {
+async fn internal_repository_sync_rejects_an_unpinned_sender_identity() {
     let tmp = tempfile::tempdir().unwrap();
     let router = app(&tmp);
     let cluster = ClusterMetadata::load(tmp.path()).unwrap();
@@ -1354,7 +1374,7 @@ async fn internal_repository_sync_requires_raft_ready_membership() {
         .unwrap();
     request.headers_mut().extend(headers);
     let response = router.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

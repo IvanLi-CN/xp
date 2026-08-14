@@ -62,6 +62,13 @@ Host-managed mode assumptions:
   reports configured, partial and unreachable states with per-member capacity and sync quality.
   `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
   no static Mesh proxy environment, listener or compatibility path.
+- Nodes exposes the same repository status and a membership editor. The editor selects existing
+  cluster nodes; `PUT /api/admin/history-repositories` accepts only `node_ids` and derives pinned
+  repository identities server-side. Lifecycle, convergence and capacity remain worker-owned. A
+  new member remains `syncing` while it reads bounded repair batches from existing `ready` members;
+  only a successful catch-up followed by five stable minutes transitions it to `ready`.
+  Repository query views accept a bounded `subject_node_id` filter and display observed/received
+  coverage, watermarks, gaps, skew, completeness, and a next-page control.
 - During `xp-ops init` or upgrade, XP may remove an already-stored legacy `mesh-proxy` Xray
   inbound and its routing rules. This is removal-only migration cleanup: it has no configuration
   input, client, metric, route, fallback or compatibility behavior, and the removed artifacts are

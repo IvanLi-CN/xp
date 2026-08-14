@@ -21,6 +21,7 @@ pub(crate) enum QueryError {
     CandidateLimitExceeded,
     MetadataLimitExceeded,
     InvalidPageCursor,
+    ResponseBudgetExceeded,
 }
 
 impl std::fmt::Display for QueryError {
@@ -84,6 +85,7 @@ pub(crate) struct HistoryQuery {
     range: QueryRange,
     page_size: usize,
     page_cursor: usize,
+    subject_node_id: Option<String>,
 }
 
 impl HistoryQuery {
@@ -99,6 +101,7 @@ impl HistoryQuery {
             range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
             page_size,
             page_cursor: 0,
+            subject_node_id: None,
         })
     }
 
@@ -113,12 +116,28 @@ impl HistoryQuery {
         Ok(self)
     }
 
+    pub(crate) fn with_subject_node_id(
+        mut self,
+        subject_node_id: Option<&str>,
+    ) -> Result<Self, QueryError> {
+        let Some(subject_node_id) = subject_node_id else {
+            return Ok(self);
+        };
+        validate_identifier(subject_node_id)?;
+        self.subject_node_id = Some(subject_node_id.to_owned());
+        Ok(self)
+    }
+
     pub(crate) fn range(&self) -> QueryRange {
         self.range
     }
 
     pub(crate) fn page_size(&self) -> usize {
         self.page_size
+    }
+
+    pub(crate) fn subject_node_id(&self) -> Option<&str> {
+        self.subject_node_id.as_deref()
     }
 
     pub(crate) fn page_offset(&self) -> Result<usize, QueryError> {

@@ -25,7 +25,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
-import { formatBackendError } from "../utils/formatBackendError";
+import { formatBackendError } from "../utils/backendErrorMessage";
 import { highlightShell } from "../utils/highlightShell";
 
 export function NodesPage() {
@@ -384,7 +384,10 @@ export function NodesPage() {
 				</div>
 			</div>
 
-			<HistoryRepositoriesPanel adminToken={adminToken} />
+			<HistoryRepositoriesPanel
+				adminToken={adminToken}
+				nodes={nodesState.data?.items ?? []}
+			/>
 		</div>
 	);
 }

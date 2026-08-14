@@ -149,6 +149,60 @@ pub(crate) fn apply_repository_membership(
     Ok(())
 }
 
+pub(crate) fn apply_repository_member_runtime_update(
+    state: &mut crate::state::PersistedState,
+    patch: &RepositoryMemberRuntimePatch,
+) -> Result<(), RepositoryControlError> {
+    let node_id = match RepositoryNodeId::try_from(patch.node_id.clone()) {
+        Ok(node_id) => node_id,
+        Err(_) => return Ok(()),
+    };
+    let Some(membership) = state.repository_membership.as_mut() else {
+        return Ok(());
+    };
+    let Some(member) = membership.repository(&node_id) else {
+        return Ok(());
+    };
+    let lifecycle = *member.lifecycle();
+    let catch_up_completed_at = member.catch_up_completed_at();
+    let current_replica_converged = member.replica_converged();
+
+    match &patch.update {
+        RepositoryMemberRuntimeUpdate::Capacity {
+            used_bytes,
+            filesystem_available_bytes,
+        } => membership.record_capacity(&node_id, *used_bytes, *filesystem_available_bytes)?,
+        RepositoryMemberRuntimeUpdate::CatchUpComplete { completed_at }
+            if lifecycle == RepositoryLifecycle::Syncing
+                && catch_up_completed_at.is_none_or(|current| current < *completed_at) =>
+        {
+            membership.mark_catch_up_complete(&node_id, *completed_at)?;
+        }
+        RepositoryMemberRuntimeUpdate::CatchUpIncomplete
+            if lifecycle == RepositoryLifecycle::Syncing =>
+        {
+            membership.mark_catch_up_incomplete(&node_id)?;
+        }
+        RepositoryMemberRuntimeUpdate::Ready { ready_at }
+            if lifecycle == RepositoryLifecycle::Syncing
+                && catch_up_completed_at.is_some_and(|completed_at| {
+                    ready_at.saturating_sub(completed_at) >= READY_STABILITY_WINDOW_SECONDS
+                }) =>
+        {
+            membership.mark_ready(&node_id, *ready_at)?;
+        }
+        RepositoryMemberRuntimeUpdate::ReplicaConverged {
+            replica_converged: requested_replica_converged,
+        } if lifecycle == RepositoryLifecycle::Ready
+            && current_replica_converged != *requested_replica_converged =>
+        {
+            membership.set_replica_converged(&node_id, *requested_replica_converged)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 impl From<RepositoryIdentityError> for RepositoryControlError {
     fn from(value: RepositoryIdentityError) -> Self {
         Self::Identity(value)
@@ -168,6 +222,31 @@ pub(crate) enum RepositoryLifecycle {
     Syncing,
     Ready,
     Retired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryMemberRuntimeUpdate {
+    Capacity {
+        used_bytes: u64,
+        filesystem_available_bytes: u64,
+    },
+    CatchUpComplete {
+        completed_at: u64,
+    },
+    CatchUpIncomplete,
+    Ready {
+        ready_at: u64,
+    },
+    ReplicaConverged {
+        replica_converged: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepositoryMemberRuntimePatch {
+    pub(crate) node_id: String,
+    pub(crate) update: RepositoryMemberRuntimeUpdate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -439,6 +518,24 @@ impl RepositoryMembership {
         member.lifecycle = RepositoryLifecycle::Ready;
         member.ready_at = Some(ready_at);
         Ok(())
+    }
+
+    pub(crate) fn mark_catch_up_incomplete(
+        &mut self,
+        node_id: &RepositoryNodeId,
+    ) -> Result<bool, RepositoryControlError> {
+        let member = self.repository_mut(node_id)?;
+        if member.lifecycle != RepositoryLifecycle::Syncing {
+            return Err(RepositoryControlError::InvalidLifecycleTransition {
+                node_id: node_id.clone(),
+                from: member.lifecycle,
+                action: "invalidate catch-up",
+            });
+        }
+        let changed = member.catch_up_completed_at.is_some() || member.ready_at.is_some();
+        member.catch_up_completed_at = None;
+        member.ready_at = None;
+        Ok(changed)
     }
 
     pub(crate) fn set_replica_converged(

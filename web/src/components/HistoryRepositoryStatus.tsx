@@ -4,6 +4,7 @@ import type {
 	HistoryRepositoryRuntime,
 } from "../api/adminHistoryRepositories";
 import type { AdminRepositoryHistory } from "../api/adminRepositoryHistory";
+import { Button } from "./Button";
 import { Badge } from "./ui/badge";
 
 function bytes(value: number): string {
@@ -39,6 +40,24 @@ function runtimeAvailability(runtime?: HistoryRepositoryRuntime): string {
 	if (runtime.history_truncated || runtime.gap_count > 0)
 		return "gaps detected";
 	return "healthy";
+}
+
+function timeRange(range: {
+	start_unix_seconds: number;
+	end_unix_seconds: number;
+}): string {
+	const start = new Date(range.start_unix_seconds * 1000).toLocaleString();
+	const end = new Date(range.end_unix_seconds * 1000).toLocaleString();
+	return start === end ? start : `${start} - ${end}`;
+}
+
+function watermarkLabel(
+	watermark: AdminRepositoryHistory["watermarks"][number],
+) {
+	return [
+		watermark.source_node_id,
+		`${watermark.stream}@${watermark.source_epoch}:${watermark.sequence}`,
+	].join("/");
 }
 
 export function RepositoryMemberStatus(props: {
@@ -127,8 +146,12 @@ export function RepositoryStatusSummary(props: {
 
 export function RepositoryQueryQuality(props: {
 	history: AdminRepositoryHistory;
+	onNextPage?: () => void;
+	nextPageLoading?: boolean;
 }) {
-	const { history } = props;
+	const { history, onNextPage, nextPageLoading = false } = props;
+	const watermarks = history.watermarks.slice(0, 3);
+	const gaps = history.gaps.slice(0, 2);
 	return (
 		<section className="border-l-2 border-border pl-3">
 			<div className="flex flex-wrap items-center gap-2">
@@ -141,9 +164,66 @@ export function RepositoryQueryQuality(props: {
 				{history.repository
 					? `Source: ${history.repository}. `
 					: "Source: local window. "}
-				{history.gaps.length} gaps · skew {history.clock_skew_seconds}s
-				{history.next_page_cursor ? " · more records available" : ""}
+				{history.records.length} records · {history.gaps.length} gaps · skew{" "}
+				{history.clock_skew_seconds}s
 			</p>
+			<dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+				<div className="min-w-0">
+					<dt className="text-muted-foreground">Observed coverage</dt>
+					<dd className="break-words font-mono">
+						{history.coverage
+							? timeRange(history.coverage.observed)
+							: "unavailable"}
+					</dd>
+				</div>
+				<div className="min-w-0">
+					<dt className="text-muted-foreground">Received coverage</dt>
+					<dd className="break-words font-mono">
+						{history.coverage
+							? timeRange(history.coverage.received)
+							: "unavailable"}
+					</dd>
+				</div>
+				<div className="min-w-0 sm:col-span-2">
+					<dt className="text-muted-foreground">Watermarks</dt>
+					<dd className="break-words font-mono">
+						{watermarks.length === 0
+							? "none"
+							: watermarks.map(watermarkLabel).join(", ")}
+						{history.watermarks.length > watermarks.length
+							? ` +${history.watermarks.length - watermarks.length}`
+							: ""}
+					</dd>
+				</div>
+				<div className="min-w-0 sm:col-span-2">
+					<dt className="text-muted-foreground">Gaps</dt>
+					<dd className="break-words font-mono">
+						{gaps.length === 0
+							? "none"
+							: gaps
+									.map(
+										(gap) =>
+											`${gap.permanent ? "permanent" : "repairing"}: ${timeRange(gap.range)}`,
+									)
+									.join("; ")}
+						{history.gaps.length > gaps.length
+							? ` +${history.gaps.length - gaps.length}`
+							: ""}
+					</dd>
+				</div>
+			</dl>
+			{onNextPage ? (
+				<div className="mt-3">
+					<Button
+						variant="secondary"
+						size="sm"
+						loading={nextPageLoading}
+						onClick={onNextPage}
+					>
+						Next page
+					</Button>
+				</div>
+			) : null}
 		</section>
 	);
 }

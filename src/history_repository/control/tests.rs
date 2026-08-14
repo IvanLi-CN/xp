@@ -2,7 +2,8 @@ use crate::state::history_repository::{
     control::{
         DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES, HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
         HistoryWriteAvailability, RepositoryCapacity, RepositoryLifecycle, RepositoryMember,
-        RepositoryMembership, RetirementDecision,
+        RepositoryMemberRuntimePatch, RepositoryMemberRuntimeUpdate, RepositoryMembership,
+        RetirementDecision,
     },
     identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
 };
@@ -80,6 +81,30 @@ fn repository_readiness_requires_completed_catch_up_and_five_stable_minutes() {
             .lifecycle(),
         &RepositoryLifecycle::Ready
     );
+}
+
+#[test]
+fn interrupted_catch_up_resets_the_stability_window() {
+    let node_id = RepositoryNodeId::try_from("node-a".to_owned()).expect("valid node id");
+    let mut membership =
+        RepositoryMembership::new(vec![member("node-a", 1)]).expect("valid membership");
+
+    membership
+        .mark_catch_up_complete(&node_id, 1_000)
+        .expect("catch-up complete");
+    assert!(
+        membership
+            .mark_catch_up_incomplete(&node_id)
+            .expect("invalidate catch-up")
+    );
+    assert!(membership.mark_ready(&node_id, 1_300).is_err());
+
+    membership
+        .mark_catch_up_complete(&node_id, 1_400)
+        .expect("catch-up complete again");
+    membership
+        .mark_ready(&node_id, 1_700)
+        .expect("stable repository becomes ready");
 }
 
 #[test]
@@ -193,6 +218,37 @@ fn capacity_rejects_a_zero_quota() {
         DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES
     );
     assert_eq!(HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES, 256 * 1024 * 1024);
+}
+
+#[test]
+fn runtime_patch_does_not_restore_a_member_removed_by_administration() {
+    let mut state = crate::state::PersistedState::empty();
+    state.repository_membership = Some(
+        RepositoryMembership::new(vec![member("node-a", 1)])
+            .expect("administrator replacement membership"),
+    );
+
+    crate::state::DesiredStateCommand::UpdateRepositoryMemberRuntime(
+        RepositoryMemberRuntimePatch {
+            node_id: "node-b".to_owned(),
+            update: RepositoryMemberRuntimeUpdate::Capacity {
+                used_bytes: 42,
+                filesystem_available_bytes: 512 * 1024 * 1024,
+            },
+        },
+    )
+    .apply(&mut state)
+    .expect("stale worker patch is ignored");
+
+    let membership = state
+        .repository_membership
+        .expect("membership remains configured");
+    assert_eq!(membership.members().len(), 1);
+    assert!(
+        membership
+            .repository(&RepositoryNodeId::try_from("node-b".to_owned()).expect("node id"))
+            .is_none()
+    );
 }
 
 #[test]

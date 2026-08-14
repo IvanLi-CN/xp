@@ -13,7 +13,8 @@ mod relay;
 
 #[allow(unused_imports)]
 pub(crate) use path::{
-    DirectPath, DirectPathHealth, PathDecision, PathSelector, RelayAttemptState,
+    DirectPath, DirectPathHealth, PathDecision, PathSelector, PathSelectorCheckpoint,
+    RelayAttemptState,
 };
 #[allow(unused_imports)]
 pub(crate) use protocol::{
@@ -24,8 +25,8 @@ pub(crate) use protocol::{
 };
 #[allow(unused_imports)]
 pub(crate) use relay::{
-    DynamicRelay, RelayError, RelayForwardReceipt, RelayFrame, RelayKeypair, RelayTrafficBytes,
-    SyncControlBytes,
+    DynamicRelay, MAX_RELAY_PLAINTEXT_BYTES, RelayError, RelayForwardReceipt, RelayFrame,
+    RelayKeypair, RelayTrafficBytes, SyncControlBytes,
 };
 
 #[cfg(test)]

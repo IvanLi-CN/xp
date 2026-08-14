@@ -74,7 +74,7 @@ export async function fetchAdminHistoryRepositories(
 
 export async function replaceAdminHistoryRepositories(
 	adminToken: string,
-	members: HistoryRepositoryMember[],
+	nodeIds: string[],
 ): Promise<HistoryRepositoryMember[]> {
 	const response = await fetch("/api/admin/history-repositories", {
 		method: "PUT",
@@ -83,7 +83,7 @@ export async function replaceAdminHistoryRepositories(
 			Authorization: `Bearer ${adminToken}`,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ members }),
+		body: JSON.stringify({ node_ids: nodeIds }),
 	});
 	await throwIfNotOk(response);
 	const json: unknown = await response.json();

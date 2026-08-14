@@ -47,6 +47,7 @@ export async function fetchAdminRepositoryHistory(
 		endUnixSeconds: number;
 		pageSize: number;
 		pageCursor?: string;
+		subjectNodeId?: string;
 	},
 	signal?: AbortSignal,
 ): Promise<AdminRepositoryHistory> {
@@ -56,6 +57,7 @@ export async function fetchAdminRepositoryHistory(
 		page_size: String(query.pageSize),
 	});
 	if (query.pageCursor) params.set("page_cursor", query.pageCursor);
+	if (query.subjectNodeId) params.set("subject_node_id", query.subjectNodeId);
 	const response = await fetch(`/api/admin/history-repository?${params}`, {
 		method: "GET",
 		headers: {

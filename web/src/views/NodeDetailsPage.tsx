@@ -34,7 +34,7 @@ import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
-import { NodeRepositoryHistoryQuality } from "../components/NodeRepositoryHistoryQuality";
+import { NodeRepositoryQuality } from "../components/NodeRepositoryHistoryQuality";
 import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
@@ -74,7 +74,7 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
-import { formatBackendError as formatErrorMessage } from "../utils/formatBackendError";
+import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
@@ -530,7 +530,6 @@ export function NodeDetailsPage() {
 			activeTab === "traffic",
 		trafficWindow: prefs.trafficWindow,
 	});
-	const RepositoryQuality = NodeRepositoryHistoryQuality;
 	useEffect(() => {
 		if (!nodeId) return;
 		setRuntimeLive(null);
@@ -892,6 +891,7 @@ export function NodeDetailsPage() {
 					</div>
 					{activeTab === "runtime" ? (
 						<section className="space-y-4">
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							<div className="flex items-center justify-between gap-3">
 								<div>
 									<h2 className="xp-card-title">Service runtime</h2>
@@ -1512,7 +1512,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "traffic" ? (
 						<div className="space-y-4">
-							<RepositoryQuality adminToken={adminToken} nodeId={nodeId} />
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{trafficQuery.isLoading && !trafficDisplay.data ? (
 								<PageState
 									variant="loading"
@@ -1562,7 +1562,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "ipUsage" ? (
 						<div className="space-y-4">
-							<RepositoryQuality adminToken={adminToken} nodeId={nodeId} />
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
 								<PageState
 									variant="loading"
@@ -1618,7 +1618,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "tcpConnections" ? (
 						<div className="space-y-4">
-							<RepositoryQuality adminToken={adminToken} nodeId={nodeId} />
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{tcpConnectionsQuery.isLoading && !tcpConnectionsDisplay.data ? (
 								<PageState
 									variant="loading"

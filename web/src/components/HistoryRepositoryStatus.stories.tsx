@@ -52,6 +52,15 @@ const meta = {
 	title: "Components/HistoryRepositoryStatus",
 	component: RepositoryStatusSummary,
 	tags: ["autodocs", "coverage-ui"],
+	decorators: [
+		(Story) => (
+			<div className="p-12">
+				<div className="rounded border border-border bg-slate-800 p-6">
+					<Story />
+				</div>
+			</div>
+		),
+	],
 	parameters: { layout: "padded" },
 	args: { status: healthy },
 } satisfies Meta<typeof RepositoryStatusSummary>;
@@ -135,8 +144,24 @@ export const PartialQueryQuality: Story = {
 			history={{
 				repository: "01K2REPOSITORY0000000000001",
 				completeness: "partial",
-				coverage: null,
-				watermarks: [],
+				coverage: {
+					observed: {
+						start_unix_seconds: 1_785_913_600,
+						end_unix_seconds: 1_786_000_000,
+					},
+					received: {
+						start_unix_seconds: 1_785_999_400,
+						end_unix_seconds: 1_786_000_000,
+					},
+				},
+				watermarks: [
+					{
+						source_node_id: "01K2SOURCE000000000000000001",
+						source_epoch: 4,
+						stream: "traffic",
+						sequence: 991,
+					},
+				],
 				gaps: [
 					{
 						range: {

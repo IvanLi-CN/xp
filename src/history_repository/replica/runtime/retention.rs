@@ -124,9 +124,11 @@ pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
         ))
 }
 
-pub(super) fn incomplete_aggregate_gap(records: &[StoredRecord]) -> Option<(u64, u64)> {
+pub(super) fn incomplete_aggregate_gap<'a>(
+    records: impl IntoIterator<Item = &'a StoredRecord>,
+) -> Option<(u64, u64)> {
     records
-        .iter()
+        .into_iter()
         .filter(|record| aggregate_payload(record).is_some_and(|payload| !payload.complete))
         .map(record_time_range)
         .fold(None, |range, (start, end)| match range {

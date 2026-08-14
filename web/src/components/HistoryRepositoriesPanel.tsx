@@ -9,13 +9,17 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
-import { formatBackendError } from "../utils/formatBackendError";
+import { formatBackendError } from "../utils/backendErrorMessage";
 import { Button } from "./Button";
+import { HistoryRepositoryMembershipEditor } from "./HistoryRepositoryMembershipEditor";
 import { RepositoryStatusSummary } from "./HistoryRepositoryStatus";
 import { CapabilityUnavailableState, PageState } from "./PageState";
 import { ReadStateBanner } from "./ReadStateBanner";
 
-export function HistoryRepositoriesPanel(props: { adminToken: string }) {
+export function HistoryRepositoriesPanel(props: {
+	adminToken: string;
+	nodes: Array<{ node_id: string; node_name: string }>;
+}) {
 	const { adminToken } = props;
 	const runtime = useAppRuntime();
 	const capability = useApiCapability("admin.history-repositories");
@@ -76,17 +80,29 @@ export function HistoryRepositoriesPanel(props: { adminToken: string }) {
 			/>
 		);
 	} else if (state.data) {
-		content = <RepositoryStatusSummary status={state.data} />;
+		content = (
+			<>
+				<RepositoryStatusSummary status={state.data} />
+				<HistoryRepositoryMembershipEditor
+					adminToken={adminToken}
+					members={state.data.items.map((item) => item.member)}
+					nodes={props.nodes}
+					disabled={
+						runtime.isReadOnly || !runtime.isOnline || !capability.available
+					}
+				/>
+			</>
+		);
 	}
 
 	return (
 		<div className="space-y-4">
-			{state.data && state.isError ? (
+			{state.data && (state.isError || !runtime.isOnline) ? (
 				<ReadStateBanner
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
 					dismissible
-					errors={[state.error]}
+					errors={state.isError ? [state.error] : []}
 					title={
 						!runtime.isOnline
 							? "Offline repository status"
