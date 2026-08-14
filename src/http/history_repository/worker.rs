@@ -65,21 +65,45 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let peers_to_replicate = peers
+    let selected_peer_ids = state
+        .repository_replica
+        .lock()
+        .await
+        .next_replication_peers(
+            &ready_repository_ids,
+            &state.cluster.node_id,
+            MAX_REPOSITORY_PEERS_PER_CYCLE,
+        )?;
+    let peers_to_replicate = selected_peer_ids
         .iter()
-        .filter(|peer| peer.node_id != state.cluster.node_id)
-        .take(MAX_REPOSITORY_PEERS_PER_CYCLE)
+        .filter_map(|repository_id| peers.iter().find(|peer| peer.node_id == *repository_id))
         .collect::<Vec<_>>();
     let mut synchronized = false;
-    let ready_peer_count = peers.len().saturating_sub(1);
-    let mut directly_verified_peers = 0usize;
+    let mut deep_verification_succeeded =
+        work.is_deep_verification() && selected_peer_ids.is_empty();
     for peer in peers_to_replicate {
         match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
-            Ok(()) => {
+            Ok(directly_converged) => {
                 synchronized = true;
-                directly_verified_peers = directly_verified_peers.saturating_add(1);
+                if work.is_deep_verification() && directly_converged {
+                    deep_verification_succeeded = state
+                        .repository_replica
+                        .lock()
+                        .await
+                        .record_direct_peer_deep_verification(
+                            &peer.node_id,
+                            &ready_repository_ids,
+                            &state.cluster.node_id,
+                            work,
+                        )?;
+                } else if work.is_deep_verification() {
+                    deep_verification_succeeded = false;
+                }
             }
             Err(error) => {
+                if work.is_deep_verification() {
+                    deep_verification_succeeded = false;
+                }
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
@@ -109,8 +133,6 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         }
     }
     if synchronized || peers.len() == 1 {
-        let deep_verification_succeeded =
-            all_ready_peers_were_directly_verified(work, ready_peer_count, directly_verified_peers);
         let completed_work = completed_replication_work(work, deep_verification_succeeded);
         state
             .repository_replica
@@ -119,14 +141,6 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             .record_replication_completed(now, completed_work)?;
     }
     Ok(())
-}
-
-fn all_ready_peers_were_directly_verified(
-    work: ReplicaWork,
-    ready_peer_count: usize,
-    directly_verified_peers: usize,
-) -> bool {
-    work.is_deep_verification() && ready_peer_count == directly_verified_peers
 }
 
 async fn known_history_source_node_ids(state: &AppState) -> Vec<String> {
@@ -243,7 +257,7 @@ async fn replicate_peer(
     ready_repository_ids: &[String],
     now: u64,
     work: ReplicaWork,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let remote_summary: RepositoryReplicaSummary = repository_direct_request(
         state,
         peer,
@@ -260,7 +274,7 @@ async fn replicate_peer(
         )
     };
     if !requires_repair {
-        return Ok(());
+        return Ok(true);
     }
     let repair = RepositoryRepairRequest {
         segment_ids: missing_segment_ids,
@@ -296,7 +310,10 @@ async fn replicate_peer(
         .lock()
         .await
         .merge_replica_gaps(&repair.gaps)?;
-    propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements).await
+    propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements).await?;
+    // A repair is a one-way pull. Require a later direct summary exchange before
+    // treating this peer as equal, because it may still need our own segments.
+    Ok(false)
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(
@@ -454,24 +471,5 @@ mod tests {
             completed_replication_work(ReplicaWork::DeepVerification, true),
             ReplicaWork::DeepVerification
         );
-    }
-
-    #[test]
-    fn daily_deep_verification_requires_every_ready_peer_directly() {
-        assert!(!super::all_ready_peers_were_directly_verified(
-            ReplicaWork::DeepVerification,
-            2,
-            1,
-        ));
-        assert!(super::all_ready_peers_were_directly_verified(
-            ReplicaWork::DeepVerification,
-            2,
-            2,
-        ));
-        assert!(!super::all_ready_peers_were_directly_verified(
-            ReplicaWork::AntiEntropy,
-            1,
-            1,
-        ));
     }
 }

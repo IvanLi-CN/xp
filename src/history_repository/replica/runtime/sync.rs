@@ -90,6 +90,7 @@ impl RepositoryReplicaRuntime {
         self.snapshot.last_anti_entropy_unix_seconds = Some(now_unix_seconds);
         if work.is_deep_verification() {
             self.snapshot.last_deep_verification_unix_seconds = Some(now_unix_seconds);
+            self.snapshot.deep_verified_peer_ids.clear();
         }
         self.persist_control_state()
     }
@@ -104,6 +105,69 @@ impl RepositoryReplicaRuntime {
             .relay_segment_offsets
             .retain(|repository_id, _| ready_repositories.contains(repository_id));
         self.persist_control_state()
+    }
+
+    pub(crate) fn next_replication_peers(
+        &mut self,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+        max_peers: usize,
+    ) -> Result<Vec<String>, RepositoryRuntimeError> {
+        if max_peers == 0 {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
+        let mut peers = ready_repositories
+            .iter()
+            .filter(|repository_id| repository_id.as_str() != local_repository_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        peers.sort_unstable();
+        peers.dedup();
+        if peers.is_empty() {
+            return Ok(Vec::new());
+        }
+        let start = self.snapshot.replication_peer_offset % peers.len();
+        let count = max_peers.min(peers.len());
+        let selected = (0..count)
+            .map(|offset| peers[(start + offset) % peers.len()].clone())
+            .collect::<Vec<_>>();
+        self.snapshot.replication_peer_offset = (start + count) % peers.len();
+        self.snapshot
+            .deep_verified_peer_ids
+            .retain(|repository_id| peers.binary_search(repository_id).is_ok());
+        self.persist_control_state()?;
+        Ok(selected)
+    }
+
+    pub(crate) fn record_direct_peer_deep_verification(
+        &mut self,
+        peer_repository_id: &str,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+        work: ReplicaWork,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !work.is_deep_verification() {
+            return Ok(false);
+        }
+        let required = ready_repositories
+            .iter()
+            .filter(|repository_id| repository_id.as_str() != local_repository_id)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if !required.contains(peer_repository_id) {
+            return Err(RepositoryRuntimeError::Replica(
+                ReplicaError::InvalidIdentifier,
+            ));
+        }
+        self.snapshot
+            .deep_verified_peer_ids
+            .retain(|repository_id| required.contains(repository_id));
+        self.snapshot
+            .deep_verified_peer_ids
+            .insert(peer_repository_id.to_owned());
+        let complete = required.is_subset(&self.snapshot.deep_verified_peer_ids);
+        self.persist_control_state()?;
+        Ok(complete)
     }
 
     pub(crate) fn collects_source(

@@ -4,6 +4,7 @@ use super::{RepositoryRepairBatch, RepositoryReplicaRuntime, StoredSegment};
 use crate::state::history_repository::{
     HistoryStorage,
     identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+    replica::ReplicaWork,
 };
 
 fn identity() -> RepositoryNodeIdentity {
@@ -83,4 +84,69 @@ fn rendezvous_failover_tracks_an_unseen_membership_source() {
             .collects_source(source, &ready, &standby)
             .expect("standby takes an unseen source after three cycles")
     );
+}
+
+#[test]
+fn deep_verification_rotates_through_every_ready_peer_before_completing() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let ready = [
+        "repository-local".to_owned(),
+        "repository-a".to_owned(),
+        "repository-b".to_owned(),
+        "repository-c".to_owned(),
+        "repository-d".to_owned(),
+        "repository-e".to_owned(),
+        "repository-f".to_owned(),
+    ];
+    let mut runtime = load(temporary.path());
+    let first = runtime
+        .next_replication_peers(&ready, "repository-local", 4)
+        .expect("first peer page");
+    assert_eq!(
+        first,
+        [
+            "repository-a",
+            "repository-b",
+            "repository-c",
+            "repository-d"
+        ]
+    );
+    for peer in &first {
+        assert!(
+            !runtime
+                .record_direct_peer_deep_verification(
+                    peer,
+                    &ready,
+                    "repository-local",
+                    ReplicaWork::DeepVerification,
+                )
+                .expect("partial deep verification")
+        );
+    }
+
+    let mut restored = load(temporary.path());
+    let second = restored
+        .next_replication_peers(&ready, "repository-local", 4)
+        .expect("second peer page");
+    assert_eq!(
+        second,
+        [
+            "repository-e",
+            "repository-f",
+            "repository-a",
+            "repository-b"
+        ]
+    );
+    let mut completed = false;
+    for peer in &second {
+        completed |= restored
+            .record_direct_peer_deep_verification(
+                peer,
+                &ready,
+                "repository-local",
+                ReplicaWork::DeepVerification,
+            )
+            .expect("direct peer verification");
+    }
+    assert!(completed);
 }

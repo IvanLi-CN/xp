@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -200,6 +200,10 @@ struct RepositoryReplicaSnapshot {
     source_last_received_unix_seconds: BTreeMap<String, u64>,
     #[serde(default)]
     relay_segment_offsets: BTreeMap<String, usize>,
+    #[serde(default)]
+    replication_peer_offset: usize,
+    #[serde(default)]
+    deep_verified_peer_ids: BTreeSet<String>,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -220,6 +224,8 @@ impl Default for RepositoryReplicaSnapshot {
             collector_failure_cycles: BTreeMap::new(),
             source_last_received_unix_seconds: BTreeMap::new(),
             relay_segment_offsets: BTreeMap::new(),
+            replication_peer_offset: 0,
+            deep_verified_peer_ids: BTreeSet::new(),
         }
     }
 }
