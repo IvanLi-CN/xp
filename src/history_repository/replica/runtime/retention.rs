@@ -113,15 +113,28 @@ impl RetentionBucket {
 pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
     aggregate_payload(record)
         .and_then(|payload| {
-            (payload.bucket_start_unix_seconds <= payload.bucket_end_unix_seconds).then_some((
-                payload.bucket_start_unix_seconds,
-                payload.bucket_end_unix_seconds,
-            ))
+            payload
+                .bucket_start_unix_seconds
+                .zip(payload.bucket_end_unix_seconds)
+                .filter(|(start, end)| start <= end)
         })
         .unwrap_or((
             record.observed_at_unix_seconds,
             record.observed_at_unix_seconds,
         ))
+}
+
+pub(super) fn incomplete_aggregate_gap(records: &[StoredRecord]) -> Option<(u64, u64)> {
+    records
+        .iter()
+        .filter(|record| aggregate_payload(record).is_some_and(|payload| !payload.complete))
+        .map(record_time_range)
+        .fold(None, |range, (start, end)| match range {
+            Some((current_start, current_end)) => {
+                Some((current_start.min(start), current_end.max(end)))
+            }
+            None => Some((start, end)),
+        })
 }
 
 fn retention_identifier(
@@ -160,10 +173,10 @@ impl RetainedRecord {
 struct RetentionAggregatePayload {
     algorithm: String,
     resolution: String,
-    #[serde(default)]
-    bucket_start_unix_seconds: u64,
-    #[serde(default)]
-    bucket_end_unix_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bucket_start_unix_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bucket_end_unix_seconds: Option<u64>,
     record_count: u64,
     first_sequence: u64,
     last_sequence: u64,
@@ -264,8 +277,8 @@ impl RetentionAggregate {
         let payload = RetentionAggregatePayload {
             algorithm: "sha256".to_owned(),
             resolution: resolution.to_owned(),
-            bucket_start_unix_seconds: self.bucket_start_unix_seconds,
-            bucket_end_unix_seconds: self.bucket_end_unix_seconds,
+            bucket_start_unix_seconds: Some(self.bucket_start_unix_seconds),
+            bucket_end_unix_seconds: Some(self.bucket_end_unix_seconds),
             record_count: self.record_count,
             first_sequence: self.first_sequence,
             last_sequence: self.last_sequence,

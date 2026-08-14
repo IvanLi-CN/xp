@@ -12,6 +12,8 @@ use crate::state::history_repository::replica::{
 };
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
+const MAX_REPAIR_GAPS: usize = 64;
+const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaSummary {
@@ -55,6 +57,7 @@ pub(crate) struct RepositoryReplicaSegment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryRepairBatch {
     pub(crate) segments: Vec<RepositoryReplicaSegment>,
+    pub(crate) gaps: Vec<RepositoryReplicaGap>,
 }
 
 impl RepositoryReplicaRuntime {
@@ -113,18 +116,41 @@ impl RepositoryReplicaRuntime {
         &mut self,
         source_node_id: &str,
         ready_repositories: &[String],
-        local_repository_id: &str,
+        _local_repository_id: &str,
         succeeded: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        let assignment = rendezvous_collectors(source_node_id, ready_repositories)?;
-        if assignment.primary() != local_repository_id {
-            return Ok(());
-        }
+        let _ = rendezvous_collectors(source_node_id, ready_repositories)?;
         let mut selector =
             CollectorSelector::from_failure_cycles(self.snapshot.collector_failure_cycles.clone());
         selector.record_primary_cycle(source_node_id, succeeded)?;
         self.snapshot.collector_failure_cycles = selector.failure_cycles().clone();
         self.persist_control_state()
+    }
+
+    pub(crate) fn record_stale_collection_cycles(
+        &mut self,
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let stale_sources = self
+            .snapshot
+            .source_last_received_unix_seconds
+            .iter()
+            .filter(|(_, last_received)| {
+                now_unix_seconds.saturating_sub(**last_received) >= COLLECTION_STALE_SECONDS
+            })
+            .map(|(source, _)| source.clone())
+            .collect::<Vec<_>>();
+        for source_node_id in stale_sources {
+            self.record_collection_cycle(
+                &source_node_id,
+                ready_repositories,
+                local_repository_id,
+                false,
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) fn replication_summary(
@@ -146,8 +172,28 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn missing_segment_ids(
         &self,
         remote: &RepositoryReplicaSummary,
-        deep_verification: bool,
+        _deep_verification: bool,
     ) -> Result<Vec<String>, RepositoryRuntimeError> {
+        let local_ids = self
+            .snapshot
+            .segments
+            .iter()
+            .map(|segment| segment.id.as_str())
+            .collect::<BTreeSet<_>>();
+        Ok(remote
+            .segment_ids
+            .iter()
+            .filter(|id| !local_ids.contains(id.as_str()))
+            .take(MAX_REPAIR_SEGMENTS)
+            .cloned()
+            .collect())
+    }
+
+    pub(crate) fn requires_repair(
+        &self,
+        remote: &RepositoryReplicaSummary,
+        deep_verification: bool,
+    ) -> Result<bool, RepositoryRuntimeError> {
         let local_ids = self
             .snapshot
             .segments
@@ -161,24 +207,12 @@ impl RepositoryReplicaRuntime {
             .collect::<BTreeSet<_>>();
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let converged = (if deep_verification {
+        let segments_converged = if deep_verification {
             self.partition_summaries()? == remote.partitions
         } else {
             local_ids == remote_ids
-        }) && gaps_converged;
-        if converged {
-            return Ok(Vec::new());
-        }
-        if local_ids == remote_ids {
-            return Err(RepositoryRuntimeError::Replica(ReplicaError::InvalidRange));
-        }
-        Ok(remote
-            .segment_ids
-            .iter()
-            .filter(|id| !local_ids.contains(id.as_str()))
-            .take(MAX_REPAIR_SEGMENTS)
-            .cloned()
-            .collect())
+        };
+        Ok(!(segments_converged && gaps_converged))
     }
 
     pub(crate) fn repair_batch(
@@ -210,7 +244,10 @@ impl RepositoryReplicaRuntime {
                 wire: segment.wire.clone(),
             });
         }
-        Ok(RepositoryRepairBatch { segments })
+        Ok(RepositoryRepairBatch {
+            segments,
+            gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+        })
     }
 
     pub(crate) fn relay_batch(&self) -> RepositoryRepairBatch {
@@ -227,7 +264,28 @@ impl RepositoryReplicaRuntime {
                     wire: segment.wire,
                 })
                 .collect(),
+            gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
         }
+    }
+
+    pub(crate) fn merge_replica_gaps(
+        &mut self,
+        remote_gaps: &[RepositoryReplicaGap],
+    ) -> Result<(), RepositoryRuntimeError> {
+        if remote_gaps.len() > MAX_REPAIR_GAPS {
+            return Err(RepositoryRuntimeError::Replica(
+                ReplicaError::RepairLimitExceeded,
+            ));
+        }
+        let mut merged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary));
+        merged.extend(canonical_gaps(remote_gaps.iter().cloned()));
+        let mut merged = canonical_gaps(merged);
+        if merged.len() > MAX_REPAIR_GAPS {
+            self.snapshot.history_truncated = true;
+            merged.truncate(MAX_REPAIR_GAPS);
+        }
+        self.snapshot.gaps = merged.into_iter().map(stored_gap).collect();
+        self.persist_control_state()
     }
 
     pub(crate) fn acknowledge_tombstones(
@@ -346,6 +404,19 @@ fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
         source_node_id: gap.source_node_id.clone(),
         source_epoch: gap.source_epoch,
         stream: gap.stream.clone(),
+        first_sequence: gap.first_sequence,
+        last_sequence: gap.last_sequence,
+        start_unix_seconds: gap.start_unix_seconds,
+        end_unix_seconds: gap.end_unix_seconds,
+        permanent: gap.permanent,
+    }
+}
+
+fn stored_gap(gap: RepositoryReplicaGap) -> StoredGap {
+    StoredGap {
+        source_node_id: gap.source_node_id,
+        source_epoch: gap.source_epoch,
+        stream: gap.stream,
         first_sequence: gap.first_sequence,
         last_sequence: gap.last_sequence,
         start_unix_seconds: gap.start_unix_seconds,

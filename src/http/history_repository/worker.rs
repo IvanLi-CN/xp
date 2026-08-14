@@ -10,7 +10,7 @@ use crate::{
     history_sync::{RelayFrame, RelayKeypair},
     internal_auth::InternalRoute,
     state::history_repository::replica::{
-        RepositoryReplicaSummary, RepositoryTombstoneAcknowledgement,
+        ReplicaWork, RepositoryReplicaSummary, RepositoryTombstoneAcknowledgement,
     },
 };
 
@@ -52,6 +52,11 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
         runtime.reconcile_ready_repositories(&ready_repository_ids)?;
+        runtime.record_stale_collection_cycles(
+            now,
+            &ready_repository_ids,
+            &state.cluster.node_id,
+        )?;
         runtime.replication_work(now)
     };
     if !work.is_anti_entropy() {
@@ -59,6 +64,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     }
 
     let mut synchronized = false;
+    let mut deep_verification_succeeded = false;
     for peer in peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
@@ -67,6 +73,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
             Ok(()) => {
                 synchronized = true;
+                deep_verification_succeeded = true;
             }
             Err(error) => {
                 tracing::debug!(
@@ -98,13 +105,22 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         }
     }
     if synchronized || peers.len() == 1 {
+        let completed_work = completed_replication_work(work, deep_verification_succeeded);
         state
             .repository_replica
             .lock()
             .await
-            .record_replication_completed(now, work)?;
+            .record_replication_completed(now, completed_work)?;
     }
     Ok(())
+}
+
+fn completed_replication_work(work: ReplicaWork, deep_verification_succeeded: bool) -> ReplicaWork {
+    if work.is_deep_verification() && !deep_verification_succeeded {
+        ReplicaWork::AntiEntropy
+    } else {
+        work
+    }
 }
 
 async fn replicate_peer_via_dynamic_relay(
@@ -193,7 +209,7 @@ async fn replicate_peer(
     peer: &MeshPeerTarget,
     ready_repository_ids: &[String],
     now: u64,
-    work: crate::state::history_repository::replica::ReplicaWork,
+    work: ReplicaWork,
 ) -> anyhow::Result<()> {
     let remote_summary: RepositoryReplicaSummary = repository_direct_request(
         state,
@@ -203,12 +219,14 @@ async fn replicate_peer(
         Vec::new(),
     )
     .await?;
-    let missing_segment_ids = state
-        .repository_replica
-        .lock()
-        .await
-        .missing_segment_ids(&remote_summary, work.is_deep_verification())?;
-    if missing_segment_ids.is_empty() {
+    let (requires_repair, missing_segment_ids) = {
+        let runtime = state.repository_replica.lock().await;
+        (
+            runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+            runtime.missing_segment_ids(&remote_summary, work.is_deep_verification())?,
+        )
+    };
+    if !requires_repair {
         return Ok(());
     }
     let repair = RepositoryRepairRequest {
@@ -240,6 +258,11 @@ async fn replicate_peer(
             )?;
         acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
     }
+    state
+        .repository_replica
+        .lock()
+        .await
+        .merge_replica_gaps(&repair.gaps)?;
     propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements).await
 }
 
@@ -357,7 +380,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{RelayFrame, relay_keypair_from_cluster_material};
+    use super::{
+        RelayFrame, ReplicaWork, completed_replication_work, relay_keypair_from_cluster_material,
+    };
 
     #[test]
     fn dynamic_relay_keys_are_deterministic_per_cluster_and_recipient() {
@@ -383,6 +408,18 @@ mod tests {
         assert_ne!(
             recipient.public_key(),
             relay_keypair_from_cluster_material("cluster-a", "repository-c", "ca-key").public_key()
+        );
+    }
+
+    #[test]
+    fn relay_repair_does_not_complete_daily_deep_verification() {
+        assert_eq!(
+            completed_replication_work(ReplicaWork::DeepVerification, false),
+            ReplicaWork::AntiEntropy
+        );
+        assert_eq!(
+            completed_replication_work(ReplicaWork::DeepVerification, true),
+            ReplicaWork::DeepVerification
         );
     }
 }

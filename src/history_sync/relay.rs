@@ -57,6 +57,10 @@ pub(crate) struct RelayFrame {
 }
 
 impl RelayFrame {
+    pub(crate) fn sender_public_key(&self) -> [u8; 32] {
+        self.sender_public_key
+    }
+
     pub(crate) fn seal(
         sender: RelayKeypair,
         recipient_public_key: [u8; 32],

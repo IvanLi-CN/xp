@@ -244,6 +244,63 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     let coverage = response.plan().coverage().expect("repository coverage");
     assert_eq!(coverage.observed().start_unix_seconds(), 900);
     assert_eq!(coverage.observed().end_unix_seconds(), 1_199);
+    assert_eq!(coverage.received().start_unix_seconds(), now);
+    assert_eq!(coverage.received().end_unix_seconds(), now);
+}
+
+#[test]
+fn legacy_aggregate_payload_keeps_its_original_query_coverage_after_restart() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let observed_at = 1_000_u64;
+    let now = observed_at + 7 * 24 * 60 * 60 + 2;
+    let record = SyncRecord::new(
+        "subject-a",
+        "node-a",
+        "ip_usage.v1",
+        1,
+        b"192.0.2.99".to_vec(),
+        b"192.0.2.99".to_vec(),
+        false,
+    );
+    let segment = segment_at(&key, 0, vec![record], None, observed_at, observed_at);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &segment.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("repository accepts old IP history");
+    let mut payload: serde_json::Value =
+        serde_json::from_slice(&runtime.snapshot.records[0].payload).expect("aggregate JSON");
+    payload
+        .as_object_mut()
+        .expect("aggregate object")
+        .remove("bucket_start_unix_seconds");
+    payload
+        .as_object_mut()
+        .expect("aggregate object")
+        .remove("bucket_end_unix_seconds");
+    runtime.snapshot.records[0].payload = serde_json::to_vec(&payload).expect("legacy payload");
+    runtime
+        .persist_control_state()
+        .expect("persist legacy payload");
+
+    let restored = load(temporary.path());
+    let response = restored
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query legacy aggregate");
+    assert_eq!(response.records.len(), 1);
+    let coverage = response.plan().coverage().expect("repository coverage");
+    assert_eq!(coverage.observed().start_unix_seconds(), observed_at);
+    assert_eq!(coverage.observed().end_unix_seconds(), observed_at);
 }
 
 #[test]
@@ -306,7 +363,7 @@ fn repository_retention_keeps_distinct_anonymized_ip_aggregates() {
 }
 
 #[test]
-fn replica_repair_does_not_converge_when_gap_metadata_differs() {
+fn replica_repair_propagates_canonical_gap_metadata() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
     let identity = identity(&key);
@@ -331,7 +388,25 @@ fn replica_repair_does_not_converge_when_gap_metadata_differs() {
         end_unix_seconds: 11,
         permanent: true,
     });
-    assert!(runtime.missing_segment_ids(&remote, true).is_err());
+    assert!(
+        runtime
+            .requires_repair(&remote, true)
+            .expect("gap metadata needs repair")
+    );
+    assert!(
+        runtime
+            .missing_segment_ids(&remote, true)
+            .expect("gap-only repair has no segments")
+            .is_empty()
+    );
+    runtime
+        .merge_replica_gaps(&remote.gaps)
+        .expect("merge remote gap metadata");
+    assert!(
+        !runtime
+            .requires_repair(&remote, true)
+            .expect("gap metadata converged")
+    );
 }
 
 #[test]
@@ -350,10 +425,14 @@ fn rendezvous_collector_failover_is_persisted_after_three_primary_cycles() {
             .collects_source("source-a", &ready, assignment.primary())
             .expect("primary collector")
     );
-    for _ in 0..3 {
+    runtime
+        .snapshot
+        .source_last_received_unix_seconds
+        .insert("source-a".to_owned(), 100);
+    for now in [400, 700, 1_000] {
         runtime
-            .record_collection_cycle("source-a", &ready, assignment.primary(), false)
-            .expect("record primary failure");
+            .record_stale_collection_cycles(now, &ready, &standby)
+            .expect("record stale primary cycle");
     }
     let restored = load(temporary.path());
     assert!(
@@ -476,6 +555,15 @@ fn repository_retention_marks_aggregates_incomplete_for_permanent_gaps() {
         .expect("epoch aggregate")
         .expect("aggregate JSON");
     assert_eq!(payload["complete"], false);
+    runtime.snapshot.gaps.clear();
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at + 1, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query incomplete aggregate");
+    assert_eq!(response.plan().completeness(), Completeness::Partial);
 }
 
 #[test]
@@ -780,6 +868,44 @@ fn low_space_stops_history_writes_but_not_control_plane_operations() {
             HistoryWriteAvailability::DegradedLowSpace
         ))
     ));
+}
+
+#[test]
+fn bounded_repository_history_eviction_reports_a_permanent_gap() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.records = (0..MAX_REPOSITORY_RECORDS)
+        .map(|sequence| StoredRecord {
+            observed_at_unix_seconds: sequence as u64,
+            received_at_unix_seconds: sequence as u64,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence: sequence as u64,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: vec![0],
+            payload: vec![0],
+            tombstone: false,
+        })
+        .collect();
+
+    runtime.evict_oldest_record_if_needed();
+
+    assert_eq!(runtime.snapshot.records.len(), MAX_REPOSITORY_RECORDS - 1);
+    assert_eq!(runtime.snapshot.gaps.len(), 1);
+    assert!(runtime.snapshot.gaps[0].permanent);
+    assert_eq!(runtime.snapshot.gaps[0].first_sequence, 0);
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(0, 1, 10).expect("query"),
+            LocalQueryMetadata::current_window(10),
+        )
+        .expect("bounded query");
+    assert_eq!(response.plan().completeness(), Completeness::Partial);
 }
 
 #[test]

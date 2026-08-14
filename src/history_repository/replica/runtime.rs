@@ -183,6 +183,8 @@ struct RepositoryReplicaSnapshot {
     #[serde(default)]
     gaps: Vec<StoredGap>,
     #[serde(default)]
+    history_truncated: bool,
+    #[serde(default)]
     capacity: RepositoryCapacity,
     #[serde(default)]
     last_verified_unix_seconds: Option<u64>,
@@ -194,6 +196,8 @@ struct RepositoryReplicaSnapshot {
     last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
     collector_failure_cycles: BTreeMap<String, u8>,
+    #[serde(default)]
+    source_last_received_unix_seconds: BTreeMap<String, u64>,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -205,12 +209,14 @@ impl Default for RepositoryReplicaSnapshot {
             records: Vec::new(),
             segments: Vec::new(),
             gaps: Vec::new(),
+            history_truncated: false,
             capacity: RepositoryCapacity::default(),
             last_verified_unix_seconds: None,
             last_anti_entropy_unix_seconds: None,
             last_deep_verification_unix_seconds: None,
             last_dynamic_relay_attempt_unix_seconds: None,
             collector_failure_cycles: BTreeMap::new(),
+            source_last_received_unix_seconds: BTreeMap::new(),
         }
     }
 }
@@ -218,6 +224,8 @@ impl Default for RepositoryReplicaSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredRecord {
     observed_at_unix_seconds: u64,
+    #[serde(default)]
+    received_at_unix_seconds: u64,
     source_node_id: String,
     source_epoch: u64,
     stream: String,
@@ -348,9 +356,6 @@ impl RepositoryReplicaRuntime {
         let segment = SignedSegment::from_wire(wire)?;
         self.bind_cluster(cluster_id)?;
         self.ensure_receiver()?;
-        if self.snapshot.records.len() >= MAX_REPOSITORY_RECORDS {
-            return Err(RepositoryRuntimeError::StateLimitExceeded);
-        }
         let previous_receiver = self
             .receiver
             .as_ref()
@@ -411,6 +416,7 @@ impl RepositoryReplicaRuntime {
             return Err(error);
         }
         self.clear_repaired_gaps(segment.canonical());
+        self.record_source_received(segment.canonical(), now_unix_seconds)?;
         self.prune_retention(now_unix_seconds);
         self.snapshot.last_verified_unix_seconds = Some(now_unix_seconds);
         self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
@@ -458,7 +464,7 @@ impl RepositoryReplicaRuntime {
                 .into_iter()
                 .map(watermark_from_cursor)
                 .collect::<Result<Vec<_>, _>>()?;
-            let gaps = self
+            let mut gaps = self
                 .snapshot
                 .gaps
                 .iter()
@@ -466,6 +472,17 @@ impl RepositoryReplicaRuntime {
                     QueryGap::new(gap.start_unix_seconds, gap.end_unix_seconds, gap.permanent)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            if let Some((start, end)) = retention::incomplete_aggregate_gap(&self.snapshot.records)
+            {
+                gaps.push(QueryGap::new(start, end, true)?);
+            }
+            if self.snapshot.history_truncated {
+                gaps.push(QueryGap::new(
+                    coverage.observed().start_unix_seconds(),
+                    coverage.observed().end_unix_seconds(),
+                    true,
+                )?);
+            }
             candidates.push(QueryCandidate::ready(
                 repository_id,
                 coverage,
@@ -648,57 +665,15 @@ impl RepositoryReplicaRuntime {
                     ProtocolError::ResurrectionPrevented,
                 ));
             }
+            self.evict_oldest_record_if_needed();
             self.snapshot.records.push(StoredRecord::from_record(
                 segment.closed_at_unix_seconds(),
+                now_unix_seconds,
                 &cursor,
                 record,
             ));
-            if self.snapshot.records.len() > MAX_REPOSITORY_RECORDS {
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
         }
         Ok(acknowledgements)
-    }
-
-    fn store_segment(
-        &mut self,
-        identity: &RepositoryNodeIdentity,
-        wire: &[u8],
-    ) -> Result<(), RepositoryRuntimeError> {
-        let id = hex::encode(Sha256::digest(wire));
-        if self
-            .snapshot
-            .segments
-            .iter()
-            .any(|segment| segment.id == id)
-        {
-            return Ok(());
-        }
-        if self.snapshot.segments.len() == MAX_REPOSITORY_SEGMENTS {
-            self.snapshot.segments.remove(0);
-        }
-        self.snapshot.segments.push(StoredSegment {
-            id,
-            identity: identity.clone(),
-            wire: wire.to_vec(),
-        });
-        Ok(())
-    }
-
-    fn record_gap(&mut self, segment: &crate::history_sync::CanonicalSegment, permanent: bool) {
-        if self.snapshot.gaps.len() == 64 {
-            self.snapshot.gaps.remove(0);
-        }
-        self.snapshot.gaps.push(StoredGap {
-            source_node_id: segment.first_cursor().source_node_id().to_owned(),
-            source_epoch: segment.first_cursor().source_epoch(),
-            stream: segment.first_cursor().stream().to_owned(),
-            first_sequence: segment.first_cursor().sequence(),
-            last_sequence: segment.last_cursor().sequence(),
-            start_unix_seconds: segment.opened_at_unix_seconds(),
-            end_unix_seconds: segment.closed_at_unix_seconds(),
-            permanent,
-        });
     }
 
     fn clear_repaired_gaps(&mut self, segment: &crate::history_sync::CanonicalSegment) {
@@ -722,20 +697,24 @@ impl RepositoryReplicaRuntime {
     }
 
     fn repository_coverage(&self) -> Option<QueryCoverage> {
-        let start = self
+        let observed_start = self
             .snapshot
             .records
             .iter()
             .map(|record| retention::record_time_range(record).0)
             .min()?;
-        let end = self
+        let observed_end = self
             .snapshot
             .records
             .iter()
             .map(|record| retention::record_time_range(record).1)
             .max()?;
-        let range = QueryRange::new(start, end).expect("record timestamps are ordered");
-        Some(QueryCoverage::new(range, range))
+        let received_start = self.snapshot.records.iter().map(record_received_at).min()?;
+        let received_end = self.snapshot.records.iter().map(record_received_at).max()?;
+        Some(QueryCoverage::new(
+            QueryRange::new(observed_start, observed_end).expect("record timestamps are ordered"),
+            QueryRange::new(received_start, received_end).expect("record timestamps are ordered"),
+        ))
     }
 
     fn records_for(&self, query: &HistoryQuery) -> (Vec<RepositoryHistoryRecord>, bool) {
@@ -795,8 +774,16 @@ impl RepositoryReplicaRuntime {
                 .checkpoint()?,
         );
         self.snapshot.tombstones = self.tombstones.checkpoint();
-        let bytes = serde_json::to_vec(&self.snapshot)
+        let mut bytes = serde_json::to_vec(&self.snapshot)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        while bytes.len() > MAX_RUNTIME_STATE_BYTES && self.evict_oldest_record() {
+            bytes = serde_json::to_vec(&self.snapshot)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        }
+        while bytes.len() > MAX_RUNTIME_STATE_BYTES && self.evict_oldest_segment() {
+            bytes = serde_json::to_vec(&self.snapshot)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        }
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {
             self.restore(previous_receiver, previous_snapshot.clone())?;
             return Err(RepositoryRuntimeError::StateLimitExceeded);
@@ -880,15 +867,25 @@ impl RepositoryReplicaRuntime {
     }
 }
 
+fn record_received_at(record: &StoredRecord) -> u64 {
+    if record.received_at_unix_seconds == 0 {
+        record.observed_at_unix_seconds
+    } else {
+        record.received_at_unix_seconds
+    }
+}
+
 impl StoredRecord {
     fn from_record(
         observed_at_unix_seconds: u64,
+        received_at_unix_seconds: u64,
         cursor: &ReplicaCursor,
         record: &SyncRecord,
     ) -> Self {
         let (schema_id, schema_version) = record.schema();
         Self {
             observed_at_unix_seconds,
+            received_at_unix_seconds,
             source_node_id: cursor.source_node_id().to_owned(),
             source_epoch: cursor.source_epoch(),
             stream: cursor.stream().to_owned(),
@@ -936,6 +933,7 @@ impl From<StoredRecord> for RepositoryHistoryRecord {
     }
 }
 
+mod capacity;
 mod helpers;
 mod retention;
 mod sync;

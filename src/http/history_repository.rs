@@ -141,6 +141,13 @@ fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_
     identity.node_id().as_str() == sender_id
 }
 
+fn relay_frame_matches_source(
+    frame: &crate::history_sync::RelayFrame,
+    source_keypair: crate::history_sync::RelayKeypair,
+) -> bool {
+    frame.sender_public_key() == source_keypair.public_key()
+}
+
 pub(super) async fn admin_internal_history_repository_summary(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -195,10 +202,11 @@ pub(super) async fn admin_internal_query_history_repository(
     )
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
-    let response = state
-        .repository_replica
-        .lock()
-        .await
+    let mut runtime = state.repository_replica.lock().await;
+    runtime
+        .prepare_for_replication(now)
+        .map_err(repository_error)?;
+    let response = runtime
         .query(
             &state.cluster.node_id,
             query,
@@ -273,6 +281,13 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     {
         return Err(ApiError::unauthorized("relay source is not ready"));
     }
+    let source_keypair = worker::cluster_relay_keypair(&state, &request.source_repository_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if !relay_frame_matches_source(&request.frame, source_keypair) {
+        return Err(ApiError::unauthorized(
+            "relay frame sender does not match the claimed repository source",
+        ));
+    }
     let keypair = worker::cluster_relay_keypair(&state, &state.cluster.node_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let plaintext = request
@@ -283,6 +298,7 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
         .map_err(|_| ApiError::invalid_request("relay payload is malformed"))?;
     let mut acknowledgements = Vec::new();
     for segment in batch.segments {
+        // The frame authenticates the forwarding repository; the segment authenticates its source.
         let receipt = state
             .repository_replica
             .lock()
@@ -298,6 +314,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .map_err(repository_error)?;
         acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
     }
+    state
+        .repository_replica
+        .lock()
+        .await
+        .merge_replica_gaps(&batch.gaps)
+        .map_err(repository_error)?;
     worker::propagate_tombstone_acknowledgements(&state, &ready_repository_ids, acknowledgements)
         .await
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
@@ -346,7 +368,10 @@ pub(super) async fn admin_query_history_repository(
         .iter()
         .any(|repository_id| repository_id == &state.cluster.node_id);
     let local_response = {
-        let runtime = state.repository_replica.lock().await;
+        let mut runtime = state.repository_replica.lock().await;
+        runtime
+            .prepare_for_replication(now)
+            .map_err(repository_error)?;
         if local_is_ready {
             runtime
                 .query(
@@ -506,5 +531,22 @@ mod tests {
             &identity,
             "repository-b"
         ));
+    }
+
+    #[test]
+    fn relay_frame_must_match_its_claimed_repository_source() {
+        let source = crate::history_sync::RelayKeypair::from_private_key([1; 32]);
+        let other_source = crate::history_sync::RelayKeypair::from_private_key([2; 32]);
+        let target = crate::history_sync::RelayKeypair::from_private_key([3; 32]);
+        let frame = crate::history_sync::RelayFrame::seal(
+            source,
+            target.public_key(),
+            [4; 12],
+            b"repair batch",
+            b"repository-c",
+        )
+        .expect("relay frame");
+        assert!(relay_frame_matches_source(&frame, source));
+        assert!(!relay_frame_matches_source(&frame, other_source));
     }
 }
