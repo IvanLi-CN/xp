@@ -164,8 +164,13 @@ impl RepositoryReplicaRuntime {
         &mut self,
         next_cursor: Option<&ReplicaRecordKey>,
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         self.snapshot.tombstone_acknowledgement_cursor = next_cursor.cloned();
-        self.persist_control_state()
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn next_replication_peers(

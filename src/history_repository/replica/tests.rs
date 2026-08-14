@@ -116,6 +116,13 @@ fn tombstones_do_not_resurrect_and_only_expire_after_horizon_and_ready_acks() {
         .acknowledge(record.key(), "repo-b")
         .expect("ack b");
     assert!(tombstones.expire(109).is_empty());
+    tombstones
+        .reconcile_ready_repositories(["repo-a", "repo-b", "repo-c"])
+        .expect("current ready repository joins active tombstones");
+    assert!(tombstones.expire(110).is_empty());
+    tombstones
+        .acknowledge(record.key(), "repo-c")
+        .expect("ack new ready repository");
     assert_eq!(tombstones.expire(110).len(), 1);
     assert!(tombstones.allows(&record.key()));
 }

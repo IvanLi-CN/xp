@@ -528,6 +528,7 @@ impl TombstoneLedger {
             state
                 .ready_repositories
                 .retain(|repository| current.contains(repository));
+            state.ready_repositories.extend(current.iter().cloned());
             state
                 .acknowledgements
                 .retain(|repository| current.contains(repository));

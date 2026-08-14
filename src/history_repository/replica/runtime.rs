@@ -382,6 +382,8 @@ impl RepositoryReplicaRuntime {
             .expect("receiver initialized")
             .checkpoint()?;
         let previous_snapshot = self.snapshot.clone();
+        self.tombstones
+            .reconcile_ready_repositories(ready_repositories)?;
         let expired_tombstones = self.expire_tombstones(now_unix_seconds)?;
         let acceptance = self
             .receiver
@@ -413,6 +415,7 @@ impl RepositoryReplicaRuntime {
             }
         };
         if matches!(acceptance, Acceptance::Duplicate { .. }) {
+            self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
             return Ok(sync_receipt(acceptance, availability, Vec::new()));
         }
 
