@@ -774,6 +774,9 @@ mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;
+#[cfg(test)]
+#[path = "runtime/legacy_cursor_tests.rs"]
+mod legacy_cursor_tests;
 mod paths;
 mod query;
 mod receive;

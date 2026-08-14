@@ -106,7 +106,7 @@ impl RepositoryReplicaRuntime {
                     cursor.export_session_id,
                 )
             }
-            Some(RepositoryTieredBackfillCursorState::Legacy(after)) => {
+            Some(RepositoryTieredBackfillCursorState::Legacy(_)) => {
                 let Some((
                     tombstone_high_watermark,
                     record_high_watermark,
@@ -121,13 +121,21 @@ impl RepositoryReplicaRuntime {
                         next_cursor: None,
                     });
                 };
+                // Legacy cursors were ordered across both history and tombstone rows. They
+                // cannot safely resume either phase of the tombstone-first export, so restart
+                // the bounded export. Replaying rows is idempotent at the receiving store.
+                let phase = if tombstone_high_watermark.is_some() {
+                    RepositoryTieredBackfillPhase::Tombstones
+                } else {
+                    RepositoryTieredBackfillPhase::Records
+                };
                 (
-                    Some(after),
+                    None,
                     repair_cache_cutoff_unix_seconds,
                     received_at_cutoff_unix_seconds,
                     tombstone_high_watermark,
                     record_high_watermark,
-                    RepositoryTieredBackfillPhase::Records,
+                    phase,
                     uuid::Uuid::new_v4().to_string(),
                 )
             }
