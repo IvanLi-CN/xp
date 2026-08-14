@@ -327,21 +327,25 @@ pub(super) async fn propagate_tombstone_acknowledgements(
     }
     let (_, peers) = ready_repository_peers(state).await?;
     let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
+    let mut first_delivery_error = None;
     for peer in peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .filter(|peer| ready_repository_ids.iter().any(|id| id == &peer.node_id))
     {
-        repository_direct_request::<serde_json::Value>(
+        if let Err(error) = repository_direct_request::<serde_json::Value>(
             state,
             peer,
             Method::POST,
             "/api/admin/_internal/history-repository/tombstone-ack",
             body.clone(),
         )
-        .await?;
+        .await
+        {
+            first_delivery_error.get_or_insert(error);
+        }
     }
-    Ok(())
+    first_delivery_error.map_or(Ok(()), Err)
 }
 
 pub(super) async fn ready_repository_peers(
