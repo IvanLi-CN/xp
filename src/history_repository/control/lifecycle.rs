@@ -301,7 +301,7 @@ impl<'de> Deserialize<'de> for RepositoryMember {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct RepositoryMembership {
+pub struct RepositoryMembership {
     members: Vec<RepositoryMember>,
 }
 
@@ -327,6 +327,12 @@ impl RepositoryMembership {
 
     pub(crate) fn members(&self) -> &[RepositoryMember] {
         &self.members
+    }
+
+    pub(crate) fn ready_members(&self) -> impl Iterator<Item = &RepositoryMember> {
+        self.members
+            .iter()
+            .filter(|member| member.lifecycle == RepositoryLifecycle::Ready)
     }
 
     pub(crate) fn add_repository(

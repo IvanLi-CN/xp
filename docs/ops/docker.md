@@ -45,7 +45,6 @@ xp-ops container run
 | `XP_VLESS_CANARY_ACME_CONTACT_EMAIL`           | optional                     | ACME contact email for Let's Encrypt DNS-01                                                                                             |
 | `XP_VLESS_CANARY_CLOUDFLARE_ZONE_ID`           | optional                     | Overrides the canary DNS-01 zone; when unset, runtime first reuses `XP_CLOUDFLARE_DDNS_ZONE_ID`, then falls back to host-derived lookup |
 | `XP_VLESS_CANARY_DNS_PROPAGATION_TIMEOUT_SECS` | optional                     | DNS-01 DoH visibility wait budget; defaults to `180` seconds                                                                            |
-| `XP_MESH_PROXY_URL`                            | optional                     | Optional proxy-first/direct layer for public fallback egress; Mesh itself uses managed VLESS/REALITY HTTPS fallback                     |
 | `XP_DEFAULT_VLESS_PORT`                        | optional                     | Bootstrap port used only when the managed default VLESS endpoint is missing; managed SNI is derived from `XP_ACCESS_HOST`               |
 | `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated bootstrap compatibility input; validated only when `XP_DEFAULT_VLESS_PORT` is set and never chooses managed VLESS SNI        |
 | `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
@@ -61,7 +60,6 @@ xp-ops container run
 - When `XP_ACCESS_HOST` is unset, it is derived from `XP_CLOUDFLARE_HOSTNAME` or `XP_API_BASE_URL`
 - `XP_VLESS_CANARY_BIND` defaults to `127.0.0.1:39043`
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
-- The bundled static Xray config exposes a loopback-only SOCKS listener at `127.0.0.1:10808` for optional public fallback egress. It is disabled unless `XP_MESH_PROXY_URL` is set; it is not the Mesh transport.
 - Xray defaults to `GOMEMLIMIT=16MiB` and `GOGC=50`; cloudflared defaults to
   `GOMEMLIMIT=12MiB`, `GOGC=50`, and disabled management diagnostics. The image
   contains the same pinned, checksummed low-memory binaries published with the

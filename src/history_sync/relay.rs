@@ -2,6 +2,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, KeyInit as _, Nonce,
     aead::{Aead as _, Payload},
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -48,7 +49,7 @@ impl RelayKeypair {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RelayFrame {
     sender_public_key: [u8; 32],
     nonce: [u8; 12],

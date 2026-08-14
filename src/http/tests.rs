@@ -155,7 +155,6 @@ fn test_config(data_dir: PathBuf) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -275,7 +274,6 @@ fn app_with(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store)
 }
@@ -326,7 +324,6 @@ fn build_app_with_cluster_store_and_raft(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     )
 }
 
@@ -1213,7 +1210,7 @@ async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
 }
 
 #[tokio::test]
-async fn internal_repository_sync_persists_signed_segment_for_admin_query() {
+async fn internal_repository_sync_requires_raft_ready_membership() {
     let tmp = tempfile::tempdir().unwrap();
     let router = app(&tmp);
     let cluster = ClusterMetadata::load(tmp.path()).unwrap();
@@ -1284,23 +1281,7 @@ async fn internal_repository_sync_persists_signed_segment_for_admin_query() {
         .unwrap();
     request.headers_mut().extend(headers);
     let response = router.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(body_json(response).await["acknowledgement"]["sequence"], 0);
-
-    let query_path = format!(
-        "/api/admin/history-repository?start_unix_seconds={now}\
-         &end_unix_seconds={now}&page_size=10"
-    );
-    let queried = router
-        .oneshot(req_authed("GET", &query_path))
-        .await
-        .unwrap();
-    assert_eq!(queried.status(), StatusCode::OK);
-    let body = body_json(queried).await;
-    assert_eq!(body["completeness"], "complete");
-    assert_eq!(body["repository"], cluster.node_id);
-    assert_eq!(body["watermarks"][0]["sequence"], 0);
-    assert_eq!(body["records"].as_array().unwrap().len(), 1);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -2299,7 +2280,6 @@ async fn follower_admin_write_does_not_redirect() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -5141,7 +5121,6 @@ async fn grant_usage_includes_warning_fields() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -5354,7 +5333,6 @@ async fn grant_usage_warns_on_quota_mismatch() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -7954,7 +7932,6 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = {
@@ -8586,7 +8563,6 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -8652,7 +8628,6 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app

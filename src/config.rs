@@ -349,14 +349,6 @@ pub struct Config {
     pub default_ss_port: Option<u16>,
 
     #[arg(
-        long = "mesh-proxy-url",
-        global = true,
-        env = "XP_MESH_PROXY_URL",
-        value_name = "URL"
-    )]
-    pub mesh_proxy_url: Option<String>,
-
-    #[arg(
         long = "cloudflare-ddns-enabled",
         global = true,
         env = "XP_CLOUDFLARE_DDNS_ENABLED",
@@ -572,7 +564,6 @@ mod tests {
             cli.config.vless_canary_bind,
             DEFAULT_VLESS_CANARY_BIND.parse().unwrap()
         );
-        assert_eq!(cli.config.mesh_proxy_url, None);
         assert!(!cli.config.endpoint_probe_skip_self_test);
         assert_eq!(cli.config.quota_poll_interval_secs, 10);
         assert!(cli.config.quota_auto_unban);

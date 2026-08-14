@@ -42,17 +42,198 @@ fn segment(
     records: Vec<SyncRecord>,
     previous: Option<[u8; 32]>,
 ) -> SignedSegment {
+    segment_at(signing_key, sequence, records, previous, 10, 11)
+}
+
+fn segment_at(
+    signing_key: &SigningKey,
+    sequence: u64,
+    records: Vec<SyncRecord>,
+    previous: Option<[u8; 32]>,
+    opened_at_unix_seconds: u64,
+    closed_at_unix_seconds: u64,
+) -> SignedSegment {
     CanonicalSegment::new(
         "cluster-a",
         Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
         records,
         previous,
-        10,
-        11,
+        opened_at_unix_seconds,
+        closed_at_unix_seconds,
     )
     .expect("segment")
     .sign(signing_key)
     .expect("signature")
+}
+
+#[test]
+fn two_repositories_repair_a_partition_to_the_same_segment_set() {
+    let first_repository = tempfile::tempdir().expect("first repository");
+    let second_repository = tempfile::tempdir().expect("second repository");
+    let key = signing_key();
+    let identity = identity(&key);
+    let segment = segment(&key, 0, vec![record(b"partitioned", false)], None);
+    let wire = segment.wire_bytes().expect("wire");
+    let ready = vec!["repo-a".to_owned(), "repo-b".to_owned()];
+    let mut primary = load(first_repository.path());
+    let mut standby = load(second_repository.path());
+    primary
+        .receive_wire_from_repository("cluster-a", &identity, &wire, 11, &ready, "repo-a")
+        .expect("primary accepts source segment");
+
+    let missing = standby
+        .missing_segment_ids(&primary.replication_summary())
+        .expect("partition summary repair");
+    let repair = primary
+        .repair_batch(&missing)
+        .expect("bounded repair batch");
+    for segment in repair.segments {
+        standby
+            .receive_wire_from_repository(
+                "cluster-a",
+                &segment.identity,
+                &segment.wire,
+                12,
+                &ready,
+                "repo-b",
+            )
+            .expect("standby applies repaired segment");
+    }
+    assert!(
+        standby
+            .missing_segment_ids(&primary.replication_summary())
+            .expect("converged summary")
+            .is_empty()
+    );
+}
+
+#[test]
+fn tombstone_expiry_waits_for_every_ready_repository_after_restart() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let ready = vec!["repo-a".to_owned(), "repo-b".to_owned()];
+    let tombstone = segment(&key, 0, vec![record(b"dead", true)], None);
+    let tombstone_hash = tombstone.segment_hash().expect("hash");
+    let mut runtime = load(temporary.path());
+    let receipt = runtime
+        .receive_wire_from_repository(
+            "cluster-a",
+            &identity,
+            &tombstone.wire_bytes().expect("wire"),
+            100,
+            &ready,
+            "repo-a",
+        )
+        .expect("tombstone");
+    let mut remote_acknowledgement = receipt.tombstone_acknowledgements()[0].clone();
+    remote_acknowledgement.repository_id = "repo-b".to_owned();
+
+    let mut restored = load(temporary.path());
+    let keep = segment(&key, 1, vec![record(b"other", false)], Some(tombstone_hash));
+    let keep_hash = keep.segment_hash().expect("hash");
+    restored
+        .receive_wire_from_repository(
+            "cluster-a",
+            &identity,
+            &keep.wire_bytes().expect("wire"),
+            100 + TOMBSTONE_HORIZON_SECONDS,
+            &ready,
+            "repo-a",
+        )
+        .expect("unacknowledged tombstone remains durable");
+    restored
+        .acknowledge_tombstones(&[remote_acknowledgement])
+        .expect("second ready repository acknowledgement");
+    let replacement = segment(&key, 2, vec![record(b"dead", false)], Some(keep_hash));
+    restored
+        .receive_wire_from_repository(
+            "cluster-a",
+            &identity,
+            &replacement.wire_bytes().expect("wire"),
+            100 + TOMBSTONE_HORIZON_SECONDS + 1,
+            &ready,
+            "repo-a",
+        )
+        .expect("all-ready acknowledgement permits expiry and replacement");
+}
+
+#[test]
+fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let observed_at = 1_000_u64;
+    let now = observed_at + 7 * 24 * 60 * 60 + 1;
+    let ip = b"192.0.2.99";
+    let record = SyncRecord::new(
+        "subject-a",
+        "node-a",
+        "ip_usage.v1",
+        1,
+        ip.to_vec(),
+        ip.to_vec(),
+        false,
+    );
+    let segment = segment_at(&key, 0, vec![record], None, observed_at, observed_at);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &segment.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("repository accepts old IP history");
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query aggregate");
+    assert_eq!(response.records.len(), 1);
+    assert_ne!(response.records[0].record_key, ip);
+    let payload = String::from_utf8(response.records[0].payload.clone()).expect("JSON aggregate");
+    assert!(payload.contains("anonymized_identifier"));
+    assert!(!payload.contains("192.0.2.99"));
+}
+
+#[test]
+fn dynamic_relay_keys_and_hourly_attempt_gate_survive_repository_restart() {
+    let first = tempfile::tempdir().expect("first repository");
+    let second = tempfile::tempdir().expect("second repository");
+    let mut sender = load(first.path());
+    let mut recipient = load(second.path());
+    sender.snapshot.cluster_id = Some("cluster-a".to_owned());
+    recipient.snapshot.cluster_id = Some("cluster-a".to_owned());
+    let sender_key = sender.relay_keypair().expect("sender relay key");
+    let recipient_key = recipient.relay_keypair().expect("recipient relay key");
+    assert!(
+        sender
+            .begin_dynamic_relay_attempt(10_000)
+            .expect("first relay attempt is due")
+    );
+    assert!(
+        !sender
+            .begin_dynamic_relay_attempt(10_001)
+            .expect("relay attempt is rate limited")
+    );
+
+    let frame = crate::history_sync::RelayFrame::seal(
+        sender_key,
+        recipient_key.public_key(),
+        [9; 12],
+        b"bounded repair batch",
+        b"repo-b",
+    )
+    .expect("seal frame");
+    let mut restored = load(second.path());
+    let restored_key = restored.relay_keypair().expect("restored relay key");
+    assert_eq!(
+        frame.open(restored_key, b"repo-b").expect("open frame"),
+        b"bounded repair batch"
+    );
 }
 
 fn load(path: &std::path::Path) -> RepositoryReplicaRuntime {

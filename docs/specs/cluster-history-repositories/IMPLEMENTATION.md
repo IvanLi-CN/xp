@@ -4,22 +4,28 @@
 
 ## Current Status
 
-- Implementation: bootstrap contract created; runtime work in progress
+- Implementation: Wave 4 replica runtime and bounded internal API are active
 - Lifecycle: active
 - Catalog note: Initiative #248; five serialized Tickets
 
 ## Coverage / rollout summary
 
-- SQLite storage and JSON migration: planned for Wave 1.
-- Repository control plane and node identity: planned for Wave 2.
-- Incremental sync transport and path selection: planned for Wave 3.
-- Replica, retention and query selection: planned for Wave 4.
-- Admin/Web integration and deployment validation: planned for Wave 5.
+- SQLite storage and JSON migration: provided by the prior Waves.
+- Repository control plane and node identity: persisted with the Raft desired state.
+- Incremental sync transport and path selection: accepted signed segment state is restored from the
+  repository SQLite boundary; worker synchronization uses only peer-direct Reality Mesh and
+  Cloudflare Tunnel paths.
+- Replica, retention and query selection: ready repositories run bounded five-minute repair and
+  daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
+  restart, retain source segment repair state, transform older repository history into aggregates,
+  anonymize IP identifiers after seven days, and select the healthiest most complete ready response.
+- The proxy configuration, proxy client, proxy listener, proxy status, and compatibility path were
+  removed. The dynamic relay contract remains separate from peer-direct transport and does not
+  persist relay frames.
 
 ## Remaining Gaps
 
-- Runtime modules, migrations, Protobuf definitions, HTTP routes, Web views,
-  and deployment tests are not yet implemented.
+- Repository membership administration and deployment rollout validation remain Wave 5 work.
 
 ## Related Changes
 

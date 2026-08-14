@@ -30,7 +30,7 @@ impl std::fmt::Display for QueryError {
 
 impl std::error::Error for QueryError {}
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct QueryRange {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
@@ -108,7 +108,7 @@ impl HistoryQuery {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct QueryCoverage {
     observed: QueryRange,
     received: QueryRange,
@@ -128,7 +128,7 @@ impl QueryCoverage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct StreamWatermark {
     source_node_id: String,
     source_epoch: u64,
@@ -172,7 +172,7 @@ impl StreamWatermark {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct QueryGap {
     range: QueryRange,
     permanent: bool,
@@ -308,7 +308,7 @@ pub(crate) enum Completeness {
     LocalOnly,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct QueryPlan {
     #[serde(rename = "repository")]
     repository_id: Option<String>,

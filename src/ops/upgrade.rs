@@ -874,12 +874,11 @@ fn preserve_control_plane_listeners(
 
     if let Some(existing_raw) = existing_config
         && let Ok(existing) = serde_json::from_str::<serde_json::Value>(existing_raw)
+        && read_xray_api_addr(paths).is_none()
     {
-        if read_xray_api_addr(paths).is_none() {
-            changed |= replace_inbound_by_tag(&mut current, &existing, "api");
-        }
-        changed |= replace_inbound_by_tag(&mut current, &existing, "mesh-proxy");
+        changed |= replace_inbound_by_tag(&mut current, &existing, "api");
     }
+    changed |= remove_inbound_and_rules_by_tag(&mut current, "mesh-proxy");
 
     if !changed {
         return Ok(());
@@ -950,6 +949,33 @@ fn replace_inbound_by_tag(
     }
     *current_inbound = existing_inbound;
     true
+}
+
+fn remove_inbound_and_rules_by_tag(config: &mut serde_json::Value, tag: &str) -> bool {
+    let mut changed = false;
+    if let Some(inbounds) = config
+        .get_mut("inbounds")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        let before = inbounds.len();
+        inbounds.retain(|inbound| inbound_tag(inbound) != Some(tag));
+        changed |= inbounds.len() != before;
+    }
+    if let Some(rules) = config
+        .get_mut("routing")
+        .and_then(|routing| routing.get_mut("rules"))
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        let before = rules.len();
+        rules.retain(|rule| {
+            !rule
+                .get("inboundTag")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tags| tags.iter().any(|value| value.as_str() == Some(tag)))
+        });
+        changed |= rules.len() != before;
+    }
+    changed
 }
 
 fn inbound_tag(inbound: &serde_json::Value) -> Option<&str> {

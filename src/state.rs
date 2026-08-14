@@ -23,6 +23,7 @@ use crate::{
     },
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
+        control::RepositoryMembership,
     },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
@@ -327,6 +328,9 @@ pub struct PersistedState {
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
     #[serde(default)]
     pub mihomo_delivery_mode: MihomoDeliveryMode,
+    /// Raft-managed repository membership. Local replicas never infer ready peers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_membership: Option<RepositoryMembership>,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
@@ -354,6 +358,7 @@ impl PersistedState {
             user_auto_assign_endpoint_kinds: BTreeMap::new(),
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
+            repository_membership: None,
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
@@ -1937,6 +1942,9 @@ pub enum DesiredStateCommand {
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
+    },
 }
 
 // ---- WAL backward compatibility ----
@@ -2077,6 +2085,9 @@ enum DesiredStateCommandCompat {
         hour: String,
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
+    },
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
     },
 
     // Legacy grants commands (schema <= 9).
@@ -2232,6 +2243,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 from_node_id,
                 samples,
             },
+            DesiredStateCommandCompat::ReplaceRepositoryMembership { membership } => {
+                Self::ReplaceRepositoryMembership { membership }
+            }
 
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
                 // Map legacy grants hard-cut to membership-only access list.
@@ -3169,6 +3183,19 @@ impl DesiredStateCommand {
                     prune_endpoint_probe_hour_map(&mut history.hours);
                 }
 
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::ReplaceRepositoryMembership { membership } => {
+                for member in membership.members() {
+                    let node_id = member.node_id().as_str();
+                    if !state.nodes.contains_key(node_id) {
+                        return Err(DomainError::MissingNode {
+                            node_id: node_id.to_owned(),
+                        }
+                        .into());
+                    }
+                }
+                state.repository_membership = Some(membership.clone());
                 Ok(DesiredStateApplyResult::Applied)
             }
         }

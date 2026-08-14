@@ -479,6 +479,30 @@ impl TombstoneLedger {
         expired
     }
 
+    pub(crate) fn reconcile_ready_repositories(
+        &mut self,
+        ready_repositories: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<(), ReplicaError> {
+        let mut current = BTreeSet::new();
+        for repository in ready_repositories {
+            let repository = repository.as_ref();
+            validate_identifier(repository)?;
+            if current.len() == MAX_TOMBSTONE_READY_REPOSITORIES && !current.contains(repository) {
+                return Err(ReplicaError::RepositoryBacklogFull);
+            }
+            current.insert(repository.to_owned());
+        }
+        for state in self.entries.values_mut() {
+            state
+                .ready_repositories
+                .retain(|repository| current.contains(repository));
+            state
+                .acknowledgements
+                .retain(|repository| current.contains(repository));
+        }
+        Ok(())
+    }
+
     pub(crate) fn checkpoint(&self) -> TombstoneLedgerCheckpoint {
         TombstoneLedgerCheckpoint {
             horizon_seconds: self.horizon_seconds,

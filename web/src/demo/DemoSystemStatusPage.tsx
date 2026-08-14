@@ -47,8 +47,6 @@ export const demoMeshStatus: AdminMeshStatus = {
 		role: "leader",
 		leader_api_base_url: "https://tokyo-1.edge.example.net",
 		term: 42,
-		mesh_proxy_status: "ready",
-		mesh_proxy_reason: null,
 		canary: {
 			enabled: true,
 			bind: "127.0.0.1:39043",

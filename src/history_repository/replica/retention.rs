@@ -48,6 +48,10 @@ impl RepositoryRetentionPolicy {
         }
     }
 
+    pub(crate) fn keeps_minute_detail(self, age_seconds: u64) -> bool {
+        age_seconds <= self.minute_retention_seconds
+    }
+
     pub(crate) const fn repository_only(self) -> bool {
         true
     }

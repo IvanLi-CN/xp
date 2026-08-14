@@ -18,8 +18,6 @@ struct AdminMeshLocalStatus {
     role: String,
     leader_api_base_url: String,
     term: u64,
-    mesh_proxy_status: String,
-    mesh_proxy_reason: Option<String>,
     canary: crate::vless_https_canary::VlessHttpsCanaryStatus,
 }
 
@@ -289,7 +287,6 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             }
         })
         .collect();
-    let proxy = state.mesh_proxy_state.snapshot().await;
     let metrics = raft_metrics(state);
     AdminMeshStatusResponse {
         generated_at: telemetry.generated_at,
@@ -305,8 +302,6 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             },
             leader_api_base_url: leader_api_base_url(&metrics).unwrap_or_default(),
             term: metrics.current_term,
-            mesh_proxy_status: proxy.status.as_str().to_string(),
-            mesh_proxy_reason: proxy.fallback_reason,
             canary: crate::vless_https_canary::load_status(
                 &state.config.data_dir,
                 state.config.vless_canary_bind,
@@ -433,8 +428,6 @@ mod tests {
                     role: "leader".to_string(),
                     leader_api_base_url: "https://local.example.test".to_string(),
                     term: 3,
-                    mesh_proxy_status: "disabled".to_string(),
-                    mesh_proxy_reason: None,
                     canary: crate::vless_https_canary::VlessHttpsCanaryStatus::disabled(
                         std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
                     ),

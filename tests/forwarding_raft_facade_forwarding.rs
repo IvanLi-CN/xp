@@ -340,7 +340,6 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: xp::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -398,18 +397,13 @@ async fn forwarding_raft_facade_client_write_forwards_to_leader() -> anyhow::Res
         raft_facade,
         None,
         geo_db_update,
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let admin_server = spawn_server(admin_listener, router)
         .await
         .context("spawn admin server")?;
 
-    let mesh_client = xp::control_plane_mesh::MeshAwareHttpClient::new(
-        reqwest::Client::new(),
-        None,
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
-    );
+    let mesh_client = xp::control_plane_mesh::MeshAwareHttpClient::new(reqwest::Client::new());
     let forwarding = ForwardingRaftFacade::try_new(
         follower.raft(),
         mesh_client,

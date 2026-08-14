@@ -252,7 +252,7 @@ async fn mesh_requests_reuse_one_tls_connection_for_sequential_and_parallel_load
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
         .expect("Mesh telemetry");
-    let factory = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
+    let factory = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory");
     let client = factory
         .mesh_client()
@@ -325,7 +325,7 @@ async fn mesh_request_reconnects_once_after_the_active_connection_is_cut() {
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
         .expect("Mesh telemetry");
-    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
+    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory")
         .mesh_client()
         .with_mesh_observability(telemetry.clone());
@@ -371,8 +371,6 @@ async fn mesh_pool_discards_idle_connections_after_the_policy_timeout() {
         &ca.cert_pem,
         &node_cert,
         &csr.key_pem,
-        None,
-        MeshProxyStateHandle::disabled(),
         crate::control_plane_mesh::MeshTransportPolicy {
             pool_idle_timeout: std::time::Duration::from_millis(50),
         },
@@ -414,7 +412,7 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
         .expect("Mesh telemetry");
-    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
+    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory")
         .mesh_client()
         .with_mesh_observability(telemetry.clone());
@@ -453,7 +451,7 @@ async fn invalid_h2_ack_never_downgrades_to_public_transport() {
     )
     .expect("node certificate");
     let server = spawn_counting_tls_server(&ca.key_pem, &ca.cert_pem).await;
-    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
+    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory")
         .mesh_client();
     let target = mesh_target(server.addr);
@@ -489,7 +487,7 @@ async fn long_lived_stream_and_large_request_share_one_h2_connection() {
     let telemetry_dir = tempfile::tempdir().expect("telemetry directory");
     let telemetry = crate::mesh_telemetry::MeshTelemetryHandle::load(telemetry_dir.path())
         .expect("Mesh telemetry");
-    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem, None)
+    let client = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &node_cert, &csr.key_pem)
         .expect("network factory")
         .mesh_client()
         .with_mesh_observability(telemetry.clone());
