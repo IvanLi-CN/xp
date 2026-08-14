@@ -63,15 +63,26 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .take(MAX_REPOSITORY_PEERS_PER_CYCLE)
     {
-        match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
-            Ok(()) => synchronized = true,
+        let collects_source = state.repository_replica.lock().await.collects_source(
+            &peer.node_id,
+            &ready_repository_ids,
+            &state.cluster.node_id,
+        )?;
+        if !collects_source {
+            continue;
+        }
+        let succeeded = match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
+            Ok(()) => {
+                synchronized = true;
+                true
+            }
             Err(error) => {
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
                     "history repository peer replication failed"
                 );
-                if let Err(relay_error) = replicate_peer_via_dynamic_relay(
+                match replicate_peer_via_dynamic_relay(
                     state,
                     peer,
                     &peers,
@@ -80,16 +91,31 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                 )
                 .await
                 {
-                    tracing::debug!(
-                        peer = %peer.node_id,
-                        error = %relay_error,
-                        "history repository dynamic relay was unavailable"
-                    );
-                } else {
-                    synchronized = true;
+                    Err(relay_error) => {
+                        tracing::debug!(
+                            peer = %peer.node_id,
+                            error = %relay_error,
+                            "history repository dynamic relay was unavailable"
+                        );
+                        false
+                    }
+                    Ok(()) => {
+                        synchronized = true;
+                        true
+                    }
                 }
             }
-        }
+        };
+        state
+            .repository_replica
+            .lock()
+            .await
+            .record_collection_cycle(
+                &peer.node_id,
+                &ready_repository_ids,
+                &state.cluster.node_id,
+                succeeded,
+            )?;
     }
     if synchronized || peers.len() == 1 {
         state
@@ -134,6 +160,7 @@ async fn replicate_peer_via_dynamic_relay(
     let body = serde_json::to_vec(&RepositoryRelayRequest {
         target_repository_id: target.node_id.clone(),
         source_repository_id: state.cluster.node_id.clone(),
+        relay_repository_id: None,
         frame,
     })?;
     repository_direct_request::<serde_json::Value>(
@@ -147,7 +174,10 @@ async fn replicate_peer_via_dynamic_relay(
     Ok(())
 }
 
-async fn ready_relay_public_key(state: &AppState, node_id: &str) -> anyhow::Result<[u8; 32]> {
+pub(super) async fn ready_relay_public_key(
+    state: &AppState,
+    node_id: &str,
+) -> anyhow::Result<[u8; 32]> {
     let node_id = RepositoryNodeId::try_from(node_id.to_owned())?;
     let store = state.store.lock().await;
     let membership = store
@@ -216,7 +246,7 @@ async fn replicate_peer(
     propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements).await
 }
 
-async fn propagate_tombstone_acknowledgements(
+pub(super) async fn propagate_tombstone_acknowledgements(
     state: &AppState,
     ready_repository_ids: &[String],
     acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,

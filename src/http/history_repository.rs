@@ -57,6 +57,8 @@ pub(super) struct RepositoryTombstoneAcknowledgementRequest {
 pub(super) struct RepositoryRelayRequest {
     target_repository_id: String,
     source_repository_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    relay_repository_id: Option<String>,
     frame: crate::history_sync::RelayFrame,
 }
 
@@ -191,6 +193,11 @@ pub(super) async fn admin_internal_forward_history_repository_relay(
             "relay source does not match the authenticated sender",
         ));
     }
+    if request.relay_repository_id.is_some() {
+        return Err(ApiError::invalid_request(
+            "nested repository relay is not supported",
+        ));
+    }
     let (_, peers) = worker::ready_repository_peers(&state)
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -198,8 +205,13 @@ pub(super) async fn admin_internal_forward_history_repository_relay(
         .iter()
         .find(|peer| peer.node_id == request.target_repository_id)
         .ok_or_else(|| ApiError::invalid_request("relay target is not a ready repository"))?;
-    let body =
-        serde_json::to_vec(&request).map_err(|error| ApiError::internal(error.to_string()))?;
+    let body = serde_json::to_vec(&RepositoryRelayRequest {
+        target_repository_id: request.target_repository_id,
+        source_repository_id: request.source_repository_id,
+        relay_repository_id: Some(state.cluster.node_id.clone()),
+        frame: request.frame,
+    })
+    .map_err(|error| ApiError::internal(error.to_string()))?;
     worker::repository_direct_request::<serde_json::Value>(
         &state,
         target,
@@ -218,9 +230,9 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     ApiJson(request): ApiJson<RepositoryRelayRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let sender = ensure_ready_repository_sender(&state, internal).await?;
-    if request.source_repository_id != sender {
+    if request.relay_repository_id.as_deref() != Some(sender.as_str()) {
         return Err(ApiError::unauthorized(
-            "relay source does not match the authenticated sender",
+            "relay forwarding identity does not match the authenticated sender",
         ));
     }
     if request.target_repository_id != state.cluster.node_id {
@@ -235,6 +247,14 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     {
         return Err(ApiError::unauthorized("relay source is not ready"));
     }
+    let source_public_key = worker::ready_relay_public_key(&state, &request.source_repository_id)
+        .await
+        .map_err(|error| ApiError::unauthorized(error.to_string()))?;
+    if request.frame.sender_public_key() != source_public_key {
+        return Err(ApiError::unauthorized(
+            "relay frame sender does not match the claimed repository source",
+        ));
+    }
     let batch = {
         let mut runtime = state.repository_replica.lock().await;
         let keypair = runtime.relay_keypair().map_err(repository_error)?;
@@ -245,8 +265,14 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
         serde_json::from_slice::<RepositoryRepairBatch>(&plaintext)
             .map_err(|_| ApiError::invalid_request("relay payload is malformed"))?
     };
+    let mut acknowledgements = Vec::new();
     for segment in batch.segments {
-        state
+        if segment.identity.node_id().as_str() != request.source_repository_id {
+            return Err(ApiError::unauthorized(
+                "relay segment identity does not match the claimed repository source",
+            ));
+        }
+        let receipt = state
             .repository_replica
             .lock()
             .await
@@ -259,7 +285,11 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
                 &state.cluster.node_id,
             )
             .map_err(repository_error)?;
+        acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
     }
+    worker::propagate_tombstone_acknowledgements(&state, &ready_repository_ids, acknowledgements)
+        .await
+        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(Json(serde_json::json!({})))
 }
 

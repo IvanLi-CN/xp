@@ -7,7 +7,9 @@ use crate::history_sync::MAX_RESPONSE_WIRE_BYTES;
 use super::{
     RepositoryReplicaRuntime, RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
 };
-use crate::state::history_repository::replica::{AntiEntropySchedule, ReplicaError, ReplicaWork};
+use crate::state::history_repository::replica::{
+    AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaWork, rendezvous_collectors,
+};
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
 
@@ -32,7 +34,7 @@ pub(crate) struct RepositoryPartitionSummary {
     record_count: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaGap {
     pub(crate) source_node_id: String,
     pub(crate) source_epoch: u64,
@@ -95,6 +97,36 @@ impl RepositoryReplicaRuntime {
         self.persist_control_state()
     }
 
+    pub(crate) fn collects_source(
+        &self,
+        source_node_id: &str,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let assignment = rendezvous_collectors(source_node_id, ready_repositories)?;
+        let selector =
+            CollectorSelector::from_failure_cycles(self.snapshot.collector_failure_cycles.clone());
+        Ok(selector.select(source_node_id, &assignment)? == local_repository_id)
+    }
+
+    pub(crate) fn record_collection_cycle(
+        &mut self,
+        source_node_id: &str,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+        succeeded: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let assignment = rendezvous_collectors(source_node_id, ready_repositories)?;
+        if assignment.primary() != local_repository_id {
+            return Ok(());
+        }
+        let mut selector =
+            CollectorSelector::from_failure_cycles(self.snapshot.collector_failure_cycles.clone());
+        selector.record_primary_cycle(source_node_id, succeeded)?;
+        self.snapshot.collector_failure_cycles = selector.failure_cycles().clone();
+        self.persist_control_state()
+    }
+
     pub(crate) fn replication_summary(
         &self,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
@@ -127,13 +159,22 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        let converged = if deep_verification {
+        let gaps_converged = self
+            .snapshot
+            .gaps
+            .iter()
+            .map(gap_summary)
+            .eq(remote.gaps.iter().cloned());
+        let converged = (if deep_verification {
             self.partition_summaries()? == remote.partitions
         } else {
             local_ids == remote_ids
-        };
+        }) && gaps_converged;
         if converged {
             return Ok(Vec::new());
+        }
+        if local_ids == remote_ids {
+            return Err(RepositoryRuntimeError::Replica(ReplicaError::InvalidRange));
         }
         Ok(remote
             .segment_ids

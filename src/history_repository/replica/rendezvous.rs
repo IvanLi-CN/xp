@@ -64,6 +64,16 @@ pub(crate) struct CollectorSelector {
 }
 
 impl CollectorSelector {
+    pub(crate) fn from_failure_cycles(failed_primary_cycles: BTreeMap<String, u8>) -> Self {
+        Self {
+            failed_primary_cycles,
+        }
+    }
+
+    pub(crate) fn failure_cycles(&self) -> &BTreeMap<String, u8> {
+        &self.failed_primary_cycles
+    }
+
     pub(crate) fn select<'a>(
         &self,
         source_node_id: &str,

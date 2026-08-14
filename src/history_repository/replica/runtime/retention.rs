@@ -26,7 +26,8 @@ pub(super) fn prune_records(
             continue;
         };
         let preserves_minute_detail = policy.keeps_minute_detail(age);
-        let bucket = RetentionBucket::for_record(&record, resolution, preserves_minute_detail);
+        let bucket =
+            RetentionBucket::for_record(&record, resolution, preserves_minute_detail, cluster_id);
         match retained.entry(bucket) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 if preserves_minute_detail {
@@ -70,6 +71,7 @@ impl RetentionBucket {
         record: &StoredRecord,
         resolution: super::super::RetentionResolution,
         preserves_minute_detail: bool,
+        cluster_id: Option<&str>,
     ) -> Self {
         let seconds = match resolution {
             super::super::RetentionResolution::Minute => 60,
@@ -80,17 +82,19 @@ impl RetentionBucket {
             record,
             record.observed_at_unix_seconds / seconds * seconds,
             preserves_minute_detail,
+            cluster_id,
         )
     }
 
     fn tombstone(record: &StoredRecord) -> Self {
-        Self::with_bucket(record, record.observed_at_unix_seconds, true)
+        Self::with_bucket(record, record.observed_at_unix_seconds, true, None)
     }
 
     fn with_bucket(
         record: &StoredRecord,
         bucket_start: u64,
         preserves_minute_detail: bool,
+        cluster_id: Option<&str>,
     ) -> Self {
         Self {
             source_node_id: record.source_node_id.clone(),
@@ -100,10 +104,28 @@ impl RetentionBucket {
             observer_node_id: record.observer_node_id.clone(),
             schema_id: record.schema_id.clone(),
             schema_version: record.schema_version,
-            record_key: preserves_minute_detail.then(|| record.record_key.clone()),
+            record_key: retention_identifier(record, preserves_minute_detail, cluster_id),
             bucket_start,
         }
     }
+}
+
+fn retention_identifier(
+    record: &StoredRecord,
+    preserves_minute_detail: bool,
+    cluster_id: Option<&str>,
+) -> Option<Vec<u8>> {
+    if preserves_minute_detail {
+        return Some(record.record_key.clone());
+    }
+    (record.schema_id == "ip_usage.v1").then(|| {
+        aggregate_contribution(record)
+            .anonymized_identifier
+            .unwrap_or_else(|| {
+                anonymized_identifier(cluster_id, &record.subject_node_id, &record.record_key)
+            })
+            .into_bytes()
+    })
 }
 
 enum RetainedRecord {

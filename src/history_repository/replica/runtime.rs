@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -192,6 +194,8 @@ struct RepositoryReplicaSnapshot {
     relay_private_key: Option<[u8; 32]>,
     #[serde(default)]
     last_dynamic_relay_attempt_unix_seconds: Option<u64>,
+    #[serde(default)]
+    collector_failure_cycles: BTreeMap<String, u8>,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -209,6 +213,7 @@ impl Default for RepositoryReplicaSnapshot {
             last_deep_verification_unix_seconds: None,
             relay_private_key: None,
             last_dynamic_relay_attempt_unix_seconds: None,
+            collector_failure_cycles: BTreeMap::new(),
         }
     }
 }

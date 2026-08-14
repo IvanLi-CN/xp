@@ -200,6 +200,117 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
 }
 
 #[test]
+fn repository_retention_keeps_distinct_anonymized_ip_aggregates() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let observed_at = 1_000_u64;
+    let now = observed_at + 7 * 24 * 60 * 60 + 2;
+    let ip_records = [b"192.0.2.10".to_vec(), b"192.0.2.11".to_vec()]
+        .into_iter()
+        .map(|ip| {
+            SyncRecord::new(
+                "subject-a",
+                "node-a",
+                "ip_usage.v1",
+                1,
+                ip.clone(),
+                ip,
+                false,
+            )
+        })
+        .collect();
+    let segment = segment_at(&key, 0, ip_records, None, observed_at, observed_at);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &segment.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("repository accepts IP history");
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query aggregates");
+    assert_eq!(response.records.len(), 2);
+    let identifiers = response
+        .records
+        .iter()
+        .map(|record| {
+            serde_json::from_slice::<serde_json::Value>(&record.payload)
+                .expect("aggregate JSON")["anonymized_identifier"]
+                .as_str()
+                .expect("anonymized identifier")
+                .to_owned()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(identifiers.len(), 2);
+}
+
+#[test]
+fn replica_repair_does_not_converge_when_gap_metadata_differs() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let segment = segment(&key, 0, vec![record(b"one", false)], None);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &segment.wire_bytes().expect("wire"),
+            11,
+        )
+        .expect("segment");
+    let mut remote = runtime.replication_summary().expect("summary");
+    remote.gaps.push(super::sync::RepositoryReplicaGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_sequence: 0,
+        last_sequence: 0,
+        start_unix_seconds: 10,
+        end_unix_seconds: 11,
+        permanent: true,
+    });
+    assert!(runtime.missing_segment_ids(&remote, true).is_err());
+}
+
+#[test]
+fn rendezvous_collector_failover_is_persisted_after_three_primary_cycles() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let ready = vec![
+        "repository-a".to_owned(),
+        "repository-b".to_owned(),
+        "repository-c".to_owned(),
+    ];
+    let assignment = super::super::rendezvous_collectors("source-a", &ready).expect("assignment");
+    let standby = assignment.standby().expect("standby").to_owned();
+    let mut runtime = load(temporary.path());
+    assert!(
+        runtime
+            .collects_source("source-a", &ready, assignment.primary())
+            .expect("primary collector")
+    );
+    for _ in 0..3 {
+        runtime
+            .record_collection_cycle("source-a", &ready, assignment.primary(), false)
+            .expect("record primary failure");
+    }
+    let restored = load(temporary.path());
+    assert!(
+        restored
+            .collects_source("source-a", &ready, &standby)
+            .expect("standby collector")
+    );
+}
+
+#[test]
 fn repository_retention_preserves_aggregate_counts_across_prune_cycles() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
