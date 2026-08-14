@@ -1,12 +1,10 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::{
     history_sync::{
-        Acceptance, Cursor, ProtocolError, SchemaCatalog, SegmentReceiver,
-        SegmentReceiverCheckpoint, SignedSegment, SyncRecord,
+        Acceptance, Cursor, ProtocolError, SegmentReceiver, SegmentReceiverCheckpoint,
+        SignedSegment, SyncRecord,
     },
     state::{
         history_repository::identity::RepositoryNodeIdentity,
@@ -15,7 +13,7 @@ use crate::{
             control::{HistoryWriteAvailability, RepositoryCapacity},
             query::{
                 HistoryQuery, QueryCandidate, QueryCoverage, QueryError, QueryGap, QueryPlan,
-                QueryRange, QuerySelector, StreamWatermark,
+                QueryRange, QuerySelector,
             },
         },
         history_storage::REPOSITORY_REPLICA_KEY,
@@ -726,48 +724,12 @@ impl RepositoryReplicaRuntime {
     }
 
     fn prune_retention(&mut self, now_unix_seconds: u64) {
-        let policy = super::RepositoryRetentionPolicy::default();
-        let mut retained = BTreeMap::<RetentionBucket, RetainedRecord>::new();
-        for record in self.snapshot.records.drain(..) {
-            if record.tombstone {
-                retained.insert(
-                    RetentionBucket::tombstone(&record),
-                    RetainedRecord::Raw(record),
-                );
-                continue;
-            }
-            let age = now_unix_seconds.saturating_sub(record.observed_at_unix_seconds);
-            let Some(resolution) = policy.resolution_for_age(age) else {
-                continue;
-            };
-            let preserves_minute_detail = policy.keeps_minute_detail(age);
-            let bucket = RetentionBucket::for_record(&record, resolution, preserves_minute_detail);
-            match retained.entry(bucket) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    if preserves_minute_detail {
-                        entry.insert(RetainedRecord::Raw(record));
-                    } else {
-                        entry.insert(RetainedRecord::Aggregate(RetentionAggregate::from_record(
-                            record,
-                            resolution,
-                            self.snapshot.cluster_id.as_deref(),
-                        )));
-                    }
-                }
-                std::collections::btree_map::Entry::Occupied(mut entry) => match entry.get_mut() {
-                    RetainedRecord::Raw(existing) => {
-                        if record.sequence >= existing.sequence {
-                            *existing = record;
-                        }
-                    }
-                    RetainedRecord::Aggregate(aggregate) => aggregate.add(record),
-                },
-            }
-        }
-        self.snapshot.records = retained
-            .into_values()
-            .map(RetainedRecord::into_stored_record)
-            .collect();
+        retention::prune_records(
+            &mut self.snapshot.records,
+            &self.snapshot.gaps,
+            now_unix_seconds,
+            self.snapshot.cluster_id.as_deref(),
+        );
     }
 
     fn repository_coverage(&self) -> Option<QueryCoverage> {
@@ -985,236 +947,10 @@ impl From<StoredRecord> for RepositoryHistoryRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct RetentionBucket {
-    source_node_id: String,
-    source_epoch: u64,
-    stream: String,
-    subject_node_id: String,
-    observer_node_id: String,
-    schema_id: String,
-    schema_version: u32,
-    record_key: Option<Vec<u8>>,
-    bucket_start: u64,
-}
-
-impl RetentionBucket {
-    fn for_record(
-        record: &StoredRecord,
-        resolution: super::RetentionResolution,
-        preserves_minute_detail: bool,
-    ) -> Self {
-        let seconds = match resolution {
-            super::RetentionResolution::Minute => 60,
-            super::RetentionResolution::FiveMinutes => 5 * 60,
-            super::RetentionResolution::Hour => 60 * 60,
-        };
-        Self::with_bucket(
-            record,
-            record.observed_at_unix_seconds / seconds * seconds,
-            preserves_minute_detail,
-        )
-    }
-
-    fn tombstone(record: &StoredRecord) -> Self {
-        Self::with_bucket(record, record.observed_at_unix_seconds, true)
-    }
-
-    fn with_bucket(
-        record: &StoredRecord,
-        bucket_start: u64,
-        preserves_minute_detail: bool,
-    ) -> Self {
-        Self {
-            source_node_id: record.source_node_id.clone(),
-            source_epoch: record.source_epoch,
-            stream: record.stream.clone(),
-            subject_node_id: record.subject_node_id.clone(),
-            observer_node_id: record.observer_node_id.clone(),
-            schema_id: record.schema_id.clone(),
-            schema_version: record.schema_version,
-            record_key: preserves_minute_detail.then(|| record.record_key.clone()),
-            bucket_start,
-        }
-    }
-}
-
-enum RetainedRecord {
-    Raw(StoredRecord),
-    Aggregate(RetentionAggregate),
-}
-
-impl RetainedRecord {
-    fn into_stored_record(self) -> StoredRecord {
-        match self {
-            Self::Raw(record) => record,
-            Self::Aggregate(aggregate) => aggregate.into_stored_record(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct RetentionAggregatePayload {
-    algorithm: &'static str,
-    resolution: &'static str,
-    record_count: u64,
-    first_sequence: u64,
-    last_sequence: u64,
-    payload_sha256: String,
-    complete: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    anonymized_identifier: Option<String>,
-}
-
-struct RetentionAggregate {
-    first: StoredRecord,
-    resolution: super::RetentionResolution,
-    cluster_id: Option<String>,
-    record_count: u64,
-    first_sequence: u64,
-    last_sequence: u64,
-    payload_hasher: Sha256,
-}
-
-impl RetentionAggregate {
-    fn from_record(
-        record: StoredRecord,
-        resolution: super::RetentionResolution,
-        cluster_id: Option<&str>,
-    ) -> Self {
-        let mut payload_hasher = Sha256::new();
-        payload_hasher.update(&record.payload);
-        payload_hasher.update(&record.record_key);
-        Self {
-            first_sequence: record.sequence,
-            last_sequence: record.sequence,
-            first: record,
-            resolution,
-            cluster_id: cluster_id.map(ToOwned::to_owned),
-            record_count: 1,
-            payload_hasher,
-        }
-    }
-
-    fn add(&mut self, record: StoredRecord) {
-        self.first_sequence = self.first_sequence.min(record.sequence);
-        self.last_sequence = self.last_sequence.max(record.sequence);
-        self.record_count = self.record_count.saturating_add(1);
-        self.payload_hasher.update(&record.payload);
-        self.payload_hasher.update(&record.record_key);
-        if record.sequence >= self.first.sequence {
-            self.first = record;
-        }
-    }
-
-    fn into_stored_record(self) -> StoredRecord {
-        let mut record = self.first;
-        let resolution = match self.resolution {
-            super::RetentionResolution::Minute => "minute",
-            super::RetentionResolution::FiveMinutes => "five_minutes",
-            super::RetentionResolution::Hour => "hour",
-        };
-        let is_ip_history = record.schema_id == "ip_usage.v1";
-        let anonymized_identifier = is_ip_history.then(|| {
-            anonymized_identifier(
-                self.cluster_id.as_deref(),
-                &record.subject_node_id,
-                &record.record_key,
-            )
-        });
-        let payload = RetentionAggregatePayload {
-            algorithm: "sha256",
-            resolution,
-            record_count: self.record_count,
-            first_sequence: self.first_sequence,
-            last_sequence: self.last_sequence,
-            payload_sha256: hex::encode(self.payload_hasher.finalize()),
-            complete: true,
-            anonymized_identifier,
-        };
-        record.sequence = self.last_sequence;
-        record.record_key = aggregate_record_key(&record, resolution);
-        record.payload = serde_json::to_vec(&payload).expect("retention aggregate is serializable");
-        record
-    }
-}
-
-fn aggregate_record_key(record: &StoredRecord, resolution: &str) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(b"xp-history-repository-aggregate-v1\0");
-    hasher.update(record.source_node_id.as_bytes());
-    hasher.update(record.source_epoch.to_be_bytes());
-    hasher.update(record.stream.as_bytes());
-    hasher.update(record.schema_id.as_bytes());
-    hasher.update(resolution.as_bytes());
-    hasher.update(record.observed_at_unix_seconds.to_be_bytes());
-    hasher.finalize().to_vec()
-}
-
-fn anonymized_identifier(
-    cluster_id: Option<&str>,
-    subject_node_id: &str,
-    raw_identifier: &[u8],
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"xp-history-repository-ip-anonymization-v1\0");
-    hasher.update(cluster_id.unwrap_or_default().as_bytes());
-    hasher.update(subject_node_id.as_bytes());
-    hasher.update(raw_identifier);
-    hex::encode(hasher.finalize())
-}
-
-fn known_schemas() -> SchemaCatalog {
-    SchemaCatalog::new(
-        KNOWN_SCHEMAS
-            .iter()
-            .map(|(schema, version)| ((*schema).to_owned(), *version)),
-    )
-}
-
-fn is_known_schema(record: &SyncRecord) -> bool {
-    KNOWN_SCHEMAS.contains(&record.schema())
-}
-
-fn watermark_from_cursor(cursor: Cursor) -> Result<StreamWatermark, RepositoryRuntimeError> {
-    Ok(StreamWatermark::new(
-        cursor.source_node_id(),
-        cursor.source_epoch(),
-        cursor.stream(),
-        cursor.sequence(),
-    )?)
-}
-
-fn sync_receipt(
-    acceptance: Acceptance,
-    history_write_availability: HistoryWriteAvailability,
-    tombstone_acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
-) -> RepositorySyncReceipt {
-    let acknowledgement =
-        repository_watermark_from_cursor(acceptance.acknowledgement().watermark());
-    let gap = acceptance.gap().map(|gap| RepositoryGap {
-        requested: repository_watermark_from_cursor(gap.requested()),
-        earliest_available: repository_watermark_from_cursor(gap.earliest_available()),
-    });
-    RepositorySyncReceipt {
-        acknowledgement,
-        gap,
-        unknown_schema_records: acceptance.unknown_schema_records(),
-        history_write_availability,
-        tombstone_acknowledgements,
-    }
-}
-
-fn repository_watermark_from_cursor(cursor: &Cursor) -> RepositoryWatermark {
-    RepositoryWatermark {
-        source_node_id: cursor.source_node_id().to_owned(),
-        source_epoch: cursor.source_epoch(),
-        stream: cursor.stream().to_owned(),
-        sequence: cursor.sequence(),
-    }
-}
-
+mod helpers;
+mod retention;
 mod sync;
+use helpers::{is_known_schema, known_schemas, sync_receipt, watermark_from_cursor};
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSummary};
 
 #[cfg(test)]

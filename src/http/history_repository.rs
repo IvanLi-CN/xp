@@ -22,6 +22,10 @@ use crate::{
 
 const MAX_HISTORY_SYNC_BASE64_BYTES: usize = MAX_RESPONSE_WIRE_BYTES.div_ceil(3) * 4;
 const MAX_REPAIR_REQUEST_IDS: usize = 64;
+pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY: &str =
+    "/api/admin/_internal/history-repository/relay";
+pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER: &str =
+    "/api/admin/_internal/history-repository/relay-deliver";
 
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
@@ -67,6 +71,11 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
     let Some(verified) = internal.verified else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
+    if !repository_identity_matches_sender(&request.identity, &verified.context.sender_id) {
+        return Err(ApiError::unauthorized(
+            "repository segment identity does not match the authenticated sender",
+        ));
+    }
     let ready_repository_ids = ready_repository_ids(&state).await?;
     if !ready_repository_ids
         .iter()
@@ -100,14 +109,22 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
     Ok(Json(receipt))
 }
 
+fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_id: &str) -> bool {
+    identity.node_id().as_str() == sender_id
+}
+
 pub(super) async fn admin_internal_history_repository_summary(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
 ) -> Result<Json<RepositoryReplicaSummary>, ApiError> {
     ensure_ready_repository_sender(&state, internal).await?;
-    Ok(Json(
-        state.repository_replica.lock().await.replication_summary(),
-    ))
+    let summary = state
+        .repository_replica
+        .lock()
+        .await
+        .replication_summary()
+        .map_err(repository_error)?;
+    Ok(Json(summary))
 }
 
 pub(super) async fn admin_internal_history_repository_repair(
@@ -168,7 +185,12 @@ pub(super) async fn admin_internal_forward_history_repository_relay(
     internal: Option<Extension<InternalSignatureAuth>>,
     ApiJson(request): ApiJson<RepositoryRelayRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    ensure_ready_repository_sender(&state, internal).await?;
+    let sender = ensure_ready_repository_sender(&state, internal).await?;
+    if request.source_repository_id != sender {
+        return Err(ApiError::unauthorized(
+            "relay source does not match the authenticated sender",
+        ));
+    }
     let (_, peers) = worker::ready_repository_peers(&state)
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -182,7 +204,7 @@ pub(super) async fn admin_internal_forward_history_repository_relay(
         &state,
         target,
         axum::http::Method::POST,
-        "/_internal/history-repository/relay-deliver",
+        INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER,
         body,
     )
     .await
@@ -195,7 +217,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     internal: Option<Extension<InternalSignatureAuth>>,
     ApiJson(request): ApiJson<RepositoryRelayRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    ensure_ready_repository_sender(&state, internal).await?;
+    let sender = ensure_ready_repository_sender(&state, internal).await?;
+    if request.source_repository_id != sender {
+        return Err(ApiError::unauthorized(
+            "relay source does not match the authenticated sender",
+        ));
+    }
     if request.target_repository_id != state.cluster.node_id {
         return Err(ApiError::invalid_request(
             "relay delivery target does not match this repository",
@@ -413,4 +440,30 @@ async fn ready_repository_ids(state: &AppState) -> Result<Vec<String>, ApiError>
         ));
     }
     Ok(ready)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::history_repository::identity::{
+        Ed25519PublicKey, RepositoryNodeId, X25519PublicKey,
+    };
+
+    #[test]
+    fn repository_segment_identity_must_match_authenticated_sender() {
+        let identity = RepositoryNodeIdentity::new(
+            RepositoryNodeId::try_from("repository-a".to_owned()).expect("node id"),
+            Ed25519PublicKey::from_bytes([1; 32]).expect("signing key"),
+            X25519PublicKey::from_bytes([2; 32]).expect("relay key"),
+        )
+        .expect("identity");
+        assert!(repository_identity_matches_sender(
+            &identity,
+            "repository-a"
+        ));
+        assert!(!repository_identity_matches_sender(
+            &identity,
+            "repository-b"
+        ));
+    }
 }

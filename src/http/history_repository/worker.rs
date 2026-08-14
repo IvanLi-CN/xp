@@ -16,7 +16,8 @@ use crate::{
 
 use super::super::AppState;
 use super::{
-    RepositoryRelayRequest, RepositoryRepairRequest, RepositoryTombstoneAcknowledgementRequest,
+    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
+    RepositoryTombstoneAcknowledgementRequest,
 };
 
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -62,7 +63,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .take(MAX_REPOSITORY_PEERS_PER_CYCLE)
     {
-        match replicate_peer(state, peer, &ready_repository_ids, now).await {
+        match replicate_peer(state, peer, &ready_repository_ids, now, work).await {
             Ok(()) => synchronized = true,
             Err(error) => {
                 tracing::debug!(
@@ -139,7 +140,7 @@ async fn replicate_peer_via_dynamic_relay(
         state,
         relay,
         Method::POST,
-        "/_internal/history-repository/relay",
+        INTERNAL_HISTORY_REPOSITORY_RELAY,
         body,
     )
     .await?;
@@ -165,6 +166,7 @@ async fn replicate_peer(
     peer: &MeshPeerTarget,
     ready_repository_ids: &[String],
     now: u64,
+    work: crate::state::history_repository::replica::ReplicaWork,
 ) -> anyhow::Result<()> {
     let remote_summary: RepositoryReplicaSummary = repository_direct_request(
         state,
@@ -178,7 +180,7 @@ async fn replicate_peer(
         .repository_replica
         .lock()
         .await
-        .missing_segment_ids(&remote_summary)?;
+        .missing_segment_ids(&remote_summary, work.is_deep_verification())?;
     if missing_segment_ids.is_empty() {
         return Ok(());
     }

@@ -23,7 +23,7 @@ use crate::{
     },
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
-        control::RepositoryMembership,
+        control::{RepositoryMembership, apply_repository_membership},
     },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
@@ -328,7 +328,6 @@ pub struct PersistedState {
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
     #[serde(default)]
     pub mihomo_delivery_mode: MihomoDeliveryMode,
-    /// Raft-managed repository membership. Local replicas never infer ready peers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_membership: Option<RepositoryMembership>,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
@@ -336,7 +335,6 @@ pub struct PersistedState {
     #[serde(default, rename = "geo_db_update_settings")]
     pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
 }
-
 impl PersistedState {
     pub fn empty() -> Self {
         Self {
@@ -2089,7 +2087,6 @@ enum DesiredStateCommandCompat {
     ReplaceRepositoryMembership {
         membership: RepositoryMembership,
     },
-
     // Legacy grants commands (schema <= 9).
     ReplaceUserGrants {
         user_id: String,
@@ -2246,7 +2243,6 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::ReplaceRepositoryMembership { membership } => {
                 Self::ReplaceRepositoryMembership { membership }
             }
-
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
                 // Map legacy grants hard-cut to membership-only access list.
                 let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
@@ -3182,20 +3178,10 @@ impl DesiredStateCommand {
                     );
                     prune_endpoint_probe_hour_map(&mut history.hours);
                 }
-
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::ReplaceRepositoryMembership { membership } => {
-                for member in membership.members() {
-                    let node_id = member.node_id().as_str();
-                    if !state.nodes.contains_key(node_id) {
-                        return Err(DomainError::MissingNode {
-                            node_id: node_id.to_owned(),
-                        }
-                        .into());
-                    }
-                }
-                state.repository_membership = Some(membership.clone());
+                apply_repository_membership(state, membership)?;
                 Ok(DesiredStateApplyResult::Applied)
             }
         }

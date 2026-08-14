@@ -697,16 +697,10 @@
     "long_line_count": 8,
     "max_line_length": 237
   },
-  "src/history_repository/replica/runtime.rs": {
-    "source_lines": 1222
-  },
-  "src/ops/upgrade.rs": {
-    "source_lines": 1027
-  },
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4452
+    "source_lines": 4438
   },
   "src/state/tests.rs": {
     "source_lines": 2448

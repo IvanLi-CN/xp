@@ -82,7 +82,7 @@ fn two_repositories_repair_a_partition_to_the_same_segment_set() {
         .expect("primary accepts source segment");
 
     let missing = standby
-        .missing_segment_ids(&primary.replication_summary())
+        .missing_segment_ids(&primary.replication_summary().expect("summary"), false)
         .expect("partition summary repair");
     let repair = primary
         .repair_batch(&missing)
@@ -101,7 +101,7 @@ fn two_repositories_repair_a_partition_to_the_same_segment_set() {
     }
     assert!(
         standby
-            .missing_segment_ids(&primary.replication_summary())
+            .missing_segment_ids(&primary.replication_summary().expect("summary"), true)
             .expect("converged summary")
             .is_empty()
     );
@@ -164,7 +164,7 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     let key = signing_key();
     let identity = identity(&key);
     let observed_at = 1_000_u64;
-    let now = observed_at + 7 * 24 * 60 * 60 + 1;
+    let now = observed_at + 7 * 24 * 60 * 60 + 2;
     let ip = b"192.0.2.99";
     let record = SyncRecord::new(
         "subject-a",
@@ -197,6 +197,121 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     let payload = String::from_utf8(response.records[0].payload.clone()).expect("JSON aggregate");
     assert!(payload.contains("anonymized_identifier"));
     assert!(!payload.contains("192.0.2.99"));
+}
+
+#[test]
+fn repository_retention_preserves_aggregate_counts_across_prune_cycles() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let observed_at = 1_000_u64;
+    let now = observed_at + 7 * 24 * 60 * 60 + 2;
+    let first = segment_at(
+        &key,
+        0,
+        vec![record(b"first", false)],
+        None,
+        observed_at,
+        observed_at,
+    );
+    let second = segment_at(
+        &key,
+        1,
+        vec![record(b"second", false)],
+        Some(first.segment_hash().expect("hash")),
+        observed_at + 1,
+        observed_at + 1,
+    );
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("first aggregate");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &second.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("second aggregate");
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at + 1, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query aggregate");
+    assert_eq!(response.records.len(), 1);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&response.records[0].payload).expect("aggregate JSON");
+    assert_eq!(payload["record_count"], 2);
+    assert_eq!(payload["first_sequence"], 0);
+    assert_eq!(payload["last_sequence"], 1);
+}
+
+#[test]
+fn repository_retention_marks_aggregates_incomplete_for_permanent_gaps() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let observed_at = 1_000_u64;
+    let now = observed_at + 7 * 24 * 60 * 60 + 2;
+    let first = segment_at(
+        &key,
+        0,
+        vec![record(b"before-epoch", false)],
+        None,
+        observed_at,
+        observed_at,
+    );
+    let epoch_transition = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 8, "runtime", 0).expect("cursor"),
+        vec![record(b"after-epoch", false)],
+        None,
+        observed_at + 1,
+        observed_at + 1,
+    )
+    .expect("segment")
+    .sign(&key)
+    .expect("signature");
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("first segment");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &epoch_transition.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("permanent epoch gap");
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(observed_at, observed_at + 1, 10).expect("query"),
+            LocalQueryMetadata::current_window(now),
+        )
+        .expect("query aggregates");
+    let payload = response
+        .records
+        .iter()
+        .find(|record| record.source_epoch == 8)
+        .map(|record| serde_json::from_slice::<serde_json::Value>(&record.payload))
+        .expect("epoch aggregate")
+        .expect("aggregate JSON");
+    assert_eq!(payload["complete"], false);
 }
 
 #[test]

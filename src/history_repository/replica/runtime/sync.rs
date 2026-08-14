@@ -7,17 +7,29 @@ use crate::history_sync::MAX_RESPONSE_WIRE_BYTES;
 use super::{
     RepositoryReplicaRuntime, RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
 };
-use crate::state::history_repository::replica::{
-    AntiEntropySchedule, PartitionSummary, RepairPlan, ReplicaError, ReplicaPartition, ReplicaWork,
-};
+use crate::state::history_repository::replica::{AntiEntropySchedule, ReplicaError, ReplicaWork};
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaSummary {
     pub(crate) segment_ids: Vec<String>,
+    /// Daily verification is over signed source-stream ranges, not opaque segment ids.
+    pub(crate) partitions: Vec<RepositoryPartitionSummary>,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
     pub(crate) last_verified_unix_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RepositoryPartitionSummary {
+    source_node_id: String,
+    source_epoch: u64,
+    stream: String,
+    partition: u32,
+    first_sequence: u64,
+    last_sequence: u64,
+    hash: [u8; 32],
+    record_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,36 +95,46 @@ impl RepositoryReplicaRuntime {
         self.persist_control_state()
     }
 
-    pub(crate) fn replication_summary(&self) -> RepositoryReplicaSummary {
-        RepositoryReplicaSummary {
+    pub(crate) fn replication_summary(
+        &self,
+    ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
+        Ok(RepositoryReplicaSummary {
             segment_ids: self
                 .snapshot
                 .segments
                 .iter()
                 .map(|segment| segment.id.clone())
                 .collect(),
+            partitions: self.partition_summaries()?,
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
-        }
+        })
     }
 
     pub(crate) fn missing_segment_ids(
         &self,
         remote: &RepositoryReplicaSummary,
+        deep_verification: bool,
     ) -> Result<Vec<String>, RepositoryRuntimeError> {
-        let local =
-            self.segment_summaries(self.snapshot.segments.iter().map(|segment| &segment.id))?;
-        let remote_summaries = self.segment_summaries(remote.segment_ids.iter())?;
-        let repair = RepairPlan::between(local, remote_summaries)?;
-        if repair.is_converged() {
-            return Ok(Vec::new());
-        }
         let local_ids = self
             .snapshot
             .segments
             .iter()
             .map(|segment| segment.id.as_str())
             .collect::<BTreeSet<_>>();
+        let remote_ids = remote
+            .segment_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let converged = if deep_verification {
+            self.partition_summaries()? == remote.partitions
+        } else {
+            local_ids == remote_ids
+        };
+        if converged {
+            return Ok(Vec::new());
+        }
         Ok(remote
             .segment_ids
             .iter()
@@ -202,28 +224,66 @@ impl RepositoryReplicaRuntime {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
 
-    fn segment_summaries<'a>(
+    fn partition_summaries(
         &self,
-        ids: impl IntoIterator<Item = &'a String>,
-    ) -> Result<Vec<PartitionSummary>, RepositoryRuntimeError> {
-        ids.into_iter()
-            .map(|id| {
-                let hash = hex::decode(id)
-                    .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?;
-                let hash: [u8; 32] = hash
-                    .try_into()
-                    .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?;
-                let partition = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
-                Ok(PartitionSummary::new(
-                    ReplicaPartition::new("repository", 0, "segments", partition)?,
-                    0,
-                    0,
-                    hash,
-                    1,
-                )?)
-            })
-            .collect()
+    ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
+        let mut summaries = self
+            .snapshot
+            .segments
+            .iter()
+            .map(partition_summary)
+            .collect::<Result<Vec<_>, _>>()?;
+        summaries.sort_by(|left, right| {
+            (
+                &left.source_node_id,
+                left.source_epoch,
+                &left.stream,
+                left.partition,
+                left.first_sequence,
+            )
+                .cmp(&(
+                    &right.source_node_id,
+                    right.source_epoch,
+                    &right.stream,
+                    right.partition,
+                    right.first_sequence,
+                ))
+        });
+        Ok(summaries)
     }
+}
+
+fn partition_summary(
+    stored: &super::StoredSegment,
+) -> Result<RepositoryPartitionSummary, RepositoryRuntimeError> {
+    let segment = crate::history_sync::SignedSegment::from_wire(&stored.wire)?;
+    let canonical = segment.canonical();
+    let first = canonical.first_cursor();
+    let last = canonical.last_cursor();
+    let mut partition_hash = sha2::Sha256::new();
+    use sha2::Digest as _;
+    partition_hash.update(first.source_node_id().as_bytes());
+    partition_hash.update(first.source_epoch().to_be_bytes());
+    partition_hash.update(first.stream().as_bytes());
+    partition_hash.update(first.sequence().to_be_bytes());
+    partition_hash.update(last.sequence().to_be_bytes());
+    let partition_hash = partition_hash.finalize();
+    Ok(RepositoryPartitionSummary {
+        source_node_id: first.source_node_id().to_owned(),
+        source_epoch: first.source_epoch(),
+        stream: first.stream().to_owned(),
+        partition: u32::from_be_bytes([
+            partition_hash[0],
+            partition_hash[1],
+            partition_hash[2],
+            partition_hash[3],
+        ]),
+        first_sequence: first.sequence(),
+        last_sequence: last.sequence(),
+        hash: segment.segment_hash()?,
+        record_count: u64::try_from(canonical.records().len())
+            .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
+    })
 }
 
 fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {

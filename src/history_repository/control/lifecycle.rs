@@ -131,6 +131,24 @@ impl std::error::Error for RepositoryControlError {
     }
 }
 
+pub(crate) fn apply_repository_membership(
+    state: &mut crate::state::PersistedState,
+    membership: &RepositoryMembership,
+) -> Result<(), crate::domain::DomainError> {
+    if let Some(node_id) = membership
+        .members()
+        .iter()
+        .map(|member| member.node_id().as_str())
+        .find(|node_id| !state.nodes.contains_key(*node_id))
+    {
+        return Err(crate::domain::DomainError::MissingNode {
+            node_id: node_id.to_owned(),
+        });
+    }
+    state.repository_membership = Some(membership.clone());
+    Ok(())
+}
+
 impl From<RepositoryIdentityError> for RepositoryControlError {
     fn from(value: RepositoryIdentityError) -> Self {
         Self::Identity(value)
