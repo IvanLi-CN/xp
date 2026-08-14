@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-const MAX_RELAY_FRAME_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_RELAY_FRAME_BYTES: usize = 256 * 1024;
 const RELAY_ENVELOPE_BYTES: usize = 32 + 12;
 const AEAD_TAG_BYTES: usize = 16;
+pub(crate) const MAX_RELAY_PLAINTEXT_BYTES: usize =
+    MAX_RELAY_FRAME_BYTES - RELAY_ENVELOPE_BYTES - AEAD_TAG_BYTES;
 const RELAY_KEY_CONTEXT: &[u8] = b"xp-history-sync-relay-v1";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -68,9 +70,7 @@ impl RelayFrame {
         plaintext: &[u8],
         associated_data: &[u8],
     ) -> Result<Self, RelayError> {
-        if plaintext.len()
-            > MAX_RELAY_FRAME_BYTES.saturating_sub(RELAY_ENVELOPE_BYTES + AEAD_TAG_BYTES)
-        {
+        if plaintext.len() > MAX_RELAY_PLAINTEXT_BYTES {
             return Err(RelayError::FrameLimit);
         }
         let cipher = relay_cipher(sender.private_key, recipient_public_key);

@@ -23,7 +23,10 @@ use crate::{
     },
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
-        control::{RepositoryMembership, apply_repository_membership},
+        control::{
+            RepositoryMemberRuntimePatch, RepositoryMembership,
+            apply_repository_member_runtime_update, apply_repository_membership,
+        },
     },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
@@ -1935,7 +1938,6 @@ pub enum DesiredStateCommand {
         note: String,
     },
     AppendEndpointProbeSamples {
-        /// Hour bucket key like `2026-02-07T12:00:00Z`.
         hour: String,
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
@@ -1943,15 +1945,8 @@ pub enum DesiredStateCommand {
     ReplaceRepositoryMembership {
         membership: RepositoryMembership,
     },
+    UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
 }
-
-// ---- WAL backward compatibility ----
-//
-// We keep legacy grants commands parseable so a node can upgrade and replay old WAL entries
-// without requiring operators to boot an old binary for snapshot/purge.
-//
-// TODO(remove-compat): remove this shim after all clusters have upgraded to schema v10 and have
-// completed at least one snapshot/purge cycle, then bump schema again (v11).
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2058,13 +2053,10 @@ enum DesiredStateCommandCompat {
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
     },
-
     ReplaceUserAccess {
         user_id: String,
-        // New shape (schema v10+): membership-only endpoint list.
         #[serde(default)]
         endpoint_ids: Vec<String>,
-        // Legacy shape (schema v9): `items: [{ endpoint_id, note? }]`.
         #[serde(default)]
         items: Vec<UserAccessItemCompat>,
     },
@@ -2078,7 +2070,6 @@ enum DesiredStateCommandCompat {
     CompatNoop {
         note: String,
     },
-
     AppendEndpointProbeSamples {
         hour: String,
         from_node_id: String,
@@ -2087,7 +2078,7 @@ enum DesiredStateCommandCompat {
     ReplaceRepositoryMembership {
         membership: RepositoryMembership,
     },
-    // Legacy grants commands (schema <= 9).
+    UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
     ReplaceUserGrants {
         user_id: String,
         grants: Vec<LegacyGrantCompat>,
@@ -2212,7 +2203,6 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 endpoint_ids,
                 items,
             } => {
-                // Support both v9 `items` and v10+ `endpoint_ids` WAL shapes.
                 let mut merged: BTreeSet<String> = endpoint_ids.into_iter().collect();
                 merged.extend(items.into_iter().map(|i| i.endpoint_id));
                 Self::ReplaceUserAccess {
@@ -2243,8 +2233,10 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::ReplaceRepositoryMembership { membership } => {
                 Self::ReplaceRepositoryMembership { membership }
             }
+            DesiredStateCommandCompat::UpdateRepositoryMemberRuntime(patch) => {
+                Self::UpdateRepositoryMemberRuntime(patch)
+            }
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
-                // Map legacy grants hard-cut to membership-only access list.
                 let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
                 Self::ReplaceUserAccess {
                     user_id,
@@ -3182,6 +3174,14 @@ impl DesiredStateCommand {
             }
             Self::ReplaceRepositoryMembership { membership } => {
                 apply_repository_membership(state, membership)?;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::UpdateRepositoryMemberRuntime(patch) => {
+                apply_repository_member_runtime_update(state, patch).map_err(|error| {
+                    StoreError::Migration {
+                        message: error.to_string(),
+                    }
+                })?;
                 Ok(DesiredStateApplyResult::Applied)
             }
         }

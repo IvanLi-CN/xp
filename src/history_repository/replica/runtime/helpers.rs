@@ -1,11 +1,14 @@
 use crate::{
     history_sync::{Acceptance, Cursor, SchemaCatalog, SyncRecord},
-    state::history_repository::{control::HistoryWriteAvailability, query::StreamWatermark},
+    state::history_repository::{
+        control::HistoryWriteAvailability,
+        query::{QueryPlan, StreamWatermark},
+    },
 };
 
 use super::{
-    KNOWN_SCHEMAS, RepositoryGap, RepositoryRuntimeError, RepositorySyncReceipt,
-    RepositoryTombstoneAcknowledgement, RepositoryWatermark,
+    KNOWN_SCHEMAS, RepositoryGap, RepositoryHistoryQueryResponse, RepositoryRuntimeError,
+    RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, RepositoryWatermark,
 };
 
 pub(super) fn known_schemas() -> SchemaCatalog {
@@ -58,4 +61,18 @@ fn repository_watermark_from_cursor(cursor: &Cursor) -> RepositoryWatermark {
         stream: cursor.stream().to_owned(),
         sequence: cursor.sequence(),
     }
+}
+
+pub(super) fn serialized_response_overhead(
+    plan: &QueryPlan,
+) -> Result<usize, RepositoryRuntimeError> {
+    let response = RepositoryHistoryQueryResponse {
+        plan: plan.clone(),
+        records: Vec::new(),
+        records_truncated: true,
+        next_page_cursor: Some(usize::MAX.to_string()),
+    };
+    serde_json::to_vec(&response)
+        .map(|bytes| bytes.len())
+        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
 }

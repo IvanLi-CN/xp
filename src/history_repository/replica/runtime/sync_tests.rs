@@ -1,12 +1,16 @@
 use ed25519_dalek::SigningKey;
 
-use super::{RepositoryRepairBatch, RepositoryReplicaRuntime, StoredSegment};
+use super::{
+    RepositoryRepairBatch, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment,
+};
 use crate::{
-    history_sync::{CanonicalSegment, Cursor, SyncRecord},
+    history_sync::{
+        CanonicalSegment, Cursor, DirectPath, MAX_RELAY_PLAINTEXT_BYTES, SignedSegment, SyncRecord,
+    },
     state::history_repository::{
         HistoryStorage,
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
-        replica::ReplicaWork,
+        replica::{ReplicaError, ReplicaWork, RepositoryReplicaGap},
     },
 };
 
@@ -70,11 +74,470 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
 }
 
 #[test]
+fn relay_repair_pages_by_frame_budget_and_advances_through_large_backlog() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let identity = identity();
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.segments = (0_u8..4)
+        .map(|sequence| StoredSegment {
+            id: format!("large-segment-{sequence}"),
+            identity: identity.clone(),
+            wire: {
+                let mut state = u32::from(sequence).saturating_add(1);
+                (0..110 * 1024)
+                    .map(|_| {
+                        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                        state.to_be_bytes()[0]
+                    })
+                    .collect()
+            },
+        })
+        .collect();
+
+    let first = runtime
+        .relay_batch("repository-b")
+        .expect("first frame-sized relay page");
+    assert!(!first.batch.segments.is_empty());
+    assert!(first.batch.segments.len() < 4);
+    assert!(first.payload.len() <= MAX_RELAY_PLAINTEXT_BYTES);
+    let first_count = first.batch.segments.len();
+    let next_segment_id = first
+        .next_segment_id()
+        .expect("next retained segment")
+        .to_owned();
+    runtime
+        .record_relay_batch_delivered("repository-b", Some(&next_segment_id))
+        .expect("persist first relay page cursor");
+
+    let mut delivered = first_count;
+    while delivered < 4 {
+        let page = runtime
+            .relay_batch("repository-b")
+            .expect("next frame-sized relay page");
+        assert!(!page.batch.segments.is_empty());
+        assert_eq!(
+            page.batch.segments[0].wire,
+            runtime.snapshot.segments[delivered].wire
+        );
+        assert!(page.payload.len() <= MAX_RELAY_PLAINTEXT_BYTES);
+        delivered += page.batch.segments.len();
+        let next_segment_id = page
+            .next_segment_id()
+            .expect("next retained segment")
+            .to_owned();
+        runtime
+            .record_relay_batch_delivered("repository-b", Some(&next_segment_id))
+            .expect("persist relay page cursor");
+    }
+    assert_eq!(delivered, 4);
+}
+
+#[test]
+fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
+    let invalid_batch = RepositoryRepairBatch {
+        segments: Vec::new(),
+        gaps: vec![RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_sequence: 2,
+            last_sequence: 1,
+            start_unix_seconds: 101,
+            end_unix_seconds: 100,
+            permanent: true,
+        }],
+    };
+    let serialized = serde_json::to_vec(&invalid_batch).expect("relay batch JSON");
+    let payload = zstd::stream::encode_all(std::io::Cursor::new(serialized), 1)
+        .expect("compressed relay batch");
+
+    assert!(matches!(
+        RepositoryRepairBatch::from_relay_payload(&payload),
+        Err(RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))
+    ));
+}
+
+#[test]
 fn repair_batch_accepts_a_pre_gap_metadata_payload() {
     let batch = serde_json::from_slice::<RepositoryRepairBatch>(br#"{"segments":[]}"#)
         .expect("legacy repair payload remains readable");
     assert!(batch.segments.is_empty());
     assert!(batch.gaps.is_empty());
+}
+
+#[test]
+fn local_source_outbox_survives_restart_until_the_primary_acknowledges_it() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let first = load(temporary.path())
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:100".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            100,
+        )
+        .expect("queue source segment")
+        .expect("source has a record");
+
+    let mut restored = load(temporary.path());
+    let retry = restored
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:101".to_vec(),
+                b"new sample".to_vec(),
+                false,
+            )],
+            101,
+        )
+        .expect("reuse queued source segment")
+        .expect("pending source segment");
+    assert_eq!(retry.wire, first.wire);
+
+    let retry_after_restart = restored
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:102".to_vec(),
+                b"third sample".to_vec(),
+                false,
+            )],
+            102,
+        )
+        .expect("queue third source sample")
+        .expect("first source segment remains pending");
+    assert_eq!(retry_after_restart.wire, first.wire);
+
+    restored
+        .acknowledge_local_source_segment(&retry.wire)
+        .expect("acknowledge source segment");
+    let next = restored
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            Vec::new(),
+            103,
+        )
+        .expect("read second pending source segment")
+        .expect("second source segment");
+    assert_eq!(source_record_key(&next), b"runtime:101");
+    restored
+        .acknowledge_local_source_segment(&next.wire)
+        .expect("acknowledge second source segment");
+    let third = restored
+        .queue_local_source_segment("cluster-a", source_identity, &signing_key, Vec::new(), 103)
+        .expect("read third pending source segment")
+        .expect("third source segment");
+    assert_eq!(source_record_key(&third), b"runtime:102");
+}
+
+fn source_record_key(segment: &super::RepositoryReplicaSegment) -> Vec<u8> {
+    SignedSegment::from_wire(&segment.wire)
+        .expect("signed source segment")
+        .canonical()
+        .records()[0]
+        .record_key()
+        .to_vec()
+}
+
+#[test]
+fn saturated_source_outbox_returns_front_and_drains_after_recovery() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    for sequence in 0..8_u64 {
+        load(temporary.path())
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment")
+            .expect("source has a record");
+    }
+
+    let mut runtime = load(temporary.path());
+    let front = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:8".to_vec(),
+                b"backpressured".to_vec(),
+                false,
+            )],
+            8,
+        )
+        .expect("return queued front while backpressured")
+        .expect("front remains available");
+    assert_eq!(source_record_key(&front), b"runtime:0");
+    runtime
+        .acknowledge_local_source_segment(&front.wire)
+        .expect("acknowledge source front");
+    let next = runtime
+        .queue_local_source_segment("cluster-a", source_identity, &signing_key, Vec::new(), 9)
+        .expect("drain queued source segment after recovery")
+        .expect("next segment remains queued");
+    assert_eq!(source_record_key(&next), b"runtime:1");
+}
+
+#[test]
+fn a_backpressured_stream_preserves_other_streams_and_a_permanent_gap() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    for sequence in 0..8_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+    let segments = runtime
+        .queue_local_source_segments(
+            "cluster-a",
+            source_identity,
+            &signing_key,
+            vec![
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    b"runtime:8".to_vec(),
+                    b"dropped".to_vec(),
+                    false,
+                ),
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "traffic.v1",
+                    1,
+                    b"traffic:8".to_vec(),
+                    b"queued".to_vec(),
+                    false,
+                ),
+            ],
+            8,
+        )
+        .expect("queue independent source streams");
+    let streams = segments
+        .iter()
+        .map(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .expect("signed segment")
+                .canonical()
+                .first_cursor()
+                .stream()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert!(streams.contains(&"runtime".to_owned()));
+    assert!(streams.contains(&"traffic".to_owned()));
+    let gaps = runtime.local_source_backpressure_gaps("node-a");
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].stream, "runtime");
+    assert!(gaps[0].permanent);
+    assert_eq!(gaps[0].start_unix_seconds, 8);
+    assert_eq!(gaps[0].end_unix_seconds, 8);
+}
+
+#[test]
+fn local_source_segments_keep_each_observation_stream_independent() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let segments = load(temporary.path())
+        .queue_local_source_segments(
+            "cluster-a",
+            identity(),
+            &signing_key,
+            vec![
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    b"runtime:100".to_vec(),
+                    b"runtime".to_vec(),
+                    false,
+                ),
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "traffic.v1",
+                    1,
+                    b"traffic:100".to_vec(),
+                    b"traffic".to_vec(),
+                    false,
+                ),
+            ],
+            100,
+        )
+        .expect("queue independent source streams");
+    assert_eq!(segments.len(), 2);
+    let mut streams = segments
+        .iter()
+        .map(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .expect("signed segment")
+                .canonical()
+                .first_cursor()
+                .stream()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    streams.sort_unstable();
+    assert_eq!(streams, ["runtime", "traffic"]);
+}
+
+#[test]
+fn direct_path_selection_retries_a_failed_tunnel_after_its_probe_window() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    assert_eq!(
+        runtime
+            .select_peer_direct_path("peer-a", false, 100)
+            .expect("select tunnel without Mesh")
+            .0,
+        DirectPath::CloudflareTunnel
+    );
+    runtime
+        .record_peer_direct_path_result("peer-a", DirectPath::CloudflareTunnel, false, 100)
+        .expect("record failed tunnel");
+    assert!(
+        runtime
+            .select_peer_direct_path("peer-a", false, 101)
+            .is_err()
+    );
+    assert_eq!(
+        runtime
+            .select_peer_direct_path("peer-a", false, 400)
+            .expect("retry tunnel probe")
+            .0,
+        DirectPath::CloudflareTunnel
+    );
+}
+
+#[test]
+fn direct_path_selection_keeps_a_continuously_healthy_path_stable() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    assert_eq!(
+        runtime
+            .select_peer_direct_path("peer-a", true, 100)
+            .expect("select initial Mesh path")
+            .0,
+        DirectPath::RealityMesh
+    );
+    runtime
+        .record_peer_direct_path_result("peer-a", DirectPath::RealityMesh, true, 100)
+        .expect("record Mesh success");
+    runtime
+        .record_peer_direct_path_result("peer-a", DirectPath::CloudflareTunnel, true, 200)
+        .expect("record tunnel probe success");
+    runtime
+        .record_peer_direct_path_result("peer-a", DirectPath::RealityMesh, true, 400)
+        .expect("record continued Mesh success");
+    assert_eq!(
+        runtime
+            .select_peer_direct_path("peer-a", true, 800)
+            .expect("keep stable Mesh path")
+            .0,
+        DirectPath::RealityMesh
+    );
+}
+
+#[test]
+fn source_switches_to_its_standby_after_three_primary_delivery_failures() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    for _ in 0..3 {
+        runtime
+            .record_local_source_collector_delivery("repository-a", "repository-a", false)
+            .expect("record failed primary delivery");
+    }
+    assert_eq!(
+        runtime.local_source_collector("repository-a", Some("repository-b")),
+        "repository-b"
+    );
+    let restored = load(temporary.path());
+    assert_eq!(
+        restored.local_source_collector("repository-a", Some("repository-b")),
+        "repository-b"
+    );
+}
+
+#[test]
+fn source_failure_state_resets_when_rendezvous_primary_changes() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    for _ in 0..3 {
+        runtime
+            .record_local_source_collector_delivery("repository-a", "repository-a", false)
+            .expect("record failed primary delivery");
+    }
+    assert_eq!(
+        runtime.local_source_collector("repository-a", Some("repository-b")),
+        "repository-b"
+    );
+    runtime
+        .record_local_source_collector_delivery("repository-c", "repository-c", false)
+        .expect("record new primary failure");
+    assert_eq!(
+        runtime.local_source_collector("repository-c", Some("repository-b")),
+        "repository-c"
+    );
 }
 
 #[test]

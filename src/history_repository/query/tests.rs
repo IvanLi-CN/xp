@@ -67,6 +67,32 @@ fn partial_and_local_only_results_expose_explicit_gaps_without_unbounded_exports
 }
 
 #[test]
+fn pagination_cursor_is_a_bounded_absolute_record_offset() {
+    let query = HistoryQuery::new(100, 200, 32)
+        .expect("bounded query")
+        .with_page_cursor(Some("14"))
+        .expect("cursor");
+    assert_eq!(query.page_offset().expect("offset"), 14);
+    assert_eq!(query.next_page_cursor(7).expect("next cursor"), "21");
+    assert!(query.next_page_cursor(0).is_err());
+}
+
+#[test]
+fn subject_node_filter_is_bounded_and_validated() {
+    let query = HistoryQuery::new(100, 200, 32)
+        .expect("bounded query")
+        .with_subject_node_id(Some("node-a"))
+        .expect("subject node id");
+    assert_eq!(query.subject_node_id(), Some("node-a"));
+    assert!(
+        HistoryQuery::new(100, 200, 32)
+            .expect("bounded query")
+            .with_subject_node_id(Some(""))
+            .is_err()
+    );
+}
+
+#[test]
 fn selection_prefers_requested_coverage_over_a_gap_free_but_short_repository() {
     let request = HistoryQuery::new(100, 200, 32).expect("bounded query");
     let short = QueryCandidate::ready(

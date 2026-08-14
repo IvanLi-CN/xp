@@ -22,6 +22,7 @@ import {
 	patchAdminNode,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
+import { fetchAdminRepositoryHistory } from "../api/adminRepositoryHistory";
 import { fetchAdminNodeTcpConnections } from "../api/adminTcpConnections";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -61,6 +62,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 vi.mock("../api/adminNodes");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/adminNodeHistory");
+vi.mock("../api/adminRepositoryHistory");
 vi.mock("../api/adminIpUsage");
 vi.mock("../api/adminTcpConnections");
 
@@ -227,6 +229,16 @@ function setupMocks(args?: {
 				},
 			],
 		},
+	});
+	vi.mocked(fetchAdminRepositoryHistory).mockResolvedValue({
+		repository: null,
+		completeness: "local_only",
+		coverage: null,
+		watermarks: [],
+		gaps: [],
+		clock_skew_seconds: 0,
+		records: [],
+		records_truncated: false,
 	});
 	vi.mocked(startNodeRuntimeEvents).mockImplementation(() => ({
 		close: vi.fn(),

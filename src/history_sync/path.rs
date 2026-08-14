@@ -1,14 +1,22 @@
 use std::cmp::Ordering;
 
+use serde::{Deserialize, Serialize};
+
 const STANDBY_PROBE_INTERVAL_SECONDS: u64 = 5 * 60;
 const RELAY_INTERVAL_SECONDS: u64 = 60 * 60;
 const MAX_RELAY_JITTER_SECONDS: u64 = 5 * 60;
 const SWITCH_HYSTERESIS_SECONDS: u64 = 30;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum DirectPath {
     RealityMesh,
     CloudflareTunnel,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub(crate) struct PathSelectorCheckpoint {
+    pub(crate) last_direct: Option<DirectPath>,
+    pub(crate) last_standby_probe_unix_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +65,20 @@ pub(crate) struct PathSelector {
 }
 
 impl PathSelector {
+    pub(crate) fn from_checkpoint(checkpoint: PathSelectorCheckpoint) -> Self {
+        Self {
+            last_direct: checkpoint.last_direct,
+            last_standby_probe_unix_seconds: checkpoint.last_standby_probe_unix_seconds,
+        }
+    }
+
+    pub(crate) fn checkpoint(self) -> PathSelectorCheckpoint {
+        PathSelectorCheckpoint {
+            last_direct: self.last_direct,
+            last_standby_probe_unix_seconds: self.last_standby_probe_unix_seconds,
+        }
+    }
+
     pub(crate) fn select(
         &mut self,
         reality: DirectPathHealth,

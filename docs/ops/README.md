@@ -57,6 +57,22 @@ Host-managed mode assumptions:
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 - `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. Repository synchronization may use a separate in-memory dynamic relay only after both direct paths fail.
+- A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
+  Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
+  reports configured, partial and unreachable states with per-member capacity and sync quality.
+  `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
+  no static Mesh proxy environment, listener or compatibility path.
+- Nodes exposes the same repository status and a membership editor. The editor selects existing
+  cluster nodes; `PUT /api/admin/history-repositories` accepts only `node_ids` and derives pinned
+  repository identities server-side. Lifecycle, convergence and capacity remain worker-owned. A
+  new member remains `syncing` while it reads bounded repair batches from existing `ready` members;
+  only a successful catch-up followed by five stable minutes transitions it to `ready`.
+  Repository query views accept a bounded `subject_node_id` filter and display observed/received
+  coverage, watermarks, gaps, skew, completeness, and a next-page control.
+- During `xp-ops init` or upgrade, XP may remove an already-stored legacy `mesh-proxy` Xray
+  inbound and its routing rules. This is removal-only migration cleanup: it has no configuration
+  input, client, metric, route, fallback or compatibility behavior, and the removed artifacts are
+  not recreated.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
@@ -602,6 +618,7 @@ ${XP_DATA_DIR}/
     snapshots/
   state.json
   usage.json
+  history.sqlite3
   node_history_cache.json
   inbound_ip_usage.json
   service_runtime.json
@@ -613,9 +630,16 @@ Notes:
 - `cluster/` holds long-lived identity and TLS assets. Treat `cluster_ca_key.pem` as sensitive (private key).
 - `raft/` holds the raft write-ahead log and snapshots.
 - `state.json` and `usage.json` are raft-backed JSON snapshots; on schema mismatches, startup fails instead of silently migrating.
+- `history.sqlite3` is the local repository replica database. SQLite uses WAL and bounded
+  checkpoints with incremental page release; XP never runs an unbounded `VACUUM` in the service
+  path. Persistent low disk space or a repository quota stops new history writes while Raft and
+  normal control-plane operations remain available. Operators can inspect member capacity,
+  coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
+  through the admin repository endpoints; requests have a bounded range, page size and cursor, so
+  the endpoints are not an arbitrary SQL or bulk-export interface.
 - `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
 - `node_history_cache.json` stores local node history and Traffic analytics. Traffic sampling runs on UTC five-minute boundaries and writes the same Xray counter delta to node and real-user rollups. It retains at most 588 five-minute buckets (49 hours) and 90 UTC daily buckets; hourly rollups are not stored. Endpoint probe traffic is included in node totals but is never exposed as a normal user.
-- Missing samples, first tracking, and counter resets remain partial and are surfaced as warnings; operators must not treat gaps as zero traffic. Deleting a user clears its stored history, deleting a node clears its node and user-node history, and removed memberships expire naturally with the retention windows.
+- Missing samples, first tracking, and counter resets remain partial and are surfaced as warnings; operators must not treat gaps as zero traffic. Deleting a user clears its stored history, deleting a node clears its node and user-node history, and removed memberships expire naturally with the retention windows. These node-data retention semantics are unchanged by the repository storage-medium migration.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
 - `ddns_state.json` stores local Cloudflare DDNS reconcile state (last synced IPs, record ids, error state, fast-mode window). It is **not** replicated via raft.
 - Geo enrichment uses a hosted API (`https://api.country.is/`); there are no local Geo DB files under `XP_DATA_DIR`.
@@ -634,7 +658,8 @@ Recommended workflow:
 
 1. Copy the unit files to `/etc/systemd/system/`.
 2. Copy `docs/ops/env/xp.env.example` to `/etc/xp/xp.env` and edit as needed.
-3. Ensure `XP_DATA_DIR` exists and is writable by the service user.
+3. Ensure `XP_DATA_DIR` exists and is writable by the service user; this includes the local
+   `history.sqlite3` repository database when the node is configured as a repository.
 4. Enable and start services:
 
 ```
@@ -655,6 +680,8 @@ Suggested workflow:
 
 1. Copy scripts to `/etc/init.d/` and make executable.
 2. (Optional) Configure environment variables via OpenRC's `/etc/conf.d/<service>` mechanism.
+   Keep `XP_DATA_DIR` writable by the `xp` service user so the repository SQLite database survives
+   restart.
 3. Add to default runlevel and start:
 
 ```

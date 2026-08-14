@@ -5,8 +5,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     history_sync::{
-        Acceptance, Cursor, ProtocolError, SegmentReceiver, SegmentReceiverCheckpoint,
-        SignedSegment, SyncRecord,
+        Acceptance, CanonicalSegment, Cursor, ProtocolError, SegmentReceiver,
+        SegmentReceiverCheckpoint, SignedSegment, SyncRecord,
     },
     state::{
         history_repository::identity::RepositoryNodeIdentity,
@@ -14,8 +14,8 @@ use crate::{
             HistoryStorage,
             control::{HistoryWriteAvailability, RepositoryCapacity},
             query::{
-                HistoryQuery, QueryCandidate, QueryCoverage, QueryError, QueryGap, QueryPlan,
-                QueryRange, QuerySelector,
+                HistoryQuery, QueryCandidate, QueryCoverage, QueryGap, QueryPlan, QueryRange,
+                QuerySelector,
             },
         },
         history_storage::REPOSITORY_REPLICA_KEY,
@@ -23,9 +23,18 @@ use crate::{
 };
 
 use super::{
-    ReplicaCursor, ReplicaError, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey,
-    TombstoneLedger, TombstoneLedgerCheckpoint,
+    ReplicaCursor, ReplicaFreshness, ReplicaRecord, ReplicaRecordKey, TombstoneLedger,
+    TombstoneLedgerCheckpoint,
 };
+use paths::PeerDirectPathState;
+use source::LocalSourceState;
+
+mod error;
+mod status;
+
+pub(crate) use error::RepositoryRuntimeError;
+pub(crate) use status::RepositoryRuntimeStatus;
+pub(crate) use sync::RepositoryReplicaGap;
 
 const MAX_REPOSITORY_RECORDS: usize = 16_384;
 const MAX_REPOSITORY_SEGMENTS: usize = 1_024;
@@ -40,43 +49,6 @@ const KNOWN_SCHEMAS: [(&str, u32); 6] = [
     ("ip_usage.v1", 1),
     ("tombstone.v1", 1),
 ];
-
-#[derive(Debug)]
-pub(crate) enum RepositoryRuntimeError {
-    Protocol(ProtocolError),
-    Replica(ReplicaError),
-    Query(QueryError),
-    Storage(String),
-    ClusterBindingMismatch,
-    WriteStopped(HistoryWriteAvailability),
-    StateLimitExceeded,
-}
-
-impl std::fmt::Display for RepositoryRuntimeError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "history repository runtime error: {self:?}")
-    }
-}
-
-impl std::error::Error for RepositoryRuntimeError {}
-
-impl From<ProtocolError> for RepositoryRuntimeError {
-    fn from(value: ProtocolError) -> Self {
-        Self::Protocol(value)
-    }
-}
-
-impl From<ReplicaError> for RepositoryRuntimeError {
-    fn from(value: ReplicaError) -> Self {
-        Self::Replica(value)
-    }
-}
-
-impl From<QueryError> for RepositoryRuntimeError {
-    fn from(value: QueryError) -> Self {
-        Self::Query(value)
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RepositorySyncReceipt {
@@ -132,7 +104,9 @@ pub(crate) struct RepositoryHistoryRecord {
     observer_node_id: String,
     schema_id: String,
     schema_version: u32,
+    #[serde(with = "base64_bytes")]
     record_key: Vec<u8>,
+    #[serde(with = "base64_bytes")]
     payload: Vec<u8>,
     tombstone: bool,
 }
@@ -143,6 +117,8 @@ pub(crate) struct RepositoryHistoryQueryResponse {
     plan: QueryPlan,
     records: Vec<RepositoryHistoryRecord>,
     records_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_page_cursor: Option<String>,
 }
 
 impl RepositoryHistoryQueryResponse {
@@ -195,6 +171,10 @@ struct RepositoryReplicaSnapshot {
     #[serde(default)]
     last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
+    local_source: LocalSourceState,
+    #[serde(default)]
+    peer_direct_paths: BTreeMap<String, PeerDirectPathState>,
+    #[serde(default)]
     collector_failure_cycles: BTreeMap<String, u8>,
     #[serde(default)]
     source_last_received_unix_seconds: BTreeMap<String, u64>,
@@ -224,6 +204,8 @@ impl Default for RepositoryReplicaSnapshot {
             last_anti_entropy_unix_seconds: None,
             last_deep_verification_unix_seconds: None,
             last_dynamic_relay_attempt_unix_seconds: None,
+            local_source: LocalSourceState::default(),
+            peer_direct_paths: BTreeMap::new(),
             collector_failure_cycles: BTreeMap::new(),
             source_last_received_unix_seconds: BTreeMap::new(),
             tombstone_acknowledgement_cursor: None,
@@ -478,7 +460,7 @@ impl RepositoryReplicaRuntime {
             local.clock_skew_seconds,
         )?;
         let mut candidates = vec![local_candidate];
-        if let Some(coverage) = self.repository_coverage() {
+        if let Some(coverage) = self.repository_coverage(query.subject_node_id()) {
             let watermarks = self
                 .receiver
                 .as_ref()
@@ -491,11 +473,17 @@ impl RepositoryReplicaRuntime {
                 .snapshot
                 .gaps
                 .iter()
+                .filter(|gap| {
+                    query
+                        .subject_node_id()
+                        .is_none_or(|subject_node_id| gap.source_node_id == subject_node_id)
+                })
                 .map(|gap| {
                     QueryGap::new(gap.start_unix_seconds, gap.end_unix_seconds, gap.permanent)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            if let Some((start, end)) = retention::incomplete_aggregate_gap(&self.snapshot.records)
+            if let Some((start, end)) =
+                retention::incomplete_aggregate_gap(self.matching_records(query.subject_node_id()))
             {
                 gaps.push(QueryGap::new(start, end, true)?);
             }
@@ -515,15 +503,16 @@ impl RepositoryReplicaRuntime {
             )?);
         }
         let plan = QuerySelector::select(&query, candidates)?;
-        let (records, records_truncated) = if plan.repository_id().is_some() {
-            self.records_for(&query)
+        let (records, records_truncated, next_page_cursor) = if plan.repository_id().is_some() {
+            self.records_for(&query, &plan)?
         } else {
-            Default::default()
+            (Vec::new(), false, None)
         };
         Ok(RepositoryHistoryQueryResponse {
             plan,
             records,
             records_truncated,
+            next_page_cursor,
         })
     }
 
@@ -560,6 +549,33 @@ impl RepositoryReplicaRuntime {
             plan,
             records: Vec::new(),
             records_truncated: false,
+            next_page_cursor: None,
+        })
+    }
+
+    pub(crate) fn runtime_status(
+        &mut self,
+        now_unix_seconds: u64,
+    ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
+        self.prepare_for_replication(now_unix_seconds)?;
+        self.refresh_capacity()?;
+        Ok(RepositoryRuntimeStatus {
+            storage_mode: if self.storage.is_sqlite() {
+                "sqlite".to_owned()
+            } else {
+                "degraded_json".to_owned()
+            },
+            capacity: self.snapshot.capacity.clone(),
+            record_count: self.snapshot.records.len(),
+            segment_count: self.snapshot.segments.len(),
+            gap_count: self.snapshot.gaps.len(),
+            history_truncated: self.snapshot.history_truncated,
+            last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
+            last_anti_entropy_unix_seconds: self.snapshot.last_anti_entropy_unix_seconds,
+            last_deep_verification_unix_seconds: self.snapshot.last_deep_verification_unix_seconds,
+            last_dynamic_relay_attempt_unix_seconds: self
+                .snapshot
+                .last_dynamic_relay_attempt_unix_seconds,
         })
     }
 
@@ -719,50 +735,27 @@ impl RepositoryReplicaRuntime {
         );
     }
 
-    fn repository_coverage(&self) -> Option<QueryCoverage> {
+    fn repository_coverage(&self, subject_node_id: Option<&str>) -> Option<QueryCoverage> {
         let observed_start = self
-            .snapshot
-            .records
-            .iter()
+            .matching_records(subject_node_id)
             .map(|record| retention::record_time_range(record).0)
             .min()?;
         let observed_end = self
-            .snapshot
-            .records
-            .iter()
+            .matching_records(subject_node_id)
             .map(|record| retention::record_time_range(record).1)
             .max()?;
-        let received_start = self.snapshot.records.iter().map(record_received_at).min()?;
-        let received_end = self.snapshot.records.iter().map(record_received_at).max()?;
+        let received_start = self
+            .matching_records(subject_node_id)
+            .map(record_received_at)
+            .min()?;
+        let received_end = self
+            .matching_records(subject_node_id)
+            .map(record_received_at)
+            .max()?;
         Some(QueryCoverage::new(
             QueryRange::new(observed_start, observed_end).expect("record timestamps are ordered"),
             QueryRange::new(received_start, received_end).expect("record timestamps are ordered"),
         ))
-    }
-
-    fn records_for(&self, query: &HistoryQuery) -> (Vec<RepositoryHistoryRecord>, bool) {
-        let mut records = Vec::with_capacity(query.page_size());
-        let mut response_bytes = 0usize;
-        let mut truncated = false;
-        for record in self.snapshot.records.iter().filter(|record| {
-            let (start, end) = retention::record_time_range(record);
-            start <= query.range().end_unix_seconds() && query.range().start_unix_seconds() <= end
-        }) {
-            let next_bytes = record
-                .payload
-                .len()
-                .saturating_add(record.record_key.len())
-                .saturating_add(256);
-            if records.len() == query.page_size()
-                || response_bytes.saturating_add(next_bytes) > MAX_QUERY_RESPONSE_BYTES
-            {
-                truncated = true;
-                break;
-            }
-            response_bytes = response_bytes.saturating_add(next_bytes);
-            records.push(record.clone().into());
-        }
-        (records, truncated)
     }
 
     fn refresh_capacity(&mut self) -> Result<(), RepositoryRuntimeError> {
@@ -956,17 +949,30 @@ impl From<StoredRecord> for RepositoryHistoryRecord {
     }
 }
 
+mod base64_bytes;
 mod capacity;
 mod helpers;
+mod paths;
+mod query;
 mod retention;
+mod source;
 mod sync;
-use helpers::{is_known_schema, known_schemas, sync_receipt, watermark_from_cursor};
-pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSummary};
+use helpers::{
+    is_known_schema, known_schemas, serialized_response_overhead, sync_receipt,
+    watermark_from_cursor,
+};
+pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
 
+#[cfg(test)]
+#[path = "runtime/sync_tests.rs"]
+mod sync_tests;
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "runtime/sync_tests.rs"]
-mod sync_tests;
+#[path = "runtime/query_budget_tests.rs"]
+mod query_budget_tests;
+#[cfg(test)]
+#[path = "runtime/query_tests.rs"]
+mod query_tests;
