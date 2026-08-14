@@ -29,10 +29,21 @@ pub(crate) struct RepositoryTieredBackfillPage {
 struct RepositoryTieredBackfillCursor {
     repair_cache_cutoff_unix_seconds: u64,
     received_at_cutoff_unix_seconds: u64,
-    high_watermark: RepositoryHistoryCompactionCursor,
+    tombstone_high_watermark: Option<RepositoryHistoryCompactionCursor>,
+    record_high_watermark: Option<RepositoryHistoryCompactionCursor>,
+    #[serde(default)]
+    phase: RepositoryTieredBackfillPhase,
     export_session_id: String,
     #[serde(default)]
     after: Option<RepositoryHistoryCompactionCursor>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RepositoryTieredBackfillPhase {
+    #[default]
+    Tombstones,
+    Records,
 }
 
 enum RepositoryTieredBackfillCursorState {
@@ -69,7 +80,9 @@ impl RepositoryReplicaRuntime {
             after,
             repair_cache_cutoff_unix_seconds,
             received_at_cutoff_unix_seconds,
-            high_watermark,
+            tombstone_high_watermark,
+            record_high_watermark,
+            phase,
             export_session_id,
         ) = match cursor {
             Some(RepositoryTieredBackfillCursorState::Current(cursor)) => {
@@ -87,14 +100,20 @@ impl RepositoryReplicaRuntime {
                     cursor.after,
                     cursor.repair_cache_cutoff_unix_seconds,
                     cursor.received_at_cutoff_unix_seconds,
-                    cursor.high_watermark,
+                    cursor.tombstone_high_watermark,
+                    cursor.record_high_watermark,
+                    cursor.phase,
                     cursor.export_session_id,
                 )
             }
             Some(RepositoryTieredBackfillCursorState::Legacy(after)) => {
-                let Some((high_watermark, received_at_cutoff_unix_seconds)) = self
+                let Some((
+                    tombstone_high_watermark,
+                    record_high_watermark,
+                    received_at_cutoff_unix_seconds,
+                )) = self
                     .storage
-                    .repository_history_export_watermark(repair_cache_cutoff_unix_seconds)
+                    .repository_history_export_watermarks(repair_cache_cutoff_unix_seconds)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 else {
                     return Ok(RepositoryTieredBackfillPage {
@@ -106,14 +125,20 @@ impl RepositoryReplicaRuntime {
                     Some(after),
                     repair_cache_cutoff_unix_seconds,
                     received_at_cutoff_unix_seconds,
-                    high_watermark,
+                    tombstone_high_watermark,
+                    record_high_watermark,
+                    RepositoryTieredBackfillPhase::Records,
                     uuid::Uuid::new_v4().to_string(),
                 )
             }
             None => {
-                let Some((high_watermark, received_at_cutoff_unix_seconds)) = self
+                let Some((
+                    tombstone_high_watermark,
+                    record_high_watermark,
+                    received_at_cutoff_unix_seconds,
+                )) = self
                     .storage
-                    .repository_history_export_watermark(repair_cache_cutoff_unix_seconds)
+                    .repository_history_export_watermarks(repair_cache_cutoff_unix_seconds)
                     .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 else {
                     return Ok(RepositoryTieredBackfillPage {
@@ -121,14 +146,28 @@ impl RepositoryReplicaRuntime {
                         next_cursor: None,
                     });
                 };
+                let phase = if tombstone_high_watermark.is_some() {
+                    RepositoryTieredBackfillPhase::Tombstones
+                } else {
+                    RepositoryTieredBackfillPhase::Records
+                };
                 (
                     None,
                     repair_cache_cutoff_unix_seconds,
                     received_at_cutoff_unix_seconds,
-                    high_watermark,
+                    tombstone_high_watermark,
+                    record_high_watermark,
+                    phase,
                     uuid::Uuid::new_v4().to_string(),
                 )
             }
+        };
+        let high_watermark = match phase {
+            RepositoryTieredBackfillPhase::Tombstones => tombstone_high_watermark.as_ref(),
+            RepositoryTieredBackfillPhase::Records => record_high_watermark.as_ref(),
+        };
+        let Some(high_watermark) = high_watermark else {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
         };
         self.storage
             .refresh_repository_history_export(&export_session_id, now_unix_seconds)
@@ -137,35 +176,48 @@ impl RepositoryReplicaRuntime {
             .storage
             .repository_history_records_page(
                 after.as_ref(),
-                &high_watermark,
+                high_watermark,
                 limit.saturating_add(1),
+                matches!(phase, RepositoryTieredBackfillPhase::Tombstones),
                 repair_cache_cutoff_unix_seconds,
                 received_at_cutoff_unix_seconds,
             )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let has_more = rows.len() > limit;
         rows.truncate(limit);
-        if !has_more {
+        let next_phase = if has_more {
+            Some(phase)
+        } else if matches!(phase, RepositoryTieredBackfillPhase::Tombstones)
+            && record_high_watermark.is_some()
+        {
+            Some(RepositoryTieredBackfillPhase::Records)
+        } else {
+            None
+        };
+        if next_phase.is_none() {
             self.storage
                 .finish_repository_history_export(&export_session_id)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         }
-        let next_cursor = has_more
-            .then(|| {
-                rows.last().map(|row| {
-                    URL_SAFE_NO_PAD.encode(
-                        serde_json::to_vec(&RepositoryTieredBackfillCursor {
-                            repair_cache_cutoff_unix_seconds,
-                            received_at_cutoff_unix_seconds,
-                            high_watermark: high_watermark.clone(),
-                            export_session_id,
-                            after: Some(RepositoryHistoryCompactionCursor::from(row)),
-                        })
-                        .expect("repository backfill cursor is serializable"),
-                    )
+        let next_cursor = next_phase.map(|next_phase| {
+            let next_after = if has_more {
+                rows.last().map(RepositoryHistoryCompactionCursor::from)
+            } else {
+                None
+            };
+            URL_SAFE_NO_PAD.encode(
+                serde_json::to_vec(&RepositoryTieredBackfillCursor {
+                    repair_cache_cutoff_unix_seconds,
+                    received_at_cutoff_unix_seconds,
+                    tombstone_high_watermark,
+                    record_high_watermark,
+                    phase: next_phase,
+                    export_session_id: export_session_id.clone(),
+                    after: next_after,
                 })
-            })
-            .flatten();
+                .expect("repository backfill cursor is serializable"),
+            )
+        });
         let records = rows
             .into_iter()
             .map(StoredRecord::from_sqlite_row)
@@ -204,6 +256,11 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(), RepositoryRuntimeError> {
         if records.is_empty() {
             return Ok(());
+        }
+        self.refresh_capacity()?;
+        let availability = self.snapshot.capacity.history_write_availability();
+        if !availability.allows_history_writes() {
+            return Err(RepositoryRuntimeError::WriteStopped(availability));
         }
         let previous_snapshot = self.snapshot.clone();
         let mut mutation = PendingRepositoryMutation::default();

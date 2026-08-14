@@ -34,6 +34,12 @@ pub(crate) struct RepositoryHistoryCompactionCursor {
     pub(crate) sequence: u64,
 }
 
+pub(crate) type RepositoryHistoryExportWatermarks = (
+    Option<RepositoryHistoryCompactionCursor>,
+    Option<RepositoryHistoryCompactionCursor>,
+    u64,
+);
+
 impl From<&RepositoryHistoryRecordRow> for RepositoryHistoryCompactionCursor {
     fn from(row: &RepositoryHistoryRecordRow) -> Self {
         Self {
@@ -477,6 +483,7 @@ impl HistoryStorage {
         after: Option<&RepositoryHistoryCompactionCursor>,
         high_watermark: &RepositoryHistoryCompactionCursor,
         limit: usize,
+        tombstones_only: bool,
         repair_cache_cutoff_unix_seconds: u64,
         received_at_cutoff_unix_seconds: u64,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
@@ -498,20 +505,22 @@ impl HistoryStorage {
                        observer_node_id, schema_id, schema_version, record_key, is_tombstone,
                        observed_start, observed_end, received_at, payload
                 FROM repository_history_records INDEXED BY repository_history_records_keyset
-                WHERE (is_tombstone = 1 OR observed_end < ?1)
-                  AND received_at <= ?2
+                WHERE is_tombstone = ?1
+                  AND (is_tombstone = 1 OR observed_end < ?2)
+                  AND received_at <= ?3
                   AND (observed_start, source_node_id, source_epoch, stream, sequence)
-                      > (?3, ?4, ?5, ?6, ?7)
+                      > (?4, ?5, ?6, ?7, ?8)
                   AND (observed_start, source_node_id, source_epoch, stream, sequence)
-                      <= (?8, ?9, ?10, ?11, ?12)
+                      <= (?9, ?10, ?11, ?12, ?13)
                 ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
-                LIMIT ?13
+                LIMIT ?14
                 ",
             )
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(
                 params![
+                    tombstones_only,
                     i64::try_from(repair_cache_cutoff_unix_seconds).unwrap_or(i64::MAX),
                     i64::try_from(received_at_cutoff_unix_seconds).unwrap_or(i64::MAX),
                     i64::try_from(after.observed_start_unix_seconds).unwrap_or(i64::MAX),
@@ -533,10 +542,10 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
-    pub(crate) fn repository_history_export_watermark(
+    pub(crate) fn repository_history_export_watermarks(
         &self,
         repair_cache_cutoff_unix_seconds: u64,
-    ) -> Result<Option<(RepositoryHistoryCompactionCursor, u64)>> {
+    ) -> Result<Option<RepositoryHistoryExportWatermarks>> {
         let mut backend = self.lock_backend();
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(None);
@@ -554,33 +563,46 @@ impl HistoryStorage {
         let Some(received_at_cutoff) = received_at_cutoff else {
             return Ok(None);
         };
-        let watermark = connection
-            .query_row(
-                "SELECT source_node_id, source_epoch, stream, sequence,
+        let watermark_for = |tombstones_only: bool| {
+            connection
+                .query_row(
+                    "SELECT source_node_id, source_epoch, stream, sequence,
                         observed_start
                  FROM repository_history_records
-                 WHERE (is_tombstone = 1 OR observed_end < ?1)
-                   AND received_at <= ?2
+                 WHERE is_tombstone = ?1
+                   AND (is_tombstone = 1 OR observed_end < ?2)
+                   AND received_at <= ?3
                  ORDER BY observed_start DESC, source_node_id DESC, source_epoch DESC,
                           stream DESC, sequence DESC
                  LIMIT 1",
-                params![
-                    i64::try_from(repair_cache_cutoff_unix_seconds).unwrap_or(i64::MAX),
-                    i64::try_from(received_at_cutoff).unwrap_or(i64::MAX),
-                ],
-                |row| {
-                    Ok(RepositoryHistoryCompactionCursor {
-                        observed_start_unix_seconds: u64::try_from(row.get::<_, i64>(4)?)
-                            .unwrap_or(u64::MAX),
-                        source_node_id: row.get(0)?,
-                        source_epoch: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
-                        stream: row.get(2)?,
-                        sequence: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(u64::MAX),
-                    })
-                },
-            )
-            .map_err(sqlite_error)?;
-        Ok(Some((watermark, received_at_cutoff)))
+                    params![
+                        tombstones_only,
+                        i64::try_from(repair_cache_cutoff_unix_seconds).unwrap_or(i64::MAX),
+                        i64::try_from(received_at_cutoff).unwrap_or(i64::MAX),
+                    ],
+                    |row| {
+                        Ok(RepositoryHistoryCompactionCursor {
+                            observed_start_unix_seconds: u64::try_from(row.get::<_, i64>(4)?)
+                                .unwrap_or(u64::MAX),
+                            source_node_id: row.get(0)?,
+                            source_epoch: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
+                            stream: row.get(2)?,
+                            sequence: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(u64::MAX),
+                        })
+                    },
+                )
+                .optional()
+                .map_err(sqlite_error)
+        };
+        let tombstone_watermark = watermark_for(true)?;
+        let record_watermark = watermark_for(false)?;
+        Ok(
+            (tombstone_watermark.is_some() || record_watermark.is_some()).then_some((
+                tombstone_watermark,
+                record_watermark,
+                received_at_cutoff,
+            )),
+        )
     }
 
     pub(crate) fn refresh_repository_history_export(

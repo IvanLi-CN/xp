@@ -85,6 +85,21 @@ fn peer_transport_failure_keeps_the_first_repository_syncing() {
 }
 
 #[test]
+fn expired_peer_export_cursor_restarts_only_after_an_application_rejection() {
+    let application = RepositoryDirectError::Application(anyhow::anyhow!("409 conflict"));
+    assert!(super::should_restart_peer_backfill(
+        Some("expired-cursor"),
+        &application
+    ));
+    assert!(!super::should_restart_peer_backfill(None, &application));
+    let transport = RepositoryDirectError::Transport(anyhow::anyhow!("connection reset"));
+    assert!(!super::should_restart_peer_backfill(
+        Some("expired-cursor"),
+        &transport
+    ));
+}
+
+#[test]
 fn peer_backfill_streams_are_independent_from_the_live_source_cursor_chain() {
     assert_eq!(
         super::peer_backfill_stream_for_schema("traffic.v1", "node-a").expect("backfill stream"),
@@ -174,4 +189,42 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
         64
     );
     assert_eq!(next.records.last_key_value().expect("last record").1.0, 127);
+}
+
+#[test]
+fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
+    let mut collector = super::HistoricalBackfillCollector::new(None, 2);
+    collector.push((
+        0,
+        super::source_record_with_key(
+            "traffic.v1",
+            "node-a",
+            0,
+            b"node-history:node:node-a:".to_vec(),
+            serde_json::json!({ "deleted": true }),
+            true,
+        )
+        .expect("tombstone"),
+    ));
+    collector.push((
+        100,
+        super::source_record_with_key(
+            "traffic.v1",
+            "node-a",
+            100,
+            b"node-history:node:node-a:old".to_vec(),
+            serde_json::json!({ "old": true }),
+            false,
+        )
+        .expect("history"),
+    ));
+    assert!(
+        collector
+            .records
+            .first_key_value()
+            .expect("first record")
+            .1
+            .1
+            .is_tombstone()
+    );
 }

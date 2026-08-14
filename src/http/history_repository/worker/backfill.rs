@@ -350,7 +350,7 @@ pub(super) async fn pull_peer_initial_history(
         {
             Ok(page) => page,
             Err(error) => {
-                if cursor.is_some() && matches!(error, RepositoryDirectError::Application(_)) {
+                if should_restart_peer_backfill(cursor.as_deref(), &error) {
                     state
                         .repository_replica
                         .lock()
@@ -411,6 +411,13 @@ pub(super) async fn pull_peer_initial_history(
                 false,
             )?;
     }
+}
+
+pub(crate) fn should_restart_peer_backfill(
+    cursor: Option<&str>,
+    error: &RepositoryDirectError,
+) -> bool {
+    cursor.is_some() && matches!(error, RepositoryDirectError::Application(_))
 }
 
 pub(super) async fn receive_peer_backfill_page(
@@ -770,7 +777,10 @@ async fn historical_source_backfill_records(
             .collect(),
         Vec::new(),
     )? {
-        records.push((now_unix_seconds, tombstone));
+        // Backfill has no source cursor before the repository protocol begins. Reserve the
+        // first collector phase for deletion intent so no historical page can arrive before its
+        // matching tombstone stream has been accepted.
+        records.push((0, tombstone));
     }
     Ok(records)
 }

@@ -4,7 +4,13 @@ use super::{
 };
 use crate::{
     history_sync::{CanonicalSegment, SyncRecord},
-    state::history_repository::query::Completeness,
+    state::history_repository::{
+        control::{
+            DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES, HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+            HistoryWriteAvailability,
+        },
+        query::Completeness,
+    },
 };
 use ed25519_dalek::SigningKey;
 
@@ -368,6 +374,59 @@ fn peer_initial_backfill_restart_reuses_the_epoch_but_resets_the_page_state() {
             ..InitialPeerBackfillCheckpoint::default()
         }
     );
+}
+
+#[test]
+fn tiered_backfill_respects_low_space_and_quota_write_guards() {
+    let record = || RepositoryTieredBackfillRecord {
+        observed_at_unix_seconds: 100,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "traffic".to_owned(),
+        sequence: 0,
+        subject_node_id: "node-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "traffic.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"tiered-capacity".to_vec(),
+        payload: b"sample".to_vec(),
+        tombstone: false,
+    };
+    for (used_bytes, available_bytes, expected) in [
+        (
+            0,
+            HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES - 1,
+            HistoryWriteAvailability::DegradedLowSpace,
+        ),
+        (
+            DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES,
+            HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+            HistoryWriteAvailability::QuotaReached,
+        ),
+    ] {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let mut runtime = load(temporary.path());
+        runtime
+            .force_capacity_for_test(used_bytes, available_bytes)
+            .expect("capacity");
+        assert!(matches!(
+            runtime.import_tiered_backfill_records(
+                vec![record()],
+                101,
+                &["repo-a".to_owned()],
+                "repo-a",
+            ),
+            Err(RepositoryRuntimeError::WriteStopped(availability)) if availability == expected
+        ));
+        assert_eq!(
+            runtime
+                .storage
+                .repository_history_record_count()
+                .expect("record count"),
+            0,
+            "rejected tiered import does not persist history"
+        );
+    }
 }
 
 #[test]

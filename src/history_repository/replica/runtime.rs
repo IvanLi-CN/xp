@@ -768,6 +768,9 @@ impl RepositoryReplicaRuntime {
 }
 
 mod backfill;
+#[cfg(test)]
+#[path = "runtime/backfill_order_tests.rs"]
+mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;

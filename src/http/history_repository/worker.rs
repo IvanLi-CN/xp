@@ -45,7 +45,8 @@ mod tests;
 #[cfg(test)]
 pub(super) use backfill::{
     HistoricalBackfillCollector, HistoricalBackfillSortKey, initial_backfill_is_complete,
-    peer_backfill_stream_for_record, peer_backfill_stream_for_schema, source_stream_for_schema,
+    peer_backfill_stream_for_record, peer_backfill_stream_for_schema, should_restart_peer_backfill,
+    source_stream_for_schema,
 };
 pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page};
 use backfill::{
