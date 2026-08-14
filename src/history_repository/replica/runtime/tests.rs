@@ -199,6 +199,7 @@ fn tombstone_expiry_waits_for_every_ready_repository_after_restart() {
         .expect("all-ready acknowledgement permits expiry and replacement");
 }
 
+#[test]
 fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
