@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::history_sync::MAX_RESPONSE_WIRE_BYTES;
 
 use super::{
-    RepositoryReplicaRuntime, RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
+    RelaySegmentCursor, RepositoryReplicaRuntime, RepositoryRuntimeError,
+    RepositoryTombstoneAcknowledgement, StoredGap,
 };
 use crate::state::history_repository::replica::{
     AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaWork, rendezvous_collectors,
@@ -63,6 +64,18 @@ pub(crate) struct RepositoryRepairBatch {
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
 }
 
+#[derive(Debug)]
+pub(crate) struct RelayRepairPage {
+    pub(crate) batch: RepositoryRepairBatch,
+    next_segment_id: Option<String>,
+}
+
+impl RelayRepairPage {
+    pub(crate) fn next_segment_id(&self) -> Option<&str> {
+        self.next_segment_id.as_deref()
+    }
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn prepare_for_replication(
         &mut self,
@@ -102,7 +115,7 @@ impl RepositoryReplicaRuntime {
         self.tombstones
             .reconcile_ready_repositories(ready_repositories)?;
         self.snapshot
-            .relay_segment_offsets
+            .relay_segment_cursors
             .retain(|repository_id, _| ready_repositories.contains(repository_id));
         self.persist_control_state()
     }
@@ -337,61 +350,78 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn relay_batch(
         &self,
         target_repository_id: &str,
-    ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
+    ) -> Result<RelayRepairPage, RepositoryRuntimeError> {
         let segment_count = self.snapshot.segments.len();
-        let offset = self
+        let start = match self
             .snapshot
-            .relay_segment_offsets
+            .relay_segment_cursors
             .get(target_repository_id)
-            .copied()
-            .unwrap_or_default();
-        Ok(RepositoryRepairBatch {
-            segments: self
+        {
+            Some(RelaySegmentCursor::LegacyOffset(offset)) if segment_count > 0 => {
+                offset % segment_count
+            }
+            Some(RelaySegmentCursor::NextSegmentId(next_segment_id)) => self
                 .snapshot
                 .segments
                 .iter()
-                .skip(if segment_count == 0 {
-                    0
-                } else {
-                    offset % segment_count
-                })
-                .take(MAX_REPAIR_SEGMENTS)
-                .cloned()
-                .map(|segment| RepositoryReplicaSegment {
-                    identity: segment.identity,
-                    wire: segment.wire,
-                })
-                .collect(),
-            gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+                .position(|segment| segment.id == *next_segment_id)
+                .unwrap_or_default(),
+            _ => 0,
+        };
+        let selected = self
+            .snapshot
+            .segments
+            .iter()
+            .skip(start)
+            .take(MAX_REPAIR_SEGMENTS)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_segment_id = if selected.is_empty() {
+            None
+        } else {
+            self.snapshot
+                .segments
+                .get(start + selected.len())
+                .or_else(|| self.snapshot.segments.first())
+                .map(|segment| segment.id.clone())
+        };
+        Ok(RelayRepairPage {
+            batch: RepositoryRepairBatch {
+                segments: selected
+                    .into_iter()
+                    .map(|segment| RepositoryReplicaSegment {
+                        identity: segment.identity,
+                        wire: segment.wire,
+                    })
+                    .collect(),
+                gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+            },
+            next_segment_id,
         })
     }
 
     pub(crate) fn record_relay_batch_delivered(
         &mut self,
         target_repository_id: &str,
-        delivered_segments: usize,
+        next_segment_id: Option<&str>,
     ) -> Result<(), RepositoryRuntimeError> {
-        let segment_count = self.snapshot.segments.len();
-        if delivered_segments == 0 || segment_count == 0 {
-            return Ok(());
-        }
+        let Some(next_segment_id) = next_segment_id else {
+            self.snapshot
+                .relay_segment_cursors
+                .remove(target_repository_id);
+            return self.persist_control_state();
+        };
         if !self
             .snapshot
-            .relay_segment_offsets
+            .relay_segment_cursors
             .contains_key(target_repository_id)
-            && self.snapshot.relay_segment_offsets.len() == MAX_RELAY_TARGETS
+            && self.snapshot.relay_segment_cursors.len() == MAX_RELAY_TARGETS
         {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
         }
-        let offset = self
-            .snapshot
-            .relay_segment_offsets
-            .get(target_repository_id)
-            .copied()
-            .unwrap_or_default();
-        self.snapshot.relay_segment_offsets.insert(
+        self.snapshot.relay_segment_cursors.insert(
             target_repository_id.to_owned(),
-            offset.saturating_add(delivered_segments) % segment_count,
+            RelaySegmentCursor::NextSegmentId(next_segment_id.to_owned()),
         );
         self.persist_control_state()
     }

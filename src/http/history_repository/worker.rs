@@ -177,17 +177,18 @@ async fn replicate_peer_via_dynamic_relay(
         .ok_or_else(|| anyhow::anyhow!("no independent ready repository can relay"))?;
     let keypair = cluster_relay_keypair(state, &state.cluster.node_id)?;
     let target_public_key = cluster_relay_keypair(state, &target.node_id)?.public_key();
-    let batch = {
+    let page = {
         let mut runtime = state.repository_replica.lock().await;
         if !runtime.begin_dynamic_relay_attempt(now)? {
             anyhow::bail!("hourly jittered dynamic relay attempt is not due");
         }
         runtime.relay_batch(&target.node_id)?
     };
+    let next_segment_id = page.next_segment_id().map(str::to_owned);
+    let batch = page.batch;
     if batch.segments.is_empty() && batch.gaps.is_empty() {
         return Ok(());
     }
-    let delivered_segments = batch.segments.len();
     let payload = serde_json::to_vec(&batch)?;
     let frame = RelayFrame::seal(
         keypair,
@@ -214,7 +215,7 @@ async fn replicate_peer_via_dynamic_relay(
         .repository_replica
         .lock()
         .await
-        .record_relay_batch_delivered(&target.node_id, delivered_segments)?;
+        .record_relay_batch_delivered(&target.node_id, next_segment_id.as_deref())?;
     Ok(())
 }
 
@@ -330,7 +331,6 @@ pub(super) async fn propagate_tombstone_acknowledgements(
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .filter(|peer| ready_repository_ids.iter().any(|id| id == &peer.node_id))
-        .take(MAX_REPOSITORY_PEERS_PER_CYCLE)
     {
         repository_direct_request::<serde_json::Value>(
             state,

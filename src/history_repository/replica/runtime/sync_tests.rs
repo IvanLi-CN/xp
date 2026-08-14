@@ -26,7 +26,7 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let identity = identity();
     let mut runtime = load(temporary.path());
-    runtime.snapshot.segments = (0_u8..65)
+    runtime.snapshot.segments = (0_u8..128)
         .map(|sequence| StoredSegment {
             id: format!("segment-{sequence}"),
             identity: identity.clone(),
@@ -37,19 +37,33 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
     let first = runtime
         .relay_batch("repository-b")
         .expect("first bounded relay page");
-    assert_eq!(first.segments.len(), 64);
-    assert_eq!(first.segments[0].wire, vec![0]);
-    assert_eq!(first.segments[63].wire, vec![63]);
+    assert_eq!(first.batch.segments.len(), 64);
+    assert_eq!(first.batch.segments[0].wire, vec![0]);
+    assert_eq!(first.batch.segments[63].wire, vec![63]);
+    let next_segment_id = first
+        .next_segment_id()
+        .expect("next retained segment")
+        .to_owned();
+    runtime.snapshot.segments.drain(..64);
     runtime
-        .record_relay_batch_delivered("repository-b", first.segments.len())
+        .snapshot
+        .segments
+        .extend((128_u8..192).map(|sequence| StoredSegment {
+            id: format!("segment-{sequence}"),
+            identity: identity.clone(),
+            wire: vec![sequence],
+        }));
+    runtime
+        .record_relay_batch_delivered("repository-b", Some(&next_segment_id))
         .expect("persist relay cursor");
 
     let restored = load(temporary.path());
     let second = restored
         .relay_batch("repository-b")
         .expect("second bounded relay page");
-    assert_eq!(second.segments.len(), 1);
-    assert_eq!(second.segments[0].wire, vec![64]);
+    assert_eq!(second.batch.segments.len(), 64);
+    assert_eq!(second.batch.segments[0].wire, vec![64]);
+    assert_eq!(second.batch.segments[63].wire, vec![127]);
 }
 
 #[test]

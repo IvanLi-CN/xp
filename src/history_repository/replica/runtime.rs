@@ -199,7 +199,8 @@ struct RepositoryReplicaSnapshot {
     #[serde(default)]
     source_last_received_unix_seconds: BTreeMap<String, u64>,
     #[serde(default)]
-    relay_segment_offsets: BTreeMap<String, usize>,
+    #[serde(rename = "relay_segment_offsets")]
+    relay_segment_cursors: BTreeMap<String, RelaySegmentCursor>,
     #[serde(default)]
     replication_peer_offset: usize,
     #[serde(default)]
@@ -223,7 +224,7 @@ impl Default for RepositoryReplicaSnapshot {
             last_dynamic_relay_attempt_unix_seconds: None,
             collector_failure_cycles: BTreeMap::new(),
             source_last_received_unix_seconds: BTreeMap::new(),
-            relay_segment_offsets: BTreeMap::new(),
+            relay_segment_cursors: BTreeMap::new(),
             replication_peer_offset: 0,
             deep_verified_peer_ids: BTreeSet::new(),
         }
@@ -253,6 +254,13 @@ struct StoredSegment {
     id: String,
     identity: RepositoryNodeIdentity,
     wire: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum RelaySegmentCursor {
+    LegacyOffset(usize),
+    NextSegmentId(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
