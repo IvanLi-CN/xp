@@ -1,5 +1,5 @@
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::state::history_repository::replica::RepositoryReplicaGap;
 
@@ -86,6 +86,73 @@ impl RepositoryReplicaRuntime {
             now_unix_seconds,
             &["local".to_owned()],
         )
+    }
+
+    /// Queue one historical backfill page without returning unrelated live outbox fronts. The
+    /// caller can atomically acknowledge these exact segments with the page checkpoint.
+    pub(crate) fn queue_local_history_backfill_segments(
+        &mut self,
+        cluster_id: &str,
+        identity: RepositoryNodeIdentity,
+        signing_key: &ed25519_dalek::SigningKey,
+        records: Vec<SyncRecord>,
+        now_unix_seconds: u64,
+    ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
+        // A page checkpoint is all-or-nothing. Reject before queuing if any target stream has a
+        // pending segment: its predecessor must be delivered first, and appending a backfill
+        // segment behind it could not be atomically acknowledged with this page's checkpoint.
+        for record in &records {
+            let stream = if record.is_tombstone() {
+                "tombstone"
+            } else {
+                stream_for_schema(record.schema().0).ok_or_else(|| {
+                    RepositoryRuntimeError::Storage(format!(
+                        "history source schema has no independent stream: {}",
+                        record.schema().0
+                    ))
+                })?
+            };
+            if self
+                .snapshot
+                .local_source
+                .streams
+                .get(stream)
+                .is_some_and(|state| !state.pending.is_empty())
+            {
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
+        }
+        let requires_segment = !records.is_empty();
+        let pending_before = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter().map(|segment| segment.id.clone()))
+            .collect::<BTreeSet<_>>();
+        self.queue_local_source_segments(
+            cluster_id,
+            identity,
+            signing_key,
+            records,
+            now_unix_seconds,
+        )?;
+        let created = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .filter(|segment| !pending_before.contains(&segment.id))
+            .map(|segment| RepositoryReplicaSegment {
+                identity: segment.identity.clone(),
+                wire: segment.wire.clone(),
+            })
+            .collect::<Vec<_>>();
+        if requires_segment && created.is_empty() {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
+        Ok(created)
     }
 
     pub(crate) fn queue_local_source_segments_for_repositories(
@@ -271,6 +338,32 @@ impl RepositoryReplicaRuntime {
         &mut self,
         delivered_wire: &[u8],
     ) -> Result<(), RepositoryRuntimeError> {
+        if self.remove_local_source_pending_segment(delivered_wire) {
+            self.persist_control_state()?;
+        }
+        Ok(())
+    }
+
+    /// Persist acknowledgement and the local historical-export cursor together. Replaying an
+    /// already accepted segment is safe after a crash; moving only one of these checkpoints is
+    /// not, because a new source sequence would otherwise be assigned to the same history row.
+    pub(crate) fn acknowledge_local_source_segment_and_checkpoint_backfill(
+        &mut self,
+        delivered_wire: &[u8],
+        page_cursor: Option<String>,
+        completed: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if !self.remove_local_source_pending_segment(delivered_wire) {
+            return Err(RepositoryRuntimeError::Storage(
+                "local history backfill acknowledgement was not pending".to_owned(),
+            ));
+        }
+        self.snapshot.local_history_backfill_cursor = page_cursor;
+        self.snapshot.local_history_backfill_completed = completed;
+        self.persist_control_state()
+    }
+
+    fn remove_local_source_pending_segment(&mut self, delivered_wire: &[u8]) -> bool {
         let mut acknowledged = false;
         for stream in self.snapshot.local_source.streams.values_mut() {
             if stream
@@ -282,10 +375,7 @@ impl RepositoryReplicaRuntime {
                 acknowledged = true;
             }
         }
-        if acknowledged {
-            self.persist_control_state()?;
-        }
-        Ok(())
+        acknowledged
     }
 
     pub(crate) fn begin_source_dynamic_relay_attempt(

@@ -5,13 +5,17 @@ use crate::{
     state::history_repository::identity::RepositoryNodeIdentity,
 };
 
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredGap, StoredSegment};
+use super::{
+    PendingRepositoryMutation, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredGap,
+    StoredSegment,
+};
 
 impl RepositoryReplicaRuntime {
     pub(super) fn store_segment(
         &mut self,
         identity: &RepositoryNodeIdentity,
         wire: &[u8],
+        mutation: &mut PendingRepositoryMutation,
     ) -> Result<(), RepositoryRuntimeError> {
         let id = hex::encode(Sha256::digest(wire));
         let segment = StoredSegment {
@@ -24,10 +28,8 @@ impl RepositoryReplicaRuntime {
             wire: wire.to_vec(),
         };
         if self.uses_sqlite_history() {
-            return self
-                .storage
-                .upsert_repository_history_segments(&[segment.sqlite_row()?])
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()));
+            mutation.segments.push(segment.sqlite_row()?);
+            return Ok(());
         }
         if !self
             .snapshot

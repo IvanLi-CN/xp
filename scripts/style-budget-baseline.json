@@ -1158,19 +1158,7 @@
     "max_line_length": 147,
     "source_lines": 2918
   },
-  "src/history_storage/mod.rs": {
-    "source_lines": 1623
-  },
   "src/http/history_repository.rs": {
     "source_lines": 1120
-  },
-  "src/http/history_repository/worker.rs": {
-    "source_lines": 1975
-  },
-  "src/history_repository/replica/runtime.rs": {
-    "source_lines": 1778
-  },
-  "src/history_repository/replica/runtime/tests.rs": {
-    "source_lines": 1699
   }
 }

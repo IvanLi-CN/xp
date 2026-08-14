@@ -939,13 +939,12 @@ pub fn build_router_with_mesh_telemetry(
     let raft = crate::raft::app::PanicBoundaryRaft::wrap(raft);
 
     let repository_storage = HistoryStorage::open(&config.data_dir);
-    let repository_replica = RepositoryReplicaRuntime::load(repository_storage.clone())
-        .unwrap_or_else(|error| {
-            tracing::warn!(
-                error = %error,
-                "repository replica checkpoint is unusable; waiting for a safe rebuild"
-            );
-            RepositoryReplicaRuntime::empty(repository_storage)
+    let repository_replica =
+        RepositoryReplicaRuntime::load(repository_storage).unwrap_or_else(|error| {
+            // An empty control snapshot cannot safely describe existing SQLite history rows. Refuse
+            // startup instead of serving a silently rebuilt repository that could lose tombstones or
+            // advertise incomplete data as a fresh replica.
+            panic!("repository replica checkpoint is unusable: {error}");
         });
     let app_state = AppState {
         config: Arc::new(config),

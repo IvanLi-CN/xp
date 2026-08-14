@@ -288,6 +288,8 @@ pub(crate) struct ReplicaRecordKey {
     source_node_id: String,
     source_epoch: u64,
     stream: String,
+    #[serde(default)]
+    sequence: u64,
     subject_node_id: String,
     observer_node_id: String,
     schema_id: String,
@@ -306,6 +308,10 @@ impl ReplicaRecordKey {
 
     pub(crate) fn stream(&self) -> &str {
         &self.stream
+    }
+
+    pub(crate) fn sequence(&self) -> u64 {
+        self.sequence
     }
 
     pub(crate) fn subject_node_id(&self) -> &str {
@@ -355,6 +361,7 @@ impl ReplicaRecord {
                 source_node_id: cursor.source_node_id.clone(),
                 source_epoch: cursor.source_epoch,
                 stream: cursor.stream.clone(),
+                sequence: cursor.sequence,
                 subject_node_id,
                 observer_node_id,
                 schema_id,
@@ -372,6 +379,8 @@ impl ReplicaRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TombstoneState {
+    #[serde(default)]
+    created_at: u64,
     expires_at: u64,
     ready_repositories: BTreeSet<String>,
     acknowledgements: BTreeSet<String>,
@@ -442,6 +451,7 @@ impl TombstoneLedger {
         self.entries.insert(
             key,
             TombstoneState {
+                created_at: now_unix_seconds,
                 expires_at: now_unix_seconds.saturating_add(self.horizon_seconds),
                 ready_repositories: repositories,
                 acknowledgements: BTreeSet::new(),

@@ -137,38 +137,17 @@ pub(super) fn compaction_bucket_end(record: &StoredRecord, now_unix_seconds: u64
     Some(bucket_time_range(record.observed_at_unix_seconds, resolution).1)
 }
 
-pub(super) fn same_compaction_bucket(
-    left: &StoredRecord,
-    right: &StoredRecord,
+/// Returns whether a record's time bucket can still receive rows after a keyset page boundary.
+/// Bucket identity also includes subject/schema dimensions, but the time boundary is shared by
+/// all of those identities; retaining every matching aggregate prevents interleaved subjects from
+/// being split across pages.
+pub(super) fn compaction_bucket_reaches(
+    record: &StoredRecord,
+    page_boundary_unix_seconds: u64,
     now_unix_seconds: u64,
 ) -> bool {
-    let policy = super::super::RepositoryRetentionPolicy::default();
-    let Some(left_resolution) =
-        policy.resolution_for_age(now_unix_seconds.saturating_sub(left.observed_at_unix_seconds))
-    else {
-        return false;
-    };
-    let Some(right_resolution) =
-        policy.resolution_for_age(now_unix_seconds.saturating_sub(right.observed_at_unix_seconds))
-    else {
-        return false;
-    };
-    left_resolution == right_resolution
-        && RetentionBucket::for_record(
-            left,
-            left_resolution,
-            policy.keeps_minute_detail(
-                now_unix_seconds.saturating_sub(left.observed_at_unix_seconds),
-            ),
-            None,
-        ) == RetentionBucket::for_record(
-            right,
-            right_resolution,
-            policy.keeps_minute_detail(
-                now_unix_seconds.saturating_sub(right.observed_at_unix_seconds),
-            ),
-            None,
-        )
+    compaction_bucket_end(record, now_unix_seconds)
+        .is_some_and(|bucket_end| bucket_end >= page_boundary_unix_seconds)
 }
 
 pub(super) fn incomplete_aggregate_gap<'a>(
