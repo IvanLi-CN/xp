@@ -200,7 +200,7 @@ async fn initial_backfill_exports_historical_data_from_an_authenticated_peer() {
             chrono::Utc::now(),
             &cluster.node_id,
             crate::node_history::NodeHistorySnapshot {
-                node_id: cluster.node_id.clone(),
+                node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
                 last_synced_at: Some("2026-08-14T00:00:00Z".to_owned()),
                 last_sync_error: None,
                 daily_traffic: vec![crate::node_history::NodeHistoryDailyTraffic {
