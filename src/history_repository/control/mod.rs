@@ -12,6 +12,7 @@ pub(crate) use capacity::{
 #[allow(unused_imports)]
 pub(crate) use lifecycle::{
     RepositoryLifecycle, RepositoryMember, RepositoryMembership, RetirementDecision,
+    apply_repository_membership,
 };
 
 #[cfg(test)]

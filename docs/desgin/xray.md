@@ -43,11 +43,11 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 - `xp` 只做**每分钟一次**的 online 快照采样，不解析 access log。
 - 极短连接如果发生在两次采样之间，不会出现在历史中；这属于采样口径的已知限制。
 - 如果 Xray 未开启 `statsUserOnline`，`xp` 会保留 warning 并继续 quota 主流程，但 IP usage 图表会进入 explanation 空态。
-- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认写入完整 reclaim profile（`handshake=4`、`connIdle=300`、`uplinkOnly=2`、`downlinkOnly=5`）并打开 `statsUserOnline=true`；旧节点通过 `xp-ops upgrade` 收敛静态配置时，也必须保留当前控制面 listener 绑定（例如自定义 `XP_XRAY_API_ADDR` 与既有 `mesh-proxy` listener）。
+- `xp-ops init` 生成的新 `/etc/xray/config.json` 已默认写入完整 reclaim profile（`handshake=4`、`connIdle=300`、`uplinkOnly=2`、`downlinkOnly=5`）并打开 `statsUserOnline=true`；旧节点通过 `xp-ops upgrade` 收敛静态配置时，自定义 `XP_XRAY_API_ADDR` 继续保持有效，并清理已退休的旧控制面代理 listener。
 
 ## 3. 推荐的 Xray 基础配置（示例）
 
-> 说明：这是 **基础配置**，不包含业务入站。业务入站由 `xp` 通过 AddInbound 动态下发。`mesh-proxy` 是控制面专用 loopback SOCKS 入站，供 `XP_MESH_PROXY_URL=socks5h://127.0.0.1:10808` 使用。
+> 说明：这是 **基础配置**，不包含业务入站。业务入站由 `xp` 通过 AddInbound 动态下发。
 
 ```json
 {
@@ -77,19 +77,11 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
       "protocol": "dokodemo-door",
       "settings": { "address": "127.0.0.1" },
       "tag": "api"
-    },
-    {
-      "listen": "127.0.0.1",
-      "port": 10808,
-      "protocol": "socks",
-      "settings": { "auth": "noauth", "udp": true },
-      "tag": "mesh-proxy"
     }
   ],
   "routing": {
     "rules": [
-      { "inboundTag": ["api"], "outboundTag": "api" },
-      { "inboundTag": ["mesh-proxy"], "outboundTag": "direct" }
+      { "inboundTag": ["api"], "outboundTag": "api" }
     ]
   },
   "outbounds": [
@@ -99,8 +91,6 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
 }
 ```
 
-`mesh-proxy` 必须绑定 loopback，不能暴露为公网开放代理。它只承载 xp-to-xp 控制面请求，不参与用户 endpoint、订阅输出或 quota 统计。
-
 ## 3.1 业务入站的 stale TCP reclaim 默认
 
 - `xp` 通过 AddInbound 动态创建的业务 listener（当前仅 VLESS Reality 与 `Ss2022_2022Blake3Aes128Gcm`）会固定下发：
@@ -108,7 +98,7 @@ Xray 通过 `api` 模块启用 gRPC API。关键点：
   - `tcp_keep_alive_interval=30`
   - `tcp_user_timeout=10000`
 - 该 `socket_settings` 只作用于业务 inbound。
-- 静态控制面 listener（`api`、`mesh-proxy`）保持现状，不增加 `sockopt`。
+- 静态控制面 `api` listener 保持现状，不增加 `sockopt`。
 
 VLESS Reality 的 metadata `transport` 决定业务 transport：历史缺失值为
 `vision_tcp`（TCP + `xtls-rprx-vision`）；新建或显式切换的 `xhttp` 使用 Xray

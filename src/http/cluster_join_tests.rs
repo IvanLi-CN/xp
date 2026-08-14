@@ -145,7 +145,6 @@ fn test_config(data_dir: PathBuf) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -311,7 +310,6 @@ fn app_with_failing_add_voters(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store, join_token, membership_changes)
 }

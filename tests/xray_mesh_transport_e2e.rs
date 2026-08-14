@@ -27,9 +27,7 @@ use tokio::{
 };
 
 use xp::{
-    control_plane_mesh::{
-        MeshPeerTarget, MeshProxyStateHandle, MeshRequest, build_mesh_http_client,
-    },
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, build_mesh_http_client},
     domain::{Endpoint, EndpointKind},
     internal_auth::{self, InternalRoute},
     mesh_telemetry::MeshPeerReason,
@@ -310,14 +308,8 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
 
     let proxy = spawn_counting_proxy(SocketAddr::from(([127, 0, 0, 1], vless_port))).await;
     let target = mesh_target(&proxy);
-    let client = build_mesh_http_client(
-        &ca.cert_pem,
-        &node_cert,
-        &csr.key_pem,
-        None,
-        MeshProxyStateHandle::disabled(),
-    )
-    .expect("Mesh client");
+    let client =
+        build_mesh_http_client(&ca.cert_pem, &node_cert, &csr.key_pem).expect("Mesh client");
 
     for index in 0..32 {
         let response = client

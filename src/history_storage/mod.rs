@@ -22,6 +22,7 @@ pub(crate) const INBOUND_IP_USAGE_KEY: &str = "inbound_ip_usage";
 pub(crate) const TCP_CONNECTION_USAGE_KEY: &str = "tcp_connection_usage";
 pub(crate) const NODE_HISTORY_KEY: &str = "node_history";
 pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
+pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -30,13 +31,14 @@ const BACKUP_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const CHECKPOINT_PAGES: u32 = 64;
 const VACUUM_PAGES: u32 = 64;
 
-const SOURCES: [HistorySource; 6] = [
+const SOURCES: [HistorySource; 7] = [
     HistorySource::new(STATE_KEY, "state.json"),
     HistorySource::new(USAGE_KEY, "usage.json"),
     HistorySource::new(INBOUND_IP_USAGE_KEY, "inbound_ip_usage.json"),
     HistorySource::new(TCP_CONNECTION_USAGE_KEY, "tcp_connection_usage.json"),
     HistorySource::new(NODE_HISTORY_KEY, "node_history_cache.json"),
     HistorySource::new(MESH_TELEMETRY_KEY, "mesh/telemetry.json"),
+    HistorySource::new(REPOSITORY_REPLICA_KEY, "history/repository_replica.json"),
 ];
 
 #[derive(Clone, Copy)]
@@ -153,6 +155,24 @@ impl HistoryStorage {
             Backend::Sqlite(_) => HistoryStorageMode::Sqlite,
             Backend::Json => HistoryStorageMode::DegradedJson,
         }
+    }
+
+    pub(crate) fn available_bytes(&self) -> io::Result<u64> {
+        let c_path =
+            std::ffi::CString::new(self.data_dir.as_os_str().as_encoded_bytes()).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "history path contains NUL")
+            })?;
+        let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        let result = unsafe { libc::statvfs(c_path.as_ptr(), stats.as_mut_ptr()) };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let stats = unsafe { stats.assume_init() };
+        #[cfg(target_os = "macos")]
+        let available_blocks = u64::from(stats.f_bavail);
+        #[cfg(not(target_os = "macos"))]
+        let available_blocks = stats.f_bavail;
+        Ok(available_blocks.saturating_mul(stats.f_frsize))
     }
 
     fn cleanup_expired_backups_at(&self, now: SystemTime) {
@@ -493,7 +513,7 @@ mod tests {
 
     use super::{
         Backend, HistoryStorage, HistoryStorageMode, INBOUND_IP_USAGE_KEY, MESH_TELEMETRY_KEY,
-        NODE_HISTORY_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
+        NODE_HISTORY_KEY, REPOSITORY_REPLICA_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
     };
 
     #[test]
@@ -521,6 +541,11 @@ mod tests {
                 "mesh/telemetry.json",
                 MESH_TELEMETRY_KEY,
                 b"mesh-telemetry".as_slice(),
+            ),
+            (
+                "history/repository_replica.json",
+                REPOSITORY_REPLICA_KEY,
+                b"repository-replica".as_slice(),
             ),
         ];
         for (relative_path, _, payload) in snapshots {

@@ -47,10 +47,6 @@
     "long_line_count": 7,
     "max_line_length": 164
   },
-  "docs/desgin/cluster.md": {
-    "long_line_count": 2,
-    "max_line_length": 221
-  },
   "docs/desgin/quality.md": {
     "long_line_count": 2,
     "max_line_length": 151
@@ -458,18 +454,6 @@
   "docs/specs/much7-endpoint-probe-online-participants/SPEC.md": {
     "long_line_count": 8,
     "max_line_length": 154
-  },
-  "docs/specs/nbs5f-xray-control-plane-relay/HISTORY.md": {
-    "long_line_count": 2,
-    "max_line_length": 109
-  },
-  "docs/specs/nbs5f-xray-control-plane-relay/IMPLEMENTATION.md": {
-    "long_line_count": 4,
-    "max_line_length": 197
-  },
-  "docs/specs/nbs5f-xray-control-plane-relay/SPEC.md": {
-    "long_line_count": 1,
-    "max_line_length": 102
   },
   "docs/specs/nujzm-access-model-hardcut-v9/SPEC.md": {
     "long_line_count": 1,

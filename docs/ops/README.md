@@ -56,7 +56,7 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` derives its primary per-peer control-plane route from exactly one managed-default VLESS/REALITY endpoint on the target node. `XP_MESH_PROXY_URL` remains an optional proxy-first/direct compatibility layer only for the public fallback egress.
+- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. Repository synchronization may use a separate in-memory dynamic relay only after both direct paths fail.
 - `xp` periodically probes `xray` and exposes status via `GET /api/health` (`xray.*` fields). On `down -> up`, `xp` requests a full reconcile.
 - `xray` is supervised by the init system (systemd/OpenRC). `xp` does not spawn `xray`, but it can request a restart through the init system (requires a minimal permission policy installed by `xp-ops`).
 - `xp` also tracks `cloudflared` when `XP_CLOUDFLARED_MONITOR_MODE!=none`. `XP_CLOUDFLARED_RESTART_MODE` separately controls whether `xp` may actively request a Tunnel restart; host-managed OpenRC defaults should monitor cloudflared but leave active restarts disabled.
@@ -482,9 +482,6 @@ Required (or commonly set):
   - Maximum wait budget for the DNS-01 TXT to become visible through both Cloudflare and Google
     DNS-over-HTTPS resolvers before ACME validation starts. Nodes do not need direct authority
     access on UDP/TCP port 53.
-- `XP_MESH_PROXY_URL` (default: unset)
-  - Optional proxy-first/direct egress layer for public control-plane fallback. With the `xp-ops init` static Xray config, use `socks5h://127.0.0.1:10808`.
-  - This does not carry Reality Mesh traffic and does not replace `XP_API_BASE_URL`; the public HTTPS origin remains the bootstrap and fallback path.
 
 DDNS runtime notes:
 
@@ -543,7 +540,7 @@ To expose minute-level TCP connection history in the admin UI, the node must run
 1. Required: the node OS is Linux. Non-Linux platforms return an `unsupported_platform` warning instead of a zero-value chart.
 2. Required: business endpoints are configured in xp state with their actual listen `port`, because TCP history maps counts by node-local endpoint port.
 3. Scope: only socket-level `ESTABLISHED` inbound TCP connections on business endpoint listen ports are counted.
-4. Excluded: `xp` admin port, Xray API, `mesh-proxy`, `cloudflared`, and outbound connections are not part of this panel.
+4. Excluded: `xp` admin port, Xray API, `cloudflared`, and outbound connections are not part of this panel.
 5. Storage: xp persists the most recent 7 days of minute samples in `${XP_DATA_DIR}/tcp_connection_usage.json`.
 
 Operational notes:
@@ -711,7 +708,7 @@ Current rollout semantics:
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started. This prevents an asynchronous OpenRC transition from being reported as a
   completed upgrade.
-- During static config rewrite, `xp-ops upgrade` preserves control-plane listener bindings that are already authoritative on the node: `XP_XRAY_API_ADDR` remains the source of truth for the `api` inbound, and an existing `mesh-proxy` inbound keeps its previous listener shape.
+- During static config rewrite, `xp-ops upgrade` preserves the authoritative `XP_XRAY_API_ADDR` binding for the `api` inbound and removes the retired legacy control-plane proxy inbound when present.
 - If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable.
 
 Useful flags:

@@ -14,7 +14,7 @@
   the row switches to the stacked presentation instead of allowing controls to overflow the panel.
 - Mock-only page demos establish presentation states but cannot establish shared AppShell geometry;
   production-route layout regressions require a real-route geometry assertion.
-- `XP_MESH_PROXY_URL` 保留为公网 egress compatibility，不定义 Mesh。
+- 本机控制面代理已完全删除；Mesh 与 peer public HTTPS origin 是同级 direct path。
 - HTTP/2 ingress may expose an absolute-form URI. Canary forwarding must discard its origin and
   combine only the authenticated raw path/query with the fixed XP loopback origin; forcing
   HTTP/1.1 would hide the defect instead of preserving the transport contract.
@@ -31,5 +31,4 @@
 
 ## Supersession
 
-- This topic supersedes `nbs5f-xray-control-plane-relay`.
-- Legacy SOCKS relay remains public egress compatibility only.
+- This topic supersedes the retired local control-plane proxy contract.

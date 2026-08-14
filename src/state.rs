@@ -23,6 +23,7 @@ use crate::{
     },
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
+        control::{RepositoryMembership, apply_repository_membership},
     },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
@@ -327,12 +328,13 @@ pub struct PersistedState {
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
     #[serde(default)]
     pub mihomo_delivery_mode: MihomoDeliveryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_membership: Option<RepositoryMembership>,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
     pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
 }
-
 impl PersistedState {
     pub fn empty() -> Self {
         Self {
@@ -354,6 +356,7 @@ impl PersistedState {
             user_auto_assign_endpoint_kinds: BTreeMap::new(),
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
+            repository_membership: None,
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
@@ -1937,6 +1940,9 @@ pub enum DesiredStateCommand {
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
+    },
 }
 
 // ---- WAL backward compatibility ----
@@ -2078,7 +2084,9 @@ enum DesiredStateCommandCompat {
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
-
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
+    },
     // Legacy grants commands (schema <= 9).
     ReplaceUserGrants {
         user_id: String,
@@ -2232,7 +2240,9 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 from_node_id,
                 samples,
             },
-
+            DesiredStateCommandCompat::ReplaceRepositoryMembership { membership } => {
+                Self::ReplaceRepositoryMembership { membership }
+            }
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
                 // Map legacy grants hard-cut to membership-only access list.
                 let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
@@ -3168,7 +3178,10 @@ impl DesiredStateCommand {
                     );
                     prune_endpoint_probe_hour_map(&mut history.hours);
                 }
-
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::ReplaceRepositoryMembership { membership } => {
+                apply_repository_membership(state, membership)?;
                 Ok(DesiredStateApplyResult::Applied)
             }
         }

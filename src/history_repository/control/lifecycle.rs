@@ -131,6 +131,24 @@ impl std::error::Error for RepositoryControlError {
     }
 }
 
+pub(crate) fn apply_repository_membership(
+    state: &mut crate::state::PersistedState,
+    membership: &RepositoryMembership,
+) -> Result<(), crate::domain::DomainError> {
+    if let Some(node_id) = membership
+        .members()
+        .iter()
+        .map(|member| member.node_id().as_str())
+        .find(|node_id| !state.nodes.contains_key(*node_id))
+    {
+        return Err(crate::domain::DomainError::MissingNode {
+            node_id: node_id.to_owned(),
+        });
+    }
+    state.repository_membership = Some(membership.clone());
+    Ok(())
+}
+
 impl From<RepositoryIdentityError> for RepositoryControlError {
     fn from(value: RepositoryIdentityError) -> Self {
         Self::Identity(value)
@@ -301,7 +319,7 @@ impl<'de> Deserialize<'de> for RepositoryMember {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct RepositoryMembership {
+pub struct RepositoryMembership {
     members: Vec<RepositoryMember>,
 }
 
@@ -327,6 +345,12 @@ impl RepositoryMembership {
 
     pub(crate) fn members(&self) -> &[RepositoryMember] {
         &self.members
+    }
+
+    pub(crate) fn ready_members(&self) -> impl Iterator<Item = &RepositoryMember> {
+        self.members
+            .iter()
+            .filter(|member| member.lifecycle == RepositoryLifecycle::Ready)
     }
 
     pub(crate) fn add_repository(

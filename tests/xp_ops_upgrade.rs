@@ -1006,12 +1006,11 @@ mod linux {
             .unwrap();
         assert_eq!(api["listen"], "127.0.0.1");
         assert_eq!(api["port"], 12345);
-        let mesh = inbounds
-            .iter()
-            .find(|inbound| inbound["tag"] == "mesh-proxy")
-            .unwrap();
-        assert_eq!(mesh["port"], 20808);
-        assert_eq!(mesh["settings"]["udp"], false);
+        assert!(
+            inbounds
+                .iter()
+                .all(|inbound| inbound["tag"] != "mesh-proxy")
+        );
         assert_eq!(value["policy"]["levels"]["0"]["handshake"], 4);
         assert_eq!(value["policy"]["levels"]["0"]["connIdle"], 300);
         assert_eq!(value["policy"]["levels"]["0"]["uplinkOnly"], 2);

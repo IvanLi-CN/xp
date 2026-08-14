@@ -49,8 +49,8 @@ outcome question.
 - Public standby probes add availability data but do not rewrite the active transport selected by
   real Mesh or public-fallback traffic.
 - A 3-minute sample gap is stale telemetry, not evidence that a peer is down.
-- `XP_MESH_PROXY_URL` remains a public-egress proxy-first/direct compatibility
-  layer; it does not carry Reality Mesh traffic.
+- No local control-plane proxy participates in peer traffic. Reality Mesh and the peer public
+  HTTPS origin are the supported direct paths.
 - Clusters change auth epochs only in a maintenance window. Existing v1 `xp-ops` binaries cannot
   parse a new cutover flag, so host-managed cutover bootstraps from a verified target-release
   binary. Container cutover uses a target-image marker command against the persistent volume. The

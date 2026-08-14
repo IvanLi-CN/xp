@@ -42,8 +42,7 @@ use crate::{
     cluster_metadata::ClusterMetadata,
     config::Config,
     control_plane_mesh::{
-        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
-        build_mesh_http_client,
+        MeshAwareHttpClient, MeshPeerTarget, MeshRequest, build_mesh_http_client,
     },
     cycle::{CycleTimeZone, current_cycle_window_at},
     domain::{
@@ -96,6 +95,7 @@ use crate::{
     state::{
         DesiredStateCommand, JsonSnapshotStore, NodeEgressProbeState, NodeSubscriptionRegion,
         StoreError,
+        history_repository::{HistoryStorage, replica::RepositoryReplicaRuntime},
     },
     subscription,
     tcp_connection_usage::{
@@ -111,6 +111,7 @@ use crate::{
 };
 
 mod capabilities;
+mod history_repository;
 mod version_check;
 mod web_assets;
 
@@ -123,6 +124,7 @@ use version_check::{VersionCheckCache, api_version_check};
 pub struct AppState {
     pub config: Arc<Config>,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
+    pub(crate) repository_replica: Arc<Mutex<RepositoryReplicaRuntime>>,
     pub reconcile: ReconcileHandle,
     pub xray_health: XrayHealthHandle,
     pub cloudflared_health: CloudflaredHealthHandle,
@@ -141,7 +143,6 @@ pub struct AppState {
     pub ops_github_repo: Arc<String>,
     pub ops_github_api_base_url: Arc<String>,
     pub ops_github_client: reqwest::Client,
-    pub mesh_proxy_state: MeshProxyStateHandle,
     pub mesh_client: MeshAwareHttpClient,
     pub mesh_telemetry: MeshTelemetryHandle,
     pub internal_idempotency: InternalIdempotencyLedger,
@@ -702,13 +703,6 @@ struct AdminServiceConfigResponse {
     vless_https_canary_bind: String,
     vless_https_canary_acme_directory_url: String,
     vless_https_canary_status: crate::vless_https_canary::VlessHttpsCanaryStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mesh_proxy_url: Option<String>,
-    mesh_proxy_status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mesh_proxy_fallback_reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mesh_proxy_last_fallback_at: Option<String>,
     quota_poll_interval_secs: u64,
     quota_auto_unban: bool,
     ip_geo_enabled: bool,
@@ -867,7 +861,6 @@ pub fn build_router(
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     geo_db_update: GeoDbUpdateHandle,
-    mesh_proxy_state: MeshProxyStateHandle,
 ) -> Router {
     let mesh_telemetry =
         MeshTelemetryHandle::load(&config.data_dir).expect("load local mesh telemetry");
@@ -877,15 +870,9 @@ pub fn build_router(
     let node_key_pem = cluster
         .read_node_key_pem(&config.data_dir)
         .expect("read node private key");
-    let mesh_client = build_mesh_http_client(
-        &cluster_ca_pem,
-        &node_cert_pem,
-        &node_key_pem,
-        config.mesh_proxy_url.as_deref(),
-        mesh_proxy_state.clone(),
-    )
-    .expect("build Mesh transport clients")
-    .with_mesh_observability(mesh_telemetry.clone());
+    let mesh_client = build_mesh_http_client(&cluster_ca_pem, &node_cert_pem, &node_key_pem)
+        .expect("build Mesh transport clients")
+        .with_mesh_observability(mesh_telemetry.clone());
     build_router_with_mesh_telemetry(
         config,
         store,
@@ -902,7 +889,6 @@ pub fn build_router(
         raft,
         raft_rpc,
         geo_db_update,
-        mesh_proxy_state,
         mesh_telemetry,
         mesh_client,
     )
@@ -925,7 +911,6 @@ pub fn build_router_with_mesh_telemetry(
     raft: Arc<dyn RaftFacade>,
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     geo_db_update: GeoDbUpdateHandle,
-    mesh_proxy_state: MeshProxyStateHandle,
     mesh_telemetry: MeshTelemetryHandle,
     mesh_client: MeshAwareHttpClient,
 ) -> Router {
@@ -953,9 +938,19 @@ pub fn build_router_with_mesh_telemetry(
 
     let raft = crate::raft::app::PanicBoundaryRaft::wrap(raft);
 
+    let repository_storage = HistoryStorage::open(&config.data_dir);
+    let repository_replica = RepositoryReplicaRuntime::load(repository_storage.clone())
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                error = %error,
+                "repository replica checkpoint is unusable; waiting for a safe rebuild"
+            );
+            RepositoryReplicaRuntime::empty(repository_storage)
+        });
     let app_state = AppState {
         config: Arc::new(config),
         store,
+        repository_replica: Arc::new(Mutex::new(repository_replica)),
         reconcile,
         xray_health,
         cloudflared_health,
@@ -974,13 +969,13 @@ pub fn build_router_with_mesh_telemetry(
         ops_github_repo: Arc::new(ops_github_repo),
         ops_github_api_base_url: Arc::new(ops_github_api_base_url),
         ops_github_client,
-        mesh_proxy_state,
         mesh_client,
         mesh_telemetry,
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
     };
     spawn_mesh_probe_worker(app_state.clone());
+    history_repository::spawn_repository_replica_worker(app_state.clone());
 
     let admin = Router::new()
         .route(
@@ -1009,6 +1004,34 @@ pub fn build_router_with_mesh_telemetry(
             get(admin_internal_get_user_node_quota_status),
         )
         .route("/_internal/alerts", get(admin_internal_get_alerts))
+        .route(
+            "/_internal/history-repository/sync",
+            post(history_repository::admin_internal_receive_history_repository_segment),
+        )
+        .route(
+            "/_internal/history-repository/summary",
+            get(history_repository::admin_internal_history_repository_summary),
+        )
+        .route(
+            "/_internal/history-repository/repair",
+            post(history_repository::admin_internal_history_repository_repair),
+        )
+        .route(
+            "/_internal/history-repository/query",
+            post(history_repository::admin_internal_query_history_repository),
+        )
+        .route(
+            "/_internal/history-repository/relay",
+            post(history_repository::admin_internal_forward_history_repository_relay),
+        )
+        .route(
+            "/_internal/history-repository/relay-deliver",
+            post(history_repository::admin_internal_deliver_history_repository_relay),
+        )
+        .route(
+            "/_internal/history-repository/tombstone-ack",
+            post(history_repository::admin_internal_acknowledge_history_repository_tombstones),
+        )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
         .route(
@@ -1224,6 +1247,10 @@ pub fn build_router_with_mesh_telemetry(
                 .delete(admin_internal_clear_local_user_traffic),
         )
         .route("/alerts", get(admin_get_alerts))
+        .route(
+            "/history-repository",
+            get(history_repository::admin_query_history_repository),
+        )
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
 
     let api = Router::new()
@@ -4170,7 +4197,6 @@ async fn build_admin_service_config_response(
         ip_geo_origin
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
-    let mesh_proxy = state.mesh_proxy_state.snapshot().await;
     let mihomo_resource_allow_private_targets = {
         let store = state.store.lock().await;
         store.mihomo_resource_allow_private_targets()
@@ -4189,10 +4215,6 @@ async fn build_admin_service_config_response(
         vless_https_canary_bind: state.config.vless_canary_bind.to_string(),
         vless_https_canary_acme_directory_url: state.config.vless_canary_acme_directory_url.clone(),
         vless_https_canary_status,
-        mesh_proxy_url: state.config.mesh_proxy_url.clone(),
-        mesh_proxy_status: mesh_proxy.status.as_str().to_string(),
-        mesh_proxy_fallback_reason: mesh_proxy.fallback_reason,
-        mesh_proxy_last_fallback_at: mesh_proxy.last_fallback_at,
         quota_poll_interval_secs: state.config.quota_poll_interval_secs,
         quota_auto_unban: state.config.quota_auto_unban,
         ip_geo_enabled: state.config.ip_geo_enabled,

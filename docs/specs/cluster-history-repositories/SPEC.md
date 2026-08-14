@@ -26,7 +26,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 不改变普通节点数据保留策略或业务流量配额。
 - 不提供 quorum 读写、强一致查询、自动提升普通节点、任意 SQL、整库下载或
   内建云备份。
-- 不把 `XP_MESH_PROXY_URL` 作为 Mesh 或同步中继；不使用 GZIP 作为新同步编码。
+- 不保留任何本机控制面代理；不使用 GZIP 作为新同步编码。
 - 不引入 SQLCipher、透明 SQLite 压缩扩展或例行 full `VACUUM`。
 
 ## 范围（Scope）
@@ -122,7 +122,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Given 两个 ready 仓库和丢包/分区，When 网络恢复，Then anti-entropy 修复到同一完整并集，
   永久缺口显式标记。
 - Given Mesh 与 Tunnel 同时不可用，When relay 周期到达，Then 使用端到端加密流式 relay；
-  不得使用 `XP_MESH_PROXY_URL` 或 relay 落盘。
+  relay 不得落盘。
 - Given 查询仓库部分缺失，When 管理员读取历史，Then 返回 partial 及覆盖/水位/缺口信息，
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，

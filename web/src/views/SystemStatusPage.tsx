@@ -350,7 +350,7 @@ export function SystemStatusSurface({
 			/>
 
 			<section className="border-y border-border/70 py-4">
-				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
 					<StatusFact
 						label="Local node"
 						value={status.local.node_name}
@@ -372,14 +372,6 @@ export function SystemStatusSurface({
 						label="Public fallback"
 						value={String(summary.fallback)}
 						detail="active paths"
-					/>
-					<StatusFact
-						label="Control relay"
-						value={status.local.mesh_proxy_status}
-						detail={
-							status.local.mesh_proxy_reason ??
-							"direct when no proxy is configured"
-						}
 					/>
 					<StatusFact
 						label="Last snapshot"

@@ -5,10 +5,14 @@ use std::{
 
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use prost::Message as _;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use super::{encoding, proto};
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
+
+mod checkpoint;
+pub(crate) use checkpoint::SegmentReceiverCheckpoint;
 
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 1_000;
 pub(crate) const MAX_CANONICAL_SEGMENT_BYTES: usize = 192 * 1024;
@@ -37,7 +41,7 @@ fn validate_identifier(kind: &'static str, value: &str) -> Result<(), ProtocolEr
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Cursor {
     source_node_id: String,
     source_epoch: u64,
@@ -167,6 +171,10 @@ impl SyncRecord {
         &self.record_key
     }
 
+    pub(crate) fn payload_bytes(&self) -> &[u8] {
+        &self.payload
+    }
+
     fn validate(&self) -> Result<(), ProtocolError> {
         validate_identifier("subject node id", &self.subject_node_id)?;
         validate_identifier("observer node id", &self.observer_node_id)?;
@@ -287,6 +295,14 @@ impl CanonicalSegment {
 
     pub(crate) fn records_hash(&self) -> [u8; 32] {
         self.records_hash
+    }
+
+    pub(crate) fn opened_at_unix_seconds(&self) -> u64 {
+        self.opened_at_unix_seconds
+    }
+
+    pub(crate) fn closed_at_unix_seconds(&self) -> u64 {
+        self.closed_at_unix_seconds
     }
 
     fn validate(&self) -> Result<(), ProtocolError> {
@@ -836,17 +852,20 @@ impl SegmentReceiver {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 struct StreamKey {
     source_node_id: String,
     stream: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 struct TombstoneKey {
     stream: StreamKey,
+    source_epoch: u64,
     schema_id: String,
     schema_version: u32,
+    subject_node_id: String,
+    observer_node_id: String,
     record_key: Vec<u8>,
 }
 
@@ -854,14 +873,17 @@ impl TombstoneKey {
     fn new(cursor: &Cursor, record: &SyncRecord) -> Self {
         Self {
             stream: cursor.stream_key(),
+            source_epoch: cursor.source_epoch,
             schema_id: record.schema_id.clone(),
             schema_version: record.schema_version,
+            subject_node_id: record.subject_node_id.clone(),
+            observer_node_id: record.observer_node_id.clone(),
             record_key: record.record_key.clone(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StreamProgress {
     epoch: u64,
     last_sequence: u64,
@@ -869,7 +891,7 @@ struct StreamProgress {
     recent_segments: VecDeque<SegmentHashRange>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct SegmentHashRange {
     first_sequence: u64,
     last_sequence: u64,
@@ -906,6 +928,7 @@ pub(crate) enum ProtocolError {
     ForkDetected { next_epoch: u64 },
     Quarantined,
     ResurrectionPrevented,
+    CheckpointLimit,
     EncodingDecision,
 }
 

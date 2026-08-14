@@ -19,6 +19,7 @@ mod inputs;
 mod managed_runtimes;
 mod reexec;
 mod transaction_lock;
+mod xray_cleanup;
 use failure::{
     cleanup_after_upgrade_failure, clear_upgrade_diagnostics, preflight_upgrade,
     record_early_upgrade_failure, restore_after_failed_install,
@@ -874,12 +875,11 @@ fn preserve_control_plane_listeners(
 
     if let Some(existing_raw) = existing_config
         && let Ok(existing) = serde_json::from_str::<serde_json::Value>(existing_raw)
+        && read_xray_api_addr(paths).is_none()
     {
-        if read_xray_api_addr(paths).is_none() {
-            changed |= replace_inbound_by_tag(&mut current, &existing, "api");
-        }
-        changed |= replace_inbound_by_tag(&mut current, &existing, "mesh-proxy");
+        changed |= replace_inbound_by_tag(&mut current, &existing, "api");
     }
+    changed |= xray_cleanup::remove_inbound_and_rules_by_tag(&mut current, "mesh-proxy");
 
     if !changed {
         return Ok(());
