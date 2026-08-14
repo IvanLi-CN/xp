@@ -14,6 +14,15 @@ function bytes(value: number): string {
 	return `${value} B`;
 }
 
+function fingerprint(publicKey: string): string {
+	if (publicKey.length <= 18) return publicKey;
+	return `${publicKey.slice(0, 10)}...${publicKey.slice(-8)}`;
+}
+
+function timestamp(value?: number): string {
+	return value ? new Date(value * 1000).toLocaleString() : "pending";
+}
+
 function lifecycleVariant(lifecycle: HistoryRepositoryMember["lifecycle"]) {
 	if (lifecycle === "ready") return "success" as const;
 	if (lifecycle === "syncing") return "warning" as const;
@@ -85,10 +94,45 @@ export function RepositoryMemberStatus(props: {
 							].join(" · ")
 						: "Repository runtime is unavailable."}
 				</p>
+				{compact ? null : (
+					<dl className="mt-2 grid min-w-0 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+						<div className="min-w-0">
+							<dt className="text-muted-foreground">Signing public key</dt>
+							<dd
+								className="break-all font-mono"
+								title={member.identity.ed25519_public_key}
+							>
+								{fingerprint(member.identity.ed25519_public_key)}
+							</dd>
+						</div>
+						<div className="min-w-0">
+							<dt className="text-muted-foreground">Relay public key</dt>
+							<dd
+								className="break-all font-mono"
+								title={member.identity.x25519_relay_public_key}
+							>
+								{fingerprint(member.identity.x25519_relay_public_key)}
+							</dd>
+						</div>
+						<div className="min-w-0">
+							<dt className="text-muted-foreground">Caught up</dt>
+							<dd>{timestamp(member.catch_up_completed_at)}</dd>
+						</div>
+						<div className="min-w-0">
+							<dt className="text-muted-foreground">Ready</dt>
+							<dd>{timestamp(member.ready_at)}</dd>
+						</div>
+					</dl>
+				)}
 			</div>
-			<Badge variant={lifecycleVariant(member.lifecycle)}>
-				{member.lifecycle}
-			</Badge>
+			<div className="flex flex-wrap items-center gap-1 sm:justify-end">
+				<Badge variant={lifecycleVariant(member.lifecycle)}>
+					{member.lifecycle}
+				</Badge>
+				<Badge variant={member.replica_converged ? "success" : "warning"}>
+					{member.replica_converged ? "converged" : "reconciling"}
+				</Badge>
+			</div>
 			{compact ? null : (
 				<p className="font-mono text-xs text-muted-foreground sm:text-right">
 					{runtime

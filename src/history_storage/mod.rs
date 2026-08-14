@@ -14,6 +14,7 @@ use std::{
 };
 
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 pub(crate) const STATE_KEY: &str = "persistent_state";
@@ -23,6 +24,79 @@ pub(crate) const TCP_CONNECTION_USAGE_KEY: &str = "tcp_connection_usage";
 pub(crate) const NODE_HISTORY_KEY: &str = "node_history";
 pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
+
+/// A repository-history row is deliberately stored outside the control snapshot.
+/// The metadata columns keep retention and paged queries in SQLite rather than loading the
+/// two-year repository window into the replica process.
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryHistoryRecordRow {
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) sequence: u64,
+    pub(crate) subject_node_id: String,
+    pub(crate) observer_node_id: String,
+    pub(crate) schema_id: String,
+    pub(crate) schema_version: u32,
+    pub(crate) record_key: Vec<u8>,
+    pub(crate) tombstone: bool,
+    pub(crate) observed_start_unix_seconds: u64,
+    pub(crate) observed_end_unix_seconds: u64,
+    pub(crate) received_at_unix_seconds: u64,
+    pub(crate) aggregate_complete: Option<bool>,
+    pub(crate) aggregate_start_unix_seconds: Option<u64>,
+    pub(crate) aggregate_end_unix_seconds: Option<u64>,
+    pub(crate) payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RepositoryHistoryCompactionCursor {
+    pub(crate) observed_start_unix_seconds: u64,
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) sequence: u64,
+}
+
+impl From<&RepositoryHistoryRecordRow> for RepositoryHistoryCompactionCursor {
+    fn from(row: &RepositoryHistoryRecordRow) -> Self {
+        Self {
+            observed_start_unix_seconds: row.observed_start_unix_seconds,
+            source_node_id: row.source_node_id.clone(),
+            source_epoch: row.source_epoch,
+            stream: row.stream.clone(),
+            sequence: row.sequence,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryHistoryTombstone {
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) subject_node_id: String,
+    pub(crate) observer_node_id: String,
+    pub(crate) schema_id: String,
+    pub(crate) schema_version: u32,
+    pub(crate) record_key: Vec<u8>,
+    pub(crate) prefix: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryHistorySegmentRow {
+    pub(crate) id: String,
+    pub(crate) closed_at_unix_seconds: u64,
+    pub(crate) payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RepositoryHistoryCoverage {
+    pub(crate) observed_start_unix_seconds: u64,
+    pub(crate) observed_end_unix_seconds: u64,
+    pub(crate) received_start_unix_seconds: u64,
+    pub(crate) received_end_unix_seconds: u64,
+}
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -173,6 +247,690 @@ impl HistoryStorage {
         #[cfg(not(target_os = "macos"))]
         let available_blocks = stats.f_bavail;
         Ok(available_blocks.saturating_mul(stats.f_frsize))
+    }
+
+    /// Allocate a fresh source epoch outside the replica control blob. When that blob is rebuilt
+    /// while SQLite remains intact, a new source chain cannot reuse sequence zero under its old
+    /// epoch.
+    pub(crate) fn allocate_repository_source_epoch(
+        &self,
+        cluster_id: &str,
+        node_id: &str,
+        initial_epoch: u64,
+    ) -> Result<u64> {
+        let key = repository_source_epoch_meta_key(cluster_id, node_id);
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(initial_epoch.max(1));
+        };
+        let previous = read_meta_i64(connection, &key)?.and_then(|value| u64::try_from(value).ok());
+        let epoch = previous
+            .and_then(|value| value.checked_add(1))
+            .unwrap_or_else(|| initial_epoch.max(1));
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        write_meta_i64(&transaction, &key, i64::try_from(epoch).unwrap_or(i64::MAX))?;
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(epoch)
+    }
+
+    pub(crate) fn record_repository_source_epoch(
+        &self,
+        cluster_id: &str,
+        node_id: &str,
+        epoch: u64,
+    ) -> Result<()> {
+        let key = repository_source_epoch_meta_key(cluster_id, node_id);
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(());
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        write_meta_i64(&transaction, &key, i64::try_from(epoch).unwrap_or(i64::MAX))?;
+        transaction.commit().map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_record_count(&self) -> Result<usize> {
+        self.repository_history_count("repository_history_records")
+    }
+
+    pub(crate) fn repository_history_segment_count(&self) -> Result<usize> {
+        self.repository_history_count("repository_history_segments")
+    }
+
+    pub(crate) fn repository_history_used_bytes(&self) -> Result<u64> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(0);
+        };
+        let page_count = connection
+            .pragma_query_value(None, "page_count", |row| row.get::<_, i64>(0))
+            .map_err(sqlite_error)?;
+        let page_size = connection
+            .pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))
+            .map_err(sqlite_error)?;
+        let database_bytes = u64::try_from(page_count)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(u64::try_from(page_size).unwrap_or(u64::MAX));
+        let wal_bytes = fs::metadata(self.data_dir.join(format!("{SQLITE_FILE}-wal")))
+            .map(|metadata| metadata.len())
+            .unwrap_or_default();
+        Ok(database_bytes.saturating_add(wal_bytes))
+    }
+
+    pub(crate) fn upsert_repository_history_records(
+        &self,
+        rows: &[RepositoryHistoryRecordRow],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Err(HistoryStorageError(
+                "repository history row storage requires SQLite".to_owned(),
+            ));
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        for row in rows {
+            transaction
+                .execute(
+                    "
+                    INSERT INTO repository_history_records (
+                        source_node_id, source_epoch, stream, sequence, subject_node_id,
+                        observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                        observed_start, observed_end, received_at, aggregate_complete,
+                        aggregate_start, aggregate_end, payload
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+                    )
+                    ON CONFLICT(source_node_id, source_epoch, stream, sequence) DO UPDATE SET
+                        subject_node_id = excluded.subject_node_id,
+                        observer_node_id = excluded.observer_node_id,
+                        schema_id = excluded.schema_id,
+                        schema_version = excluded.schema_version,
+                        record_key = excluded.record_key,
+                        is_tombstone = excluded.is_tombstone,
+                        observed_start = excluded.observed_start,
+                        observed_end = excluded.observed_end,
+                        received_at = excluded.received_at,
+                        aggregate_complete = excluded.aggregate_complete,
+                        aggregate_start = excluded.aggregate_start,
+                        aggregate_end = excluded.aggregate_end,
+                        payload = excluded.payload
+                    ",
+                    params![
+                        row.source_node_id,
+                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        row.stream,
+                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                        row.subject_node_id,
+                        row.observer_node_id,
+                        row.schema_id,
+                        i64::from(row.schema_version),
+                        row.record_key,
+                        row.tombstone,
+                        i64::try_from(row.observed_start_unix_seconds).unwrap_or(i64::MAX),
+                        i64::try_from(row.observed_end_unix_seconds).unwrap_or(i64::MAX),
+                        i64::try_from(row.received_at_unix_seconds).unwrap_or(i64::MAX),
+                        row.aggregate_complete,
+                        row.aggregate_start_unix_seconds
+                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                        row.aggregate_end_unix_seconds
+                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                        row.payload,
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    pub(crate) fn replace_repository_history_records(
+        &self,
+        removed: &[RepositoryHistoryRecordRow],
+        retained: &[RepositoryHistoryRecordRow],
+    ) -> Result<()> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Err(HistoryStorageError(
+                "repository history row storage requires SQLite".to_owned(),
+            ));
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        for row in removed {
+            transaction
+                .execute(
+                    "DELETE FROM repository_history_records
+                     WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+                       AND sequence = ?4",
+                    params![
+                        row.source_node_id,
+                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        row.stream,
+                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        for row in retained {
+            transaction
+                .execute(
+                    "
+                    INSERT INTO repository_history_records (
+                        source_node_id, source_epoch, stream, sequence, subject_node_id,
+                        observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                        observed_start, observed_end, received_at, aggregate_complete,
+                        aggregate_start, aggregate_end, payload
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+                    )
+                    ON CONFLICT(source_node_id, source_epoch, stream, sequence) DO UPDATE SET
+                        subject_node_id = excluded.subject_node_id,
+                        observer_node_id = excluded.observer_node_id,
+                        schema_id = excluded.schema_id,
+                        schema_version = excluded.schema_version,
+                        record_key = excluded.record_key,
+                        is_tombstone = excluded.is_tombstone,
+                        observed_start = excluded.observed_start,
+                        observed_end = excluded.observed_end,
+                        received_at = excluded.received_at,
+                        aggregate_complete = excluded.aggregate_complete,
+                        aggregate_start = excluded.aggregate_start,
+                        aggregate_end = excluded.aggregate_end,
+                        payload = excluded.payload
+                    ",
+                    params![
+                        row.source_node_id,
+                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        row.stream,
+                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                        row.subject_node_id,
+                        row.observer_node_id,
+                        row.schema_id,
+                        i64::from(row.schema_version),
+                        row.record_key,
+                        row.tombstone,
+                        i64::try_from(row.observed_start_unix_seconds).unwrap_or(i64::MAX),
+                        i64::try_from(row.observed_end_unix_seconds).unwrap_or(i64::MAX),
+                        i64::try_from(row.received_at_unix_seconds).unwrap_or(i64::MAX),
+                        row.aggregate_complete,
+                        row.aggregate_start_unix_seconds
+                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                        row.aggregate_end_unix_seconds
+                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                        row.payload,
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    pub(crate) fn delete_repository_history_for_tombstone(
+        &self,
+        tombstone: &RepositoryHistoryTombstone,
+    ) -> Result<usize> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(0);
+        };
+        let key_predicate = if tombstone.prefix {
+            "substr(record_key, 1, length(?6)) = ?6"
+        } else {
+            "record_key = ?6"
+        };
+        let stream_predicate = if tombstone.prefix {
+            "1 = 1"
+        } else {
+            "stream = ?1"
+        };
+        let affected = connection
+            .execute(
+                &format!(
+                    "DELETE FROM repository_history_records
+                     WHERE {stream_predicate}
+                       AND subject_node_id = ?2 AND observer_node_id = ?3
+                       AND schema_id = ?4 AND schema_version = ?5 AND {key_predicate}
+                       AND is_tombstone = 0"
+                ),
+                params![
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        maintain_sqlite(connection)?;
+        Ok(affected)
+    }
+
+    pub(crate) fn delete_repository_history_tombstone(
+        &self,
+        tombstone: &RepositoryHistoryTombstone,
+    ) -> Result<()> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(());
+        };
+        connection
+            .execute(
+                "DELETE FROM repository_history_records
+                 WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+                   AND subject_node_id = ?4 AND observer_node_id = ?5
+                   AND schema_id = ?6 AND schema_version = ?7 AND record_key = ?8
+                   AND is_tombstone = 1",
+                params![
+                    tombstone.source_node_id,
+                    i64::try_from(tombstone.source_epoch).unwrap_or(i64::MAX),
+                    tombstone.stream,
+                    tombstone.subject_node_id,
+                    tombstone.observer_node_id,
+                    tombstone.schema_id,
+                    i64::from(tombstone.schema_version),
+                    tombstone.record_key,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    pub(crate) fn repository_history_records(
+        &self,
+        subject_node_id: Option<&str>,
+        start_unix_seconds: Option<u64>,
+        end_unix_seconds: Option<u64>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistoryRecordRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let mut statement = connection
+            .prepare(
+                "
+                SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
+                       observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                       observed_start, observed_end, received_at, payload
+                FROM repository_history_records
+                WHERE is_tombstone = 0
+                  AND (?1 IS NULL OR subject_node_id = ?1)
+                  AND (?2 IS NULL OR observed_end >= ?2)
+                  AND (?3 IS NULL OR observed_start <= ?3)
+                ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
+                LIMIT ?4 OFFSET ?5
+                ",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    subject_node_id,
+                    start_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                    end_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                    i64::try_from(offset).unwrap_or(i64::MAX),
+                ],
+                repository_history_record_row,
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_records_for_compaction(
+        &self,
+        end_unix_seconds: u64,
+        after: Option<&RepositoryHistoryCompactionCursor>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistoryRecordRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let mut statement = connection
+            .prepare(
+                "
+                SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
+                       observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                       observed_start, observed_end, received_at, payload
+                FROM repository_history_records
+                WHERE is_tombstone = 0 AND observed_start < ?1
+                  AND (
+                    ?2 IS NULL OR observed_start > ?2 OR (
+                      observed_start = ?2 AND (
+                        source_node_id > ?3 OR (
+                          source_node_id = ?3 AND (
+                            source_epoch > ?4 OR (
+                              source_epoch = ?4 AND (
+                                stream > ?5 OR (stream = ?5 AND sequence > ?6)
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
+                LIMIT ?7
+                ",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    i64::try_from(end_unix_seconds).unwrap_or(i64::MAX),
+                    after.map(|cursor| i64::try_from(cursor.observed_start_unix_seconds)
+                        .unwrap_or(i64::MAX)),
+                    after.map(|cursor| cursor.source_node_id.as_str()),
+                    after.map(|cursor| i64::try_from(cursor.source_epoch).unwrap_or(i64::MAX)),
+                    after.map(|cursor| cursor.stream.as_str()),
+                    after.map(|cursor| i64::try_from(cursor.sequence).unwrap_or(i64::MAX)),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                ],
+                repository_history_record_row,
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    /// Bounded keyset export of the retained canonical representation. This is used only by a
+    /// syncing repository after the short signed-frame repair cache has expired.
+    pub(crate) fn repository_history_records_page(
+        &self,
+        after: Option<&RepositoryHistoryCompactionCursor>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistoryRecordRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let mut statement = connection
+            .prepare(
+                "
+                SELECT source_node_id, source_epoch, stream, sequence, subject_node_id,
+                       observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                       observed_start, observed_end, received_at, payload
+                FROM repository_history_records
+                WHERE is_tombstone = 0
+                  AND (
+                    ?1 IS NULL OR observed_start > ?1 OR (
+                      observed_start = ?1 AND (
+                        source_node_id > ?2 OR (
+                          source_node_id = ?2 AND (
+                            source_epoch > ?3 OR (
+                              source_epoch = ?3 AND (
+                                stream > ?4 OR (stream = ?4 AND sequence > ?5)
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
+                LIMIT ?6
+                ",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    after.map(|cursor| i64::try_from(cursor.observed_start_unix_seconds)
+                        .unwrap_or(i64::MAX)),
+                    after.map(|cursor| cursor.source_node_id.as_str()),
+                    after.map(|cursor| i64::try_from(cursor.source_epoch).unwrap_or(i64::MAX)),
+                    after.map(|cursor| cursor.stream.as_str()),
+                    after.map(|cursor| i64::try_from(cursor.sequence).unwrap_or(i64::MAX)),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                ],
+                repository_history_record_row,
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_coverage(
+        &self,
+        subject_node_id: Option<&str>,
+    ) -> Result<Option<RepositoryHistoryCoverage>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(None);
+        };
+        connection
+            .query_row(
+                "
+                SELECT MIN(observed_start), MAX(observed_end), MIN(received_at), MAX(received_at)
+                FROM repository_history_records
+                WHERE is_tombstone = 0
+                  AND (?1 IS NULL OR subject_node_id = ?1)
+                ",
+                [subject_node_id],
+                |row| {
+                    let observed_start = row.get::<_, Option<i64>>(0)?;
+                    let Some(observed_start) = observed_start else {
+                        return Ok(None);
+                    };
+                    Ok(Some(RepositoryHistoryCoverage {
+                        observed_start_unix_seconds: u64::try_from(observed_start)
+                            .unwrap_or(u64::MAX),
+                        observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
+                            .unwrap_or(u64::MAX),
+                        received_start_unix_seconds: u64::try_from(row.get::<_, i64>(2)?)
+                            .unwrap_or(u64::MAX),
+                        received_end_unix_seconds: u64::try_from(row.get::<_, i64>(3)?)
+                            .unwrap_or(u64::MAX),
+                    }))
+                },
+            )
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_incomplete_aggregate_range(
+        &self,
+        subject_node_id: Option<&str>,
+        start_unix_seconds: u64,
+        end_unix_seconds: u64,
+    ) -> Result<Option<(u64, u64)>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(None);
+        };
+        connection
+            .query_row(
+                "
+                SELECT MIN(aggregate_start), MAX(aggregate_end)
+                FROM repository_history_records
+                WHERE is_tombstone = 0
+                  AND (?1 IS NULL OR subject_node_id = ?1)
+                  AND aggregate_complete = 0
+                  AND aggregate_start <= ?2
+                  AND aggregate_end >= ?3
+                ",
+                params![
+                    subject_node_id,
+                    i64::try_from(end_unix_seconds).unwrap_or(i64::MAX),
+                    i64::try_from(start_unix_seconds).unwrap_or(i64::MAX),
+                ],
+                |row| {
+                    let Some(start) = row.get::<_, Option<i64>>(0)? else {
+                        return Ok(None);
+                    };
+                    Ok(Some((
+                        u64::try_from(start).unwrap_or(u64::MAX),
+                        u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
+                    )))
+                },
+            )
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn upsert_repository_history_segments(
+        &self,
+        rows: &[RepositoryHistorySegmentRow],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Err(HistoryStorageError(
+                "repository history row storage requires SQLite".to_owned(),
+            ));
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        for row in rows {
+            transaction
+                .execute(
+                    "INSERT INTO repository_history_segments (id, closed_at, payload)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(id) DO UPDATE SET
+                       closed_at = excluded.closed_at,
+                       payload = excluded.payload",
+                    params![
+                        row.id,
+                        i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
+                        row.payload,
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    /// Signed segments are a short-lived anti-entropy cache. Reads are always page-bounded so
+    /// a repository never rehydrates the retained SQLite history window into process memory.
+    pub(crate) fn repository_history_segments_page(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let mut statement = connection
+            .prepare(
+                "SELECT id, closed_at, payload FROM repository_history_segments
+                 WHERE (?1 IS NULL OR id > ?1)
+                 ORDER BY id ASC
+                 LIMIT ?2",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![after_id, i64::try_from(limit).unwrap_or(i64::MAX),],
+                |row| {
+                    Ok(RepositoryHistorySegmentRow {
+                        id: row.get(0)?,
+                        closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
+                            .unwrap_or(u64::MAX),
+                        payload: row.get(2)?,
+                    })
+                },
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_segments_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT id, closed_at, payload FROM repository_history_segments
+             WHERE id IN ({placeholders}) ORDER BY id ASC"
+        );
+        let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+                Ok(RepositoryHistorySegmentRow {
+                    id: row.get(0)?,
+                    closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
+                        .unwrap_or(u64::MAX),
+                    payload: row.get(2)?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn delete_repository_history_before(
+        &self,
+        record_end_unix_seconds: u64,
+        segment_closed_at_unix_seconds: u64,
+    ) -> Result<()> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(());
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_history_records
+                 WHERE observed_end < ?1 AND is_tombstone = 0",
+                [i64::try_from(record_end_unix_seconds).unwrap_or(i64::MAX)],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_history_segments WHERE closed_at < ?1",
+                [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    pub(crate) fn clear_repository_history(&self) -> Result<()> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(());
+        };
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
+            .execute("DELETE FROM repository_history_records", [])
+            .map_err(sqlite_error)?;
+        transaction
+            .execute("DELETE FROM repository_history_segments", [])
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)?;
+        maintain_sqlite(connection)
+    }
+
+    fn repository_history_count(&self, table: &str) -> Result<usize> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(0);
+        };
+        let query = format!("SELECT COUNT(*) FROM {table}");
+        connection
+            .query_row(&query, [], |row| row.get::<_, i64>(0))
+            .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+            .map_err(sqlite_error)
     }
 
     fn cleanup_expired_backups_at(&self, now: SystemTime) {
@@ -354,9 +1112,136 @@ fn ensure_schema(connection: &Connection) -> Result<()> {
                 key TEXT PRIMARY KEY NOT NULL,
                 value INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS repository_history_records (
+                source_node_id TEXT NOT NULL,
+                source_epoch INTEGER NOT NULL,
+                stream TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                subject_node_id TEXT NOT NULL,
+                observer_node_id TEXT NOT NULL DEFAULT '',
+                schema_id TEXT NOT NULL DEFAULT '',
+                schema_version INTEGER NOT NULL DEFAULT 0,
+                record_key BLOB NOT NULL DEFAULT X'',
+                is_tombstone INTEGER NOT NULL DEFAULT 0,
+                observed_start INTEGER NOT NULL,
+                observed_end INTEGER NOT NULL,
+                received_at INTEGER NOT NULL,
+                aggregate_complete INTEGER,
+                aggregate_start INTEGER,
+                aggregate_end INTEGER,
+                payload BLOB NOT NULL,
+                PRIMARY KEY (source_node_id, source_epoch, stream, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS repository_history_records_query
+                ON repository_history_records
+                    (subject_node_id, observed_start, observed_end, source_node_id,
+                     source_epoch, stream, sequence);
+            CREATE TABLE IF NOT EXISTS repository_history_segments (
+                id TEXT PRIMARY KEY NOT NULL,
+                closed_at INTEGER NOT NULL DEFAULT 0,
+                payload BLOB NOT NULL
+            );
             ",
         )
+        .map_err(sqlite_error)?;
+    ensure_repository_history_columns(connection)?;
+    ensure_repository_history_segment_columns(connection)?;
+    connection
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS repository_history_records_tombstone
+              ON repository_history_records
+                 (source_node_id, source_epoch, stream, subject_node_id, observer_node_id,
+                  schema_id, schema_version, record_key, is_tombstone);
+             CREATE INDEX IF NOT EXISTS repository_history_records_aggregate_completeness
+               ON repository_history_records
+                  (subject_node_id, aggregate_complete, aggregate_start, aggregate_end);",
+        )
         .map_err(sqlite_error)
+}
+
+fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<()> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(repository_history_segments)")
+        .map_err(sqlite_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+        .map_err(sqlite_error)?;
+    if !columns.contains("closed_at") {
+        connection
+            .execute(
+                "ALTER TABLE repository_history_segments
+                 ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(sqlite_error)?;
+    }
+    connection
+        .execute(
+            "CREATE INDEX IF NOT EXISTS repository_history_segments_closed_at
+             ON repository_history_segments (closed_at ASC, id ASC)",
+            [],
+        )
+        .map(|_| ())
+        .map_err(sqlite_error)
+}
+
+fn ensure_repository_history_columns(connection: &Connection) -> Result<()> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(repository_history_records)")
+        .map_err(sqlite_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+        .map_err(sqlite_error)?;
+    for (name, definition) in [
+        ("observer_node_id", "TEXT NOT NULL DEFAULT ''"),
+        ("schema_id", "TEXT NOT NULL DEFAULT ''"),
+        ("schema_version", "INTEGER NOT NULL DEFAULT 0"),
+        ("record_key", "BLOB NOT NULL DEFAULT X''"),
+        ("is_tombstone", "INTEGER NOT NULL DEFAULT 0"),
+        ("aggregate_complete", "INTEGER"),
+        ("aggregate_start", "INTEGER"),
+        ("aggregate_end", "INTEGER"),
+    ] {
+        if !columns.contains(name) {
+            connection
+                .execute(
+                    &format!(
+                        "ALTER TABLE repository_history_records ADD COLUMN {name} {definition}"
+                    ),
+                    [],
+                )
+                .map_err(sqlite_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn repository_history_record_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<RepositoryHistoryRecordRow> {
+    Ok(RepositoryHistoryRecordRow {
+        source_node_id: row.get(0)?,
+        source_epoch: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
+        stream: row.get(2)?,
+        sequence: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(u64::MAX),
+        subject_node_id: row.get(4)?,
+        observer_node_id: row.get(5)?,
+        schema_id: row.get(6)?,
+        schema_version: u32::try_from(row.get::<_, i64>(7)?).unwrap_or(u32::MAX),
+        record_key: row.get(8)?,
+        tombstone: row.get(9)?,
+        observed_start_unix_seconds: u64::try_from(row.get::<_, i64>(10)?).unwrap_or(u64::MAX),
+        observed_end_unix_seconds: u64::try_from(row.get::<_, i64>(11)?).unwrap_or(u64::MAX),
+        received_at_unix_seconds: u64::try_from(row.get::<_, i64>(12)?).unwrap_or(u64::MAX),
+        aggregate_complete: None,
+        aggregate_start_unix_seconds: None,
+        aggregate_end_unix_seconds: None,
+        payload: row.get(13)?,
+    })
 }
 
 fn read_sqlite(connection: &Connection, key: &str) -> Result<Option<Vec<u8>>> {
@@ -385,6 +1270,10 @@ fn write_sqlite(connection: &mut Connection, key: &str, payload: &[u8]) -> Resul
         .map_err(sqlite_error)?;
     transaction.commit().map_err(sqlite_error)?;
 
+    maintain_sqlite(connection)
+}
+
+fn maintain_sqlite(connection: &Connection) -> Result<()> {
     // Both operations are page-bounded and avoid a blocking full checkpoint or VACUUM.
     connection
         .pragma_update(None, "wal_autocheckpoint", CHECKPOINT_PAGES)
@@ -430,6 +1319,16 @@ fn source_path(data_dir: &Path, key: &str) -> PathBuf {
         .find(|source| source.key == key)
         .map(|source| source.path(data_dir))
         .unwrap_or_else(|| data_dir.join(format!("{key}.json")))
+}
+
+fn repository_source_epoch_meta_key(cluster_id: &str, node_id: &str) -> String {
+    let mut hasher = sha2::Sha256::new();
+    use sha2::Digest as _;
+    hasher.update(b"xp-history-source-epoch-meta-v1\0");
+    hasher.update(cluster_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(node_id.as_bytes());
+    format!("repository_source_epoch:{}", hex::encode(hasher.finalize()))
 }
 
 fn read_json(path: PathBuf) -> Result<Option<Vec<u8>>> {
@@ -480,7 +1379,8 @@ fn read_meta_i64(connection: &Connection, key: &str) -> Result<Option<i64>> {
 fn write_meta_i64(connection: &rusqlite::Transaction<'_>, key: &str, value: i64) -> Result<()> {
     connection
         .execute(
-            "INSERT INTO history_storage_meta (key, value) VALUES (?1, ?2)",
+            "INSERT INTO history_storage_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )
         .map_err(sqlite_error)?;

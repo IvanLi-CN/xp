@@ -9,20 +9,15 @@ impl RepositoryReplicaRuntime {
         let mut records = Vec::with_capacity(query.page_size());
         let mut response_bytes = serialized_response_overhead(plan)?;
         let mut truncated = false;
-        let mut remaining_skip = query.page_offset()?;
-        for record in self
-            .matching_records(query.subject_node_id())
-            .filter(|record| {
-                let (start, end) = retention::record_time_range(record);
-                start <= query.range().end_unix_seconds()
-                    && query.range().start_unix_seconds() <= end
-            })
-        {
-            if remaining_skip > 0 {
-                remaining_skip -= 1;
-                continue;
-            }
-            let next_record: RepositoryHistoryRecord = record.clone().into();
+        let candidates = self.records_for_query(
+            query.subject_node_id(),
+            query.range().start_unix_seconds(),
+            query.range().end_unix_seconds(),
+            query.page_offset()?,
+            query.page_size().saturating_add(1),
+        )?;
+        for record in candidates {
+            let next_record: RepositoryHistoryRecord = record.into();
             let next_bytes = serde_json::to_vec(&next_record)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
                 .len()
@@ -48,12 +43,38 @@ impl RepositoryReplicaRuntime {
         Ok((records, truncated, next_page_cursor))
     }
 
-    pub(super) fn matching_records(
+    pub(super) fn records_for_query(
         &self,
         subject_node_id: Option<&str>,
-    ) -> impl Iterator<Item = &StoredRecord> {
-        self.snapshot.records.iter().filter(move |record| {
-            subject_node_id.is_none_or(|subject_node_id| record.subject_node_id == subject_node_id)
-        })
+        start_unix_seconds: u64,
+        end_unix_seconds: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<StoredRecord>, RepositoryRuntimeError> {
+        if self.uses_sqlite_history() {
+            return self.sqlite_records(
+                subject_node_id,
+                Some(start_unix_seconds),
+                Some(end_unix_seconds),
+                offset,
+                limit,
+            );
+        }
+        Ok(self
+            .snapshot
+            .records
+            .iter()
+            .filter(|record| {
+                subject_node_id
+                    .is_none_or(|subject_node_id| record.subject_node_id == subject_node_id)
+            })
+            .filter(|record| {
+                let (start, end) = retention::record_time_range(record);
+                start <= end_unix_seconds && start_unix_seconds <= end
+            })
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 }

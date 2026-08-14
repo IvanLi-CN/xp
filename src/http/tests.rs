@@ -1339,9 +1339,11 @@ async fn internal_repository_sync_rejects_an_unpinned_sender_identity() {
     .unwrap()
     .sign(&signing_key)
     .unwrap();
+    let wire = segment.wire_bytes().unwrap();
     let body = json!({
         "identity": identity,
-        "wire_base64": URL_SAFE_NO_PAD.encode(segment.wire_bytes().unwrap()),
+        "wire_base64": URL_SAFE_NO_PAD.encode(&wire),
+        "canonical_len": wire.len(),
     })
     .to_string();
     let uri: Uri = "/api/admin/_internal/history-repository/sync"

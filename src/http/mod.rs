@@ -1009,6 +1009,10 @@ pub fn build_router_with_mesh_telemetry(
             post(history_repository::admin_internal_receive_history_repository_segment),
         )
         .route(
+            "/_internal/history-repository/initial-backfill",
+            get(history_repository::admin_internal_initial_history_repository_backfill),
+        )
+        .route(
             "/_internal/history-repository/summary",
             get(history_repository::admin_internal_history_repository_summary),
         )

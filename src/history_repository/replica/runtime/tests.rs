@@ -5,7 +5,10 @@ use crate::{
     history_sync::{CanonicalSegment, SyncRecord},
     state::history_repository::{
         HistoryStorage,
-        control::{HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES, HistoryWriteAvailability},
+        control::{
+            DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES, HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
+            HistoryWriteAvailability,
+        },
         identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
         query::Completeness,
     },
@@ -16,8 +19,12 @@ fn signing_key() -> SigningKey {
 }
 
 fn identity(key: &SigningKey) -> RepositoryNodeIdentity {
+    identity_for(key, "node-a")
+}
+
+fn identity_for(key: &SigningKey, node_id: &str) -> RepositoryNodeIdentity {
     RepositoryNodeIdentity::new(
-        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        RepositoryNodeId::try_from(node_id.to_owned()).expect("node id"),
         Ed25519PublicKey::from_bytes(key.verifying_key().to_bytes()).expect("signing key"),
         X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
     )
@@ -104,6 +111,55 @@ fn two_repositories_repair_a_partition_to_the_same_segment_set() {
             .missing_segment_ids(&primary.replication_summary().expect("summary"), true)
             .expect("converged summary")
             .is_empty()
+    );
+}
+
+#[test]
+fn sqlite_replication_summary_keyset_pages_every_segment_beyond_the_first_256() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let ready = vec!["repository-a".to_owned()];
+    let mut runtime = load(temporary.path());
+    let mut previous = None;
+    for sequence in 0..257_u64 {
+        let signed = segment_at(
+            &key,
+            sequence,
+            vec![record(format!("segment-{sequence}").as_bytes(), false)],
+            previous,
+            sequence,
+            sequence,
+        );
+        previous = Some(signed.segment_hash().expect("segment hash"));
+        runtime
+            .receive_wire_from_repository(
+                "cluster-a",
+                &identity,
+                &signed.wire_bytes().expect("segment wire"),
+                sequence,
+                &ready,
+                "repository-a",
+            )
+            .expect("store SQLite segment");
+    }
+
+    let first = runtime.replication_summary().expect("first summary page");
+    assert_eq!(first.segment_ids.len(), 256);
+    let cursor = first.next_segment_id.expect("keyset cursor");
+    let second = runtime
+        .replication_summary_after(Some(&cursor))
+        .expect("second summary page");
+    assert_eq!(second.segment_ids.len(), 1);
+    assert!(second.next_segment_id.is_none());
+    assert!(!first.segment_ids.contains(&second.segment_ids[0]));
+    assert!(
+        runtime
+            .repair_batch(&second.segment_ids)
+            .expect("repair a later SQLite segment")
+            .segments
+            .len()
+            == 1
     );
 }
 
@@ -218,6 +274,7 @@ fn repository_retention_aggregates_old_ip_history_without_raw_identifiers() {
     );
     let segment = segment_at(&key, 0, vec![record], None, observed_at, observed_at);
     let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
     runtime
         .receive_wire(
             "cluster-a",
@@ -266,6 +323,7 @@ fn legacy_aggregate_payload_keeps_its_original_query_coverage_after_restart() {
     );
     let segment = segment_at(&key, 0, vec![record], None, observed_at, observed_at);
     let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
     runtime
         .receive_wire(
             "cluster-a",
@@ -503,6 +561,468 @@ fn repository_retention_preserves_aggregate_counts_across_prune_cycles() {
     assert_eq!(payload["record_count"], 2);
     assert_eq!(payload["first_sequence"], 0);
     assert_eq!(payload["last_sequence"], 1);
+}
+
+#[test]
+fn quiet_sqlite_repository_compacts_at_the_exact_tiered_retention_boundaries() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let now = policy.max_age_seconds().saturating_add(10_000);
+    let day = 24 * 60 * 60;
+    let timestamps = [
+        now.saturating_sub(policy.max_age_seconds())
+            .saturating_sub(1),
+        now.saturating_sub(
+            policy.minute_retention_seconds() + policy.five_minute_retention_seconds() + 1,
+        ),
+        now.saturating_sub(policy.minute_retention_seconds() + 1),
+        now.saturating_sub(policy.minute_retention_seconds()),
+    ];
+    let mut runtime = load(temporary.path());
+    let mut previous = None;
+    for (sequence, observed_at) in timestamps.into_iter().enumerate() {
+        let signed = segment_at(
+            &key,
+            u64::try_from(sequence).expect("sequence"),
+            vec![record(format!("boundary-{sequence}").as_bytes(), false)],
+            previous,
+            observed_at,
+            observed_at,
+        );
+        previous = Some(signed.segment_hash().expect("segment hash"));
+        runtime
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &signed.wire_bytes().expect("wire"),
+                observed_at,
+            )
+            .expect("store history before quiet period");
+    }
+
+    runtime
+        .prepare_for_replication(now)
+        .expect("periodic idle compaction");
+    let records = runtime
+        .sqlite_records(None, None, None, 0, 16)
+        .expect("read compacted SQLite rows");
+    assert_eq!(records.len(), 3, "older than two years expires");
+    let mut resolutions = records
+        .iter()
+        .filter_map(|record| {
+            serde_json::from_slice::<serde_json::Value>(&record.payload)
+                .ok()
+                .and_then(|payload| payload["resolution"].as_str().map(str::to_owned))
+        })
+        .collect::<Vec<_>>();
+    resolutions.sort();
+    assert_eq!(resolutions, vec!["five_minutes", "hour"]);
+    assert!(
+        records
+            .iter()
+            .any(|record| record.observed_at_unix_seconds == now.saturating_sub(7 * day))
+    );
+}
+
+#[test]
+fn sqlite_retention_keyset_advances_past_more_than_one_compaction_page() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let first_observed = 1_000_u64;
+    let interval = 5 * 60;
+    let count = RETENTION_COMPACTION_PAGE_SIZE + 1;
+    let now = first_observed
+        .saturating_add(u64::try_from(count).expect("count") * interval)
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(1);
+    let mut runtime = load(temporary.path());
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            let observed_at = first_observed.saturating_add(sequence * interval);
+            StoredRecord {
+                observed_at_unix_seconds: observed_at,
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("bucket-{sequence}").into_bytes(),
+                payload: b"sample".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed more than one retention page");
+    runtime
+        .prepare_for_replication(now)
+        .expect("compact first page");
+    assert!(runtime.snapshot.retention_compaction_cursor.is_some());
+    runtime
+        .prepare_for_replication(now)
+        .expect("advance the second compaction page");
+    assert!(runtime.snapshot.retention_compaction_cursor.is_none());
+}
+
+#[test]
+fn sqlite_retention_does_not_split_a_bucket_at_a_keyset_page_boundary() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let first_observed = 1_000_u64;
+    let count = RETENTION_COMPACTION_PAGE_SIZE + 1;
+    let now = first_observed
+        .saturating_add(u64::try_from(count).expect("count") * 60)
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(1);
+    let mut runtime = load(temporary.path());
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: first_observed.saturating_add(sequence * 60),
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "traffic".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "traffic.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("traffic-{sequence}").into_bytes(),
+                payload: b"sample".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed boundary page");
+    runtime
+        .prepare_for_replication(now)
+        .expect("compact the first bounded page");
+    while runtime.snapshot.retention_compaction_cursor.is_some() {
+        runtime
+            .prepare_for_replication(now)
+            .expect("compact a bounded page");
+    }
+    let records = runtime
+        .sqlite_records(None, None, None, 0, count)
+        .expect("read compacted records");
+    let mut per_bucket = std::collections::BTreeMap::<u64, usize>::new();
+    for record in records {
+        let payload: serde_json::Value =
+            serde_json::from_slice(&record.payload).expect("aggregated payload");
+        let bucket = payload["bucket_start_unix_seconds"]
+            .as_u64()
+            .expect("bucket start");
+        *per_bucket.entry(bucket).or_default() += 1;
+    }
+    assert!(
+        per_bucket.values().all(|count| *count == 1),
+        "a five-minute aggregate is never split by a SQLite keyset page"
+    );
+}
+
+#[test]
+fn sqlite_retention_progresses_when_one_bucket_exceeds_the_lookahead() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let now = 10_000_u64
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(1);
+    let count = RETENTION_COMPACTION_PAGE_SIZE + RETENTION_COMPACTION_BUCKET_LOOKAHEAD + 32;
+    let runtime = load(temporary.path());
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: 10_000,
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "traffic".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "traffic.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("dense-{sequence}").into_bytes(),
+                payload: b"sample".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed dense bucket");
+    let mut runtime = runtime;
+    runtime
+        .prepare_for_replication(now)
+        .expect("compact first continuation page");
+    runtime
+        .prepare_for_replication(now)
+        .expect("merge continuation page");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("record count"),
+        1,
+        "dense bucket is folded into one bounded aggregate"
+    );
+}
+
+#[test]
+fn continuous_ingestion_does_not_restart_sqlite_retention_compaction() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let first_observed = 1_000_u64;
+    let count = RETENTION_COMPACTION_PAGE_SIZE * 3 + 1;
+    let now = first_observed
+        .saturating_add(u64::try_from(count).expect("count") * 60)
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(1);
+    let mut runtime = load(temporary.path());
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: first_observed.saturating_add(sequence * 60),
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("continuous-{sequence}").into_bytes(),
+                payload: b"sample".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed multiple compaction pages");
+    runtime
+        .prepare_for_replication(now)
+        .expect("compact first page");
+    let first_cursor = runtime
+        .snapshot
+        .retention_compaction_cursor
+        .clone()
+        .expect("first cursor");
+
+    let key = SigningKey::from_bytes(&[13; 32]);
+    let identity = identity_for(&key, "node-b");
+    let live = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-b", 8, "runtime", 0).expect("cursor"),
+        vec![record(b"newer-live-sample", false)],
+        None,
+        now,
+        now,
+    )
+    .expect("live segment")
+    .sign(&key)
+    .expect("sign live segment");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &live.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("receive newer live segment");
+    let advanced_cursor = runtime
+        .snapshot
+        .retention_compaction_cursor
+        .clone()
+        .expect("cursor remains while old pages remain");
+    assert!(advanced_cursor.observed_start_unix_seconds > first_cursor.observed_start_unix_seconds);
+}
+
+#[test]
+fn sqlite_signed_segment_cache_expires_after_the_minute_detail_window() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let now = policy.minute_retention_seconds().saturating_add(10_000);
+    let observed_at = now
+        .saturating_sub(policy.minute_retention_seconds())
+        .saturating_sub(1);
+    let key = signing_key();
+    let identity = identity(&key);
+    let signed = segment_at(
+        &key,
+        0,
+        vec![record(b"expired-anti-entropy-cache", false)],
+        None,
+        observed_at,
+        observed_at,
+    );
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &signed.wire_bytes().expect("wire"),
+            now,
+        )
+        .expect("receive old segment");
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_segment_count()
+            .expect("segment count"),
+        0,
+        "canonical rows remain tiered in SQLite while raw signed wire is short-lived"
+    );
+}
+
+#[test]
+fn peer_initial_backfill_checkpoint_survives_restart() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    let mut streams = std::collections::BTreeMap::new();
+    streams.insert("traffic-backfill-node-b".to_owned(), (64, Some([7; 32])));
+    runtime
+        .update_initial_peer_backfill_checkpoint(
+            "node-b",
+            Some("opaque-page-cursor".to_owned()),
+            streams.clone(),
+            true,
+            false,
+        )
+        .expect("persist peer checkpoint");
+    drop(runtime);
+
+    let restored = load(temporary.path());
+    assert_eq!(
+        restored.initial_peer_backfill_checkpoint("node-b"),
+        Some(InitialPeerBackfillCheckpoint {
+            page_cursor: Some("opaque-page-cursor".to_owned()),
+            stream_state: streams,
+            saw_history: true,
+            completed: false,
+            epoch: 0,
+        })
+    );
+}
+
+#[test]
+fn sqlite_query_marks_an_incomplete_aggregate_beyond_the_first_compaction_page_partial() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let count = RETENTION_COMPACTION_PAGE_SIZE + 1;
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            let observed_at = 1_000_u64.saturating_add(sequence * 60 * 60);
+            StoredRecord {
+                observed_at_unix_seconds: observed_at,
+                received_at_unix_seconds: 2_000_000,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "traffic".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "traffic.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("aggregate-{sequence}").into_bytes(),
+                payload: serde_json::to_vec(&serde_json::json!({
+                    "algorithm": "sha256",
+                    "resolution": "hour",
+                    "bucket_start_unix_seconds": observed_at,
+                    "bucket_end_unix_seconds": observed_at + 59 * 60,
+                    "record_count": 1,
+                    "first_sequence": sequence,
+                    "last_sequence": sequence,
+                    "payload_sha256": "00",
+                    "complete": sequence + 1 != u64::try_from(count).expect("count"),
+                }))
+                .expect("aggregate payload"),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed aggregate pages");
+    let response = runtime
+        .query(
+            "repository-a",
+            HistoryQuery::new(
+                1_000,
+                1_000_u64.saturating_add(u64::try_from(count).expect("count") * 60 * 60),
+                10,
+            )
+            .expect("query"),
+            LocalQueryMetadata::current_window(2_000_000),
+        )
+        .expect("query SQLite aggregates");
+    assert_eq!(response.plan().completeness(), Completeness::Partial);
+}
+
+#[test]
+fn tiered_sqlite_history_exports_with_a_bounded_keyset_cursor() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let rows = (0..2_u64)
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: 1_000 + sequence,
+                received_at_unix_seconds: 2_000,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "traffic".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "traffic.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("tiered-{sequence}").into_bytes(),
+                payload: format!("tiered payload {sequence}").into_bytes(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed tiered rows");
+    let first = runtime
+        .tiered_backfill_page(None, 1)
+        .expect("first bounded tiered page");
+    assert_eq!(first.records.len(), 1);
+    let second = runtime
+        .tiered_backfill_page(first.next_cursor.as_deref(), 1)
+        .expect("second bounded tiered page");
+    assert_eq!(second.records.len(), 1);
+    assert_ne!(first.records[0].record_key, second.records[0].record_key);
 }
 
 #[test]
@@ -851,6 +1371,179 @@ fn expired_tombstones_allow_replacement_after_fresh_activity() {
 }
 
 #[test]
+fn tombstone_prefix_removes_persisted_historical_keyspace_before_blocking_resurrection() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let live = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "traffic", 0).expect("traffic cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            b"node-history:node:node-a:daily-traffic:2026-08-14".to_vec(),
+            b"historical payload".to_vec(),
+            false,
+        )],
+        None,
+        10,
+        10,
+    )
+    .expect("live historical segment")
+    .sign(&key)
+    .expect("sign live historical segment");
+    let tombstone = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "tombstone", 0).expect("tombstone cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            b"node-history:node:node-a:".to_vec(),
+            b"deleted".to_vec(),
+            true,
+        )],
+        None,
+        11,
+        11,
+    )
+    .expect("tombstone segment")
+    .sign(&key)
+    .expect("sign tombstone segment");
+    let mut runtime = load(temporary.path());
+
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &live.wire_bytes().expect("live wire"),
+            10,
+        )
+        .expect("store historical record");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &tombstone.wire_bytes().expect("tombstone wire"),
+            11,
+        )
+        .expect("accept tombstone");
+
+    let records = runtime
+        .storage
+        .repository_history_records(None, None, None, 0, 8)
+        .expect("read persisted records");
+    assert!(
+        records.is_empty(),
+        "tombstones are retained in the ledger, not query rows"
+    );
+    let resurrect = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "traffic", 1).expect("next traffic cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "traffic.v1",
+            1,
+            b"node-history:node:node-a:daily-traffic:2026-08-14".to_vec(),
+            b"resurrected".to_vec(),
+            false,
+        )],
+        Some(live.segment_hash().expect("live hash")),
+        12,
+        12,
+    )
+    .expect("resurrection segment")
+    .sign(&key)
+    .expect("sign resurrection segment");
+    assert!(matches!(
+        runtime.receive_wire(
+            "cluster-a",
+            &identity,
+            &resurrect.wire_bytes().expect("resurrection wire"),
+            12,
+        ),
+        Err(RepositoryRuntimeError::Protocol(
+            ProtocolError::ResurrectionPrevented
+        ))
+    ));
+}
+
+#[test]
+fn node_tombstone_removes_peer_backfill_records_from_a_repository_import_stream() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let peer_key = SigningKey::from_bytes(&[13; 32]);
+    let peer_identity = identity_for(&peer_key, "node-b");
+    let imported = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "path_health-backfill-node-b", 0).expect("backfill cursor"),
+        vec![SyncRecord::new(
+            "node-b",
+            "node-b",
+            "path_health.v1",
+            1,
+            b"node-history:node:node-b:mesh:peer-c:2026-08-14T00:00:00Z".to_vec(),
+            b"peer history".to_vec(),
+            false,
+        )],
+        None,
+        10,
+        10,
+    )
+    .expect("peer backfill")
+    .sign(&key)
+    .expect("sign peer backfill");
+    let tombstone = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-b", 7, "tombstone", 0).expect("tombstone cursor"),
+        vec![SyncRecord::new(
+            "node-b",
+            "node-b",
+            "path_health.v1",
+            1,
+            b"node-history:node:node-b:".to_vec(),
+            b"deleted".to_vec(),
+            true,
+        )],
+        None,
+        11,
+        11,
+    )
+    .expect("node tombstone")
+    .sign(&peer_key)
+    .expect("sign tombstone");
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &imported.wire_bytes().expect("backfill wire"),
+            10,
+        )
+        .expect("persist peer backfill");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &peer_identity,
+            &tombstone.wire_bytes().expect("tombstone wire"),
+            11,
+        )
+        .expect("delete imported peer history");
+    assert!(
+        runtime
+            .storage
+            .repository_history_records(None, None, None, 0, 8)
+            .expect("read records")
+            .is_empty()
+    );
+}
+
+#[test]
 fn low_space_stops_history_writes_but_not_control_plane_operations() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
@@ -879,41 +1572,63 @@ fn low_space_stops_history_writes_but_not_control_plane_operations() {
 }
 
 #[test]
-fn bounded_repository_history_eviction_reports_a_permanent_gap() {
+fn repository_history_persists_beyond_legacy_snapshot_limit_without_a_gap() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let rows = (0..16_385)
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: sequence as u64,
+                received_at_unix_seconds: sequence as u64,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence: sequence as u64,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: vec![0],
+                payload: vec![0],
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("sqlite row")
+        })
+        .collect::<Vec<_>>();
+
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("store external repository history");
+
+    assert_eq!(
+        runtime
+            .storage
+            .repository_history_record_count()
+            .expect("count persisted repository history"),
+        16_385
+    );
+    assert!(runtime.snapshot.records.is_empty());
+    assert!(runtime.snapshot.gaps.is_empty());
+}
+
+#[test]
+fn quota_guard_stops_history_writes_at_ten_gib_without_stopping_control_plane() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let mut runtime = load(temporary.path());
-    runtime.snapshot.records = (0..MAX_REPOSITORY_RECORDS)
-        .map(|sequence| StoredRecord {
-            observed_at_unix_seconds: sequence as u64,
-            received_at_unix_seconds: sequence as u64,
-            source_node_id: "node-a".to_owned(),
-            source_epoch: 7,
-            stream: "runtime".to_owned(),
-            sequence: sequence as u64,
-            subject_node_id: "subject-a".to_owned(),
-            observer_node_id: "node-a".to_owned(),
-            schema_id: "runtime.v1".to_owned(),
-            schema_version: 1,
-            record_key: vec![0],
-            payload: vec![0],
-            tombstone: false,
-        })
-        .collect();
-
-    runtime.evict_oldest_record_if_needed();
-
-    assert_eq!(runtime.snapshot.records.len(), MAX_REPOSITORY_RECORDS - 1);
-    assert_eq!(runtime.snapshot.gaps.len(), 1);
-    assert!(runtime.snapshot.gaps[0].permanent);
-    assert_eq!(runtime.snapshot.gaps[0].first_sequence, 0);
-    let response = runtime
-        .query(
-            "repository-a",
-            HistoryQuery::new(0, 1, 10).expect("query"),
-            LocalQueryMetadata::current_window(10),
+    runtime
+        .force_capacity_for_test(
+            DEFAULT_HISTORY_REPOSITORY_QUOTA_BYTES,
+            HISTORY_REPOSITORY_LOW_SPACE_GUARD_BYTES,
         )
-        .expect("bounded query");
-    assert_eq!(response.plan().completeness(), Completeness::Partial);
+        .expect("capacity");
+
+    assert_eq!(
+        runtime.history_write_availability(),
+        HistoryWriteAvailability::QuotaReached
+    );
+    assert!(runtime.control_plane_permitted());
 }
 
 #[test]

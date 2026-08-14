@@ -27,6 +27,8 @@ const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryReplicaSummary {
     pub(crate) segment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) next_segment_id: Option<String>,
     /// Daily verification is over signed source-stream ranges, not opaque segment ids.
     pub(crate) partitions: Vec<RepositoryPartitionSummary>,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
@@ -194,7 +196,8 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
-        self.rebuild_if_stale(now_unix_seconds)
+        self.rebuild_if_stale(now_unix_seconds)?;
+        self.prune_retention(now_unix_seconds)
     }
 
     pub(crate) fn replication_work(&self, now_unix_seconds: u64) -> ReplicaWork {
@@ -412,16 +415,32 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn replication_summary(
         &self,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
+        self.replication_summary_after(None)
+    }
+
+    pub(crate) fn replication_summary_after(
+        &self,
+        after_segment_id: Option<&str>,
+    ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
+        let mut segments = self.stored_segments_page(
+            after_segment_id,
+            super::REPLICATION_SEGMENT_PAGE_SIZE.saturating_add(1),
+        )?;
+        let has_next_page = segments.len() > super::REPLICATION_SEGMENT_PAGE_SIZE;
+        segments.truncate(super::REPLICATION_SEGMENT_PAGE_SIZE);
+        let next_segment_id = has_next_page.then(|| {
+            segments
+                .last()
+                .expect("nonempty page had an extra segment")
+                .id
+                .clone()
+        });
         Ok(RepositoryReplicaSummary {
-            segment_ids: self
-                .snapshot
-                .segments
-                .iter()
-                .map(|segment| segment.id.clone())
-                .collect(),
-            partitions: self.partition_summaries()?,
+            segment_ids: segments.iter().map(|segment| segment.id.clone()).collect(),
+            partitions: self.partition_summaries(&segments)?,
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
+            next_segment_id,
         })
     }
 
@@ -430,9 +449,8 @@ impl RepositoryReplicaRuntime {
         remote: &RepositoryReplicaSummary,
         _deep_verification: bool,
     ) -> Result<Vec<String>, RepositoryRuntimeError> {
-        let local_ids = self
-            .snapshot
-            .segments
+        let local_segments = self.stored_segments_by_ids(&remote.segment_ids)?;
+        let local_ids = local_segments
             .iter()
             .map(|segment| segment.id.as_str())
             .collect::<BTreeSet<_>>();
@@ -450,24 +468,12 @@ impl RepositoryReplicaRuntime {
         remote: &RepositoryReplicaSummary,
         deep_verification: bool,
     ) -> Result<bool, RepositoryRuntimeError> {
-        let local_ids = self
-            .snapshot
-            .segments
-            .iter()
-            .map(|segment| segment.id.as_str())
-            .collect::<BTreeSet<_>>();
-        let remote_ids = remote
-            .segment_ids
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let segments_converged = if deep_verification {
-            self.partition_summaries()? == remote.partitions
-        } else {
-            local_ids == remote_ids
-        };
+        let _ = deep_verification;
+        // The remote summary is keyset-paged. Its page is complete only when every advertised
+        // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
+        let segments_converged = self.missing_segment_ids(remote, false)?.is_empty();
         Ok(!(segments_converged && gaps_converged))
     }
 
@@ -486,7 +492,7 @@ impl RepositoryReplicaRuntime {
             .collect::<BTreeSet<_>>();
         let mut response_bytes = 0usize;
         let mut segments = Vec::new();
-        for segment in &self.snapshot.segments {
+        for segment in self.stored_segments_by_ids(requested_segment_ids)? {
             if !requested.contains(segment.id.as_str()) {
                 continue;
             }
@@ -496,8 +502,8 @@ impl RepositoryReplicaRuntime {
             }
             response_bytes = response_bytes.saturating_add(next);
             segments.push(RepositoryReplicaSegment {
-                identity: segment.identity.clone(),
-                wire: segment.wire.clone(),
+                identity: segment.identity,
+                wire: segment.wire,
             });
         }
         Ok(RepositoryRepairBatch {
@@ -510,30 +516,25 @@ impl RepositoryReplicaRuntime {
         &self,
         target_repository_id: &str,
     ) -> Result<RelayRepairPage, RepositoryRuntimeError> {
-        let segment_count = self.snapshot.segments.len();
-        let start = match self
+        let after_id = match self
             .snapshot
             .relay_segment_cursors
             .get(target_repository_id)
         {
-            Some(RelaySegmentCursor::LegacyOffset(offset)) if segment_count > 0 => {
-                offset % segment_count
+            Some(RelaySegmentCursor::NextSegmentId(next_segment_id)) => {
+                Some(next_segment_id.as_str())
             }
-            Some(RelaySegmentCursor::NextSegmentId(next_segment_id)) => self
-                .snapshot
-                .segments
-                .iter()
-                .position(|segment| segment.id == *next_segment_id)
-                .unwrap_or_default(),
-            _ => 0,
+            _ => None,
         };
-        let candidates = self
-            .snapshot
-            .segments
+        let mut candidates =
+            self.stored_segments_page(after_id, MAX_REPAIR_SEGMENTS.saturating_add(1))?;
+        if candidates.is_empty() && after_id.is_some() {
+            candidates = self.stored_segments_page(None, MAX_REPAIR_SEGMENTS.saturating_add(1))?;
+        }
+        candidates.truncate(MAX_REPAIR_SEGMENTS);
+        let candidate_ids = candidates
             .iter()
-            .skip(start)
-            .take(MAX_REPAIR_SEGMENTS)
-            .cloned()
+            .map(|segment| segment.id.clone())
             .collect::<Vec<_>>();
         let payload = RepositoryRepairBatch {
             segments: candidates
@@ -546,15 +547,12 @@ impl RepositoryReplicaRuntime {
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
         }
         .frame_sized_relay_payload()?;
-        let next_segment_id = if payload.batch.segments.is_empty() {
-            None
-        } else {
-            self.snapshot
-                .segments
-                .get(start + payload.batch.segments.len())
-                .or_else(|| self.snapshot.segments.first())
-                .map(|segment| segment.id.clone())
-        };
+        let next_segment_id = payload
+            .batch
+            .segments
+            .len()
+            .checked_sub(1)
+            .and_then(|index| candidate_ids.get(index).cloned());
         Ok(RelayRepairPage {
             batch: payload.batch,
             payload: payload.bytes,
@@ -637,10 +635,9 @@ impl RepositoryReplicaRuntime {
 
     fn partition_summaries(
         &self,
+        stored_segments: &[super::StoredSegment],
     ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
-        let mut segments = self
-            .snapshot
-            .segments
+        let mut segments = stored_segments
             .iter()
             .map(partition_summary)
             .collect::<Result<Vec<_>, _>>()?;

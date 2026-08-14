@@ -5,10 +5,7 @@ use crate::{
     state::history_repository::identity::RepositoryNodeIdentity,
 };
 
-use super::{
-    MAX_REPOSITORY_RECORDS, MAX_REPOSITORY_SEGMENTS, RepositoryReplicaRuntime,
-    RepositoryRuntimeError, StoredGap, StoredRecord, StoredSegment,
-};
+use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredGap, StoredSegment};
 
 impl RepositoryReplicaRuntime {
     pub(super) fn store_segment(
@@ -17,22 +14,29 @@ impl RepositoryReplicaRuntime {
         wire: &[u8],
     ) -> Result<(), RepositoryRuntimeError> {
         let id = hex::encode(Sha256::digest(wire));
-        if self
+        let segment = StoredSegment {
+            id,
+            closed_at_unix_seconds: SignedSegment::from_wire(wire)
+                .map_err(RepositoryRuntimeError::from)?
+                .canonical()
+                .closed_at_unix_seconds(),
+            identity: identity.clone(),
+            wire: wire.to_vec(),
+        };
+        if self.uses_sqlite_history() {
+            return self
+                .storage
+                .upsert_repository_history_segments(&[segment.sqlite_row()?])
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()));
+        }
+        if !self
             .snapshot
             .segments
             .iter()
-            .any(|segment| segment.id == id)
+            .any(|existing| existing.id == segment.id)
         {
-            return Ok(());
+            self.snapshot.segments.push(segment);
         }
-        if self.snapshot.segments.len() == MAX_REPOSITORY_SEGMENTS {
-            self.evict_oldest_segment();
-        }
-        self.snapshot.segments.push(StoredSegment {
-            id,
-            identity: identity.clone(),
-            wire: wire.to_vec(),
-        });
         Ok(())
     }
 
@@ -50,69 +54,6 @@ impl RepositoryReplicaRuntime {
             start_unix_seconds: segment.opened_at_unix_seconds(),
             end_unix_seconds: segment.closed_at_unix_seconds(),
             permanent,
-        });
-    }
-
-    pub(super) fn evict_oldest_record_if_needed(&mut self) {
-        if self.snapshot.records.len() < MAX_REPOSITORY_RECORDS {
-            return;
-        }
-        self.evict_oldest_record();
-    }
-
-    pub(super) fn evict_oldest_record(&mut self) -> bool {
-        let Some(record) = self.snapshot.records.first().cloned() else {
-            return false;
-        };
-        self.snapshot.records.remove(0);
-        self.record_stored_record_gap(record);
-        true
-    }
-
-    pub(super) fn evict_oldest_segment(&mut self) -> bool {
-        let Some(evicted) = self.snapshot.segments.first().cloned() else {
-            return false;
-        };
-        self.snapshot.segments.remove(0);
-        match SignedSegment::from_wire(&evicted.wire) {
-            Ok(segment) => self.record_gap(segment.canonical(), true),
-            Err(_) => self.snapshot.history_truncated = true,
-        }
-        true
-    }
-
-    fn record_stored_record_gap(&mut self, record: StoredRecord) {
-        if let Some(existing) = self.snapshot.gaps.iter_mut().find(|gap| {
-            gap.permanent
-                && gap.source_node_id == record.source_node_id
-                && gap.source_epoch == record.source_epoch
-                && gap.stream == record.stream
-                && record.sequence <= gap.last_sequence.saturating_add(1)
-                && gap.first_sequence <= record.sequence.saturating_add(1)
-        }) {
-            existing.first_sequence = existing.first_sequence.min(record.sequence);
-            existing.last_sequence = existing.last_sequence.max(record.sequence);
-            existing.start_unix_seconds = existing
-                .start_unix_seconds
-                .min(record.observed_at_unix_seconds);
-            existing.end_unix_seconds = existing
-                .end_unix_seconds
-                .max(record.observed_at_unix_seconds);
-            return;
-        }
-        if self.snapshot.gaps.len() == 64 {
-            self.snapshot.history_truncated = true;
-            return;
-        }
-        self.snapshot.gaps.push(StoredGap {
-            source_node_id: record.source_node_id,
-            source_epoch: record.source_epoch,
-            stream: record.stream,
-            first_sequence: record.sequence,
-            last_sequence: record.sequence,
-            start_unix_seconds: record.observed_at_unix_seconds,
-            end_unix_seconds: record.observed_at_unix_seconds,
-            permanent: true,
         });
     }
 

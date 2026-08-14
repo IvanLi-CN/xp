@@ -124,6 +124,53 @@ pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
         ))
 }
 
+/// An aggregate bucket may only be compacted once its end is before the page boundary. This
+/// keeps a keyset page from producing two independent aggregates for one five-minute/hourly
+/// bucket when its final source samples are on the next page.
+pub(super) fn compaction_bucket_end(record: &StoredRecord, now_unix_seconds: u64) -> Option<u64> {
+    if record.tombstone {
+        return None;
+    }
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let resolution = policy
+        .resolution_for_age(now_unix_seconds.saturating_sub(record.observed_at_unix_seconds))?;
+    Some(bucket_time_range(record.observed_at_unix_seconds, resolution).1)
+}
+
+pub(super) fn same_compaction_bucket(
+    left: &StoredRecord,
+    right: &StoredRecord,
+    now_unix_seconds: u64,
+) -> bool {
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let Some(left_resolution) =
+        policy.resolution_for_age(now_unix_seconds.saturating_sub(left.observed_at_unix_seconds))
+    else {
+        return false;
+    };
+    let Some(right_resolution) =
+        policy.resolution_for_age(now_unix_seconds.saturating_sub(right.observed_at_unix_seconds))
+    else {
+        return false;
+    };
+    left_resolution == right_resolution
+        && RetentionBucket::for_record(
+            left,
+            left_resolution,
+            policy.keeps_minute_detail(
+                now_unix_seconds.saturating_sub(left.observed_at_unix_seconds),
+            ),
+            None,
+        ) == RetentionBucket::for_record(
+            right,
+            right_resolution,
+            policy.keeps_minute_detail(
+                now_unix_seconds.saturating_sub(right.observed_at_unix_seconds),
+            ),
+            None,
+        )
+}
+
 pub(super) fn incomplete_aggregate_gap<'a>(
     records: impl IntoIterator<Item = &'a StoredRecord>,
 ) -> Option<(u64, u64)> {
@@ -137,6 +184,15 @@ pub(super) fn incomplete_aggregate_gap<'a>(
             }
             None => Some((start, end)),
         })
+}
+
+pub(super) fn aggregate_metadata(record: &StoredRecord) -> Option<(bool, u64, u64)> {
+    let payload = aggregate_payload(record)?;
+    let (start, end) = payload
+        .bucket_start_unix_seconds
+        .zip(payload.bucket_end_unix_seconds)
+        .filter(|(start, end)| start <= end)?;
+    Some((payload.complete, start, end))
 }
 
 fn retention_identifier(

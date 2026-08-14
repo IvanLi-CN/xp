@@ -75,6 +75,18 @@ fn pagination_cursor_is_a_bounded_absolute_record_offset() {
     assert_eq!(query.page_offset().expect("offset"), 14);
     assert_eq!(query.next_page_cursor(7).expect("next cursor"), "21");
     assert!(query.next_page_cursor(0).is_err());
+    assert!(
+        HistoryQuery::new(100, 200, 32)
+            .expect("bounded query")
+            .with_page_cursor(Some("4097"))
+            .is_err()
+    );
+    assert!(
+        HistoryQuery::new(100, 200, 32)
+            .expect("bounded query")
+            .with_page_cursor(Some("18446744073709551615"))
+            .is_err()
+    );
 }
 
 #[test]

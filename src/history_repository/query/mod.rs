@@ -7,6 +7,10 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 const MAX_QUERY_PAGE_SIZE: usize = 1_000;
+// SQLite's OFFSET work is bounded as part of the public request contract. Clients use the
+// returned cursor for short, scan-safe pagination instead of turning one request into an
+// arbitrary table walk.
+const MAX_QUERY_PAGE_OFFSET: usize = 4_096;
 const MAX_QUERY_RANGE_SECONDS: u64 = 2 * 365 * 24 * 60 * 60;
 const MAX_QUERY_CANDIDATES: usize = 64;
 const MAX_QUERY_WATERMARKS: usize = 256;
@@ -113,6 +117,9 @@ impl HistoryQuery {
             return Err(QueryError::InvalidPageCursor);
         }
         self.page_cursor = cursor.parse().map_err(|_| QueryError::InvalidPageCursor)?;
+        if self.page_cursor > MAX_QUERY_PAGE_OFFSET {
+            return Err(QueryError::InvalidPageCursor);
+        }
         Ok(self)
     }
 
@@ -150,6 +157,7 @@ impl HistoryQuery {
         }
         self.page_cursor
             .checked_add(returned_records)
+            .filter(|cursor| *cursor <= MAX_QUERY_PAGE_OFFSET)
             .ok_or(QueryError::InvalidPageCursor)
             .map(|cursor| cursor.to_string())
     }

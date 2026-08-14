@@ -159,6 +159,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 PR: none
 
+![Repository syncing status](./assets/repository-status-syncing.png)
+
+![Repository status on mobile](./assets/repository-status-mobile.png)
+
 ## Related PRs
 
 - Issue #248: https://github.com/IvanLi-CN/xp/issues/248
