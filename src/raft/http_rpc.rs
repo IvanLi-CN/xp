@@ -167,9 +167,9 @@ mod tests {
     fn node(node_id: &str) -> Node {
         Node {
             node_id: node_id.to_owned(),
-            node_name: node_id.to_owned(),
-            access_host: String::new(),
-            api_base_url: format!("https://{node_id}.example.test"),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            access_host: xp_test_fixtures::primary_host().to_owned(),
+            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         }
@@ -177,12 +177,14 @@ mod tests {
 
     #[test]
     fn initial_raft_bootstrap_only_allows_empty_or_self_only_state() {
-        assert!(is_initial_raft_bootstrap(&[], "self"));
-        assert!(is_initial_raft_bootstrap(&[node("self")], "self"));
-        assert!(!is_initial_raft_bootstrap(&[node("other")], "self"));
+        let self_id = xp_test_fixtures::primary_node_id();
+        let other_id = xp_test_fixtures::secondary_node_id();
+        assert!(is_initial_raft_bootstrap(&[], self_id));
+        assert!(is_initial_raft_bootstrap(&[node(self_id)], self_id));
+        assert!(!is_initial_raft_bootstrap(&[node(other_id)], self_id));
         assert!(!is_initial_raft_bootstrap(
-            &[node("self"), node("other")],
-            "self"
+            &[node(self_id), node(other_id)],
+            self_id
         ));
     }
 }
