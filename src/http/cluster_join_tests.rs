@@ -368,7 +368,12 @@ fn app_with_failing_add_voters(
 
 fn app_with_blocking_catch_up(
     tmp: &TempDir,
-) -> (axum::Router, Arc<Mutex<usize>>, Arc<Mutex<usize>>) {
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    Arc<Mutex<usize>>,
+    Arc<Mutex<usize>>,
+) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -459,13 +464,13 @@ fn app_with_blocking_catch_up(
         geo_db_update,
         crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
-    (router, wait_calls, promotion_calls)
+    (router, store, wait_calls, promotion_calls)
 }
 
 #[tokio::test]
 async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
     let tmp = TempDir::new().unwrap();
-    let (app, wait_calls, promotion_calls) = app_with_blocking_catch_up(&tmp);
+    let (app, _store, wait_calls, promotion_calls) = app_with_blocking_catch_up(&tmp);
     let cluster = ClusterMetadata::load(tmp.path()).unwrap();
     let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
     let ca_key_pem = cluster
@@ -524,6 +529,57 @@ async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
     assert_eq!(retry.status(), StatusCode::OK);
     assert_eq!(*wait_calls.lock().await, 0);
     assert_eq!(*promotion_calls.lock().await, 0);
+}
+
+#[tokio::test]
+async fn cluster_join_rejects_pending_replay_after_activation_deadline() {
+    let tmp = TempDir::new().unwrap();
+    let (app, store, _wait_calls, _promotion_calls) = app_with_blocking_catch_up(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let join_token = signed_join_token(&cluster, &ca_pem, &ca_key_pem);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+    let request = json!({
+        "join_token": join_token,
+        "node_name": "node-2",
+        "access_host": "example.com",
+        "api_base_url": "https://node-2.internal:8443",
+        "csr_pem": csr.csr_pem,
+    });
+
+    let initial = app
+        .clone()
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            request.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(initial.status(), StatusCode::OK);
+    {
+        let mut store = store.lock().await;
+        store
+            .state_mut()
+            .join_sessions
+            .get_mut(&decoded.token_id)
+            .unwrap()
+            .activation_deadline = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
+        store.save().unwrap();
+    }
+
+    let retry = app
+        .oneshot(req_authed_json("POST", "/api/cluster/join", request))
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

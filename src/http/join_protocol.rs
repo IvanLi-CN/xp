@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use super::{ApiError, AppState, ClusterJoinRequest};
 
@@ -45,6 +45,15 @@ pub(super) async fn resolve_reservation(
         }
         if session.status == crate::join_session::JoinSessionStatus::Expired {
             return Err(ApiError::invalid_request("join token already used"));
+        }
+        if session.status.is_pending()
+            && DateTime::parse_from_rfc3339(&session.activation_deadline)
+                .map_err(|error| ApiError::internal(error.to_string()))?
+                <= Utc::now()
+        {
+            return Err(ApiError::invalid_request(
+                "join activation deadline has expired",
+            ));
         }
         session.signed_cert_pem.clone()
     } else {

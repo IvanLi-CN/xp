@@ -1972,7 +1972,6 @@ async fn cluster_join(
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
         .await;
-    join_capability::require_on_voters(&state).await?;
     let request_fingerprint = crate::join_session::JoinSession::request_fingerprint(
         &req.node_name,
         &req.access_host,
@@ -1986,6 +1985,9 @@ async fn cluster_join(
     let existing_session = reservation.existing;
     let activation_deadline = reservation.activation_deadline;
     let signed_cert_pem = reservation.signed_cert_pem;
+    if existing_session.is_none() {
+        join_capability::require_on_voters(&state).await?;
+    }
     if existing_session.as_ref().is_some_and(|session| {
         matches!(
             session.status,

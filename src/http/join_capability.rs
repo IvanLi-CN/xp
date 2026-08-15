@@ -12,12 +12,22 @@ struct Response {
     capabilities: Vec<String>,
 }
 
+fn all_remote_voters_represented(
+    voter_ids: &BTreeSet<u64>,
+    represented_voters: &BTreeSet<u64>,
+) -> bool {
+    represented_voters == voter_ids
+}
+
 pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> {
-    let voter_ids = raft_metrics(state)
+    let mut voter_ids = raft_metrics(state)
         .membership_config
         .membership()
         .voter_ids()
         .collect::<BTreeSet<_>>();
+    let local_node_id = crate::raft::types::raft_node_id_from_ulid(&state.cluster.node_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    voter_ids.remove(&local_node_id);
     let peers = state
         .store
         .lock()
@@ -30,7 +40,16 @@ pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> 
                 .is_ok_and(|node_id| voter_ids.contains(&node_id))
         })
         .collect::<Vec<_>>();
-    if peers.is_empty() {
+    let represented_voters = peers
+        .iter()
+        .filter_map(|node| crate::raft::types::raft_node_id_from_ulid(&node.node_id).ok())
+        .collect::<BTreeSet<_>>();
+    if !all_remote_voters_represented(&voter_ids, &represented_voters) {
+        return Err(ApiError::conflict(
+            "every voter must have valid node metadata before accepting staged joins",
+        ));
+    }
+    if voter_ids.is_empty() {
         return Ok(());
     }
     let client =
@@ -68,4 +87,22 @@ pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_any_voter_without_probeable_node_metadata() {
+        let voters = BTreeSet::from([2, 3]);
+        assert!(all_remote_voters_represented(
+            &voters,
+            &BTreeSet::from([2, 3])
+        ));
+        assert!(!all_remote_voters_represented(
+            &voters,
+            &BTreeSet::from([2])
+        ));
+    }
 }

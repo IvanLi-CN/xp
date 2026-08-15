@@ -124,7 +124,23 @@ async fn reconcile_once(
                 .nodes()
                 .any(|(member_id, _)| *member_id == node_id);
             if !registered {
-                continue;
+                let node = store
+                    .lock()
+                    .await
+                    .get_node(&session.node_id)
+                    .ok_or_else(|| anyhow::anyhow!("reserved join node is missing"))?;
+                let _guard = crate::raft_membership_guard::membership_operation_gate()
+                    .lock_owned()
+                    .await;
+                raft.add_learner(
+                    node_id,
+                    crate::raft::types::NodeMeta {
+                        name: node.node_name.clone(),
+                        api_base_url: node.api_base_url.clone(),
+                        raft_endpoint: node.api_base_url.clone(),
+                    },
+                )
+                .await?;
             }
             session.status = JoinSessionStatus::LearnerRegistered;
             let node = store
@@ -171,4 +187,159 @@ async fn reconcile_once(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tokio::sync::watch;
+
+    use super::*;
+    use crate::{
+        domain::{Node, NodeQuotaReset},
+        join_session::JoinSession,
+        raft::{
+            app::{BoxFuture, LocalRaft},
+            types::{ClientResponse, NodeMeta as RaftNodeMeta},
+        },
+        state::StoreInit,
+    };
+
+    #[derive(Clone)]
+    struct RecoveringRaft {
+        inner: LocalRaft,
+        add_learner_calls: Arc<AtomicUsize>,
+    }
+
+    impl RaftFacade for RecoveringRaft {
+        fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
+            self.inner.metrics()
+        }
+
+        fn client_write(
+            &self,
+            cmd: DesiredStateCommand,
+        ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
+            self.inner.client_write(cmd)
+        }
+
+        fn add_learner(
+            &self,
+            _node_id: u64,
+            _node: RaftNodeMeta,
+        ) -> BoxFuture<'_, anyhow::Result<()>> {
+            let calls = self.add_learner_calls.clone();
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn wait_learner_caught_up(
+            &self,
+            _node_id: u64,
+            _required_log_index: u64,
+            _timeout: Duration,
+        ) -> BoxFuture<'_, anyhow::Result<()>> {
+            Box::pin(async { anyhow::bail!("learner has not started") })
+        }
+
+        fn add_voters(&self, _node_ids: BTreeSet<u64>) -> BoxFuture<'_, anyhow::Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn change_membership(
+            &self,
+            changes: openraft::ChangeMembers<u64, RaftNodeMeta>,
+            retain: bool,
+        ) -> BoxFuture<'_, anyhow::Result<()>> {
+            self.inner.change_membership(changes, retain)
+        }
+    }
+
+    #[tokio::test]
+    async fn failover_re_registers_a_durable_reserved_learner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leader_id = ulid::Ulid::new().to_string();
+        let learner_id = ulid::Ulid::new().to_string();
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(StoreInit {
+                data_dir: tmp.path().to_owned(),
+                bootstrap_node_id: Some(leader_id.clone()),
+                bootstrap_node_name: "leader".into(),
+                bootstrap_access_host: "leader.example".into(),
+                bootstrap_api_base_url: "https://leader.example".into(),
+            })
+            .unwrap(),
+        ));
+        {
+            let mut store = store.lock().await;
+            store.state_mut().nodes.insert(
+                learner_id.clone(),
+                Node {
+                    node_id: learner_id.clone(),
+                    node_name: "learner".into(),
+                    access_host: "learner.example".into(),
+                    api_base_url: "https://learner.example".into(),
+                    quota_limit_bytes: 0,
+                    quota_reset: NodeQuotaReset::default(),
+                },
+            );
+            store.state_mut().join_sessions.insert(
+                learner_id.clone(),
+                JoinSession {
+                    node_id: learner_id,
+                    request_fingerprint: "fingerprint".into(),
+                    signed_cert_pem: "certificate".into(),
+                    token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+                    activation_deadline: (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339(),
+                    required_log_index: 1,
+                    status: JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                },
+            );
+            store.save().unwrap();
+        }
+        let raft_id = raft_node_id_from_ulid(&leader_id).unwrap();
+        let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(raft_id);
+        metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+            None,
+            openraft::Membership::new(
+                vec![BTreeSet::from([raft_id])],
+                std::collections::BTreeMap::from([(
+                    raft_id,
+                    RaftNodeMeta {
+                        name: "leader".into(),
+                        api_base_url: "https://leader.example".into(),
+                        raft_endpoint: "https://leader.example".into(),
+                    },
+                )]),
+            ),
+        ));
+        let (_tx, rx) = watch::channel(metrics);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
+            inner: LocalRaft::new(store.clone(), rx),
+            add_learner_calls: calls.clone(),
+        });
+
+        reconcile_once(raft, store.clone()).await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            store
+                .lock()
+                .await
+                .state()
+                .join_sessions
+                .values()
+                .next()
+                .unwrap()
+                .status,
+            JoinSessionStatus::LearnerRegistered
+        );
+    }
 }
