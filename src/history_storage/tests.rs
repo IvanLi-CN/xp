@@ -196,6 +196,28 @@ fn configures_wal_bounded_checkpoint_and_incremental_vacuum() {
 }
 
 #[test]
+fn repository_source_epoch_rejects_values_beyond_sqlite_integer_range() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert!(
+        storage
+            .record_repository_source_epoch("cluster-a", "node-a", i64::MAX as u64)
+            .is_ok()
+    );
+    assert!(
+        storage
+            .allocate_repository_source_epoch("cluster-a", "node-a", 1)
+            .is_err()
+    );
+    assert!(
+        storage
+            .record_repository_source_epoch("cluster-a", "node-a", i64::MAX as u64 + 1)
+            .is_err()
+    );
+}
+
+#[test]
 fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

@@ -40,9 +40,12 @@ impl LocalSourceState {
 
     pub(super) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
         if self.epoch != 0 {
-            self.epoch = self.epoch.checked_add(1).ok_or_else(|| {
-                RepositoryRuntimeError::Storage("source epoch exhausted".to_owned())
-            })?;
+            if self.epoch >= i64::MAX as u64 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source epoch exhausted".to_owned(),
+                ));
+            }
+            self.epoch += 1;
         }
         self.streams.clear();
         self.backpressure_gaps.clear();
@@ -452,10 +455,10 @@ impl RepositoryReplicaRuntime {
             .local_source
             .backpressure_gaps
             .iter()
-            .map(|(stream, gap)| RepositoryReplicaGap {
+            .map(|(key, gap)| RepositoryReplicaGap {
                 source_node_id: source_node_id.to_owned(),
                 source_epoch: gap.source_epoch,
-                stream: stream.clone(),
+                stream: backpressure_gap_stream(key).to_owned(),
                 first_sequence: gap.first_sequence,
                 last_sequence: gap.last_sequence,
                 start_unix_seconds: gap.start_unix_seconds,
@@ -579,11 +582,23 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
     ) {
         let epoch = self.snapshot.local_source.epoch;
+        let contiguous_key = self
+            .snapshot
+            .local_source
+            .backpressure_gaps
+            .iter()
+            .find(|(key, gap)| {
+                backpressure_gap_stream(key) == stream
+                    && (gap.last_sequence.checked_add(1) == Some(first_sequence)
+                        || last_sequence.checked_add(1) == Some(gap.first_sequence))
+            })
+            .map(|(key, _)| key.clone());
+        let key = contiguous_key.unwrap_or_else(|| format!("{stream}\0{first_sequence:020}"));
         let gap = self
             .snapshot
             .local_source
             .backpressure_gaps
-            .entry(stream.to_owned())
+            .entry(key)
             .or_insert(LocalSourceGap {
                 source_epoch: epoch,
                 first_sequence,
@@ -596,6 +611,10 @@ impl RepositoryReplicaRuntime {
         gap.start_unix_seconds = gap.start_unix_seconds.min(now_unix_seconds);
         gap.end_unix_seconds = gap.end_unix_seconds.max(now_unix_seconds);
     }
+}
+
+fn backpressure_gap_stream(key: &str) -> &str {
+    key.split_once('\0').map_or(key, |(stream, _)| stream)
 }
 
 fn stream_for_schema(schema_id: &str) -> Option<&'static str> {
@@ -634,7 +653,7 @@ pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{LocalSourceState, LocalSourceStreamState};
+    use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
 
     #[test]
     fn stale_repository_rebuild_rotates_the_durable_source_epoch_before_resetting_sequences() {
@@ -653,11 +672,51 @@ mod tests {
     #[test]
     fn stale_repository_rebuild_rejects_exhausted_source_epoch() {
         let mut state = LocalSourceState {
-            epoch: u64::MAX,
+            epoch: i64::MAX as u64,
             ..LocalSourceState::default()
         };
 
         assert!(state.rotate_after_repository_rebuild().is_err());
-        assert_eq!(state.epoch, u64::MAX);
+        assert_eq!(state.epoch, i64::MAX as u64);
+    }
+
+    #[test]
+    fn disjoint_backpressure_ranges_remain_independent() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+        let mut runtime = RepositoryReplicaRuntime::empty(storage);
+        runtime.snapshot.local_source.epoch = 7;
+
+        runtime.record_local_source_backpressure_gap("runtime", 8, 8, 100);
+        runtime.record_local_source_backpressure_gap("runtime", 10, 10, 120);
+
+        let gaps = runtime.local_source_backpressure_gaps("node-a");
+        assert_eq!(gaps.len(), 2);
+        assert_eq!(gaps[0].stream, "runtime");
+        assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (8, 8));
+        assert_eq!((gaps[1].first_sequence, gaps[1].last_sequence), (10, 10));
+    }
+
+    #[test]
+    fn failed_sqlite_control_write_reports_read_only_degradation() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+        let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+        storage
+            .set_query_only_for_test(true)
+            .expect("enable SQLite write failure");
+
+        assert!(
+            runtime
+                .record_local_source_collector_delivery("repository-a", "repository-a", false)
+                .is_err()
+        );
+        assert_eq!(
+            runtime
+                .runtime_status(12)
+                .expect("degraded status remains readable")
+                .storage_mode,
+            "sqlite_degraded"
+        );
     }
 }

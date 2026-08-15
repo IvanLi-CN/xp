@@ -106,8 +106,10 @@ impl HistoryStorage {
         let epoch = previous
             .and_then(|value| value.checked_add(1))
             .unwrap_or_else(|| initial_epoch.max(1));
+        let stored_epoch = i64::try_from(epoch)
+            .map_err(|_| HistoryStorageError("repository source epoch exhausted".to_owned()))?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        write_meta_i64(&transaction, &key, i64::try_from(epoch).unwrap_or(i64::MAX))?;
+        write_meta_i64(&transaction, &key, stored_epoch)?;
         transaction.commit().map_err(sqlite_error)?;
         Ok(epoch)
     }
@@ -123,8 +125,10 @@ impl HistoryStorage {
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(());
         };
+        let stored_epoch = i64::try_from(epoch)
+            .map_err(|_| HistoryStorageError("repository source epoch exhausted".to_owned()))?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        write_meta_i64(&transaction, &key, i64::try_from(epoch).unwrap_or(i64::MAX))?;
+        write_meta_i64(&transaction, &key, stored_epoch)?;
         transaction.commit().map_err(sqlite_error)
     }
 

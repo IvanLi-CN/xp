@@ -642,12 +642,17 @@ impl RepositoryReplicaRuntime {
         if bytes.len() > super::MAX_RUNTIME_STATE_BYTES {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
         }
-        self.storage
-            .write(
-                crate::state::history_storage::REPOSITORY_REPLICA_KEY,
-                &bytes,
-            )
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+        let result = self.storage.write(
+            crate::state::history_storage::REPOSITORY_REPLICA_KEY,
+            &bytes,
+        );
+        if let Err(error) = result {
+            if self.uses_sqlite_history() {
+                self.storage_degraded = true;
+            }
+            return Err(RepositoryRuntimeError::Storage(error.to_string()));
+        }
+        Ok(())
     }
 
     fn retained_partition_summaries(
