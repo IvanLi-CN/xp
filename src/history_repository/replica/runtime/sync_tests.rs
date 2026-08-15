@@ -561,10 +561,7 @@ fn a_backpressured_stream_preserves_other_streams_and_a_permanent_gap() {
     assert!(gaps[0].permanent);
     assert_eq!(gaps[0].start_unix_seconds, 8);
     assert_eq!(gaps[0].end_unix_seconds, 8);
-    assert_eq!(
-        runtime.snapshot.local_source.streams["runtime"].next_sequence,
-        9
-    );
+    assert_eq!(runtime.local_source_next_sequence("runtime"), Some(9));
 }
 
 #[test]

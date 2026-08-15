@@ -660,9 +660,6 @@ impl RepositoryReplicaRuntime {
                 let page = self.sqlite_records(None, None, None, offset, 1_000)?;
                 let page_len = page.len();
                 accumulate_record_partitions(&mut summaries, page.iter())?;
-                if summaries.len() > MAX_RETAINED_PARTITION_SUMMARIES {
-                    return Err(RepositoryRuntimeError::StateLimitExceeded);
-                }
                 if page_len < 1_000 {
                     break;
                 }
@@ -686,9 +683,6 @@ impl RepositoryReplicaRuntime {
                 )
             });
             accumulate_record_partitions(&mut summaries, records.iter())?;
-            if summaries.len() > MAX_RETAINED_PARTITION_SUMMARIES {
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
         }
         Ok(summaries.into_values().collect())
     }
@@ -700,19 +694,38 @@ fn accumulate_record_partitions<'a>(
 ) -> Result<(), RepositoryRuntimeError> {
     for record in records {
         let record_summary = record_partition_summary(record)?;
-        let key = (
+        let mut key = (
             record_summary.source_node_id.clone(),
             record_summary.source_epoch,
             record_summary.stream.clone(),
             record_summary.partition,
         );
+        if !summaries.contains_key(&key)
+            && summaries.len() >= MAX_RETAINED_PARTITION_SUMMARIES.saturating_sub(1)
+        {
+            key = (String::new(), u64::MAX, String::new(), u32::MAX);
+        }
         if let Some(summary) = summaries.get_mut(&key) {
             summary.first_sequence = summary.first_sequence.min(record_summary.first_sequence);
             summary.last_sequence = summary.last_sequence.max(record_summary.last_sequence);
             summary.hash = combine_partition_hash(summary.hash, record_summary.hash);
             summary.record_count = summary.record_count.saturating_add(1);
         } else {
-            summaries.insert(key, record_summary);
+            let summary = if key.0.is_empty() {
+                RepositoryPartitionSummary {
+                    source_node_id: String::new(),
+                    source_epoch: u64::MAX,
+                    stream: String::new(),
+                    partition: u32::MAX,
+                    first_sequence: record_summary.first_sequence,
+                    last_sequence: record_summary.last_sequence,
+                    hash: record_summary.hash,
+                    record_count: 1,
+                }
+            } else {
+                record_summary
+            };
+            summaries.insert(key, summary);
         }
     }
     Ok(())

@@ -429,6 +429,15 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 
+    #[cfg(test)]
+    pub(crate) fn local_source_next_sequence(&self, stream: &str) -> Option<u64> {
+        self.snapshot
+            .local_source
+            .streams
+            .get(stream)
+            .map(|state| state.next_sequence)
+    }
+
     pub(crate) fn local_source_backpressure_gaps(
         &self,
         source_node_id: &str,

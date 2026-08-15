@@ -62,6 +62,23 @@ impl RepositoryReplicaRuntime {
         self.tombstones
             .reconcile_ready_repositories(ready_repositories)?;
         let expired_tombstones = self.expire_tombstones(now_unix_seconds)?;
+        let first_cursor = segment.canonical().first_cursor();
+        if let Some(gap) = self.snapshot.gaps.iter().find(|gap| {
+            gap.permanent
+                && gap.source_node_id == first_cursor.source_node_id()
+                && gap.source_epoch == first_cursor.source_epoch()
+                && gap.stream == first_cursor.stream()
+                && gap.last_sequence.checked_add(1) == Some(first_cursor.sequence())
+        }) {
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .advance_declared_sequence_gap(
+                    first_cursor,
+                    gap.first_sequence,
+                    gap.last_sequence,
+                )?;
+        }
         let acceptance = self
             .receiver
             .as_mut()
@@ -261,14 +278,32 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(super) fn clear_repaired_gaps(&mut self, segment: &crate::history_sync::CanonicalSegment) {
-        self.snapshot.gaps.retain(|gap| {
-            gap.permanent
+        let first = segment.first_cursor().sequence();
+        let last = segment.last_cursor().sequence();
+        let mut remaining = Vec::with_capacity(self.snapshot.gaps.len().saturating_add(1));
+        for gap in self.snapshot.gaps.drain(..) {
+            if gap.permanent
                 || gap.source_node_id != segment.first_cursor().source_node_id()
                 || gap.source_epoch != segment.first_cursor().source_epoch()
                 || gap.stream != segment.first_cursor().stream()
-                || segment.first_cursor().sequence() > gap.first_sequence
-                || segment.last_cursor().sequence() < gap.last_sequence
-        });
+                || last < gap.first_sequence
+                || first > gap.last_sequence
+            {
+                remaining.push(gap);
+                continue;
+            }
+            if gap.first_sequence < first {
+                let mut before = gap.clone();
+                before.last_sequence = first - 1;
+                remaining.push(before);
+            }
+            if last < gap.last_sequence {
+                let mut after = gap;
+                after.first_sequence = last + 1;
+                remaining.push(after);
+            }
+        }
+        self.snapshot.gaps = remaining;
     }
 
     pub(super) fn reopen_retention_compaction_for_late_record(

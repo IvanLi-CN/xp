@@ -583,6 +583,47 @@ fn gaps_do_not_advance_the_persisted_acknowledgement() {
 }
 
 #[test]
+fn authenticated_source_gap_allows_the_stream_to_resume_after_dropped_records() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"one", false)], None);
+    let first_hash = first.segment_hash().expect("hash");
+    let resumed = segment(&key, 2, vec![record(b"three", false)], Some(first_hash));
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("wire"),
+            11,
+        )
+        .expect("first segment");
+    runtime
+        .merge_replica_gaps(&[super::sync::RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            last_sequence: 1,
+            start_unix_seconds: 12,
+            end_unix_seconds: 12,
+            permanent: true,
+        }])
+        .expect("authenticated source gap");
+
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &resumed.wire_bytes().expect("wire"),
+            13,
+        )
+        .expect("resume after declared gap");
+    assert_eq!(runtime.replication_summary().unwrap().segment_ids.len(), 2);
+}
+
+#[test]
 fn repaired_segments_clear_gaps_only_after_the_continuous_chain_is_restored() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

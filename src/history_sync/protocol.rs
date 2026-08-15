@@ -832,6 +832,30 @@ impl SegmentReceiver {
         })
     }
 
+    pub(crate) fn advance_declared_sequence_gap(
+        &mut self,
+        next: &Cursor,
+        first_missing: u64,
+        last_missing: u64,
+    ) -> Result<bool, ProtocolError> {
+        let stream_key = next.stream_key();
+        let Some(progress) = self.streams.get_mut(&stream_key) else {
+            return Ok(false);
+        };
+        let expected = progress
+            .last_sequence
+            .checked_add(1)
+            .ok_or(ProtocolError::InvalidSegment("sequence overflow"))?;
+        if progress.epoch != next.source_epoch
+            || expected != first_missing
+            || last_missing.checked_add(1) != Some(next.sequence)
+        {
+            return Ok(false);
+        }
+        progress.last_sequence = last_missing;
+        Ok(true)
+    }
+
     pub(crate) fn is_tombstoned(&self, cursor: &Cursor, record: &SyncRecord) -> bool {
         self.tombstones.contains(&TombstoneKey::new(cursor, record))
     }
