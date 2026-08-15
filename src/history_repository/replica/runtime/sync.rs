@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::{Cursor as IoCursor, Read as _},
 };
 
@@ -437,7 +437,7 @@ impl RepositoryReplicaRuntime {
         });
         Ok(RepositoryReplicaSummary {
             segment_ids: segments.iter().map(|segment| segment.id.clone()).collect(),
-            partitions: self.partition_summaries(&segments)?,
+            partitions: self.retained_partition_summaries()?,
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
             next_segment_id,
@@ -470,11 +470,12 @@ impl RepositoryReplicaRuntime {
     ) -> Result<bool, RepositoryRuntimeError> {
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let _ = deep_verification;
+        let partitions_converged =
+            !deep_verification || self.retained_partition_summaries()? == remote.partitions;
         // The remote summary is keyset-paged. Its page is complete only when every advertised
         // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
         let segments_converged = self.missing_segment_ids(remote, false)?.is_empty();
-        Ok(!(segments_converged && gaps_converged))
+        Ok(!(segments_converged && gaps_converged && partitions_converged))
     }
 
     pub(crate) fn repair_batch(
@@ -639,45 +640,66 @@ impl RepositoryReplicaRuntime {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
 
-    fn partition_summaries(
+    fn retained_partition_summaries(
         &self,
-        stored_segments: &[super::StoredSegment],
     ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
-        let mut segments = stored_segments
-            .iter()
-            .map(partition_summary)
-            .collect::<Result<Vec<_>, _>>()?;
-        segments.sort_by(|left, right| {
-            (
-                &left.source_node_id,
-                left.source_epoch,
-                &left.stream,
-                left.partition,
-                left.first_sequence,
-            )
-                .cmp(&(
-                    &right.source_node_id,
-                    right.source_epoch,
-                    &right.stream,
-                    right.partition,
-                    right.first_sequence,
-                ))
-        });
-        let mut summaries = Vec::<RepositoryPartitionSummary>::new();
-        for segment in segments {
-            if let Some(summary) = summaries.last_mut()
-                && same_partition(summary, &segment)
-            {
-                summary.first_sequence = summary.first_sequence.min(segment.first_sequence);
-                summary.last_sequence = summary.last_sequence.max(segment.last_sequence);
-                summary.hash = combine_partition_hash(summary.hash, segment.hash);
-                summary.record_count = summary.record_count.saturating_add(segment.record_count);
-            } else {
-                summaries.push(segment);
+        let mut summaries = BTreeMap::new();
+        if self.uses_sqlite_history() {
+            let mut offset = 0;
+            loop {
+                let page = self.sqlite_records(None, None, None, offset, 1_000)?;
+                let page_len = page.len();
+                accumulate_record_partitions(&mut summaries, page.iter())?;
+                if page_len < 1_000 {
+                    break;
+                }
+                offset += page_len;
             }
+        } else {
+            let mut records = self
+                .snapshot
+                .records
+                .iter()
+                .filter(|record| !record.tombstone)
+                .cloned()
+                .collect::<Vec<_>>();
+            records.sort_by_key(|record| {
+                (
+                    record.observed_at_unix_seconds,
+                    record.source_node_id.clone(),
+                    record.source_epoch,
+                    record.stream.clone(),
+                    record.sequence,
+                )
+            });
+            accumulate_record_partitions(&mut summaries, records.iter())?;
         }
-        Ok(summaries)
+        Ok(summaries.into_values().collect())
     }
+}
+
+fn accumulate_record_partitions<'a>(
+    summaries: &mut BTreeMap<(String, u64, String, u32), RepositoryPartitionSummary>,
+    records: impl IntoIterator<Item = &'a super::StoredRecord>,
+) -> Result<(), RepositoryRuntimeError> {
+    for record in records {
+        let record_summary = record_partition_summary(record)?;
+        let key = (
+            record_summary.source_node_id.clone(),
+            record_summary.source_epoch,
+            record_summary.stream.clone(),
+            record_summary.partition,
+        );
+        if let Some(summary) = summaries.get_mut(&key) {
+            summary.first_sequence = summary.first_sequence.min(record_summary.first_sequence);
+            summary.last_sequence = summary.last_sequence.max(record_summary.last_sequence);
+            summary.hash = combine_partition_hash(summary.hash, record_summary.hash);
+            summary.record_count = summary.record_count.saturating_add(1);
+        } else {
+            summaries.insert(key, record_summary);
+        }
+    }
+    Ok(())
 }
 
 fn repair_segment_order(
@@ -693,32 +715,35 @@ fn repair_segment_order(
     ))
 }
 
-fn partition_summary(
-    stored: &super::StoredSegment,
+fn record_partition_summary(
+    record: &super::StoredRecord,
 ) -> Result<RepositoryPartitionSummary, RepositoryRuntimeError> {
-    let segment = crate::history_sync::SignedSegment::from_wire(&stored.wire)?;
-    let canonical = segment.canonical();
-    let first = canonical.first_cursor();
-    let last = canonical.last_cursor();
-    Ok(RepositoryPartitionSummary {
-        source_node_id: first.source_node_id().to_owned(),
-        source_epoch: first.source_epoch(),
-        stream: first.stream().to_owned(),
-        partition: u32::try_from(canonical.closed_at_unix_seconds() / (24 * 60 * 60))
-            .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
-        first_sequence: first.sequence(),
-        last_sequence: last.sequence(),
-        hash: segment.segment_hash()?,
-        record_count: u64::try_from(canonical.records().len())
-            .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
-    })
-}
+    use sha2::Digest as _;
 
-fn same_partition(left: &RepositoryPartitionSummary, right: &RepositoryPartitionSummary) -> bool {
-    left.source_node_id == right.source_node_id
-        && left.source_epoch == right.source_epoch
-        && left.stream == right.stream
-        && left.partition == right.partition
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"xp-history-repository-record-v1\0");
+    hasher.update(record.source_node_id.as_bytes());
+    hasher.update(record.source_epoch.to_be_bytes());
+    hasher.update(record.stream.as_bytes());
+    hasher.update(record.sequence.to_be_bytes());
+    hasher.update(record.subject_node_id.as_bytes());
+    hasher.update(record.observer_node_id.as_bytes());
+    hasher.update(record.schema_id.as_bytes());
+    hasher.update(record.schema_version.to_be_bytes());
+    hasher.update(&record.record_key);
+    hasher.update(record.observed_at_unix_seconds.to_be_bytes());
+    hasher.update(&record.payload);
+    Ok(RepositoryPartitionSummary {
+        source_node_id: record.source_node_id.clone(),
+        source_epoch: record.source_epoch,
+        stream: record.stream.clone(),
+        partition: u32::try_from(record.observed_at_unix_seconds / (24 * 60 * 60))
+            .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
+        first_sequence: record.sequence,
+        last_sequence: record.sequence,
+        hash: hasher.finalize().into(),
+        record_count: 1,
+    })
 }
 
 fn combine_partition_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {

@@ -59,6 +59,30 @@ impl RepositoryReplicaRuntime {
         });
     }
 
+    pub(super) fn record_sequence_gap(
+        &mut self,
+        segment: &CanonicalSegment,
+        expected: u64,
+        actual: u64,
+    ) {
+        if actual <= expected || self.snapshot.gaps.len() == 64 {
+            self.snapshot.history_truncated = true;
+            return;
+        }
+        self.snapshot.gaps.push(StoredGap {
+            source_node_id: segment.first_cursor().source_node_id().to_owned(),
+            source_epoch: segment.first_cursor().source_epoch(),
+            stream: segment.first_cursor().stream().to_owned(),
+            first_sequence: expected,
+            last_sequence: actual - 1,
+            // A rejected segment cannot prove when the absent records were observed. Cover the
+            // full preceding timeline so a narrow query cannot be reported complete by mistake.
+            start_unix_seconds: 0,
+            end_unix_seconds: segment.opened_at_unix_seconds(),
+            permanent: false,
+        });
+    }
+
     pub(super) fn record_source_received(
         &mut self,
         segment: &CanonicalSegment,

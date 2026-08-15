@@ -129,7 +129,11 @@ impl HistoryStorage {
                         "history storage degraded; returning to JSON snapshots"
                     );
                     switch_to_json(&mut backend, &self.data_dir);
-                    read_json(source_path(&self.data_dir, key))
+                    if matches!(*backend, Backend::Json) {
+                        read_json(source_path(&self.data_dir, key))
+                    } else {
+                        Err(error)
+                    }
                 }
             },
             Backend::Json => read_json(source_path(&self.data_dir, key)),
@@ -149,7 +153,11 @@ impl HistoryStorage {
                         "history storage degraded; returning to JSON snapshots"
                     );
                     switch_to_json(&mut backend, &self.data_dir);
-                    write_json(source_path(&self.data_dir, key), payload)
+                    if matches!(*backend, Backend::Json) {
+                        write_json(source_path(&self.data_dir, key), payload)
+                    } else {
+                        Err(error)
+                    }
                 }
             },
             Backend::Json => write_json(source_path(&self.data_dir, key), payload),
@@ -690,6 +698,13 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
     let Backend::Sqlite(connection) = backend else {
         return;
     };
+    if repository_history_is_external(connection) {
+        warn!(
+            history_storage_mode = "sqlite_degraded",
+            "keeping SQLite active because repository history cannot use JSON fallback"
+        );
+        return;
+    }
     for source in SOURCES {
         match read_sqlite(connection, source.key) {
             Ok(Some(payload)) => {
@@ -713,6 +728,19 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
         warn!(error = %error, "record persistent JSON history fallback");
     }
     *backend = Backend::Json;
+}
+
+fn repository_history_is_external(connection: &Connection) -> bool {
+    read_sqlite(connection, REPOSITORY_REPLICA_KEY)
+        .ok()
+        .flatten()
+        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+        .and_then(|snapshot| {
+            snapshot
+                .get("external_history")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false)
 }
 
 fn source_path(data_dir: &Path, key: &str) -> PathBuf {

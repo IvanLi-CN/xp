@@ -566,6 +566,9 @@ fn gaps_do_not_advance_the_persisted_acknowledgement() {
         ))
     ));
     let restored = load(temporary.path());
+    assert_eq!(restored.snapshot.gaps[0].first_sequence, 1);
+    assert_eq!(restored.snapshot.gaps[0].last_sequence, 1);
+    assert_eq!(restored.snapshot.gaps[0].start_unix_seconds, 0);
     let response = restored
         .query(
             "repository-a",

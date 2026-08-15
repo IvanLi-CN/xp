@@ -76,14 +76,10 @@ impl RepositoryReplicaRuntime {
                         | ProtocolError::EpochGap { .. }
                         | ProtocolError::ForkDetected { .. }
                 );
-                if records_gap {
-                    self.record_gap(
-                        segment.canonical(),
-                        matches!(
-                            error,
-                            ProtocolError::EpochGap { .. } | ProtocolError::ForkDetected { .. }
-                        ),
-                    );
+                if let ProtocolError::SequenceGap { expected, actual } = error {
+                    self.record_sequence_gap(segment.canonical(), expected, actual);
+                } else if records_gap {
+                    self.record_gap(segment.canonical(), true);
                 }
                 if records_gap || expired_tombstones {
                     self.persist_or_restore(&previous_receiver, &previous_snapshot)?;

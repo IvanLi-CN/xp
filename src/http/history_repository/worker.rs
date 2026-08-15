@@ -54,6 +54,7 @@ pub(super) use backfill::{
 pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page};
 use backfill::{
     backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
+    pull_peer_initial_history,
 };
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
@@ -829,6 +830,19 @@ async fn replicate_peer(
             )
         };
         if requires_repair {
+            if work.is_deep_verification() && missing_segment_ids.is_empty() {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .restart_initial_peer_backfill(&peer.node_id)?;
+                if pull_peer_initial_history(state, peer, ready_repository_ids)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(false);
+                }
+            }
             let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();
             let mut acknowledgements = Vec::new();
             let mut needs_gap_refresh = true;

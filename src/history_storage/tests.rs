@@ -113,6 +113,22 @@ fn handles_for_one_data_dir_share_the_json_fallback() {
 }
 
 #[test]
+fn external_repository_history_prevents_lossy_json_fallback() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let snapshot = br#"{"external_history":true}"#;
+    storage.write(REPOSITORY_REPLICA_KEY, snapshot).unwrap();
+    set_query_only(&storage);
+
+    assert!(storage.write(STATE_KEY, b"cannot-write").is_err());
+    assert!(storage.is_sqlite());
+    assert_eq!(
+        storage.read(REPOSITORY_REPLICA_KEY).unwrap(),
+        Some(snapshot.to_vec())
+    );
+}
+
+#[test]
 fn restart_uses_the_committed_migration_instead_of_reimporting_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("state.json");
