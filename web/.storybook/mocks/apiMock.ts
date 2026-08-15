@@ -78,6 +78,10 @@ import {
 	normalizeFixtureUserPatch,
 } from "./fixtureMutationPolicy";
 import {
+	buildHistoryRepositories,
+	buildRepositoryHistory,
+} from "./historyRepositoryMock";
+import {
 	buildFixtureUserQuotaSummaryItem,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
@@ -1280,6 +1284,11 @@ async function handleRequest(
 	if (path === "/api/capabilities" && method === "GET") {
 		return jsonResponse(clone(state.capabilities));
 	}
+
+	if (path === "/api/admin/history-repositories" && method === "GET")
+		return jsonResponse(buildHistoryRepositories(state.nodes));
+	if (path === "/api/admin/history-repository" && method === "GET")
+		return jsonResponse(buildRepositoryHistory(state.nodes));
 
 	if (path === "/api/version/check" && method === "GET") {
 		if (state.failVersionCheck) {

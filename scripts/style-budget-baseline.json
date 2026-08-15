@@ -47,10 +47,6 @@
     "long_line_count": 7,
     "max_line_length": 164
   },
-  "docs/desgin/cluster.md": {
-    "long_line_count": 2,
-    "max_line_length": 221
-  },
   "docs/desgin/quality.md": {
     "long_line_count": 2,
     "max_line_length": 151
@@ -459,18 +455,6 @@
     "long_line_count": 8,
     "max_line_length": 154
   },
-  "docs/specs/nbs5f-xray-control-plane-relay/HISTORY.md": {
-    "long_line_count": 2,
-    "max_line_length": 109
-  },
-  "docs/specs/nbs5f-xray-control-plane-relay/IMPLEMENTATION.md": {
-    "long_line_count": 4,
-    "max_line_length": 197
-  },
-  "docs/specs/nbs5f-xray-control-plane-relay/SPEC.md": {
-    "long_line_count": 1,
-    "max_line_length": 102
-  },
   "docs/specs/nujzm-access-model-hardcut-v9/SPEC.md": {
     "long_line_count": 1,
     "max_line_length": 158
@@ -584,7 +568,7 @@
   "src/http/tests.rs": {
     "long_line_count": 3,
     "max_line_length": 142,
-    "source_lines": 9924
+    "source_lines": 9926
   },
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
@@ -614,7 +598,7 @@
     "max_line_length": 114
   },
   "src/node_history.rs": {
-    "source_lines": 3672
+    "source_lines": 3676
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,
@@ -1173,5 +1157,8 @@
     "long_line_count": 36,
     "max_line_length": 147,
     "source_lines": 2918
+  },
+  "src/http/history_repository.rs": {
+    "source_lines": 1120
   }
 }

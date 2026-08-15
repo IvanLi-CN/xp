@@ -29,12 +29,12 @@ import {
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
 import type { AdminTcpConnectionUsageWindow } from "../api/adminTcpConnections";
-import { isBackendApiError } from "../api/backendError";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { IpUsageView } from "../components/IpUsageView";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
+import { NodeRepositoryQuality } from "../components/NodeRepositoryHistoryQuality";
 import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
@@ -74,6 +74,7 @@ import {
 	latestQueryDataUpdatedAt,
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
+import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
@@ -81,11 +82,6 @@ import {
 	nodeQuotaDraftFromNode,
 	toNodeQuotaReset,
 } from "./nodeQuotaDraft";
-function formatErrorMessage(error: unknown): string {
-	return isBackendApiError(error)
-		? `${error.status}${error.code ? ` ${error.code}` : ""}: ${error.message}`
-		: String(error);
-}
 function summaryBadgeVariant(status: string) {
 	switch (status) {
 		case "up":
@@ -895,6 +891,7 @@ export function NodeDetailsPage() {
 					</div>
 					{activeTab === "runtime" ? (
 						<section className="space-y-4">
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							<div className="flex items-center justify-between gap-3">
 								<div>
 									<h2 className="xp-card-title">Service runtime</h2>
@@ -1023,7 +1020,7 @@ export function NodeDetailsPage() {
 											<p className="text-xs uppercase tracking-wide text-muted-foreground">
 												7-day activity (30-minute slots)
 											</p>
-											<div className="flex items-center gap-3 text-[11px] opacity-70">
+											<div className="flex items-center gap-3 text-xs opacity-70">
 												<span className="inline-flex items-center gap-1">
 													<span className="size-2 rounded-[2px] bg-success" />
 													up
@@ -1047,7 +1044,7 @@ export function NodeDetailsPage() {
 											<div className="overflow-x-auto">
 												<div className="min-w-[28rem]">
 													<div
-														className="mb-1 grid items-center gap-2 text-[10px] text-muted-foreground"
+														className="mb-1 grid items-center gap-2 text-xs text-muted-foreground"
 														style={{
 															gridTemplateColumns: "4.5rem minmax(0,1fr)",
 														}}
@@ -1072,7 +1069,7 @@ export function NodeDetailsPage() {
 																		gridTemplateColumns: "4.5rem minmax(0,1fr)",
 																	}}
 																>
-																	<span className="truncate font-mono text-[11px] text-muted-foreground">
+																	<span className="truncate font-mono text-xs text-muted-foreground">
 																		{row.label}
 																	</span>
 																	<div
@@ -1515,6 +1512,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "traffic" ? (
 						<div className="space-y-4">
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{trafficQuery.isLoading && !trafficDisplay.data ? (
 								<PageState
 									variant="loading"
@@ -1564,6 +1562,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "ipUsage" ? (
 						<div className="space-y-4">
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
 								<PageState
 									variant="loading"
@@ -1619,6 +1618,7 @@ export function NodeDetailsPage() {
 
 					{activeTab === "tcpConnections" ? (
 						<div className="space-y-4">
+							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{tcpConnectionsQuery.isLoading && !tcpConnectionsDisplay.data ? (
 								<PageState
 									variant="loading"
@@ -1819,7 +1819,6 @@ export function NodeDetailsPage() {
 			trafficQuery.isError ||
 			ipUsageQuery.isError ||
 			tcpConnectionsQuery.isError);
-
 	return (
 		<div className="space-y-4 sm:space-y-6">
 			<PageHeader

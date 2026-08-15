@@ -86,8 +86,6 @@ export const AdminMeshStatusSchema = z.object({
 		role: z.enum(["leader", "follower"]),
 		leader_api_base_url: z.string(),
 		term: z.number(),
-		mesh_proxy_status: z.string(),
-		mesh_proxy_reason: z.string().nullable(),
 		canary: z.object({
 			enabled: z.boolean(),
 			bind: z.string().nullable().optional(),

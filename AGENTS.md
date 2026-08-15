@@ -28,15 +28,19 @@
   do not require direct authority access on UDP/TCP port 53.
 - Managed-default VLESS/REALITY endpoints also provide the control-plane Mesh ingress: signed
   `health-v2` and `mesh-v2` traffic is routed by the canary only to fixed local XP loopback paths;
-  public `/generate_204` and authority-based camouflage remain separate. `XP_MESH_PROXY_URL` is
-  public-fallback egress compatibility, not a Mesh tunnel. All outbound Mesh users share one
-  process-wide HTTP/2-only client with one idle connection per origin and a 120-second idle bound;
-  public direct and relay fallback use separate compatibility clients. An internal-auth v2 cluster
+  public `/generate_204` and authority-based camouflage remain separate. All outbound Mesh users
+  share one process-wide HTTP/2-only client with one idle connection per origin and a 120-second
+  idle bound; public direct and dynamic relay use separate clients. An internal-auth v2 cluster
   upgrade requires a one-shot maintenance marker: host-managed nodes bootstrap from a verified
   target `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the
   target image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.
+- Cluster history repositories persist their replica state in `${XP_DATA_DIR}/history.sqlite3` on
+  each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
+  sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then an
+  in-memory dynamic relay only after both fail. No static Mesh proxy environment or compatibility
+  path exists.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.

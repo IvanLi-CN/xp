@@ -158,21 +158,10 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
           "settings": { "address": "127.0.0.1" },
           "tag": "api"
         },
-        {
-          "listen": "127.0.0.1",
-          "port": 10808,
-          "protocol": "socks",
-          "settings": {
-            "auth": "noauth",
-            "udp": true
-          },
-          "tag": "mesh-proxy"
-        }
       ],
       "routing": {
         "rules": [
           { "inboundTag": ["api"], "outboundTag": "api" },
-          { "inboundTag": ["mesh-proxy"], "outboundTag": "direct" }
         ]
       },
       "outbounds": [
@@ -1014,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn static_xray_config_includes_mesh_proxy_inbound() {
+    fn static_xray_config_uses_low_memory_defaults() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
 
@@ -1031,8 +1020,12 @@ mod tests {
         assert_eq!(value["policy"]["levels"]["0"]["statsUserUplink"], true);
         assert_eq!(value["policy"]["levels"]["0"]["statsUserDownlink"], true);
         assert_eq!(value["policy"]["levels"]["0"]["statsUserOnline"], true);
-        assert!(content.contains("\"tag\": \"mesh-proxy\""));
-        assert!(content.contains("\"port\": 10808"));
-        assert!(content.contains("\"outboundTag\": \"direct\""));
+        assert!(
+            value["inbounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|inbound| inbound["tag"] != "mesh-proxy")
+        );
     }
 }

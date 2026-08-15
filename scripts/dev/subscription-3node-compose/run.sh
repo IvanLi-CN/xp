@@ -48,10 +48,10 @@ ensure_ports() {
 
 ensure_admin_token() {
   if [ -z "${XP_APXDG_ADMIN_TOKEN:-}" ]; then
-    XP_APXDG_ADMIN_TOKEN="devtoken"
+    XP_APXDG_ADMIN_TOKEN="history-e2e-admin-token-0123456789abcdef"
   fi
   if [ -z "${XP_APXDG_ADMIN_TOKEN_HASH:-}" ]; then
-    XP_APXDG_ADMIN_TOKEN_HASH='$argon2id$v=19$m=65536,t=3,p=1$6uKH2kKC9AT6hehxo9FSkA$2CLHgqDffZmHkDhywvDK59us3WlSXc0rX1rE1zbKi/U'
+    XP_APXDG_ADMIN_TOKEN_HASH='$argon2id$v=19$m=4096,t=3,p=1$INyD6NZ1bzNCvngpRVnb0w$/yrSaR57oW+nxcjQUfrxsIlR3wewSpPcZisTwKbK4yM'
   fi
   export XP_APXDG_ADMIN_TOKEN XP_APXDG_ADMIN_TOKEN_HASH
 }

@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 
 import { fetchAdminAlerts } from "@/api/adminAlerts";
 import {
+	type AdminHistoryRepositoriesResponse,
+	fetchAdminHistoryRepositories,
+} from "@/api/adminHistoryRepositories";
+import {
 	type AdminMeshPeer,
 	type AdminMeshStatus,
 	fetchAdminMeshStatus,
@@ -11,6 +15,7 @@ import {
 } from "@/api/adminMesh";
 import { fetchAdminNodesRuntime } from "@/api/adminNodeRuntime";
 import { Button, IconButton } from "@/components/Button";
+import { RepositoryStatusSummary } from "@/components/HistoryRepositoryStatus";
 import { Icon } from "@/components/Icon";
 import { MeshUptimeStrip } from "@/components/MeshUptimeStrip";
 import { PageHeader } from "@/components/PageHeader";
@@ -30,6 +35,7 @@ import { useApiCapability } from "../api/useApiCompatibility";
 
 export type SystemStatusSurfaceProps = {
 	status: AdminMeshStatus;
+	repositoryStatus?: AdminHistoryRepositoriesResponse;
 	components?: Array<{ component: string; status: string }>;
 	isRefreshing?: boolean;
 	isProbing?: boolean;
@@ -283,6 +289,7 @@ function PeerRows({
 
 export function SystemStatusSurface({
 	status,
+	repositoryStatus,
 	components = [],
 	isRefreshing,
 	isProbing,
@@ -350,7 +357,7 @@ export function SystemStatusSurface({
 			/>
 
 			<section className="border-y border-border/70 py-4">
-				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
 					<StatusFact
 						label="Local node"
 						value={status.local.node_name}
@@ -372,14 +379,6 @@ export function SystemStatusSurface({
 						label="Public fallback"
 						value={String(summary.fallback)}
 						detail="active paths"
-					/>
-					<StatusFact
-						label="Control relay"
-						value={status.local.mesh_proxy_status}
-						detail={
-							status.local.mesh_proxy_reason ??
-							"direct when no proxy is configured"
-						}
 					/>
 					<StatusFact
 						label="Last snapshot"
@@ -475,6 +474,10 @@ export function SystemStatusSurface({
 					</ol>
 				</div>
 			</section>
+
+			{repositoryStatus ? (
+				<RepositoryStatusSummary status={repositoryStatus} compact />
+			) : null}
 		</div>
 	);
 }
@@ -502,6 +505,9 @@ export function SystemStatusPage() {
 	);
 	const nodesCapability = useApiCapability("admin.nodes");
 	const alertsCapability = useApiCapability("admin.alerts");
+	const historyRepositoriesCapability = useApiCapability(
+		"admin.history-repositories",
+	);
 	const meshQuery = useQuery({
 		queryKey: ["adminMeshStatus", adminToken],
 		enabled: adminToken.length > 0 && meshCapability.available,
@@ -522,6 +528,17 @@ export function SystemStatusPage() {
 		enabled: adminToken.length > 0 && alertsCapability.available,
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
+	const repositoriesQuery = useQuery({
+		queryKey: ["adminHistoryRepositories", adminToken],
+		enabled:
+			adminToken.length > 0 &&
+			(historyRepositoriesCapability.available || !runtime.isOnline),
+		queryFn: ({ signal }) => fetchAdminHistoryRepositories(adminToken, signal),
+	});
+	const repositoriesState = useQueryWithOfflineFallback(
+		["adminHistoryRepositories", adminToken],
+		repositoriesQuery,
+	);
 	const probe = useMutation({
 		mutationFn: (nodeIds: string[]) => runAdminMeshProbes(adminToken, nodeIds),
 		onSuccess: () => meshQuery.refetch(),
@@ -531,6 +548,7 @@ export function SystemStatusPage() {
 		meshCapability.available ? meshState : null,
 		runtimeQuery,
 		alertsQuery,
+		historyRepositoriesCapability.available ? repositoriesState : null,
 	]);
 	const localComponents =
 		runtimeQuery.data?.items
@@ -605,7 +623,8 @@ export function SystemStatusPage() {
 
 	return (
 		<div className="space-y-5">
-			{latestAt !== null && (!runtime.isOnline || meshState.isError) ? (
+			{latestAt !== null &&
+			(!runtime.isOnline || meshState.isError || repositoriesState.isError) ? (
 				<ReadStateBanner
 					tone={!runtime.isOnline ? "warning" : "info"}
 					variant="inline"
@@ -619,6 +638,7 @@ export function SystemStatusPage() {
 			) : null}
 			<SystemStatusSurface
 				status={meshData}
+				repositoryStatus={repositoriesState.data}
 				components={localComponents}
 				isRefreshing={meshState.isFetching}
 				isProbing={probe.isPending}

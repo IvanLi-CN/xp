@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
+import { fetchAdminHistoryRepositories } from "../api/adminHistoryRepositories";
 import { createAdminJoinToken } from "../api/adminJoinTokens";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { BackendApiError } from "../api/backendError";
@@ -49,6 +50,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 });
 
 vi.mock("../api/adminJoinTokens");
+vi.mock("../api/adminHistoryRepositories");
 vi.mock("../api/adminNodeRuntime");
 vi.mock("../api/clusterInfo");
 vi.mock("../offline/useQueryWithOfflineFallback", () => ({
@@ -110,6 +112,12 @@ describe("<NodesPage />", () => {
 		});
 		vi.mocked(createAdminJoinToken).mockResolvedValue({
 			join_token: "join-token-1",
+		});
+		vi.mocked(fetchAdminHistoryRepositories).mockResolvedValue({
+			configured: false,
+			partial: false,
+			unreachable_node_ids: [],
+			items: [],
 		});
 		vi.mocked(fetchAdminNodesRuntime).mockResolvedValue({
 			partial: false,
