@@ -4,6 +4,12 @@ use super::{
 };
 
 #[test]
+fn stream_watermark_rejects_values_outside_the_durable_sqlite_range() {
+    assert!(StreamWatermark::new("source-a", i64::MAX as u64 + 1, "traffic", 0).is_err());
+    assert!(StreamWatermark::new("source-a", 1, "traffic", i64::MAX as u64 + 1).is_err());
+}
+
+#[test]
 fn healthiest_complete_repository_wins_with_coverage_watermark_and_skew() {
     let request = HistoryQuery::new(100, 200, 100).expect("bounded query");
     let complete = candidate("repo-a", 0, vec![]);

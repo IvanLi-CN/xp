@@ -164,6 +164,17 @@ fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
 }
 
 #[test]
+fn relay_payload_rejects_excessive_decompression_expansion() {
+    let payload = zstd::stream::encode_all(std::io::Cursor::new(vec![0_u8; 1024 * 1024]), 1)
+        .expect("compressed expansion payload");
+
+    assert!(matches!(
+        RepositoryRepairBatch::from_relay_payload(&payload),
+        Err(RepositoryRuntimeError::StateLimitExceeded)
+    ));
+}
+
+#[test]
 fn repair_batch_accepts_a_pre_gap_metadata_payload() {
     let batch = serde_json::from_slice::<RepositoryRepairBatch>(br#"{"segments":[]}"#)
         .expect("legacy repair payload remains readable");

@@ -450,6 +450,8 @@ impl HistoryStorage {
             stream: String::new(),
             sequence: 0,
         });
+        let after_source_epoch = durable_i64(after.source_epoch, "cursor source epoch")?;
+        let after_sequence = durable_i64(after.sequence, "cursor sequence")?;
         let mut statement = connection
             .prepare(
                 "
@@ -471,9 +473,9 @@ impl HistoryStorage {
                     i64::try_from(end_unix_seconds).unwrap_or(i64::MAX),
                     i64::try_from(after.observed_start_unix_seconds).unwrap_or(i64::MAX),
                     after.source_node_id,
-                    i64::try_from(after.source_epoch).unwrap_or(i64::MAX),
+                    after_source_epoch,
                     after.stream,
-                    i64::try_from(after.sequence).unwrap_or(i64::MAX),
+                    after_sequence,
                     i64::try_from(limit).unwrap_or(i64::MAX),
                 ],
                 repository_history_record_row,
@@ -505,6 +507,11 @@ impl HistoryStorage {
             stream: String::new(),
             sequence: 0,
         });
+        let after_source_epoch = durable_i64(after.source_epoch, "cursor source epoch")?;
+        let after_sequence = durable_i64(after.sequence, "cursor sequence")?;
+        let watermark_source_epoch =
+            durable_i64(high_watermark.source_epoch, "watermark source epoch")?;
+        let watermark_sequence = durable_i64(high_watermark.sequence, "watermark sequence")?;
         let mut statement = connection
             .prepare(
                 "
@@ -532,14 +539,14 @@ impl HistoryStorage {
                     i64::try_from(received_at_cutoff_unix_seconds).unwrap_or(i64::MAX),
                     i64::try_from(after.observed_start_unix_seconds).unwrap_or(i64::MAX),
                     after.source_node_id,
-                    i64::try_from(after.source_epoch).unwrap_or(i64::MAX),
+                    after_source_epoch,
                     after.stream,
-                    i64::try_from(after.sequence).unwrap_or(i64::MAX),
+                    after_sequence,
                     i64::try_from(high_watermark.observed_start_unix_seconds).unwrap_or(i64::MAX),
                     high_watermark.source_node_id.as_str(),
-                    i64::try_from(high_watermark.source_epoch).unwrap_or(i64::MAX),
+                    watermark_source_epoch,
                     high_watermark.stream.as_str(),
-                    i64::try_from(high_watermark.sequence).unwrap_or(i64::MAX),
+                    watermark_sequence,
                     i64::try_from(limit).unwrap_or(i64::MAX),
                 ],
                 repository_history_record_row,

@@ -202,6 +202,9 @@ impl StreamWatermark {
         let stream = stream.into();
         validate_identifier(&source_node_id)?;
         validate_identifier(&stream)?;
+        if source_epoch > i64::MAX as u64 || sequence > i64::MAX as u64 {
+            return Err(QueryError::InvalidRange);
+        }
         Ok(Self {
             source_node_id,
             source_epoch,

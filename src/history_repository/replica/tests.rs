@@ -129,6 +129,8 @@ fn tombstones_do_not_resurrect_and_only_expire_after_horizon_and_ready_acks() {
 
 #[test]
 fn fork_unknown_schema_and_stale_replicas_fail_closed_until_rebuilt() {
+    assert!(ReplicaCursor::new("source-a", i64::MAX as u64 + 1, "traffic", 0).is_err());
+    assert!(ReplicaCursor::new("source-a", 1, "traffic", i64::MAX as u64 + 1).is_err());
     let mut forks = StreamForkGuard::default();
     let cursor = ReplicaCursor::new("source-a", 7, "traffic", 9).expect("cursor");
     assert!(forks.observe(&cursor, [1; 32]).is_ok());

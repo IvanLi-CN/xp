@@ -5,7 +5,7 @@ use super::protocol::{
 };
 
 pub(crate) const IDENTITY_THRESHOLD_BYTES: usize = 4 * 1024;
-const MAX_DECOMPRESSION_EXPANSION_RATIO: usize = 2_048;
+pub(crate) const MAX_DECOMPRESSION_EXPANSION_RATIO: usize = 2_048;
 
 pub(crate) fn encode(canonical: Vec<u8>) -> Result<(PayloadEncoding, Vec<u8>), ProtocolError> {
     if canonical.len() > MAX_RESPONSE_CANONICAL_BYTES {

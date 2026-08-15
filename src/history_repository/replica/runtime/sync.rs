@@ -5,7 +5,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::history_sync::{MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES, SignedSegment};
+use crate::history_sync::{
+    MAX_DECOMPRESSION_EXPANSION_RATIO, MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES,
+    SignedSegment,
+};
 
 use super::{
     RelaySegmentCursor, RepositoryReplicaRuntime, RepositoryRuntimeError,
@@ -142,6 +145,10 @@ impl RepositoryRepairBatch {
             })?;
         let mut decoded = Vec::with_capacity(payload.len());
         let mut chunk = [0_u8; 8 * 1024];
+        let max_expanded_len = payload
+            .len()
+            .saturating_mul(MAX_DECOMPRESSION_EXPANSION_RATIO)
+            .min(MAX_RELAY_BATCH_DECODED_BYTES);
         loop {
             let read = decoder.read(&mut chunk).map_err(|_| {
                 RepositoryRuntimeError::Storage("relay payload is malformed".to_owned())
@@ -149,7 +156,7 @@ impl RepositoryRepairBatch {
             if read == 0 {
                 break;
             }
-            if decoded.len().saturating_add(read) > MAX_RELAY_BATCH_DECODED_BYTES {
+            if decoded.len().saturating_add(read) > max_expanded_len {
                 return Err(RepositoryRuntimeError::StateLimitExceeded);
             }
             decoded.extend_from_slice(&chunk[..read]);
