@@ -609,9 +609,9 @@ fn upsert_repository_history_record(
             ",
             params![
                 row.source_node_id,
-                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                durable_i64(row.source_epoch, "source epoch")?,
                 row.stream,
-                i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                durable_i64(row.sequence, "sequence")?,
                 row.subject_node_id,
                 row.observer_node_id,
                 row.schema_id,
@@ -821,6 +821,11 @@ fn write_meta_i64(connection: &rusqlite::Transaction<'_>, key: &str, value: i64)
         )
         .map_err(sqlite_error)?;
     Ok(())
+}
+
+fn durable_i64(value: u64, field: &str) -> Result<i64> {
+    i64::try_from(value)
+        .map_err(|_| HistoryStorageError(format!("repository {field} exceeds SQLite range")))
 }
 
 fn migrated_meta_key(key: &str) -> String {

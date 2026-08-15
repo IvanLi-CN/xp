@@ -17,7 +17,7 @@ pub(crate) enum RepositoryDirectError {
 }
 
 impl RepositoryDirectError {
-    pub(super) fn is_transport(&self) -> bool {
+    pub(in crate::http::history_repository) fn is_transport(&self) -> bool {
         matches!(self, Self::Transport(_))
     }
 }

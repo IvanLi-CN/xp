@@ -202,14 +202,12 @@ impl RepositoryReplicaRuntime {
             return Ok(self.local_source_pending_segments());
         }
         if self.snapshot.local_source.epoch == 0 {
-            self.snapshot.local_source.epoch = self
-                .storage
-                .allocate_repository_source_epoch(
-                    cluster_id,
-                    identity.node_id().as_str(),
-                    source_epoch(cluster_id, identity.node_id().as_str()),
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let result = self.storage.allocate_repository_source_epoch(
+                cluster_id,
+                identity.node_id().as_str(),
+                source_epoch(cluster_id, identity.node_id().as_str()),
+            );
+            self.snapshot.local_source.epoch = self.finish_storage_write(result)?;
             self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
         }
         for (stream, records) in records_by_stream {

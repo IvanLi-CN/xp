@@ -40,6 +40,21 @@ impl RepositoryReplicaRuntime {
         self.snapshot.external_history && self.storage.is_sqlite()
     }
 
+    pub(super) fn finish_storage_write<T, E: std::fmt::Display>(
+        &mut self,
+        result: Result<T, E>,
+    ) -> Result<T, RepositoryRuntimeError> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                if self.uses_sqlite_history() {
+                    self.storage_degraded = true;
+                }
+                Err(RepositoryRuntimeError::Storage(error.to_string()))
+            }
+        }
+    }
+
     pub(crate) fn stored_segments_page(
         &self,
         after_id: Option<&str>,
@@ -266,9 +281,10 @@ impl RepositoryReplicaRuntime {
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
         if !rows.is_empty() {
-            self.storage
-                .replace_repository_history_records(&removed_rows, &retained)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let result = self
+                .storage
+                .replace_repository_history_records(&removed_rows, &retained);
+            self.finish_storage_write(result)?;
         }
         self.snapshot.retention_compaction_cursor =
             if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
@@ -300,12 +316,11 @@ impl RepositoryReplicaRuntime {
                     aggregate: None,
                 });
         }
-        self.storage
-            .delete_repository_history_before(
-                now_unix_seconds.saturating_sub(policy.max_age_seconds()),
-                now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
-            )
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let result = self.storage.delete_repository_history_before(
+            now_unix_seconds.saturating_sub(policy.max_age_seconds()),
+            now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
+        );
+        self.finish_storage_write(result)?;
         self.persist_control_state()
     }
 

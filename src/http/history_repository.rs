@@ -36,6 +36,7 @@ pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY: &str =
 pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER: &str =
     "/api/admin/_internal/history-repository/relay-deliver";
 
+pub(super) mod gaps;
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
 
@@ -207,7 +208,7 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
         ));
     }
     let wire = request.decode_wire()?;
-    if !source_gaps_match_identity(&request.gaps, request.identity.node_id().as_str()) {
+    if !gaps::source_gaps_match_identity(&request.gaps, request.identity.node_id().as_str()) {
         return Err(ApiError::invalid_request(
             "history source gaps do not match the authenticated source",
         ));
@@ -267,13 +268,6 @@ fn repository_identity_matches_sender(identity: &RepositoryNodeIdentity, sender_
     identity.node_id().as_str() == sender_id
 }
 
-fn source_gaps_match_identity(gaps: &[RepositoryReplicaGap], source_node_id: &str) -> bool {
-    gaps.len() <= MAX_REPAIR_REQUEST_IDS
-        && gaps
-            .iter()
-            .all(|gap| gap.source_node_id == source_node_id && gap.permanent)
-}
-
 fn ordinary_source_relay_batch_is_valid(
     batch: &RepositoryRepairBatch,
     source_node_id: &str,
@@ -282,7 +276,7 @@ fn ordinary_source_relay_batch_is_valid(
         .segments
         .iter()
         .all(|segment| segment.identity.node_id().as_str() == source_node_id)
-        && source_gaps_match_identity(&batch.gaps, source_node_id)
+        && gaps::source_gaps_match_identity(&batch.gaps, source_node_id)
 }
 
 pub(super) async fn identity_is_pinned_for_node(

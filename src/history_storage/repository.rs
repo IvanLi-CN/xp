@@ -103,9 +103,12 @@ impl HistoryStorage {
             return Ok(initial_epoch.max(1));
         };
         let previous = read_meta_i64(connection, &key)?.and_then(|value| u64::try_from(value).ok());
-        let epoch = previous
-            .and_then(|value| value.checked_add(1))
-            .unwrap_or_else(|| initial_epoch.max(1));
+        let epoch = match previous {
+            Some(value) => value.checked_add(1).ok_or_else(|| {
+                HistoryStorageError("repository source epoch exhausted".to_owned())
+            })?,
+            None => initial_epoch.max(1),
+        };
         let stored_epoch = i64::try_from(epoch)
             .map_err(|_| HistoryStorageError("repository source epoch exhausted".to_owned()))?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -205,9 +208,9 @@ impl HistoryStorage {
                     ",
                     params![
                         row.source_node_id,
-                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        durable_i64(row.source_epoch, "source epoch")?,
                         row.stream,
-                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                        durable_i64(row.sequence, "sequence")?,
                         row.subject_node_id,
                         row.observer_node_id,
                         row.schema_id,
@@ -277,9 +280,9 @@ impl HistoryStorage {
                        AND sequence = ?4",
                     params![
                         row.source_node_id,
-                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        durable_i64(row.source_epoch, "source epoch")?,
                         row.stream,
-                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                        durable_i64(row.sequence, "sequence")?,
                     ],
                 )
                 .map_err(sqlite_error)?;
@@ -314,9 +317,9 @@ impl HistoryStorage {
                     ",
                     params![
                         row.source_node_id,
-                        i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                        durable_i64(row.source_epoch, "source epoch")?,
                         row.stream,
-                        i64::try_from(row.sequence).unwrap_or(i64::MAX),
+                        durable_i64(row.sequence, "sequence")?,
                         row.subject_node_id,
                         row.observer_node_id,
                         row.schema_id,
@@ -373,7 +376,7 @@ impl HistoryStorage {
                    AND is_tombstone = 1",
                 params![
                     tombstone.source_node_id,
-                    i64::try_from(tombstone.source_epoch).unwrap_or(i64::MAX),
+                    durable_i64(tombstone.source_epoch, "source epoch")?,
                     tombstone.stream,
                     tombstone.subject_node_id,
                     tombstone.observer_node_id,

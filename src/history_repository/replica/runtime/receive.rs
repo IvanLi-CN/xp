@@ -494,14 +494,16 @@ impl RepositoryReplicaRuntime {
         let mut local_source = self.snapshot.local_source.clone();
         local_source.rotate_after_repository_rebuild()?;
         if let (Some(cluster_id), Some(node_id)) = (cluster_id.as_deref(), local_source.node_id()) {
-            self.storage
-                .record_repository_source_epoch(cluster_id, node_id, local_source.epoch())
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let result = self.storage.record_repository_source_epoch(
+                cluster_id,
+                node_id,
+                local_source.epoch(),
+            );
+            self.finish_storage_write(result)?;
         }
         if self.storage.is_sqlite() {
-            self.storage
-                .clear_repository_history()
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            let result = self.storage.clear_repository_history();
+            self.finish_storage_write(result)?;
         }
         self.snapshot = RepositoryReplicaSnapshot {
             cluster_id: cluster_id.clone(),
@@ -546,19 +548,20 @@ impl RepositoryReplicaRuntime {
                 .retain(|record| !record.matches_key(&key));
             if self.uses_sqlite_history() {
                 let (schema_id, schema_version) = key.schema();
-                self.storage
-                    .delete_repository_history_tombstone(&RepositoryHistoryTombstone {
-                        source_node_id: key.source_node_id().to_owned(),
-                        source_epoch: key.source_epoch(),
-                        stream: key.stream().to_owned(),
-                        subject_node_id: key.subject_node_id().to_owned(),
-                        observer_node_id: key.observer_node_id().to_owned(),
-                        schema_id: schema_id.to_owned(),
-                        schema_version,
-                        record_key: key.record_key().to_vec(),
-                        prefix: false,
-                    })
-                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                let result =
+                    self.storage
+                        .delete_repository_history_tombstone(&RepositoryHistoryTombstone {
+                            source_node_id: key.source_node_id().to_owned(),
+                            source_epoch: key.source_epoch(),
+                            stream: key.stream().to_owned(),
+                            subject_node_id: key.subject_node_id().to_owned(),
+                            observer_node_id: key.observer_node_id().to_owned(),
+                            schema_id: schema_id.to_owned(),
+                            schema_version,
+                            record_key: key.record_key().to_vec(),
+                            prefix: false,
+                        });
+                self.finish_storage_write(result)?;
             }
         }
         Ok(removed_tombstones)

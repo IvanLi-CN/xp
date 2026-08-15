@@ -60,6 +60,11 @@ impl Cursor {
         let stream = stream.into();
         validate_identifier("source node id", &source_node_id)?;
         validate_identifier("stream", &stream)?;
+        if source_epoch > i64::MAX as u64 || sequence > i64::MAX as u64 {
+            return Err(ProtocolError::InvalidSegment(
+                "cursor exceeds durable integer range",
+            ));
+        }
         Ok(Self {
             source_node_id,
             source_epoch,

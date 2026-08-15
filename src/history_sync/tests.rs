@@ -21,6 +21,12 @@ fn cursor(sequence: u64) -> Cursor {
     Cursor::new("node-a", 7, "runtime", sequence).expect("valid cursor")
 }
 
+#[test]
+fn cursor_rejects_values_outside_the_durable_sqlite_range() {
+    assert!(Cursor::new("node-a", i64::MAX as u64 + 1, "runtime", 0).is_err());
+    assert!(Cursor::new("node-a", 7, "runtime", i64::MAX as u64 + 1).is_err());
+}
+
 fn record(key: &[u8], tombstone: bool) -> SyncRecord {
     SyncRecord::new(
         "subject-a",

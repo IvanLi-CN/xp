@@ -260,7 +260,7 @@ async fn publish_local_history_segment(
         let mut runtime = state.repository_replica.lock().await;
         let segments = runtime.queue_local_source_segments_for_repositories(
             &state.cluster.cluster_id,
-            identity,
+            identity.clone(),
             &signing_key,
             source_batch.records,
             now,
@@ -269,7 +269,7 @@ async fn publish_local_history_segment(
         let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id);
         (segments, gaps)
     };
-    if segments.is_empty() {
+    if segments.is_empty() && gaps.is_empty() {
         return Ok(());
     }
     let assignment = rendezvous_collectors(&state.cluster.node_id, ready_repository_ids)?;
@@ -301,6 +301,11 @@ async fn publish_local_history_segment(
     let mut delivery_succeeded = true;
     let mut transport_failed = false;
     let mut tombstone_acknowledgements = Vec::new();
+    if segments.is_empty() {
+        (delivery_succeeded, transport_failed) =
+            super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
+                .await?;
+    }
     for segment in &segments {
         if selected_repository_id == state.cluster.node_id {
             if let Err(error) =
@@ -443,7 +448,7 @@ async fn relay_local_source_segments(
         }
         .frame_sized_relay_payload()?
     };
-    if payload.batch.segments.is_empty() {
+    if payload.batch.segments.is_empty() && payload.batch.gaps.is_empty() {
         return Ok(());
     }
     let relay = peers

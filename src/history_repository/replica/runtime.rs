@@ -697,17 +697,12 @@ impl RepositoryReplicaRuntime {
             return Ok(epoch);
         }
         let allocator_node_id = format!("{source_node_id}:initial-backfill:{peer_node_id}");
-        let epoch = self
-            .storage
-            .allocate_repository_source_epoch(
-                cluster_id,
-                &allocator_node_id,
-                crate::state::history_repository::replica::source_epoch(
-                    cluster_id,
-                    &allocator_node_id,
-                ),
-            )
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let result = self.storage.allocate_repository_source_epoch(
+            cluster_id,
+            &allocator_node_id,
+            crate::state::history_repository::replica::source_epoch(cluster_id, &allocator_node_id),
+        );
+        let epoch = self.finish_storage_write(result)?;
         self.snapshot
             .initial_peer_backfills
             .entry(peer_node_id.to_owned())
