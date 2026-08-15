@@ -40,9 +40,10 @@ pub(super) async fn reconcile(
         &cluster_ca_key_pem,
         &cluster_ca_pem,
         &cluster_meta.cluster_id,
-        &leader.node_id,
         &cluster_meta.node_id,
-    );
+        &cluster_meta.node_id,
+    )
+    .for_target(leader.node_id);
     let endpoints =
         fetch_endpoints_after_initial_replication(&client, xp_base_url, &ops_auth).await?;
     let node_endpoints: Vec<Endpoint> = endpoints
