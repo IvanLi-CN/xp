@@ -370,7 +370,8 @@ fn failed_replica_commit_does_not_leave_rows_or_checkpoint_behind() {
         0
     );
 }
-
+#[path = "post_commit_tests.rs"]
+mod post_commit_tests;
 #[test]
 fn legacy_sqlite_rows_without_aggregate_metadata_are_partial() {
     let temporary = tempfile::tempdir().expect("temporary directory");

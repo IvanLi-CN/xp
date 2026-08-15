@@ -83,12 +83,24 @@ impl SegmentReceiver {
             .collect::<Result<Vec<_>, _>>()?;
         let mut streams = BTreeMap::new();
         for entry in checkpoint.streams {
+            Cursor::new(
+                entry.key.source_node_id.clone(),
+                entry.progress.epoch,
+                entry.key.stream.clone(),
+                entry.progress.last_sequence,
+            )?;
             if streams.insert(entry.key, entry.progress).is_some() {
                 return Err(ProtocolError::CheckpointLimit);
             }
         }
         let mut quarantined_streams = BTreeMap::new();
         for entry in checkpoint.quarantined_streams {
+            Cursor::new(
+                entry.key.source_node_id.clone(),
+                entry.next_epoch,
+                entry.key.stream.clone(),
+                0,
+            )?;
             if quarantined_streams
                 .insert(entry.key, entry.next_epoch)
                 .is_some()

@@ -27,6 +27,23 @@ fn cursor_rejects_values_outside_the_durable_sqlite_range() {
     assert!(Cursor::new("node-a", 7, "runtime", i64::MAX as u64 + 1).is_err());
 }
 
+#[test]
+fn segment_rejects_a_last_cursor_outside_the_durable_sqlite_range() {
+    assert!(matches!(
+        CanonicalSegment::new(
+            "cluster-a",
+            cursor(i64::MAX as u64),
+            vec![record(b"first", false), record(b"overflow", false)],
+            None,
+            10,
+            11,
+        ),
+        Err(ProtocolError::InvalidSegment(
+            "cursor exceeds durable integer range"
+        ))
+    ));
+}
+
 fn record(key: &[u8], tombstone: bool) -> SyncRecord {
     SyncRecord::new(
         "subject-a",
@@ -179,7 +196,9 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
         })
     );
     assert_eq!(
-        receiver.continuous_watermark(initial.canonical().first_cursor()),
+        receiver
+            .continuous_watermark(initial.canonical().first_cursor())
+            .expect("valid watermark"),
         Some(initial.canonical().last_cursor().clone())
     );
 }
@@ -216,7 +235,9 @@ fn receiver_rotates_to_a_new_epoch_and_reports_a_gap() {
     );
     assert!(!receiver.is_quarantined(initial.canonical().first_cursor()));
     assert_eq!(
-        receiver.continuous_watermark(next_epoch.canonical().first_cursor()),
+        receiver
+            .continuous_watermark(next_epoch.canonical().first_cursor())
+            .expect("valid watermark"),
         Some(next_epoch.canonical().last_cursor().clone())
     );
 }

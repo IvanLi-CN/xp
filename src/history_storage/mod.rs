@@ -84,6 +84,8 @@ type Result<T> = std::result::Result<T, HistoryStorageError>;
 pub(crate) struct HistoryStorage {
     data_dir: Arc<PathBuf>,
     backend: Arc<Mutex<Backend>>,
+    #[cfg(test)]
+    fail_maintenance_after_commit: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for HistoryStorage {
@@ -111,7 +113,12 @@ impl HistoryStorage {
     pub(crate) fn open(data_dir: &Path) -> Self {
         let data_dir = Arc::new(normalize_data_dir(data_dir));
         let backend = shared_backend(&data_dir);
-        let storage = Self { data_dir, backend };
+        let storage = Self {
+            data_dir,
+            backend,
+            #[cfg(test)]
+            fail_maintenance_after_commit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
         storage.cleanup_expired_backups_at(SystemTime::now());
         storage
     }
@@ -250,6 +257,12 @@ impl HistoryStorage {
         connection
             .pragma_update(None, "query_only", if enabled { "ON" } else { "OFF" })
             .map_err(sqlite_error)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_maintenance_failure_for_test(&self, enabled: bool) {
+        self.fail_maintenance_after_commit
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -698,6 +711,15 @@ fn maintain_sqlite(connection: &Connection) -> Result<()> {
         .execute_batch(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))
         .map_err(sqlite_error)?;
     Ok(())
+}
+
+fn finish_post_commit_maintenance(result: Result<()>) {
+    if let Err(error) = result {
+        warn!(
+            error = %error,
+            "repository mutation committed; deferred bounded SQLite maintenance"
+        );
+    }
 }
 
 fn switch_to_json(backend: &mut Backend, data_dir: &Path) {

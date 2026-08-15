@@ -239,6 +239,10 @@ impl HistoryStorage {
         mutation: RepositoryReplicaMutation,
         control_payload: &[u8],
     ) -> Result<()> {
+        #[cfg(test)]
+        let fail_maintenance = self
+            .fail_maintenance_after_commit
+            .load(std::sync::atomic::Ordering::Relaxed);
         let mut backend = self.lock_backend();
         let Backend::Sqlite(connection) = &mut *backend else {
             return Err(HistoryStorageError(
@@ -257,7 +261,18 @@ impl HistoryStorage {
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
+        #[cfg(test)]
+        let maintenance_result = if fail_maintenance {
+            Err(HistoryStorageError(
+                "injected post-commit maintenance failure".to_owned(),
+            ))
+        } else {
+            maintain_sqlite(connection)
+        };
+        #[cfg(not(test))]
+        let maintenance_result = maintain_sqlite(connection);
+        finish_post_commit_maintenance(maintenance_result);
+        Ok(())
     }
 
     pub(crate) fn replace_repository_history_records(
@@ -972,9 +987,10 @@ impl HistoryStorage {
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(0);
         };
-        let query = format!("SELECT COUNT(*) FROM {table}");
         connection
-            .query_row(&query, [], |row| row.get::<_, i64>(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
             .map_err(sqlite_error)
     }

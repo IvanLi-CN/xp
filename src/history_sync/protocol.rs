@@ -89,13 +89,13 @@ impl Cursor {
         self.sequence
     }
 
-    fn with_sequence(&self, sequence: u64) -> Self {
-        Self {
-            source_node_id: self.source_node_id.clone(),
-            source_epoch: self.source_epoch,
-            stream: self.stream.clone(),
+    fn with_sequence(&self, sequence: u64) -> Result<Self, ProtocolError> {
+        Self::new(
+            self.source_node_id.clone(),
+            self.source_epoch,
+            self.stream.clone(),
             sequence,
-        }
+        )
     }
 
     fn stream_key(&self) -> StreamKey {
@@ -260,7 +260,7 @@ impl CanonicalSegment {
         let records_hash = hash_records(&records);
         let segment = Self {
             cluster_id: cluster_id.into(),
-            last_cursor: first_cursor.with_sequence(last_sequence),
+            last_cursor: first_cursor.with_sequence(last_sequence)?,
             first_cursor,
             records,
             records_hash,
@@ -738,7 +738,7 @@ impl SegmentReceiver {
                     }) {
                         return Ok(Acceptance::Duplicate {
                             acknowledgement: Acknowledgement {
-                                watermark: progress.watermark(first),
+                                watermark: progress.watermark(first)?,
                             },
                         });
                     }
@@ -869,11 +869,15 @@ impl SegmentReceiver {
         self.quarantined_streams.contains_key(&cursor.stream_key())
     }
 
-    pub(crate) fn continuous_watermark(&self, cursor: &Cursor) -> Option<Cursor> {
+    pub(crate) fn continuous_watermark(
+        &self,
+        cursor: &Cursor,
+    ) -> Result<Option<Cursor>, ProtocolError> {
         self.streams
             .get(&cursor.stream_key())
             .filter(|progress| progress.epoch == cursor.source_epoch)
             .map(|progress| progress.watermark(cursor))
+            .transpose()
     }
 
     pub(crate) fn forwardable_unknown_segments(&self) -> &[SignedSegment] {
@@ -928,7 +932,7 @@ struct SegmentHashRange {
 }
 
 impl StreamProgress {
-    fn watermark(&self, cursor: &Cursor) -> Cursor {
+    fn watermark(&self, cursor: &Cursor) -> Result<Cursor, ProtocolError> {
         cursor.with_sequence(self.last_sequence)
     }
 }
