@@ -6,6 +6,11 @@ use crate::ops::cli::ExitError;
 use crate::ops::internal_auth::InternalOpsAuth;
 use crate::ops::paths::Paths;
 
+const PENDING_JOIN_AUTH_ERROR: &str = concat!(
+    "401: {\"error\":{\"code\":\"unauthorized\",",
+    "\"message\":\"invalid internal authentication\"",
+);
+
 pub(super) async fn reconcile(
     paths: &Paths,
     spec: &ContainerSpec,
@@ -38,7 +43,7 @@ pub(super) async fn reconcile(
         &cluster_meta.node_id,
     );
     let endpoints =
-        crate::ops::xp::fetch_admin_endpoints_internal(&client, xp_base_url, &ops_auth).await?;
+        fetch_endpoints_after_initial_replication(&client, xp_base_url, &ops_auth).await?;
     let node_endpoints: Vec<Endpoint> = endpoints
         .into_iter()
         .filter(|endpoint| endpoint.node_id == cluster_meta.node_id)
@@ -80,4 +85,24 @@ pub(super) async fn reconcile(
     )
     .await
     .map_err(|err| ExitError::new(5, format!("container_reconcile_failed: {err}")))
+}
+
+async fn fetch_endpoints_after_initial_replication(
+    client: &reqwest::Client,
+    xp_base_url: &str,
+    auth: &InternalOpsAuth,
+) -> Result<Vec<Endpoint>, ExitError> {
+    let deadline = tokio::time::Instant::now() + crate::join_session::ACTIVATION_TIMEOUT;
+    loop {
+        match crate::ops::xp::fetch_admin_endpoints_internal(client, xp_base_url, auth).await {
+            Ok(endpoints) => return Ok(endpoints),
+            Err(error)
+                if error.message.contains(PENDING_JOIN_AUTH_ERROR)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }

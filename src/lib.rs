@@ -16,6 +16,8 @@ pub mod internal_auth;
 pub mod internal_auth_epoch;
 pub mod internal_idempotency;
 pub mod ip_geo_db;
+pub mod join_coordinator;
+pub mod join_session;
 pub mod login_token;
 pub mod managed_default_endpoints;
 pub mod mesh_telemetry;

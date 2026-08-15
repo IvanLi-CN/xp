@@ -22,6 +22,7 @@ use chrono::{DateTime, SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use sha2::{Digest as _, Sha256};
 use tokio::{
     sync::{Mutex, mpsc},
     time::Duration,
@@ -221,6 +222,7 @@ impl From<StoreError> for ApiError {
             },
             StoreError::SchemaVersionMismatch { .. } => ApiError::internal(value.to_string()),
             StoreError::Migration { .. } => ApiError::internal(value.to_string()),
+            StoreError::InvalidJoinSession { .. } => ApiError::conflict(value.to_string()),
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
     }
@@ -596,6 +598,7 @@ struct ClusterJoinRequest {
 #[derive(Serialize)]
 struct ClusterJoinResponse {
     node_id: String,
+    leader_node_id: String,
     signed_cert_pem: String,
     cluster_ca_pem: String,
     cluster_ca_key_pem: String,
@@ -1262,6 +1265,24 @@ pub fn build_router_with_mesh_telemetry(
                         cluster_ca_key_pem: cluster_ca_key_pem.to_string(),
                         cluster_ca_cert_pem: (*app_state.cluster_ca_pem).clone(),
                         store: app_state.store.clone(),
+                        bootstrap_sender: std::fs::read_to_string(
+                            app_state
+                                .config
+                                .data_dir
+                                .join("cluster")
+                                .join("raft_bootstrap_sender"),
+                        )
+                        .ok()
+                        .map(|sender_id| {
+                            (
+                                sender_id.trim().to_string(),
+                                app_state
+                                    .config
+                                    .data_dir
+                                    .join("cluster")
+                                    .join("raft_bootstrap_sender"),
+                            )
+                        }),
                     },
                 ))
             }
@@ -1929,7 +1950,7 @@ async fn cluster_join(
         return Err(ApiError::invalid_request("not leader"));
     }
 
-    let token = JoinToken::decode_and_validate(&req.join_token, Utc::now())
+    let token = JoinToken::decode_base64url_json(&req.join_token)
         .map_err(|e| ApiError::invalid_request(e.to_string()))?;
 
     let ca_key_pem = state
@@ -1947,19 +1968,91 @@ async fn cluster_join(
 
     let node_id = token.token_id.clone();
     let raft_node_id = validate_cluster_join_request(&node_id, &req)?;
-    {
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+    let request_fingerprint = hex::encode(Sha256::digest(
+        serde_json::to_vec(&json!({
+            "node_name": req.node_name,
+            "access_host": req.access_host,
+            "api_base_url": req.api_base_url,
+            "csr_pem": req.csr_pem,
+        }))
+        .map_err(|e| ApiError::internal(e.to_string()))?,
+    ));
+    let existing_session = {
         let store = state.store.lock().await;
-        if store.get_node(&node_id).is_some() {
+        store.state().join_sessions.get(&node_id).cloned()
+    };
+    if existing_session.is_none() {
+        token
+            .validate_at(Utc::now())
+            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
+    }
+    let activation_deadline = existing_session
+        .as_ref()
+        .map(|session| session.activation_deadline.clone())
+        .unwrap_or_else(|| {
+            (Utc::now()
+                + chrono::Duration::from_std(crate::join_session::ACTIVATION_TIMEOUT)
+                    .expect("join activation timeout fits chrono duration"))
+            .to_rfc3339()
+        });
+
+    let signed_cert_pem = if let Some(session) = existing_session.as_ref() {
+        if session.request_fingerprint != request_fingerprint {
+            return Err(ApiError::invalid_request(
+                "join token reserved by another request",
+            ));
+        }
+        if session.status == crate::join_session::JoinSessionStatus::Expired {
             return Err(ApiError::invalid_request("join token already used"));
         }
+        session.signed_cert_pem.clone()
+    } else {
+        if state.store.lock().await.get_node(&node_id).is_some() {
+            return Err(ApiError::invalid_request("join token already used"));
+        }
+        let signed_cert_pem = crate::cluster_identity::sign_node_csr(
+            &state.cluster.cluster_id,
+            &ca_key_pem,
+            &req.csr_pem,
+        )
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        let _ = raft_write(
+            &state,
+            crate::state::DesiredStateCommand::UpsertJoinSession {
+                session: crate::join_session::JoinSession {
+                    node_id: node_id.clone(),
+                    request_fingerprint: request_fingerprint.clone(),
+                    signed_cert_pem: signed_cert_pem.clone(),
+                    token_expires_at: token.expires_at.to_rfc3339(),
+                    activation_deadline: activation_deadline.clone(),
+                    required_log_index: 0,
+                    status: crate::join_session::JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                },
+            },
+        )
+        .await?;
+        signed_cert_pem
+    };
+    if existing_session.as_ref().is_some_and(|session| {
+        matches!(
+            session.status,
+            crate::join_session::JoinSessionStatus::LearnerRegistered
+                | crate::join_session::JoinSessionStatus::Consumed
+        )
+    }) {
+        return Ok(Json(ClusterJoinResponse {
+            node_id,
+            leader_node_id: state.cluster.node_id.clone(),
+            signed_cert_pem,
+            cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+            cluster_ca_key_pem: ca_key_pem,
+            xp_admin_token_hash: state.config.admin_token_hash.clone(),
+        }));
     }
-
-    let signed_cert_pem = crate::cluster_identity::sign_node_csr(
-        &state.cluster.cluster_id,
-        &ca_key_pem,
-        &req.csr_pem,
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
 
     // Ensure the current leader exists in the Raft state machine so joiners can replicate the
     // full node list (including the bootstrap node).
@@ -1993,10 +2086,6 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
-    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
-        .lock_owned()
-        .await;
-
     state
         .raft
         .add_learner(
@@ -2021,24 +2110,26 @@ async fn cluster_join(
     }
 
     let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
-    if let Err(err) = state
-        .raft
-        .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
-        .await
-    {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true, false).await;
-        return Err(ApiError::internal(format!(
-            "join learner catch-up failed: {err}"
-        )));
-    }
-
-    if let Err(err) = state.raft.add_voters(BTreeSet::from([raft_node_id])).await {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true, true).await;
-        return Err(ApiError::internal(format!("join add_voters failed: {err}")));
-    }
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::UpsertJoinSession {
+            session: crate::join_session::JoinSession {
+                node_id: node_id.clone(),
+                request_fingerprint,
+                signed_cert_pem: signed_cert_pem.clone(),
+                token_expires_at: token.expires_at.to_rfc3339(),
+                activation_deadline,
+                required_log_index,
+                status: crate::join_session::JoinSessionStatus::LearnerRegistered,
+                terminal_at: None,
+            },
+        },
+    )
+    .await?;
 
     Ok(Json(ClusterJoinResponse {
         node_id,
+        leader_node_id: state.cluster.node_id.clone(),
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
         cluster_ca_key_pem: ca_key_pem,

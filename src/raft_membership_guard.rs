@@ -44,6 +44,30 @@ pub async fn repair_membership_voters_once(
     repair_membership_voters_once_with_gate(raft, membership_operation_gate()).await
 }
 
+async fn repair_membership_voters_except(
+    raft: Arc<dyn RaftFacade>,
+    excluded: BTreeSet<NodeId>,
+) -> anyhow::Result<BTreeSet<NodeId>> {
+    let _guard = membership_operation_gate().lock_owned().await;
+    let metrics = raft.metrics().borrow().clone();
+    let non_voters = non_voter_membership_node_ids(&metrics)
+        .difference(&excluded)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if non_voters.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    if !matches!(metrics.state, openraft::ServerState::Leader) {
+        anyhow::bail!(
+            "stable learner repair requires leader/quorum: state={:?}, current_leader={:?}",
+            metrics.state,
+            metrics.current_leader
+        );
+    }
+    raft.add_voters(non_voters.clone()).await?;
+    Ok(non_voters)
+}
+
 async fn repair_membership_voters_once_with_gate(
     raft: Arc<dyn RaftFacade>,
     gate: Arc<Mutex<()>>,
@@ -79,11 +103,23 @@ async fn repair_membership_voters_once_with_gate(
 
 pub fn spawn_membership_voter_guard(
     raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            match repair_membership_voters_once(raft.clone()).await {
+            let excluded = store
+                .lock()
+                .await
+                .state()
+                .join_sessions
+                .values()
+                .filter(|session| session.status.is_pending())
+                .filter_map(|session| {
+                    crate::raft::types::raft_node_id_from_ulid(&session.node_id).ok()
+                })
+                .collect();
+            match repair_membership_voters_except(raft.clone(), excluded).await {
                 Ok(promoted) if promoted.is_empty() => {}
                 Ok(promoted) => {
                     tracing::info!(

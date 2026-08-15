@@ -1,0 +1,132 @@
+x-testbox-caps: &testbox-caps
+  cap_drop: [ALL]
+  cap_add:
+    - AUDIT_WRITE
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+    - FSETID
+    - KILL
+    - MKNOD
+    - NET_BIND_SERVICE
+    - NET_RAW
+    - SETGID
+    - SETPCAP
+    - SETUID
+    - SYS_CHROOT
+
+services:
+  certgen:
+    <<: *testbox-caps
+    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    entrypoint: [/bin/sh]
+    command:
+      - -ec
+      - |
+        test ! -f /tls/leader.json || exit 0
+        openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+        -subj /CN=xp-testbox-ca -keyout /tls/ca.key -out /tls/ca.pem
+        openssl req -newkey rsa:2048 -nodes -subj /CN=leader-tls \
+        -addext subjectAltName=DNS:leader-tls,DNS:joiner-tls \
+        -keyout /tls/server.key -out /tls/server.csr
+        openssl x509 -req -days 1 -in /tls/server.csr -CA /tls/ca.pem -CAkey /tls/ca.key \
+        -CAcreateserial -copy_extensions copy -out /tls/server.pem
+        cp /etc/ssl/certs/ca-certificates.crt /tls/ca-bundle.pem
+        cat /tls/ca.pem >> /tls/ca-bundle.pem
+        cat > /tls/leader.json <<'EOF'
+        {
+          "inbounds": [{
+            "listen": "0.0.0.0",
+            "port": 6443,
+            "protocol": "vless",
+            "settings": {
+              "clients": [{"id": "00000000-0000-4000-8000-000000000001"}],
+              "decryption": "none",
+              "fallbacks": [{"dest": "leader:62416"}]
+            },
+            "streamSettings": {
+              "security": "tls",
+              "tlsSettings": {
+                "alpn": ["http/1.1"],
+                "certificates": [{
+                  "certificateFile": "/tls/server.pem",
+                  "keyFile": "/tls/server.key"
+                }]
+              }
+            }
+          }],
+          "outbounds": [{"protocol": "freedom"}]
+        }
+        EOF
+        sed 's/leader:62416/joiner:62416/' /tls/leader.json > /tls/joiner.json
+    volumes:
+      - test-tls:/tls
+
+  leader:
+    <<: *testbox-caps
+    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    build:
+      context: ../..
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    environment:
+      XP_NODE_NAME: leader
+      XP_ADMIN_TOKEN: testbox-admin-token-0123456789abcdef
+      XP_BIND: 0.0.0.0:62416
+      XP_API_BASE_URL: https://leader-tls:6443
+      XP_ENABLE_CLOUDFLARE: "false"
+      SSL_CERT_FILE: /tls/ca-bundle.pem
+      NO_PROXY: leader,leader-tls,joiner,joiner-tls
+      no_proxy: leader,leader-tls,joiner,joiner-tls
+    volumes:
+      - leader-data:/var/lib/xp/data
+      - test-tls:/tls:ro
+
+  leader-tls:
+    <<: *testbox-caps
+    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+      leader:
+        condition: service_healthy
+    entrypoint: [/usr/local/bin/xray, run, -config, /tls/leader.json]
+    volumes:
+      - test-tls:/tls:ro
+
+  joiner:
+    <<: *testbox-caps
+    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    build:
+      context: ../..
+    depends_on:
+      leader-tls:
+        condition: service_started
+    environment:
+      XP_NODE_NAME: joiner
+      XP_JOIN_TOKEN: ${XP_JOIN_TOKEN:?set XP_JOIN_TOKEN}
+      XP_BIND: 0.0.0.0:62416
+      XP_API_BASE_URL: https://joiner-tls:6443
+      XP_ENABLE_CLOUDFLARE: "false"
+      SSL_CERT_FILE: /tls/ca-bundle.pem
+      NO_PROXY: leader,leader-tls,joiner,joiner-tls
+      no_proxy: leader,leader-tls,joiner,joiner-tls
+    volumes:
+      - joiner-data:/var/lib/xp/data
+      - test-tls:/tls:ro
+
+  joiner-tls:
+    <<: *testbox-caps
+    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    entrypoint: [/usr/local/bin/xray, run, -config, /tls/joiner.json]
+    volumes:
+      - test-tls:/tls:ro
+
+volumes:
+  leader-data:
+  joiner-data:
+  test-tls:

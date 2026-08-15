@@ -103,6 +103,11 @@
   after its public `api_base_url/health` returns HTTP `200`; post-join health failure preserves
   membership and metadata for retry. Geo remains disabled by default and is written only by explicit
   host-managed `--ip-geo` / TUI opt-in, never by automatic backfill.
+- Fresh joins use a durable two-stage protocol: the leader reserves the token, registers the
+  learner, and returns bootstrap identity before catch-up; after the authenticated runtime starts,
+  the leader coordinator waits for the recorded log index and promotes the learner. Same-request
+  retries replay the reservation without extending its 10-minute activation deadline. Expired
+  sessions are cleaned by the leader; existing-node recovery remains separate.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the

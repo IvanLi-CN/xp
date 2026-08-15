@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -33,6 +34,7 @@ pub struct RaftRpcAuth {
     pub cluster_ca_key_pem: String,
     pub cluster_ca_cert_pem: String,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
+    pub bootstrap_sender: Option<(String, PathBuf)>,
 }
 
 pub fn build_raft_rpc_router(state: RaftRpcState) -> Router {
@@ -77,13 +79,22 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         Ok(verified) if verified.context.route == InternalRoute::MeshV2 => verified,
         _ => return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response(),
     };
-    let sender_is_member = auth
-        .store
-        .lock()
-        .await
-        .get_node(&verified.context.sender_id)
-        .is_some();
-    if !sender_is_member {
+    let (sender_is_member, state_is_pristine) = {
+        let store = auth.store.lock().await;
+        (
+            store.get_node(&verified.context.sender_id).is_some(),
+            store.state().nodes.len() == 1 && store.get_node(&auth.local_node_id).is_some(),
+        )
+    };
+    let bootstrap_sender = bootstrap_sender_is_allowed(
+        sender_is_member,
+        state_is_pristine,
+        auth.bootstrap_sender
+            .as_ref()
+            .map(|(sender_id, _)| sender_id),
+        &verified.context.sender_id,
+    );
+    if !sender_is_member && !bootstrap_sender {
         return (
             StatusCode::UNAUTHORIZED,
             "raft sender is not a cluster member",
@@ -105,7 +116,29 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             value,
         );
     }
+    if bootstrap_sender
+        && auth
+            .store
+            .lock()
+            .await
+            .get_node(&verified.context.sender_id)
+            .is_some()
+        && let Some((_, marker_path)) = auth.bootstrap_sender.as_ref()
+    {
+        let _ = std::fs::remove_file(marker_path);
+    }
     response
+}
+
+fn bootstrap_sender_is_allowed(
+    sender_is_member: bool,
+    state_is_pristine: bool,
+    bootstrap_sender_id: Option<&String>,
+    sender_id: &str,
+) -> bool {
+    !sender_is_member
+        && state_is_pristine
+        && bootstrap_sender_id.is_some_and(|expected| expected == sender_id)
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -134,4 +167,33 @@ async fn install_snapshot(
     >,
 > {
     Json(state.raft.install_snapshot(req).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bootstrap_sender_is_allowed;
+
+    #[test]
+    fn bootstrap_sender_requires_pristine_state_and_exact_identity() {
+        let leader = "leader".to_string();
+        assert!(bootstrap_sender_is_allowed(
+            false,
+            true,
+            Some(&leader),
+            "leader"
+        ));
+        assert!(!bootstrap_sender_is_allowed(
+            false,
+            true,
+            Some(&leader),
+            "removed-node"
+        ));
+        assert!(!bootstrap_sender_is_allowed(
+            false,
+            false,
+            Some(&leader),
+            "leader"
+        ));
+        assert!(!bootstrap_sender_is_allowed(false, true, None, "leader"));
+    }
 }

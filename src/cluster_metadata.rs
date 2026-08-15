@@ -26,6 +26,7 @@ pub struct ClusterPaths {
     pub node_csr_pem: PathBuf,
     pub node_cert_pem: PathBuf,
     pub node_key_pem: PathBuf,
+    pub raft_bootstrap_sender: PathBuf,
 }
 
 impl ClusterPaths {
@@ -39,6 +40,7 @@ impl ClusterPaths {
             node_csr_pem: dir.join("node_csr.pem"),
             node_cert_pem: dir.join("node_cert.pem"),
             node_key_pem: dir.join("node_key.pem"),
+            raft_bootstrap_sender: dir.join("raft_bootstrap_sender"),
             dir,
         }
     }
@@ -192,10 +194,21 @@ impl ClusterMetadata {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with_mode(path, bytes, false)
+}
+
+pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with_mode(path, bytes, true)
+}
+
+fn write_atomic_with_mode(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
     let tmp_path = path.with_extension("tmp");
     {
         let mut f = fs::File::create(&tmp_path)?;
+        if private {
+            best_effort_chmod_0600(&tmp_path);
+        }
         f.write_all(bytes)?;
         f.sync_all()?;
     }

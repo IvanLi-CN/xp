@@ -7,7 +7,6 @@ use axum::{
 };
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
-use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tempfile::TempDir;
@@ -35,6 +34,62 @@ const TEST_ADMIN_TOKEN: &str = "testtoken";
 struct FailingAddVotersRaft {
     inner: LocalRaft,
     membership_changes: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[derive(Clone)]
+struct BlockingCatchUpRaft {
+    inner: LocalRaft,
+    wait_calls: Arc<Mutex<usize>>,
+    promotion_calls: Arc<Mutex<usize>>,
+}
+
+impl RaftFacade for BlockingCatchUpRaft {
+    fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
+        <LocalRaft as RaftFacade>::metrics(&self.inner)
+    }
+
+    fn client_write(
+        &self,
+        cmd: DesiredStateCommand,
+    ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
+        <LocalRaft as RaftFacade>::client_write(&self.inner, cmd)
+    }
+
+    fn add_learner(&self, node_id: u64, node: RaftNodeMeta) -> BoxFuture<'_, anyhow::Result<()>> {
+        <LocalRaft as RaftFacade>::add_learner(&self.inner, node_id, node)
+    }
+
+    fn wait_learner_caught_up(
+        &self,
+        _node_id: u64,
+        _required_log_index: u64,
+        _timeout: std::time::Duration,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let wait_calls = self.wait_calls.clone();
+        Box::pin(async move {
+            *wait_calls.lock().await += 1;
+            std::future::pending().await
+        })
+    }
+
+    fn add_voters(
+        &self,
+        _node_ids: std::collections::BTreeSet<u64>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let promotion_calls = self.promotion_calls.clone();
+        Box::pin(async move {
+            *promotion_calls.lock().await += 1;
+            Ok(())
+        })
+    }
+
+    fn change_membership(
+        &self,
+        changes: openraft::ChangeMembers<u64, RaftNodeMeta>,
+        retain: bool,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        <LocalRaft as RaftFacade>::change_membership(&self.inner, changes, retain)
+    }
 }
 
 impl RaftFacade for FailingAddVotersRaft {
@@ -174,11 +229,6 @@ fn req_authed_json(method: &str, uri: &str, value: Value) -> Request<Body> {
         .unwrap()
 }
 
-async fn body_json(res: axum::response::Response) -> Value {
-    let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    serde_json::from_slice(&bytes).unwrap()
-}
-
 fn signed_join_token(cluster: &ClusterMetadata, ca_pem: &str, ca_key_pem: &str) -> String {
     #[derive(serde::Serialize)]
     struct SignedPayload<'a> {
@@ -316,8 +366,159 @@ fn app_with_failing_add_voters(
     (router, store, join_token, membership_changes)
 }
 
+fn app_with_blocking_catch_up(
+    tmp: &TempDir,
+) -> (axum::Router, Arc<Mutex<usize>>, Arc<Mutex<usize>>) {
+    let config = test_config(tmp.path().to_path_buf());
+    let cluster = ClusterMetadata::init_new_cluster(
+        tmp.path(),
+        config.node_name.clone(),
+        config.access_host.clone(),
+        config.api_base_url.clone(),
+    )
+    .unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: config.data_dir.clone(),
+            bootstrap_node_id: Some(cluster.node_id.clone()),
+            bootstrap_node_name: config.node_name.clone(),
+            bootstrap_access_host: config.access_host.clone(),
+            bootstrap_api_base_url: config.api_base_url.clone(),
+        })
+        .unwrap(),
+    ));
+    let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+    metrics.current_term = 1;
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(raft_id);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+        None,
+        openraft::Membership::new(
+            vec![std::collections::BTreeSet::from([raft_id])],
+            std::collections::BTreeMap::from([(
+                raft_id,
+                RaftNodeMeta {
+                    name: cluster.node_name.clone(),
+                    api_base_url: cluster.api_base_url.clone(),
+                    raft_endpoint: cluster.api_base_url.clone(),
+                },
+            )]),
+        ),
+    ));
+    let (_tx, rx) = watch::channel(metrics);
+    let wait_calls = Arc::new(Mutex::new(0));
+    let promotion_calls = Arc::new(Mutex::new(0));
+    let raft: Arc<dyn RaftFacade> = Arc::new(BlockingCatchUpRaft {
+        inner: LocalRaft::new(store.clone(), rx),
+        wait_calls: wait_calls.clone(),
+        promotion_calls: promotion_calls.clone(),
+    });
+    let xray_health = XrayHealthHandle::new_unknown();
+    let cloudflared_health = CloudflaredHealthHandle::new_with_status(CloudflaredStatus::Disabled);
+    let (node_runtime, _runtime_task) = crate::node_runtime::spawn_node_runtime_monitor(
+        Arc::new(config.clone()),
+        cluster.node_id.clone(),
+        xray_health.clone(),
+        cloudflared_health.clone(),
+        DdnsHealthHandle::new_with_status(DdnsStatus::Disabled),
+    );
+    let endpoint_probe = crate::endpoint_probe::new_endpoint_probe_handle(
+        cluster.node_id.clone(),
+        store.clone(),
+        raft.clone(),
+        "test-probe-secret".to_string(),
+        false,
+    );
+    let (geo_db_update, _geo_task) =
+        crate::ip_geo_db::spawn_geo_db_update_worker(Arc::new(config.clone()), store.clone())
+            .unwrap();
+    let router = build_router(
+        config.clone(),
+        store.clone(),
+        ReconcileHandle::noop(),
+        xray_health,
+        cloudflared_health,
+        node_runtime,
+        crate::node_history::NodeHistoryHandle::from_config(&config),
+        endpoint_probe,
+        crate::node_egress_probe::NodeEgressProbeHandle::new_noop(
+            cluster.node_id.clone(),
+            store.clone(),
+        ),
+        cluster,
+        ca_pem,
+        Some(ca_key_pem),
+        raft,
+        None,
+        geo_db_update,
+        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
+    );
+    (router, wait_calls, promotion_calls)
+}
+
 #[tokio::test]
-async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_node() {
+async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
+    let tmp = TempDir::new().unwrap();
+    let (app, wait_calls, promotion_calls) = app_with_blocking_catch_up(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let join_token = signed_join_token(&cluster, &ca_pem, &ca_key_pem);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        app.clone().oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            json!({
+                "join_token": join_token.clone(),
+                "node_name": "node-2",
+                "access_host": "example.com",
+                "api_base_url": "https://node-2.internal:8443",
+                "csr_pem": csr.csr_pem.clone(),
+            }),
+        )),
+    )
+    .await
+    .expect("bootstrap response must not wait for learner catch-up")
+    .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let retry = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            json!({
+                "join_token": join_token,
+                "node_name": "node-2",
+                "access_host": "example.com",
+                "api_base_url": "https://node-2.internal:8443",
+                "csr_pem": csr.csr_pem,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), StatusCode::OK);
+    assert_eq!(*wait_calls.lock().await, 0);
+    assert_eq!(*promotion_calls.lock().await, 0);
+}
+
+#[tokio::test]
+async fn cluster_join_defers_add_voters_and_keeps_registered_learner() {
     let tmp = TempDir::new().unwrap();
     let (app, store, join_token, membership_changes) = app_with_failing_add_voters(&tmp);
     let decoded =
@@ -340,18 +541,17 @@ async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_no
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "internal");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("join add_voters failed: simulated add_voters failure")
-    );
-    assert!(store.lock().await.get_node(&decoded.token_id).is_none());
+    assert_eq!(res.status(), StatusCode::OK);
+    let store = store.lock().await;
+    assert!(store.get_node(&decoded.token_id).is_some());
     assert_eq!(
-        *membership_changes.lock().await,
-        vec!["remove_voters", "remove_nodes"]
+        store
+            .state()
+            .join_sessions
+            .get(&decoded.token_id)
+            .unwrap()
+            .status,
+        crate::join_session::JoinSessionStatus::LearnerRegistered
     );
+    assert!(membership_changes.lock().await.is_empty());
 }

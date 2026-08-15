@@ -17,6 +17,7 @@ use crate::{
     inbound_ip_usage::{
         GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
     },
+    join_session::JoinSession,
     protocol::{
         RealityServerNamesSource, RotateShortIdResult, VlessRealityVisionTcpEndpointMeta,
         normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
@@ -173,6 +174,7 @@ pub enum StoreError {
     Domain(DomainError),
     Migration { message: String },
     SchemaVersionMismatch { expected: u32, got: u32 },
+    InvalidJoinSession { message: &'static str },
 }
 
 impl std::fmt::Display for StoreError {
@@ -185,6 +187,7 @@ impl std::fmt::Display for StoreError {
             Self::SchemaVersionMismatch { expected, got } => {
                 write!(f, "schema_version mismatch: expected {expected}, got {got}")
             }
+            Self::InvalidJoinSession { message } => write!(f, "invalid join session: {message}"),
         }
     }
 }
@@ -197,6 +200,7 @@ impl std::error::Error for StoreError {
             Self::Domain(e) => Some(e),
             Self::Migration { .. } => None,
             Self::SchemaVersionMismatch { .. } => None,
+            Self::InvalidJoinSession { .. } => None,
         }
     }
 }
@@ -265,6 +269,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub nodes: BTreeMap<String, Node>,
     #[serde(default)]
+    pub join_sessions: BTreeMap<String, JoinSession>,
+    #[serde(default)]
     pub endpoints: BTreeMap<String, Endpoint>,
     /// Endpoint probe history (hour buckets, per node).
     ///
@@ -312,6 +318,7 @@ impl PersistedState {
             mihomo_resource_revision: 0,
             mihomo_resource_allow_private_targets: false,
             nodes: BTreeMap::new(),
+            join_sessions: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
             endpoint_probe_participants_by_hour: BTreeMap::new(),
@@ -1803,6 +1810,9 @@ fn is_false(value: &bool) -> bool {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateCommand {
+    UpsertJoinSession {
+        session: JoinSession,
+    },
     UpsertNode {
         node: Node,
     },
@@ -1947,6 +1957,9 @@ struct UserAccessItemCompat {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum DesiredStateCommandCompat {
+    UpsertJoinSession {
+        session: JoinSession,
+    },
     UpsertNode {
         node: Node,
     },
@@ -2083,6 +2096,9 @@ impl<'de> Deserialize<'de> for DesiredStateCommand {
 impl From<DesiredStateCommandCompat> for DesiredStateCommand {
     fn from(value: DesiredStateCommandCompat) -> Self {
         match value {
+            DesiredStateCommandCompat::UpsertJoinSession { session } => {
+                Self::UpsertJoinSession { session }
+            }
             DesiredStateCommandCompat::UpsertNode { node } => Self::UpsertNode { node },
             DesiredStateCommandCompat::DeleteNode {
                 node_id,
@@ -2413,6 +2429,17 @@ fn apply_vless_meta_updates(
 impl DesiredStateCommand {
     pub fn apply(&self, state: &mut PersistedState) -> Result<DesiredStateApplyResult, StoreError> {
         match self {
+            Self::UpsertJoinSession { session } => {
+                if let Some(current) = state.join_sessions.get(&session.node_id) {
+                    current
+                        .validate_successor(session)
+                        .map_err(|message| StoreError::InvalidJoinSession { message })?;
+                }
+                state
+                    .join_sessions
+                    .insert(session.node_id.clone(), session.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
             Self::UpsertNode { node } => {
                 validate_node_quota_reset(&node.quota_reset)?;
                 validate_node_quota_config(node)?;
