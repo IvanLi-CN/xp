@@ -291,10 +291,13 @@ impl RetentionAggregate {
         };
         let incomplete = gaps.iter().any(|gap| {
             gap.source_node_id == record.source_node_id
-                && gap.source_epoch == record.source_epoch
                 && gap.stream == record.stream
-                && gap.first_sequence <= self.last_sequence
-                && gap.last_sequence >= self.first_sequence
+                && ((gap.source_epoch == record.source_epoch
+                    && gap.first_sequence <= self.last_sequence
+                    && gap.last_sequence >= self.first_sequence)
+                    || (gap.permanent
+                        && gap.start_unix_seconds <= self.bucket_end_unix_seconds
+                        && self.bucket_start_unix_seconds <= gap.end_unix_seconds))
         });
         let anonymized_identifier = self.anonymized_identifier.or_else(|| {
             (record.schema_id == "ip_usage.v1").then(|| {

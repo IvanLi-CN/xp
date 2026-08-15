@@ -535,6 +535,13 @@ impl RepositoryReplicaRuntime {
             self.snapshot.local_source.primary_failure_cycles = 0;
         }
         if selected_repository_id != primary_repository_id {
+            if succeeded {
+                self.snapshot.local_source.primary_failure_cycles = self
+                    .snapshot
+                    .local_source
+                    .primary_failure_cycles
+                    .saturating_sub(1);
+            }
             return self.persist_control_state();
         }
         if succeeded {

@@ -68,7 +68,7 @@ fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
         .record_relay_batch_delivered("repository-b", Some(&next_segment_id))
         .expect("persist relay cursor");
 
-    let restored = load(temporary.path());
+    let mut restored = load(temporary.path());
     let second = restored
         .relay_batch("repository-b")
         .expect("second bounded relay page");
@@ -686,6 +686,15 @@ fn source_switches_to_its_standby_after_three_primary_delivery_failures() {
     assert_eq!(
         restored.local_source_collector("repository-a", Some("repository-b")),
         "repository-b"
+    );
+    for _ in 0..3 {
+        restored
+            .record_local_source_collector_delivery("repository-a", "repository-b", true)
+            .expect("record stable standby delivery");
+    }
+    assert_eq!(
+        restored.local_source_collector("repository-a", Some("repository-b")),
+        "repository-a"
     );
 }
 
