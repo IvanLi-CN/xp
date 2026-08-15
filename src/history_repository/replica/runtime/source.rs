@@ -17,6 +17,8 @@ pub(super) struct LocalSourceState {
     last_dynamic_relay_attempt_unix_seconds: Option<u64>,
     #[serde(default)]
     primary_failure_cycles: u8,
+    #[serde(default)]
+    standby_success_cycles: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     primary_failure_repository_id: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -36,15 +38,19 @@ impl LocalSourceState {
         (!self.node_id.is_empty()).then_some(self.node_id.as_str())
     }
 
-    pub(super) fn rotate_after_repository_rebuild(&mut self) {
+    pub(super) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
         if self.epoch != 0 {
-            self.epoch = self.epoch.saturating_add(1);
+            self.epoch = self.epoch.checked_add(1).ok_or_else(|| {
+                RepositoryRuntimeError::Storage("source epoch exhausted".to_owned())
+            })?;
         }
         self.streams.clear();
         self.backpressure_gaps.clear();
         self.deletion_marker_keys.clear();
         self.primary_failure_cycles = 0;
+        self.standby_success_cycles = 0;
         self.primary_failure_repository_id = None;
+        Ok(())
     }
 }
 
@@ -533,20 +539,29 @@ impl RepositoryReplicaRuntime {
             self.snapshot.local_source.primary_failure_repository_id =
                 Some(primary_repository_id.to_owned());
             self.snapshot.local_source.primary_failure_cycles = 0;
+            self.snapshot.local_source.standby_success_cycles = 0;
         }
         if selected_repository_id != primary_repository_id {
             if succeeded {
-                self.snapshot.local_source.primary_failure_cycles = self
+                self.snapshot.local_source.standby_success_cycles = self
                     .snapshot
                     .local_source
-                    .primary_failure_cycles
-                    .saturating_sub(1);
+                    .standby_success_cycles
+                    .saturating_add(1);
+                if self.snapshot.local_source.standby_success_cycles >= 3 {
+                    self.snapshot.local_source.primary_failure_cycles = 0;
+                    self.snapshot.local_source.standby_success_cycles = 0;
+                }
+            } else {
+                self.snapshot.local_source.standby_success_cycles = 0;
             }
             return self.persist_control_state();
         }
         if succeeded {
             self.snapshot.local_source.primary_failure_cycles = 0;
+            self.snapshot.local_source.standby_success_cycles = 0;
         } else {
+            self.snapshot.local_source.standby_success_cycles = 0;
             self.snapshot.local_source.primary_failure_cycles = self
                 .snapshot
                 .local_source
@@ -628,8 +643,21 @@ mod tests {
             streams: BTreeMap::from([("runtime".to_owned(), LocalSourceStreamState::default())]),
             ..LocalSourceState::default()
         };
-        state.rotate_after_repository_rebuild();
+        state
+            .rotate_after_repository_rebuild()
+            .expect("rotate source epoch");
         assert_eq!(state.epoch, 8);
         assert!(state.streams.is_empty());
+    }
+
+    #[test]
+    fn stale_repository_rebuild_rejects_exhausted_source_epoch() {
+        let mut state = LocalSourceState {
+            epoch: u64::MAX,
+            ..LocalSourceState::default()
+        };
+
+        assert!(state.rotate_after_repository_rebuild().is_err());
+        assert_eq!(state.epoch, u64::MAX);
     }
 }

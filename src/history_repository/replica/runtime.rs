@@ -358,6 +358,7 @@ pub(crate) struct RepositoryReplicaRuntime {
     snapshot: RepositoryReplicaSnapshot,
     receiver: Option<SegmentReceiver>,
     tombstones: TombstoneLedger,
+    storage_degraded: bool,
     #[cfg(test)]
     capacity_override: Option<(u64, u64)>,
 }
@@ -395,6 +396,7 @@ impl RepositoryReplicaRuntime {
             snapshot,
             receiver,
             tombstones,
+            storage_degraded: false,
             #[cfg(test)]
             capacity_override: None,
         };
@@ -416,6 +418,7 @@ impl RepositoryReplicaRuntime {
             snapshot: RepositoryReplicaSnapshot::default(),
             receiver: None,
             tombstones: TombstoneLedger::new(TOMBSTONE_HORIZON_SECONDS),
+            storage_degraded: false,
             #[cfg(test)]
             capacity_override: None,
         }
@@ -544,10 +547,14 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
-        self.prepare_for_replication(now_unix_seconds)?;
-        self.refresh_capacity()?;
+        if !self.storage_degraded {
+            self.prepare_for_replication(now_unix_seconds)?;
+            self.refresh_capacity()?;
+        }
         Ok(RepositoryRuntimeStatus {
-            storage_mode: if self.storage.is_sqlite() {
+            storage_mode: if self.storage_degraded {
+                "sqlite_degraded".to_owned()
+            } else if self.storage.is_sqlite() {
                 "sqlite".to_owned()
             } else {
                 "degraded_json".to_owned()

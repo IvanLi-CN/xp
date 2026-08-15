@@ -352,6 +352,10 @@ fn failed_replica_commit_does_not_leave_rows_or_checkpoint_behind() {
         .expect_err("query-only SQLite must reject the atomic commit");
     assert!(matches!(error, RepositoryRuntimeError::Storage(_)));
     assert_eq!(storage.repository_history_record_count().expect("count"), 0);
+    let status = runtime
+        .runtime_status(12)
+        .expect("degraded status remains readable");
+    assert_eq!(status.storage_mode, "sqlite_degraded");
 
     storage
         .set_query_only_for_test(false)

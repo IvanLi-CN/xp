@@ -400,6 +400,9 @@ impl RepositoryReplicaRuntime {
         };
         if let Err(error) = result {
             self.restore(previous_receiver, previous_snapshot.clone())?;
+            if self.uses_sqlite_history() {
+                self.storage_degraded = true;
+            }
             return Err(RepositoryRuntimeError::Storage(error.to_string()));
         }
         Ok(())
@@ -427,6 +430,9 @@ impl RepositoryReplicaRuntime {
         if let Err(error) = result {
             self.snapshot = previous_snapshot;
             self.tombstones = TombstoneLedger::from_checkpoint(self.snapshot.tombstones.clone())?;
+            if self.uses_sqlite_history() {
+                self.storage_degraded = true;
+            }
             return Err(RepositoryRuntimeError::Storage(error.to_string()));
         }
         Ok(())
@@ -486,7 +492,7 @@ impl RepositoryReplicaRuntime {
         }
         let cluster_id = self.snapshot.cluster_id.clone();
         let mut local_source = self.snapshot.local_source.clone();
-        local_source.rotate_after_repository_rebuild();
+        local_source.rotate_after_repository_rebuild()?;
         if let (Some(cluster_id), Some(node_id)) = (cluster_id.as_deref(), local_source.node_id()) {
             self.storage
                 .record_repository_source_epoch(cluster_id, node_id, local_source.epoch())
