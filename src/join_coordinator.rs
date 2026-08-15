@@ -261,15 +261,15 @@ mod tests {
     #[tokio::test]
     async fn failover_re_registers_a_durable_reserved_learner() {
         let tmp = tempfile::tempdir().unwrap();
-        let leader_id = ulid::Ulid::new().to_string();
-        let learner_id = ulid::Ulid::new().to_string();
+        let leader_id = xp_test_fixtures::identifier_ulid_a().to_owned();
+        let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
         let store = Arc::new(Mutex::new(
             JsonSnapshotStore::load_or_init(StoreInit {
                 data_dir: tmp.path().to_owned(),
-                bootstrap_node_id: Some(leader_id.clone()),
-                bootstrap_node_name: "leader".into(),
-                bootstrap_access_host: "leader.example".into(),
-                bootstrap_api_base_url: "https://leader.example".into(),
+                bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
+                bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+                bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
             })
             .unwrap(),
         ));
@@ -278,10 +278,10 @@ mod tests {
             store.state_mut().nodes.insert(
                 learner_id.clone(),
                 Node {
-                    node_id: learner_id.clone(),
-                    node_name: "learner".into(),
-                    access_host: "learner.example".into(),
-                    api_base_url: "https://learner.example".into(),
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                    access_host: xp_test_fixtures::secondary_host().to_owned(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
                     quota_limit_bytes: 0,
                     quota_reset: NodeQuotaReset::default(),
                 },
@@ -289,7 +289,7 @@ mod tests {
             store.state_mut().join_sessions.insert(
                 learner_id.clone(),
                 JoinSession {
-                    node_id: learner_id,
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                     request_fingerprint: "fingerprint".into(),
                     signed_cert_pem: "certificate".into(),
                     token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
@@ -312,9 +312,9 @@ mod tests {
                 std::collections::BTreeMap::from([(
                     raft_id,
                     RaftNodeMeta {
-                        name: "leader".into(),
-                        api_base_url: "https://leader.example".into(),
-                        raft_endpoint: "https://leader.example".into(),
+                        name: xp_test_fixtures::primary_node_name().to_owned(),
+                        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
                     },
                 )]),
             ),
