@@ -4,9 +4,9 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use axum::{
     body::Body,
-    http::{Request, StatusCode, header},
+    http::{Method, Request, StatusCode, Uri, header},
 };
-use base64::Engine as _;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
@@ -20,6 +20,8 @@ use tower::util::ServiceExt;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+#[path = "tests/history_repository.rs"]
+mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
 mod vless_xhttp;
@@ -29,6 +31,7 @@ use crate::{
     config::Config,
     ddns::{DdnsHealthHandle, DdnsStatus},
     domain::{EndpointKind, Node, NodeQuotaReset, QuotaResetSource},
+    history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
     http::build_router,
     id::{is_ulid_string, new_ulid_string},
     inbound_ip_usage::PersistedInboundIpGeo,
@@ -43,7 +46,15 @@ use crate::{
     reconcile::{ReconcileHandle, ReconcileRequest},
     state::{
         DesiredStateCommand, EndpointProbeNodeSample, JsonSnapshotStore, NodeEgressProbeState,
-        NodeSubscriptionRegion, StoreInit, membership_key,
+        NodeSubscriptionRegion, StoreInit,
+        history_repository::{
+            control::{RepositoryCapacity, RepositoryMember, RepositoryMembership},
+            identity::{
+                Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
+            },
+            replica::rendezvous_collectors,
+        },
+        membership_key,
     },
     xray_supervisor::XrayHealthHandle,
 };
@@ -150,7 +161,6 @@ fn test_config(data_dir: PathBuf) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -270,7 +280,6 @@ fn app_with(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store)
 }
@@ -321,7 +330,6 @@ fn build_app_with_cluster_store_and_raft(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     )
 }
 
@@ -763,7 +771,6 @@ fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: fn(
     .apply(store.state_mut())
     .unwrap();
 }
-
 fn probe_hour_now() -> String {
     crate::endpoint_probe::format_hour_key(chrono::Utc::now())
 }
@@ -1174,6 +1181,202 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2&page_size=10",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["completeness"], "local_only");
+    assert!(body["coverage"].is_object());
+    assert!(body["watermarks"].is_array());
+    assert!(body["gaps"].is_array());
+    assert_eq!(body["clock_skew_seconds"], 0);
+    assert_eq!(body["records"], json!([]));
+
+    let invalid = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            "/api/admin/history-repository?start_unix_seconds=2&end_unix_seconds=1&page_size=1001",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_cursor = app
+        .clone()
+        .oneshot(req_authed(
+            "GET",
+            concat!(
+                "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2",
+                "&page_size=10&page_cursor=not-a-cursor",
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_subject = app
+        .oneshot(req_authed(
+            "GET",
+            concat!(
+                "/api/admin/history-repository?start_unix_seconds=1&end_unix_seconds=2",
+                "&page_size=10&subject_node_id=",
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_subject.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn repository_membership_is_raft_backed_and_reports_local_runtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let nodes = app
+        .clone()
+        .oneshot(req_authed("GET", "/api/admin/nodes"))
+        .await
+        .unwrap();
+    assert_eq!(nodes.status(), StatusCode::OK);
+    let node_id = body_json(nodes).await["items"][0]["node_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let membership = json!({
+        "node_ids": [node_id],
+    });
+    let updated = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/history-repositories",
+            membership,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(updated).await["members"][0]["identity"]["node_id"],
+        node_id
+    );
+
+    let forged_ready = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            "/api/admin/history-repositories",
+            json!({
+                "node_ids": [node_id],
+                "lifecycle": "ready",
+                "catch_up_completed_at": 1,
+                "ready_at": 301,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forged_ready.status(), StatusCode::BAD_REQUEST);
+
+    let status = app
+        .oneshot(req_authed("GET", "/api/admin/history-repositories"))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let status = body_json(status).await;
+    assert_eq!(status["configured"], true);
+    assert_eq!(status["partial"], false);
+    assert_eq!(status["items"][0]["member"]["lifecycle"], "syncing");
+    assert!(status["items"][0]["runtime"].is_object());
+}
+
+#[tokio::test]
+async fn internal_repository_sync_rejects_an_unpinned_sender_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let router = app(&tmp);
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .unwrap()
+        .unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[37; 32]);
+    let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap();
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from(cluster.node_id.clone()).unwrap(),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).unwrap(),
+        X25519PublicKey::from_bytes([38; 32]).unwrap(),
+    )
+    .unwrap();
+    let segment = CanonicalSegment::new(
+        cluster.cluster_id.clone(),
+        Cursor::new(cluster.node_id.clone(), 1, "runtime", 0).unwrap(),
+        vec![SyncRecord::new(
+            cluster.node_id.clone(),
+            cluster.node_id.clone(),
+            "runtime.v1",
+            1,
+            b"record".to_vec(),
+            b"payload".to_vec(),
+            false,
+        )],
+        None,
+        now,
+        now,
+    )
+    .unwrap()
+    .sign(&signing_key)
+    .unwrap();
+    let wire = segment.wire_bytes().unwrap();
+    let body = json!({
+        "identity": identity,
+        "wire_base64": URL_SAFE_NO_PAD.encode(&wire),
+        "canonical_len": wire.len(),
+    })
+    .to_string();
+    let uri: Uri = "/api/admin/_internal/history-repository/sync"
+        .parse()
+        .unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -1663,7 +1866,6 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
     let join_token = json["join_token"].as_str().unwrap().to_string();
-
     let decoded =
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
@@ -1787,7 +1989,6 @@ async fn cluster_join_rejects_non_https_api_base_url_before_writes() {
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
-
     let res = app
         .oneshot(
             Request::builder()
@@ -1863,7 +2064,6 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         raft,
         ReconcileHandle::noop(),
     );
-
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -1913,7 +2113,6 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         "unexpected error: {}",
         body["error"]["message"].as_str().unwrap()
     );
-
     let store = store.lock().await;
     assert!(store.get_node(&decoded.token_id).is_some());
     assert_eq!(
@@ -1921,7 +2120,6 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         crate::join_session::JoinSessionStatus::Reserved
     );
 }
-
 #[tokio::test]
 async fn delete_node_returns_json_error_when_change_membership_panics() {
     let tmp = tempfile::tempdir().unwrap();
@@ -2176,7 +2374,6 @@ async fn follower_admin_write_does_not_redirect() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -5018,7 +5215,6 @@ async fn grant_usage_includes_warning_fields() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -5231,7 +5427,6 @@ async fn grant_usage_warns_on_quota_mismatch() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -7831,7 +8026,6 @@ async fn node_ip_usage_includes_geo_lookup_failed_warning_when_enabled_and_upstr
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = {
@@ -8092,12 +8286,10 @@ async fn user_traffic_returns_partial_report_when_all_membership_nodes_are_unrea
     assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
     assert_eq!(json["traffic"]["current"].as_array().unwrap().len(), 288);
 }
-
 #[tokio::test]
 async fn node_tcp_connections_returns_per_endpoint_series() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-
     let (node_id, minute0, minute1, endpoint_one_id, endpoint_two_id, endpoint_one_tag) = {
         let mut store = store.lock().await;
         let node = Node {
@@ -8466,7 +8658,6 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app
@@ -8532,7 +8723,6 @@ async fn persistence_smoke_user_roundtrip_via_api() {
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let res = app

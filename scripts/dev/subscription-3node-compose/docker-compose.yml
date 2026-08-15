@@ -121,7 +121,7 @@ services:
     image: xp-local:apxdg
     entrypoint: ["tail", "-f", "/dev/null"]
     environment:
-      XP_APXDG_ADMIN_TOKEN: ${XP_APXDG_ADMIN_TOKEN:-devtoken}
+      XP_APXDG_ADMIN_TOKEN: ${XP_APXDG_ADMIN_TOKEN:-history-e2e-admin-token-0123456789abcdef}
     volumes:
       - xp1_data:/vol/xp1
       - xp2_data:/vol/xp2

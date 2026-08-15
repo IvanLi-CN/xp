@@ -1,7 +1,7 @@
 use crate::{
     control_plane_mesh::{
-        MeshAwareHttpClient, MeshPeerTarget, MeshProxyStateHandle, MeshRequest,
-        build_mesh_http_client, build_unauthenticated_mesh_http_client, peer_target_from_node,
+        MeshAwareHttpClient, MeshPeerTarget, MeshRequest, build_mesh_http_client,
+        build_unauthenticated_mesh_http_client, peer_target_from_node,
     },
     internal_auth::InternalRoute,
     mesh_telemetry::MeshTelemetryHandle,
@@ -39,18 +39,16 @@ pub struct HttpNetworkFactory {
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
-        let state = MeshProxyStateHandle::disabled();
         Self {
-            client: build_unauthenticated_mesh_http_client(state)
+            client: build_unauthenticated_mesh_http_client()
                 .expect("build unauthenticated Mesh transport clients"),
             mesh_auth: None,
         }
     }
 
     pub fn from_client(client: reqwest::Client) -> Self {
-        let state = MeshProxyStateHandle::disabled();
         Self {
-            client: MeshAwareHttpClient::new(client, None, state),
+            client: MeshAwareHttpClient::new(client),
             mesh_auth: None,
         }
     }
@@ -59,58 +57,21 @@ impl HttpNetworkFactory {
         cluster_ca_pem: &str,
         node_cert_pem: &str,
         node_key_pem: &str,
-        mesh_proxy_url: Option<&str>,
-    ) -> anyhow::Result<Self> {
-        let state = if mesh_proxy_url.is_some() {
-            MeshProxyStateHandle::ready()
-        } else {
-            MeshProxyStateHandle::disabled()
-        };
-        Self::try_new_mtls_with_state(
-            cluster_ca_pem,
-            node_cert_pem,
-            node_key_pem,
-            mesh_proxy_url,
-            state,
-        )
-    }
-
-    pub fn try_new_mtls_with_state(
-        cluster_ca_pem: &str,
-        node_cert_pem: &str,
-        node_key_pem: &str,
-        mesh_proxy_url: Option<&str>,
-        state: MeshProxyStateHandle,
     ) -> anyhow::Result<Self> {
         Ok(Self {
-            client: build_mesh_http_client(
-                cluster_ca_pem,
-                node_cert_pem,
-                node_key_pem,
-                mesh_proxy_url,
-                state,
-            )
-            .context("build Mesh transport clients")?,
+            client: build_mesh_http_client(cluster_ca_pem, node_cert_pem, node_key_pem)
+                .context("build Mesh transport clients")?,
             mesh_auth: None,
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn try_new_mtls_with_mesh_auth(
         cluster_ca_pem: &str,
         node_cert_pem: &str,
         node_key_pem: &str,
-        mesh_proxy_url: Option<&str>,
-        state: MeshProxyStateHandle,
         mesh_auth: RaftMeshAuth,
     ) -> anyhow::Result<Self> {
-        let mut factory = Self::try_new_mtls_with_state(
-            cluster_ca_pem,
-            node_cert_pem,
-            node_key_pem,
-            mesh_proxy_url,
-            state,
-        )?;
+        let mut factory = Self::try_new_mtls(cluster_ca_pem, node_cert_pem, node_key_pem)?;
         factory.mesh_auth = Some(mesh_auth);
         Ok(factory)
     }
@@ -226,12 +187,11 @@ impl HttpNetwork {
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?
         } else {
             self.client
-                .send_with_fallback(option.hard_ttl(), |client| {
-                    client
-                        .post(url.clone())
-                        .timeout(option.hard_ttl())
-                        .json(req)
-                })
+                .direct()
+                .post(url.clone())
+                .timeout(option.hard_ttl())
+                .json(req)
+                .send()
                 .await?
         };
         tracing::trace!(
@@ -324,8 +284,8 @@ mod tests {
         let cert = crate::cluster_identity::sign_node_csr(cluster_id, &ca.key_pem, &csr.csr_pem)
             .expect("sign node csr");
 
-        let _factory = HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem, None)
-            .expect("mtls");
+        let _factory =
+            HttpNetworkFactory::try_new_mtls(&ca.cert_pem, &cert, &csr.key_pem).expect("mtls");
     }
 }
 

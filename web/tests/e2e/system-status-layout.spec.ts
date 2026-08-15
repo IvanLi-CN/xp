@@ -16,8 +16,6 @@ const meshStatus = {
 		role: "follower",
 		leader_api_base_url: fixtureCatalog.url.primaryApi(),
 		term: 63_193,
-		mesh_proxy_status: "disabled",
-		mesh_proxy_reason: null,
 		canary: {
 			enabled: true,
 			bind: fixtureCatalog.address.loopback39043(),

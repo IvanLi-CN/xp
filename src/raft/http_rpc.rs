@@ -77,7 +77,18 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         &auth.local_node_id,
     ) {
         Ok(verified) if verified.context.route == InternalRoute::MeshV2 => verified,
-        _ => return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response(),
+        Ok(verified) => {
+            tracing::warn!(
+                sender_id = %verified.context.sender_id,
+                route = %verified.context.route.as_str(),
+                "rejected Raft request with an invalid internal route"
+            );
+            return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "rejected unauthenticated Raft request");
+            return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
+        }
     };
     let (sender_is_member, state_is_pristine) = {
         let store = auth.store.lock().await;
@@ -92,6 +103,10 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         auth.bootstrap_sender.is_some(),
     );
     if !sender_is_member && !bootstrap_sender {
+        tracing::warn!(
+            sender_id = %verified.context.sender_id,
+            "rejected Raft request from a non-member"
+        );
         return (
             StatusCode::UNAUTHORIZED,
             "raft sender is not a cluster member",

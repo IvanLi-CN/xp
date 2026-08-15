@@ -332,11 +332,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let node_key_pem = cluster.read_node_key_pem(&config.data_dir)?;
 
     let config_arc = Arc::new(config.clone());
-    let mesh_proxy_state = if config.mesh_proxy_url.is_some() {
-        xp::control_plane_mesh::MeshProxyStateHandle::ready()
-    } else {
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled()
-    };
     let store = xp::state::JsonSnapshotStore::load_or_init(xp::state::StoreInit {
         data_dir: config.data_dir.clone(),
         bootstrap_node_id: Some(cluster.node_id.clone()),
@@ -384,8 +379,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         &cluster_ca_pem,
         &node_cert_pem,
         &node_key_pem,
-        config.mesh_proxy_url.as_deref(),
-        mesh_proxy_state.clone(),
         xp::raft::network_http::RaftMeshAuth {
             cluster_id: cluster.cluster_id.clone(),
             sender_id: cluster.node_id.clone(),
@@ -593,7 +586,6 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         raft_facade,
         Some(raft.raft()),
         geo_db_update,
-        mesh_proxy_state,
         mesh_telemetry,
         mesh_client,
     )

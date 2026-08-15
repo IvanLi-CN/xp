@@ -88,7 +88,6 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: xp::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -333,7 +332,6 @@ async fn shared_quota_e2e_p3_is_banned_without_overflow_then_unbanned_with_overf
         raft.clone(),
         None,
         geo_db_update,
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
@@ -600,7 +598,6 @@ async fn shared_quota_e2e_policy_change_weight_decrease_bans_without_new_traffic
         raft.clone(),
         None,
         geo_db_update,
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };
@@ -872,7 +869,6 @@ async fn shared_quota_e2e_cycle_rollover_unbans_and_resets() {
         raft.clone(),
         None,
         geo_db_update,
-        xp::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
 
     let node_id = { store.lock().await.list_nodes()[0].node_id.clone() };

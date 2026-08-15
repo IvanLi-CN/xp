@@ -5,9 +5,6 @@ pub(super) fn build_runtime_env(
     ddns: Option<&ContainerDdns>,
 ) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    if let Some(value) = optional_env(env_map, "XP_MESH_PROXY_URL") {
-        out.insert("XP_MESH_PROXY_URL".to_string(), value);
-    }
     for key in [
         "XP_VLESS_CANARY_BIND",
         "XP_VLESS_CANARY_ACME_DIRECTORY_URL",

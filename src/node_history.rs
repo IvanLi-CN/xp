@@ -1,7 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{self, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -24,7 +22,11 @@ use crate::{
         LocalNodeRuntimeSnapshot, NodeRuntimeEventKind, NodeRuntimeHandle, RuntimeComponent,
         RuntimeStatus,
     },
-    state::{JsonSnapshotStore, membership_xray_email},
+    state::{
+        JsonSnapshotStore,
+        history_repository::{HistoryStorage, NODE_HISTORY_KEY},
+        membership_xray_email,
+    },
     xray,
 };
 
@@ -89,6 +91,28 @@ pub struct NodeHistorySnapshot {
     /// Bounded user ID index mirrored with node history for post-membership queries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_traffic_users: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryHistoryDeletionMarker {
+    pub schema_id: String,
+    pub record_key: Vec<u8>,
+    kind: RepositoryHistoryDeletionKind,
+}
+
+impl RepositoryHistoryDeletionMarker {
+    pub fn target_node_id(&self) -> Option<&str> {
+        match &self.kind {
+            RepositoryHistoryDeletionKind::Node(node_id) => Some(node_id),
+            RepositoryHistoryDeletionKind::User(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RepositoryHistoryDeletionKind {
+    Node(String),
+    User(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,7 +448,7 @@ impl PersistedNodeHistoryCache {
 #[derive(Clone)]
 pub struct NodeHistoryHandle {
     inner: Arc<RwLock<PersistedNodeHistoryCache>>,
-    persistence_path: Arc<PathBuf>,
+    history_storage: HistoryStorage,
     persistence_lock: Arc<Mutex<()>>,
 }
 
@@ -434,11 +458,13 @@ impl NodeHistoryHandle {
     }
 
     fn new(persistence_path: PathBuf) -> Self {
+        let data_dir = persistence_path.parent().unwrap_or_else(|| Path::new("."));
+        let history_storage = HistoryStorage::open(data_dir);
         let cache =
-            load_history_cache(&persistence_path).unwrap_or_else(PersistedNodeHistoryCache::empty);
+            load_history_cache(&history_storage).unwrap_or_else(PersistedNodeHistoryCache::empty);
         Self {
             inner: Arc::new(RwLock::new(cache)),
-            persistence_path: Arc::new(persistence_path),
+            history_storage,
             persistence_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -449,6 +475,84 @@ impl NodeHistoryHandle {
             .nodes
             .get(node_id)
             .map(PersistedNodeHistoryRecord::snapshot)
+    }
+
+    /// Pending cleanup is durable local deletion intent. Repository sources turn these markers
+    /// into signed tombstones before publishing later records, and keep retrying until the
+    /// repository tombstone ledger has fanned acknowledgements out.
+    pub async fn repository_deletion_markers(
+        &self,
+        destination_node_id: &str,
+    ) -> Vec<RepositoryHistoryDeletionMarker> {
+        let state = self.inner.read().await;
+        let node_ids = state
+            .pending_node_history_cleanup
+            .get(destination_node_id)
+            .into_iter()
+            .flat_map(|nodes| nodes.iter())
+            .chain(state.deleted_nodes.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut markers = node_ids
+            .into_iter()
+            .flat_map(|node_id| {
+                [
+                    "runtime.v1",
+                    "path_health.v1",
+                    "traffic.v1",
+                    "connections.v1",
+                    "ip_usage.v1",
+                ]
+                .into_iter()
+                .map(move |schema_id| RepositoryHistoryDeletionMarker {
+                    schema_id: schema_id.to_owned(),
+                    record_key: format!("node-history:node:{node_id}:").into_bytes(),
+                    kind: RepositoryHistoryDeletionKind::Node(node_id.clone()),
+                })
+            })
+            .collect::<Vec<_>>();
+        markers.extend(
+            state
+                .pending_user_traffic_cleanup
+                .get(destination_node_id)
+                .into_iter()
+                .flat_map(|users| users.iter())
+                .chain(state.deleted_users.iter())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|user_id| RepositoryHistoryDeletionMarker {
+                    schema_id: "traffic.v1".to_owned(),
+                    record_key: format!("node-history:user:{user_id}:").into_bytes(),
+                    kind: RepositoryHistoryDeletionKind::User(user_id.to_string()),
+                }),
+        );
+        markers.sort_by(|left, right| left.record_key.cmp(&right.record_key));
+        markers
+    }
+
+    pub async fn complete_repository_deletion_marker(
+        &self,
+        destination_node_id: &str,
+        marker: &RepositoryHistoryDeletionMarker,
+    ) {
+        match &marker.kind {
+            RepositoryHistoryDeletionKind::Node(node_id) => {
+                self.complete_node_history_cleanup(destination_node_id, node_id)
+                    .await;
+                let changed = self.inner.write().await.deleted_nodes.remove(node_id);
+                if changed {
+                    self.persist().await;
+                }
+            }
+            RepositoryHistoryDeletionKind::User(user_id) => {
+                self.complete_user_traffic_cleanup(destination_node_id, user_id)
+                    .await;
+                let changed = self.inner.write().await.deleted_users.remove(user_id);
+                if changed {
+                    self.persist().await;
+                }
+            }
+        }
     }
 
     pub async fn record_local_sample(
@@ -722,10 +826,9 @@ impl NodeHistoryHandle {
     async fn persist(&self) {
         let _guard = self.persistence_lock.lock().await;
         let state = self.inner.read().await.clone();
-        if let Err(err) = persist_history_cache(&self.persistence_path, &state) {
+        if let Err(err) = persist_history_cache(&self.history_storage, &state) {
             warn!(
                 error = %err,
-                path = %self.persistence_path.display(),
                 "persist node history cache"
             );
         }
@@ -2146,8 +2249,8 @@ async fn sync_remote_node_histories(
     }
 }
 
-fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {
-    let bytes = fs::read(path).ok()?;
+fn load_history_cache(storage: &HistoryStorage) -> Option<PersistedNodeHistoryCache> {
+    let bytes = storage.read(NODE_HISTORY_KEY).ok()??;
     let mut cache: PersistedNodeHistoryCache = serde_json::from_slice(&bytes).ok()?;
     if cache.schema_version == 1 {
         cache.schema_version = HISTORY_SCHEMA_VERSION;
@@ -2157,23 +2260,14 @@ fn load_history_cache(path: &Path) -> Option<PersistedNodeHistoryCache> {
     Some(cache)
 }
 
-fn persist_history_cache(path: &Path, cache: &PersistedNodeHistoryCache) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+fn persist_history_cache(
+    storage: &HistoryStorage,
+    cache: &PersistedNodeHistoryCache,
+) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec_pretty(cache)?;
-    write_atomic(path, &bytes)
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp_path = path.with_extension("tmp");
-    {
-        let mut f = fs::File::create(&tmp_path)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    fs::rename(tmp_path, path)?;
-    Ok(())
+    storage
+        .write(NODE_HISTORY_KEY, &bytes)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn rfc3339(at: DateTime<Utc>) -> String {
@@ -2190,6 +2284,7 @@ mod tests {
     use crate::node_runtime::{
         ComponentRuntimeStatus, NodeRuntimeEvent, NodeRuntimeSummary, RuntimeSummaryStatus,
     };
+    use std::fs;
 
     fn component(component: RuntimeComponent, status: RuntimeStatus) -> ComponentRuntimeStatus {
         ComponentRuntimeStatus {

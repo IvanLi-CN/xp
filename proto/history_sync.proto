@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package xp.history_sync;
+
+message Cursor {
+  string source_node_id = 1;
+  uint64 source_epoch = 2;
+  string stream = 3;
+  uint64 sequence = 4;
+}
+
+message Record {
+  string schema_id = 1;
+  uint32 schema_version = 2;
+  bytes record_key = 3;
+  bytes payload = 4;
+  bool tombstone = 5;
+  string subject_node_id = 6;
+  string observer_node_id = 7;
+}
+
+message Segment {
+  string cluster_id = 1;
+  Cursor first_cursor = 2;
+  Cursor last_cursor = 3;
+  repeated Record records = 4;
+  bytes previous_segment_hash = 5;
+  uint64 opened_at_unix_seconds = 6;
+  uint64 closed_at_unix_seconds = 7;
+  bytes signature = 8;
+  bytes records_hash = 9;
+}
+
+message Acknowledgement {
+  Cursor watermark = 1;
+}
+
+message CursorGap {
+  Cursor requested = 1;
+  Cursor earliest_available = 2;
+}

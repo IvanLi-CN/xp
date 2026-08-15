@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use pretty_assertions::assert_eq;
 use rand::{SeedableRng as _, rngs::StdRng};
@@ -211,16 +211,29 @@ fn probe_state_with_stale_deleted_node() -> PersistedState {
     state
 }
 
+fn read_sqlite_snapshot(data_dir: &std::path::Path, key: &str) -> Vec<u8> {
+    crate::state::history_repository::HistoryStorage::open(data_dir)
+        .read(key)
+        .unwrap()
+        .unwrap()
+}
+
+fn write_sqlite_snapshot(data_dir: &std::path::Path, key: &str, bytes: &[u8]) {
+    crate::state::history_repository::HistoryStorage::open(data_dir)
+        .write(key, bytes)
+        .unwrap();
+}
+
 #[test]
-fn bootstrap_creates_state_json_with_one_node() {
+fn bootstrap_creates_state_sqlite_snapshot_with_one_node() {
     let tmp = tempfile::tempdir().unwrap();
 
     let _store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
-    let state_path = tmp.path().join("state.json");
+    let state_path = tmp.path().join("history.sqlite3");
 
     assert!(state_path.exists());
 
-    let bytes = fs::read(&state_path).unwrap();
+    let bytes = read_sqlite_snapshot(tmp.path(), crate::state::history_storage::STATE_KEY);
     let state: PersistedState = serde_json::from_slice(&bytes).unwrap();
 
     assert_eq!(state.schema_version, SCHEMA_VERSION);
@@ -272,7 +285,7 @@ fn load_or_init_migrates_v1_state_json_public_domain_to_access_host() {
     let nodes = &store.state().nodes;
     let node = nodes.get(xp_test_fixtures::primary_node_id()).unwrap();
     assert_eq!(node.access_host, xp_test_fixtures::primary_host());
-    let bytes = fs::read(&state_path).unwrap();
+    let bytes = read_sqlite_snapshot(data_dir, crate::state::history_storage::STATE_KEY);
     let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved["schema_version"], SCHEMA_VERSION);
     let saved_node = &saved["nodes"][xp_test_fixtures::primary_node_id()];
@@ -339,8 +352,7 @@ fn load_or_init_persists_pruned_usage_memberships() {
     );
     assert!(store.get_membership_usage(&valid_membership_key).is_some());
 
-    let usage_path = tmp.path().join("usage.json");
-    let bytes = fs::read(usage_path).unwrap();
+    let bytes = read_sqlite_snapshot(tmp.path(), crate::state::history_storage::USAGE_KEY);
     let usage: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
     assert!(!usage.memberships.contains_key("stale_user::stale_endpoint"));
     assert!(usage.memberships.contains_key(&valid_membership_key));
@@ -429,7 +441,7 @@ fn load_or_init_recovers_when_state_is_v10_but_usage_is_v1() {
     assert_eq!(store.usage.schema_version, USAGE_SCHEMA_VERSION);
     assert!(store.usage.memberships.is_empty());
 
-    let bytes = fs::read(&usage_path).unwrap();
+    let bytes = read_sqlite_snapshot(data_dir, crate::state::history_storage::USAGE_KEY);
     let saved: PersistedUsage = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(saved.schema_version, USAGE_SCHEMA_VERSION);
 }
@@ -1294,7 +1306,6 @@ fn load_usage_json_missing_quota_fields_is_backward_compatible() {
         store.save().unwrap();
         membership
     };
-    let usage_path = tmp.path().join("usage.json");
     let bytes = serde_json::to_vec_pretty(&json!({
         "schema_version": USAGE_SCHEMA_VERSION,
         "memberships": {
@@ -1309,7 +1320,7 @@ fn load_usage_json_missing_quota_fields_is_backward_compatible() {
         }
     }))
     .unwrap();
-    fs::write(&usage_path, bytes).unwrap();
+    write_sqlite_snapshot(tmp.path(), crate::state::history_storage::USAGE_KEY, &bytes);
 
     let store = JsonSnapshotStore::load_or_init(test_init(tmp.path())).unwrap();
     let usage = store.get_membership_usage(&membership).unwrap();
@@ -1874,8 +1885,11 @@ fn load_or_init_prunes_deleted_probe_nodes_from_current_schema_state() {
         vec!["node_keep".to_string()],
     );
 
-    let saved: PersistedState =
-        serde_json::from_slice(&fs::read(tmp.path().join("state.json")).unwrap()).unwrap();
+    let saved: PersistedState = serde_json::from_slice(&read_sqlite_snapshot(
+        tmp.path(),
+        crate::state::history_storage::STATE_KEY,
+    ))
+    .unwrap();
     assert_eq!(
         saved
             .endpoint_probe_participants_by_hour

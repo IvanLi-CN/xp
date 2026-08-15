@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
 use axum::{
@@ -31,7 +31,7 @@ use crate::{
 const TEST_ADMIN_TOKEN: &str = "testtoken";
 
 #[derive(Clone)]
-struct FailingAddVotersRaft {
+struct DeferredPromotionRaft {
     inner: LocalRaft,
     membership_changes: Arc<Mutex<Vec<&'static str>>>,
 }
@@ -92,7 +92,7 @@ impl RaftFacade for BlockingCatchUpRaft {
     }
 }
 
-impl RaftFacade for FailingAddVotersRaft {
+impl RaftFacade for DeferredPromotionRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
         <LocalRaft as RaftFacade>::metrics(&self.inner)
     }
@@ -110,16 +110,11 @@ impl RaftFacade for FailingAddVotersRaft {
 
     fn wait_learner_caught_up(
         &self,
-        node_id: u64,
-        required_log_index: u64,
-        timeout: std::time::Duration,
+        _node_id: u64,
+        _required_log_index: u64,
+        _timeout: Duration,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        <LocalRaft as RaftFacade>::wait_learner_caught_up(
-            &self.inner,
-            node_id,
-            required_log_index,
-            timeout,
-        )
+        Box::pin(async { std::future::pending::<anyhow::Result<()>>().await })
     }
 
     fn add_voters(
@@ -200,7 +195,6 @@ fn test_config(data_dir: PathBuf) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
-        mesh_proxy_url: None,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),
@@ -266,7 +260,7 @@ fn signed_join_token(cluster: &ClusterMetadata, ca_pem: &str, ca_key_pem: &str) 
     )
 }
 
-fn app_with_failing_add_voters(
+fn app_with_deferred_promotion(
     tmp: &TempDir,
 ) -> (
     axum::Router,
@@ -318,7 +312,7 @@ fn app_with_failing_add_voters(
     ));
     let (_tx, rx) = watch::channel(metrics);
     let membership_changes = Arc::new(Mutex::new(Vec::new()));
-    let raft: Arc<dyn RaftFacade> = Arc::new(FailingAddVotersRaft {
+    let raft: Arc<dyn RaftFacade> = Arc::new(DeferredPromotionRaft {
         inner: LocalRaft::new(store.clone(), rx),
         membership_changes: membership_changes.clone(),
     });
@@ -361,7 +355,6 @@ fn app_with_failing_add_voters(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store, join_token, membership_changes)
 }
@@ -462,7 +455,6 @@ fn app_with_blocking_catch_up(
         raft,
         None,
         geo_db_update,
-        crate::control_plane_mesh::MeshProxyStateHandle::disabled(),
     );
     (router, store, wait_calls, promotion_calls)
 }
@@ -585,14 +577,15 @@ async fn cluster_join_rejects_pending_replay_after_activation_deadline() {
 #[tokio::test]
 async fn cluster_join_defers_add_voters_and_keeps_registered_learner() {
     let tmp = TempDir::new().unwrap();
-    let (app, store, join_token, membership_changes) = app_with_failing_add_voters(&tmp);
+    let (app, store, join_token, membership_changes) = app_with_deferred_promotion(&tmp);
     let decoded =
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
 
-    let res = app
-        .oneshot(req_authed_json(
+    let res = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.oneshot(req_authed_json(
             "POST",
             "/api/cluster/join",
             json!({
@@ -602,9 +595,11 @@ async fn cluster_join_defers_add_voters_and_keeps_registered_learner() {
                 "api_base_url": "https://node-2.internal:8443",
                 "csr_pem": csr.csr_pem,
             }),
-        ))
-        .await
-        .unwrap();
+        )),
+    )
+    .await
+    .expect("join response must not wait for learner promotion")
+    .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
     let store = store.lock().await;

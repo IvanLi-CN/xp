@@ -41,8 +41,6 @@ const meshStatus = {
 		role: "leader",
 		leader_api_base_url: fixtureCatalog.service.fixture85(),
 		term: 1,
-		mesh_proxy_status: "direct",
-		mesh_proxy_reason: null,
 		canary: {
 			enabled: false,
 			bind: fixtureCatalog.optional.none(),

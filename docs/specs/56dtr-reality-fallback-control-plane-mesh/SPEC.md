@@ -5,7 +5,6 @@
 
 ## 背景
 
-- `XP_MESH_PROXY_URL` 只是一条本机 SOCKS 出站路径。
 - 控制面此前只访问 peer 的公网 `api_base_url`。
 - 内部 HMAC 没有覆盖 body、时间或身份。
 - 失败后的跨路径重试可能让 mutation 重复执行。
@@ -51,7 +50,6 @@
 - Mesh URL 只能由唯一 managed-default endpoint 推导。
 - 无端点、多个 endpoint 或不可用的 `access_host` 时，使用 `Node.api_base_url`；已选择 Mesh
   路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
-- `XP_MESH_PROXY_URL` 仅保留公网出站 proxy-first/direct 兼容语义。
 - `health-v2` 与 `mesh-v2` 使用同一个 v2 认证协议。
 - canonical 覆盖版本、route、method、原始 URI、content metadata、body hash、
   cluster、sender、target、request ID 和 issued-at。
@@ -74,8 +72,8 @@
 - Mesh client 固定使用 HTTP/2 prior knowledge 与自适应 H2 flow-control window；后者仅在活动大流量时
   扩张，避免为每个 peer 常驻预留大快照缓冲。每个 origin 最多保留一条 idle connection，pool idle timeout
   固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
-- 公网 direct 与可选 relay 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
-  fallback。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理。
+- 公网 direct 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
+  direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理。
 - 同一 target 的顺序请求、并发 fan-out、Raft burst、8 MiB snapshot 与长驻 SSE 必须复用同一
   HTTP/2 connection。主动断链或 idle timeout 后允许新建一条；重连交叠瞬间最多两条，随后回到一条。
 - 每个 peer 连续三次可重试 Mesh transport 失败后打开 breaker。
@@ -88,8 +86,6 @@
 - 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback。
 - 其他 mutation 必须返回 `outcome_unknown`。
 - 跨 Mesh/public 的 mutation 重用同一个 `request_id`。
-- `XP_MESH_PROXY_URL` 的 relay 无响应同样属于模糊结果；没有 durable 幂等保障的 mutation
-  不得再直连重试。
 - 本地 ledger 保留 10 分钟，最多 16,384 条，满载拒绝新请求。
 
 ## 遥测与 API

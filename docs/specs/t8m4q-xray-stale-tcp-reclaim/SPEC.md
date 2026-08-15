@@ -24,7 +24,7 @@
 ### Non-goals
 
 - 不修改业务 endpoint 协议、鉴权、订阅输出、quota 语义或 admin/Web API。
-- 不给 `api` 或 `mesh-proxy` 静态 listener 增加 `sockopt`。
+- 不给 `api` 静态 listener 增加 `sockopt`。
 - 不新增 ADR；本次结论沉淀到 spec 与 current-truth docs。
 
 ## 需求（Requirements）
@@ -50,7 +50,7 @@
 - 后半段必须升级 `xp`、备份并重写 `/etc/xray/config.json`、重启 `xray`。
 - `xray` restart 失败时，必须恢复旧 config，并做一次 rollback restart 尝试，不能把节点留在半收敛状态。
 - 若静态 config rewrite 后 `xray` restart 失败，upgrade 还必须把 `xp` 二进制恢复到升级前版本，并重启 `xp` 回到旧运行面。
-- 静态 config rewrite 不得重置节点已有的控制面 listener 绑定：若 `/etc/xp/xp.env` 已声明 `XP_XRAY_API_ADDR`，则重写后的 `api` inbound 必须继续匹配该地址；既有 `mesh-proxy` inbound 也必须保持原 listener 语义。
+- 静态 config rewrite 不得重置节点已有的控制面 listener 绑定：若 `/etc/xp/xp.env` 已声明 `XP_XRAY_API_ADDR`，则重写后的 `api` inbound 必须继续匹配该地址，并清理已退休的旧控制面代理 inbound。
 - 共享测试机必须在同一次隔离 run 里顺序执行 `tests/xray_e2e` 与 `tests/shared_quota_xray_e2e` 的 ignored real-Xray 用例。
 
 ### SHOULD
@@ -69,26 +69,26 @@
 
 ### Edge cases / errors
 
-- `api` 与 `mesh-proxy` 必须继续保持 loopback 控制面语义，不参与 stale WAN session 修复。
+- `api` 必须继续保持 loopback 控制面语义，不参与 stale WAN session 修复。
 - `xray` restart 失败且旧 config 能恢复时，upgrade 必须失败退出，但节点应回到旧 config。
 - `xray` restart 失败且旧 config 能恢复时，upgrade 也必须把 `xp` 回滚到旧二进制，不能留下“新 xp + 旧 xray config”的半升级状态。
-- 若节点已经自定义 `XP_XRAY_API_ADDR` 或 `mesh-proxy` listener，静态 config rewrite 后这些控制面 listener 必须保持兼容，不得被默认端口覆盖。
+- 若节点已经自定义 `XP_XRAY_API_ADDR`，静态 config rewrite 后该控制面 listener 必须保持兼容，不得被默认端口覆盖。
 - 若恢复旧 config 后 rollback restart 仍失败，也必须明确报失败，不得吞错。
 
 ## 验收标准（Acceptance Criteria）
 
 - Given `xp-ops init`，When 写出 `/etc/xray/config.json`，Then `policy.levels.0` 同时包含四个 reclaim timeout 与三项 `statsUser*` 开关。
 - Given VLESS REALITY 或 SS2022 业务 endpoint，When 构建 AddInbound 请求，Then `socket_settings` 精确包含 `300 / 30 / 10000`。
-- Given `api` 或 `mesh-proxy` 静态 listener，When 本次变更完成，Then 它们的 listener 范围与无 `sockopt` 语义保持不变。
+- Given `api` 静态 listener，When 本次变更完成，Then 其 listener 范围与无 `sockopt` 语义保持不变。
 - Given 旧版本节点执行 `xp-ops upgrade`，When upgrade 成功，Then 新 `xp`、新静态 config 与 `xray` restart 都已完成。
 - Given `xray` restart 失败，When upgrade 返回错误，Then 原静态 config 已恢复，并执行过一次 rollback restart 尝试。
-- Given `XP_XRAY_API_ADDR` 已自定义，When `xp-ops upgrade` 重写静态 Xray config，Then `api` inbound 仍与该地址一致，且既有 `mesh-proxy` inbound listener 不被默认值覆盖。
+- Given `XP_XRAY_API_ADDR` 已自定义，When `xp-ops upgrade` 重写静态 Xray config，Then `api` inbound 仍与该地址一致，且遗留控制面代理 inbound 被移除。
 - Given 共享测试机隔离 run，When 顺序执行 `cargo test --test xray_e2e -- --ignored` 与 `cargo test --test shared_quota_xray_e2e -- --ignored`，Then reconcile/grant、流量 roundtrip、quota ban/unban 等现有行为不回归。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
 - 已确认所有现有业务用户都通过 Xray `level 0` 下发。
-- 已确认 `api` 与 `mesh-proxy` 只承载 loopback 控制面流量。
+- 已确认 `api` 只承载 loopback 控制面流量。
 - 已确认 `xp` 在 `xray down -> up` 后具备 full reconcile 能力。
 
 ## 非功能性验收 / 质量门槛

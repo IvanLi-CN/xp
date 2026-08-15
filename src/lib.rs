@@ -9,6 +9,7 @@ pub mod cycle;
 pub mod ddns;
 pub mod domain;
 pub mod endpoint_probe;
+pub mod history_sync;
 pub mod http;
 pub mod id;
 pub mod inbound_ip_usage;

@@ -1,8 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{self, Write},
-    path::{Path, PathBuf},
+    fs, io,
+    path::PathBuf,
 };
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
@@ -23,6 +22,13 @@ use crate::{
         normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
         validate_reality_dest, validate_reality_server_name,
     },
+    state::history_repository::{
+        HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
+        control::{
+            RepositoryMemberRuntimePatch, RepositoryMembership,
+            apply_repository_member_runtime_update, apply_repository_membership,
+        },
+    },
     tcp_connection_usage::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
         TcpConnectionUsageWarning,
@@ -31,6 +37,11 @@ use crate::{
 
 mod endpoint_meta;
 use endpoint_meta::build_endpoint_meta;
+
+#[path = "history_repository/mod.rs"]
+pub(crate) mod history_repository;
+#[path = "history_storage/mod.rs"]
+pub(crate) mod history_storage;
 
 pub const SCHEMA_VERSION: u32 = 12;
 const SCHEMA_VERSION_V11: u32 = 11;
@@ -176,7 +187,6 @@ pub enum StoreError {
     SchemaVersionMismatch { expected: u32, got: u32 },
     InvalidJoinSession { message: &'static str },
 }
-
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -221,6 +231,27 @@ impl From<DomainError> for StoreError {
     fn from(value: DomainError) -> Self {
         Self::Domain(value)
     }
+}
+
+fn read_history_snapshot(
+    storage: &HistoryStorage,
+    key: &str,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    storage.read(key).map_err(|error| StoreError::Migration {
+        message: format!("read {key} history storage: {error}"),
+    })
+}
+
+fn write_history_snapshot(
+    storage: &HistoryStorage,
+    key: &str,
+    bytes: &[u8],
+) -> Result<(), StoreError> {
+    storage
+        .write(key, bytes)
+        .map_err(|error| StoreError::Migration {
+            message: format!("write {key} history storage: {error}"),
+        })
 }
 
 const fn default_geo_db_update_interval_days_compat() -> u8 {
@@ -305,12 +336,13 @@ pub struct PersistedState {
     pub user_mihomo_profiles: BTreeMap<String, UserMihomoProfile>,
     #[serde(default)]
     pub mihomo_delivery_mode: MihomoDeliveryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_membership: Option<RepositoryMembership>,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
     pub geo_db_update_settings_compat: GeoDbUpdateSettingsCompat,
 }
-
 impl PersistedState {
     pub fn empty() -> Self {
         Self {
@@ -333,6 +365,7 @@ impl PersistedState {
             user_auto_assign_endpoint_kinds: BTreeMap::new(),
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
+            repository_membership: None,
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
@@ -1915,20 +1948,15 @@ pub enum DesiredStateCommand {
         note: String,
     },
     AppendEndpointProbeSamples {
-        /// Hour bucket key like `2026-02-07T12:00:00Z`.
         hour: String,
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
+    },
+    UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
 }
-
-// ---- WAL backward compatibility ----
-//
-// We keep legacy grants commands parseable so a node can upgrade and replay old WAL entries
-// without requiring operators to boot an old binary for snapshot/purge.
-//
-// TODO(remove-compat): remove this shim after all clusters have upgraded to schema v10 and have
-// completed at least one snapshot/purge cycle, then bump schema again (v11).
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2039,13 +2067,10 @@ enum DesiredStateCommandCompat {
     SetGeoDbUpdateSettings {
         settings: GeoDbUpdateSettingsCompat,
     },
-
     ReplaceUserAccess {
         user_id: String,
-        // New shape (schema v10+): membership-only endpoint list.
         #[serde(default)]
         endpoint_ids: Vec<String>,
-        // Legacy shape (schema v9): `items: [{ endpoint_id, note? }]`.
         #[serde(default)]
         items: Vec<UserAccessItemCompat>,
     },
@@ -2059,14 +2084,15 @@ enum DesiredStateCommandCompat {
     CompatNoop {
         note: String,
     },
-
     AppendEndpointProbeSamples {
         hour: String,
         from_node_id: String,
         samples: Vec<EndpointProbeAppendSample>,
     },
-
-    // Legacy grants commands (schema <= 9).
+    ReplaceRepositoryMembership {
+        membership: RepositoryMembership,
+    },
+    UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
     ReplaceUserGrants {
         user_id: String,
         grants: Vec<LegacyGrantCompat>,
@@ -2195,7 +2221,6 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 endpoint_ids,
                 items,
             } => {
-                // Support both v9 `items` and v10+ `endpoint_ids` WAL shapes.
                 let mut merged: BTreeSet<String> = endpoint_ids.into_iter().collect();
                 merged.extend(items.into_iter().map(|i| i.endpoint_id));
                 Self::ReplaceUserAccess {
@@ -2223,9 +2248,13 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
                 from_node_id,
                 samples,
             },
-
+            DesiredStateCommandCompat::ReplaceRepositoryMembership { membership } => {
+                Self::ReplaceRepositoryMembership { membership }
+            }
+            DesiredStateCommandCompat::UpdateRepositoryMemberRuntime(patch) => {
+                Self::UpdateRepositoryMemberRuntime(patch)
+            }
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
-                // Map legacy grants hard-cut to membership-only access list.
                 let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
                 Self::ReplaceUserAccess {
                     user_id,
@@ -3159,7 +3188,18 @@ impl DesiredStateCommand {
                     );
                     prune_endpoint_probe_hour_map(&mut history.hours);
                 }
-
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::ReplaceRepositoryMembership { membership } => {
+                apply_repository_membership(state, membership)?;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::UpdateRepositoryMemberRuntime(patch) => {
+                apply_repository_member_runtime_update(state, patch).map_err(|error| {
+                    StoreError::Migration {
+                        message: error.to_string(),
+                    }
+                })?;
                 Ok(DesiredStateApplyResult::Applied)
             }
         }
@@ -3273,13 +3313,10 @@ pub struct UsageSnapshot {
 
 #[derive(Debug)]
 pub struct JsonSnapshotStore {
-    state_path: PathBuf,
+    history_storage: HistoryStorage,
     state: PersistedState,
-    usage_path: PathBuf,
     usage: PersistedUsage,
-    inbound_ip_usage_path: PathBuf,
     inbound_ip_usage: PersistedInboundIpUsage,
-    tcp_connection_usage_path: PathBuf,
     tcp_connection_usage: PersistedTcpConnectionUsage,
 }
 
@@ -3287,13 +3324,9 @@ impl JsonSnapshotStore {
     pub fn load_or_init(init: StoreInit) -> Result<Self, StoreError> {
         fs::create_dir_all(&init.data_dir)?;
 
-        let state_path = init.data_dir.join("state.json");
-        let usage_path = init.data_dir.join("usage.json");
-        let inbound_ip_usage_path = init.data_dir.join("inbound_ip_usage.json");
-        let tcp_connection_usage_path = init.data_dir.join("tcp_connection_usage.json");
+        let history_storage = HistoryStorage::open(&init.data_dir);
         let (mut state, grant_id_to_membership_key, is_new_state, mut migrated) =
-            if state_path.exists() {
-                let bytes = fs::read(&state_path)?;
+            if let Some(bytes) = read_history_snapshot(&history_storage, STATE_KEY)? {
                 let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
                 let schema_version = raw
                     .get("schema_version")
@@ -3494,8 +3527,7 @@ impl JsonSnapshotStore {
             .collect::<BTreeMap<_, _>>();
 
         let mut usage_migrated = false;
-        let mut usage = if usage_path.exists() {
-            let bytes = fs::read(&usage_path)?;
+        let mut usage = if let Some(bytes) = read_history_snapshot(&history_storage, USAGE_KEY)? {
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let usage_schema_version = raw
                 .get("schema_version")
@@ -3560,19 +3592,20 @@ impl JsonSnapshotStore {
         }
 
         let mut inbound_ip_usage_migrated = false;
-        let mut inbound_ip_usage = if inbound_ip_usage_path.exists() {
-            let bytes = fs::read(&inbound_ip_usage_path)?;
-            serde_json::from_slice::<PersistedInboundIpUsage>(&bytes)?
-        } else {
-            PersistedInboundIpUsage::default()
-        };
+        let mut inbound_ip_usage =
+            if let Some(bytes) = read_history_snapshot(&history_storage, INBOUND_IP_USAGE_KEY)? {
+                serde_json::from_slice::<PersistedInboundIpUsage>(&bytes)?
+            } else {
+                PersistedInboundIpUsage::default()
+            };
         if inbound_ip_usage.normalize(&allowed_membership_keys) {
             inbound_ip_usage_migrated = true;
         }
 
         let mut tcp_connection_usage_migrated = false;
-        let mut tcp_connection_usage = if tcp_connection_usage_path.exists() {
-            let bytes = fs::read(&tcp_connection_usage_path)?;
+        let mut tcp_connection_usage = if let Some(bytes) =
+            read_history_snapshot(&history_storage, TCP_CONNECTION_USAGE_KEY)?
+        {
             serde_json::from_slice::<PersistedTcpConnectionUsage>(&bytes)?
         } else {
             PersistedTcpConnectionUsage::default()
@@ -3582,13 +3615,10 @@ impl JsonSnapshotStore {
         }
 
         let store = Self {
-            state_path,
+            history_storage,
             state,
-            usage_path,
             usage,
-            inbound_ip_usage_path,
             inbound_ip_usage,
-            tcp_connection_usage_path,
             tcp_connection_usage,
         };
 
@@ -3634,13 +3664,13 @@ impl JsonSnapshotStore {
 
     pub fn save(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.state)?;
-        write_atomic(&self.state_path, &bytes)?;
+        write_history_snapshot(&self.history_storage, STATE_KEY, &bytes)?;
         Ok(())
     }
 
     pub fn save_usage(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.usage)?;
-        write_atomic(&self.usage_path, &bytes)?;
+        write_history_snapshot(&self.history_storage, USAGE_KEY, &bytes)?;
         Ok(())
     }
 
@@ -3654,13 +3684,13 @@ impl JsonSnapshotStore {
 
     pub fn save_inbound_ip_usage(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.inbound_ip_usage)?;
-        write_atomic(&self.inbound_ip_usage_path, &bytes)?;
+        write_history_snapshot(&self.history_storage, INBOUND_IP_USAGE_KEY, &bytes)?;
         Ok(())
     }
 
     pub fn save_tcp_connection_usage(&self) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(&self.tcp_connection_usage)?;
-        write_atomic(&self.tcp_connection_usage_path, &bytes)?;
+        write_history_snapshot(&self.history_storage, TCP_CONNECTION_USAGE_KEY, &bytes)?;
         Ok(())
     }
 
@@ -4424,32 +4454,6 @@ fn endpoint_tag(kind: &EndpointKind, endpoint_id: &str) -> String {
         EndpointKind::Ss2022_2022Blake3Aes128Gcm => "ss2022",
     };
     format!("{kind_short}-{endpoint_id}")
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), io::Error> {
-    let dir = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
-    })?;
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    let tmp_path = dir.join(format!("{}.tmp", file_name.to_string_lossy()));
-    {
-        let mut file = fs::File::create(&tmp_path)?;
-        file.write_all(bytes)?;
-        file.write_all(b"\n")?;
-        let _ = file.sync_all();
-    }
-
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            let _ = fs::remove_file(path);
-        }
-    }
-
-    fs::rename(tmp_path, path)?;
-    Ok(())
 }
 
 #[cfg(test)]
