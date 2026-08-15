@@ -28,6 +28,7 @@ mod upgrade;
 pub(crate) mod upgrade_artifacts;
 mod util;
 mod xp;
+pub(crate) use xp::build_xp_ops_http_client;
 mod xp_env;
 
 pub(crate) use paths::Paths;

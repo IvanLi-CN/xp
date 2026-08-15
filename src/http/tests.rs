@@ -758,6 +758,7 @@ fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: fn(
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
+        join_session: None,
     }
     .apply(store.state_mut())
     .unwrap();
@@ -1914,7 +1915,11 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
     );
 
     let store = store.lock().await;
-    assert!(store.get_node(&decoded.token_id).is_none());
+    assert!(store.get_node(&decoded.token_id).is_some());
+    assert_eq!(
+        store.state().join_sessions[&decoded.token_id].status,
+        crate::join_session::JoinSessionStatus::Reserved
+    );
 }
 
 #[tokio::test]
@@ -8103,9 +8108,12 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         };
-        DesiredStateCommand::UpsertNode { node: node.clone() }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
         let endpoint_one = crate::domain::Endpoint {
             endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
             node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),

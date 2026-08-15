@@ -6,8 +6,20 @@ use tokio::sync::Mutex;
 use crate::{
     join_session::JoinSessionStatus,
     raft::{app::RaftFacade, types::raft_node_id_from_ulid},
-    state::{DesiredStateCommand, JsonSnapshotStore},
+    state::{DesiredStateApplyResult, DesiredStateCommand, JsonSnapshotStore},
 };
+
+async fn write_applied(
+    raft: &Arc<dyn RaftFacade>,
+    command: DesiredStateCommand,
+) -> anyhow::Result<DesiredStateApplyResult> {
+    match raft.client_write(command).await? {
+        crate::raft::types::ClientResponse::Ok { result } => Ok(result),
+        crate::raft::types::ClientResponse::Err { code, message, .. } => {
+            anyhow::bail!("join coordinator state write rejected: {code}: {message}")
+        }
+    }
+}
 
 pub fn spawn_join_coordinator(
     raft: Arc<dyn RaftFacade>,
@@ -52,8 +64,19 @@ async fn reconcile_once(
         if voters.contains(&node_id) {
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
-            raft.client_write(DesiredStateCommand::UpsertJoinSession { session })
-                .await?;
+            let node = store
+                .lock()
+                .await
+                .get_node(&session.node_id)
+                .ok_or_else(|| anyhow::anyhow!("pending join node is missing"))?;
+            write_applied(
+                &raft,
+                DesiredStateCommand::UpsertNode {
+                    node,
+                    join_session: Some(session),
+                },
+            )
+            .await?;
             continue;
         }
         let deadline =
@@ -73,20 +96,50 @@ async fn reconcile_once(
                 true,
             )
             .await?;
-            raft.client_write(DesiredStateCommand::DeleteNode {
-                node_id: session.node_id.clone(),
-                delete_endpoints: false,
-                expected_endpoint_ids: Vec::new(),
-            })
-            .await?;
             session.status = JoinSessionStatus::Expired;
             session.terminal_at = Some(Utc::now().to_rfc3339());
-            raft.client_write(DesiredStateCommand::UpsertJoinSession { session })
-                .await?;
+            let expected_endpoint_ids = store
+                .lock()
+                .await
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == session.node_id)
+                .map(|endpoint| endpoint.endpoint_id)
+                .collect();
+            write_applied(
+                &raft,
+                DesiredStateCommand::DeleteNode {
+                    node_id: session.node_id.clone(),
+                    delete_endpoints: true,
+                    expected_endpoint_ids,
+                    join_session: Some(session),
+                },
+            )
+            .await?;
             continue;
         }
         if session.status == JoinSessionStatus::Reserved {
-            continue;
+            let registered = metrics
+                .membership_config
+                .nodes()
+                .any(|(member_id, _)| *member_id == node_id);
+            if !registered {
+                continue;
+            }
+            session.status = JoinSessionStatus::LearnerRegistered;
+            let node = store
+                .lock()
+                .await
+                .get_node(&session.node_id)
+                .ok_or_else(|| anyhow::anyhow!("reserved join node is missing"))?;
+            write_applied(
+                &raft,
+                DesiredStateCommand::UpsertNode {
+                    node,
+                    join_session: Some(session.clone()),
+                },
+            )
+            .await?;
         }
         let _guard = crate::raft_membership_guard::membership_operation_gate()
             .lock_owned()
@@ -102,8 +155,19 @@ async fn reconcile_once(
             raft.add_voters(BTreeSet::from([node_id])).await?;
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
-            raft.client_write(DesiredStateCommand::UpsertJoinSession { session })
-                .await?;
+            let node = store
+                .lock()
+                .await
+                .get_node(&session.node_id)
+                .ok_or_else(|| anyhow::anyhow!("pending join node is missing"))?;
+            write_applied(
+                &raft,
+                DesiredStateCommand::UpsertNode {
+                    node,
+                    join_session: Some(session),
+                },
+            )
+            .await?;
         }
     }
     Ok(())

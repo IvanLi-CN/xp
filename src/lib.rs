@@ -36,6 +36,7 @@ pub mod raft;
 pub mod raft_membership_guard;
 pub mod reconcile;
 pub mod state;
+mod state_join_command;
 pub mod subscription;
 pub mod tcp_connection_usage;
 pub mod upgrade_job;

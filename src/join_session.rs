@@ -44,6 +44,28 @@ pub struct JoinSession {
 }
 
 impl JoinSession {
+    pub fn request_fingerprint(
+        node_name: &str,
+        access_host: &str,
+        api_base_url: &str,
+        csr_pem: &str,
+    ) -> Result<String, serde_json::Error> {
+        use sha2::Digest as _;
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "node_name": node_name,
+            "access_host": access_host,
+            "api_base_url": api_base_url,
+            "csr_pem": csr_pem,
+        }))?;
+        Ok(hex::encode(sha2::Sha256::digest(bytes)))
+    }
+
+    pub fn learner_registered(mut self, required_log_index: u64) -> Self {
+        self.required_log_index = self.required_log_index.max(required_log_index);
+        self.status = JoinSessionStatus::LearnerRegistered;
+        self
+    }
+
     pub fn validate_successor(&self, next: &Self) -> Result<(), &'static str> {
         if self.node_id != next.node_id
             || self.request_fingerprint != next.request_fingerprint
@@ -65,6 +87,8 @@ impl JoinSession {
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+
     use super::*;
 
     fn session(status: JoinSessionStatus) -> JoinSession {
@@ -107,5 +131,30 @@ mod tests {
         let mut next = regressed.clone();
         next.required_log_index = 0;
         assert!(regressed.validate_successor(&next).is_err());
+    }
+
+    #[test]
+    fn session_is_additive_to_legacy_upsert_node_command() {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum LegacyCommand {
+            UpsertNode { node: crate::domain::Node },
+        }
+        let node = crate::domain::Node {
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            access_host: xp_test_fixtures::host_fixture465().to_owned(),
+            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: Default::default(),
+        };
+        let command = crate::state::DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: Some(session(JoinSessionStatus::Reserved)),
+        };
+        let legacy: LegacyCommand =
+            serde_json::from_value(serde_json::to_value(command).unwrap()).unwrap();
+        let LegacyCommand::UpsertNode { node: decoded } = legacy;
+        assert_eq!(decoded, node);
     }
 }

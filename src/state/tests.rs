@@ -1586,9 +1586,12 @@ fn desired_state_apply_upsert_node_inserts_node() {
         quota_reset: NodeQuotaReset::default(),
     };
 
-    DesiredStateCommand::UpsertNode { node: node.clone() }
-        .apply(&mut state)
-        .unwrap();
+    DesiredStateCommand::UpsertNode {
+        node: node.clone(),
+        join_session: None,
+    }
+    .apply(&mut state)
+    .unwrap();
 
     assert_eq!(state.nodes.get(&node.node_id), Some(&node));
 }
@@ -2251,6 +2254,7 @@ fn desired_state_apply_delete_node_removes_probe_participation_for_removed_node(
         node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
+        join_session: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -2298,6 +2302,7 @@ fn desired_state_apply_delete_node_can_delete_referenced_endpoints() {
         node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_drop".to_string()],
+        join_session: None,
     }
     .apply(&mut state)
     .unwrap();
@@ -2344,6 +2349,7 @@ fn desired_state_apply_delete_node_rejects_changed_endpoint_set() {
         node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
+        join_session: None,
     }
     .apply(&mut state)
     .unwrap_err();
@@ -2377,6 +2383,7 @@ fn desired_state_apply_delete_node_rejects_removed_preview_endpoint_set() {
         node_id: xp_test_fixtures::label_node_drop().to_owned(),
         delete_endpoints: true,
         expected_endpoint_ids: vec!["endpoint_previewed".to_string()],
+        join_session: None,
     }
     .apply(&mut state)
     .unwrap_err();

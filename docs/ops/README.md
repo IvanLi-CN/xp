@@ -251,9 +251,13 @@ Deployment note:
 - `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
 - The host-managed deploy path is therefore no longer container-only; the same one-shot flow now covers host-managed service nodes as well as official single-image container nodes.
 - During a fresh single-image join, the wrapper keeps the authenticated XP learner running while
-  its initial Raft state is replicated. Managed-default reconcile starts after local internal
-  authentication observes that replicated state; unrelated authentication and network failures
-  still fail immediately.
+  its initial Raft state is replicated. Managed-default reconcile uses the local XP API as the
+  readiness gate and forwards writes through local Raft only after local internal authentication
+  observes that replicated state; unrelated authentication and network failures still fail immediately.
+- Before issuing a fresh join token reservation, the leader verifies that every current voter
+  exposes `cluster.join.staged-v1`. Finish the XP rolling upgrade first when the API returns a
+  staged-join capability conflict. Host-managed startup keeps managed-default reconciliation active
+  until it succeeds after learner replication.
 
 Example host-managed bootstrap (systemd / RHEL-family included):
 

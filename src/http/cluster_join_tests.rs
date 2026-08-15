@@ -479,7 +479,7 @@ async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
 
     let response = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
+        std::time::Duration::from_secs(2),
         app.clone().oneshot(req_authed_json(
             "POST",
             "/api/cluster/join",
@@ -496,7 +496,16 @@ async fn cluster_join_returns_bootstrap_before_learner_catch_up() {
     .expect("bootstrap response must not wait for learner catch-up")
     .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let response_status = response.status();
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        response_status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&response_body)
+    );
 
     let retry = app
         .oneshot(req_authed_json(

@@ -89,10 +89,7 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
     let bootstrap_sender = bootstrap_sender_is_allowed(
         sender_is_member,
         state_is_pristine,
-        auth.bootstrap_sender
-            .as_ref()
-            .map(|(sender_id, _)| sender_id),
-        &verified.context.sender_id,
+        auth.bootstrap_sender.is_some(),
     );
     if !sender_is_member && !bootstrap_sender {
         return (
@@ -133,12 +130,9 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
 fn bootstrap_sender_is_allowed(
     sender_is_member: bool,
     state_is_pristine: bool,
-    bootstrap_sender_id: Option<&String>,
-    sender_id: &str,
+    has_bootstrap_marker: bool,
 ) -> bool {
-    !sender_is_member
-        && state_is_pristine
-        && bootstrap_sender_id.is_some_and(|expected| expected == sender_id)
+    !sender_is_member && state_is_pristine && has_bootstrap_marker
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -174,26 +168,10 @@ mod tests {
     use super::bootstrap_sender_is_allowed;
 
     #[test]
-    fn bootstrap_sender_requires_pristine_state_and_exact_identity() {
-        let leader = "leader".to_string();
-        assert!(bootstrap_sender_is_allowed(
-            false,
-            true,
-            Some(&leader),
-            "leader"
-        ));
-        assert!(!bootstrap_sender_is_allowed(
-            false,
-            true,
-            Some(&leader),
-            "removed-node"
-        ));
-        assert!(!bootstrap_sender_is_allowed(
-            false,
-            false,
-            Some(&leader),
-            "leader"
-        ));
-        assert!(!bootstrap_sender_is_allowed(false, true, None, "leader"));
+    fn bootstrap_sender_requires_pristine_state_and_marker() {
+        assert!(bootstrap_sender_is_allowed(false, true, true));
+        assert!(!bootstrap_sender_is_allowed(true, true, true));
+        assert!(!bootstrap_sender_is_allowed(false, false, true));
+        assert!(!bootstrap_sender_is_allowed(false, true, false));
     }
 }

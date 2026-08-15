@@ -108,6 +108,10 @@
   the leader coordinator waits for the recorded log index and promotes the learner. Same-request
   retries replay the reservation without extending its 10-minute activation deadline. Expired
   sessions are cleaned by the leader; existing-node recovery remains separate.
+- Staged fresh joins require every current voter to expose `cluster.join.staged-v1`; operators must
+  finish the XP rolling upgrade before adding a fresh node. The pristine learner accepts only signed
+  internal-auth v2 Raft traffic, but any elected leader in the authenticated cluster may complete
+  its initial replication after failover.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the

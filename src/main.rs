@@ -51,9 +51,9 @@ async fn reconcile_managed_defaults_with_startup_retries(
     intent: xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
     raft_facade: Arc<dyn xp::raft::app::RaftFacade>,
 ) {
-    const ATTEMPTS: usize = 8;
-
-    for attempt in 1..=ATTEMPTS {
+    let mut attempt = 0_u64;
+    loop {
+        attempt += 1;
         let endpoints = {
             let store = store.lock().await;
             store
@@ -62,7 +62,14 @@ async fn reconcile_managed_defaults_with_startup_retries(
                 .filter(|endpoint| endpoint.node_id == node_id)
                 .collect::<Vec<_>>()
         };
-        let mut writer = |cmd| async { raft_facade.client_write(cmd).await.map(|_| ()) };
+        let mut writer = |cmd| async {
+            match raft_facade.client_write(cmd).await? {
+                xp::raft::types::ClientResponse::Ok { .. } => Ok(()),
+                xp::raft::types::ClientResponse::Err { code, message, .. } => {
+                    anyhow::bail!("{code}: {message}")
+                }
+            }
+        };
         match xp::managed_default_endpoints::reconcile_managed_default_endpoints(
             &data_dir,
             &node_id,
@@ -82,22 +89,13 @@ async fn reconcile_managed_defaults_with_startup_retries(
                 }
                 return;
             }
-            Err(err) if attempt < ATTEMPTS => {
+            Err(err) => {
                 tracing::warn!(
                     attempt,
-                    max_attempts = ATTEMPTS,
                     error = %err,
                     "managed default endpoint reconcile failed after startup; retrying"
                 );
-                tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
-            }
-            Err(err) => {
-                tracing::error!(
-                    attempt,
-                    max_attempts = ATTEMPTS,
-                    error = %err,
-                    "managed default endpoint reconcile failed after startup retries"
-                );
+                tokio::time::sleep(Duration::from_secs(attempt.min(10))).await;
             }
         }
     }
@@ -675,7 +673,10 @@ async fn bootstrap_upsert_node(
     let mut backoff = Duration::from_millis(100);
     for attempt in 0..5u8 {
         match raft
-            .client_write(xp::state::DesiredStateCommand::UpsertNode { node: node.clone() })
+            .client_write(xp::state::DesiredStateCommand::UpsertNode {
+                node: node.clone(),
+                join_session: None,
+            })
             .await
         {
             Ok(_resp) => return Ok(()),

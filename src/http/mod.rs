@@ -22,7 +22,6 @@ use chrono::{DateTime, SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use sha2::{Digest as _, Sha256};
 use tokio::{
     sync::{Mutex, mpsc},
     time::Duration,
@@ -112,6 +111,8 @@ use crate::{
 };
 
 mod capabilities;
+mod join_capability;
+mod join_protocol;
 mod version_check;
 mod web_assets;
 
@@ -1971,72 +1972,20 @@ async fn cluster_join(
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
         .await;
-    let request_fingerprint = hex::encode(Sha256::digest(
-        serde_json::to_vec(&json!({
-            "node_name": req.node_name,
-            "access_host": req.access_host,
-            "api_base_url": req.api_base_url,
-            "csr_pem": req.csr_pem,
-        }))
-        .map_err(|e| ApiError::internal(e.to_string()))?,
-    ));
-    let existing_session = {
-        let store = state.store.lock().await;
-        store.state().join_sessions.get(&node_id).cloned()
-    };
-    if existing_session.is_none() {
-        token
-            .validate_at(Utc::now())
-            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
-    }
-    let activation_deadline = existing_session
-        .as_ref()
-        .map(|session| session.activation_deadline.clone())
-        .unwrap_or_else(|| {
-            (Utc::now()
-                + chrono::Duration::from_std(crate::join_session::ACTIVATION_TIMEOUT)
-                    .expect("join activation timeout fits chrono duration"))
-            .to_rfc3339()
-        });
-
-    let signed_cert_pem = if let Some(session) = existing_session.as_ref() {
-        if session.request_fingerprint != request_fingerprint {
-            return Err(ApiError::invalid_request(
-                "join token reserved by another request",
-            ));
-        }
-        if session.status == crate::join_session::JoinSessionStatus::Expired {
-            return Err(ApiError::invalid_request("join token already used"));
-        }
-        session.signed_cert_pem.clone()
-    } else {
-        if state.store.lock().await.get_node(&node_id).is_some() {
-            return Err(ApiError::invalid_request("join token already used"));
-        }
-        let signed_cert_pem = crate::cluster_identity::sign_node_csr(
-            &state.cluster.cluster_id,
-            &ca_key_pem,
-            &req.csr_pem,
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-        let _ = raft_write(
-            &state,
-            crate::state::DesiredStateCommand::UpsertJoinSession {
-                session: crate::join_session::JoinSession {
-                    node_id: node_id.clone(),
-                    request_fingerprint: request_fingerprint.clone(),
-                    signed_cert_pem: signed_cert_pem.clone(),
-                    token_expires_at: token.expires_at.to_rfc3339(),
-                    activation_deadline: activation_deadline.clone(),
-                    required_log_index: 0,
-                    status: crate::join_session::JoinSessionStatus::Reserved,
-                    terminal_at: None,
-                },
-            },
-        )
-        .await?;
-        signed_cert_pem
-    };
+    join_capability::require_on_voters(&state).await?;
+    let request_fingerprint = crate::join_session::JoinSession::request_fingerprint(
+        &req.node_name,
+        &req.access_host,
+        &req.api_base_url,
+        &req.csr_pem,
+    )
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let reservation =
+        join_protocol::resolve_reservation(&state, &req, &token, &request_fingerprint, &ca_key_pem)
+            .await?;
+    let existing_session = reservation.existing;
+    let activation_deadline = reservation.activation_deadline;
+    let signed_cert_pem = reservation.signed_cert_pem;
     if existing_session.as_ref().is_some_and(|session| {
         matches!(
             session.status,
@@ -2073,6 +2022,7 @@ async fn cluster_join(
         &state,
         crate::state::DesiredStateCommand::UpsertNode {
             node: leader_node.clone(),
+            join_session: None,
         },
     )
     .await?;
@@ -2085,6 +2035,30 @@ async fn cluster_join(
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
+
+    if existing_session.is_none() {
+        let reservation_log_index = raft_metrics(&state)
+            .last_log_index
+            .unwrap_or(0)
+            .saturating_add(1);
+        let _ = raft_write(
+            &state,
+            crate::state::DesiredStateCommand::UpsertNode {
+                node: node.clone(),
+                join_session: Some(crate::join_session::JoinSession {
+                    node_id: node_id.clone(),
+                    request_fingerprint: request_fingerprint.clone(),
+                    signed_cert_pem: signed_cert_pem.clone(),
+                    token_expires_at: token.expires_at.to_rfc3339(),
+                    activation_deadline: activation_deadline.clone(),
+                    required_log_index: reservation_log_index,
+                    status: crate::join_session::JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                }),
+            },
+        )
+        .await?;
+    }
 
     state
         .raft
@@ -2101,7 +2075,10 @@ async fn cluster_join(
 
     let upsert_result = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        },
     )
     .await;
     if let Err(err) = upsert_result {
@@ -2109,20 +2086,34 @@ async fn cluster_join(
         return Err(err);
     }
 
-    let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
+    let reserved_log_index = state
+        .store
+        .lock()
+        .await
+        .state()
+        .join_sessions
+        .get(&node_id)
+        .map(|session| session.required_log_index)
+        .unwrap_or(0);
+    let required_log_index = raft_metrics(&state)
+        .last_log_index
+        .unwrap_or(0)
+        .max(reserved_log_index);
+    let session = state
+        .store
+        .lock()
+        .await
+        .state()
+        .join_sessions
+        .get(&node_id)
+        .cloned()
+        .expect("join reservation was committed")
+        .learner_registered(required_log_index);
     let _ = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertJoinSession {
-            session: crate::join_session::JoinSession {
-                node_id: node_id.clone(),
-                request_fingerprint,
-                signed_cert_pem: signed_cert_pem.clone(),
-                token_expires_at: token.expires_at.to_rfc3339(),
-                activation_deadline,
-                required_log_index,
-                status: crate::join_session::JoinSessionStatus::LearnerRegistered,
-                terminal_at: None,
-            },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node,
+            join_session: Some(session),
         },
     )
     .await?;
@@ -2182,6 +2173,7 @@ async fn rollback_joined_learner(
                 node_id: node_id.to_string(),
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
+                join_session: None,
             },
         )
         .await
@@ -4018,7 +4010,10 @@ async fn admin_patch_node(
 
     let _ = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        },
     )
     .await?;
     let probe = {
@@ -4193,6 +4188,7 @@ async fn admin_delete_node(
                 node_id: node_id.clone(),
                 delete_endpoints: query.delete_endpoints,
                 expected_endpoint_ids,
+                join_session: None,
             },
         ),
     )
