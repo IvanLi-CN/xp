@@ -84,15 +84,13 @@ impl RepositoryReplicaRuntime {
             segments.truncate(limit);
             return Ok(segments);
         }
-        let mut segments = self
+        let segments = self
             .storage
             .repository_history_segments_page(after_id, limit)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
             .into_iter()
             .map(StoredSegment::from_sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
-        segments.sort_by(|left, right| left.id.cmp(&right.id));
-        segments.truncate(limit);
         Ok(segments)
     }
 

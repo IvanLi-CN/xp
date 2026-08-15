@@ -802,6 +802,9 @@ pub(crate) use source::source_epoch;
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
 
 #[cfg(test)]
+#[path = "runtime/sqlite_order_tests.rs"]
+mod sqlite_order_tests;
+#[cfg(test)]
 #[path = "runtime/sync_tests.rs"]
 mod sync_tests;
 #[cfg(test)]
