@@ -434,6 +434,7 @@ fn ensure_schema(connection: &Connection) -> Result<()> {
             CREATE TABLE IF NOT EXISTS repository_history_segments (
                 id TEXT PRIMARY KEY NOT NULL,
                 closed_at INTEGER NOT NULL DEFAULT 0,
+                contains_tombstone INTEGER NOT NULL DEFAULT 1,
                 payload BLOB NOT NULL
             );
             CREATE TABLE IF NOT EXISTS repository_history_export_leases (
@@ -484,13 +485,22 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
             )
             .map_err(sqlite_error)?;
     }
+    if !columns.contains("contains_tombstone") {
+        connection
+            .execute(
+                "ALTER TABLE repository_history_segments
+                 ADD COLUMN contains_tombstone INTEGER NOT NULL DEFAULT 1",
+                [],
+            )
+            .map_err(sqlite_error)?;
+    }
     connection
-        .execute(
+        .execute_batch(
             "CREATE INDEX IF NOT EXISTS repository_history_segments_closed_at
-             ON repository_history_segments (closed_at ASC, id ASC)",
-            [],
+               ON repository_history_segments (closed_at ASC, id ASC);
+             CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
+               ON repository_history_segments (contains_tombstone DESC, id ASC);",
         )
-        .map(|_| ())
         .map_err(sqlite_error)
 }
 
@@ -652,14 +662,17 @@ fn upsert_repository_history_segment(
 ) -> Result<()> {
     transaction
         .execute(
-            "INSERT INTO repository_history_segments (id, closed_at, payload)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO repository_history_segments
+                (id, closed_at, contains_tombstone, payload)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(id) DO UPDATE SET
                closed_at = excluded.closed_at,
+               contains_tombstone = excluded.contains_tombstone,
                payload = excluded.payload",
             params![
                 row.id,
                 i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
+                row.contains_tombstone,
                 row.payload,
             ],
         )
@@ -713,13 +726,15 @@ fn maintain_sqlite(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn finish_post_commit_maintenance(result: Result<()>) {
+fn finish_post_commit_maintenance(result: Result<()>) -> bool {
     if let Err(error) = result {
         warn!(
             error = %error,
             "repository mutation committed; deferred bounded SQLite maintenance"
         );
+        return true;
     }
+    false
 }
 
 fn switch_to_json(backend: &mut Backend, data_dir: &Path) {

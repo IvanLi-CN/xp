@@ -22,7 +22,7 @@ fn maintenance_failure_keeps_runtime_and_sqlite_committed() {
     assert_eq!(storage.repository_history_record_count().expect("count"), 1);
     assert_eq!(
         runtime.runtime_status(12).expect("status").storage_mode,
-        "sqlite"
+        "sqlite_degraded"
     );
 
     storage.set_maintenance_failure_for_test(false);

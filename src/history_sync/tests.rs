@@ -303,6 +303,48 @@ fn receiver_verifies_signatures_hash_chain_and_isolates_valid_forks() {
 }
 
 #[test]
+fn receiver_rejects_a_fork_when_the_durable_epoch_is_exhausted() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::default());
+    let at_limit = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", i64::MAX as u64, "runtime", 0).expect("limit cursor"),
+        vec![record(b"original", false)],
+        None,
+        10,
+        11,
+    )
+    .expect("limit segment")
+    .sign(&key)
+    .expect("signed limit segment");
+    receiver
+        .accept(&at_limit, &identity)
+        .expect("initial segment");
+    let fork = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", i64::MAX as u64, "runtime", 0).expect("limit cursor"),
+        vec![record(b"fork", false)],
+        None,
+        10,
+        11,
+    )
+    .expect("fork segment")
+    .sign(&key)
+    .expect("signed fork");
+
+    assert!(matches!(
+        receiver.accept(&fork, &identity),
+        Err(ProtocolError::InvalidSegment(
+            "cursor exceeds durable integer range"
+        ))
+    ));
+    receiver
+        .checkpoint()
+        .expect("checkpoint remains restorable");
+}
+
+#[test]
 fn receiver_rejects_a_valid_segment_from_another_cluster() {
     let key = signing_key();
     let identity = identity(&key);

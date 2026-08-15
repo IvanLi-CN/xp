@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
+mod segments;
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.
@@ -69,7 +70,13 @@ pub(crate) struct RepositoryHistoryTombstone {
 pub(crate) struct RepositoryHistorySegmentRow {
     pub(crate) id: String,
     pub(crate) closed_at_unix_seconds: u64,
+    pub(crate) contains_tombstone: bool,
     pub(crate) payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RepositoryCommitOutcome {
+    pub(crate) maintenance_degraded: bool,
 }
 
 /// All durable changes caused by accepting one repository segment. Keeping these changes with
@@ -238,7 +245,7 @@ impl HistoryStorage {
         &self,
         mutation: RepositoryReplicaMutation,
         control_payload: &[u8],
-    ) -> Result<()> {
+    ) -> Result<RepositoryCommitOutcome> {
         #[cfg(test)]
         let fail_maintenance = self
             .fail_maintenance_after_commit
@@ -271,8 +278,10 @@ impl HistoryStorage {
         };
         #[cfg(not(test))]
         let maintenance_result = maintain_sqlite(connection);
-        finish_post_commit_maintenance(maintenance_result);
-        Ok(())
+        let maintenance_degraded = finish_post_commit_maintenance(maintenance_result);
+        Ok(RepositoryCommitOutcome {
+            maintenance_degraded,
+        })
     }
 
     pub(crate) fn replace_repository_history_records(
@@ -832,110 +841,6 @@ impl HistoryStorage {
                     )))
                 },
             )
-            .map_err(sqlite_error)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn upsert_repository_history_segments(
-        &self,
-        rows: &[RepositoryHistorySegmentRow],
-    ) -> Result<()> {
-        if rows.is_empty() {
-            return Ok(());
-        }
-        let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Err(HistoryStorageError(
-                "repository history row storage requires SQLite".to_owned(),
-            ));
-        };
-        let transaction = connection.transaction().map_err(sqlite_error)?;
-        for row in rows {
-            transaction
-                .execute(
-                    "INSERT INTO repository_history_segments (id, closed_at, payload)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(id) DO UPDATE SET
-                       closed_at = excluded.closed_at,
-                       payload = excluded.payload",
-                    params![
-                        row.id,
-                        i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
-                        row.payload,
-                    ],
-                )
-                .map_err(sqlite_error)?;
-        }
-        transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
-    }
-
-    /// Signed segments are a short-lived anti-entropy cache. Reads are always page-bounded so
-    /// a repository never rehydrates the retained SQLite history window into process memory.
-    pub(crate) fn repository_history_segments_page(
-        &self,
-        after_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
-        let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
-        };
-        let mut statement = connection
-            .prepare(
-                "SELECT id, closed_at, payload FROM repository_history_segments
-                 WHERE (?1 IS NULL OR id > ?1)
-                 ORDER BY id ASC
-                 LIMIT ?2",
-            )
-            .map_err(sqlite_error)?;
-        let rows = statement
-            .query_map(
-                params![after_id, i64::try_from(limit).unwrap_or(i64::MAX),],
-                |row| {
-                    Ok(RepositoryHistorySegmentRow {
-                        id: row.get(0)?,
-                        closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
-                            .unwrap_or(u64::MAX),
-                        payload: row.get(2)?,
-                    })
-                },
-            )
-            .map_err(sqlite_error)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(sqlite_error)
-    }
-
-    pub(crate) fn repository_history_segments_by_ids(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
-        };
-        let placeholders = std::iter::repeat_n("?", ids.len())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let sql = format!(
-            "SELECT id, closed_at, payload FROM repository_history_segments
-             WHERE id IN ({placeholders}) ORDER BY id ASC"
-        );
-        let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
-        let rows = statement
-            .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
-                Ok(RepositoryHistorySegmentRow {
-                    id: row.get(0)?,
-                    closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(1)?)
-                        .unwrap_or(u64::MAX),
-                    payload: row.get(2)?,
-                })
-            })
-            .map_err(sqlite_error)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error)
     }
 

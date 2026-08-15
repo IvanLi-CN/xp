@@ -395,15 +395,21 @@ impl RepositoryReplicaRuntime {
         let result = if self.uses_sqlite_history() {
             self.storage
                 .commit_repository_replica_mutation(mutation.into_storage_mutation(), &bytes)
+                .map(|outcome| outcome.maintenance_degraded)
         } else {
-            self.storage.write(REPOSITORY_REPLICA_KEY, &bytes)
+            self.storage
+                .write(REPOSITORY_REPLICA_KEY, &bytes)
+                .map(|()| false)
         };
-        if let Err(error) = result {
-            self.restore(previous_receiver, previous_snapshot.clone())?;
-            if self.uses_sqlite_history() {
-                self.storage_degraded = true;
+        match result {
+            Ok(maintenance_degraded) => self.storage_degraded |= maintenance_degraded,
+            Err(error) => {
+                self.restore(previous_receiver, previous_snapshot.clone())?;
+                if self.uses_sqlite_history() {
+                    self.storage_degraded = true;
+                }
+                return Err(RepositoryRuntimeError::Storage(error.to_string()));
             }
-            return Err(RepositoryRuntimeError::Storage(error.to_string()));
         }
         Ok(())
     }
@@ -424,16 +430,23 @@ impl RepositoryReplicaRuntime {
         let result = if self.uses_sqlite_history() {
             self.storage
                 .commit_repository_replica_mutation(mutation.into_storage_mutation(), &bytes)
+                .map(|outcome| outcome.maintenance_degraded)
         } else {
-            self.storage.write(REPOSITORY_REPLICA_KEY, &bytes)
+            self.storage
+                .write(REPOSITORY_REPLICA_KEY, &bytes)
+                .map(|()| false)
         };
-        if let Err(error) = result {
-            self.snapshot = previous_snapshot;
-            self.tombstones = TombstoneLedger::from_checkpoint(self.snapshot.tombstones.clone())?;
-            if self.uses_sqlite_history() {
-                self.storage_degraded = true;
+        match result {
+            Ok(maintenance_degraded) => self.storage_degraded |= maintenance_degraded,
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                self.tombstones =
+                    TombstoneLedger::from_checkpoint(self.snapshot.tombstones.clone())?;
+                if self.uses_sqlite_history() {
+                    self.storage_degraded = true;
+                }
+                return Err(RepositoryRuntimeError::Storage(error.to_string()));
             }
-            return Err(RepositoryRuntimeError::Storage(error.to_string()));
         }
         Ok(())
     }

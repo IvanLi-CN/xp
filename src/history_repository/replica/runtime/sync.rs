@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::history_sync::{
     MAX_DECOMPRESSION_EXPANSION_RATIO, MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES,
-    SignedSegment,
+    SignedSegment, SyncRecord,
 };
 
 use super::{
@@ -439,13 +439,13 @@ impl RepositoryReplicaRuntime {
         )?;
         let has_next_page = segments.len() > super::REPLICATION_SEGMENT_PAGE_SIZE;
         segments.truncate(super::REPLICATION_SEGMENT_PAGE_SIZE);
-        let next_segment_id = has_next_page.then(|| {
-            segments
-                .last()
-                .expect("nonempty page had an extra segment")
-                .id
-                .clone()
-        });
+        let next_segment_id = if has_next_page {
+            Some(segment_sync_cursor(
+                segments.last().expect("nonempty page had an extra segment"),
+            ))
+        } else {
+            None
+        };
         Ok(RepositoryReplicaSummary {
             segment_ids: segments.iter().map(|segment| segment.id.clone()).collect(),
             partitions: if deep_verification && after_segment_id.is_none() {
@@ -558,7 +558,7 @@ impl RepositoryReplicaRuntime {
         candidates.truncate(MAX_REPAIR_SEGMENTS);
         let candidate_ids = candidates
             .iter()
-            .map(|segment| segment.id.clone())
+            .map(segment_sync_cursor)
             .collect::<Vec<_>>();
         let payload = RepositoryRepairBatch {
             segments: candidates
@@ -745,15 +745,29 @@ fn accumulate_record_partitions<'a>(
 
 fn repair_segment_order(
     segment: &super::StoredSegment,
-) -> Result<(String, u64, String, u64), RepositoryRuntimeError> {
+) -> Result<(bool, String, u64, String, u64), RepositoryRuntimeError> {
     let signed = SignedSegment::from_wire(&segment.wire)?;
     let first_cursor = signed.canonical().first_cursor();
     Ok((
+        !signed
+            .canonical()
+            .records()
+            .iter()
+            .any(SyncRecord::is_tombstone),
         first_cursor.source_node_id().to_owned(),
         first_cursor.source_epoch(),
         first_cursor.stream().to_owned(),
         first_cursor.sequence(),
     ))
+}
+
+fn segment_sync_cursor(segment: &super::StoredSegment) -> String {
+    let phase = if super::storage::segment_tombstone_rank(segment) {
+        'r'
+    } else {
+        't'
+    };
+    format!("{phase}:{}", segment.id)
 }
 
 fn record_partition_summary(

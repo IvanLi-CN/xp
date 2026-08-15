@@ -30,6 +30,97 @@ fn load(path: &std::path::Path) -> RepositoryReplicaRuntime {
 }
 
 #[test]
+fn repair_and_relay_pages_send_tombstone_segments_first() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let identity = identity();
+    let signed = |stream: &str, tombstone: bool| {
+        CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 1, stream, 0).expect("cursor"),
+            vec![SyncRecord::new(
+                "subject-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"same-key".to_vec(),
+                b"payload".to_vec(),
+                tombstone,
+            )],
+            None,
+            10,
+            11,
+        )
+        .expect("segment")
+        .sign(&signing_key)
+        .expect("signed segment")
+        .wire_bytes()
+        .expect("wire")
+    };
+    let record_wire = signed("runtime", false);
+    let tombstone_wire = signed("tombstone", true);
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = false;
+    runtime.snapshot.segments = vec![
+        StoredSegment {
+            id: "a-record".to_owned(),
+            closed_at_unix_seconds: 10,
+            identity: identity.clone(),
+            wire: record_wire.clone(),
+        },
+        StoredSegment {
+            id: "z-tombstone".to_owned(),
+            closed_at_unix_seconds: 11,
+            identity,
+            wire: tombstone_wire.clone(),
+        },
+    ];
+
+    let summary = runtime.replication_summary().expect("summary");
+    assert_eq!(summary.segment_ids, ["z-tombstone", "a-record"]);
+    let repair = runtime
+        .repair_batch(&["a-record".to_owned(), "z-tombstone".to_owned()])
+        .expect("repair batch");
+    assert!(
+        SignedSegment::from_wire(&repair.segments[0].wire)
+            .expect("repair tombstone")
+            .canonical()
+            .records()[0]
+            .is_tombstone()
+    );
+    let relay = runtime.relay_batch("repository-b").expect("relay batch");
+    assert!(
+        SignedSegment::from_wire(&relay.batch.segments[0].wire)
+            .expect("relay tombstone")
+            .canonical()
+            .records()[0]
+            .is_tombstone()
+    );
+
+    let sqlite_temporary = tempfile::tempdir().expect("SQLite temporary directory");
+    let mut sqlite_runtime = load(sqlite_temporary.path());
+    sqlite_runtime
+        .receive_wire("cluster-a", &identity(), &record_wire, 12)
+        .expect("store ordinary segment");
+    sqlite_runtime
+        .receive_wire("cluster-a", &identity(), &tombstone_wire, 13)
+        .expect("store tombstone segment");
+    let sqlite_summary = sqlite_runtime
+        .replication_summary()
+        .expect("SQLite summary");
+    let sqlite_repair = sqlite_runtime
+        .repair_batch(&sqlite_summary.segment_ids)
+        .expect("SQLite repair");
+    assert!(
+        SignedSegment::from_wire(&sqlite_repair.segments[0].wire)
+            .expect("SQLite tombstone")
+            .canonical()
+            .records()[0]
+            .is_tombstone()
+    );
+}
+
+#[test]
 fn relay_repair_pages_through_the_full_bounded_segment_history_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let identity = identity();

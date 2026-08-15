@@ -29,9 +29,11 @@ impl RepositoryReplicaRuntime {
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
         }
-        self.storage
+        let outcome = self
+            .storage
             .commit_repository_replica_mutation(mutation, &bytes)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.storage_degraded |= outcome.maintenance_degraded;
         self.snapshot = migrated_snapshot;
         Ok(())
     }
@@ -61,14 +63,24 @@ impl RepositoryReplicaRuntime {
         limit: usize,
     ) -> Result<Vec<StoredSegment>, RepositoryRuntimeError> {
         if !self.uses_sqlite_history() {
+            let (after_tombstone_rank, after_id) = segment_sync_cursor_parts(after_id);
             let mut segments = self
                 .snapshot
                 .segments
                 .iter()
-                .filter(|segment| after_id.is_none_or(|after_id| segment.id.as_str() > after_id))
                 .cloned()
+                .map(|segment| (segment_tombstone_rank(&segment), segment))
                 .collect::<Vec<_>>();
-            segments.sort_by(|left, right| left.id.cmp(&right.id));
+            segments.sort_by(|(left_rank, left), (right_rank, right)| {
+                (left_rank, &left.id).cmp(&(right_rank, &right.id))
+            });
+            let mut segments = segments
+                .into_iter()
+                .filter(|(rank, segment)| {
+                    (*rank, segment.id.as_str()) > (after_tombstone_rank, after_id)
+                })
+                .map(|(_, segment)| segment)
+                .collect::<Vec<_>>();
             segments.truncate(limit);
             return Ok(segments);
         }
@@ -405,6 +417,24 @@ impl RepositoryReplicaRuntime {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
 }
+
+fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str) {
+    match cursor {
+        Some(cursor) if cursor.starts_with("t:") => (false, &cursor[2..]),
+        Some(cursor) if cursor.starts_with("r:") => (true, &cursor[2..]),
+        Some(_) | None => (false, ""),
+    }
+}
+
+pub(super) fn segment_tombstone_rank(segment: &StoredSegment) -> bool {
+    SignedSegment::from_wire(&segment.wire).map_or(true, |signed| {
+        !signed
+            .canonical()
+            .records()
+            .iter()
+            .any(SyncRecord::is_tombstone)
+    })
+}
 pub(crate) fn record_received_at(record: &StoredRecord) -> u64 {
     if record.received_at_unix_seconds == 0 {
         record.observed_at_unix_seconds
@@ -505,6 +535,11 @@ impl StoredSegment {
         Ok(RepositoryHistorySegmentRow {
             id: self.id.clone(),
             closed_at_unix_seconds: self.closed_at_unix_seconds,
+            contains_tombstone: SignedSegment::from_wire(&self.wire)?
+                .canonical()
+                .records()
+                .iter()
+                .any(SyncRecord::is_tombstone),
             payload: serde_json::to_vec(self)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
         })

@@ -749,6 +749,12 @@ impl SegmentReceiver {
                             .ok_or(ProtocolError::InvalidSegment(
                                 "source epoch overflows after a fork",
                             ))?;
+                    Cursor::new(
+                        first.source_node_id.clone(),
+                        next_epoch,
+                        first.stream.clone(),
+                        0,
+                    )?;
                     self.quarantined_streams.insert(stream_key, next_epoch);
                     return Err(ProtocolError::ForkDetected { next_epoch });
                 }
