@@ -12,6 +12,7 @@ use axum::{
 use tokio::sync::Mutex;
 
 use crate::{
+    domain::Node,
     internal_auth::{self, InternalRoute},
     raft::types::{NodeId, TypeConfig},
     state::JsonSnapshotStore,
@@ -75,15 +76,33 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         &auth.local_node_id,
     ) {
         Ok(verified) if verified.context.route == InternalRoute::MeshV2 => verified,
-        _ => return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response(),
+        Ok(verified) => {
+            tracing::warn!(
+                sender_id = %verified.context.sender_id,
+                route = %verified.context.route.as_str(),
+                "rejected Raft request with an invalid internal route"
+            );
+            return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "rejected unauthenticated Raft request");
+            return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
+        }
     };
-    let sender_is_member = auth
-        .store
-        .lock()
-        .await
-        .get_node(&verified.context.sender_id)
-        .is_some();
-    if !sender_is_member {
+    let store = auth.store.lock().await;
+    let sender_is_member = store.get_node(&verified.context.sender_id).is_some();
+    let nodes = store.list_nodes();
+    // A freshly joined node has no replicated state yet. Its first authenticated Raft request
+    // is what installs the member list, so requiring the sender to already exist would make
+    // bootstrap impossible. The CA signature still authenticates the request; once any state
+    // exists, keep the membership check strict so removed nodes cannot resume replication.
+    let initial_bootstrap = is_initial_raft_bootstrap(&nodes, &auth.local_node_id);
+    drop(store);
+    if !sender_is_member && !initial_bootstrap {
+        tracing::warn!(
+            sender_id = %verified.context.sender_id,
+            "rejected Raft request from a non-member"
+        );
         return (
             StatusCode::UNAUTHORIZED,
             "raft sender is not a cluster member",
@@ -106,6 +125,10 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         );
     }
     response
+}
+
+fn is_initial_raft_bootstrap(nodes: &[Node], local_node_id: &str) -> bool {
+    nodes.is_empty() || (nodes.len() == 1 && nodes[0].node_id == local_node_id)
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -134,4 +157,32 @@ async fn install_snapshot(
     >,
 > {
     Json(state.raft.install_snapshot(req).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::NodeQuotaReset;
+
+    fn node(node_id: &str) -> Node {
+        Node {
+            node_id: node_id.to_owned(),
+            node_name: node_id.to_owned(),
+            access_host: String::new(),
+            api_base_url: format!("https://{node_id}.example.test"),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        }
+    }
+
+    #[test]
+    fn initial_raft_bootstrap_only_allows_empty_or_self_only_state() {
+        assert!(is_initial_raft_bootstrap(&[], "self"));
+        assert!(is_initial_raft_bootstrap(&[node("self")], "self"));
+        assert!(!is_initial_raft_bootstrap(&[node("other")], "self"));
+        assert!(!is_initial_raft_bootstrap(
+            &[node("self"), node("other")],
+            "self"
+        ));
+    }
 }

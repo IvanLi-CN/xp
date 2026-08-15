@@ -2,6 +2,86 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn ready_repository_serves_internal_queries_from_an_ordinary_cluster_peer() {
+    let tmp = tempfile::tempdir().expect("temporary directory");
+    let (router, store) = app_with(&tmp, ReconcileHandle::noop());
+    let cluster = ClusterMetadata::load(tmp.path()).expect("cluster metadata");
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).expect("cluster CA");
+    let ca_key = cluster
+        .read_cluster_ca_key_pem(tmp.path())
+        .expect("cluster CA key")
+        .expect("private cluster CA key");
+    let peer_id = xp_test_fixtures::secondary_node_id().to_owned();
+    {
+        let mut store = store.lock().await;
+        add_cluster_node(&mut store, &peer_id, xp_test_fixtures::secondary_node_name);
+        let identity = RepositoryNodeIdentity::new(
+            RepositoryNodeId::try_from(cluster.node_id.clone()).expect("repository node id"),
+            Ed25519PublicKey::from_bytes([1; 32]).expect("signing key"),
+            X25519PublicKey::from_bytes([2; 32]).expect("relay key"),
+        )
+        .expect("repository identity");
+        let mut membership = RepositoryMembership::new(vec![
+            RepositoryMember::new(identity, RepositoryCapacity::default())
+                .expect("repository member"),
+        ])
+        .expect("repository membership");
+        let repository_node_id =
+            RepositoryNodeId::try_from(cluster.node_id.clone()).expect("repository node id");
+        membership
+            .mark_catch_up_complete(&repository_node_id, 1_000)
+            .expect("complete catch-up");
+        membership
+            .mark_ready(&repository_node_id, 1_300)
+            .expect("mark ready");
+        store.state_mut().repository_membership = Some(membership);
+    }
+
+    let now = u64::try_from(chrono::Utc::now().timestamp()).expect("current time");
+    let body = json!({
+        "start_unix_seconds": now.saturating_sub(60),
+        "end_unix_seconds": now,
+        "page_size": 100,
+    })
+    .to_string();
+    let uri: Uri = "/api/admin/_internal/history-repository/query"
+        .parse()
+        .expect("query URI");
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &peer_id,
+        &cluster.node_id,
+        new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .expect("sign internal query");
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("internal query request");
+    request.headers_mut().extend(headers);
+
+    let response = router
+        .oneshot(request)
+        .await
+        .expect("internal query response");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn repository_relay_bypasses_collector_gate_only_for_ready_repository_sources() {
     let tmp = tempfile::tempdir().unwrap();
     let (router, store) = app_with(&tmp, ReconcileHandle::noop());

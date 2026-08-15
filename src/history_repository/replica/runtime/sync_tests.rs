@@ -1,4 +1,5 @@
 use ed25519_dalek::SigningKey;
+use sha2::Digest as _;
 
 use super::{
     RepositoryRepairBatch, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment,
@@ -168,6 +169,58 @@ fn repair_batch_accepts_a_pre_gap_metadata_payload() {
         .expect("legacy repair payload remains readable");
     assert!(batch.segments.is_empty());
     assert!(batch.gaps.is_empty());
+}
+
+#[test]
+fn repair_batch_orders_same_stream_segments_by_cursor_not_segment_id() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut primary = load(temporary.path());
+    let mut previous_hash = None;
+    let mut segment_ids = Vec::new();
+
+    for sequence in 0_u64..10 {
+        let signed = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("runtime:{sequence}").into_bytes(),
+                format!("sample:{sequence}").into_bytes(),
+                false,
+            )],
+            previous_hash,
+            100 + sequence,
+            100 + sequence,
+        )
+        .expect("canonical segment")
+        .sign(&signing_key)
+        .expect("signed segment");
+        let wire = signed.wire_bytes().expect("wire bytes");
+        primary
+            .receive_wire("cluster-a", &source_identity, &wire, 100 + sequence)
+            .expect("primary accepts ordered source segment");
+        previous_hash = Some(signed.segment_hash().expect("segment hash"));
+        segment_ids.push(hex::encode(sha2::Sha256::digest(&wire)));
+    }
+
+    let repair = primary.repair_batch(&segment_ids).expect("repair batch");
+    let sequences = repair
+        .segments
+        .iter()
+        .map(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .expect("repair wire")
+                .canonical()
+                .first_cursor()
+                .sequence()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, (0_u64..10).collect::<Vec<_>>());
 }
 
 #[test]

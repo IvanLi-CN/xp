@@ -5,7 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::history_sync::{MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES};
+use crate::history_sync::{MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES, SignedSegment};
 
 use super::{
     RelaySegmentCursor, RepositoryReplicaRuntime, RepositoryRuntimeError,
@@ -490,9 +490,15 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
+        let mut stored_segments = self
+            .stored_segments_by_ids(requested_segment_ids)?
+            .into_iter()
+            .map(|segment| Ok((repair_segment_order(&segment)?, segment)))
+            .collect::<Result<Vec<_>, RepositoryRuntimeError>>()?;
+        stored_segments.sort_by(|(left, _), (right, _)| left.cmp(right));
         let mut response_bytes = 0usize;
         let mut segments = Vec::new();
-        for segment in self.stored_segments_by_ids(requested_segment_ids)? {
+        for (_, segment) in stored_segments {
             if !requested.contains(segment.id.as_str()) {
                 continue;
             }
@@ -672,6 +678,19 @@ impl RepositoryReplicaRuntime {
         }
         Ok(summaries)
     }
+}
+
+fn repair_segment_order(
+    segment: &super::StoredSegment,
+) -> Result<(String, u64, String, u64), RepositoryRuntimeError> {
+    let signed = SignedSegment::from_wire(&segment.wire)?;
+    let first_cursor = signed.canonical().first_cursor();
+    Ok((
+        first_cursor.source_node_id().to_owned(),
+        first_cursor.source_epoch(),
+        first_cursor.stream().to_owned(),
+        first_cursor.sequence(),
+    ))
 }
 
 fn partition_summary(

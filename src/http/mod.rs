@@ -2059,22 +2059,24 @@ async fn cluster_join(
         return Err(err);
     }
 
+    // The joiner cannot start its Raft endpoint until it receives this response. Waiting for
+    // learner catch-up here therefore deadlocks bootstrap: the leader cannot replicate to a
+    // process that is still waiting for credentials. Leave the node as a learner and let the
+    // membership guard promote it after the endpoint becomes reachable and catches up.
     let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
-    if let Err(err) = state
-        .raft
-        .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
-        .await
-    {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true, false).await;
-        return Err(ApiError::internal(format!(
-            "join learner catch-up failed: {err}"
-        )));
-    }
-
-    if let Err(err) = state.raft.add_voters(BTreeSet::from([raft_node_id])).await {
-        rollback_joined_learner(&state, raft_node_id, &node_id, true, true).await;
-        return Err(ApiError::internal(format!("join add_voters failed: {err}")));
-    }
+    let raft = state.raft.clone();
+    tokio::spawn(async move {
+        if let Err(err) = raft
+            .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
+            .await
+        {
+            tracing::warn!(
+                raft_node_id,
+                error = %err,
+                "joined learner did not catch up during the initial window"
+            );
+        }
+    });
 
     Ok(Json(ClusterJoinResponse {
         node_id,

@@ -3,6 +3,8 @@ use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
 };
 
+const CATCH_UP_PEER_VERIFICATION_ATTEMPTS: usize = 2;
+
 pub(super) struct PeerBackfillImport<'a> {
     identity: &'a crate::state::history_repository::identity::RepositoryNodeIdentity,
     signing_key: &'a ed25519_dalek::SigningKey,
@@ -860,26 +862,36 @@ pub(crate) async fn catch_up_against_ready_repositories(
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
     {
-        match replicate_peer(
-            state,
-            peer,
-            &receiving_repository_ids,
-            now,
-            ReplicaWork::DeepVerification,
-            false,
-        )
-        .await
-        {
-            Ok(true) => {}
-            Ok(false) => return Ok(false),
-            Err(error) => {
-                tracing::debug!(
-                    peer = %peer.node_id,
-                    error = %error,
-                    "history repository catch-up verification failed"
-                );
-                return Ok(false);
+        let mut caught_up = false;
+        for attempt in 0..CATCH_UP_PEER_VERIFICATION_ATTEMPTS {
+            match replicate_peer(
+                state,
+                peer,
+                &receiving_repository_ids,
+                now,
+                ReplicaWork::DeepVerification,
+                false,
+            )
+            .await
+            {
+                Ok(true) => {
+                    caught_up = true;
+                    break;
+                }
+                Ok(false) if catch_up_has_verification_retry(attempt) => continue,
+                Ok(false) => break,
+                Err(error) => {
+                    tracing::debug!(
+                        peer = %peer.node_id,
+                        error = %error,
+                        "history repository catch-up verification failed"
+                    );
+                    return Ok(false);
+                }
             }
+        }
+        if !caught_up {
+            return Ok(false);
         }
     }
     // Signed anti-entropy covers the seven-day detail cache above. One ready repository exports
@@ -898,4 +910,8 @@ pub(crate) async fn catch_up_against_ready_repositories(
         return Ok(false);
     }
     Ok(true)
+}
+
+pub(crate) fn catch_up_has_verification_retry(attempt: usize) -> bool {
+    attempt.saturating_add(1) < CATCH_UP_PEER_VERIFICATION_ATTEMPTS
 }

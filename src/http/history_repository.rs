@@ -378,7 +378,7 @@ pub(super) async fn admin_internal_query_history_repository(
     internal: Option<Extension<InternalSignatureAuth>>,
     ApiJson(request): ApiJson<RepositoryHistoryQuery>,
 ) -> Result<Json<RepositoryHistoryQueryResponse>, ApiError> {
-    ensure_ready_repository_sender(&state, internal).await?;
+    ensure_cluster_sender(&state, internal).await?;
     let ready_repository_ids = ready_repository_ids(&state).await?;
     if !ready_repository_ids
         .iter()

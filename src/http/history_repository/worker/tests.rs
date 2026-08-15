@@ -40,6 +40,24 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
 }
 
 #[test]
+fn truncated_repair_response_leaves_only_undelivered_segments_pending() {
+    let first = vec![1_u8, 2, 3];
+    let second = vec![4_u8, 5, 6];
+    let third = vec![7_u8, 8, 9];
+    let first_id = hex::encode(Sha256::digest(&first));
+    let second_id = hex::encode(Sha256::digest(&second));
+    let third_id = hex::encode(Sha256::digest(&third));
+    let mut pending = [first_id, second_id, third_id.clone()]
+        .into_iter()
+        .collect();
+
+    remove_delivered_repair_segment_ids(&mut pending, [first.as_slice(), second.as_slice()])
+        .expect("partial repair response advances pending ids");
+
+    assert_eq!(pending.into_iter().collect::<Vec<_>>(), vec![third_id]);
+}
+
+#[test]
 fn source_deletion_producer_queues_the_independent_tombstone_before_matching_history() {
     let historical_key = b"node-history:node:node-a:daily-traffic:2026-08-14".to_vec();
     let records = source_records_with_deletions(
@@ -82,6 +100,18 @@ fn peer_transport_failure_keeps_the_first_repository_syncing() {
         true,
         &[Some(false), Some(true)]
     ));
+}
+
+#[test]
+fn catch_up_rechecks_a_peer_after_repair_before_declaring_it_complete() {
+    assert!(super::backfill::catch_up_has_verification_retry(0));
+    assert!(!super::backfill::catch_up_has_verification_retry(1));
+}
+
+#[test]
+fn completed_catch_up_starts_a_stability_window_without_rechecking_live_segments() {
+    assert!(!super::should_run_initial_catch_up(true));
+    assert!(super::should_run_initial_catch_up(false));
 }
 
 #[test]

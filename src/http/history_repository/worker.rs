@@ -2,7 +2,10 @@ use axum::http::Method;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use tokio::time::MissedTickBehavior;
 
 use crate::{
@@ -69,6 +72,13 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
+            let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+            if let Err(error) = sync_local_repository_capacity(&source_state, now).await {
+                tracing::debug!(error = %error, "history repository capacity cycle skipped");
+            }
+            if let Err(error) = advance_local_repository_lifecycle(&source_state, now).await {
+                tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
+            }
             if let Err(error) = publish_local_history_segments(&source_state).await {
                 tracing::debug!(error = %error, "history source collection cycle skipped");
             }
@@ -88,8 +98,6 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
 
 async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-    sync_local_repository_capacity(state, now).await?;
-    advance_local_repository_lifecycle(state, now).await?;
     let Ok((ready_repository_ids, peers)) = ready_repository_peers(state).await else {
         return Ok(());
     };
@@ -546,7 +554,7 @@ async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::R
 
 async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyhow::Result<()> {
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
-    let (lifecycle, ready_repository_ids) = {
+    let (lifecycle, catch_up_completed, ready_repository_ids) = {
         let store = state.store.lock().await;
         let Some(membership) = store.state().repository_membership.as_ref() else {
             return Ok(());
@@ -556,6 +564,7 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
         };
         (
             *member.lifecycle(),
+            member.catch_up_completed_at().is_some(),
             membership
                 .ready_members()
                 .map(|member| member.node_id().as_str().to_owned())
@@ -566,12 +575,21 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
         return Ok(());
     }
 
-    let caught_up = if ready_repository_ids.is_empty() {
+    // Catch-up validates a bounded point in time. Once it completes, continuously arriving
+    // source segments must not reset the five-minute stability window: a busy cluster otherwise
+    // has no instant at which it can be exactly equal to an actively writing repository.
+    let caught_up = if !should_run_initial_catch_up(catch_up_completed) {
+        true
+    } else if ready_repository_ids.is_empty() {
         backfill_initial_repository_from_local_history(state, now).await?
     } else {
         catch_up_against_ready_repositories(state, now).await?
     };
     apply_local_catch_up_result(state, &node_id, now, caught_up).await
+}
+
+fn should_run_initial_catch_up(catch_up_completed: bool) -> bool {
+    !catch_up_completed
 }
 
 async fn apply_local_catch_up_result(
@@ -679,6 +697,25 @@ fn completed_replication_work(work: ReplicaWork, deep_verification_succeeded: bo
     }
 }
 
+fn remove_delivered_repair_segment_ids<'a>(
+    pending_segment_ids: &mut BTreeSet<String>,
+    delivered_wires: impl IntoIterator<Item = &'a [u8]>,
+) -> anyhow::Result<()> {
+    let delivered_ids = delivered_wires
+        .into_iter()
+        .map(|wire| hex::encode(Sha256::digest(wire)))
+        .collect::<Vec<_>>();
+    let delivered_set = delivered_ids.iter().cloned().collect::<BTreeSet<_>>();
+    if delivered_set.len() != delivered_ids.len() {
+        anyhow::bail!("repository repair response repeated a segment")
+    }
+    if delivered_set.is_empty() || !delivered_set.is_subset(pending_segment_ids) {
+        anyhow::bail!("repository repair response did not advance the requested segment set")
+    }
+    pending_segment_ids.retain(|segment_id| !delivered_set.contains(segment_id));
+    Ok(())
+}
+
 async fn replicate_peer_via_dynamic_relay(
     state: &AppState,
     target: &MeshPeerTarget,
@@ -775,7 +812,6 @@ async fn replicate_peer(
     propagate_acknowledgements: bool,
 ) -> anyhow::Result<bool> {
     let mut after_segment_id = None::<String>;
-    let mut repaired = false;
     loop {
         let path = after_segment_id.as_ref().map_or_else(
             || "/api/admin/_internal/history-repository/summary".to_owned(),
@@ -793,50 +829,67 @@ async fn replicate_peer(
             )
         };
         if requires_repair {
-            let repair_body = serde_json::to_vec(&RepositoryRepairRequest {
-                segment_ids: missing_segment_ids,
-            })?;
-            let repair: crate::state::history_repository::replica::RepositoryRepairBatch =
-                repository_direct_request(
-                    state,
-                    peer,
-                    Method::POST,
-                    "/api/admin/_internal/history-repository/repair",
-                    repair_body,
-                )
-                .await?;
+            let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();
             let mut acknowledgements = Vec::new();
-            for segment in repair.segments {
-                if !super::identity_is_pinned_for_node(state, &segment.identity)
-                    .await
-                    .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
-                {
-                    anyhow::bail!("repository repair segment identity is not pinned")
+            let mut needs_gap_refresh = true;
+            while needs_gap_refresh || !pending_segment_ids.is_empty() {
+                needs_gap_refresh = false;
+                let repair_body = serde_json::to_vec(&RepositoryRepairRequest {
+                    segment_ids: pending_segment_ids.iter().cloned().collect(),
+                })?;
+                let repair: crate::state::history_repository::replica::RepositoryRepairBatch =
+                    repository_direct_request(
+                        state,
+                        peer,
+                        Method::POST,
+                        "/api/admin/_internal/history-repository/repair",
+                        repair_body,
+                    )
+                    .await?;
+                if pending_segment_ids.is_empty() {
+                    if !repair.segments.is_empty() {
+                        anyhow::bail!("repository repair response returned unrequested segments")
+                    }
+                } else {
+                    remove_delivered_repair_segment_ids(
+                        &mut pending_segment_ids,
+                        repair
+                            .segments
+                            .iter()
+                            .map(|segment| segment.wire.as_slice()),
+                    )?;
                 }
-                let receipt = state
+                for segment in repair.segments {
+                    if !super::identity_is_pinned_for_node(state, &segment.identity)
+                        .await
+                        .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
+                    {
+                        anyhow::bail!("repository repair segment identity is not pinned")
+                    }
+                    let receipt = state
+                        .repository_replica
+                        .lock()
+                        .await
+                        .receive_wire_from_repository(
+                            &state.cluster.cluster_id,
+                            &segment.identity,
+                            &segment.wire,
+                            now,
+                            ready_repository_ids,
+                            &state.cluster.node_id,
+                        )?;
+                    acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
+                }
+                state
                     .repository_replica
                     .lock()
                     .await
-                    .receive_wire_from_repository(
-                        &state.cluster.cluster_id,
-                        &segment.identity,
-                        &segment.wire,
-                        now,
-                        ready_repository_ids,
-                        &state.cluster.node_id,
-                    )?;
-                acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
+                    .merge_replica_gaps(&repair.gaps)?;
             }
-            state
-                .repository_replica
-                .lock()
-                .await
-                .merge_replica_gaps(&repair.gaps)?;
             if propagate_acknowledgements {
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
             }
-            repaired = true;
         }
         let Some(next) = remote_summary.next_segment_id else {
             break;
@@ -846,9 +899,11 @@ async fn replicate_peer(
         }
         after_segment_id = Some(next);
     }
-    // A repair is a one-way pull. Require a later direct summary exchange before
-    // treating this peer as equal, because it may still need our own segments.
-    Ok(!repaired)
+    // The keyset traversal defines a bounded remote snapshot. Once every advertised segment
+    // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
+    // source for exact equality is not a valid convergence condition: ordinary sources append
+    // continuously, while the peer independently performs the symmetric pull.
+    Ok(true)
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(

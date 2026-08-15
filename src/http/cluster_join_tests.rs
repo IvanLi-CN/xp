@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
 use axum::{
@@ -32,12 +32,12 @@ use crate::{
 const TEST_ADMIN_TOKEN: &str = "testtoken";
 
 #[derive(Clone)]
-struct FailingAddVotersRaft {
+struct DeferredPromotionRaft {
     inner: LocalRaft,
     membership_changes: Arc<Mutex<Vec<&'static str>>>,
 }
 
-impl RaftFacade for FailingAddVotersRaft {
+impl RaftFacade for DeferredPromotionRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
         <LocalRaft as RaftFacade>::metrics(&self.inner)
     }
@@ -55,16 +55,11 @@ impl RaftFacade for FailingAddVotersRaft {
 
     fn wait_learner_caught_up(
         &self,
-        node_id: u64,
-        required_log_index: u64,
-        timeout: std::time::Duration,
+        _node_id: u64,
+        _required_log_index: u64,
+        _timeout: Duration,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        <LocalRaft as RaftFacade>::wait_learner_caught_up(
-            &self.inner,
-            node_id,
-            required_log_index,
-            timeout,
-        )
+        Box::pin(async { std::future::pending::<anyhow::Result<()>>().await })
     }
 
     fn add_voters(
@@ -215,7 +210,7 @@ fn signed_join_token(cluster: &ClusterMetadata, ca_pem: &str, ca_key_pem: &str) 
     )
 }
 
-fn app_with_failing_add_voters(
+fn app_with_deferred_promotion(
     tmp: &TempDir,
 ) -> (
     axum::Router,
@@ -267,7 +262,7 @@ fn app_with_failing_add_voters(
     ));
     let (_tx, rx) = watch::channel(metrics);
     let membership_changes = Arc::new(Mutex::new(Vec::new()));
-    let raft: Arc<dyn RaftFacade> = Arc::new(FailingAddVotersRaft {
+    let raft: Arc<dyn RaftFacade> = Arc::new(DeferredPromotionRaft {
         inner: LocalRaft::new(store.clone(), rx),
         membership_changes: membership_changes.clone(),
     });
@@ -315,16 +310,17 @@ fn app_with_failing_add_voters(
 }
 
 #[tokio::test]
-async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_node() {
+async fn cluster_join_returns_response_before_voter_promotion() {
     let tmp = TempDir::new().unwrap();
-    let (app, store, join_token, membership_changes) = app_with_failing_add_voters(&tmp);
+    let (app, store, join_token, membership_changes) = app_with_deferred_promotion(&tmp);
     let decoded =
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
 
-    let res = app
-        .oneshot(req_authed_json(
+    let res = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.oneshot(req_authed_json(
             "POST",
             "/api/cluster/join",
             json!({
@@ -334,22 +330,15 @@ async fn cluster_join_returns_json_error_when_add_voters_fails_and_rolls_back_no
                 "api_base_url": "https://node-2.internal:8443",
                 "csr_pem": csr.csr_pem,
             }),
-        ))
-        .await
-        .unwrap();
+        )),
+    )
+    .await
+    .expect("join response must not wait for learner promotion")
+    .unwrap();
 
-    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "internal");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("join add_voters failed: simulated add_voters failure")
-    );
-    assert!(store.lock().await.get_node(&decoded.token_id).is_none());
-    assert_eq!(
-        *membership_changes.lock().await,
-        vec!["remove_voters", "remove_nodes"]
-    );
+    assert_eq!(body["node_id"], decoded.token_id);
+    assert!(store.lock().await.get_node(&decoded.token_id).is_some());
+    assert!(membership_changes.lock().await.is_empty());
 }
