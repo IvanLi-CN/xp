@@ -405,8 +405,8 @@ fn app_with_blocking_catch_up(
                 raft_id,
                 RaftNodeMeta {
                     name: cluster.node_name.clone(),
-                    api_base_url: cluster.api_base_url.clone(),
-                    raft_endpoint: cluster.api_base_url.clone(),
+                    api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                    raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
                 },
             )]),
         ),

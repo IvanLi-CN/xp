@@ -69,7 +69,7 @@ mod tests {
 
     fn session(status: JoinSessionStatus) -> JoinSession {
         JoinSession {
-            node_id: "node".into(),
+            node_id: xp_test_fixtures::primary_node_id().into(),
             request_fingerprint: "fingerprint".into(),
             signed_cert_pem: "certificate".into(),
             token_expires_at: "2026-08-16T00:00:00Z".into(),
