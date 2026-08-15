@@ -815,7 +815,12 @@ async fn replicate_peer(
     let mut after_segment_id = None::<String>;
     loop {
         let path = after_segment_id.as_ref().map_or_else(
-            || "/api/admin/_internal/history-repository/summary".to_owned(),
+            || {
+                format!(
+                    "/api/admin/_internal/history-repository/summary?deep_verification={}",
+                    work.is_deep_verification()
+                )
+            },
             |cursor| {
                 format!("/api/admin/_internal/history-repository/summary?after_segment_id={cursor}")
             },
@@ -842,6 +847,7 @@ async fn replicate_peer(
                 {
                     return Ok(false);
                 }
+                return Ok(false);
             }
             let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();
             let mut acknowledgements = Vec::new();

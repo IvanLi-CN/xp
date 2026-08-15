@@ -154,7 +154,7 @@ fn sqlite_replication_summary_keyset_pages_every_segment_beyond_the_first_256() 
     assert_eq!(first.segment_ids.len(), 256);
     let cursor = first.next_segment_id.expect("keyset cursor");
     let second = runtime
-        .replication_summary_after(Some(&cursor))
+        .replication_summary_after(Some(&cursor), false)
         .expect("second summary page");
     assert_eq!(second.segment_ids.len(), 1);
     assert!(second.next_segment_id.is_none());

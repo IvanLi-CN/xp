@@ -1,7 +1,7 @@
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    history_sync::{CanonicalSegment, SignedSegment},
+    history_sync::{CanonicalSegment, CursorGap, SignedSegment},
     state::history_repository::identity::RepositoryNodeIdentity,
 };
 
@@ -80,6 +80,27 @@ impl RepositoryReplicaRuntime {
             start_unix_seconds: 0,
             end_unix_seconds: segment.opened_at_unix_seconds(),
             permanent: false,
+        });
+    }
+
+    pub(super) fn record_epoch_rotation_gap(
+        &mut self,
+        gap: &CursorGap,
+        earliest_observed_unix_seconds: u64,
+    ) {
+        if self.snapshot.gaps.len() == 64 {
+            self.snapshot.history_truncated = true;
+            return;
+        }
+        self.snapshot.gaps.push(StoredGap {
+            source_node_id: gap.requested().source_node_id().to_owned(),
+            source_epoch: gap.requested().source_epoch(),
+            stream: gap.requested().stream().to_owned(),
+            first_sequence: gap.requested().sequence().saturating_add(1),
+            last_sequence: u64::MAX,
+            start_unix_seconds: 0,
+            end_unix_seconds: earliest_observed_unix_seconds.saturating_sub(1),
+            permanent: true,
         });
     }
 

@@ -92,8 +92,8 @@ impl RepositoryReplicaRuntime {
             return Ok(sync_receipt(acceptance, availability, Vec::new()));
         }
 
-        if acceptance.gap().is_some() {
-            self.record_gap(segment.canonical(), true);
+        if let Some(gap) = acceptance.gap() {
+            self.record_epoch_rotation_gap(gap, segment.canonical().opened_at_unix_seconds());
         }
         let mut mutation = PendingRepositoryMutation::default();
         let tombstone_acknowledgements = match self.append_known_records(

@@ -175,6 +175,12 @@ impl HistoryStorage {
         }
     }
 
+    pub(crate) fn degrade_to_json(&self) -> bool {
+        let mut backend = self.lock_backend();
+        switch_to_json(&mut backend, &self.data_dir);
+        matches!(*backend, Backend::Json)
+    }
+
     pub(crate) fn available_bytes(&self) -> io::Result<u64> {
         let c_path =
             std::ffi::CString::new(self.data_dir.as_os_str().as_encoded_bytes()).map_err(|_| {

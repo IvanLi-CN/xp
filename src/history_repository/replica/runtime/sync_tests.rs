@@ -556,9 +556,15 @@ fn a_backpressured_stream_preserves_other_streams_and_a_permanent_gap() {
     let gaps = runtime.local_source_backpressure_gaps("node-a");
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].stream, "runtime");
+    assert_eq!(gaps[0].first_sequence, 8);
+    assert_eq!(gaps[0].last_sequence, 8);
     assert!(gaps[0].permanent);
     assert_eq!(gaps[0].start_unix_seconds, 8);
     assert_eq!(gaps[0].end_unix_seconds, 8);
+    assert_eq!(
+        runtime.snapshot.local_source.streams["runtime"].next_sequence,
+        9
+    );
 }
 
 #[test]

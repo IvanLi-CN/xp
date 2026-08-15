@@ -398,7 +398,15 @@ impl RepositoryReplicaRuntime {
             #[cfg(test)]
             capacity_override: None,
         };
-        runtime.migrate_history_to_sqlite()?;
+        if let Err(error) = runtime.migrate_history_to_sqlite() {
+            if runtime.snapshot.external_history || !runtime.storage.degrade_to_json() {
+                return Err(error);
+            }
+            tracing::warn!(
+                error = %error,
+                "repository history migration failed; continuing with JSON history"
+            );
+        }
         Ok(runtime)
     }
 

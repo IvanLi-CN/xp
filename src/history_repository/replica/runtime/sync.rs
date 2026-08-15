@@ -22,6 +22,7 @@ const MAX_RELAY_BATCH_DECODED_BYTES: usize = 1024 * 1024;
 const MAX_RELAY_TARGETS: usize = 64;
 const MAX_COLLECTION_SOURCES: usize = 4_096;
 const MAX_TOMBSTONE_ACKNOWLEDGEMENTS_PER_CYCLE: usize = 64;
+const MAX_RETAINED_PARTITION_SUMMARIES: usize = 1_024;
 const COLLECTION_STALE_SECONDS: u64 = 5 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ pub(crate) struct RepositoryReplicaSummary {
     pub(crate) next_segment_id: Option<String>,
     /// Daily verification is over signed source-stream ranges, not opaque segment ids.
     pub(crate) partitions: Vec<RepositoryPartitionSummary>,
+    #[serde(default)]
+    pub(crate) partitions_included: bool,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
     pub(crate) last_verified_unix_seconds: Option<u64>,
 }
@@ -415,12 +418,13 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn replication_summary(
         &self,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
-        self.replication_summary_after(None)
+        self.replication_summary_after(None, true)
     }
 
     pub(crate) fn replication_summary_after(
         &self,
         after_segment_id: Option<&str>,
+        deep_verification: bool,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
         let mut segments = self.stored_segments_page(
             after_segment_id,
@@ -437,7 +441,12 @@ impl RepositoryReplicaRuntime {
         });
         Ok(RepositoryReplicaSummary {
             segment_ids: segments.iter().map(|segment| segment.id.clone()).collect(),
-            partitions: self.retained_partition_summaries()?,
+            partitions: if deep_verification && after_segment_id.is_none() {
+                self.retained_partition_summaries()?
+            } else {
+                Vec::new()
+            },
+            partitions_included: deep_verification && after_segment_id.is_none(),
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
             next_segment_id,
@@ -470,8 +479,9 @@ impl RepositoryReplicaRuntime {
     ) -> Result<bool, RepositoryRuntimeError> {
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let partitions_converged =
-            !deep_verification || self.retained_partition_summaries()? == remote.partitions;
+        let partitions_converged = !deep_verification
+            || !remote.partitions_included
+            || self.retained_partition_summaries()? == remote.partitions;
         // The remote summary is keyset-paged. Its page is complete only when every advertised
         // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
         let segments_converged = self.missing_segment_ids(remote, false)?.is_empty();
@@ -650,6 +660,9 @@ impl RepositoryReplicaRuntime {
                 let page = self.sqlite_records(None, None, None, offset, 1_000)?;
                 let page_len = page.len();
                 accumulate_record_partitions(&mut summaries, page.iter())?;
+                if summaries.len() > MAX_RETAINED_PARTITION_SUMMARIES {
+                    return Err(RepositoryRuntimeError::StateLimitExceeded);
+                }
                 if page_len < 1_000 {
                     break;
                 }
@@ -673,6 +686,9 @@ impl RepositoryReplicaRuntime {
                 )
             });
             accumulate_record_partitions(&mut summaries, records.iter())?;
+            if summaries.len() > MAX_RETAINED_PARTITION_SUMMARIES {
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
         }
         Ok(summaries.into_values().collect())
     }
@@ -737,7 +753,7 @@ fn record_partition_summary(
         source_node_id: record.source_node_id.clone(),
         source_epoch: record.source_epoch,
         stream: record.stream.clone(),
-        partition: u32::try_from(record.observed_at_unix_seconds / (24 * 60 * 60))
+        partition: u32::try_from(record.observed_at_unix_seconds / (365 * 24 * 60 * 60))
             .map_err(|_| RepositoryRuntimeError::Replica(ReplicaError::InvalidRange))?,
         first_sequence: record.sequence,
         last_sequence: record.sequence,

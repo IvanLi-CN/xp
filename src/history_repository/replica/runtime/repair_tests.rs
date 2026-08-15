@@ -449,6 +449,8 @@ fn repository_retention_marks_aggregates_incomplete_for_permanent_gaps() {
             now,
         )
         .expect("permanent epoch gap");
+    assert_eq!(runtime.snapshot.gaps[0].source_epoch, 7);
+    assert_eq!(runtime.snapshot.gaps[0].end_unix_seconds, observed_at);
     let response = runtime
         .query(
             "repository-a",

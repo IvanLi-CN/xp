@@ -214,20 +214,30 @@ impl RepositoryReplicaRuntime {
                     .entry(stream.to_owned())
                     .or_default();
                 if stream_state.pending.len() >= MAX_PENDING_SEGMENTS_PER_STREAM {
+                    let first_sequence = stream_state.next_sequence;
+                    stream_state.next_sequence = stream_state
+                        .next_sequence
+                        .checked_add(record_count)
+                        .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
                     stream_state.backpressured_records = stream_state
                         .backpressured_records
                         .saturating_add(record_count);
                     (
                         Some(stream_state.pending.len()),
                         stream_state.backpressured_records,
-                        stream_state.next_sequence,
+                        first_sequence,
                     )
                 } else {
                     (None, 0, 0)
                 }
             };
             if let Some(pending_segments) = pending_segments {
-                self.record_local_source_backpressure_gap(stream, sequence, now_unix_seconds);
+                self.record_local_source_backpressure_gap(
+                    stream,
+                    sequence,
+                    sequence.saturating_add(record_count.saturating_sub(1)),
+                    now_unix_seconds,
+                );
                 tracing::warn!(
                     stream,
                     pending_segments,
@@ -533,7 +543,8 @@ impl RepositoryReplicaRuntime {
     fn record_local_source_backpressure_gap(
         &mut self,
         stream: &str,
-        sequence: u64,
+        first_sequence: u64,
+        last_sequence: u64,
         now_unix_seconds: u64,
     ) {
         let epoch = self.snapshot.local_source.epoch;
@@ -544,13 +555,13 @@ impl RepositoryReplicaRuntime {
             .entry(stream.to_owned())
             .or_insert(LocalSourceGap {
                 source_epoch: epoch,
-                first_sequence: sequence,
-                last_sequence: sequence,
+                first_sequence,
+                last_sequence,
                 start_unix_seconds: now_unix_seconds,
                 end_unix_seconds: now_unix_seconds,
             });
-        gap.first_sequence = gap.first_sequence.min(sequence);
-        gap.last_sequence = gap.last_sequence.max(sequence);
+        gap.first_sequence = gap.first_sequence.min(first_sequence);
+        gap.last_sequence = gap.last_sequence.max(last_sequence);
         gap.start_unix_seconds = gap.start_unix_seconds.min(now_unix_seconds);
         gap.end_unix_seconds = gap.end_unix_seconds.max(now_unix_seconds);
     }
