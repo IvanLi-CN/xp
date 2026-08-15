@@ -33,7 +33,7 @@ fn load(path: &std::path::Path) -> RepositoryReplicaRuntime {
 fn repair_and_relay_pages_send_tombstone_segments_first() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
-    let identity = identity();
+    let repository_identity = identity();
     let signed = |stream: &str, tombstone: bool| {
         CanonicalSegment::new(
             "cluster-a",
@@ -65,13 +65,13 @@ fn repair_and_relay_pages_send_tombstone_segments_first() {
         StoredSegment {
             id: "a-record".to_owned(),
             closed_at_unix_seconds: 10,
-            identity: identity.clone(),
+            identity: repository_identity.clone(),
             wire: record_wire.clone(),
         },
         StoredSegment {
             id: "z-tombstone".to_owned(),
             closed_at_unix_seconds: 11,
-            identity,
+            identity: repository_identity,
             wire: tombstone_wire.clone(),
         },
     ];

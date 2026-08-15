@@ -22,7 +22,7 @@ export const HistoryRepositoryMemberSchema = z.object({
 });
 
 export const HistoryRepositoryRuntimeSchema = z.object({
-	storage_mode: z.enum(["sqlite", "degraded_json"]),
+	storage_mode: z.enum(["sqlite", "sqlite_degraded", "degraded_json"]),
 	capacity: HistoryRepositoryCapacitySchema,
 	record_count: z.number(),
 	segment_count: z.number(),

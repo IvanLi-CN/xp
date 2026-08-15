@@ -39,7 +39,9 @@ function completenessVariant(
 
 function runtimeAvailability(runtime?: HistoryRepositoryRuntime): string {
 	if (!runtime) return "offline";
-	if (runtime.storage_mode !== "sqlite") return "degraded JSON";
+	if (runtime.storage_mode === "sqlite_degraded")
+		return "SQLite maintenance degraded";
+	if (runtime.storage_mode === "degraded_json") return "JSON fallback";
 	if (runtime.capacity.filesystem_available_bytes < 256 * 1024 * 1024) {
 		return "low disk";
 	}
