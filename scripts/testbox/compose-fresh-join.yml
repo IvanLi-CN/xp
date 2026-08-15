@@ -18,7 +18,7 @@ x-testbox-caps: &testbox-caps
 services:
   certgen:
     <<: *testbox-caps
-    image: ${XP_TEST_IMAGE:-xp-fresh-join-candidate}
+    image: ${XP_TEST_CERTGEN_IMAGE:-alpine/openssl:3.5.4}
     entrypoint: [/bin/sh]
     command:
       - -ec
@@ -31,7 +31,7 @@ services:
         -keyout /tls/server.key -out /tls/server.csr
         openssl x509 -req -days 1 -in /tls/server.csr -CA /tls/ca.pem -CAkey /tls/ca.key \
         -CAcreateserial -copy_extensions copy -out /tls/server.pem
-        cp /etc/ssl/certs/ca-certificates.crt /tls/ca-bundle.pem
+        cp /etc/ssl/cert.pem /tls/ca-bundle.pem
         cat /tls/ca.pem >> /tls/ca-bundle.pem
         cat > /tls/leader.json <<'EOF'
         {

@@ -96,6 +96,9 @@ async fn reconcile_once(
             .await
             .is_ok()
         {
+            if deadline <= Utc::now() {
+                continue;
+            }
             raft.add_voters(BTreeSet::from([node_id])).await?;
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());

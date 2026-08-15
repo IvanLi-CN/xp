@@ -235,14 +235,14 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         "csr_pem": pending.csr_pem,
     });
 
-    let resp = client
-        .post(url)
-        .json(&req)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<serde_json::Value>()
-        .await?;
+    let resp = client.post(url).json(&req).send().await?;
+    if resp.status().is_client_error() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let _ = std::fs::remove_file(&pending_path);
+        anyhow::bail!("join rejected: {status}: {body}");
+    }
+    let resp = resp.error_for_status()?.json::<serde_json::Value>().await?;
 
     let node_id = resp
         .get("node_id")

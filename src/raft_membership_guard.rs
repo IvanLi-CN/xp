@@ -46,9 +46,18 @@ pub async fn repair_membership_voters_once(
 
 async fn repair_membership_voters_except(
     raft: Arc<dyn RaftFacade>,
-    excluded: BTreeSet<NodeId>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
 ) -> anyhow::Result<BTreeSet<NodeId>> {
     let _guard = membership_operation_gate().lock_owned().await;
+    let excluded = store
+        .lock()
+        .await
+        .state()
+        .join_sessions
+        .values()
+        .filter(|session| session.status.is_pending())
+        .filter_map(|session| crate::raft::types::raft_node_id_from_ulid(&session.node_id).ok())
+        .collect::<BTreeSet<_>>();
     let metrics = raft.metrics().borrow().clone();
     let non_voters = non_voter_membership_node_ids(&metrics)
         .difference(&excluded)
@@ -108,18 +117,7 @@ pub fn spawn_membership_voter_guard(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            let excluded = store
-                .lock()
-                .await
-                .state()
-                .join_sessions
-                .values()
-                .filter(|session| session.status.is_pending())
-                .filter_map(|session| {
-                    crate::raft::types::raft_node_id_from_ulid(&session.node_id).ok()
-                })
-                .collect();
-            match repair_membership_voters_except(raft.clone(), excluded).await {
+            match repair_membership_voters_except(raft.clone(), store.clone()).await {
                 Ok(promoted) if promoted.is_empty() => {}
                 Ok(promoted) => {
                     tracing::info!(

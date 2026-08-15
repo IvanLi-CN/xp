@@ -8,7 +8,7 @@ use crate::ops::paths::Paths;
 
 const PENDING_JOIN_AUTH_ERROR: &str = concat!(
     "401: {\"error\":{\"code\":\"unauthorized\",",
-    "\"message\":\"invalid internal authentication\"",
+    "\"message\":\"internal sender is not a cluster member\"",
 );
 
 pub(super) async fn reconcile(
@@ -35,11 +35,12 @@ pub(super) async fn reconcile(
         .map_err(|e| ExitError::new(5, format!("cluster_ca_error: {e}")))?;
 
     let client = crate::ops::xp::build_xp_ops_http_client(xp_base_url, &cluster_ca_pem)?;
+    let leader = crate::ops::cluster_info::fetch(&client, xp_base_url).await?;
     let ops_auth = InternalOpsAuth::new(
         &cluster_ca_key_pem,
         &cluster_ca_pem,
         &cluster_meta.cluster_id,
-        &cluster_meta.node_id,
+        &leader.node_id,
         &cluster_meta.node_id,
     );
     let endpoints =
