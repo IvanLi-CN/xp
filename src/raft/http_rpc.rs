@@ -104,12 +104,9 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
         }
     };
-    let (sender_is_member, state_is_pristine) = {
+    let sender_is_member = {
         let store = auth.store.lock().await;
-        (
-            store.get_node(&verified.context.sender_id).is_some(),
-            store.state().nodes.len() == 1 && store.get_node(&auth.local_node_id).is_some(),
-        )
+        store.get_node(&verified.context.sender_id).is_some()
     };
     let marker_sender_ids = auth
         .bootstrap_sender
@@ -118,7 +115,6 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
     let bootstrap_sender = bootstrap_sender_is_allowed(
         &verified.context.sender_id,
         sender_is_member,
-        state_is_pristine,
         marker_sender_ids,
     );
     if !sender_is_member && !bootstrap_sender {
@@ -147,17 +143,20 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             value,
         );
     }
-    if bootstrap_sender
-        && response.status().is_success()
-        && auth
+    if response.status().is_success()
+        && let Some((marker_sender_ids, marker_path)) = auth.bootstrap_sender.as_ref()
+    {
+        let replicated_node_ids = auth
             .store
             .lock()
             .await
-            .get_node(&verified.context.sender_id)
-            .is_some()
-        && let Some((_, marker_path)) = auth.bootstrap_sender.as_ref()
-    {
-        let _ = std::fs::remove_file(marker_path);
+            .list_nodes()
+            .into_iter()
+            .map(|node| node.node_id)
+            .collect::<BTreeSet<_>>();
+        if bootstrap_replication_complete(Some(marker_sender_ids), &replicated_node_ids) {
+            let _ = std::fs::remove_file(marker_path);
+        }
     }
     response
 }
@@ -165,12 +164,20 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
 fn bootstrap_sender_is_allowed(
     sender_id: &str,
     sender_is_member: bool,
-    state_is_pristine: bool,
     marker_sender_ids: Option<&BTreeSet<String>>,
 ) -> bool {
-    !sender_is_member
-        && state_is_pristine
-        && marker_sender_ids.is_some_and(|markers| markers.contains(sender_id))
+    !sender_is_member && marker_sender_ids.is_some_and(|markers| markers.contains(sender_id))
+}
+
+fn bootstrap_replication_complete(
+    marker_sender_ids: Option<&BTreeSet<String>>,
+    replicated_node_ids: &BTreeSet<String>,
+) -> bool {
+    marker_sender_ids.is_some_and(|markers| {
+        markers
+            .iter()
+            .all(|sender_id| replicated_node_ids.contains(sender_id))
+    })
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -205,29 +212,26 @@ async fn install_snapshot(
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::bootstrap_sender_is_allowed;
+    use super::{bootstrap_replication_complete, bootstrap_sender_is_allowed};
 
     #[test]
-    fn bootstrap_sender_requires_pristine_state_and_marker() {
+    fn bootstrap_sender_requires_marker_and_membership_bypass() {
         assert!(bootstrap_sender_is_allowed(
             "leader",
             false,
-            true,
             Some(&BTreeSet::from(["leader".to_string()]))
         ));
         assert!(!bootstrap_sender_is_allowed(
             "leader",
             true,
-            true,
             Some(&BTreeSet::from(["leader".to_string()]))
         ));
-        assert!(!bootstrap_sender_is_allowed(
+        assert!(bootstrap_sender_is_allowed(
             "leader",
             false,
-            false,
             Some(&BTreeSet::from(["leader".to_string()]))
         ));
-        assert!(!bootstrap_sender_is_allowed("leader", false, true, None));
+        assert!(!bootstrap_sender_is_allowed("leader", false, None));
     }
 
     #[test]
@@ -235,7 +239,6 @@ mod tests {
         assert!(!bootstrap_sender_is_allowed(
             "removed-node",
             false,
-            true,
             Some(&BTreeSet::from(["elected-leader".to_string()]))
         ));
     }
@@ -246,8 +249,15 @@ mod tests {
         assert!(bootstrap_sender_is_allowed(
             "new-leader",
             false,
-            true,
             Some(&voters)
         ));
+    }
+
+    #[test]
+    fn bootstrap_marker_waits_for_all_recorded_voters() {
+        let voters = BTreeSet::from(["old-leader".to_string(), "new-leader".to_string()]);
+        let only_old = BTreeSet::from(["old-leader".to_string()]);
+        assert!(!bootstrap_replication_complete(Some(&voters), &only_old));
+        assert!(bootstrap_replication_complete(Some(&voters), &voters));
     }
 }
