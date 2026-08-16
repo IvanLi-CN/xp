@@ -12,6 +12,8 @@ const PENDING_JOIN_AUTH_ERROR: &str = concat!(
 );
 const PENDING_JOIN_LEADER_ERROR: &str =
     concat!("raft forward: leader is not a current ", "cluster member",);
+const PENDING_JOIN_LEADER_UNAVAILABLE_ERROR: &str =
+    "raft client_write forward: leader not available";
 
 pub(super) async fn reconcile(
     paths: &Paths,
@@ -133,6 +135,9 @@ async fn fetch_endpoints_after_initial_replication(
 fn is_pending_join_retryable(error: &ExitError) -> bool {
     error.message.contains(PENDING_JOIN_AUTH_ERROR)
         || error.message.contains(PENDING_JOIN_LEADER_ERROR)
+        || error
+            .message
+            .contains(PENDING_JOIN_LEADER_UNAVAILABLE_ERROR)
 }
 
 #[cfg(test)]
@@ -152,6 +157,13 @@ mod tests {
                 "http_error: admin endpoints get failed: 401: ",
                 "{\"error\":{\"code\":\"unauthorized\",",
                 "\"message\":\"internal sender is not a cluster member\"",
+            ),
+        )));
+        assert!(is_pending_join_retryable(&ExitError::new(
+            5,
+            concat!(
+                "container_reconcile_failed: http_error: client-write failed: 500: ",
+                "raft client_write forward: leader not available",
             ),
         )));
         assert!(!is_pending_join_retryable(&ExitError::new(
