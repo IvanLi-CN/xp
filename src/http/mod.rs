@@ -3934,25 +3934,22 @@ async fn remove_raft_node_membership(
         ));
     }
     let membership = metrics.membership_config.membership();
-    if membership.get_node(&raft_node_id).is_some() {
-        let is_voter = membership
-            .voter_ids()
-            .any(|voter_id| voter_id == raft_node_id);
-
-        if !is_voter {
-            return Err(ApiError::conflict(
-                "node deletion requires a mapped voter; learner removal is not inferred",
-            ));
-        }
-        state
-            .raft
-            .change_membership(
-                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
-                false,
-            )
-            .await
-            .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
+    if !membership
+        .voter_ids()
+        .any(|voter_id| voter_id == raft_node_id)
+    {
+        return Err(ApiError::conflict(
+            "node deletion target is no longer a current voter",
+        ));
     }
+    state
+        .raft
+        .change_membership(
+            openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+            false,
+        )
+        .await
+        .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
     if raft_metrics(state)
         .membership_config
         .membership()
@@ -4073,7 +4070,6 @@ async fn admin_delete_node(
     crate::raft_membership_guard::require_clean_membership_for_remove_node(
         state.raft.clone(),
         state.store.clone(),
-        raft_node_id,
     )
     .await
     .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -4090,6 +4086,16 @@ async fn admin_delete_node(
     let metrics = raft_metrics(&state);
     if metrics.current_leader == Some(raft_node_id) {
         return Err(ApiError::invalid_request("cannot delete current leader"));
+    }
+    if !metrics
+        .membership_config
+        .membership()
+        .voter_ids()
+        .any(|voter_id| voter_id == raft_node_id)
+    {
+        return Err(ApiError::conflict(
+            "node deletion requires a mapped current voter; absent and learner targets are blocked",
+        ));
     }
 
     let expected_membership = crate::raft_membership_guard::membership_revision(&metrics)

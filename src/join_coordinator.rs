@@ -178,7 +178,7 @@ async fn reconcile_once(
             continue;
         }
         let node_id = raft_node_id_from_ulid(&session.node_id)?;
-        let Some(operation) = store
+        let Some(mut operation) = store
             .lock()
             .await
             .state()
@@ -382,6 +382,19 @@ async fn reconcile_once(
         if session.status == JoinSessionStatus::LearnerRegistered
             && operation.phase == crate::state::MembershipOperationPhase::Prepared
         {
+            let learner_observed = raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .membership()
+                .get_node(&node_id)
+                .is_some();
+            if !learner_observed {
+                // OpenRaft may acknowledge nonblocking learner registration before this leader's
+                // metrics watcher has published it. Keep Prepared until that exact learner shape
+                // is observable, so its fingerprint cannot be recorded from the old membership.
+                continue;
+            }
             transition_join_operation(
                 &raft,
                 &store,
@@ -390,6 +403,12 @@ async fn reconcile_once(
                 "learner observed after uncertain registration request",
             )
             .await?;
+            operation.phase = crate::state::MembershipOperationPhase::LearnerRegistered;
+        }
+        if session.status == JoinSessionStatus::LearnerRegistered
+            && operation.phase != crate::state::MembershipOperationPhase::LearnerRegistered
+        {
+            continue;
         }
         let _guard = crate::raft_membership_guard::membership_operation_gate()
             .lock_owned()
@@ -651,6 +670,20 @@ mod tests {
                 .unwrap()
                 .status,
             JoinSessionStatus::LearnerRegistered
+        );
+        assert_eq!(
+            store
+                .lock()
+                .await
+                .state()
+                .active_membership_operation()
+                .unwrap()
+                .phase,
+            crate::state::MembershipOperationPhase::Prepared,
+            concat!(
+                "a nonblocking add_learner acknowledgement must not advance the operation ",
+                "before metrics observe the learner"
+            )
         );
     }
 

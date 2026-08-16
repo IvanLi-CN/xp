@@ -1452,7 +1452,7 @@ async fn admin_get_node_includes_egress_probe_summary_when_present() {
 }
 
 #[tokio::test]
-async fn delete_node_removes_from_inventory() {
+async fn delete_node_rejects_a_desired_node_absent_from_raft_membership() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -1475,7 +1475,9 @@ async fn delete_node_removes_from_inventory() {
         .oneshot(req_authed("DELETE", &uri))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "conflict");
 
     let res = app
         .clone()
@@ -1488,7 +1490,7 @@ async fn delete_node_removes_from_inventory() {
     assert!(
         items
             .iter()
-            .all(|n| n["node_id"].as_str().unwrap() != node.node_id)
+            .any(|n| n["node_id"].as_str().unwrap() == node.node_id)
     );
 }
 
@@ -1584,7 +1586,7 @@ async fn get_node_delete_preview_lists_referenced_endpoints() {
 }
 
 #[tokio::test]
-async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_absent_raft_member() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
@@ -1619,7 +1621,9 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
         .oneshot(req_authed("DELETE", &uri))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "conflict");
 
     let res = app
         .clone()
@@ -1633,20 +1637,14 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|item| item["node_id"] != json!(node.node_id))
+            .any(|item| item["node_id"] == json!(node.node_id))
     );
 
     let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
     let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::OK);
 
-    assert_eq!(
-        drain_reconcile_requests(&mut rx),
-        vec![
-            ReconcileRequest::RemoveInbound { tag: endpoint.tag },
-            ReconcileRequest::Full
-        ]
-    );
+    assert!(drain_reconcile_requests(&mut rx).is_empty());
 }
 
 #[tokio::test]

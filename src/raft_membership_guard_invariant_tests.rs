@@ -57,6 +57,8 @@ async fn context(
         .unwrap(),
     ));
     let mut metrics = openraft::RaftMetrics::new_initial(1);
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(1);
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(
         None,
         openraft::Membership::new(vec![voters], members),
@@ -138,4 +140,19 @@ async fn audit_blocks_duplicate_desired_identity_mappings() {
     let audit = audit_membership(raft, store).await;
     assert_eq!(audit.duplicate_desired_members, BTreeSet::from([voter_id]));
     assert!(!audit.is_clean());
+}
+
+#[tokio::test]
+async fn delete_precondition_rejects_a_desired_node_that_is_already_absent() {
+    let target_id =
+        crate::raft::types::raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_c()).unwrap();
+    let (_temp, raft, store) = context(BTreeSet::new(), BTreeMap::new()).await;
+    store.lock().await.upsert_node(node()).unwrap();
+
+    let error = crate::raft_membership_guard::require_clean_membership_for_remove_node(raft, store)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("missing_desired_members"));
+    assert!(error.to_string().contains(&target_id.to_string()));
 }
