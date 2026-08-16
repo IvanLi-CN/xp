@@ -146,6 +146,12 @@ async fn reconcile_once(
                 )
                 .await?;
             }
+            // A recovered reservation may already have its learner membership. Record the
+            // committed state that precedes this status transition so promotion cannot use only
+            // the original reservation index after a leader failover.
+            session.required_log_index = session
+                .required_log_index
+                .max(raft.metrics().borrow().last_log_index.unwrap_or(0));
             session.status = JoinSessionStatus::LearnerRegistered;
             let node = store
                 .lock()
@@ -214,6 +220,7 @@ mod tests {
     struct RecoveringRaft {
         inner: LocalRaft,
         add_learner_calls: Arc<AtomicUsize>,
+        wait_required_log_index: Arc<AtomicUsize>,
     }
 
     impl RaftFacade for RecoveringRaft {
@@ -243,10 +250,14 @@ mod tests {
         fn wait_learner_caught_up(
             &self,
             _node_id: u64,
-            _required_log_index: u64,
+            required_log_index: u64,
             _timeout: Duration,
         ) -> BoxFuture<'_, anyhow::Result<()>> {
-            Box::pin(async { anyhow::bail!("learner has not started") })
+            let observed = self.wait_required_log_index.clone();
+            Box::pin(async move {
+                observed.store(required_log_index as usize, Ordering::SeqCst);
+                anyhow::bail!("learner has not started")
+            })
         }
 
         fn add_voters(&self, _node_ids: BTreeSet<u64>) -> BoxFuture<'_, anyhow::Result<()>> {
@@ -328,6 +339,7 @@ mod tests {
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
             inner: LocalRaft::new(store.clone(), rx),
             add_learner_calls: calls.clone(),
+            wait_required_log_index: Arc::new(AtomicUsize::new(0)),
         });
 
         reconcile_once(raft, store.clone()).await.unwrap();
@@ -344,6 +356,104 @@ mod tests {
                 .unwrap()
                 .status,
             JoinSessionStatus::LearnerRegistered
+        );
+    }
+
+    #[tokio::test]
+    async fn failover_refreshes_required_index_for_existing_reserved_learner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(StoreInit {
+                data_dir: tmp.path().to_owned(),
+                bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
+                bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+                bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            })
+            .unwrap(),
+        ));
+        {
+            let mut store = store.lock().await;
+            store.state_mut().nodes.insert(
+                learner_id.clone(),
+                Node {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                    access_host: xp_test_fixtures::secondary_host().to_owned(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                    quota_limit_bytes: 0,
+                    quota_reset: NodeQuotaReset::default(),
+                },
+            );
+            store.state_mut().join_sessions.insert(
+                learner_id,
+                JoinSession {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    request_fingerprint: "fingerprint".into(),
+                    signed_cert_pem: "certificate".into(),
+                    token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+                    activation_deadline: (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339(),
+                    required_log_index: 1,
+                    status: JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                },
+            );
+            store.save().unwrap();
+        }
+        let leader_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+        let learner_raft_id =
+            raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+        let mut metrics = openraft::RaftMetrics::new_initial(leader_id);
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(leader_id);
+        metrics.last_log_index = Some(9);
+        metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+            None,
+            openraft::Membership::new(
+                vec![BTreeSet::from([leader_id])],
+                std::collections::BTreeMap::from([
+                    (
+                        leader_id,
+                        RaftNodeMeta {
+                            name: xp_test_fixtures::primary_node_name().to_owned(),
+                            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                            raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
+                        },
+                    ),
+                    (
+                        learner_raft_id,
+                        RaftNodeMeta {
+                            name: xp_test_fixtures::secondary_node_name().to_owned(),
+                            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+                        },
+                    ),
+                ]),
+            ),
+        ));
+        let (_tx, rx) = watch::channel(metrics);
+        let observed = Arc::new(AtomicUsize::new(0));
+        let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
+            inner: LocalRaft::new(store.clone(), rx),
+            add_learner_calls: Arc::new(AtomicUsize::new(0)),
+            wait_required_log_index: observed.clone(),
+        });
+
+        reconcile_once(raft, store.clone()).await.unwrap();
+
+        assert_eq!(observed.load(Ordering::SeqCst), 9);
+        assert_eq!(
+            store
+                .lock()
+                .await
+                .state()
+                .join_sessions
+                .values()
+                .next()
+                .unwrap()
+                .required_log_index,
+            9
         );
     }
 
@@ -397,6 +507,7 @@ mod tests {
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
             inner: LocalRaft::new(store.clone(), rx),
             add_learner_calls: Arc::new(AtomicUsize::new(0)),
+            wait_required_log_index: Arc::new(AtomicUsize::new(0)),
         });
 
         reconcile_once(raft, store.clone()).await.unwrap();

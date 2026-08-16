@@ -57,15 +57,13 @@ async fn reconcile_once(
         .map_err(|e| ExitError::new(5, format!("cluster_ca_error: {e}")))?;
 
     let client = crate::ops::xp::build_xp_ops_http_client(xp_base_url, &cluster_ca_pem)?;
-    let leader = crate::ops::cluster_info::fetch(&client, xp_base_url).await?;
     let ops_auth = InternalOpsAuth::new(
         &cluster_ca_key_pem,
         &cluster_ca_pem,
         &cluster_meta.cluster_id,
         &cluster_meta.node_id,
         &cluster_meta.node_id,
-    )
-    .for_target(leader.node_id);
+    );
     let endpoints =
         fetch_endpoints_after_initial_replication(&client, xp_base_url, &ops_auth, deadline)
             .await?;
