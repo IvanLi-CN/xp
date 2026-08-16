@@ -1,7 +1,7 @@
 ARG XP_TEST_IMAGE=xp-fresh-join-candidate
-FROM ${XP_TEST_IMAGE} AS candidate
+FROM ${XP_TEST_IMAGE} AS base
 
 COPY scripts/testbox/artifacts/xp /usr/local/bin/xp
-COPY --from=candidate /usr/local/bin/xray /usr/local/bin/xray
+COPY --from=base /usr/local/bin/xray /usr/local/bin/xray
 
 RUN chmod 0755 /usr/local/bin/xp /usr/local/bin/xray
