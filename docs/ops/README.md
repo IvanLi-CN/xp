@@ -266,6 +266,17 @@ Deployment note:
   and leaves a new node on XP's disabled default; deploy does not backfill existing nodes.
 - `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
 - The host-managed deploy path is therefore no longer container-only; the same one-shot flow now covers host-managed service nodes as well as official single-image container nodes.
+- During a fresh single-image join, the wrapper keeps the authenticated XP learner running while
+  its initial Raft state is replicated. Managed-default reconcile uses the local XP API as the
+  readiness gate and forwards writes through local Raft only after local internal authentication
+  observes that replicated state. During the activation deadline it retries only the three expected
+  pre-replication signals (`internal sender is not a cluster member`, a missing local leader
+  membership record, and `raft client_write forward: leader not available`); unrelated
+  authentication, network, and configuration failures still fail immediately.
+- Before issuing a fresh join token reservation, the leader verifies that every current voter
+  exposes `cluster.join.staged-v1`. Finish the XP rolling upgrade first when the API returns a
+  staged-join capability conflict. Host-managed startup keeps managed-default reconciliation active
+  until it succeeds after learner replication.
 
 Example host-managed bootstrap (systemd / RHEL-family included):
 
@@ -976,8 +987,12 @@ After recovery:
 - Re-join each repaired node using a join token issued by the recovered leader
   (`/api/admin/cluster/join-tokens`), then run `xp join` on the repaired node and restart its
   service.
-- Treat `xp join` success as voter success: a node that cannot be promoted to voter must not be
-  considered joined.
+- `xp join` success means the node's authenticated bootstrap material is durable and the learner
+  can start. The leader promotes it only after Raft catch-up; do not consider deployment complete
+  until membership reports the node as a voter and its public health endpoint returns `200`.
+- Re-running `xp join` after a lost response reuses the pending node key/CSR and the same reserved
+  token. Retries do not extend the fixed 10-minute activation deadline. If the learner never starts,
+  the leader removes the incomplete membership/node and expires the reservation.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
   `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
   managed-default endpoint ports from Raft even when the local bootstrap env differs.

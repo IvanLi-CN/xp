@@ -316,6 +316,7 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
                 quota_limit_bytes: 0,
                 quota_reset: Default::default(),
             },
+            join_session: None,
         }
         .apply(store.state_mut())
         .expect("insert resource peer");

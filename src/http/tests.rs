@@ -766,11 +766,11 @@ fn add_cluster_node(store: &mut JsonSnapshotStore, node_id: &str, node_name: fn(
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         },
+        join_session: None,
     }
     .apply(store.state_mut())
     .unwrap();
 }
-
 fn probe_hour_now() -> String {
     crate::endpoint_probe::format_hour_key(chrono::Utc::now())
 }
@@ -1866,7 +1866,6 @@ async fn cluster_join_returns_cluster_ca_key_pem_when_leader_has_it() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
     let join_token = json["join_token"].as_str().unwrap().to_string();
-
     let decoded =
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
@@ -1990,7 +1989,6 @@ async fn cluster_join_rejects_non_https_api_base_url_before_writes() {
         crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
             .unwrap();
     let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
-
     let res = app
         .oneshot(
             Request::builder()
@@ -2066,7 +2064,6 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         raft,
         ReconcileHandle::noop(),
     );
-
     let res = app
         .clone()
         .oneshot(req_authed_json(
@@ -2116,11 +2113,13 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
         "unexpected error: {}",
         body["error"]["message"].as_str().unwrap()
     );
-
     let store = store.lock().await;
-    assert!(store.get_node(&decoded.token_id).is_none());
+    assert!(store.get_node(&decoded.token_id).is_some());
+    assert_eq!(
+        store.state().join_sessions[&decoded.token_id].status,
+        crate::join_session::JoinSessionStatus::Reserved
+    );
 }
-
 #[tokio::test]
 async fn delete_node_returns_json_error_when_change_membership_panics() {
     let tmp = tempfile::tempdir().unwrap();
@@ -8287,12 +8286,10 @@ async fn user_traffic_returns_partial_report_when_all_membership_nodes_are_unrea
     assert_eq!(json["unreachable_nodes"], json!([remote_node_id]));
     assert_eq!(json["traffic"]["current"].as_array().unwrap().len(), 288);
 }
-
 #[tokio::test]
 async fn node_tcp_connections_returns_per_endpoint_series() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
-
     let (node_id, minute0, minute1, endpoint_one_id, endpoint_two_id, endpoint_one_tag) = {
         let mut store = store.lock().await;
         let node = Node {
@@ -8303,9 +8300,12 @@ async fn node_tcp_connections_returns_per_endpoint_series() {
             quota_limit_bytes: 0,
             quota_reset: NodeQuotaReset::default(),
         };
-        DesiredStateCommand::UpsertNode { node: node.clone() }
-            .apply(store.state_mut())
-            .unwrap();
+        DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        }
+        .apply(store.state_mut())
+        .unwrap();
         let endpoint_one = crate::domain::Endpoint {
             endpoint_id: xp_test_fixtures::endpoint_id_fixture584().to_owned(),
             node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),

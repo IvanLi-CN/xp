@@ -51,9 +51,9 @@ async fn reconcile_managed_defaults_with_startup_retries(
     intent: xp::managed_default_endpoints::ManagedDefaultEndpointsIntent,
     raft_facade: Arc<dyn xp::raft::app::RaftFacade>,
 ) {
-    const ATTEMPTS: usize = 8;
-
-    for attempt in 1..=ATTEMPTS {
+    let mut attempt = 0_u64;
+    loop {
+        attempt += 1;
         let endpoints = {
             let store = store.lock().await;
             store
@@ -62,7 +62,14 @@ async fn reconcile_managed_defaults_with_startup_retries(
                 .filter(|endpoint| endpoint.node_id == node_id)
                 .collect::<Vec<_>>()
         };
-        let mut writer = |cmd| async { raft_facade.client_write(cmd).await.map(|_| ()) };
+        let mut writer = |cmd| async {
+            match raft_facade.client_write(cmd).await? {
+                xp::raft::types::ClientResponse::Ok { .. } => Ok(()),
+                xp::raft::types::ClientResponse::Err { code, message, .. } => {
+                    anyhow::bail!("{code}: {message}")
+                }
+            }
+        };
         match xp::managed_default_endpoints::reconcile_managed_default_endpoints(
             &data_dir,
             &node_id,
@@ -82,22 +89,13 @@ async fn reconcile_managed_defaults_with_startup_retries(
                 }
                 return;
             }
-            Err(err) if attempt < ATTEMPTS => {
+            Err(err) => {
                 tracing::warn!(
                     attempt,
-                    max_attempts = ATTEMPTS,
                     error = %err,
                     "managed default endpoint reconcile failed after startup; retrying"
                 );
-                tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
-            }
-            Err(err) => {
-                tracing::error!(
-                    attempt,
-                    max_attempts = ATTEMPTS,
-                    error = %err,
-                    "managed default endpoint reconcile failed after startup retries"
-                );
+                tokio::time::sleep(Duration::from_secs(attempt.min(10))).await;
             }
         }
     }
@@ -172,11 +170,51 @@ fn login_link(config: &xp::config::Config) -> Result<()> {
 async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<()> {
     use xp::cluster_identity::JoinToken;
 
-    let token = JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct PendingJoin {
+        token_id: String,
+        node_name: String,
+        access_host: String,
+        api_base_url: String,
+        key_pem: String,
+        csr_pem: String,
+    }
+
+    let token = JoinToken::decode_base64url_json(&join_token)
         .map_err(|e| anyhow::anyhow!("decode join token: {e}"))?;
     let expected_node_id = token.token_id.clone();
 
-    let csr = xp::cluster_identity::generate_node_keypair_and_csr(&expected_node_id)?;
+    let pending_path = config.data_dir.join("cluster").join("pending-join.json");
+    let node_name = config.node_name.clone();
+    let access_host = config.access_host.clone();
+    let api_base_url = config.api_base_url.clone();
+    let pending = if pending_path.exists() {
+        let pending: PendingJoin = serde_json::from_slice(&std::fs::read(&pending_path)?)?;
+        if pending.token_id != expected_node_id
+            || pending.node_name != node_name
+            || pending.access_host != access_host
+            || pending.api_base_url != api_base_url
+        {
+            anyhow::bail!("pending join belongs to another token or node configuration");
+        }
+        pending
+    } else {
+        let csr = xp::cluster_identity::generate_node_keypair_and_csr(&expected_node_id)?;
+        let pending = PendingJoin {
+            token_id: expected_node_id.clone(),
+            node_name: node_name.clone(),
+            access_host: access_host.clone(),
+            api_base_url: api_base_url.clone(),
+            key_pem: csr.key_pem,
+            csr_pem: csr.csr_pem,
+        };
+        std::fs::create_dir_all(pending_path.parent().expect("pending join parent"))?;
+        xp::cluster_metadata::write_atomic_private(
+            &pending_path,
+            &serde_json::to_vec_pretty(&pending)?,
+        )?;
+        pending
+    };
 
     let url = format!(
         "{}/api/cluster/join",
@@ -187,26 +225,22 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .add_root_certificate(cluster_ca)
         .build()?;
 
-    let node_name = config.node_name.clone();
-    let access_host = config.access_host.clone();
-    let api_base_url = config.api_base_url.clone();
-
     let req = serde_json::json!({
         "join_token": join_token,
         "node_name": node_name,
         "access_host": access_host,
         "api_base_url": api_base_url,
-        "csr_pem": csr.csr_pem,
+        "csr_pem": pending.csr_pem,
     });
 
-    let resp = client
-        .post(url)
-        .json(&req)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<serde_json::Value>()
-        .await?;
+    let resp = client.post(url).json(&req).send().await?;
+    if resp.status().is_client_error() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let _ = std::fs::remove_file(&pending_path);
+        anyhow::bail!("join rejected: {status}: {body}");
+    }
+    let resp = resp.error_for_status()?.json::<serde_json::Value>().await?;
 
     let node_id = resp
         .get("node_id")
@@ -217,6 +251,28 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .get("signed_cert_pem")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing signed_cert_pem in join response"))?
+        .to_string();
+    let leader_node_id = resp
+        .get("leader_node_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing leader_node_id in join response"))?
+        .to_string();
+    let bootstrap_sender_ids = resp
+        .get("bootstrap_sender_ids")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .filter(|id| !id.trim().is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|ids| !ids.is_empty())
+        .unwrap_or_else(|| vec![leader_node_id.clone()]);
+    let activation_deadline = resp
+        .get("activation_deadline")
+        .and_then(|value| value.as_str())
+        .filter(|deadline| !deadline.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing activation_deadline in join response"))?
         .to_string();
     let cluster_ca_pem = resp
         .get("cluster_ca_pem")
@@ -242,14 +298,23 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
 
     let paths = xp::cluster_metadata::ClusterPaths::new(&config.data_dir);
     std::fs::create_dir_all(&paths.dir)?;
-    std::fs::write(&paths.cluster_ca_pem, cluster_ca_pem.as_bytes())?;
-    std::fs::write(&paths.cluster_ca_key_pem, cluster_ca_key_pem.as_bytes())?;
-    best_effort_chmod_0600(&paths.cluster_ca_key_pem);
-    std::fs::write(&paths.admin_token_hash, xp_admin_token_hash.as_bytes())?;
-    best_effort_chmod_0600(&paths.admin_token_hash);
-    std::fs::write(&paths.node_key_pem, csr.key_pem.as_bytes())?;
-    std::fs::write(&paths.node_csr_pem, csr.csr_pem.as_bytes())?;
-    std::fs::write(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
+    xp::cluster_metadata::write_atomic(&paths.cluster_ca_pem, cluster_ca_pem.as_bytes())?;
+    xp::cluster_metadata::write_atomic_private(
+        &paths.cluster_ca_key_pem,
+        cluster_ca_key_pem.as_bytes(),
+    )?;
+    xp::cluster_metadata::write_atomic_private(
+        &paths.admin_token_hash,
+        xp_admin_token_hash.as_bytes(),
+    )?;
+    xp::cluster_metadata::write_atomic_private(&paths.node_key_pem, pending.key_pem.as_bytes())?;
+    xp::cluster_metadata::write_atomic(&paths.node_csr_pem, pending.csr_pem.as_bytes())?;
+    xp::cluster_metadata::write_atomic(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
+    let bootstrap_marker = xp::raft::http_rpc::encode_bootstrap_sender_marker(
+        &bootstrap_sender_ids,
+        &activation_deadline,
+    )?;
+    xp::cluster_metadata::write_atomic_private(&paths.raft_bootstrap_sender, &bootstrap_marker)?;
 
     let meta = xp::cluster_metadata::ClusterMetadata {
         schema_version: xp::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,
@@ -270,6 +335,7 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         bootstrap_access_host: meta.access_host.clone(),
         bootstrap_api_base_url: meta.api_base_url.clone(),
     })?;
+    std::fs::remove_file(pending_path)?;
 
     Ok(())
 }
@@ -516,8 +582,11 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     let _vless_https_canary_task = vless_https_canary_task;
     let _raft_membership_guard_task = xp::raft_membership_guard::spawn_membership_voter_guard(
         membership_guard_raft_facade,
+        store.clone(),
         Duration::from_secs(60),
     );
+    let _join_coordinator_task =
+        xp::join_coordinator::spawn_join_coordinator(raft_facade.clone(), store.clone());
 
     let app = xp::http::build_router_with_mesh_telemetry(
         config.clone(),
@@ -614,7 +683,10 @@ async fn bootstrap_upsert_node(
     let mut backoff = Duration::from_millis(100);
     for attempt in 0..5u8 {
         match raft
-            .client_write(xp::state::DesiredStateCommand::UpsertNode { node: node.clone() })
+            .client_write(xp::state::DesiredStateCommand::UpsertNode {
+                node: node.clone(),
+                join_session: None,
+            })
             .await
         {
             Ok(_resp) => return Ok(()),
@@ -636,14 +708,6 @@ async fn bootstrap_upsert_node(
     }
 
     anyhow::bail!("bootstrap raft upsert_node: leader not available after retries");
-}
-
-fn best_effort_chmod_0600(path: &std::path::Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
 }
 
 #[cfg(test)]

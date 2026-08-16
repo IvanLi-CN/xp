@@ -1,0 +1,21 @@
+ARG XP_TEST_IMAGE=xp-fresh-join-candidate
+FROM ${XP_TEST_IMAGE} AS candidate
+
+FROM debian:bookworm-slim
+ENV container=docker
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl systemd systemd-sysv \
+  && rm -rf /var/lib/apt/lists/* \
+  && systemctl mask dev-hugepages.mount sys-fs-fuse-connections.mount
+
+COPY scripts/testbox/artifacts/xp /opt/xp-candidate/xp
+COPY scripts/testbox/artifacts/xp-ops /usr/local/bin/xp-ops
+COPY scripts/testbox/host-systemd-init.sh /usr/local/libexec/xp-testbox-systemd-init
+COPY --from=candidate /usr/local/bin/xray /opt/xp-candidate/xray
+
+RUN chmod 0755 /opt/xp-candidate/xp /opt/xp-candidate/xray \
+  /usr/local/bin/xp-ops /usr/local/libexec/xp-testbox-systemd-init
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/local/libexec/xp-testbox-systemd-init"]

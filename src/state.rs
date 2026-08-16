@@ -16,6 +16,7 @@ use crate::{
     inbound_ip_usage::{
         GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
     },
+    join_session::JoinSession,
     protocol::{
         RealityServerNamesSource, RotateShortIdResult, VlessRealityVisionTcpEndpointMeta,
         normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
@@ -184,8 +185,8 @@ pub enum StoreError {
     Domain(DomainError),
     Migration { message: String },
     SchemaVersionMismatch { expected: u32, got: u32 },
+    InvalidJoinSession { message: &'static str },
 }
-
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -196,6 +197,7 @@ impl std::fmt::Display for StoreError {
             Self::SchemaVersionMismatch { expected, got } => {
                 write!(f, "schema_version mismatch: expected {expected}, got {got}")
             }
+            Self::InvalidJoinSession { message } => write!(f, "invalid join session: {message}"),
         }
     }
 }
@@ -208,6 +210,7 @@ impl std::error::Error for StoreError {
             Self::Domain(e) => Some(e),
             Self::Migration { .. } => None,
             Self::SchemaVersionMismatch { .. } => None,
+            Self::InvalidJoinSession { .. } => None,
         }
     }
 }
@@ -297,6 +300,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub nodes: BTreeMap<String, Node>,
     #[serde(default)]
+    pub join_sessions: BTreeMap<String, JoinSession>,
+    #[serde(default)]
     pub endpoints: BTreeMap<String, Endpoint>,
     /// Endpoint probe history (hour buckets, per node).
     ///
@@ -345,6 +350,7 @@ impl PersistedState {
             mihomo_resource_revision: 0,
             mihomo_resource_allow_private_targets: false,
             nodes: BTreeMap::new(),
+            join_sessions: BTreeMap::new(),
             endpoints: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
             endpoint_probe_participants_by_hour: BTreeMap::new(),
@@ -1058,7 +1064,7 @@ fn infer_user_auto_assign_endpoint_kinds(
     out
 }
 
-fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
+pub(super) fn sync_node_user_endpoint_memberships(state: &mut PersistedState) {
     state.user_auto_assign_endpoint_kinds = normalize_user_auto_assign_endpoint_kinds(
         state,
         state.user_auto_assign_endpoint_kinds.clone(),
@@ -1839,6 +1845,8 @@ fn is_false(value: &bool) -> bool {
 pub enum DesiredStateCommand {
     UpsertNode {
         node: Node,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        join_session: Option<JoinSession>,
     },
     DeleteNode {
         node_id: String,
@@ -1846,6 +1854,8 @@ pub enum DesiredStateCommand {
         delete_endpoints: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         expected_endpoint_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        join_session: Option<JoinSession>,
     },
     UpsertEndpoint {
         endpoint: Endpoint,
@@ -1978,6 +1988,8 @@ struct UserAccessItemCompat {
 enum DesiredStateCommandCompat {
     UpsertNode {
         node: Node,
+        #[serde(default)]
+        join_session: Option<JoinSession>,
     },
     DeleteNode {
         node_id: String,
@@ -1985,6 +1997,8 @@ enum DesiredStateCommandCompat {
         delete_endpoints: bool,
         #[serde(default)]
         expected_endpoint_ids: Vec<String>,
+        #[serde(default)]
+        join_session: Option<JoinSession>,
     },
     UpsertEndpoint {
         endpoint: Endpoint,
@@ -2110,15 +2124,19 @@ impl<'de> Deserialize<'de> for DesiredStateCommand {
 impl From<DesiredStateCommandCompat> for DesiredStateCommand {
     fn from(value: DesiredStateCommandCompat) -> Self {
         match value {
-            DesiredStateCommandCompat::UpsertNode { node } => Self::UpsertNode { node },
+            DesiredStateCommandCompat::UpsertNode { node, join_session } => {
+                Self::UpsertNode { node, join_session }
+            }
             DesiredStateCommandCompat::DeleteNode {
                 node_id,
                 delete_endpoints,
                 expected_endpoint_ids,
+                join_session,
             } => Self::DeleteNode {
                 node_id,
                 delete_endpoints,
                 expected_endpoint_ids,
+                join_session,
             },
             DesiredStateCommandCompat::UpsertEndpoint { endpoint, expected } => {
                 Self::UpsertEndpoint { endpoint, expected }
@@ -2309,7 +2327,7 @@ fn validate_user_quota_reset(reset: &UserQuotaReset) -> Result<(), DomainError> 
     Ok(())
 }
 
-fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> {
+pub(super) fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> {
     match reset {
         NodeQuotaReset::Unlimited { tz_offset_minutes } => {
             if let Some(tz_offset_minutes) = tz_offset_minutes {
@@ -2329,7 +2347,7 @@ fn validate_node_quota_reset(reset: &NodeQuotaReset) -> Result<(), DomainError> 
     Ok(())
 }
 
-fn validate_node_quota_config(node: &Node) -> Result<(), DomainError> {
+pub(super) fn validate_node_quota_config(node: &Node) -> Result<(), DomainError> {
     // Shared node quota enforcement requires a finite cycle window.
     if node.quota_limit_bytes > 0 && matches!(node.quota_reset, NodeQuotaReset::Unlimited { .. }) {
         return Err(DomainError::InvalidNodeQuotaConfig {
@@ -2443,19 +2461,18 @@ fn apply_vless_meta_updates(
 impl DesiredStateCommand {
     pub fn apply(&self, state: &mut PersistedState) -> Result<DesiredStateApplyResult, StoreError> {
         match self {
-            Self::UpsertNode { node } => {
-                validate_node_quota_reset(&node.quota_reset)?;
-                validate_node_quota_config(node)?;
-                state.nodes.insert(node.node_id.clone(), node.clone());
-                sync_node_user_endpoint_memberships(state);
-                Ok(DesiredStateApplyResult::Applied)
+            Self::UpsertNode { node, join_session } => {
+                crate::state_join_command::apply_upsert_node(state, node, join_session.as_ref())
             }
             Self::DeleteNode {
                 node_id,
                 delete_endpoints,
                 expected_endpoint_ids,
+                join_session,
             } => {
+                crate::state_join_command::validate_session(state, join_session.as_ref())?;
                 if !state.nodes.contains_key(node_id) {
+                    crate::state_join_command::commit_session(state, join_session.as_ref());
                     return Ok(DesiredStateApplyResult::NodeDeleted {
                         deleted: false,
                         deleted_endpoint_tags: Vec::new(),
@@ -2500,6 +2517,7 @@ impl DesiredStateCommand {
                 }
 
                 state.nodes.remove(node_id);
+                crate::state_join_command::commit_session(state, join_session.as_ref());
                 for domain in state.reality_domains.iter_mut() {
                     domain.disabled_node_ids.remove(node_id);
                 }
@@ -4217,7 +4235,11 @@ impl JsonSnapshotStore {
     }
 
     pub fn upsert_node(&mut self, node: Node) -> Result<Node, StoreError> {
-        DesiredStateCommand::UpsertNode { node: node.clone() }.apply(&mut self.state)?;
+        DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        }
+        .apply(&mut self.state)?;
         self.save()?;
         Ok(node)
     }

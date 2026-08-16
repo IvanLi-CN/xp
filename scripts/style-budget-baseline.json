@@ -700,7 +700,7 @@
   "src/state.rs": {
     "long_line_count": 2,
     "max_line_length": 129,
-    "source_lines": 4438
+    "source_lines": 4460
   },
   "src/state/tests.rs": {
     "source_lines": 2448

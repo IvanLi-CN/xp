@@ -431,7 +431,10 @@ pub(crate) async fn sync_node_meta_runtime(
         &client,
         xp_base_url,
         &ops_auth,
-        crate::state::DesiredStateCommand::UpsertNode { node: desired_node },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: desired_node,
+            join_session: None,
+        },
     )
     .await?;
 

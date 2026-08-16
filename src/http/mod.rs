@@ -112,14 +112,13 @@ use crate::{
 
 mod capabilities;
 mod history_repository;
+mod join_capability;
+mod join_protocol;
 mod version_check;
 mod web_assets;
-
-use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
-
 use capabilities::api_capabilities;
+use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
 use version_check::{VersionCheckCache, api_version_check};
-
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
@@ -222,6 +221,7 @@ impl From<StoreError> for ApiError {
             },
             StoreError::SchemaVersionMismatch { .. } => ApiError::internal(value.to_string()),
             StoreError::Migration { .. } => ApiError::internal(value.to_string()),
+            StoreError::InvalidJoinSession { .. } => ApiError::conflict(value.to_string()),
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
     }
@@ -597,6 +597,9 @@ struct ClusterJoinRequest {
 #[derive(Serialize)]
 struct ClusterJoinResponse {
     node_id: String,
+    leader_node_id: String,
+    bootstrap_sender_ids: Vec<String>,
+    activation_deadline: String,
     signed_cert_pem: String,
     cluster_ca_pem: String,
     cluster_ca_key_pem: String,
@@ -1305,6 +1308,13 @@ pub fn build_router_with_mesh_telemetry(
                         cluster_ca_key_pem: cluster_ca_key_pem.to_string(),
                         cluster_ca_cert_pem: (*app_state.cluster_ca_pem).clone(),
                         store: app_state.store.clone(),
+                        bootstrap_sender: crate::raft::http_rpc::read_bootstrap_sender_marker(
+                            app_state
+                                .config
+                                .data_dir
+                                .join("cluster")
+                                .join("raft_bootstrap_sender"),
+                        ),
                     },
                 ))
             }
@@ -1972,7 +1982,7 @@ async fn cluster_join(
         return Err(ApiError::invalid_request("not leader"));
     }
 
-    let token = JoinToken::decode_and_validate(&req.join_token, Utc::now())
+    let token = JoinToken::decode_base64url_json(&req.join_token)
         .map_err(|e| ApiError::invalid_request(e.to_string()))?;
 
     let ca_key_pem = state
@@ -1990,19 +2000,44 @@ async fn cluster_join(
 
     let node_id = token.token_id.clone();
     let raft_node_id = validate_cluster_join_request(&node_id, &req)?;
-    {
-        let store = state.store.lock().await;
-        if store.get_node(&node_id).is_some() {
-            return Err(ApiError::invalid_request("join token already used"));
-        }
-    }
-
-    let signed_cert_pem = crate::cluster_identity::sign_node_csr(
-        &state.cluster.cluster_id,
-        &ca_key_pem,
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+    let request_fingerprint = crate::join_session::JoinSession::request_fingerprint(
+        &req.node_name,
+        &req.access_host,
+        &req.api_base_url,
         &req.csr_pem,
     )
     .map_err(|e| ApiError::internal(e.to_string()))?;
+    let reservation =
+        join_protocol::resolve_reservation(&state, &req, &token, &request_fingerprint, &ca_key_pem)
+            .await?;
+    let existing_session = reservation.existing;
+    let activation_deadline = reservation.activation_deadline;
+    let signed_cert_pem = reservation.signed_cert_pem;
+    let bootstrap_sender_ids = join_protocol::bootstrap_sender_ids(&state).await;
+    if existing_session.is_none() {
+        join_capability::require_on_voters(&state).await?;
+    }
+    if existing_session.as_ref().is_some_and(|session| {
+        matches!(
+            session.status,
+            crate::join_session::JoinSessionStatus::LearnerRegistered
+                | crate::join_session::JoinSessionStatus::Consumed
+        )
+    }) {
+        return Ok(Json(ClusterJoinResponse {
+            node_id,
+            leader_node_id: state.cluster.node_id.clone(),
+            bootstrap_sender_ids,
+            activation_deadline,
+            signed_cert_pem,
+            cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+            cluster_ca_key_pem: ca_key_pem,
+            xp_admin_token_hash: state.config.admin_token_hash.clone(),
+        }));
+    }
 
     // Ensure the current leader exists in the Raft state machine so joiners can replicate the
     // full node list (including the bootstrap node).
@@ -2023,6 +2058,7 @@ async fn cluster_join(
         &state,
         crate::state::DesiredStateCommand::UpsertNode {
             node: leader_node.clone(),
+            join_session: None,
         },
     )
     .await?;
@@ -2036,9 +2072,29 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
-    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
-        .lock_owned()
-        .await;
+    if existing_session.is_none() {
+        let reservation_log_index = raft_metrics(&state)
+            .last_log_index
+            .unwrap_or(0)
+            .saturating_add(1);
+        let _ = raft_write(
+            &state,
+            crate::state::DesiredStateCommand::UpsertNode {
+                node: node.clone(),
+                join_session: Some(crate::join_session::JoinSession {
+                    node_id: node_id.clone(),
+                    request_fingerprint: request_fingerprint.clone(),
+                    signed_cert_pem: signed_cert_pem.clone(),
+                    token_expires_at: token.expires_at.to_rfc3339(),
+                    activation_deadline: activation_deadline.clone(),
+                    required_log_index: reservation_log_index,
+                    status: crate::join_session::JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                }),
+            },
+        )
+        .await?;
+    }
 
     state
         .raft
@@ -2055,7 +2111,10 @@ async fn cluster_join(
 
     let upsert_result = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        },
     )
     .await;
     if let Err(err) = upsert_result {
@@ -2063,27 +2122,13 @@ async fn cluster_join(
         return Err(err);
     }
 
-    // The joiner cannot start its Raft endpoint until it receives this response. Waiting for
-    // learner catch-up here therefore deadlocks bootstrap: the leader cannot replicate to a
-    // process that is still waiting for credentials. Leave the node as a learner and let the
-    // membership guard promote it after the endpoint becomes reachable and catches up.
-    let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
-    let raft = state.raft.clone();
-    tokio::spawn(async move {
-        if let Err(err) = raft
-            .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
-            .await
-        {
-            tracing::warn!(
-                raft_node_id,
-                error = %err,
-                "joined learner did not catch up during the initial window"
-            );
-        }
-    });
+    join_protocol::mark_learner_registered(&state, node).await?;
 
     Ok(Json(ClusterJoinResponse {
         node_id,
+        leader_node_id: state.cluster.node_id.clone(),
+        bootstrap_sender_ids,
+        activation_deadline,
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
         cluster_ca_key_pem: ca_key_pem,
@@ -2136,6 +2181,7 @@ async fn rollback_joined_learner(
                 node_id: node_id.to_string(),
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
+                join_session: None,
             },
         )
         .await
@@ -3972,7 +4018,10 @@ async fn admin_patch_node(
 
     let _ = raft_write(
         &state,
-        crate::state::DesiredStateCommand::UpsertNode { node: node.clone() },
+        crate::state::DesiredStateCommand::UpsertNode {
+            node: node.clone(),
+            join_session: None,
+        },
     )
     .await?;
     let probe = {
@@ -4147,6 +4196,7 @@ async fn admin_delete_node(
                 node_id: node_id.clone(),
                 delete_endpoints: query.delete_endpoints,
                 expected_endpoint_ids,
+                join_session: None,
             },
         ),
     )

@@ -1,0 +1,16 @@
+ARG XP_TEST_IMAGE=xp-fresh-join-candidate
+FROM ${XP_TEST_IMAGE} AS candidate
+
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates curl openrc
+
+COPY scripts/testbox/artifacts/xp /opt/xp-candidate/xp
+COPY scripts/testbox/artifacts/xp-ops /usr/local/bin/xp-ops
+COPY scripts/testbox/host-openrc-init.sh /usr/local/libexec/xp-testbox-openrc-init
+COPY --from=candidate /usr/local/bin/xray /opt/xp-candidate/xray
+
+RUN chmod 0755 /opt/xp-candidate/xp /opt/xp-candidate/xray \
+  /usr/local/bin/xp-ops /usr/local/libexec/xp-testbox-openrc-init
+
+CMD ["/usr/local/libexec/xp-testbox-openrc-init"]

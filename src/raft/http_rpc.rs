@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use axum::{
     Json, Router,
@@ -9,10 +10,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
 
 use crate::{
-    domain::Node,
     internal_auth::{self, InternalRoute},
     raft::types::{NodeId, TypeConfig},
     state::JsonSnapshotStore,
@@ -34,6 +35,47 @@ pub struct RaftRpcAuth {
     pub cluster_ca_key_pem: String,
     pub cluster_ca_cert_pem: String,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
+    pub bootstrap_sender: Option<BootstrapSenderMarker>,
+}
+
+#[derive(Clone)]
+pub struct BootstrapSenderMarker {
+    pub sender_ids: BTreeSet<String>,
+    pub activation_deadline: DateTime<Utc>,
+    pub path: PathBuf,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct BootstrapSenderMarkerFile {
+    sender_ids: BTreeSet<String>,
+    activation_deadline: String,
+}
+
+pub fn encode_bootstrap_sender_marker(
+    sender_ids: &[String],
+    activation_deadline: &str,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&BootstrapSenderMarkerFile {
+        sender_ids: sender_ids.iter().cloned().collect(),
+        activation_deadline: activation_deadline.to_string(),
+    })
+}
+
+pub fn read_bootstrap_sender_marker(path: PathBuf) -> Option<BootstrapSenderMarker> {
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let file = serde_json::from_str::<BootstrapSenderMarkerFile>(&raw).ok()?;
+    let activation_deadline = DateTime::parse_from_rfc3339(&file.activation_deadline)
+        .ok()?
+        .with_timezone(&Utc);
+    if activation_deadline <= Utc::now() || file.sender_ids.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    Some(BootstrapSenderMarker {
+        sender_ids: file.sender_ids,
+        activation_deadline,
+        path,
+    })
 }
 
 pub fn build_raft_rpc_router(state: RaftRpcState) -> Router {
@@ -89,16 +131,17 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             return (StatusCode::UNAUTHORIZED, "invalid raft authentication").into_response();
         }
     };
-    let store = auth.store.lock().await;
-    let sender_is_member = store.get_node(&verified.context.sender_id).is_some();
-    let nodes = store.list_nodes();
-    // A freshly joined node has no replicated state yet. Its first authenticated Raft request
-    // is what installs the member list, so requiring the sender to already exist would make
-    // bootstrap impossible. The CA signature still authenticates the request; once any state
-    // exists, keep the membership check strict so removed nodes cannot resume replication.
-    let initial_bootstrap = is_initial_raft_bootstrap(&nodes, &auth.local_node_id);
-    drop(store);
-    if !sender_is_member && !initial_bootstrap {
+    let sender_is_member = {
+        let store = auth.store.lock().await;
+        store.get_node(&verified.context.sender_id).is_some()
+    };
+    let marker_sender_ids = active_bootstrap_sender_ids(auth.bootstrap_sender.as_ref());
+    let bootstrap_sender = bootstrap_sender_is_allowed(
+        &verified.context.sender_id,
+        sender_is_member,
+        marker_sender_ids,
+    );
+    if !sender_is_member && !bootstrap_sender {
         tracing::warn!(
             sender_id = %verified.context.sender_id,
             "rejected Raft request from a non-member"
@@ -124,11 +167,50 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             value,
         );
     }
+    if response.status().is_success()
+        && let Some(marker) = auth.bootstrap_sender.as_ref()
+    {
+        let replicated_node_ids = auth
+            .store
+            .lock()
+            .await
+            .list_nodes()
+            .into_iter()
+            .map(|node| node.node_id)
+            .collect::<BTreeSet<_>>();
+        if bootstrap_replication_complete(Some(&marker.sender_ids), &replicated_node_ids) {
+            let _ = std::fs::remove_file(&marker.path);
+        }
+    }
     response
 }
 
-fn is_initial_raft_bootstrap(nodes: &[Node], local_node_id: &str) -> bool {
-    nodes.is_empty() || (nodes.len() == 1 && nodes[0].node_id == local_node_id)
+fn bootstrap_sender_is_allowed(
+    sender_id: &str,
+    sender_is_member: bool,
+    marker_sender_ids: Option<&BTreeSet<String>>,
+) -> bool {
+    !sender_is_member && marker_sender_ids.is_some_and(|markers| markers.contains(sender_id))
+}
+
+fn active_bootstrap_sender_ids(
+    bootstrap_sender: Option<&BootstrapSenderMarker>,
+) -> Option<&BTreeSet<String>> {
+    bootstrap_sender.and_then(|marker| {
+        (marker.activation_deadline > Utc::now() && std::fs::metadata(&marker.path).is_ok())
+            .then_some(&marker.sender_ids)
+    })
+}
+
+fn bootstrap_replication_complete(
+    marker_sender_ids: Option<&BTreeSet<String>>,
+    replicated_node_ids: &BTreeSet<String>,
+) -> bool {
+    marker_sender_ids.is_some_and(|markers| {
+        markers
+            .iter()
+            .all(|sender_id| replicated_node_ids.contains(sender_id))
+    })
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -161,40 +243,80 @@ async fn install_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::domain::NodeQuotaReset;
+    use std::collections::BTreeSet;
 
-    fn primary_node() -> Node {
-        Node {
-            node_id: xp_test_fixtures::primary_node_id().to_owned(),
-            node_name: xp_test_fixtures::primary_node_name().to_owned(),
-            access_host: xp_test_fixtures::primary_host().to_owned(),
-            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
-            quota_limit_bytes: 0,
-            quota_reset: NodeQuotaReset::default(),
-        }
-    }
+    use super::{
+        BootstrapSenderMarker, active_bootstrap_sender_ids, bootstrap_replication_complete,
+        bootstrap_sender_is_allowed,
+    };
 
-    fn secondary_node() -> Node {
-        Node {
-            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
-            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
-            access_host: xp_test_fixtures::secondary_host().to_owned(),
-            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-            quota_limit_bytes: 0,
-            quota_reset: NodeQuotaReset::default(),
-        }
+    #[test]
+    fn bootstrap_sender_requires_marker_and_membership_bypass() {
+        assert!(bootstrap_sender_is_allowed(
+            "leader",
+            false,
+            Some(&BTreeSet::from(["leader".to_string()]))
+        ));
+        assert!(!bootstrap_sender_is_allowed(
+            "leader",
+            true,
+            Some(&BTreeSet::from(["leader".to_string()]))
+        ));
+        assert!(!bootstrap_sender_is_allowed("leader", false, None));
     }
 
     #[test]
-    fn initial_raft_bootstrap_only_allows_empty_or_self_only_state() {
-        let self_id = xp_test_fixtures::primary_node_id();
-        assert!(is_initial_raft_bootstrap(&[], self_id));
-        assert!(is_initial_raft_bootstrap(&[primary_node()], self_id));
-        assert!(!is_initial_raft_bootstrap(&[secondary_node()], self_id));
-        assert!(!is_initial_raft_bootstrap(
-            &[primary_node(), secondary_node()],
-            self_id
+    fn bootstrap_sender_rejects_a_different_authenticated_principal() {
+        assert!(!bootstrap_sender_is_allowed(
+            "removed-node",
+            false,
+            Some(&BTreeSet::from(["elected-leader".to_string()]))
         ));
+    }
+
+    #[test]
+    fn bootstrap_sender_allows_a_current_voter_after_failover() {
+        let voters = BTreeSet::from(["old-leader".to_string(), "new-leader".to_string()]);
+        assert!(bootstrap_sender_is_allowed(
+            "new-leader",
+            false,
+            Some(&voters)
+        ));
+    }
+
+    #[test]
+    fn bootstrap_marker_waits_for_all_recorded_voters() {
+        let voters = BTreeSet::from(["old-leader".to_string(), "new-leader".to_string()]);
+        let only_old = BTreeSet::from(["old-leader".to_string()]);
+        assert!(!bootstrap_replication_complete(Some(&voters), &only_old));
+        assert!(bootstrap_replication_complete(Some(&voters), &voters));
+    }
+
+    #[test]
+    fn bootstrap_marker_cache_stops_authorizing_after_file_removal() {
+        let temp = tempfile::tempdir().expect("marker directory");
+        let marker_path = temp.path().join("raft_bootstrap_sender");
+        std::fs::write(&marker_path, "marker").expect("write marker");
+        let marker = BootstrapSenderMarker {
+            sender_ids: BTreeSet::from(["leader".to_string()]),
+            activation_deadline: chrono::Utc::now() + chrono::Duration::minutes(1),
+            path: marker_path.clone(),
+        };
+        assert!(active_bootstrap_sender_ids(Some(&marker)).is_some());
+        std::fs::remove_file(marker_path).expect("remove marker");
+        assert!(active_bootstrap_sender_ids(Some(&marker)).is_none());
+    }
+
+    #[test]
+    fn expired_bootstrap_marker_is_removed_and_not_authorized() {
+        let temp = tempfile::tempdir().expect("marker directory");
+        let marker_path = temp.path().join("raft_bootstrap_sender");
+        let marker = serde_json::json!({
+            "sender_ids": ["leader"],
+            "activation_deadline": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(&marker_path, marker.to_string()).expect("write marker");
+        assert!(super::read_bootstrap_sender_marker(marker_path.clone()).is_none());
+        assert!(!marker_path.exists());
     }
 }

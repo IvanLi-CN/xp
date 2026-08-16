@@ -978,7 +978,7 @@ async fn reconcile_runtime_state(paths: &Paths, spec: &ContainerSpec) -> Result<
         .await?;
     }
 
-    container_managed_default::reconcile(paths, spec, control_plane_base_url).await
+    container_managed_default::reconcile(paths, spec, &local_base_url).await
 }
 
 fn local_xp_base_url(port: u16) -> String {

@@ -1,0 +1,6 @@
+ARG XP_TEST_IMAGE=xp-fresh-join-candidate
+FROM ${XP_TEST_IMAGE}
+
+COPY scripts/testbox/artifacts/xp /usr/local/bin/xp
+
+RUN chmod 0755 /usr/local/bin/xp
