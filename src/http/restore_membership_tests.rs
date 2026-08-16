@@ -282,7 +282,7 @@ async fn internal_restore_existing_node_requires_internal_auth() {
     let res = app
         .oneshot(req_json(
             "POST",
-            "/api/admin/_internal/raft/restore-existing-node",
+            "/api/admin/_internal/raft/restore-node",
             json!({ "node_id": restored.node_id }),
         ))
         .await
@@ -291,15 +291,13 @@ async fn internal_restore_existing_node_requires_internal_auth() {
 }
 
 #[tokio::test]
-async fn internal_restore_existing_node_promotes_existing_state_node() {
+async fn internal_restore_existing_node_starts_durable_lifecycle_operation() {
     let tmp = TempDir::new().unwrap();
     let (app, calls, restored, ca_key_pem) = app_with_recording_raft(&tmp).await;
     let cluster = ClusterMetadata::load(tmp.path()).unwrap();
     let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
     let body = json!({ "node_id": restored.node_id }).to_string();
-    let uri: Uri = "/api/admin/_internal/raft/restore-existing-node"
-        .parse()
-        .unwrap();
+    let uri: Uri = "/api/admin/_internal/raft/restore-node".parse().unwrap();
     let context = crate::internal_auth::RequestContext::now(
         crate::internal_auth::InternalRoute::MeshV2,
         &cluster.cluster_id,
@@ -322,7 +320,7 @@ async fn internal_restore_existing_node_promotes_existing_state_node() {
 
     let mut request = Request::builder()
         .method("POST")
-        .uri("/api/admin/_internal/raft/restore-existing-node")
+        .uri("/api/admin/_internal/raft/restore-node")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .unwrap();
@@ -330,10 +328,9 @@ async fn internal_restore_existing_node_promotes_existing_state_node() {
     let res = app.oneshot(request).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["ok"],
-        true
-    );
+    let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["phase"], "prepared");
 
     let restored_raft_id = raft_node_id_from_ulid(&restored.node_id).unwrap();
     let add_learners = calls.add_learners.lock().await;
@@ -343,9 +340,5 @@ async fn internal_restore_existing_node_promotes_existing_state_node() {
     assert_eq!(add_learners[0].1.api_base_url, restored.api_base_url);
     drop(add_learners);
 
-    let add_voters = calls.add_voters.lock().await;
-    assert_eq!(
-        add_voters.as_slice(),
-        &[std::collections::BTreeSet::from([restored_raft_id])]
-    );
+    assert!(calls.add_voters.lock().await.is_empty());
 }

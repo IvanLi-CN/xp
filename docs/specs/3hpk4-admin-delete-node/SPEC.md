@@ -20,6 +20,8 @@
 - 提供只读删除预览 API：`GET /api/admin/nodes/:node_id/delete-preview`，返回该节点下会被清理的 endpoints。
 - Web UI 在 Node details Danger zone 提供删除入口，先预览受影响 endpoints，再二次确认删除。
 - 删除动作从 Raft membership 与 Raft state machine nodes inventory 中移除节点。
+- 删除以 durable RemoveNode membership operation 表示；成员移除成功但 HTTP 未知结果时不执行
+  补偿性 restore。
 - 显式确认清理时，同一状态机命令原子删除该节点拥有的 endpoints，并清理 endpoint probe history、memberships、node quota/weight/probe 等节点相关状态。
 - 保留护栏：禁止删除当前 leader、禁止删除当前正在服务的本机节点。
 
@@ -55,7 +57,9 @@
 - 管理员进入节点详情 Danger zone，点击 Delete node。
 - 前端调用 `GET /api/admin/nodes/:node_id/delete-preview`。
 - 若 preview 返回 endpoints，确认弹窗展示 endpoint 影响列表，并把确认动作升级为 `delete_endpoints=true`。
-- 后端删除时先执行本机/leader 护栏与 membership removal，再通过 Raft state machine 删除 node 和 endpoints。
+- 后端删除时先执行本机/leader 护栏、全 voter lifecycle capability barrier 与写前不变量校验，记录
+  RemoveNode intent；成员移除以 retain=false 使目标成为 absent 后，才通过 Raft state machine 删除
+  node 和 endpoints。
 - 状态机完成后，HTTP 层根据删除结果触发每个 endpoint tag 的 remove-inbound 和一次 full reconcile。
 
 ### Edge cases / errors
@@ -72,7 +76,8 @@
 - `DELETE /api/admin/nodes/:node_id`
   - 默认行为：若仍有 endpoints，返回 `409 conflict`。
 - `DELETE /api/admin/nodes/:node_id?delete_endpoints=true&expected_endpoint_ids=<id,id>`
-  - 确认清理行为：删除节点及其 endpoints，成功返回 `204 No Content`。
+  - 确认清理行为：在五秒内完成时返回 `204 No Content`；未完成时返回
+    `202 { operation_id, phase, status_url }`。
   - `expected_endpoint_ids` 是逗号分隔 endpoint ID 列表；当节点仍有 endpoints 时，后端必须验证当前 endpoint ID 集合与请求中的确认集合完全一致，否则返回 `409 conflict`。
 
 ## 验收标准（Acceptance Criteria）
@@ -83,6 +88,8 @@
 - Given 节点仍有关联 endpoints，When 带 `delete_endpoints=true` 删除，Then 节点和 endpoints 都从后续 admin API 响应中消失。
 - Given 删除本机节点或当前 leader，When 调用 delete，Then 返回 `400 invalid_request` 且 endpoints 不被清理。
 - Given Web UI preview 返回 endpoints，When 打开确认弹窗，Then 展示 endpoint 数量、tag、kind、port，并在确认后调用带 endpoint cleanup 的删除请求。
+- Given delete 返回 `202`，When 页面刷新，Then Web 保留 operation id 并每 2.5 秒查询
+  `GET /api/admin/membership-operations/:operation_id`；仅在 completed 后刷新 inventory。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 

@@ -87,6 +87,12 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
             // Any actionable errors are surfaced by the command itself.
             Ok(())
         }
+        Command::Xp(XpCommand::RepairOrphanVoter(_))
+        | Command::Xp(XpCommand::MembershipOperation(_)) => {
+            // Runtime commands: they authenticate to the local xp API and do not write local
+            // filesystem state.
+            Ok(())
+        }
         Command::Xp(XpCommand::RecoverSingleNode(_args)) => {
             // Runtime command: it reads /etc/xp/xp.env and rewrites local Raft persistence.
             // Any actionable errors are surfaced by the command itself.

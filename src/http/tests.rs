@@ -1709,8 +1709,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
             raft_endpoint: node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, node_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2121,7 +2123,7 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
     );
 }
 #[tokio::test]
-async fn delete_node_returns_json_error_when_change_membership_panics() {
+async fn delete_node_stops_before_membership_when_voter_capability_is_unavailable() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -2172,8 +2174,10 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, extra_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2192,14 +2196,14 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
 
     let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
     let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "internal");
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
     assert!(
         body["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("change_membership remove_nodes: raft change_membership panicked"),
+            .contains("cannot verify staged join support"),
         "unexpected error: {}",
         body["error"]["message"].as_str().unwrap()
     );
@@ -2209,7 +2213,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
 }
 
 #[tokio::test]
-async fn delete_node_times_out_when_change_membership_hangs() {
+async fn delete_node_does_not_start_timeout_before_voter_capability_barrier() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -2260,8 +2264,10 @@ async fn delete_node_times_out_when_change_membership_hangs() {
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, extra_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2280,17 +2286,9 @@ async fn delete_node_times_out_when_change_membership_hangs() {
 
     let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
     let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "timeout");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("delete node timed out while removing raft membership"),
-        "unexpected error: {}",
-        body["error"]["message"].as_str().unwrap()
-    );
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
 
     let store = store.lock().await;
     assert!(store.get_node(&extra_node.node_id).is_some());

@@ -1,51 +1,126 @@
-# Raft membership voter invariant (#7mvqp)
+# Raft membership lifecycle invariant (#7mvqp)
 
-## 状态
+## Background
 
-- Status: 已完成
-- Created: 2026-07-07
-- Last: 2026-07-07
+An earlier guard treated every member outside `voter_ids` as a stable voter candidate and called
+`add_voters`. That classification was invalid: OpenRaft has exactly three relevant roles,
+`voter`, `learner`, and `absent`. A learner is a transient replication state, not a fourth
+"non-voter" role that can safely be promoted by a timer. The old guard could turn stale member
+metadata into an orphan voter without a DesiredState Node mapping.
 
-## 背景 / 问题陈述
+## Goals
 
-- Raft membership 曾允许节点已经存在于 `membership.nodes`，但没有出现在 `voter_ids`。
-- 这种长期 learner 分化会让管理员看到“三个节点”，但实际只有两个 voter；任一 voter 失联后集群无法选主，写入也无法提交。
-- Join API 如果在 `add_learner` 后提前返回成功，会把“节点存在但不能投票”暴露成稳定生产状态。
+- Persist one auditable membership operation at a time for join, restore, node removal, and orphan
+  voter repair.
+- Check a quorum-backed, linearizable membership view before a lifecycle write.
+- Preserve a strict mapping from every voter to exactly one DesiredState Node.
+- Permit learners only while the recorded join or restore operation owns their transition.
+- Make an abnormal member shape visible and block further unrelated membership writes; never infer
+  a promotion, deletion, rollback, or disk rewrite from a periodic scan.
+- Permit one exact, leader-local orphan voter repair after dry-run fingerprint confirmation.
 
-## 目标 / 非目标
+## Roles and invariants
 
-### Goals
+- `voter`: Raft voting member with a DesiredState Node mapping; valid in steady state.
+- `learner`: replication-only member owned by an active Join or Restore operation; never steady.
+- `absent`: no Raft membership identity; valid for deleted and repaired targets.
 
-- 稳定 membership invariant：`membership.nodes` 中每个节点都必须是 voter。
-- `POST /api/cluster/join` 只有在新节点进入 voters 后才返回成功。
-- leader 启动和运行时周期性检查 `membership.nodes - voter_ids`，发现遗留 learner 时尝试 promote。
-- 无 leader/quorum 时只报告需要恢复，不自动重写 Raft 磁盘状态。
-- 运维文档明确 2-voter 拓扑不可接受，生产建议至少 3 个稳定 voter。
+- Every voter maps to one DesiredState Node. A voter without that mapping is an orphan voter.
+- A learner is valid only for the active operation's target during its recorded learner phase.
+- A DesiredState Node without a Raft member is valid only for the target of a recorded removal
+  after membership has become absent.
+- Operations advance monotonically through `prepared`, learner/voter/removal phases, and a terminal
+  `completed`, `blocked`, or `expired` state. Terminal records include evidence and are retained for
+  24 hours. A second non-terminal operation is rejected.
+- The membership revision is a SHA-256 fingerprint of the linearizable membership log identity,
+  voters, and node metadata. It is an opaque compare-and-swap value, not a user-editable setting.
 
-### Non-goals
+## Lifecycle contract
 
-- 不新增 `can_vote`、`voter=false`、观察者、只读节点、非投票节点或 UI 配置。
-- 不支持长期 learner 作为 v1 生产角色。
-- 不在无 quorum 时自动执行危险恢复。
-- 不把失联节点强行保留在 membership 里等待以后恢复。
+- A fresh join passes `cluster.membership-lifecycle-v1` on every current voter before the first
+  lifecycle command. It records Join intent, registers the learner, waits for the durable log
+  index, promotes only that recorded learner, then terminally records completion.
+- Delete records its endpoint snapshot and RemoveNode intent, requires the mapped target to be a
+  voter, uses `RemoveVoters(..., false)`, verifies `absent`, and only then deletes DesiredState
+  Node/endpoints. It never performs a compensating re-add on an unknown result.
+- The periodic worker only audits invariants, prunes terminal records after their retention period,
+  and resumes a recorded RemoveNode or Restore operation. The Join coordinator advances only a
+  matching recorded Join operation. None of them calls `add_voters` for an unknown session, deletes
+  an unknown member, or uses a speculative rollback.
+- Any voter lacking `cluster.membership-lifecycle-v1` freezes fresh join, delete, restore, and
+  repair lifecycle writes with `coordinated_upgrade_required`. Upgrade one voter at a time while
+  retaining serving quorum. After that barrier, a replayable legacy JoinSession converts to a Join
+  operation; malformed legacy material records a terminal Blocked operation. New binaries do not
+  fall back to the old auto-promotion behavior.
 
-## 功能与行为规格
+## Orphan voter repair
 
-- Join leader 校验 token、签发证书、写入 state node，等待 learner 追平，并同步执行 `add_voters`。
-- learner 追平或 `add_voters` 失败时，Join 返回错误，并尽力移除刚加入的 Raft learner 与 state node。
-- 旧版本留下的 `membership.nodes - voter_ids` 由 leader-side guard 自动调用 `add_voters` 修复。
-- follower、candidate 或无 leader 状态不能伪修复 membership，只输出明确日志信号。
-- 删除/恢复节点路径必须维持稳定 voter invariant：恢复被删除的 voter 时必须重新加入 voters。
+- Run only on the current leader's local API endpoint:
 
-## 验收标准
+```bash
+sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-node-id <id>
+sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-node-id <id> \
+  --apply --expected-membership <fingerprint>
+```
 
-- `POST /api/cluster/join` 返回 200 时，新节点已经被提交为 voter。
-- 模拟 `add_voters` 失败时，join 不返回成功，并且不留下稳定 state node。
-- guard 能识别遗留 non-voter membership node，并在 leader 上调用 `add_voters`。
-- guard 在 follower/no leader 状态不修改 membership。
-- 仓库内不存在新增的“是否投票”配置、字段、环境变量或 UI 控件。
+- The first command is dry-run and writes nothing. Apply requires the exact returned fingerprint.
+- The service rechecks signed internal authentication, leader ownership, linearizability, no joint
+  configuration, no active operation, the target not being leader, no DesiredState mapping or
+  pending join session, and the target being the unique orphan voter.
+- Apply issues only `RemoveVoters({target}, false)` and verifies `absent`. It does not edit Nodes,
+  endpoints, users, traffic configuration, or Raft files. A failed or mismatched precondition is a
+  blocked incident, not an automated recovery signal.
 
-## 文档更新
+## Interfaces
 
-- `docs/desgin/cluster.md` 定义稳定节点全部 voter、无可配置投票权。
-- `docs/ops/README.md` 定义丢失 quorum 后的显式恢复与重新 join 合同。
+- `POST /api/admin/_internal/raft/repair-orphan-voter` accepts signed internal-auth requests.
+  Dry-run returns `{ dry_run, raft_node_id, expected_membership }`; apply also requires
+  `expected_membership` and returns the operation record.
+- `GET /api/admin/membership-operations/{operation_id}` is read-only admin status.
+- `xp-ops xp membership-operation status --api-base-url <local-url> --operation-id <uuid>` reads
+  that status through local signed internal authentication.
+- Generic internal `client-write` rejects membership-operation commands. The Admin Web has no
+  repair action.
+
+## Acceptance
+
+- Unknown learners are never automatically promoted.
+- Dry-run repair performs zero writes; a stale fingerprint, leader target, joint membership, active
+  operation, mapping conflict, or multiple orphan voters is rejected.
+- Delete returns `204` when completed within five seconds; otherwise it returns `202` with an
+  operation id and status URL. The Web resumes polling the same operation after refresh and only
+  refreshes inventory after a terminal completion.
+
+## Visual Evidence
+
+PR: none
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
+  requested_viewport: `none`
+  viewport_strategy: `storybook-viewport`
+  margin_policy: `trim_only`
+  evidence_surface: `page`
+  sensitive_exclusion: `N/A; synthetic Storybook fixture only`
+  submission_gate: `pending-owner-approval`
+  story_id_or_title: `Pages/NodeDetailsPage/DeletePending`
+  state: `prepared`
+  evidence_note: `202 delete operation remains visible and disables duplicate deletion.`
+
+![Pending node deletion](./assets/node-delete-pending-final.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
+  requested_viewport: `none`
+  viewport_strategy: `storybook-viewport`
+  margin_policy: `trim_only`
+  evidence_surface: `page`
+  sensitive_exclusion: `N/A; synthetic Storybook fixture only`
+  submission_gate: `pending-owner-approval`
+  story_id_or_title: `Pages/NodeDetailsPage/DeleteBlocked`
+  state: `blocked`
+  evidence_note: `A blocked delete exposes membership evidence; destructive retry stays disabled.`
+
+![Blocked node deletion](./assets/node-delete-blocked-final.png)

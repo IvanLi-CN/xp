@@ -1,115 +1,790 @@
-use std::{collections::BTreeSet, sync::Arc, sync::OnceLock, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    sync::OnceLock,
+    time::Duration,
+};
 
-use anyhow::Context;
+use chrono::Utc;
+use sha2::{Digest as _, Sha256};
 use tokio::sync::Mutex;
 
-use crate::raft::{
-    app::RaftFacade,
-    types::{NodeId, NodeMeta},
+use crate::{
+    raft::{
+        app::RaftFacade,
+        types::{NodeId, NodeMeta, raft_node_id_from_ulid},
+    },
+    state::{
+        DesiredStateCommand, MembershipOperation, MembershipOperationKind, MembershipOperationPhase,
+    },
 };
 
 static MEMBERSHIP_OPERATION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
-
 pub fn membership_operation_gate() -> Arc<Mutex<()>> {
     MEMBERSHIP_OPERATION_GATE
         .get_or_init(|| Arc::new(Mutex::new(())))
         .clone()
 }
 
-pub fn non_voter_membership_node_ids(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MembershipAudit {
+    pub orphan_voters: BTreeSet<NodeId>,
+    pub duplicate_desired_members: BTreeSet<NodeId>,
+    pub unexpected_learners: BTreeSet<NodeId>,
+    pub missing_desired_members: BTreeSet<NodeId>,
+}
+
+impl MembershipAudit {
+    pub fn is_clean(&self) -> bool {
+        self.orphan_voters.is_empty()
+            && self.duplicate_desired_members.is_empty()
+            && self.unexpected_learners.is_empty()
+            && self.missing_desired_members.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanVoterRepairPreview {
+    pub raft_node_id: NodeId,
+    pub expected_membership: String,
+}
+
+pub fn membership_revision(
     metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
-) -> BTreeSet<NodeId> {
+) -> anyhow::Result<String> {
+    let membership = metrics.membership_config.membership();
+    let voters = membership.voter_ids().collect::<BTreeSet<_>>();
+    let mut nodes = metrics
+        .membership_config
+        .nodes()
+        .map(|(node_id, node)| {
+            (
+                *node_id,
+                serde_json::json!({
+                    "name": node.name,
+                    "api_base_url": node.api_base_url,
+                    "raft_endpoint": node.raft_endpoint,
+                }),
+            )
+        })
+        .collect::<Vec<_>>();
+    nodes.sort_by_key(|(node_id, _)| *node_id);
+    let joint_configs = membership
+        .get_joint_config()
+        .iter()
+        .map(|config| config.iter().copied().collect::<BTreeSet<_>>())
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "log_id": format!("{:?}", metrics.membership_config.log_id()),
+        "voters": voters,
+        "joint_configs": joint_configs,
+        "nodes": nodes,
+    }))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+pub async fn audit_membership(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+) -> MembershipAudit {
+    let metrics = raft.metrics().borrow().clone();
     let voters = metrics
         .membership_config
         .membership()
         .voter_ids()
         .collect::<BTreeSet<_>>();
-
-    metrics
+    let (desired_nodes, duplicate_desired_members, pending_join_nodes, active_operation) = {
+        let store = store.lock().await;
+        let state = store.state();
+        let desired_member_counts = state
+            .nodes
+            .keys()
+            .filter_map(|node_id| raft_node_id_from_ulid(node_id).ok())
+            .fold(BTreeMap::new(), |mut counts, node_id| {
+                *counts.entry(node_id).or_insert(0usize) += 1;
+                counts
+            });
+        let desired_nodes = desired_member_counts
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let duplicate_desired_members = desired_member_counts
+            .into_iter()
+            .filter_map(|(node_id, count)| (count > 1).then_some(node_id))
+            .collect::<BTreeSet<_>>();
+        let pending_join_nodes = state
+            .join_sessions
+            .values()
+            .filter(|session| session.status.is_pending())
+            .filter_map(|session| raft_node_id_from_ulid(&session.node_id).ok())
+            .collect::<BTreeSet<_>>();
+        let active_operation = state.active_membership_operation().cloned();
+        (
+            desired_nodes,
+            duplicate_desired_members,
+            pending_join_nodes,
+            active_operation,
+        )
+    };
+    let orphan_voters = voters
+        .iter()
+        .filter(|node_id| !desired_nodes.contains(node_id))
+        .copied()
+        .collect();
+    let permitted_learner = active_operation.as_ref().and_then(|operation| {
+        let phase_allows_learner = matches!(
+            operation.phase,
+            MembershipOperationPhase::Prepared | MembershipOperationPhase::LearnerRegistered
+        );
+        match operation.kind {
+            MembershipOperationKind::Join
+                if phase_allows_learner && pending_join_nodes.contains(&operation.raft_node_id) =>
+            {
+                Some(operation.raft_node_id)
+            }
+            MembershipOperationKind::Restore if phase_allows_learner => {
+                Some(operation.raft_node_id)
+            }
+            _ => None,
+        }
+    });
+    let unexpected_learners = metrics
         .membership_config
         .nodes()
-        .filter_map(|(node_id, _node)| {
-            if voters.contains(node_id) {
+        .filter_map(|(node_id, _)| {
+            if voters.contains(node_id) || permitted_learner == Some(*node_id) {
                 None
             } else {
                 Some(*node_id)
             }
         })
-        .collect()
+        .collect();
+    let membership_nodes = metrics
+        .membership_config
+        .nodes()
+        .map(|(node_id, _)| *node_id)
+        .collect::<BTreeSet<_>>();
+    let missing_desired_members = desired_nodes
+        .iter()
+        .filter(|node_id| !membership_nodes.contains(node_id))
+        .filter(|node_id| {
+            !active_operation.as_ref().is_some_and(|operation| {
+                operation.raft_node_id == **node_id
+                    && matches!(
+                        (&operation.kind, &operation.phase),
+                        (
+                            MembershipOperationKind::Join | MembershipOperationKind::Restore,
+                            MembershipOperationPhase::Prepared
+                        ) | (
+                            MembershipOperationKind::RemoveNode,
+                            MembershipOperationPhase::MembershipRemoved
+                        )
+                    )
+            })
+        })
+        .copied()
+        .collect();
+    MembershipAudit {
+        orphan_voters,
+        duplicate_desired_members,
+        unexpected_learners,
+        missing_desired_members,
+    }
 }
 
-pub async fn repair_membership_voters_once(
-    raft: Arc<dyn RaftFacade>,
-) -> anyhow::Result<BTreeSet<NodeId>> {
-    repair_membership_voters_once_with_gate(raft, membership_operation_gate()).await
-}
-
-async fn repair_membership_voters_except(
+pub async fn require_clean_membership_for_write(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
-) -> anyhow::Result<BTreeSet<NodeId>> {
+) -> anyhow::Result<()> {
+    raft.ensure_linearizable().await?;
+    let audit = audit_membership(raft, store).await;
+    if audit.is_clean() {
+        return Ok(());
+    }
+    Err(membership_invariant_error(&audit))
+}
+
+/// A delete may clean up its own mapped node when a prior failed operation already made that
+/// target absent. It may not use that exception to hide any other membership inconsistency.
+pub async fn require_clean_membership_for_remove_node(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    raft_node_id: NodeId,
+) -> anyhow::Result<()> {
+    raft.ensure_linearizable().await?;
+    let mut audit = audit_membership(raft, store).await;
+    audit.unexpected_learners.remove(&raft_node_id);
+    audit.missing_desired_members.remove(&raft_node_id);
+    if audit.is_clean() {
+        return Ok(());
+    }
+    Err(membership_invariant_error(&audit))
+}
+
+/// A restore owns the one DesiredState node that is intentionally absent while it is being
+/// returned through learner and voter phases. It may not mask any other broken mapping.
+pub async fn require_clean_membership_for_restore_node(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    raft_node_id: NodeId,
+) -> anyhow::Result<()> {
+    raft.ensure_linearizable().await?;
+    let mut audit = audit_membership(raft, store).await;
+    audit.missing_desired_members.remove(&raft_node_id);
+    if audit.is_clean() {
+        return Ok(());
+    }
+    Err(membership_invariant_error(&audit))
+}
+
+fn membership_invariant_error(audit: &MembershipAudit) -> anyhow::Error {
+    anyhow::anyhow!(
+        "membership_invariant_violation: orphan_voters={:?}, duplicate_desired_members={:?}, \
+         unexpected_learners={:?}, missing_desired_members={:?}",
+        audit.orphan_voters,
+        audit.duplicate_desired_members,
+        audit.unexpected_learners,
+        audit.missing_desired_members,
+    )
+}
+
+pub async fn preview_orphan_voter_repair(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    raft_node_id: NodeId,
+) -> anyhow::Result<OrphanVoterRepairPreview> {
+    raft.ensure_linearizable().await?;
+    let metrics = raft.metrics().borrow().clone();
+    validate_orphan_voter_repair(&metrics, &store, raft_node_id, None).await?;
+    Ok(OrphanVoterRepairPreview {
+        raft_node_id,
+        expected_membership: membership_revision(&metrics)?,
+    })
+}
+
+pub async fn repair_orphan_voter(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    raft_node_id: NodeId,
+    expected_membership: &str,
+) -> anyhow::Result<MembershipOperation> {
     let _guard = membership_operation_gate().lock_owned().await;
-    let excluded = store
-        .lock()
-        .await
+    raft.ensure_linearizable().await?;
+    let metrics = raft.metrics().borrow().clone();
+    validate_orphan_voter_repair(&metrics, &store, raft_node_id, Some(expected_membership)).await?;
+
+    let operation = MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: MembershipOperationKind::RepairOrphanVoter,
+        raft_node_id,
+        node_id: None,
+        expected_membership: expected_membership.to_string(),
+        phase: MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: false,
+        expected_endpoint_ids: Vec::new(),
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("manual orphan voter repair".to_string()),
+    };
+    write_operation(
+        &raft,
+        DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation.clone()),
+            node: None,
+            join_session: None,
+        },
+    )
+    .await?;
+
+    if let Err(error) = require_expected_membership(&raft, &operation).await {
+        block_membership_operation(&raft, operation.clone(), error.to_string()).await?;
+        anyhow::bail!("membership revision changed before orphan voter repair")
+    }
+
+    raft.change_membership(
+        openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+        false,
+    )
+    .await?;
+
+    let after = raft.metrics().borrow().clone();
+    if after
+        .membership_config
+        .membership()
+        .get_node(&raft_node_id)
+        .is_some()
+    {
+        anyhow::bail!("orphan voter removal did not remove node from membership")
+    }
+    let membership_removed = MembershipOperation {
+        expected_membership: membership_revision(&after)?,
+        phase: MembershipOperationPhase::MembershipRemoved,
+        evidence: Some("orphan voter removed with RemoveVoters retain=false".to_string()),
+        ..operation
+    };
+    write_operation(
+        &raft,
+        DesiredStateCommand::TransitionMembershipOperation {
+            operation: membership_removed.clone(),
+        },
+    )
+    .await?;
+    let completed = MembershipOperation {
+        phase: MembershipOperationPhase::Completed,
+        terminal_at: Some(Utc::now().to_rfc3339()),
+        evidence: Some("orphan voter repair completed".to_string()),
+        ..membership_removed
+    };
+    write_operation(
+        &raft,
+        DesiredStateCommand::TransitionMembershipOperation {
+            operation: completed.clone(),
+        },
+    )
+    .await?;
+    Ok(completed)
+}
+
+async fn validate_orphan_voter_repair(
+    metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
+    store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    raft_node_id: NodeId,
+    expected_membership: Option<&str>,
+) -> anyhow::Result<()> {
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
+        anyhow::bail!("orphan voter repair must run on the current local leader")
+    }
+    let membership = metrics.membership_config.membership();
+    if membership.get_joint_config().len() > 1 {
+        anyhow::bail!("orphan voter repair is forbidden during joint consensus")
+    }
+    if metrics.id == raft_node_id {
+        anyhow::bail!("orphan voter repair cannot remove the current leader")
+    }
+    if !membership
+        .voter_ids()
+        .any(|node_id| node_id == raft_node_id)
+    {
+        anyhow::bail!("repair target is not a current voter")
+    }
+    if let Some(expected_membership) = expected_membership
+        && membership_revision(metrics)? != expected_membership
+    {
+        anyhow::bail!("membership revision changed since dry-run")
+    }
+    let store = store.lock().await;
+    if store.state().active_membership_operation().is_some() {
+        anyhow::bail!("another membership operation is active")
+    }
+    let desired_nodes = store
+        .state()
+        .nodes
+        .keys()
+        .filter_map(|node_id| raft_node_id_from_ulid(node_id).ok())
+        .collect::<BTreeSet<_>>();
+    if desired_nodes.contains(&raft_node_id) {
+        anyhow::bail!("repair target is represented by desired state")
+    }
+    let orphan_voters = membership
+        .voter_ids()
+        .filter(|node_id| !desired_nodes.contains(node_id))
+        .collect::<BTreeSet<_>>();
+    if orphan_voters != BTreeSet::from([raft_node_id]) {
+        anyhow::bail!("repair target must be the unique orphan voter")
+    }
+    if store
         .state()
         .join_sessions
         .values()
         .filter(|session| session.status.is_pending())
-        .filter_map(|session| crate::raft::types::raft_node_id_from_ulid(&session.node_id).ok())
-        .collect::<BTreeSet<_>>();
-    let metrics = raft.metrics().borrow().clone();
-    let non_voters = non_voter_membership_node_ids(&metrics)
-        .difference(&excluded)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if non_voters.is_empty() {
-        return Ok(BTreeSet::new());
+        .filter_map(|session| raft_node_id_from_ulid(&session.node_id).ok())
+        .any(|node_id| node_id == raft_node_id)
+    {
+        anyhow::bail!("repair target has a pending join session")
     }
-    if !matches!(metrics.state, openraft::ServerState::Leader) {
-        anyhow::bail!(
-            "stable learner repair requires leader/quorum: state={:?}, current_leader={:?}",
-            metrics.state,
-            metrics.current_leader
-        );
-    }
-    raft.add_voters(non_voters.clone()).await?;
-    Ok(non_voters)
+    Ok(())
 }
 
-async fn repair_membership_voters_once_with_gate(
-    raft: Arc<dyn RaftFacade>,
-    gate: Arc<Mutex<()>>,
-) -> anyhow::Result<BTreeSet<NodeId>> {
-    let Ok(_membership_operation_guard) = gate.try_lock_owned() else {
-        tracing::debug!(
-            "raft membership guard skipped because a membership operation is in progress"
-        );
-        return Ok(BTreeSet::new());
-    };
+async fn write_operation(
+    raft: &Arc<dyn RaftFacade>,
+    command: DesiredStateCommand,
+) -> anyhow::Result<()> {
+    match raft.client_write(command).await? {
+        crate::raft::types::ClientResponse::Ok { .. } => Ok(()),
+        crate::raft::types::ClientResponse::Err { code, message, .. } => {
+            anyhow::bail!("membership operation state write rejected: {code}: {message}")
+        }
+    }
+}
 
+async fn transition_operation(
+    raft: &Arc<dyn RaftFacade>,
+    mut operation: MembershipOperation,
+    phase: MembershipOperationPhase,
+    evidence: &str,
+) -> anyhow::Result<MembershipOperation> {
+    operation.expected_membership = membership_revision(&raft.metrics().borrow().clone())?;
+    operation.phase = phase;
+    operation.evidence = Some(evidence.to_string());
+    if operation.phase.is_terminal() {
+        operation.terminal_at = Some(Utc::now().to_rfc3339());
+    }
+    write_operation(
+        raft,
+        DesiredStateCommand::TransitionMembershipOperation {
+            operation: operation.clone(),
+        },
+    )
+    .await?;
+    Ok(operation)
+}
+
+pub async fn block_membership_operation(
+    raft: &Arc<dyn RaftFacade>,
+    mut operation: MembershipOperation,
+    evidence: impl Into<String>,
+) -> anyhow::Result<()> {
+    operation.phase = MembershipOperationPhase::Blocked;
+    operation.terminal_at = Some(Utc::now().to_rfc3339());
+    operation.evidence = Some(evidence.into());
+    write_operation(
+        raft,
+        DesiredStateCommand::TransitionMembershipOperation { operation },
+    )
+    .await
+}
+
+async fn require_expected_membership(
+    raft: &Arc<dyn RaftFacade>,
+    operation: &MembershipOperation,
+) -> anyhow::Result<openraft::RaftMetrics<NodeId, NodeMeta>> {
+    raft.ensure_linearizable().await?;
     let metrics = raft.metrics().borrow().clone();
-    let non_voters = non_voter_membership_node_ids(&metrics);
-    if non_voters.is_empty() {
-        return Ok(BTreeSet::new());
-    }
-
-    if !matches!(metrics.state, openraft::ServerState::Leader) {
+    let current = membership_revision(&metrics)?;
+    if current != operation.expected_membership {
         anyhow::bail!(
-            "stable learner repair requires leader/quorum: \
-             state={:?}, current_leader={:?}, non_voters={:?}",
-            metrics.state,
-            metrics.current_leader,
-            non_voters
-        );
+            "membership revision changed for operation {}",
+            operation.operation_id
+        )
     }
+    Ok(metrics)
+}
 
-    raft.add_voters(non_voters.clone())
+async fn prune_terminal_operations(
+    raft: &Arc<dyn RaftFacade>,
+    store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
+) -> anyhow::Result<()> {
+    let has_terminal_operation = store
+        .lock()
         .await
-        .context("promote membership nodes to voters")?;
-    Ok(non_voters)
+        .state()
+        .membership_operations
+        .values()
+        .any(|operation| operation.phase.is_terminal());
+    if !has_terminal_operation {
+        return Ok(());
+    }
+    let metrics = raft.metrics().borrow().clone();
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
+        return Ok(());
+    }
+    raft.ensure_linearizable().await?;
+    write_operation(
+        raft,
+        DesiredStateCommand::PruneMembershipOperations {
+            terminal_before: (Utc::now() - chrono::Duration::hours(24)).to_rfc3339(),
+        },
+    )
+    .await
 }
 
+async fn resume_restore_operation(
+    raft: &Arc<dyn RaftFacade>,
+    store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    operation: MembershipOperation,
+) -> anyhow::Result<()> {
+    let node_id = operation
+        .node_id
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("restore operation is missing node_id"))?;
+    let node = store
+        .lock()
+        .await
+        .get_node(&node_id)
+        .ok_or_else(|| anyhow::anyhow!("restore operation node is missing"))?;
+    let metrics = raft.metrics().borrow().clone();
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
+        return Ok(());
+    }
+    let membership = metrics.membership_config.membership();
+    let target_is_voter = membership
+        .voter_ids()
+        .any(|node_id| node_id == operation.raft_node_id);
+    let target_exists = membership.get_node(&operation.raft_node_id).is_some();
+
+    match operation.phase {
+        MembershipOperationPhase::Prepared => {
+            if target_is_voter {
+                block_membership_operation(
+                    raft,
+                    operation,
+                    "restore target unexpectedly became voter before learner phase",
+                )
+                .await?;
+                return Ok(());
+            }
+            if target_exists {
+                let _ = transition_operation(
+                    raft,
+                    operation,
+                    MembershipOperationPhase::LearnerRegistered,
+                    "restore learner observed after uncertain request",
+                )
+                .await?;
+                return Ok(());
+            }
+            if let Err(error) = require_expected_membership(raft, &operation).await {
+                block_membership_operation(raft, operation, error.to_string()).await?;
+                return Ok(());
+            }
+            raft.add_learner(
+                operation.raft_node_id,
+                NodeMeta {
+                    name: node.node_name,
+                    api_base_url: node.api_base_url.clone(),
+                    raft_endpoint: node.api_base_url,
+                },
+            )
+            .await?;
+            let after = raft.metrics().borrow().clone();
+            if after
+                .membership_config
+                .membership()
+                .get_node(&operation.raft_node_id)
+                .is_none()
+            {
+                // OpenRaft acknowledges the change before the local metrics watcher is required
+                // to publish it. Leave the durable intent in Prepared; the next leader scan will
+                // advance only after it observes the exact learner shape.
+                return Ok(());
+            }
+            let _ = transition_operation(
+                raft,
+                operation,
+                MembershipOperationPhase::LearnerRegistered,
+                "restore learner registered",
+            )
+            .await?;
+        }
+        MembershipOperationPhase::LearnerRegistered => {
+            if target_is_voter {
+                let _ = transition_operation(
+                    raft,
+                    operation,
+                    MembershipOperationPhase::VoterPromoted,
+                    "restore voter observed after uncertain request",
+                )
+                .await?;
+                return Ok(());
+            }
+            if !target_exists {
+                block_membership_operation(
+                    raft,
+                    operation,
+                    "restore learner disappeared before promotion",
+                )
+                .await?;
+                return Ok(());
+            }
+            let metrics = match require_expected_membership(raft, &operation).await {
+                Ok(metrics) => metrics,
+                Err(error) => {
+                    block_membership_operation(raft, operation, error.to_string()).await?;
+                    return Ok(());
+                }
+            };
+            let required_log_index = metrics.last_log_index.unwrap_or(0);
+            if raft
+                .wait_learner_caught_up(
+                    operation.raft_node_id,
+                    required_log_index,
+                    Duration::from_secs(30),
+                )
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            raft.add_voters(BTreeSet::from([operation.raft_node_id]))
+                .await?;
+            let after = raft.metrics().borrow().clone();
+            if !after
+                .membership_config
+                .membership()
+                .voter_ids()
+                .any(|node_id| node_id == operation.raft_node_id)
+            {
+                // As above, wait for the confirmed metrics shape before recording promotion.
+                return Ok(());
+            }
+            let _ = transition_operation(
+                raft,
+                operation,
+                MembershipOperationPhase::VoterPromoted,
+                "restore voter promoted",
+            )
+            .await?;
+        }
+        MembershipOperationPhase::VoterPromoted => {
+            if !target_is_voter {
+                block_membership_operation(
+                    raft,
+                    operation,
+                    "restore voter disappeared before completion",
+                )
+                .await?;
+                return Ok(());
+            }
+            let _ = transition_operation(
+                raft,
+                operation,
+                MembershipOperationPhase::Completed,
+                "restore completed",
+            )
+            .await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Continue only a durable, explicitly recorded operation. Unexpected membership shapes are
+/// errors, never an instruction to infer a promotion or rollback.
+pub async fn resume_membership_operations_once(
+    raft: Arc<dyn RaftFacade>,
+    store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+) -> anyhow::Result<()> {
+    let Ok(_guard) = membership_operation_gate().try_lock_owned() else {
+        return Ok(());
+    };
+    let operation = store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .cloned();
+    let Some(operation) = operation else {
+        return prune_terminal_operations(&raft, &store).await;
+    };
+    if operation.kind == MembershipOperationKind::Restore {
+        return resume_restore_operation(&raft, &store, operation).await;
+    }
+    if operation.kind != MembershipOperationKind::RemoveNode {
+        return Ok(());
+    }
+    let node_id = operation
+        .node_id
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("remove-node operation is missing node_id"))?;
+
+    match operation.phase {
+        MembershipOperationPhase::Prepared => {
+            let metrics = raft.metrics().borrow().clone();
+            let membership = metrics.membership_config.membership();
+            let is_voter = membership
+                .voter_ids()
+                .any(|member| member == operation.raft_node_id);
+            let is_member = membership.get_node(&operation.raft_node_id).is_some();
+            if !is_member {
+                let _ = transition_operation(
+                    &raft,
+                    operation,
+                    MembershipOperationPhase::MembershipRemoved,
+                    "target absent after uncertain remove-voters request",
+                )
+                .await?;
+                return Ok(());
+            }
+            if !is_voter {
+                block_membership_operation(
+                    &raft,
+                    operation,
+                    "delete target is learner; remove-voters cannot safely make it absent",
+                )
+                .await?;
+                return Ok(());
+            }
+            if let Err(error) = require_expected_membership(&raft, &operation).await {
+                block_membership_operation(&raft, operation, error.to_string()).await?;
+                return Ok(());
+            }
+            raft.change_membership(
+                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([operation.raft_node_id])),
+                false,
+            )
+            .await?;
+            let after = raft.metrics().borrow().clone();
+            if after
+                .membership_config
+                .membership()
+                .get_node(&operation.raft_node_id)
+                .is_some()
+            {
+                anyhow::bail!("remove-node operation did not make target absent")
+            }
+            let _ = transition_operation(
+                &raft,
+                operation,
+                MembershipOperationPhase::MembershipRemoved,
+                "target made absent from Raft membership",
+            )
+            .await?;
+        }
+        MembershipOperationPhase::MembershipRemoved => {
+            if let Err(error) = require_expected_membership(&raft, &operation).await {
+                block_membership_operation(&raft, operation, error.to_string()).await?;
+                return Ok(());
+            }
+            let out = raft
+                .client_write(DesiredStateCommand::DeleteNode {
+                    node_id,
+                    delete_endpoints: operation.delete_endpoints,
+                    expected_endpoint_ids: operation.expected_endpoint_ids.clone(),
+                    join_session: None,
+                })
+                .await?;
+            match out {
+                crate::raft::types::ClientResponse::Ok {
+                    result: crate::state::DesiredStateApplyResult::NodeDeleted { .. },
+                } => {
+                    let _ = transition_operation(
+                        &raft,
+                        operation,
+                        MembershipOperationPhase::Completed,
+                        "desired node deleted after membership removal",
+                    )
+                    .await?;
+                }
+                crate::raft::types::ClientResponse::Ok { .. } => {
+                    anyhow::bail!("remove-node operation received unexpected desired-state result")
+                }
+                crate::raft::types::ClientResponse::Err { code, message, .. } => {
+                    anyhow::bail!("remove-node desired-state delete rejected: {code}: {message}")
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The periodic task resumes only an already durable lifecycle operation; it never infers a new
+/// membership action from an audit finding.
 pub fn spawn_membership_voter_guard(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
@@ -117,20 +792,19 @@ pub fn spawn_membership_voter_guard(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            match repair_membership_voters_except(raft.clone(), store.clone()).await {
-                Ok(promoted) if promoted.is_empty() => {}
-                Ok(promoted) => {
-                    tracing::info!(
-                        raft_node_ids = ?promoted,
-                        "raft membership guard promoted stable nodes to voters"
-                    );
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        error = %err,
-                        "raft membership guard detected non-voter nodes but could not repair"
-                    );
-                }
+            if let Err(error) = resume_membership_operations_once(raft.clone(), store.clone()).await
+            {
+                tracing::warn!(%error, "membership operation resume failed");
+            }
+            let audit = audit_membership(raft.clone(), store.clone()).await;
+            if !audit.is_clean() {
+                tracing::error!(
+                    orphan_voters = ?audit.orphan_voters,
+                    duplicate_desired_members = ?audit.duplicate_desired_members,
+                    unexpected_learners = ?audit.unexpected_learners,
+                    missing_desired_members = ?audit.missing_desired_members,
+                    "membership_invariant_violation; automatic membership repair is disabled"
+                );
             }
             tokio::time::sleep(interval).await;
         }
@@ -139,33 +813,38 @@ pub fn spawn_membership_voter_guard(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
-    use crate::raft::{
-        app::BoxFuture,
-        types::{ClientResponse, NodeId, NodeMeta},
-    };
     use tokio::sync::{Mutex, watch};
 
+    use super::*;
+    use crate::{
+        domain::{Node, NodeQuotaReset},
+        raft::{
+            app::{BoxFuture, LocalRaft},
+            types::{ClientResponse, NodeMeta},
+        },
+        state::{JsonSnapshotStore, StoreInit},
+    };
+
     #[derive(Clone)]
-    struct RecordingRaft {
+    struct RepairingRaft {
+        inner: LocalRaft,
         metrics: watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>,
-        promoted: Arc<Mutex<Vec<BTreeSet<NodeId>>>>,
+        metrics_tx: watch::Sender<openraft::RaftMetrics<NodeId, NodeMeta>>,
+        retain_values: Arc<Mutex<Vec<bool>>>,
     }
 
-    impl RaftFacade for RecordingRaft {
+    impl RaftFacade for RepairingRaft {
         fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>> {
             self.metrics.clone()
         }
 
         fn client_write(
             &self,
-            _cmd: crate::state::DesiredStateCommand,
+            command: DesiredStateCommand,
         ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
-            Box::pin(async move {
-                anyhow::bail!("client_write should not be called by membership guard")
-            })
+            self.inner.client_write(command)
         }
 
         fn add_learner(
@@ -173,140 +852,147 @@ mod tests {
             _node_id: NodeId,
             _node: NodeMeta,
         ) -> BoxFuture<'_, anyhow::Result<()>> {
-            Box::pin(async move {
-                anyhow::bail!("add_learner should not be called by membership guard")
-            })
+            Box::pin(async { anyhow::bail!("unexpected add_learner") })
         }
 
-        fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
-            let promoted = self.promoted.clone();
-            Box::pin(async move {
-                promoted.lock().await.push(node_ids);
-                Ok(())
-            })
+        fn wait_learner_caught_up(
+            &self,
+            _node_id: NodeId,
+            _required_log_index: u64,
+            _timeout: Duration,
+        ) -> BoxFuture<'_, anyhow::Result<()>> {
+            Box::pin(async { anyhow::bail!("unexpected learner catch-up") })
+        }
+
+        fn add_voters(&self, _node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
+            Box::pin(async { anyhow::bail!("unexpected add_voters") })
         }
 
         fn change_membership(
             &self,
-            _changes: openraft::ChangeMembers<NodeId, NodeMeta>,
-            _retain: bool,
+            changes: openraft::ChangeMembers<NodeId, NodeMeta>,
+            retain: bool,
         ) -> BoxFuture<'_, anyhow::Result<()>> {
+            let metrics = self.metrics.clone();
+            let metrics_tx = self.metrics_tx.clone();
+            let retain_values = self.retain_values.clone();
             Box::pin(async move {
-                anyhow::bail!("change_membership should not be called by membership guard")
+                retain_values.lock().await.push(retain);
+                let openraft::ChangeMembers::RemoveVoters(removed) = changes else {
+                    anyhow::bail!("unexpected membership change")
+                };
+                let mut next = metrics.borrow().clone();
+                let previous = next.membership_config.clone();
+                let voters = previous
+                    .membership()
+                    .voter_ids()
+                    .filter(|node_id| !removed.contains(node_id))
+                    .collect::<BTreeSet<_>>();
+                let nodes = previous
+                    .nodes()
+                    .filter(|(node_id, _)| !removed.contains(node_id))
+                    .map(|(node_id, node)| (*node_id, node.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                next.membership_config = Arc::new(openraft::StoredMembership::new(
+                    previous.log_id().clone(),
+                    openraft::Membership::new(vec![voters], nodes),
+                ));
+                metrics_tx.send_replace(next);
+                Ok(())
             })
         }
     }
 
-    fn meta(name: &str) -> NodeMeta {
-        NodeMeta {
-            name: name.to_string(),
-            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
-            raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
-        }
-    }
+    #[tokio::test]
+    async fn orphan_voter_repair_requires_fingerprint_and_only_removes_the_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(StoreInit {
+                data_dir: temp.path().to_path_buf(),
+                bootstrap_node_id: None,
+                bootstrap_node_name: "node".to_string(),
+                bootstrap_access_host: "".to_string(),
+                bootstrap_api_base_url: "https://node.example".to_string(),
+            })
+            .unwrap(),
+        ));
+        let desired_node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
+        let local_node_id = raft_node_id_from_ulid(&desired_node_id).unwrap();
+        let orphan_node_id = local_node_id.saturating_add(1);
+        store
+            .lock()
+            .await
+            .upsert_node(Node {
+                node_id: desired_node_id,
+                node_name: "leader".to_string(),
+                access_host: "leader.example".to_string(),
+                api_base_url: "https://leader.example".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .unwrap();
+        let desired_nodes_before = store.lock().await.list_nodes();
 
-    fn metrics_with_membership(
-        state: openraft::ServerState,
-        current_leader: Option<NodeId>,
-        voters: BTreeSet<NodeId>,
-        nodes: BTreeMap<NodeId, NodeMeta>,
-    ) -> openraft::RaftMetrics<NodeId, NodeMeta> {
-        let id = 1;
-        let mut metrics = openraft::RaftMetrics::new_initial(id);
-        metrics.current_term = 1;
-        metrics.state = state;
-        metrics.current_leader = current_leader;
+        let mut metrics = openraft::RaftMetrics::new_initial(local_node_id);
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(local_node_id);
         metrics.membership_config = Arc::new(openraft::StoredMembership::new(
             None,
-            openraft::Membership::new(vec![voters], nodes),
+            openraft::Membership::new(
+                vec![BTreeSet::from([local_node_id, orphan_node_id])],
+                BTreeMap::from([
+                    (
+                        local_node_id,
+                        NodeMeta {
+                            name: "leader".to_string(),
+                            api_base_url: "https://leader.example".to_string(),
+                            raft_endpoint: "https://leader.example".to_string(),
+                        },
+                    ),
+                    (
+                        orphan_node_id,
+                        NodeMeta {
+                            name: "orphan".to_string(),
+                            api_base_url: "https://orphan.example".to_string(),
+                            raft_endpoint: "https://orphan.example".to_string(),
+                        },
+                    ),
+                ]),
+            ),
         ));
-        metrics
-    }
-
-    #[test]
-    fn finds_membership_nodes_that_are_not_voters() {
-        let nodes = BTreeMap::from([(1, meta("one")), (2, meta("two")), (3, meta("three"))]);
-        let metrics = metrics_with_membership(
-            openraft::ServerState::Leader,
-            Some(1),
-            BTreeSet::from([1, 3]),
-            nodes,
-        );
-
-        assert_eq!(non_voter_membership_node_ids(&metrics), BTreeSet::from([2]));
-    }
-
-    #[tokio::test]
-    async fn leader_repairs_legacy_non_voter_nodes() {
-        let nodes = BTreeMap::from([(1, meta("one")), (2, meta("two"))]);
-        let metrics = metrics_with_membership(
-            openraft::ServerState::Leader,
-            Some(1),
-            BTreeSet::from([1]),
-            nodes,
-        );
-        let (_tx, rx) = watch::channel(metrics);
-        let promoted = Arc::new(Mutex::new(Vec::new()));
-        let raft: Arc<dyn RaftFacade> = Arc::new(RecordingRaft {
-            metrics: rx,
-            promoted: promoted.clone(),
+        let (metrics_tx, metrics_rx) = watch::channel(metrics);
+        let retain_values = Arc::new(Mutex::new(Vec::new()));
+        let raft: Arc<dyn RaftFacade> = Arc::new(RepairingRaft {
+            inner: LocalRaft::new(store.clone(), metrics_rx.clone()),
+            metrics: metrics_rx,
+            metrics_tx,
+            retain_values: retain_values.clone(),
         });
 
-        let repaired = repair_membership_voters_once_with_gate(raft, Arc::new(Mutex::new(())))
+        let preview = preview_orphan_voter_repair(raft.clone(), store.clone(), orphan_node_id)
             .await
             .unwrap();
+        assert!(store.lock().await.state().membership_operations.is_empty());
 
-        assert_eq!(repaired, BTreeSet::from([2]));
-        assert_eq!(*promoted.lock().await, vec![BTreeSet::from([2])]);
-    }
+        let operation = repair_orphan_voter(
+            raft.clone(),
+            store.clone(),
+            orphan_node_id,
+            &preview.expected_membership,
+        )
+        .await
+        .unwrap();
 
-    #[tokio::test]
-    async fn follower_reports_non_voters_without_repairing() {
-        let nodes = BTreeMap::from([(1, meta("one")), (2, meta("two"))]);
-        let metrics = metrics_with_membership(
-            openraft::ServerState::Follower,
-            None,
-            BTreeSet::from([1]),
-            nodes,
+        assert_eq!(operation.phase, MembershipOperationPhase::Completed);
+        assert_eq!(*retain_values.lock().await, vec![false]);
+        assert!(
+            raft.metrics()
+                .borrow()
+                .membership_config
+                .membership()
+                .get_node(&orphan_node_id)
+                .is_none()
         );
-        let (_tx, rx) = watch::channel(metrics);
-        let promoted = Arc::new(Mutex::new(Vec::new()));
-        let raft: Arc<dyn RaftFacade> = Arc::new(RecordingRaft {
-            metrics: rx,
-            promoted: promoted.clone(),
-        });
-
-        let err = repair_membership_voters_once_with_gate(raft, Arc::new(Mutex::new(())))
-            .await
-            .unwrap_err();
-
-        assert!(err.to_string().contains("requires leader/quorum"));
-        assert!(promoted.lock().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn guard_skips_when_membership_operation_gate_is_busy() {
-        let nodes = BTreeMap::from([(1, meta("one")), (2, meta("two"))]);
-        let metrics = metrics_with_membership(
-            openraft::ServerState::Leader,
-            Some(1),
-            BTreeSet::from([1]),
-            nodes,
-        );
-        let (_tx, rx) = watch::channel(metrics);
-        let promoted = Arc::new(Mutex::new(Vec::new()));
-        let raft: Arc<dyn RaftFacade> = Arc::new(RecordingRaft {
-            metrics: rx,
-            promoted: promoted.clone(),
-        });
-        let gate = Arc::new(Mutex::new(()));
-        let _busy = gate.clone().lock_owned().await;
-
-        let repaired = repair_membership_voters_once_with_gate(raft, gate)
-            .await
-            .unwrap();
-
-        assert!(repaired.is_empty());
-        assert!(promoted.lock().await.is_empty());
+        assert_eq!(store.lock().await.list_nodes(), desired_nodes_before);
     }
 }

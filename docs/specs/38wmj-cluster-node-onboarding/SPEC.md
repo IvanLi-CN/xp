@@ -17,9 +17,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 
 - `/etc/xp/xp.env` 使用 `XP_ADMIN_TOKEN_HASH='<argon2id PHC>'`；PHC 必须能被 POSIX shell 安全读取。
 - `POST /api/cluster/join` 返回集群当前 PHC，且不得记录该字段。
-- fresh join 使用 leader 驱动的两阶段协议。Phase 1 通过兼容旧节点的 additive `upsert_node`
-  字段原子 reservation join token、写入 desired-state node 和 durable join session，再注册 Raft
-  learner 并立即返回证书、CA 与 PHC；不得在
+- fresh join 使用 leader 驱动的两阶段协议。Phase 1 在全 voter lifecycle capability barrier
+  通过后记录 Join membership operation、reservation join token、desired-state node 和 durable
+  join session，再注册 Raft learner 并立即返回证书、CA 与 PHC；不得在
   HTTP response 前等待 learner catch-up 或 voter promotion。
 - join session 状态为 `reserved -> learner_registered -> consumed|expired`。session 保存规范化
   请求指纹、签发证书、token expiry、固定 10 分钟 activation deadline 和 required log index。
@@ -32,8 +32,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   voter 并标记 consumed。leader 重启或换主必须继续；超出 activation deadline 时移除未完成
   membership/desired-state node 并标记 expired。terminal tombstone 至少保留 24 小时且覆盖 token
   expiry，节点删除也不得使 token 可复用。
-- 接受 staged join 前，leader 必须确认所有现有 voter 声明 `cluster.join.staged-v1` capability；
-  未完成滚动升级或无法验证的集群拒绝创建 reservation，避免旧 leader 丢失 session 状态。
+- 接受 fresh join 前，leader 必须确认所有现有 voter 声明
+  `cluster.membership-lifecycle-v1` capability；未完成滚动升级或无法验证的集群返回
+  `coordinated_upgrade_required`，不创建 reservation 或 lifecycle command。
 - bootstrap response 携带当前 leader node ID 和当前 voter node IDs。joiner 将 0600 bootstrap
   marker 与证书材料一起原子持久化，marker 同时记录 activation deadline；每个 Raft RPC 仍须
   通过 v2 HMAC、cluster/target/time-window 校验。只要 marker 文件存在且未过期，marker 中记录的
@@ -42,8 +43,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   部分复制期间 marker 保留并允许剩余记录 sender 继续发送；仅当 marker 中全部 voter sender
   都已出现在本地 state 且一次 RPC 成功后才删除 marker；过期 marker 在读取时清理，后续请求恢复
   为正常 membership 校验。
-- membership guard 不得抢先晋升存在 pending join session 的 learner；没有 session 的 legacy
-  learner 继续使用 existing-node recovery 行为。
+- membership guard 不得晋升任何 learner。它只报告异常并由 recorded Join operation / JoinSession
+  coordinator 续跑合法 learner；没有 session 的 learner 是阻断成员变更的异常，而非 recovery
+  候选。
 - single-image wrapper 在 fresh learner 首次复制完成前必须保持 XP 子进程存活。managed-default
   reconcile 必须先通过本机 internal API 验证复制完成，再由本机 Raft 转发写入；仅当本机 API
   明确返回 signer 尚未进入 state machine 的认证失败或本地 leader membership 尚未复制时，才可

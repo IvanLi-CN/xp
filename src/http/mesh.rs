@@ -135,6 +135,18 @@ pub(super) async fn admin_internal_raft_client_write(
     let Some(Extension(internal)) = internal else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
+    if matches!(
+        cmd,
+        DesiredStateCommand::UpsertNode { .. }
+            | DesiredStateCommand::DeleteNode { .. }
+            | DesiredStateCommand::BeginMembershipOperation { .. }
+            | DesiredStateCommand::TransitionMembershipOperation { .. }
+            | DesiredStateCommand::PruneMembershipOperations { .. }
+    ) {
+        return Err(ApiError::not_implemented(
+            "node and membership lifecycle commands require dedicated lifecycle endpoints",
+        ));
+    }
     let idempotency_request = internal
         .verified
         .as_ref()

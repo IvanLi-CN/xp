@@ -2,7 +2,7 @@ use std::{any::Any, collections::BTreeSet, future::Future, pin::Pin, sync::Arc, 
 
 use anyhow::Context;
 use futures_util::FutureExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::watch;
 
 use crate::{
@@ -41,6 +41,28 @@ where
 
 pub trait RaftFacade: Send + Sync + 'static {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>>;
+
+    /// Confirm that the local node still owns a quorum-backed, linearizable view before a
+    /// membership precondition is evaluated. Test facades use the conservative metrics check;
+    /// production facades override this with OpenRaft's quorum heartbeat protocol.
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        let metrics = self.metrics();
+        Box::pin(async move {
+            let snapshot = metrics.borrow().clone();
+            if snapshot.state != openraft::ServerState::Leader
+                || snapshot.current_leader != Some(snapshot.id)
+            {
+                anyhow::bail!(
+                    "linearizable membership check requires local leader: \
+                     state={:?}, current_leader={:?}, local={}",
+                    snapshot.state,
+                    snapshot.current_leader,
+                    snapshot.id
+                );
+            }
+            Ok(())
+        })
+    }
 
     fn client_write(
         &self,
@@ -122,6 +144,14 @@ impl PanicBoundaryRaft {
 impl RaftFacade for PanicBoundaryRaft {
     fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<NodeId, NodeMeta>> {
         self.inner.metrics()
+    }
+
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            catch_raft_panic("raft ensure_linearizable", inner.ensure_linearizable()).await??;
+            Ok(())
+        })
     }
 
     fn client_write(
@@ -232,6 +262,16 @@ impl RaftFacade for RealRaft {
         self.metrics.clone()
     }
 
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            catch_raft_panic("raft ensure_linearizable", self.raft.ensure_linearizable())
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .map_err(|e| anyhow::anyhow!("raft ensure_linearizable: {e}"))?;
+            Ok(())
+        })
+    }
+
     fn client_write(
         &self,
         cmd: DesiredStateCommand,
@@ -331,6 +371,16 @@ impl RaftFacade for ForwardingRaftFacade {
         self.metrics.clone()
     }
 
+    fn ensure_linearizable(&self) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async move {
+            catch_raft_panic("raft ensure_linearizable", self.raft.ensure_linearizable())
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .map_err(|e| anyhow::anyhow!("raft ensure_linearizable: {e}"))?;
+            Ok(())
+        })
+    }
+
     fn client_write(
         &self,
         cmd: DesiredStateCommand,
@@ -348,6 +398,12 @@ impl RaftFacade for ForwardingRaftFacade {
             match catch_raft_panic("raft client_write", raft.client_write(cmd)).await? {
                 Ok(resp) => Ok(resp.data),
                 Err(err) => {
+                    if lifecycle_command_requires_local_leader(&cmd_clone) {
+                        return Err(anyhow::anyhow!(concat!(
+                            "membership lifecycle leader changed; retry the recorded operation ",
+                            "on the current leader"
+                        )));
+                    }
                     let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
                         err.api_error()
                     else {
@@ -410,57 +466,27 @@ impl RaftFacade for ForwardingRaftFacade {
         retain: bool,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         let raft = self.raft.clone();
-        let metrics = self.metrics.clone();
-        let mesh_client = self.mesh_client.clone();
-        let cluster_ca_key_pem = self.cluster_ca_key_pem.clone();
-        let cluster_ca_pem = self.cluster_ca_pem.clone();
-        let cluster_id = self.cluster_id.clone();
-        let local_node_id = self.local_node_id.clone();
-        let store = self.store.clone();
         Box::pin(async move {
-            let changes_clone = changes.clone();
-            match catch_raft_panic(
+            catch_raft_panic(
                 "raft change_membership",
                 raft.change_membership(changes, retain),
             )
             .await?
-            {
-                Ok(_resp) => Ok(()),
-                Err(err) => {
-                    let Some(openraft::error::ClientWriteError::ForwardToLeader(forward)) =
-                        err.api_error()
-                    else {
-                        return Err(anyhow::anyhow!("raft change_membership: {err}"));
-                    };
-                    let metrics_snapshot = metrics.borrow().clone();
-                    let leader_base_url = leader_api_base_url_from_forward(
-                        forward,
-                        &metrics_snapshot,
-                    )
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("raft change_membership forward: leader not available")
-                    })?;
-                    let target_id =
-                        leader_target_id(&store, forward, &metrics_snapshot, &leader_base_url)
-                            .await?;
-                    let peer = forwarding_peer_target(&store, &target_id, &leader_base_url).await?;
-                    forward_change_membership(
-                        &mesh_client,
-                        &ForwardingAuth {
-                            cluster_ca_key_pem: &cluster_ca_key_pem,
-                            cluster_ca_pem: &cluster_ca_pem,
-                            cluster_id: &cluster_id,
-                            sender_id: &local_node_id,
-                        },
-                        &peer,
-                        &changes_clone,
-                        retain,
-                    )
-                    .await
-                }
-            }
+            .map_err(|err| anyhow::anyhow!("raft change_membership: {err}"))?;
+            Ok(())
         })
     }
+}
+
+fn lifecycle_command_requires_local_leader(cmd: &DesiredStateCommand) -> bool {
+    matches!(
+        cmd,
+        DesiredStateCommand::UpsertNode { .. }
+            | DesiredStateCommand::DeleteNode { .. }
+            | DesiredStateCommand::BeginMembershipOperation { .. }
+            | DesiredStateCommand::TransitionMembershipOperation { .. }
+            | DesiredStateCommand::PruneMembershipOperations { .. }
+    )
 }
 
 async fn leader_target_id(
@@ -526,19 +552,6 @@ fn leader_api_base_url_from_forward(
         })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct InternalChangeMembershipRequest {
-    retain: bool,
-    changes: InternalChangeMembers,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum InternalChangeMembers {
-    RemoveVoters { node_ids: Vec<NodeId> },
-    RemoveNodes { node_ids: Vec<NodeId> },
-}
-
 struct ForwardingAuth<'a> {
     cluster_ca_key_pem: &'a str,
     cluster_ca_pem: &'a str,
@@ -575,47 +588,6 @@ async fn send_forwarded_mesh_request(
         )
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))
-}
-
-async fn forward_change_membership(
-    client: &MeshAwareHttpClient,
-    auth: &ForwardingAuth<'_>,
-    peer: &MeshPeerTarget,
-    changes: &openraft::ChangeMembers<NodeId, NodeMeta>,
-    retain: bool,
-) -> anyhow::Result<()> {
-    let changes = match changes {
-        openraft::ChangeMembers::RemoveVoters(node_ids) => InternalChangeMembers::RemoveVoters {
-            node_ids: node_ids.iter().cloned().collect(),
-        },
-        openraft::ChangeMembers::RemoveNodes(node_ids) => InternalChangeMembers::RemoveNodes {
-            node_ids: node_ids.iter().cloned().collect(),
-        },
-        other => {
-            return Err(anyhow::anyhow!(
-                "forward change_membership: unsupported change type: {other:?}"
-            ));
-        }
-    };
-    let body = serde_json::to_vec(&InternalChangeMembershipRequest { retain, changes })?;
-    let response = send_forwarded_mesh_request(
-        client,
-        auth,
-        peer,
-        "/api/admin/_internal/raft/change-membership",
-        body,
-        false,
-    )
-    .await
-    .context("forward change_membership request")?;
-    if !response.status().is_success() {
-        anyhow::bail!(
-            "forward change_membership response status: {}",
-            response.status()
-        );
-    }
-
-    Ok(())
 }
 
 async fn forward_client_write(

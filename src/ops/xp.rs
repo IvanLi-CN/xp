@@ -7,10 +7,12 @@ use crate::ops::cli::{
 };
 use crate::ops::cluster_info;
 use crate::ops::internal_auth::InternalOpsAuth;
+use crate::ops::membership_lifecycle::{InternalNodeMetadataArgs, internal_update_node_metadata};
 use crate::ops::paths::Paths;
 use crate::ops::util::{Mode, chmod, ensure_dir, is_test_root, write_bytes_if_changed};
 use axum::http::{Method, Uri};
 use chrono::Utc;
+use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -192,6 +194,83 @@ pub async fn cmd_xp_restart(paths: Paths, args: XpRestartArgs) -> Result<(), Exi
         6,
         "xp_restart_failed: failed to restart service (hint: run via sudo; ensure systemctl/rc-service exists)",
     ))
+}
+
+pub(super) fn local_internal_ops_client(
+    paths: &Paths,
+    api_base_url: &str,
+) -> Result<(reqwest::Client, InternalOpsAuth), ExitError> {
+    let raw_env = fs::read_to_string(paths.etc_xp_env())
+        .map_err(|_| ExitError::new(2, "invalid_input: /etc/xp/xp.env not found"))?;
+    let parsed = crate::ops::xp_env::parse_xp_env(Some(raw_env));
+    let data_dir = parsed
+        .data_dir
+        .unwrap_or_else(|| "/var/lib/xp/data".to_string());
+    if data_dir.trim().is_empty() {
+        return Err(ExitError::new(2, "invalid_input: XP_DATA_DIR is empty"));
+    }
+    let abs_data_dir = paths.map_abs(Path::new(&data_dir));
+    let metadata = crate::cluster_metadata::ClusterMetadata::load(&abs_data_dir)
+        .map_err(|error| ExitError::new(5, format!("cluster_metadata_error: {error}")))?;
+    let cluster_ca_key_pem = metadata
+        .read_cluster_ca_key_pem(&abs_data_dir)
+        .map_err(|error| ExitError::new(5, format!("cluster_ca_key_error: {error}")))?
+        .ok_or_else(|| ExitError::new(5, "cluster_ca_key_missing"))?;
+    let cluster_ca_pem = metadata
+        .read_cluster_ca_pem(&abs_data_dir)
+        .map_err(|error| ExitError::new(5, format!("cluster_ca_error: {error}")))?;
+    let client = build_xp_ops_http_client(api_base_url, &cluster_ca_pem)?;
+    let auth = InternalOpsAuth::new(
+        &cluster_ca_key_pem,
+        &cluster_ca_pem,
+        &metadata.cluster_id,
+        &metadata.node_id,
+        &metadata.node_id,
+    );
+    Ok((client, auth))
+}
+
+pub(super) async fn internal_json_request<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    base_url: &str,
+    auth: &InternalOpsAuth,
+    method: Method,
+    path: &str,
+    body: Option<Vec<u8>>,
+) -> Result<T, ExitError> {
+    let uri: Uri = path
+        .parse()
+        .map_err(|error| ExitError::new(5, format!("invalid internal URI: {error}")))?;
+    let payload = body.unwrap_or_default();
+    let headers = auth.signed_headers(
+        &method,
+        &uri,
+        (!payload.is_empty()).then_some("application/json"),
+        &payload,
+    )?;
+    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    let mut request = client.request(method, url).headers(headers);
+    if !payload.is_empty() {
+        request = request
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(payload);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| ExitError::new(5, format!("http_error: {error}")))?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ExitError::new(
+            5,
+            format!("membership_lifecycle_error: {status}: {body}"),
+        ));
+    }
+    response
+        .json::<T>()
+        .await
+        .map_err(|error| ExitError::new(5, format!("http_error: parse response: {error}")))
 }
 
 pub async fn cmd_xp_sync_node_meta(
@@ -419,25 +498,6 @@ pub(crate) async fn sync_node_meta_runtime(
     meta.save(&abs_data_dir)
         .map_err(|e| ExitError::new(5, format!("cluster_metadata_error: {e}")))?;
 
-    let desired_node = crate::domain::Node {
-        node_id: node_id.clone(),
-        node_name: node_name.to_string(),
-        access_host: access_host.to_string(),
-        api_base_url: api_base_url.to_string(),
-        quota_limit_bytes: current.quota_limit_bytes,
-        quota_reset: current.quota_reset.clone(),
-    };
-    internal_client_write(
-        &client,
-        xp_base_url,
-        &ops_auth,
-        crate::state::DesiredStateCommand::UpsertNode {
-            node: desired_node,
-            join_session: None,
-        },
-    )
-    .await?;
-
     let info = cluster_info::fetch(&client, xp_base_url).await?;
     let set_nodes_base_url = if info.role == "leader" {
         xp_base_url
@@ -451,15 +511,16 @@ pub(crate) async fn sync_node_meta_runtime(
         ));
     }
     let leader_info = cluster_info::fetch(&client, set_nodes_base_url).await?;
-    internal_set_nodes(
+    internal_update_node_metadata(
         &client,
         set_nodes_base_url,
         &ops_auth.for_target(leader_info.node_id),
-        vec![InternalSetNodeArgs {
+        InternalNodeMetadataArgs {
             node_id: node_id.clone(),
             node_name: node_name.to_string(),
+            access_host: access_host.to_string(),
             api_base_url: api_base_url.to_string(),
-        }],
+        },
     )
     .await?;
 
@@ -1093,53 +1154,6 @@ pub(crate) async fn internal_client_write(
             format!("raft_error: {status} {code}: {message}"),
         )),
     }
-}
-
-#[derive(serde::Serialize)]
-struct InternalSetNodesRequestArgs {
-    nodes: Vec<InternalSetNodeArgs>,
-}
-
-#[derive(serde::Serialize)]
-pub(crate) struct InternalSetNodeArgs {
-    pub node_id: String,
-    pub node_name: String,
-    pub api_base_url: String,
-}
-
-pub(crate) async fn internal_set_nodes(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &InternalOpsAuth,
-    nodes: Vec<InternalSetNodeArgs>,
-) -> Result<(), ExitError> {
-    let base = base_url.trim_end_matches('/');
-    let url = format!("{base}/api/admin/_internal/raft/set-nodes");
-    let uri: Uri = "/api/admin/_internal/raft/set-nodes"
-        .parse()
-        .expect("valid uri");
-    let body = serde_json::to_vec(&InternalSetNodesRequestArgs { nodes })
-        .map_err(|error| ExitError::new(5, format!("encode internal request: {error}")))?;
-    let headers = auth.signed_headers(&Method::POST, &uri, Some("application/json"), &body)?;
-
-    let resp = client
-        .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| ExitError::new(5, format!("http_error: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(ExitError::new(
-            5,
-            format!("http_error: set-nodes failed: {status}: {body}"),
-        ));
-    }
-    Ok(())
 }
 
 #[derive(serde::Deserialize)]

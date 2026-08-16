@@ -14,6 +14,7 @@ mod deploy;
 mod init;
 mod install;
 pub(crate) mod internal_auth;
+pub(crate) mod membership_lifecycle;
 mod mihomo;
 mod paths;
 mod platform;

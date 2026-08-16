@@ -52,6 +52,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.mihomo-tools",
             "admin.mihomo-resource-policy",
             "cluster.join.staged-v1",
+            "cluster.membership-lifecycle-v1",
         ],
         fingerprint,
     })
@@ -86,6 +87,11 @@ mod tests {
         );
         assert!(response.capabilities.contains(&"admin.status-events"));
         assert!(response.capabilities.contains(&"cluster.join.staged-v1"));
+        assert!(
+            response
+                .capabilities
+                .contains(&"cluster.membership-lifecycle-v1")
+        );
         assert!(
             response
                 .capabilities

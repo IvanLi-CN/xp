@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -22,7 +22,6 @@ import {
 	type AdminNodeDeletePreviewEndpoint,
 	type AdminNodeEgressProbe,
 	type AdminNodePatchRequest,
-	deleteAdminNode,
 	fetchAdminNode,
 	fetchAdminNodeDeletePreview,
 	patchAdminNode,
@@ -77,6 +76,10 @@ import {
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
+import {
+	NodeDeleteOperationStatus,
+	useNodeDeleteFlow,
+} from "./nodeDetailsDeleteOperation";
 import {
 	isNodeQuotaDraftDirty,
 	nodeQuotaDraftFromNode,
@@ -540,12 +543,31 @@ export function NodeDetailsPage() {
 	const [isSaving, setIsSaving] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
-	const [isDeleting, setIsDeleting] = useState(false);
 	const [isPreparingDelete, setIsPreparingDelete] = useState(false);
 	const [deletePreviewEndpoints, setDeletePreviewEndpoints] = useState<
 		AdminNodeDeletePreviewEndpoint[]
 	>([]);
-	const displayedNodeIdRef = useRef(nodeId);
+	const {
+		operation: pendingDeleteOperation,
+		operationId: pendingDeleteOperationId,
+		isDeleting,
+		submitDelete,
+	} = useNodeDeleteFlow({
+		adminToken,
+		isOnline: appRuntime.isOnline,
+		nodeId,
+		deletePreviewEndpoints,
+		queryClient,
+		pushToast,
+		navigateToNodes: () => navigate({ to: "/nodes" }),
+		syncCompletedCache: () =>
+			resourceListCache.nodeDeleted(
+				queryClient,
+				adminToken,
+				nodeId,
+				deletePreviewEndpoints,
+			),
+	});
 	const quotaForm = useForm<QuotaResetFormInput, unknown, QuotaResetFormValues>(
 		{
 			resolver: zodResolver(quotaResetSchema),
@@ -556,9 +578,7 @@ export function NodeDetailsPage() {
 			},
 		},
 	);
-
 	const resetQuotaForm = quotaForm.reset;
-
 	const resetQuotaDraft = useCallback(() => {
 		if (!nodeQuery.data) return;
 		resetQuotaForm(nodeQuotaDraftFromNode(nodeQuery.data));
@@ -570,8 +590,7 @@ export function NodeDetailsPage() {
 	}, [resetQuotaDraft]);
 
 	useEffect(() => {
-		if (displayedNodeIdRef.current === nodeId) return;
-		displayedNodeIdRef.current = nodeId;
+		if (!nodeId) return;
 		setDeleteOpen(false);
 		setDeletePreviewEndpoints([]);
 	}, [nodeId]);
@@ -779,6 +798,7 @@ export function NodeDetailsPage() {
 			setIsPreparingDelete(false);
 		}
 	};
+	const hasPendingDeleteOperation = pendingDeleteOperationId !== null;
 
 	const content = (() => {
 		if (nodesCapability.unavailable) {
@@ -1680,7 +1700,10 @@ export function NodeDetailsPage() {
 
 					{activeTab === "danger" ? (
 						<section className="space-y-4 border-t border-destructive/30 pt-4">
-							<h2 className="xp-card-title text-destructive">Danger zone</h2>
+							<NodeDeleteOperationStatus
+								operation={pendingDeleteOperation}
+								visible={hasPendingDeleteOperation}
+							/>
 							<p className="text-sm text-muted-foreground">
 								Deleting a node removes it from the cluster membership and
 								inventory. If the node still owns endpoints, the next step shows
@@ -1691,7 +1714,11 @@ export function NodeDetailsPage() {
 									variant="danger"
 									onClick={() => void handleOpenDeleteDialog()}
 									loading={isPreparingDelete}
-									disabled={isDeleting || appRuntime.isReadOnly}
+									disabled={
+										isDeleting ||
+										hasPendingDeleteOperation ||
+										appRuntime.isReadOnly
+									}
 								>
 									Delete node
 								</Button>
@@ -1759,35 +1786,8 @@ export function NodeDetailsPage() {
 							<Button
 								variant="danger"
 								loading={isDeleting}
-								onClick={async () => {
-									setIsDeleting(true);
-									try {
-										await deleteAdminNode(adminToken, nodeId, {
-											deleteEndpoints: deletePreviewEndpoints.length > 0,
-											expectedEndpointIds: deletePreviewEndpoints.map(
-												(endpoint) => endpoint.endpoint_id,
-											),
-										});
-										resourceListCache.nodeDeleted(
-											queryClient,
-											adminToken,
-											nodeId,
-											deletePreviewEndpoints,
-										);
-										pushToast({
-											variant: "success",
-											message: "Node deleted.",
-										});
-										navigate({ to: "/nodes" });
-									} catch (error) {
-										pushToast({
-											variant: "error",
-											message: formatErrorMessage(error),
-										});
-									} finally {
-										setIsDeleting(false);
-										setDeleteOpen(false);
-									}
+								onClick={() => {
+									void submitDelete().finally(() => setDeleteOpen(false));
 								}}
 							>
 								{deletePreviewEndpoints.length > 0

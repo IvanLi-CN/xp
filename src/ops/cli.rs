@@ -4,6 +4,7 @@ use crate::ops::container;
 use crate::ops::deploy;
 use crate::ops::init;
 use crate::ops::install;
+use crate::ops::membership_lifecycle;
 use crate::ops::mihomo;
 use crate::ops::paths::Paths;
 use crate::ops::preflight;
@@ -113,6 +114,9 @@ pub enum XpCommand {
     Bootstrap(XpBootstrapArgs),
     Restart(XpRestartArgs),
     SyncNodeMeta(XpSyncNodeMetaArgs),
+    RepairOrphanVoter(XpRepairOrphanVoterArgs),
+    #[command(subcommand)]
+    MembershipOperation(MembershipOperationCommand),
     /// Disaster recovery: force this node to become the only Raft voter.
     ///
     /// This is only meant for cases where quorum is permanently lost (e.g. a voter node is wiped).
@@ -279,6 +283,40 @@ pub struct XpSyncNodeMetaArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpRepairOrphanVoterArgs {
+    /// Local xp API base URL. This command must be run on the current Raft leader.
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+
+    /// Exact numeric Raft id of the one orphan voter to inspect or remove.
+    #[arg(long)]
+    pub raft_node_id: u64,
+
+    /// Perform the removal. Omit for the default no-write preview.
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Opaque membership fingerprint returned by the dry-run preview. Required with --apply.
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub expected_membership: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MembershipOperationCommand {
+    Status(XpMembershipOperationStatusArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpMembershipOperationStatusArgs {
+    /// Local xp API base URL.
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+
+    #[arg(long, value_name = "UUID")]
+    pub operation_id: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -609,6 +647,12 @@ pub async fn run() -> i32 {
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
             XpCommand::Restart(args) => xp::cmd_xp_restart(paths, args).await,
             XpCommand::SyncNodeMeta(args) => xp::cmd_xp_sync_node_meta(paths, args).await,
+            XpCommand::RepairOrphanVoter(args) => {
+                membership_lifecycle::cmd_xp_repair_orphan_voter(paths, args).await
+            }
+            XpCommand::MembershipOperation(MembershipOperationCommand::Status(args)) => {
+                membership_lifecycle::cmd_xp_membership_operation_status(paths, args).await
+            }
             XpCommand::RecoverSingleNode(args) => xp::cmd_xp_recover_single_node(paths, args).await,
         },
         Some(Command::Deploy(args)) => deploy::cmd_deploy(paths, args).await,

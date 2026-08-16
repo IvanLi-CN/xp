@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod legacy_smux;
+mod membership_operation;
 
 #[derive(Debug, Default)]
 struct TestGeoLookup;

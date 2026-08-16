@@ -1,10 +1,12 @@
-# Raft Membership Voter Invariant History
+# Raft membership lifecycle decisions
 
-## Key Decisions
-
-- 2026-07-07: Stable membership nodes are all voters. Long-lived learners and configurable voting
-  rights are unsupported.
-- 2026-07-07: Join success is defined as voter success; asynchronous best-effort promotion is not a
-  valid API success condition.
-- 2026-07-07: No-quorum repair remains an explicit disaster recovery operation, not an automatic
-  disk rewrite.
+- `voter`, `learner`, and `absent` are role outcomes, not configurable classes. "Non-voter" is
+  only a set description and must not drive promotion.
+- A periodic scan is evidence and recovery scheduling, not an authority to decide a membership
+  transition.
+- Every membership mutation begins from a durable intent and a linearizable membership fingerprint.
+  Unknown outcomes are resumed only when the observed shape is an exact current or next state.
+- Repairing a known orphan voter is narrower than general disaster recovery: it removes one verified
+  non-leader voter with retain=false and never rewrites local Raft files or desired/user data.
+- Mixed-version voters cannot safely decode the new state-machine command variants. Lifecycle work
+  freezes until the whole voter set advertises the capability.

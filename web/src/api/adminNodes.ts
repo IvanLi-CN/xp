@@ -76,6 +76,51 @@ export type AdminNodeDeletePreviewResponse = z.infer<
 	typeof AdminNodeDeletePreviewResponseSchema
 >;
 
+export const AdminMembershipOperationSchema = z.object({
+	operation_id: z.string().uuid(),
+	kind: z.enum(["join", "restore", "remove_node", "repair_orphan_voter"]),
+	raft_node_id: z.number().int().nonnegative(),
+	node_id: z.string().nullable().optional(),
+	expected_membership: z.string(),
+	phase: z.enum([
+		"prepared",
+		"learner_registered",
+		"voter_promoted",
+		"membership_removed",
+		"completed",
+		"blocked",
+		"expired",
+	]),
+	delete_endpoints: z.boolean(),
+	expected_endpoint_ids: z.array(z.string()),
+	created_at: z.string(),
+	next_retry_at: z.string().nullable().optional(),
+	terminal_at: z.string().nullable().optional(),
+	evidence: z.string().nullable().optional(),
+});
+
+export type AdminMembershipOperation = z.infer<
+	typeof AdminMembershipOperationSchema
+>;
+
+const AdminMembershipOperationResponseSchema = z.object({
+	operation: AdminMembershipOperationSchema,
+});
+
+const AdminNodeDeleteAcceptedSchema = z.object({
+	operation_id: z.string().uuid(),
+	phase: AdminMembershipOperationSchema.shape.phase,
+	status_url: z.string(),
+});
+
+export type AdminNodeDeleteResult =
+	| { status: "completed" }
+	| {
+			status: "accepted";
+			operationId: string;
+			phase: AdminMembershipOperation["phase"];
+	  };
+
 const AdminNodeEgressProbeRefreshResponseSchema = z.object({
 	node_id: z.string(),
 	accepted: z.boolean(),
@@ -198,7 +243,7 @@ export async function deleteAdminNode(
 	nodeId: string,
 	options?: { deleteEndpoints?: boolean; expectedEndpointIds?: string[] },
 	signal?: AbortSignal,
-): Promise<void> {
+): Promise<AdminNodeDeleteResult> {
 	const controller = new AbortController();
 	let timedOut = false;
 	const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
@@ -236,6 +281,16 @@ export async function deleteAdminNode(
 		);
 
 		await throwIfNotOk(res);
+		if (res.status === 202) {
+			const json: unknown = await res.json();
+			const accepted = AdminNodeDeleteAcceptedSchema.parse(json);
+			return {
+				status: "accepted",
+				operationId: accepted.operation_id,
+				phase: accepted.phase,
+			};
+		}
+		return { status: "completed" };
 	} catch (error) {
 		if (timedOut) {
 			throw new Error(
@@ -247,4 +302,25 @@ export async function deleteAdminNode(
 		clearTimeout(timeoutId);
 		signal?.removeEventListener("abort", abort);
 	}
+}
+
+export async function fetchAdminMembershipOperation(
+	adminToken: string,
+	operationId: string,
+	signal?: AbortSignal,
+): Promise<AdminMembershipOperation> {
+	const res = await fetch(
+		`/api/admin/membership-operations/${encodeURIComponent(operationId)}`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+	await throwIfNotOk(res);
+	const json: unknown = await res.json();
+	return AdminMembershipOperationResponseSchema.parse(json).operation;
 }

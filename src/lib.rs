@@ -35,6 +35,8 @@ pub mod quota;
 pub mod quota_policy;
 pub mod raft;
 pub mod raft_membership_guard;
+#[cfg(test)]
+mod raft_membership_guard_invariant_tests;
 pub mod reconcile;
 pub mod state;
 mod state_join_command;

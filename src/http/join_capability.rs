@@ -5,48 +5,50 @@ use serde::Deserialize;
 
 use super::{ApiError, AppState, raft_metrics};
 
-const CAPABILITY: &str = "cluster.join.staged-v1";
+pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 
 #[derive(Deserialize)]
 struct Response {
     capabilities: Vec<String>,
 }
 
-fn all_remote_voters_represented(
-    voter_ids: &BTreeSet<u64>,
-    represented_voters: &BTreeSet<u64>,
-) -> bool {
-    represented_voters == voter_ids
+#[derive(Debug, Clone)]
+struct VoterCapabilityPeer {
+    raft_node_id: u64,
+    api_base_url: String,
 }
 
-pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> {
-    let mut voter_ids = raft_metrics(state)
-        .membership_config
-        .membership()
-        .voter_ids()
-        .collect::<BTreeSet<_>>();
+pub(super) async fn require_membership_lifecycle_on_voters(
+    state: &AppState,
+) -> Result<(), ApiError> {
+    require_capability_on_voters(state, MEMBERSHIP_LIFECYCLE_CAPABILITY).await
+}
+
+async fn require_capability_on_voters(state: &AppState, capability: &str) -> Result<(), ApiError> {
+    let metrics = raft_metrics(state);
+    let membership = metrics.membership_config.membership();
+    let mut voter_ids = membership.voter_ids().collect::<BTreeSet<_>>();
     let local_node_id = crate::raft::types::raft_node_id_from_ulid(&state.cluster.node_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     voter_ids.remove(&local_node_id);
-    let peers = state
-        .store
-        .lock()
-        .await
-        .list_nodes()
-        .into_iter()
-        .filter(|node| node.node_id != state.cluster.node_id)
-        .filter(|node| {
-            crate::raft::types::raft_node_id_from_ulid(&node.node_id)
-                .is_ok_and(|node_id| voter_ids.contains(&node_id))
+    let peers = voter_ids
+        .iter()
+        .filter_map(|raft_node_id| {
+            membership
+                .get_node(raft_node_id)
+                .map(|node| VoterCapabilityPeer {
+                    raft_node_id: *raft_node_id,
+                    api_base_url: node.api_base_url.clone(),
+                })
         })
         .collect::<Vec<_>>();
-    let represented_voters = peers
-        .iter()
-        .filter_map(|node| crate::raft::types::raft_node_id_from_ulid(&node.node_id).ok())
-        .collect::<BTreeSet<_>>();
-    if !all_remote_voters_represented(&voter_ids, &represented_voters) {
-        return Err(ApiError::conflict(
-            "every voter must have valid node metadata before accepting staged joins",
+    if peers.len() != voter_ids.len()
+        || peers.iter().any(|peer| peer.api_base_url.trim().is_empty())
+    {
+        return Err(ApiError::new(
+            "coordinated_upgrade_required",
+            StatusCode::CONFLICT,
+            "every voter must expose valid Raft member metadata before membership changes",
         ));
     }
     if voter_ids.is_empty() {
@@ -71,7 +73,7 @@ pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> 
                     StatusCode::SERVICE_UNAVAILABLE,
                     format!(
                         "cannot verify staged join support on {}: {error}",
-                        peer.node_id
+                        peer.raft_node_id
                     ),
                 )
             })?;
@@ -79,30 +81,14 @@ pub(super) async fn require_on_voters(state: &AppState) -> Result<(), ApiError> 
             || !response
                 .json::<Response>()
                 .await
-                .is_ok_and(|body| body.capabilities.iter().any(|item| item == CAPABILITY))
+                .is_ok_and(|body| body.capabilities.iter().any(|item| item == capability))
         {
-            return Err(ApiError::conflict(
-                "all voters must be upgraded before accepting staged joins",
+            return Err(ApiError::new(
+                "coordinated_upgrade_required",
+                StatusCode::CONFLICT,
+                "all voters must be upgraded before membership changes",
             ));
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_any_voter_without_probeable_node_metadata() {
-        let voters = BTreeSet::from([2, 3]);
-        assert!(all_remote_voters_represented(
-            &voters,
-            &BTreeSet::from([2, 3])
-        ));
-        assert!(!all_remote_voters_represented(
-            &voters,
-            &BTreeSet::from([2])
-        ));
-    }
 }
