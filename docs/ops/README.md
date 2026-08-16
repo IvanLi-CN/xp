@@ -269,10 +269,10 @@ Deployment note:
 - During a fresh single-image join, the wrapper keeps the authenticated XP learner running while
   its initial Raft state is replicated. Managed-default reconcile uses the local XP API as the
   readiness gate and forwards writes through local Raft only after local internal authentication
-  observes that replicated state. During the activation deadline it retries only the two expected
-  pre-replication signals (`internal sender is not a cluster member` and a missing local leader
-  membership record); unrelated authentication, network, and configuration failures still fail
-  immediately.
+  observes that replicated state. During the activation deadline it retries only the three expected
+  pre-replication signals (`internal sender is not a cluster member`, a missing local leader
+  membership record, and `raft client_write forward: leader not available`); unrelated
+  authentication, network, and configuration failures still fail immediately.
 - Before issuing a fresh join token reservation, the leader verifies that every current voter
   exposes `cluster.join.staged-v1`. Finish the XP rolling upgrade first when the API returns a
   staged-join capability conflict. Host-managed startup keeps managed-default reconciliation active

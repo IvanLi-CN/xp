@@ -108,10 +108,7 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         let store = auth.store.lock().await;
         store.get_node(&verified.context.sender_id).is_some()
     };
-    let marker_sender_ids = auth
-        .bootstrap_sender
-        .as_ref()
-        .map(|(sender_ids, _)| sender_ids);
+    let marker_sender_ids = active_bootstrap_sender_ids(auth.bootstrap_sender.as_ref());
     let bootstrap_sender = bootstrap_sender_is_allowed(
         &verified.context.sender_id,
         sender_is_member,
@@ -169,6 +166,14 @@ fn bootstrap_sender_is_allowed(
     !sender_is_member && marker_sender_ids.is_some_and(|markers| markers.contains(sender_id))
 }
 
+fn active_bootstrap_sender_ids(
+    bootstrap_sender: Option<&(BTreeSet<String>, PathBuf)>,
+) -> Option<&BTreeSet<String>> {
+    bootstrap_sender.and_then(|(sender_ids, marker_path)| {
+        std::fs::metadata(marker_path).is_ok().then_some(sender_ids)
+    })
+}
+
 fn bootstrap_replication_complete(
     marker_sender_ids: Option<&BTreeSet<String>>,
     replicated_node_ids: &BTreeSet<String>,
@@ -212,7 +217,9 @@ async fn install_snapshot(
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{bootstrap_replication_complete, bootstrap_sender_is_allowed};
+    use super::{
+        active_bootstrap_sender_ids, bootstrap_replication_complete, bootstrap_sender_is_allowed,
+    };
 
     #[test]
     fn bootstrap_sender_requires_marker_and_membership_bypass() {
@@ -224,11 +231,6 @@ mod tests {
         assert!(!bootstrap_sender_is_allowed(
             "leader",
             true,
-            Some(&BTreeSet::from(["leader".to_string()]))
-        ));
-        assert!(bootstrap_sender_is_allowed(
-            "leader",
-            false,
             Some(&BTreeSet::from(["leader".to_string()]))
         ));
         assert!(!bootstrap_sender_is_allowed("leader", false, None));
@@ -259,5 +261,16 @@ mod tests {
         let only_old = BTreeSet::from(["old-leader".to_string()]);
         assert!(!bootstrap_replication_complete(Some(&voters), &only_old));
         assert!(bootstrap_replication_complete(Some(&voters), &voters));
+    }
+
+    #[test]
+    fn bootstrap_marker_cache_stops_authorizing_after_file_removal() {
+        let temp = tempfile::tempdir().expect("marker directory");
+        let marker_path = temp.path().join("raft_bootstrap_sender");
+        std::fs::write(&marker_path, "leader\n").expect("write marker");
+        let marker = (BTreeSet::from(["leader".to_string()]), marker_path.clone());
+        assert!(active_bootstrap_sender_ids(Some(&marker)).is_some());
+        std::fs::remove_file(marker_path).expect("remove marker");
+        assert!(active_bootstrap_sender_ids(Some(&marker)).is_none());
     }
 }
