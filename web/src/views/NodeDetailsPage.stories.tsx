@@ -58,7 +58,7 @@ const pendingDeleteOperation: AdminMembershipOperation = {
 	operation_id: "e9a42d3c-9812-4a38-8a23-2d8cb7770001",
 	kind: "remove_node",
 	raft_node_id: 42,
-	node_id: node.node_id,
+	node_id: fixtureCatalog.identifier.nodePrimary(),
 	expected_membership: "storybook-membership-revision",
 	phase: "prepared",
 	delete_endpoints: false,
@@ -247,7 +247,7 @@ export const DeletePending: Story = {
 				nodes: [node],
 			},
 			nodeDeleteAccepted: {
-				nodeId: node.node_id,
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
 				operation: pendingDeleteOperation,
 			},
 		},
@@ -279,7 +279,7 @@ export const DeleteBlocked: Story = {
 				nodes: [node],
 			},
 			nodeDeleteAccepted: {
-				nodeId: node.node_id,
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
 				operation: blockedDeleteOperation,
 			},
 		},

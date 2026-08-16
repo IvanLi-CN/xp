@@ -494,23 +494,22 @@ mod tests {
     async fn insert_join_operation(
         store: &Arc<Mutex<JsonSnapshotStore>>,
         metrics: &openraft::RaftMetrics<u64, RaftNodeMeta>,
-        node_id: &str,
     ) {
-        let raft_node_id = raft_node_id_from_ulid(node_id).unwrap();
+        let raft_node_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
         store.lock().await.state_mut().membership_operations.insert(
             "join-operation".to_string(),
             crate::state::MembershipOperation {
                 operation_id: "join-operation".to_string(),
                 kind: crate::state::MembershipOperationKind::Join,
                 raft_node_id,
-                node_id: Some(node_id.to_string()),
+                node_id: Some(xp_test_fixtures::identifier_ulid_b().to_owned()),
                 expected_membership: crate::raft_membership_guard::membership_revision(metrics)
                     .unwrap(),
                 phase: crate::state::MembershipOperationPhase::Prepared,
                 legacy: false,
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
-                created_at: Utc::now().to_rfc3339(),
+                created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
                 next_retry_at: None,
                 terminal_at: None,
                 evidence: Some("test join operation".to_string()),
@@ -629,7 +628,7 @@ mod tests {
                 )]),
             ),
         ));
-        insert_join_operation(&store, &metrics, &learner_id).await;
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let calls = Arc::new(AtomicUsize::new(0));
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
@@ -674,7 +673,7 @@ mod tests {
             store.state_mut().nodes.insert(
                 learner_id.clone(),
                 Node {
-                    node_id: learner_id.clone(),
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                     node_name: xp_test_fixtures::secondary_node_name().to_owned(),
                     access_host: xp_test_fixtures::secondary_host().to_owned(),
                     api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -685,7 +684,7 @@ mod tests {
             store.state_mut().join_sessions.insert(
                 learner_id.clone(),
                 JoinSession {
-                    node_id: learner_id,
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                     request_fingerprint: "fingerprint".into(),
                     signed_cert_pem: "certificate".into(),
                     token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
@@ -786,7 +785,7 @@ mod tests {
                 ]),
             ),
         ));
-        insert_join_operation(&store, &metrics, xp_test_fixtures::identifier_ulid_b()).await;
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let observed = Arc::new(AtomicUsize::new(0));
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
@@ -858,7 +857,7 @@ mod tests {
         let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
         metrics.state = openraft::ServerState::Leader;
         metrics.current_leader = Some(raft_id);
-        insert_join_operation(&store, &metrics, &learner_id).await;
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
             inner: LocalRaft::new(store.clone(), rx),

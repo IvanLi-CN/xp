@@ -18,16 +18,12 @@ use crate::{
     },
 };
 
-fn desired_node_id(raft_node_id: NodeId, variant: u64) -> String {
-    ulid::Ulid::from(((variant as u128) << 64) | raft_node_id as u128).to_string()
-}
-
-fn node(node_id: String) -> Node {
+fn node() -> Node {
     Node {
-        node_id: node_id.clone(),
-        node_name: node_id,
-        access_host: "node.example".to_string(),
-        api_base_url: "https://node.example".to_string(),
+        node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        access_host: xp_test_fixtures::primary_host().to_owned(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     }
@@ -35,9 +31,9 @@ fn node(node_id: String) -> Node {
 
 fn meta() -> NodeMeta {
     NodeMeta {
-        name: "node".to_string(),
-        api_base_url: "https://node.example".to_string(),
-        raft_endpoint: "https://node.example".to_string(),
+        name: xp_test_fixtures::primary_node_name().to_owned(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
     }
 }
 
@@ -54,9 +50,9 @@ async fn context(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
             bootstrap_node_id: None,
-            bootstrap_node_name: "node".to_string(),
+            bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: "".to_string(),
-            bootstrap_api_base_url: "https://node.example".to_string(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
         })
         .unwrap(),
     ));
@@ -78,13 +74,13 @@ fn operation(kind: MembershipOperationKind, raft_node_id: NodeId) -> MembershipO
         operation_id: "operation".to_string(),
         kind,
         raft_node_id,
-        node_id: None,
+        node_id: Some(xp_test_fixtures::identifier_ulid_c().to_owned()),
         expected_membership: "revision".to_string(),
         phase: MembershipOperationPhase::Prepared,
         legacy: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
-        created_at: "2026-01-01T00:00:00Z".to_string(),
+        created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
         next_retry_at: None,
         terminal_at: None,
         evidence: None,
@@ -121,19 +117,22 @@ async fn audit_allows_only_the_precise_join_or_restore_learner_shape() {
 
 #[tokio::test]
 async fn audit_blocks_duplicate_desired_identity_mappings() {
-    let voter_id = 42;
+    let voter_id =
+        crate::raft::types::raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_c()).unwrap();
     let (_temp, raft, store) = context(
         BTreeSet::from([voter_id]),
         BTreeMap::from([(voter_id, meta())]),
     )
     .await;
     let mut store_guard = store.lock().await;
-    for variant in [1, 2] {
-        let node_id = desired_node_id(voter_id, variant);
+    for node_key in [
+        xp_test_fixtures::identifier_ulid_c().to_owned(),
+        xp_test_fixtures::identifier_ulid_c().to_ascii_lowercase(),
+    ] {
         store_guard
             .state_mut()
             .nodes
-            .insert(node_id.clone(), node(node_id));
+            .insert(node_key.to_string(), node());
     }
     drop(store_guard);
     let audit = audit_membership(raft, store).await;

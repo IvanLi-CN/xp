@@ -910,9 +910,9 @@ mod tests {
             JsonSnapshotStore::load_or_init(StoreInit {
                 data_dir: temp.path().to_path_buf(),
                 bootstrap_node_id: None,
-                bootstrap_node_name: "node".to_string(),
-                bootstrap_access_host: "".to_string(),
-                bootstrap_api_base_url: "https://node.example".to_string(),
+                bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                bootstrap_access_host: xp_test_fixtures::label_empty().to_owned(),
+                bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
             })
             .unwrap(),
         ));
@@ -923,10 +923,10 @@ mod tests {
             .lock()
             .await
             .upsert_node(Node {
-                node_id: desired_node_id,
-                node_name: "leader".to_string(),
-                access_host: "leader.example".to_string(),
-                api_base_url: "https://leader.example".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_d().to_owned(),
+                node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                access_host: xp_test_fixtures::primary_host().to_owned(),
+                api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -944,17 +944,17 @@ mod tests {
                     (
                         local_node_id,
                         NodeMeta {
-                            name: "leader".to_string(),
-                            api_base_url: "https://leader.example".to_string(),
-                            raft_endpoint: "https://leader.example".to_string(),
+                            name: xp_test_fixtures::primary_node_name().to_owned(),
+                            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                            raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
                         },
                     ),
                     (
                         orphan_node_id,
                         NodeMeta {
-                            name: "orphan".to_string(),
-                            api_base_url: "https://orphan.example".to_string(),
-                            raft_endpoint: "https://orphan.example".to_string(),
+                            name: xp_test_fixtures::secondary_node_name().to_owned(),
+                            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
                         },
                     ),
                 ]),
