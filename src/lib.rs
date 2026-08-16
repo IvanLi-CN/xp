@@ -34,6 +34,7 @@ pub mod public_ip_probe;
 pub mod quota;
 pub mod quota_policy;
 pub mod raft;
+mod raft_membership_cleanup;
 pub mod raft_membership_guard;
 #[cfg(test)]
 mod raft_membership_guard_invariant_tests;

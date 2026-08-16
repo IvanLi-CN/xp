@@ -90,6 +90,7 @@ pub(super) async fn admin_internal_restore_node(
                 legacy: false,
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
+                expected_endpoint_tags: Vec::new(),
                 created_at: Utc::now().to_rfc3339(),
                 next_retry_at: None,
                 terminal_at: None,

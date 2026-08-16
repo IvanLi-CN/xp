@@ -575,7 +575,7 @@ async fn cluster_join_rejects_pending_replay_after_activation_deadline() {
 }
 
 #[tokio::test]
-async fn cluster_join_defers_add_voters_and_keeps_registered_learner() {
+async fn cluster_join_keeps_the_reservation_prepared_until_metrics_observe_the_learner() {
     let tmp = TempDir::new().unwrap();
     let (app, store, join_token, membership_changes) = app_with_deferred_promotion(&tmp);
     let decoded =
@@ -611,7 +611,11 @@ async fn cluster_join_defers_add_voters_and_keeps_registered_learner() {
             .get(&decoded.token_id)
             .unwrap()
             .status,
-        crate::join_session::JoinSessionStatus::LearnerRegistered
+        crate::join_session::JoinSessionStatus::Reserved
+    );
+    assert_eq!(
+        store.state().active_membership_operation().unwrap().phase,
+        crate::state::MembershipOperationPhase::Prepared
     );
     assert!(membership_changes.lock().await.is_empty());
 }

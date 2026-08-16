@@ -19,6 +19,10 @@ use crate::{
     },
 };
 
+pub use crate::raft_membership_cleanup::{
+    MembershipRemovalCleanup, finalize_remove_node_cleanup_once,
+};
+
 static MEMBERSHIP_OPERATION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 pub fn membership_operation_gate() -> Arc<Mutex<()>> {
     MEMBERSHIP_OPERATION_GATE
@@ -276,6 +280,7 @@ pub async fn repair_orphan_voter(
         legacy: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
@@ -579,7 +584,7 @@ async fn write_operation(
     }
 }
 
-async fn transition_operation(
+pub(crate) async fn transition_operation(
     raft: &Arc<dyn RaftFacade>,
     mut operation: MembershipOperation,
     phase: MembershipOperationPhase,
@@ -616,7 +621,7 @@ pub async fn block_membership_operation(
     .await
 }
 
-async fn require_expected_membership(
+pub(crate) async fn require_expected_membership(
     raft: &Arc<dyn RaftFacade>,
     operation: &MembershipOperation,
 ) -> anyhow::Result<openraft::RaftMetrics<NodeId, NodeMeta>> {
@@ -908,6 +913,9 @@ pub async fn resume_membership_operations_once(
             .await?;
         }
         MembershipOperationPhase::MembershipRemoved => {
+            if store.lock().await.get_node(&node_id).is_none() {
+                return Ok(());
+            }
             if let Err(error) = require_expected_membership(&raft, &operation).await {
                 block_membership_operation(&raft, operation, error.to_string()).await?;
                 return Ok(());
@@ -923,15 +931,7 @@ pub async fn resume_membership_operations_once(
             match out {
                 crate::raft::types::ClientResponse::Ok {
                     result: crate::state::DesiredStateApplyResult::NodeDeleted { .. },
-                } => {
-                    let _ = transition_operation(
-                        &raft,
-                        operation,
-                        MembershipOperationPhase::Completed,
-                        "desired node deleted after membership removal",
-                    )
-                    .await?;
-                }
+                } => {}
                 crate::raft::types::ClientResponse::Ok { .. } => {
                     anyhow::bail!("remove-node operation received unexpected desired-state result")
                 }
@@ -950,6 +950,7 @@ pub async fn resume_membership_operations_once(
 pub fn spawn_membership_voter_guard(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    cleanup: MembershipRemovalCleanup,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -957,6 +958,11 @@ pub fn spawn_membership_voter_guard(
             if let Err(error) = resume_membership_operations_once(raft.clone(), store.clone()).await
             {
                 tracing::warn!(%error, "membership operation resume failed");
+            }
+            if let Err(error) =
+                finalize_remove_node_cleanup_once(raft.clone(), store.clone(), &cleanup).await
+            {
+                tracing::warn!(%error, "membership operation cleanup failed");
             }
             let audit = audit_membership(raft.clone(), store.clone()).await;
             if !audit.is_clean() {

@@ -1915,6 +1915,36 @@ async fn cluster_join(
             xp_admin_token_hash: state.config.admin_token_hash.clone(),
         }));
     }
+    if existing_session.is_some() {
+        let has_join_operation = state
+            .store
+            .lock()
+            .await
+            .state()
+            .active_membership_operation()
+            .is_some_and(|operation| {
+                operation.kind == crate::state::MembershipOperationKind::Join
+                    && operation.raft_node_id == raft_node_id
+                    && operation.node_id.as_deref() == Some(node_id.as_str())
+            });
+        if !has_join_operation {
+            return Err(ApiError::conflict(
+                "pending join session has no durable lifecycle operation; promotion is blocked",
+            ));
+        }
+        // The coordinator alone advances a reservation after it observes the exact learner
+        // membership shape. Retrying the same request only replays bootstrap material.
+        return Ok(Json(ClusterJoinResponse {
+            node_id,
+            leader_node_id: state.cluster.node_id.clone(),
+            bootstrap_sender_ids,
+            activation_deadline,
+            signed_cert_pem,
+            cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+            cluster_ca_key_pem: ca_key_pem,
+            xp_admin_token_hash: state.config.admin_token_hash.clone(),
+        }));
+    }
 
     let node = Node {
         node_id: node_id.clone(),
@@ -1925,66 +1955,47 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
-    let expected_membership = if existing_session.is_none() {
-        let membership = crate::raft_membership_guard::membership_revision(&raft_metrics(&state))
+    let expected_membership =
+        crate::raft_membership_guard::membership_revision(&raft_metrics(&state))
             .map_err(|error| ApiError::internal(error.to_string()))?;
-        let operation = crate::state::MembershipOperation {
-            operation_id: uuid::Uuid::new_v4().to_string(),
-            kind: crate::state::MembershipOperationKind::Join,
-            raft_node_id,
-            node_id: Some(node_id.clone()),
-            expected_membership: membership.clone(),
-            phase: crate::state::MembershipOperationPhase::Prepared,
-            legacy: false,
-            delete_endpoints: false,
-            expected_endpoint_ids: Vec::new(),
-            created_at: Utc::now().to_rfc3339(),
-            next_retry_at: None,
-            terminal_at: None,
-            evidence: Some("join reservation accepted".to_string()),
-        };
-        let reservation_log_index = raft_metrics(&state)
-            .last_log_index
-            .unwrap_or(0)
-            .saturating_add(1);
-        let _ = raft_write(
-            &state,
-            crate::state::DesiredStateCommand::BeginMembershipOperation {
-                operation: Box::new(operation),
-                node: Some(node.clone()),
-                join_session: Some(crate::join_session::JoinSession {
-                    node_id: node_id.clone(),
-                    request_fingerprint: request_fingerprint.clone(),
-                    signed_cert_pem: signed_cert_pem.clone(),
-                    token_expires_at: token.expires_at.to_rfc3339(),
-                    activation_deadline: activation_deadline.clone(),
-                    required_log_index: reservation_log_index,
-                    status: crate::join_session::JoinSessionStatus::Reserved,
-                    terminal_at: None,
-                }),
-            },
-        )
-        .await?;
-        membership
-    } else {
-        state
-            .store
-            .lock()
-            .await
-            .state()
-            .active_membership_operation()
-            .filter(|operation| {
-                operation.kind == crate::state::MembershipOperationKind::Join
-                    && operation.raft_node_id == raft_node_id
-                    && operation.node_id.as_deref() == Some(node_id.as_str())
-            })
-            .map(|operation| operation.expected_membership.clone())
-            .ok_or_else(|| {
-                ApiError::conflict(
-                    "pending join session has no durable lifecycle operation; promotion is blocked",
-                )
-            })?
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::Join,
+        raft_node_id,
+        node_id: Some(node_id.clone()),
+        expected_membership: expected_membership.clone(),
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: false,
+        expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("join reservation accepted".to_string()),
     };
+    let reservation_log_index = raft_metrics(&state)
+        .last_log_index
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation),
+            node: Some(node.clone()),
+            join_session: Some(crate::join_session::JoinSession {
+                node_id: node_id.clone(),
+                request_fingerprint: request_fingerprint.clone(),
+                signed_cert_pem: signed_cert_pem.clone(),
+                token_expires_at: token.expires_at.to_rfc3339(),
+                activation_deadline: activation_deadline.clone(),
+                required_log_index: reservation_log_index,
+                status: crate::join_session::JoinSessionStatus::Reserved,
+                terminal_at: None,
+            }),
+        },
+    )
+    .await?;
 
     state
         .raft
@@ -2019,15 +2030,6 @@ async fn cluster_join(
         )
         .await
         .map_err(|e| ApiError::internal(format!("join add_learner failed: {e}")))?;
-
-    join_protocol::mark_learner_registered(&state, node).await?;
-    transition_membership_operation(
-        &state,
-        raft_node_id,
-        crate::state::MembershipOperationPhase::LearnerRegistered,
-        "learner registered",
-    )
-    .await?;
 
     Ok(Json(ClusterJoinResponse {
         node_id,
@@ -3978,23 +3980,43 @@ fn admin_node_delete_accepted_response(
         .into_response()
 }
 
-fn spawn_admin_node_delete_resume(state: AppState, node_id: String, cleanup_nodes: Vec<Node>) {
+fn membership_removal_cleanup(
+    state: &AppState,
+) -> crate::raft_membership_guard::MembershipRemovalCleanup {
+    crate::raft_membership_guard::MembershipRemovalCleanup {
+        local_raft_node_id: raft_node_id_from_ulid(&state.cluster.node_id)
+            .expect("cluster node id must be a valid raft node id"),
+        local_node_id: state.cluster.node_id.clone(),
+        node_history: state.node_history.clone(),
+        reconcile: state.reconcile.clone(),
+    }
+}
+
+fn spawn_admin_node_delete_resume(state: AppState) {
     tokio::spawn(async move {
         tokio::task::yield_now().await;
-        if let Err(error) = crate::raft_membership_guard::resume_membership_operations_once(
+        // A remove-node operation has two durable Raft steps before cleanup. Advance both
+        // immediately when possible; the periodic guard owns any later retry.
+        for _ in 0..2 {
+            if let Err(error) = crate::raft_membership_guard::resume_membership_operations_once(
+                state.raft.clone(),
+                state.store.clone(),
+            )
+            .await
+            {
+                tracing::warn!(%error, "admin node deletion resume failed");
+                return;
+            }
+        }
+        let cleanup = membership_removal_cleanup(&state);
+        if let Err(error) = crate::raft_membership_guard::finalize_remove_node_cleanup_once(
             state.raft.clone(),
             state.store.clone(),
+            &cleanup,
         )
         .await
         {
-            tracing::warn!(%error, node_id = %node_id, "admin node deletion resume failed");
-            return;
-        }
-        let deleted = state.store.lock().await.get_node(&node_id).is_none();
-        if deleted {
-            state.node_history.clear_node(&node_id).await;
-            clear_node_history_on_cluster(&state, &node_id, &cleanup_nodes).await;
-            state.reconcile.request_full();
+            tracing::warn!(%error, "admin node deletion cleanup failed");
         }
     });
 }
@@ -4008,11 +4030,6 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete local node"));
     }
 
-    let cleanup_nodes = {
-        let store = state.store.lock().await;
-        store.list_nodes()
-    };
-
     let expected_endpoint_ids = query
         .expected_endpoint_ids
         .unwrap_or_default()
@@ -4022,16 +4039,19 @@ async fn admin_delete_node(
         .collect::<Vec<_>>();
 
     // Preflight validation before touching Raft membership, to avoid partial updates.
-    {
+    let expected_endpoint_tags = {
         let store = state.store.lock().await;
         if store.get_node(&node_id).is_none() {
             return Err(ApiError::not_found(format!("node not found: {node_id}")));
         }
-        let node_endpoint_ids = store
+        let node_endpoints = store
             .list_endpoints()
             .into_iter()
             .filter(|endpoint| endpoint.node_id == node_id)
-            .map(|endpoint| endpoint.endpoint_id)
+            .collect::<Vec<_>>();
+        let node_endpoint_ids = node_endpoints
+            .iter()
+            .map(|endpoint| endpoint.endpoint_id.clone())
             .collect::<Vec<_>>();
         let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
         let expected_endpoint_ids_set = expected_endpoint_ids
@@ -4056,7 +4076,15 @@ async fn admin_delete_node(
                 .to_string(),
             ));
         }
-    }
+        if query.delete_endpoints {
+            node_endpoints
+                .into_iter()
+                .map(|endpoint| endpoint.tag)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    };
 
     let raft_node_id =
         raft_node_id_from_ulid(&node_id).map_err(|e| ApiError::invalid_request(e.to_string()))?;
@@ -4110,6 +4138,7 @@ async fn admin_delete_node(
         legacy: false,
         delete_endpoints: query.delete_endpoints,
         expected_endpoint_ids: expected_endpoint_ids.clone(),
+        expected_endpoint_tags,
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
@@ -4135,7 +4164,7 @@ async fn admin_delete_node(
         Ok(result) => result?,
         Err(_) => {
             drop(_membership_operation_guard);
-            spawn_admin_node_delete_resume(state.clone(), node_id, cleanup_nodes);
+            spawn_admin_node_delete_resume(state.clone());
             return Ok(admin_node_delete_accepted_response(
                 operation_id,
                 crate::state::MembershipOperationPhase::Prepared,
@@ -4167,39 +4196,34 @@ async fn admin_delete_node(
         Ok(result) => result?,
         Err(_) => {
             drop(_membership_operation_guard);
-            spawn_admin_node_delete_resume(state.clone(), node_id, cleanup_nodes);
+            spawn_admin_node_delete_resume(state.clone());
             return Ok(admin_node_delete_accepted_response(
                 operation_id,
                 crate::state::MembershipOperationPhase::MembershipRemoved,
             ));
         }
     };
-    let crate::state::DesiredStateApplyResult::NodeDeleted {
-        deleted,
-        deleted_endpoint_tags,
-    } = out
-    else {
+    let crate::state::DesiredStateApplyResult::NodeDeleted { deleted, .. } = out else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     if !deleted {
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
     }
-    transition_membership_operation(
-        &state,
-        raft_node_id,
-        crate::state::MembershipOperationPhase::Completed,
-        "admin node deletion completed",
+    drop(_membership_operation_guard);
+    let cleanup = membership_removal_cleanup(&state);
+    match crate::raft_membership_guard::finalize_remove_node_cleanup_once(
+        state.raft.clone(),
+        state.store.clone(),
+        &cleanup,
     )
-    .await?;
-
-    for tag in deleted_endpoint_tags {
-        state.reconcile.request_remove_inbound(tag);
+    .await
+    {
+        Ok(true) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Ok(false) | Err(_) => Ok(admin_node_delete_accepted_response(
+            operation_id,
+            crate::state::MembershipOperationPhase::MembershipRemoved,
+        )),
     }
-    state.node_history.clear_node(&node_id).await;
-    clear_node_history_on_cluster(&state, &node_id, &cleanup_nodes).await;
-    state.reconcile.request_full();
-
-    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn build_admin_service_config_response(
@@ -6506,18 +6530,6 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
             state
                 .node_history
                 .queue_user_traffic_cleanup(&node.node_id, user_id)
-                .await;
-        }
-    }
-}
-
-async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &[Node]) {
-    let local_node_id = state.cluster.node_id.clone();
-    for destination in nodes {
-        if destination.node_id != local_node_id && destination.node_id != node_id {
-            state
-                .node_history
-                .queue_node_history_cleanup(&destination.node_id, node_id)
                 .await;
         }
     }

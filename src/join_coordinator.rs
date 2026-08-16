@@ -137,6 +137,7 @@ pub async fn migrate_one_legacy_join_session(
         legacy: true,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
@@ -358,6 +359,19 @@ async fn reconcile_once(
                 )
                 .await?;
             }
+            let learner_observed = raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .membership()
+                .get_node(&node_id)
+                .is_some();
+            if !learner_observed {
+                // `add_learner` may resolve before the local metrics watcher publishes the
+                // committed membership. Keep the reservation replayable until the exact learner
+                // shape is observable instead of persisting a state transition ahead of Raft.
+                continue;
+            }
             // A recovered reservation may already have its learner membership. Record the
             // committed state that precedes this status transition so promotion cannot use only
             // the original reservation index after a leader failover.
@@ -528,6 +542,7 @@ mod tests {
                 legacy: false,
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
+                expected_endpoint_tags: Vec::new(),
                 created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
                 next_retry_at: None,
                 terminal_at: None,
@@ -587,7 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failover_re_registers_a_durable_reserved_learner() {
+    async fn failover_keeps_a_durable_reservation_until_metrics_observe_the_learner() {
         let tmp = tempfile::tempdir().unwrap();
         let leader_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
@@ -669,7 +684,8 @@ mod tests {
                 .next()
                 .unwrap()
                 .status,
-            JoinSessionStatus::LearnerRegistered
+            JoinSessionStatus::Reserved,
+            "a nonblocking learner registration acknowledgement must not advance the session"
         );
         assert_eq!(
             store

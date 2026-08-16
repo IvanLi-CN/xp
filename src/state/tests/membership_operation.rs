@@ -11,6 +11,7 @@ fn operation(operation_id: &str, phase: MembershipOperationPhase) -> MembershipO
         legacy: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
         created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
         next_retry_at: None,
         terminal_at: None,

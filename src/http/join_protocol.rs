@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 
-use super::{ApiError, AppState, ClusterJoinRequest, raft_metrics, raft_write};
+use super::{ApiError, AppState, ClusterJoinRequest, raft_metrics};
 
 pub(super) async fn bootstrap_sender_ids(state: &AppState) -> Vec<String> {
     let voter_ids = raft_metrics(state)
@@ -91,33 +91,4 @@ pub(super) async fn resolve_reservation(
         activation_deadline,
         signed_cert_pem,
     })
-}
-
-pub(super) async fn mark_learner_registered(
-    state: &AppState,
-    node: crate::domain::Node,
-) -> Result<(), ApiError> {
-    let session = {
-        let store = state.store.lock().await;
-        let session = store
-            .state()
-            .join_sessions
-            .get(&node.node_id)
-            .cloned()
-            .expect("join reservation was committed");
-        let required_log_index = raft_metrics(state)
-            .last_log_index
-            .unwrap_or(0)
-            .max(session.required_log_index);
-        session.learner_registered(required_log_index)
-    };
-    let _ = raft_write(
-        state,
-        crate::state::DesiredStateCommand::UpsertNode {
-            node,
-            join_session: Some(session),
-        },
-    )
-    .await?;
-    Ok(())
 }

@@ -72,6 +72,10 @@ pub struct MembershipOperation {
     pub delete_endpoints: bool,
     #[serde(default)]
     pub expected_endpoint_ids: Vec<String>,
+    /// Runtime inbound tags captured with a remove-node operation so cleanup can be resumed
+    /// after the desired-state endpoint records have been deleted.
+    #[serde(default)]
+    pub expected_endpoint_tags: Vec<String>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_retry_at: Option<String>,
@@ -95,6 +99,7 @@ impl MembershipOperation {
             || self.legacy != next.legacy
             || self.delete_endpoints != next.delete_endpoints
             || self.expected_endpoint_ids != next.expected_endpoint_ids
+            || self.expected_endpoint_tags != next.expected_endpoint_tags
         {
             return Err("immutable membership operation identity changed");
         }
