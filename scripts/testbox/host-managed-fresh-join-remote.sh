@@ -33,7 +33,7 @@ cleanup() {
     XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
   docker rm -f "$BUILDER_NAME" "$SOURCE_NAME" >/dev/null 2>&1 || true
-  docker image rm "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
+  docker image rm "$XP_HOST_IMAGE_PREFIX-leader" "$XP_HOST_IMAGE_PREFIX-systemd" "$XP_HOST_IMAGE_PREFIX-openrc" >/dev/null 2>&1 || true
   rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
   return "$status"
 }
@@ -81,7 +81,7 @@ docker run --rm --name "$BUILDER_NAME" \
     chown -R "$HOST_UID:$HOST_GID" /workspace/scripts/testbox/artifacts /workspace/web/dist
   '
 
-XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" build systemd openrc </dev/null
+XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" build leader systemd openrc </dev/null
 XP_TEST_IMAGE="$XP_TEST_IMAGE" XP_HOST_IMAGE_PREFIX="$XP_HOST_IMAGE_PREFIX" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d \
   certgen artifact leader leader-tls systemd systemd-tls openrc openrc-tls </dev/null
 

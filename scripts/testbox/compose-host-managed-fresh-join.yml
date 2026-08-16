@@ -87,9 +87,12 @@ services:
 
   leader:
     <<: *testbox-caps
-    image: ${XP_TEST_IMAGE}
+    image: ${XP_HOST_IMAGE_PREFIX}-leader
     build:
       context: ../..
+      dockerfile: scripts/testbox/Dockerfile.host-leader
+      args:
+        XP_TEST_IMAGE: ${XP_TEST_IMAGE}
     depends_on:
       certgen:
         condition: service_completed_successfully

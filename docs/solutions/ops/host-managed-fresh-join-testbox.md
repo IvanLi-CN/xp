@@ -39,7 +39,9 @@ The run id includes a random nonce in addition to UTC time and the candidate SHA
 launches from the same checkout cannot share Compose projects, volumes, receipts, or cleanup paths.
 
 The remote driver builds static musl `xp` and `xp-ops` binaries in a restricted Docker builder.
-It creates an isolated Compose project containing:
+It then rebuilds the leader image from that run's `xp` artifact, rather than trusting the
+preloaded candidate image. This keeps the leader API and host-managed joiner on the same exact
+head. It creates an isolated Compose project containing:
 
 - a normal official single-image leader and a TLS sidecar;
 - a Debian systemd PID 1 node and an Alpine OpenRC PID 1 node;
