@@ -1,6 +1,29 @@
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 
 use super::{ApiError, AppState, ClusterJoinRequest, raft_metrics, raft_write};
+
+pub(super) async fn bootstrap_sender_ids(state: &AppState) -> Vec<String> {
+    let voter_ids = raft_metrics(state)
+        .membership_config
+        .membership()
+        .voter_ids()
+        .collect::<BTreeSet<_>>();
+    let store = state.store.lock().await;
+    let mut sender_ids = store
+        .list_nodes()
+        .into_iter()
+        .filter_map(|node| {
+            crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+                .ok()
+                .filter(|raft_id| voter_ids.contains(raft_id))
+                .map(|_| node.node_id)
+        })
+        .collect::<BTreeSet<_>>();
+    sender_ids.insert(state.cluster.node_id.clone());
+    sender_ids.into_iter().collect()
+}
 
 pub(super) struct BootstrapReservation {
     pub existing: Option<crate::join_session::JoinSession>,

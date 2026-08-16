@@ -61,6 +61,10 @@ async fn reconcile_once(
             .membership()
             .voter_ids()
             .collect::<BTreeSet<_>>();
+        let registered = metrics
+            .membership_config
+            .nodes()
+            .any(|(member_id, _)| *member_id == node_id);
         if voters.contains(&node_id) {
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
@@ -85,17 +89,21 @@ async fn reconcile_once(
             let _guard = crate::raft_membership_guard::membership_operation_gate()
                 .lock_owned()
                 .await;
-            let _ = raft
-                .change_membership(
-                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([node_id])),
+            if voters.contains(&node_id) {
+                let _ = raft
+                    .change_membership(
+                        openraft::ChangeMembers::RemoveVoters(BTreeSet::from([node_id])),
+                        true,
+                    )
+                    .await;
+            }
+            if registered {
+                raft.change_membership(
+                    openraft::ChangeMembers::RemoveNodes(BTreeSet::from([node_id])),
                     true,
                 )
-                .await;
-            raft.change_membership(
-                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([node_id])),
-                true,
-            )
-            .await?;
+                .await?;
+            }
             session.status = JoinSessionStatus::Expired;
             session.terminal_at = Some(Utc::now().to_rfc3339());
             let expected_endpoint_ids = store
@@ -119,10 +127,6 @@ async fn reconcile_once(
             continue;
         }
         if session.status == JoinSessionStatus::Reserved {
-            let registered = metrics
-                .membership_config
-                .nodes()
-                .any(|(member_id, _)| *member_id == node_id);
             if !registered {
                 let node = store
                     .lock()
@@ -340,6 +344,73 @@ mod tests {
                 .unwrap()
                 .status,
             JoinSessionStatus::LearnerRegistered
+        );
+    }
+
+    #[tokio::test]
+    async fn expiry_without_registered_learner_still_tombstones_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(StoreInit {
+                data_dir: tmp.path().to_owned(),
+                bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
+                bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+                bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            })
+            .unwrap(),
+        ));
+        {
+            let mut store = store.lock().await;
+            store.state_mut().nodes.insert(
+                learner_id.clone(),
+                Node {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                    access_host: xp_test_fixtures::secondary_host().to_owned(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                    quota_limit_bytes: 0,
+                    quota_reset: NodeQuotaReset::default(),
+                },
+            );
+            store.state_mut().join_sessions.insert(
+                learner_id.clone(),
+                JoinSession {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    request_fingerprint: "fingerprint".into(),
+                    signed_cert_pem: "certificate".into(),
+                    token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+                    activation_deadline: (Utc::now() - chrono::Duration::seconds(1)).to_rfc3339(),
+                    required_log_index: 1,
+                    status: JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                },
+            );
+            store.save().unwrap();
+        }
+        let raft_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+        let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(raft_id);
+        let (_tx, rx) = watch::channel(metrics);
+        let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
+            inner: LocalRaft::new(store.clone(), rx),
+            add_learner_calls: Arc::new(AtomicUsize::new(0)),
+        });
+
+        reconcile_once(raft, store.clone()).await.unwrap();
+
+        let store = store.lock().await;
+        assert_eq!(
+            store.state().join_sessions.values().next().unwrap().status,
+            JoinSessionStatus::Expired
+        );
+        assert!(
+            !store
+                .state()
+                .nodes
+                .contains_key(xp_test_fixtures::identifier_ulid_b())
         );
     }
 }

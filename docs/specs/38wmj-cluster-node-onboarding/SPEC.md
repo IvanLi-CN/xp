@@ -34,17 +34,18 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   expiry，节点删除也不得使 token 可复用。
 - 接受 staged join 前，leader 必须确认所有现有 voter 声明 `cluster.join.staged-v1` capability；
   未完成滚动升级或无法验证的集群拒绝创建 reservation，避免旧 leader 丢失 session 状态。
-- bootstrap response 携带当前 leader node ID。joiner 将 0600 bootstrap marker 与证书材料一起原子
-  持久化；首次 Raft RPC 仍须通过 v2 HMAC、cluster/target/time-window 校验，仅当 state machine
-  处于只含本节点的 pristine 状态且 marker 存在时，任一通过同一 cluster CA 认证的 elected leader
-  可跳过尚未复制的 sender membership lookup，以便 Phase 1 leader 故障后继续复制。
-  leader 首次复制成功后删除 marker，后续请求全部恢复正常 membership 校验。
+- bootstrap response 携带当前 leader node ID 和当前 voter node IDs。joiner 将 0600 bootstrap
+  marker 与证书材料一起原子持久化；首次 Raft RPC 仍须通过 v2 HMAC、cluster/target/time-window
+  校验，仅当 state machine 处于只含本节点的 pristine 状态且 marker 存在时，marker 中的当前
+  voter sender（包括故障切换后新选出的 leader）可跳过尚未复制的 sender membership lookup，
+  其他仅持有 cluster CA 的 principal 必须拒绝。leader 首次复制成功后删除 marker，后续请求
+  全部恢复正常 membership 校验。
 - membership guard 不得抢先晋升存在 pending join session 的 learner；没有 session 的 legacy
   learner 继续使用 existing-node recovery 行为。
 - single-image wrapper 在 fresh learner 首次复制完成前必须保持 XP 子进程存活。managed-default
   reconcile 必须先通过本机 internal API 验证复制完成，再由本机 Raft 转发写入；仅当本机 API
-  明确返回 signer 尚未进入 state machine 的认证失败时，才可在
-  activation deadline 内重试；其他认证、网络和配置错误立即失败。
+  明确返回 signer 尚未进入 state machine 的认证失败或本地 leader membership 尚未复制时，才可
+  在 activation deadline 内重试；其他认证、网络和配置错误立即失败。
 - host-managed startup 的 managed-default reconcile 在后台持续重试到成功，因此 learner 初次复制
   超过旧的短重试窗口时也不会永久遗漏配置端点。
 - `GET /api/cluster/info` 提供 leader 的 XP 版本，供部署命令锁定版本。

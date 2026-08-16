@@ -35,6 +35,8 @@ Use `scripts/testbox/run-host-managed-fresh-join-e2e.sh`. The local launcher map
 a unique `/srv/codex/workspaces/<user>/<repo>__<path-hash>/runs/<run-id>` directory and invokes a
 synced remote driver. Keeping the driver as a file, instead of piping it over SSH, is necessary:
 Docker Compose may read standard input and otherwise consume the rest of the control script.
+The run id includes a random nonce in addition to UTC time and the candidate SHA, so concurrent
+launches from the same checkout cannot share Compose projects, volumes, receipts, or cleanup paths.
 
 The remote driver builds static musl `xp` and `xp-ops` binaries in a restricted Docker builder.
 It creates an isolated Compose project containing:

@@ -10,11 +10,33 @@ const PENDING_JOIN_AUTH_ERROR: &str = concat!(
     "401: {\"error\":{\"code\":\"unauthorized\",",
     "\"message\":\"internal sender is not a cluster member\"",
 );
+const PENDING_JOIN_LEADER_ERROR: &str =
+    concat!("raft forward: leader is not a current ", "cluster member",);
 
 pub(super) async fn reconcile(
     paths: &Paths,
     spec: &ContainerSpec,
     xp_base_url: &str,
+) -> Result<(), ExitError> {
+    let deadline = tokio::time::Instant::now() + crate::join_session::ACTIVATION_TIMEOUT;
+    loop {
+        match reconcile_once(paths, spec, xp_base_url, deadline).await {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if is_pending_join_retryable(&error) && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+async fn reconcile_once(
+    paths: &Paths,
+    spec: &ContainerSpec,
+    xp_base_url: &str,
+    deadline: tokio::time::Instant,
 ) -> Result<(), ExitError> {
     let abs_data_dir = paths.map_abs(&spec.data_dir);
     let canary_bind = socket_addr_env(
@@ -45,7 +67,8 @@ pub(super) async fn reconcile(
     )
     .for_target(leader.node_id);
     let endpoints =
-        fetch_endpoints_after_initial_replication(&client, xp_base_url, &ops_auth).await?;
+        fetch_endpoints_after_initial_replication(&client, xp_base_url, &ops_auth, deadline)
+            .await?;
     let node_endpoints: Vec<Endpoint> = endpoints
         .into_iter()
         .filter(|endpoint| endpoint.node_id == cluster_meta.node_id)
@@ -93,8 +116,8 @@ async fn fetch_endpoints_after_initial_replication(
     client: &reqwest::Client,
     xp_base_url: &str,
     auth: &InternalOpsAuth,
+    deadline: tokio::time::Instant,
 ) -> Result<Vec<Endpoint>, ExitError> {
-    let deadline = tokio::time::Instant::now() + crate::join_session::ACTIVATION_TIMEOUT;
     loop {
         match crate::ops::xp::fetch_admin_endpoints_internal(client, xp_base_url, auth).await {
             Ok(endpoints) => return Ok(endpoints),
@@ -106,5 +129,36 @@ async fn fetch_endpoints_after_initial_replication(
             }
             Err(error) => return Err(error),
         }
+    }
+}
+
+fn is_pending_join_retryable(error: &ExitError) -> bool {
+    error.message.contains(PENDING_JOIN_AUTH_ERROR)
+        || error.message.contains(PENDING_JOIN_LEADER_ERROR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pending_join_retryable;
+    use crate::ops::cli::ExitError;
+
+    #[test]
+    fn retries_forwarding_until_initial_replication_is_visible() {
+        assert!(is_pending_join_retryable(&ExitError::new(
+            5,
+            "container_reconcile_failed: raft forward: leader is not a current cluster member",
+        )));
+        assert!(is_pending_join_retryable(&ExitError::new(
+            5,
+            concat!(
+                "http_error: admin endpoints get failed: 401: ",
+                "{\"error\":{\"code\":\"unauthorized\",",
+                "\"message\":\"internal sender is not a cluster member\"",
+            ),
+        )));
+        assert!(!is_pending_join_retryable(&ExitError::new(
+            5,
+            "container_reconcile_failed: endpoint port is already in use",
+        )));
     }
 }

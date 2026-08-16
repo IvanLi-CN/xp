@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use axum::{
     Json, Router,
@@ -34,7 +34,21 @@ pub struct RaftRpcAuth {
     pub cluster_ca_key_pem: String,
     pub cluster_ca_cert_pem: String,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
-    pub bootstrap_sender: Option<(String, PathBuf)>,
+    pub bootstrap_sender: Option<(BTreeSet<String>, PathBuf)>,
+}
+
+pub fn read_bootstrap_sender_marker(path: PathBuf) -> Option<(BTreeSet<String>, PathBuf)> {
+    std::fs::read_to_string(&path).ok().map(|sender_ids| {
+        (
+            sender_ids
+                .lines()
+                .map(str::trim)
+                .filter(|sender_id| !sender_id.is_empty())
+                .map(str::to_string)
+                .collect(),
+            path,
+        )
+    })
 }
 
 pub fn build_raft_rpc_router(state: RaftRpcState) -> Router {
@@ -97,10 +111,15 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             store.state().nodes.len() == 1 && store.get_node(&auth.local_node_id).is_some(),
         )
     };
+    let marker_sender_ids = auth
+        .bootstrap_sender
+        .as_ref()
+        .map(|(sender_ids, _)| sender_ids);
     let bootstrap_sender = bootstrap_sender_is_allowed(
+        &verified.context.sender_id,
         sender_is_member,
         state_is_pristine,
-        auth.bootstrap_sender.is_some(),
+        marker_sender_ids,
     );
     if !sender_is_member && !bootstrap_sender {
         tracing::warn!(
@@ -129,6 +148,7 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         );
     }
     if bootstrap_sender
+        && response.status().is_success()
         && auth
             .store
             .lock()
@@ -143,11 +163,14 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
 }
 
 fn bootstrap_sender_is_allowed(
+    sender_id: &str,
     sender_is_member: bool,
     state_is_pristine: bool,
-    has_bootstrap_marker: bool,
+    marker_sender_ids: Option<&BTreeSet<String>>,
 ) -> bool {
-    !sender_is_member && state_is_pristine && has_bootstrap_marker
+    !sender_is_member
+        && state_is_pristine
+        && marker_sender_ids.is_some_and(|markers| markers.contains(sender_id))
 }
 
 // The handlers deserialize only after `raft_auth` verifies a signed body, membership, and target.
@@ -180,13 +203,51 @@ async fn install_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::bootstrap_sender_is_allowed;
 
     #[test]
     fn bootstrap_sender_requires_pristine_state_and_marker() {
-        assert!(bootstrap_sender_is_allowed(false, true, true));
-        assert!(!bootstrap_sender_is_allowed(true, true, true));
-        assert!(!bootstrap_sender_is_allowed(false, false, true));
-        assert!(!bootstrap_sender_is_allowed(false, true, false));
+        assert!(bootstrap_sender_is_allowed(
+            "leader",
+            false,
+            true,
+            Some(&BTreeSet::from(["leader".to_string()]))
+        ));
+        assert!(!bootstrap_sender_is_allowed(
+            "leader",
+            true,
+            true,
+            Some(&BTreeSet::from(["leader".to_string()]))
+        ));
+        assert!(!bootstrap_sender_is_allowed(
+            "leader",
+            false,
+            false,
+            Some(&BTreeSet::from(["leader".to_string()]))
+        ));
+        assert!(!bootstrap_sender_is_allowed("leader", false, true, None));
+    }
+
+    #[test]
+    fn bootstrap_sender_rejects_a_different_authenticated_principal() {
+        assert!(!bootstrap_sender_is_allowed(
+            "removed-node",
+            false,
+            true,
+            Some(&BTreeSet::from(["elected-leader".to_string()]))
+        ));
+    }
+
+    #[test]
+    fn bootstrap_sender_allows_a_current_voter_after_failover() {
+        let voters = BTreeSet::from(["old-leader".to_string(), "new-leader".to_string()]);
+        assert!(bootstrap_sender_is_allowed(
+            "new-leader",
+            false,
+            true,
+            Some(&voters)
+        ));
     }
 }

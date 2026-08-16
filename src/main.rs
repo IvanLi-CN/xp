@@ -257,6 +257,17 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing leader_node_id in join response"))?
         .to_string();
+    let bootstrap_sender_ids = resp
+        .get("bootstrap_sender_ids")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .filter(|id| !id.trim().is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|ids| !ids.is_empty())
+        .unwrap_or_else(|| vec![leader_node_id.clone()]);
     let cluster_ca_pem = resp
         .get("cluster_ca_pem")
         .and_then(|v| v.as_str())
@@ -295,7 +306,7 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     xp::cluster_metadata::write_atomic(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
     xp::cluster_metadata::write_atomic_private(
         &paths.raft_bootstrap_sender,
-        leader_node_id.as_bytes(),
+        bootstrap_sender_ids.join("\n").as_bytes(),
     )?;
 
     let meta = xp::cluster_metadata::ClusterMetadata {

@@ -598,6 +598,7 @@ struct ClusterJoinRequest {
 struct ClusterJoinResponse {
     node_id: String,
     leader_node_id: String,
+    bootstrap_sender_ids: Vec<String>,
     signed_cert_pem: String,
     cluster_ca_pem: String,
     cluster_ca_key_pem: String,
@@ -1306,24 +1307,13 @@ pub fn build_router_with_mesh_telemetry(
                         cluster_ca_key_pem: cluster_ca_key_pem.to_string(),
                         cluster_ca_cert_pem: (*app_state.cluster_ca_pem).clone(),
                         store: app_state.store.clone(),
-                        bootstrap_sender: std::fs::read_to_string(
+                        bootstrap_sender: crate::raft::http_rpc::read_bootstrap_sender_marker(
                             app_state
                                 .config
                                 .data_dir
                                 .join("cluster")
                                 .join("raft_bootstrap_sender"),
-                        )
-                        .ok()
-                        .map(|sender_id| {
-                            (
-                                sender_id.trim().to_string(),
-                                app_state
-                                    .config
-                                    .data_dir
-                                    .join("cluster")
-                                    .join("raft_bootstrap_sender"),
-                            )
-                        }),
+                        ),
                     },
                 ))
             }
@@ -2025,6 +2015,7 @@ async fn cluster_join(
     let existing_session = reservation.existing;
     let activation_deadline = reservation.activation_deadline;
     let signed_cert_pem = reservation.signed_cert_pem;
+    let bootstrap_sender_ids = join_protocol::bootstrap_sender_ids(&state).await;
     if existing_session.is_none() {
         join_capability::require_on_voters(&state).await?;
     }
@@ -2038,6 +2029,7 @@ async fn cluster_join(
         return Ok(Json(ClusterJoinResponse {
             node_id,
             leader_node_id: state.cluster.node_id.clone(),
+            bootstrap_sender_ids,
             signed_cert_pem,
             cluster_ca_pem: (*state.cluster_ca_pem).clone(),
             cluster_ca_key_pem: ca_key_pem,
@@ -2133,6 +2125,7 @@ async fn cluster_join(
     Ok(Json(ClusterJoinResponse {
         node_id,
         leader_node_id: state.cluster.node_id.clone(),
+        bootstrap_sender_ids,
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),
         cluster_ca_key_pem: ca_key_pem,
