@@ -1699,7 +1699,7 @@ export function NodeDetailsPage() {
 					) : null}
 
 					{activeTab === "danger" ? (
-						<section className="space-y-4 border-t border-destructive/30 pt-4">
+						<section className="space-y-4">
 							<NodeDeleteOperationStatus
 								operation={pendingDeleteOperation}
 								visible={hasPendingDeleteOperation}
