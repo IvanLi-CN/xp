@@ -268,6 +268,12 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         })
         .filter(|ids| !ids.is_empty())
         .unwrap_or_else(|| vec![leader_node_id.clone()]);
+    let activation_deadline = resp
+        .get("activation_deadline")
+        .and_then(|value| value.as_str())
+        .filter(|deadline| !deadline.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing activation_deadline in join response"))?
+        .to_string();
     let cluster_ca_pem = resp
         .get("cluster_ca_pem")
         .and_then(|v| v.as_str())
@@ -304,10 +310,11 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     xp::cluster_metadata::write_atomic_private(&paths.node_key_pem, pending.key_pem.as_bytes())?;
     xp::cluster_metadata::write_atomic(&paths.node_csr_pem, pending.csr_pem.as_bytes())?;
     xp::cluster_metadata::write_atomic(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
-    xp::cluster_metadata::write_atomic_private(
-        &paths.raft_bootstrap_sender,
-        bootstrap_sender_ids.join("\n").as_bytes(),
+    let bootstrap_marker = xp::raft::http_rpc::encode_bootstrap_sender_marker(
+        &bootstrap_sender_ids,
+        &activation_deadline,
     )?;
+    xp::cluster_metadata::write_atomic_private(&paths.raft_bootstrap_sender, &bootstrap_marker)?;
 
     let meta = xp::cluster_metadata::ClusterMetadata {
         schema_version: xp::cluster_metadata::CLUSTER_METADATA_SCHEMA_VERSION,

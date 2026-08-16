@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -34,20 +35,46 @@ pub struct RaftRpcAuth {
     pub cluster_ca_key_pem: String,
     pub cluster_ca_cert_pem: String,
     pub store: Arc<Mutex<JsonSnapshotStore>>,
-    pub bootstrap_sender: Option<(BTreeSet<String>, PathBuf)>,
+    pub bootstrap_sender: Option<BootstrapSenderMarker>,
 }
 
-pub fn read_bootstrap_sender_marker(path: PathBuf) -> Option<(BTreeSet<String>, PathBuf)> {
-    std::fs::read_to_string(&path).ok().map(|sender_ids| {
-        (
-            sender_ids
-                .lines()
-                .map(str::trim)
-                .filter(|sender_id| !sender_id.is_empty())
-                .map(str::to_string)
-                .collect(),
-            path,
-        )
+#[derive(Clone)]
+pub struct BootstrapSenderMarker {
+    pub sender_ids: BTreeSet<String>,
+    pub activation_deadline: DateTime<Utc>,
+    pub path: PathBuf,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct BootstrapSenderMarkerFile {
+    sender_ids: BTreeSet<String>,
+    activation_deadline: String,
+}
+
+pub fn encode_bootstrap_sender_marker(
+    sender_ids: &[String],
+    activation_deadline: &str,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&BootstrapSenderMarkerFile {
+        sender_ids: sender_ids.iter().cloned().collect(),
+        activation_deadline: activation_deadline.to_string(),
+    })
+}
+
+pub fn read_bootstrap_sender_marker(path: PathBuf) -> Option<BootstrapSenderMarker> {
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let file = serde_json::from_str::<BootstrapSenderMarkerFile>(&raw).ok()?;
+    let activation_deadline = DateTime::parse_from_rfc3339(&file.activation_deadline)
+        .ok()?
+        .with_timezone(&Utc);
+    if activation_deadline <= Utc::now() || file.sender_ids.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    Some(BootstrapSenderMarker {
+        sender_ids: file.sender_ids,
+        activation_deadline,
+        path,
     })
 }
 
@@ -141,7 +168,7 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
         );
     }
     if response.status().is_success()
-        && let Some((marker_sender_ids, marker_path)) = auth.bootstrap_sender.as_ref()
+        && let Some(marker) = auth.bootstrap_sender.as_ref()
     {
         let replicated_node_ids = auth
             .store
@@ -151,8 +178,8 @@ async fn raft_auth(State(auth): State<RaftRpcAuth>, req: Request<Body>, next: Ne
             .into_iter()
             .map(|node| node.node_id)
             .collect::<BTreeSet<_>>();
-        if bootstrap_replication_complete(Some(marker_sender_ids), &replicated_node_ids) {
-            let _ = std::fs::remove_file(marker_path);
+        if bootstrap_replication_complete(Some(&marker.sender_ids), &replicated_node_ids) {
+            let _ = std::fs::remove_file(&marker.path);
         }
     }
     response
@@ -167,10 +194,11 @@ fn bootstrap_sender_is_allowed(
 }
 
 fn active_bootstrap_sender_ids(
-    bootstrap_sender: Option<&(BTreeSet<String>, PathBuf)>,
+    bootstrap_sender: Option<&BootstrapSenderMarker>,
 ) -> Option<&BTreeSet<String>> {
-    bootstrap_sender.and_then(|(sender_ids, marker_path)| {
-        std::fs::metadata(marker_path).is_ok().then_some(sender_ids)
+    bootstrap_sender.and_then(|marker| {
+        (marker.activation_deadline > Utc::now() && std::fs::metadata(&marker.path).is_ok())
+            .then_some(&marker.sender_ids)
     })
 }
 
@@ -218,7 +246,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        active_bootstrap_sender_ids, bootstrap_replication_complete, bootstrap_sender_is_allowed,
+        BootstrapSenderMarker, active_bootstrap_sender_ids, bootstrap_replication_complete,
+        bootstrap_sender_is_allowed,
     };
 
     #[test]
@@ -267,10 +296,27 @@ mod tests {
     fn bootstrap_marker_cache_stops_authorizing_after_file_removal() {
         let temp = tempfile::tempdir().expect("marker directory");
         let marker_path = temp.path().join("raft_bootstrap_sender");
-        std::fs::write(&marker_path, "leader\n").expect("write marker");
-        let marker = (BTreeSet::from(["leader".to_string()]), marker_path.clone());
+        std::fs::write(&marker_path, "marker").expect("write marker");
+        let marker = BootstrapSenderMarker {
+            sender_ids: BTreeSet::from(["leader".to_string()]),
+            activation_deadline: chrono::Utc::now() + chrono::Duration::minutes(1),
+            path: marker_path.clone(),
+        };
         assert!(active_bootstrap_sender_ids(Some(&marker)).is_some());
         std::fs::remove_file(marker_path).expect("remove marker");
         assert!(active_bootstrap_sender_ids(Some(&marker)).is_none());
+    }
+
+    #[test]
+    fn expired_bootstrap_marker_is_removed_and_not_authorized() {
+        let temp = tempfile::tempdir().expect("marker directory");
+        let marker_path = temp.path().join("raft_bootstrap_sender");
+        let marker = serde_json::json!({
+            "sender_ids": ["leader"],
+            "activation_deadline": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(&marker_path, marker.to_string()).expect("write marker");
+        assert!(super::read_bootstrap_sender_marker(marker_path.clone()).is_none());
+        assert!(!marker_path.exists());
     }
 }

@@ -35,11 +35,13 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - 接受 staged join 前，leader 必须确认所有现有 voter 声明 `cluster.join.staged-v1` capability；
   未完成滚动升级或无法验证的集群拒绝创建 reservation，避免旧 leader 丢失 session 状态。
 - bootstrap response 携带当前 leader node ID 和当前 voter node IDs。joiner 将 0600 bootstrap
-  marker 与证书材料一起原子持久化；每个 Raft RPC 仍须通过 v2 HMAC、cluster/target/time-window
-  校验。只要 marker 存在，marker 中记录的当前 voter sender（包括故障切换后新选出的 leader）
+  marker 与证书材料一起原子持久化，marker 同时记录 activation deadline；每个 Raft RPC 仍须
+  通过 v2 HMAC、cluster/target/time-window 校验。只要 marker 文件存在且未过期，marker 中记录的
+  当前 voter sender（包括故障切换后新选出的 leader）
   可跳过尚未复制的 sender membership lookup；其他仅持有 cluster CA 的 principal 必须拒绝。
   部分复制期间 marker 保留并允许剩余记录 sender 继续发送；仅当 marker 中全部 voter sender
-  都已出现在本地 state 且一次 RPC 成功后才删除 marker，后续请求恢复为正常 membership 校验。
+  都已出现在本地 state 且一次 RPC 成功后才删除 marker；过期 marker 在读取时清理，后续请求恢复
+  为正常 membership 校验。
 - membership guard 不得抢先晋升存在 pending join session 的 learner；没有 session 的 legacy
   learner 继续使用 existing-node recovery 行为。
 - single-image wrapper 在 fresh learner 首次复制完成前必须保持 XP 子进程存活。managed-default
