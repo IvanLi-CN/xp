@@ -2468,6 +2468,12 @@ impl DesiredStateCommand {
                 })
             }
             Self::UpsertEndpoint { endpoint, expected } => {
+                let current = state.endpoints.get(&endpoint.endpoint_id).cloned();
+                membership_operation::ensure_endpoint_mutation_is_allowed(
+                    state,
+                    current.as_ref(),
+                    Some(endpoint),
+                )?;
                 if let Some(expected) = expected
                     && state.endpoints.get(&endpoint.endpoint_id) != Some(expected)
                 {
@@ -2576,6 +2582,12 @@ impl DesiredStateCommand {
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::DeleteEndpoint { endpoint_id } => {
+                let current = state.endpoints.get(endpoint_id).cloned();
+                membership_operation::ensure_endpoint_mutation_is_allowed(
+                    state,
+                    current.as_ref(),
+                    None,
+                )?;
                 let deleted = state.endpoints.remove(endpoint_id).is_some();
                 state.endpoint_probe_history.remove(endpoint_id);
                 sync_node_user_endpoint_memberships(state);

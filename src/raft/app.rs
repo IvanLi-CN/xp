@@ -824,6 +824,7 @@ fn map_store_error(err: StoreError) -> ClientResponse {
             },
             DomainError::NodeInUse { .. }
             | DomainError::NodeEndpointSetChanged { .. }
+            | DomainError::NodeLifecycleOperationActive { .. }
             | DomainError::EndpointChanged { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),

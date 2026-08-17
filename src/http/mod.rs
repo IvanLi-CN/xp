@@ -218,6 +218,11 @@ impl From<StoreError> for ApiError {
                 | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
+                crate::domain::DomainError::NodeEndpointSetChanged { .. }
+                | crate::domain::DomainError::NodeLifecycleOperationActive { .. }
+                | crate::domain::DomainError::EndpointChanged { .. } => {
+                    ApiError::conflict(domain.to_string())
+                }
                 _ => ApiError::invalid_request(domain.to_string()),
             },
             StoreError::SchemaVersionMismatch { .. } => ApiError::internal(value.to_string()),
@@ -4193,7 +4198,27 @@ async fn admin_delete_node(
     )
     .await
     {
-        Ok(result) => result?,
+        Ok(Ok(result)) => result,
+        Ok(Err(error))
+            if error.code == "conflict"
+                && error
+                    .message
+                    .contains("node endpoint set changed since delete preview") =>
+        {
+            transition_membership_operation(
+                &state,
+                raft_node_id,
+                crate::state::MembershipOperationPhase::Blocked,
+                "node endpoint set changed after membership removal; manual recovery required",
+            )
+            .await?;
+            drop(_membership_operation_guard);
+            return Ok(admin_node_delete_accepted_response(
+                operation_id,
+                crate::state::MembershipOperationPhase::Blocked,
+            ));
+        }
+        Ok(Err(error)) => return Err(error),
         Err(_) => {
             drop(_membership_operation_guard);
             spawn_admin_node_delete_resume(state.clone());

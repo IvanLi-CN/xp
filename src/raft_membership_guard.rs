@@ -936,7 +936,12 @@ pub async fn resume_membership_operations_once(
                     anyhow::bail!("remove-node operation received unexpected desired-state result")
                 }
                 crate::raft::types::ClientResponse::Err { code, message, .. } => {
-                    anyhow::bail!("remove-node desired-state delete rejected: {code}: {message}")
+                    block_membership_operation(
+                        &raft,
+                        operation,
+                        format!("remove-node desired-state delete rejected: {code}: {message}"),
+                    )
+                    .await?;
                 }
             }
         }

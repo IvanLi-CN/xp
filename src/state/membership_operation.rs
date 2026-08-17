@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
-use super::{DesiredStateApplyResult, DesiredStateCommand, PersistedState, StoreError};
+use super::{DesiredStateApplyResult, DesiredStateCommand, Endpoint, PersistedState, StoreError};
 
 /// The only supported sources of a membership change. The role itself is represented by
 /// OpenRaft; this record makes the intent and recovery boundary durable in desired state.
@@ -129,6 +131,80 @@ impl MembershipOperation {
     }
 }
 
+fn remove_node_target(operation: &MembershipOperation) -> Result<&str, StoreError> {
+    operation
+        .node_id
+        .as_deref()
+        .filter(|node_id| !node_id.trim().is_empty())
+        .ok_or(StoreError::InvalidMembershipOperation {
+            message: "remove-node operation must include desired node",
+        })
+}
+
+fn validate_remove_node_endpoint_snapshot(
+    state: &PersistedState,
+    operation: &MembershipOperation,
+) -> Result<(), StoreError> {
+    if operation.kind != MembershipOperationKind::RemoveNode {
+        return Ok(());
+    }
+    let node_id = remove_node_target(operation)?;
+    let actual_endpoint_ids = state
+        .endpoints
+        .values()
+        .filter(|endpoint| endpoint.node_id == node_id)
+        .map(|endpoint| endpoint.endpoint_id.clone())
+        .collect::<BTreeSet<_>>();
+    let actual_endpoint_tags = state
+        .endpoints
+        .values()
+        .filter(|endpoint| endpoint.node_id == node_id)
+        .map(|endpoint| endpoint.tag.clone())
+        .collect::<BTreeSet<_>>();
+    let expected_endpoint_ids = operation
+        .expected_endpoint_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let expected_endpoint_tags = operation
+        .expected_endpoint_tags
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let snapshot_matches = actual_endpoint_ids == expected_endpoint_ids
+        && actual_endpoint_tags == expected_endpoint_tags;
+    if (!operation.delete_endpoints && !actual_endpoint_ids.is_empty()) || !snapshot_matches {
+        return Err(crate::domain::DomainError::NodeEndpointSetChanged {
+            node_id: node_id.to_string(),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_endpoint_mutation_is_allowed(
+    state: &PersistedState,
+    current: Option<&Endpoint>,
+    next: Option<&Endpoint>,
+) -> Result<(), StoreError> {
+    let Some(operation) = state.active_membership_operation() else {
+        return Ok(());
+    };
+    if operation.kind != MembershipOperationKind::RemoveNode {
+        return Ok(());
+    }
+    let node_id = remove_node_target(operation)?;
+    if current.is_some_and(|endpoint| endpoint.node_id == node_id)
+        || next.is_some_and(|endpoint| endpoint.node_id == node_id)
+    {
+        return Err(crate::domain::DomainError::NodeLifecycleOperationActive {
+            node_id: node_id.to_string(),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 pub(super) fn apply_command(
     state: &mut PersistedState,
     command: &DesiredStateCommand,
@@ -179,6 +255,7 @@ pub(super) fn apply_command(
                     message: "membership operation node and join session must be paired",
                 });
             }
+            validate_remove_node_endpoint_snapshot(state, operation)?;
             // Begin is the durability boundary for a fresh join. Apply against a cloned state so
             // a rejected node/session cannot leave an active orphan operation.
             let mut next = state.clone();

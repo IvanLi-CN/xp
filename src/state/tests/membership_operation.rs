@@ -40,6 +40,36 @@ fn begin(operation: MembershipOperation) -> DesiredStateCommand {
     }
 }
 
+fn remove_node_operation(
+    operation_id: &str,
+    endpoint: &crate::domain::Endpoint,
+) -> MembershipOperation {
+    MembershipOperation {
+        operation_id: operation_id.to_string(),
+        kind: MembershipOperationKind::RemoveNode,
+        raft_node_id: 42,
+        node_id: Some(xp_test_fixtures::label_node1().to_owned()),
+        expected_membership: "membership-revision".to_string(),
+        phase: MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: true,
+        expected_endpoint_ids: vec![endpoint.endpoint_id.clone()],
+        expected_endpoint_tags: vec![endpoint.tag.clone()],
+        created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("test remove operation".to_string()),
+    }
+}
+
+fn begin_remove_node(operation: MembershipOperation) -> DesiredStateCommand {
+    DesiredStateCommand::BeginMembershipOperation {
+        operation: Box::new(operation),
+        node: None,
+        join_session: None,
+    }
+}
+
 #[test]
 fn rejects_overlapping_operations_and_illegal_transitions() {
     let mut state = PersistedState::empty();
@@ -79,4 +109,50 @@ fn terminal_transition_requires_timestamp_and_evidence() {
         .apply(&mut state)
         .unwrap_err();
     assert!(matches!(err, StoreError::InvalidMembershipOperation { .. }));
+}
+
+#[test]
+fn remove_node_begin_requires_the_exact_endpoint_snapshot() {
+    let mut state = PersistedState::empty();
+    let node = super::test_node(xp_test_fixtures::label_node1());
+    let endpoint = super::ss_endpoint("endpoint_1", &node.node_id);
+    state.nodes.insert(node.node_id.clone(), node);
+    state
+        .endpoints
+        .insert(endpoint.endpoint_id.clone(), endpoint.clone());
+
+    let mut operation = remove_node_operation("remove-node", &endpoint);
+    operation.expected_endpoint_ids = vec!["stale-endpoint".to_string()];
+    let err = begin_remove_node(operation).apply(&mut state).unwrap_err();
+
+    assert!(matches!(
+        err,
+        StoreError::Domain(DomainError::NodeEndpointSetChanged { .. })
+    ));
+    assert!(state.membership_operations.is_empty());
+}
+
+#[test]
+fn remove_node_operation_rejects_endpoint_changes_until_completion() {
+    let mut state = PersistedState::empty();
+    let node = super::test_node(xp_test_fixtures::label_node1());
+    let endpoint = super::ss_endpoint("endpoint_1", &node.node_id);
+    state.nodes.insert(node.node_id.clone(), node);
+    state
+        .endpoints
+        .insert(endpoint.endpoint_id.clone(), endpoint.clone());
+    begin_remove_node(remove_node_operation("remove-node", &endpoint))
+        .apply(&mut state)
+        .unwrap();
+
+    let mut changed = endpoint.clone();
+    changed.port = 10_001;
+    let err = DesiredStateCommand::UpsertEndpoint {
+        endpoint: changed,
+        expected: Some(endpoint),
+    }
+    .apply(&mut state)
+    .unwrap_err();
+
+    assert!(matches!(err, StoreError::Domain(_)));
 }

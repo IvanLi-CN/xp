@@ -41,6 +41,7 @@ async fn transition_join_operation(
     else {
         return Ok(());
     };
+    raft.ensure_linearizable().await?;
     operation.expected_membership =
         crate::raft_membership_guard::membership_revision(&raft.metrics().borrow().clone())?;
     operation.phase = phase;
@@ -162,8 +163,14 @@ async fn reconcile_once(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> anyhow::Result<()> {
+    let observed = raft.metrics().borrow().clone();
+    if observed.state != openraft::ServerState::Leader {
+        return Ok(());
+    }
+    raft.ensure_linearizable().await?;
     let metrics = raft.metrics().borrow().clone();
-    if metrics.state != openraft::ServerState::Leader {
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
         return Ok(());
     }
     let sessions = store
@@ -264,30 +271,34 @@ async fn reconcile_once(
         let deadline =
             DateTime::parse_from_rfc3339(&session.activation_deadline)?.with_timezone(&Utc);
         if deadline <= Utc::now() {
-            if crate::raft_membership_guard::membership_revision(&metrics)?
-                != operation.expected_membership
-            {
-                crate::raft_membership_guard::block_membership_operation(
-                    &raft,
-                    operation,
-                    "join membership revision changed before expiry cleanup",
-                )
-                .await?;
-                tracing::error!(
-                    "join membership revision changed before expiry cleanup; cleanup is blocked"
-                );
-                continue;
-            }
             let _guard = crate::raft_membership_guard::membership_operation_gate()
                 .lock_owned()
                 .await;
-            if voters.contains(&node_id) {
+            let metrics =
+                match crate::raft_membership_guard::require_expected_membership(&raft, &operation)
+                    .await
+                {
+                    Ok(metrics) => metrics,
+                    Err(error) => {
+                        crate::raft_membership_guard::block_membership_operation(
+                            &raft,
+                            operation,
+                            format!(
+                                "join membership revision changed before expiry cleanup: {error}"
+                            ),
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
+            let membership = metrics.membership_config.membership();
+            if membership.voter_ids().any(|voter_id| voter_id == node_id) {
                 raft.change_membership(
                     openraft::ChangeMembers::RemoveVoters(BTreeSet::from([node_id])),
                     false,
                 )
                 .await?;
-            } else if registered {
+            } else if membership.get_node(&node_id).is_some() {
                 raft.change_membership(
                     openraft::ChangeMembers::RemoveNodes(BTreeSet::from([node_id])),
                     false,
@@ -326,19 +337,32 @@ async fn reconcile_once(
         }
         if session.status == JoinSessionStatus::Reserved {
             if !registered {
-                if crate::raft_membership_guard::membership_revision(&metrics)?
-                    != operation.expected_membership
-                {
-                    crate::raft_membership_guard::block_membership_operation(
-                        &raft,
-                        operation,
-                        "join membership revision changed before learner registration",
+                let _guard = crate::raft_membership_guard::membership_operation_gate()
+                    .lock_owned()
+                    .await;
+                let confirmed_metrics =
+                    match crate::raft_membership_guard::require_expected_membership(
+                        &raft, &operation,
                     )
-                    .await?;
-                    tracing::error!(concat!(
-                        "join membership revision changed before learner registration; ",
-                        "promotion is blocked"
-                    ));
+                    .await
+                    {
+                        Ok(metrics) => metrics,
+                        Err(_error) => {
+                            crate::raft_membership_guard::block_membership_operation(
+                                &raft,
+                                operation,
+                                "join membership revision changed before learner registration",
+                            )
+                            .await?;
+                            continue;
+                        }
+                    };
+                if confirmed_metrics
+                    .membership_config
+                    .membership()
+                    .get_node(&node_id)
+                    .is_some()
+                {
                     continue;
                 }
                 let node = store
@@ -346,9 +370,6 @@ async fn reconcile_once(
                     .await
                     .get_node(&session.node_id)
                     .ok_or_else(|| anyhow::anyhow!("reserved join node is missing"))?;
-                let _guard = crate::raft_membership_guard::membership_operation_gate()
-                    .lock_owned()
-                    .await;
                 raft.add_learner(
                     node_id,
                     crate::raft::types::NodeMeta {
@@ -435,9 +456,6 @@ async fn reconcile_once(
             if deadline <= Utc::now() {
                 continue;
             }
-            let current = crate::raft_membership_guard::membership_revision(
-                &raft.metrics().borrow().clone(),
-            )?;
             let Some(current_operation) = store
                 .lock()
                 .await
@@ -451,16 +469,31 @@ async fn reconcile_once(
             else {
                 anyhow::bail!("join operation disappeared before promotion")
             };
-            if current != current_operation.expected_membership {
+            let current_metrics = match crate::raft_membership_guard::require_expected_membership(
+                &raft,
+                &current_operation,
+            )
+            .await
+            {
+                Ok(metrics) => metrics,
+                Err(error) => {
+                    crate::raft_membership_guard::block_membership_operation(
+                        &raft,
+                        current_operation,
+                        format!("join membership revision changed before promotion: {error}"),
+                    )
+                    .await?;
+                    continue;
+                }
+            };
+            let current_membership = current_metrics.membership_config.membership();
+            if current_membership.get_node(&node_id).is_none() {
                 crate::raft_membership_guard::block_membership_operation(
                     &raft,
                     current_operation,
-                    "join membership revision changed before promotion",
+                    "join learner disappeared before promotion",
                 )
                 .await?;
-                tracing::error!(
-                    "join membership revision changed before promotion; promotion is blocked"
-                );
                 continue;
             }
             raft.add_voters(BTreeSet::from([node_id])).await?;
@@ -499,6 +532,10 @@ async fn reconcile_once(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "join_coordinator_promotion_tests.rs"]
+mod promotion_tests;
 
 #[cfg(test)]
 mod tests {
