@@ -25,6 +25,7 @@ import {
 } from "../api/adminNodes";
 import { fetchAdminRepositoryHistory } from "../api/adminRepositoryHistory";
 import { fetchAdminNodeTcpConnections } from "../api/adminTcpConnections";
+import { BackendApiError } from "../api/backendError";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -704,6 +705,29 @@ describe("<NodeDetailsPage />", () => {
 			"Node deletion is continuing.",
 		);
 		expect(await screenByRole("button", "Delete node")).toBeDisabled();
+	});
+
+	it("clears an expired stored node deletion operation after a 404", async () => {
+		setupMocks();
+		const operationId = "e9a42d3c-9812-4a38-8a23-2d8cb7770001";
+		sessionStorage.setItem(
+			`xp_node_delete_operation_v1:${fixtureCatalog.nodeId.fixture134()}`,
+			operationId,
+		);
+		vi.mocked(fetchAdminMembershipOperation).mockRejectedValue(
+			new BackendApiError({ status: 404, message: "operation not found" }),
+		);
+		renderPage();
+
+		await waitFor(() => {
+			expect(
+				sessionStorage.getItem(
+					`xp_node_delete_operation_v1:${fixtureCatalog.nodeId.fixture134()}`,
+				),
+			).toBeNull();
+		});
+		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		expect(await screenByRole("button", "Delete node")).toBeEnabled();
 	});
 
 	it("shows online stats warning state when snapshots are unavailable", async () => {

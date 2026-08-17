@@ -7,6 +7,7 @@ import {
 	deleteAdminNode,
 	fetchAdminMembershipOperation,
 } from "../api/adminNodes";
+import { isBackendApiError } from "../api/backendError";
 import { alertClass } from "../components/ui-helpers";
 import { Badge } from "../components/ui/badge";
 import { formatBackendError } from "../utils/backendErrorMessage";
@@ -86,6 +87,11 @@ export function useNodeDeleteOperation({
 		setPendingOperation(null);
 		onCompleted();
 	}, [onCompleted, query.data, setPendingOperation]);
+	useEffect(() => {
+		if (isBackendApiError(query.error) && query.error.status === 404) {
+			setPendingOperation(null);
+		}
+	}, [query.error, setPendingOperation]);
 
 	return {
 		operation: query.data,
