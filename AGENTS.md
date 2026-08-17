@@ -107,15 +107,21 @@
   after its public `api_base_url/health` returns HTTP `200`; post-join health failure preserves
   membership and metadata for retry. Geo remains disabled by default and is written only by explicit
   host-managed `--ip-geo` / TUI opt-in, never by automatic backfill.
-- Fresh joins use a durable two-stage protocol: the leader reserves the token, registers the
-  learner, and returns bootstrap identity before catch-up; after the authenticated runtime starts,
-  the leader coordinator waits for the recorded log index and promotes the learner. Same-request
-  retries replay the reservation without extending its 10-minute activation deadline. Expired
-  sessions are cleaned by the leader; existing-node recovery remains separate.
-- Staged fresh joins require every current voter to expose `cluster.join.staged-v1`; operators must
-  finish the XP rolling upgrade before adding a fresh node. The pristine learner accepts only signed
-  internal-auth v2 Raft traffic, but any elected leader in the authenticated cluster may complete
-  its initial replication after failover.
+- Raft member roles are only `voter`, transient `learner`, and `absent`; “non-voter member” is a
+  set description, never a promotable role. Every voter maps to one DesiredState Node. An unexpected
+  learner or orphan voter blocks lifecycle writes and is reported, never automatically promoted,
+  deleted, rolled back, or repaired by periodic work.
+- Fresh joins use a durable two-stage protocol: the leader records a Join membership operation and
+  reservation, registers the learner, and returns bootstrap identity before catch-up; after the
+  authenticated runtime starts, the leader coordinator waits for the recorded log index and promotes
+  only that recorded learner. Same-request retries replay the reservation without extending its
+  10-minute activation deadline. Expired sessions are cleaned by the leader; existing-node recovery
+  remains separate.
+- Fresh join, restore, delete and orphan-voter repair require every current voter to expose
+  `cluster.membership-lifecycle-v1`; operators must finish the XP rolling upgrade one voter at a
+  time while maintaining quorum before lifecycle writes resume. The pristine learner accepts only
+  signed internal-auth v2 Raft traffic, but any elected leader in the authenticated cluster may
+  complete its initial replication after failover.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the

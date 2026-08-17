@@ -940,10 +940,39 @@ Ideal post-release path:
 
 ## Disaster recovery: quorum lost (single-node leader recovery)
 
-Stable Raft membership treats every listed node as a voter. Long-lived learners, observer nodes,
-`can_vote` flags, or `voter=false` configuration are not supported. A 2-voter topology is not an
-acceptable production shape because losing either voter removes writable quorum; use at least 3
-stable voters for production clusters.
+Raft has three role outcomes: `voter`, transient `learner`, and `absent`. Long-lived learners,
+observer nodes, `can_vote` flags, or `voter=false` configuration are not supported. Every voter
+must map to a DesiredState Node. A 2-voter topology is not an acceptable production shape because
+losing either voter removes writable quorum; use at least 3 stable voters for production clusters.
+
+Before fresh join, restore, delete, or repair, upgrade every voter to a build that exposes
+`cluster.membership-lifecycle-v1`. Upgrade one voter at a time and preserve serving quorum. During
+the mixed-version interval lifecycle writes return `coordinated_upgrade_required`; do not work
+around that freeze by calling internal membership APIs or editing Raft files.
+
+### Orphan voter incident
+
+An orphan voter is a current voter without a DesiredState Node mapping. It is not a learner and it
+must never be converted or removed by a periodic scan. First finish the rolling upgrade barrier,
+confirm the target is the only orphan and that the local node is leader, then run the local
+signed-CLI dry-run:
+
+```bash
+sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-node-id <id>
+```
+
+Copy the returned `expected_membership` exactly into the explicit apply command:
+
+```bash
+sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-node-id <id> \
+  --apply --expected-membership <fingerprint>
+```
+
+The repair removes only that non-leader voter with `RemoveVoters(..., false)`. It does not touch
+DesiredState Nodes, endpoints, users, traffic configuration, or raw Raft files. If the fingerprint,
+leader, joint-consensus, mapping, session, or operation precondition changes, stop and investigate;
+do not retry with `recover-single-node` or a bulk repair. After the target is absent, verify the
+membership invariant and perform a normal fresh join when the node should return.
 
 If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
 case you can force a single-node Raft membership on the chosen surviving node to restore write
@@ -997,8 +1026,10 @@ After recovery:
   `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
   managed-default endpoint ports from Raft even when the local bootstrap env differs.
 - After all intended nodes are rejoined, confirm `/api/cluster/info` has a leader and endpoint
-  creation succeeds through the admin UI/API. Any `membership.nodes - voter_ids` divergence is an
-  incident and must be repaired by the leader-side guard or by explicit disaster recovery.
+  creation succeeds through the admin UI/API. Any unexpected learner or voter without a DesiredState
+  mapping is an incident. The periodic worker reports it but never repairs it; use the bounded
+  orphan-voter runbook above only when its preconditions hold, otherwise use explicit disaster
+  recovery.
 
 ### Backup before upgrade
 

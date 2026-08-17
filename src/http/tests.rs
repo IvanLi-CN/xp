@@ -1452,7 +1452,7 @@ async fn admin_get_node_includes_egress_probe_summary_when_present() {
 }
 
 #[tokio::test]
-async fn delete_node_removes_from_inventory() {
+async fn delete_node_rejects_a_desired_node_absent_from_raft_membership() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, store) = app_with(&tmp, ReconcileHandle::noop());
 
@@ -1475,7 +1475,9 @@ async fn delete_node_removes_from_inventory() {
         .oneshot(req_authed("DELETE", &uri))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "conflict");
 
     let res = app
         .clone()
@@ -1488,7 +1490,7 @@ async fn delete_node_removes_from_inventory() {
     assert!(
         items
             .iter()
-            .all(|n| n["node_id"].as_str().unwrap() != node.node_id)
+            .any(|n| n["node_id"].as_str().unwrap() == node.node_id)
     );
 }
 
@@ -1584,7 +1586,7 @@ async fn get_node_delete_preview_lists_referenced_endpoints() {
 }
 
 #[tokio::test]
-async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
+async fn delete_node_with_confirmed_endpoint_cleanup_rejects_absent_raft_member() {
     let tmp = tempfile::tempdir().unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (app, store) = app_with(&tmp, ReconcileHandle::from_sender(tx));
@@ -1619,7 +1621,9 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
         .oneshot(req_authed("DELETE", &uri))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = body_json(res).await;
+    assert_eq!(body["error"]["code"], "conflict");
 
     let res = app
         .clone()
@@ -1633,20 +1637,14 @@ async fn delete_node_with_confirmed_endpoint_cleanup_removes_endpoints() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|item| item["node_id"] != json!(node.node_id))
+            .any(|item| item["node_id"] == json!(node.node_id))
     );
 
     let endpoint_uri = format!("/api/admin/endpoints/{}", endpoint.endpoint_id);
     let res = app.oneshot(req_authed("GET", &endpoint_uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::OK);
 
-    assert_eq!(
-        drain_reconcile_requests(&mut rx),
-        vec![
-            ReconcileRequest::RemoveInbound { tag: endpoint.tag },
-            ReconcileRequest::Full
-        ]
-    );
+    assert!(drain_reconcile_requests(&mut rx).is_empty());
 }
 
 #[tokio::test]
@@ -1709,8 +1707,10 @@ async fn delete_node_with_confirmed_endpoint_cleanup_rejects_stale_preview() {
             raft_endpoint: node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, node_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2121,7 +2121,7 @@ async fn cluster_join_returns_json_error_when_add_learner_panics() {
     );
 }
 #[tokio::test]
-async fn delete_node_returns_json_error_when_change_membership_panics() {
+async fn delete_node_stops_before_membership_when_voter_capability_is_unavailable() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -2172,8 +2172,10 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, extra_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2192,14 +2194,14 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
 
     let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
     let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "internal");
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
     assert!(
         body["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("change_membership remove_nodes: raft change_membership panicked"),
+            .contains("cannot verify staged join support"),
         "unexpected error: {}",
         body["error"]["message"].as_str().unwrap()
     );
@@ -2209,7 +2211,7 @@ async fn delete_node_returns_json_error_when_change_membership_panics() {
 }
 
 #[tokio::test]
-async fn delete_node_times_out_when_change_membership_hangs() {
+async fn delete_node_does_not_start_timeout_before_voter_capability_barrier() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
@@ -2260,8 +2262,10 @@ async fn delete_node_times_out_when_change_membership_hangs() {
             raft_endpoint: extra_node.api_base_url.clone(),
         },
     );
-    let membership =
-        openraft::Membership::new(vec![std::collections::BTreeSet::from([raft_id])], nodes);
+    let membership = openraft::Membership::new(
+        vec![std::collections::BTreeSet::from([raft_id, extra_raft_id])],
+        nodes,
+    );
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(None, membership));
     let (_tx, rx) = watch::channel(metrics);
     let raft: Arc<dyn crate::raft::app::RaftFacade> = Arc::new(PanickingRaft {
@@ -2280,17 +2284,9 @@ async fn delete_node_times_out_when_change_membership_hangs() {
 
     let uri = format!("/api/admin/nodes/{}", extra_node.node_id);
     let res = app.oneshot(req_authed("DELETE", &uri)).await.unwrap();
-    assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = body_json(res).await;
-    assert_eq!(body["error"]["code"], "timeout");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("delete node timed out while removing raft membership"),
-        "unexpected error: {}",
-        body["error"]["message"].as_str().unwrap()
-    );
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
 
     let store = store.lock().await;
     assert!(store.get_node(&extra_node.node_id).is_some());

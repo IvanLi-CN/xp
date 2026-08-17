@@ -21,6 +21,42 @@ async fn write_applied(
     }
 }
 
+async fn transition_join_operation(
+    raft: &Arc<dyn RaftFacade>,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    node_id: u64,
+    phase: crate::state::MembershipOperationPhase,
+    evidence: &str,
+) -> anyhow::Result<()> {
+    let Some(mut operation) = store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .filter(|operation| {
+            operation.raft_node_id == node_id
+                && operation.kind == crate::state::MembershipOperationKind::Join
+        })
+        .cloned()
+    else {
+        return Ok(());
+    };
+    raft.ensure_linearizable().await?;
+    operation.expected_membership =
+        crate::raft_membership_guard::membership_revision(&raft.metrics().borrow().clone())?;
+    operation.phase = phase;
+    operation.evidence = Some(evidence.to_string());
+    if operation.phase.is_terminal() {
+        operation.terminal_at = Some(Utc::now().to_rfc3339());
+    }
+    write_applied(
+        raft,
+        DesiredStateCommand::TransitionMembershipOperation { operation },
+    )
+    .await?;
+    Ok(())
+}
+
 pub fn spawn_join_coordinator(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -35,12 +71,106 @@ pub fn spawn_join_coordinator(
     })
 }
 
+/// This runs only after the caller has crossed the all-voter capability barrier and acquired the
+/// lifecycle gate. It converts one replayable legacy reservation at a time; malformed legacy
+/// material is preserved as terminal evidence and is never eligible for promotion.
+pub async fn migrate_one_legacy_join_session(
+    raft: &Arc<dyn RaftFacade>,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+) -> anyhow::Result<()> {
+    raft.ensure_linearizable().await?;
+    let metrics = raft.metrics().borrow().clone();
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
+        return Ok(());
+    }
+    let Some((session, node)) = ({
+        let store = store.lock().await;
+        if store.state().active_membership_operation().is_some() {
+            None
+        } else {
+            store
+                .state()
+                .join_sessions
+                .values()
+                .find(|session| session.status.is_pending())
+                .cloned()
+                .map(|session| {
+                    let node = store.get_node(&session.node_id);
+                    (session, node)
+                })
+        }
+    }) else {
+        return Ok(());
+    };
+    let parsed_raft_node_id = raft_node_id_from_ulid(&session.node_id).ok();
+    // A malformed legacy identity has no legal membership target. Keep terminal evidence without
+    // ever issuing a membership action for the synthetic zero id.
+    let raft_node_id = parsed_raft_node_id.unwrap_or_default();
+    let membership = metrics.membership_config.membership();
+    let target_is_voter = membership
+        .voter_ids()
+        .any(|node_id| node_id == raft_node_id);
+    let target_exists = membership.get_node(&raft_node_id).is_some();
+    let deadline_valid = DateTime::parse_from_rfc3339(&session.activation_deadline)
+        .is_ok_and(|deadline| deadline.with_timezone(&Utc) > Utc::now());
+    let replayable = parsed_raft_node_id.is_some()
+        && node.as_ref().is_some_and(|node| {
+            node.node_id == session.node_id
+                && !session.request_fingerprint.trim().is_empty()
+                && !session.signed_cert_pem.trim().is_empty()
+                && deadline_valid
+                && !target_is_voter
+                && (target_exists || session.status == JoinSessionStatus::Reserved)
+        });
+    let evidence = if replayable {
+        "legacy join session converted after capability barrier"
+    } else {
+        "legacy join session is not replayable and was blocked"
+    };
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::Join,
+        raft_node_id,
+        node_id: Some(session.node_id.clone()),
+        expected_membership: crate::raft_membership_guard::membership_revision(&metrics)?,
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: true,
+        delete_endpoints: false,
+        expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some(evidence.to_string()),
+    };
+    write_applied(
+        raft,
+        DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation.clone()),
+            node: replayable.then_some(node).flatten(),
+            join_session: replayable.then_some(session.clone()),
+        },
+    )
+    .await?;
+    if !replayable {
+        crate::raft_membership_guard::block_membership_operation(raft, operation, evidence).await?;
+    }
+    Ok(())
+}
+
 async fn reconcile_once(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
 ) -> anyhow::Result<()> {
+    let observed = raft.metrics().borrow().clone();
+    if observed.state != openraft::ServerState::Leader {
+        return Ok(());
+    }
+    raft.ensure_linearizable().await?;
     let metrics = raft.metrics().borrow().clone();
-    if metrics.state != openraft::ServerState::Leader {
+    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
+    {
         return Ok(());
     }
     let sessions = store
@@ -56,6 +186,27 @@ async fn reconcile_once(
             continue;
         }
         let node_id = raft_node_id_from_ulid(&session.node_id)?;
+        let Some(mut operation) = store
+            .lock()
+            .await
+            .state()
+            .active_membership_operation()
+            .filter(|operation| {
+                operation.kind == crate::state::MembershipOperationKind::Join
+                    && operation.raft_node_id == node_id
+                    && operation.node_id.as_deref() == Some(session.node_id.as_str())
+            })
+            .cloned()
+        else {
+            tracing::error!(
+                node_id = %session.node_id,
+                concat!(
+                    "legacy or malformed pending join session has no durable Join operation; ",
+                    "promotion is blocked"
+                )
+            );
+            continue;
+        };
         let voters = metrics
             .membership_config
             .membership()
@@ -66,6 +217,32 @@ async fn reconcile_once(
             .nodes()
             .any(|(member_id, _)| *member_id == node_id);
         if voters.contains(&node_id) {
+            match operation.phase {
+                crate::state::MembershipOperationPhase::LearnerRegistered => {
+                    transition_join_operation(
+                        &raft,
+                        &store,
+                        node_id,
+                        crate::state::MembershipOperationPhase::VoterPromoted,
+                        "join voter observed after uncertain promotion request",
+                    )
+                    .await?;
+                }
+                crate::state::MembershipOperationPhase::VoterPromoted => {}
+                _ => {
+                    crate::raft_membership_guard::block_membership_operation(
+                        &raft,
+                        operation,
+                        "join voter shape is not an exact lifecycle successor",
+                    )
+                    .await?;
+                    tracing::error!(concat!(
+                        "join voter shape is not an exact lifecycle successor; ",
+                        "completion is blocked"
+                    ));
+                    continue;
+                }
+            }
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
             let node = store
@@ -81,6 +258,14 @@ async fn reconcile_once(
                 },
             )
             .await?;
+            transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::Completed,
+                "join voter observed after recovery",
+            )
+            .await?;
             continue;
         }
         let deadline =
@@ -89,18 +274,34 @@ async fn reconcile_once(
             let _guard = crate::raft_membership_guard::membership_operation_gate()
                 .lock_owned()
                 .await;
-            if voters.contains(&node_id) {
-                let _ = raft
-                    .change_membership(
-                        openraft::ChangeMembers::RemoveVoters(BTreeSet::from([node_id])),
-                        true,
-                    )
-                    .await;
-            }
-            if registered {
+            let metrics =
+                match crate::raft_membership_guard::require_expected_membership(&raft, &operation)
+                    .await
+                {
+                    Ok(metrics) => metrics,
+                    Err(error) => {
+                        crate::raft_membership_guard::block_membership_operation(
+                            &raft,
+                            operation,
+                            format!(
+                                "join membership revision changed before expiry cleanup: {error}"
+                            ),
+                        )
+                        .await?;
+                        continue;
+                    }
+                };
+            let membership = metrics.membership_config.membership();
+            if membership.voter_ids().any(|voter_id| voter_id == node_id) {
+                raft.change_membership(
+                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([node_id])),
+                    false,
+                )
+                .await?;
+            } else if membership.get_node(&node_id).is_some() {
                 raft.change_membership(
                     openraft::ChangeMembers::RemoveNodes(BTreeSet::from([node_id])),
-                    true,
+                    false,
                 )
                 .await?;
             }
@@ -124,18 +325,51 @@ async fn reconcile_once(
                 },
             )
             .await?;
+            transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::Expired,
+                "join expired and its registered learner was removed",
+            )
+            .await?;
             continue;
         }
         if session.status == JoinSessionStatus::Reserved {
             if !registered {
+                let _guard = crate::raft_membership_guard::membership_operation_gate()
+                    .lock_owned()
+                    .await;
+                let confirmed_metrics =
+                    match crate::raft_membership_guard::require_expected_membership(
+                        &raft, &operation,
+                    )
+                    .await
+                    {
+                        Ok(metrics) => metrics,
+                        Err(_error) => {
+                            crate::raft_membership_guard::block_membership_operation(
+                                &raft,
+                                operation,
+                                "join membership revision changed before learner registration",
+                            )
+                            .await?;
+                            continue;
+                        }
+                    };
+                if confirmed_metrics
+                    .membership_config
+                    .membership()
+                    .get_node(&node_id)
+                    .is_some()
+                {
+                    continue;
+                }
                 let node = store
                     .lock()
                     .await
                     .get_node(&session.node_id)
                     .ok_or_else(|| anyhow::anyhow!("reserved join node is missing"))?;
-                let _guard = crate::raft_membership_guard::membership_operation_gate()
-                    .lock_owned()
-                    .await;
                 raft.add_learner(
                     node_id,
                     crate::raft::types::NodeMeta {
@@ -145,6 +379,19 @@ async fn reconcile_once(
                     },
                 )
                 .await?;
+            }
+            let learner_observed = raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .membership()
+                .get_node(&node_id)
+                .is_some();
+            if !learner_observed {
+                // `add_learner` may resolve before the local metrics watcher publishes the
+                // committed membership. Keep the reservation replayable until the exact learner
+                // shape is observable instead of persisting a state transition ahead of Raft.
+                continue;
             }
             // A recovered reservation may already have its learner membership. Record the
             // committed state that precedes this status transition so promotion cannot use only
@@ -167,6 +414,37 @@ async fn reconcile_once(
             )
             .await?;
         }
+        if session.status == JoinSessionStatus::LearnerRegistered
+            && operation.phase == crate::state::MembershipOperationPhase::Prepared
+        {
+            let learner_observed = raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .membership()
+                .get_node(&node_id)
+                .is_some();
+            if !learner_observed {
+                // OpenRaft may acknowledge nonblocking learner registration before this leader's
+                // metrics watcher has published it. Keep Prepared until that exact learner shape
+                // is observable, so its fingerprint cannot be recorded from the old membership.
+                continue;
+            }
+            transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::LearnerRegistered,
+                "learner observed after uncertain registration request",
+            )
+            .await?;
+            operation.phase = crate::state::MembershipOperationPhase::LearnerRegistered;
+        }
+        if session.status == JoinSessionStatus::LearnerRegistered
+            && operation.phase != crate::state::MembershipOperationPhase::LearnerRegistered
+        {
+            continue;
+        }
         let _guard = crate::raft_membership_guard::membership_operation_gate()
             .lock_owned()
             .await;
@@ -178,7 +456,55 @@ async fn reconcile_once(
             if deadline <= Utc::now() {
                 continue;
             }
+            let Some(current_operation) = store
+                .lock()
+                .await
+                .state()
+                .active_membership_operation()
+                .filter(|operation| {
+                    operation.kind == crate::state::MembershipOperationKind::Join
+                        && operation.raft_node_id == node_id
+                })
+                .cloned()
+            else {
+                anyhow::bail!("join operation disappeared before promotion")
+            };
+            let current_metrics = match crate::raft_membership_guard::require_expected_membership(
+                &raft,
+                &current_operation,
+            )
+            .await
+            {
+                Ok(metrics) => metrics,
+                Err(error) => {
+                    crate::raft_membership_guard::block_membership_operation(
+                        &raft,
+                        current_operation,
+                        format!("join membership revision changed before promotion: {error}"),
+                    )
+                    .await?;
+                    continue;
+                }
+            };
+            let current_membership = current_metrics.membership_config.membership();
+            if current_membership.get_node(&node_id).is_none() {
+                crate::raft_membership_guard::block_membership_operation(
+                    &raft,
+                    current_operation,
+                    "join learner disappeared before promotion",
+                )
+                .await?;
+                continue;
+            }
             raft.add_voters(BTreeSet::from([node_id])).await?;
+            transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::VoterPromoted,
+                "learner promoted after catch-up",
+            )
+            .await?;
             session.status = JoinSessionStatus::Consumed;
             session.terminal_at = Some(Utc::now().to_rfc3339());
             let node = store
@@ -194,10 +520,22 @@ async fn reconcile_once(
                 },
             )
             .await?;
+            transition_join_operation(
+                &raft,
+                &store,
+                node_id,
+                crate::state::MembershipOperationPhase::Completed,
+                "join completed",
+            )
+            .await?;
         }
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "join_coordinator_promotion_tests.rs"]
+mod promotion_tests;
 
 #[cfg(test)]
 mod tests {
@@ -221,6 +559,33 @@ mod tests {
         inner: LocalRaft,
         add_learner_calls: Arc<AtomicUsize>,
         wait_required_log_index: Arc<AtomicUsize>,
+    }
+
+    async fn insert_join_operation(
+        store: &Arc<Mutex<JsonSnapshotStore>>,
+        metrics: &openraft::RaftMetrics<u64, RaftNodeMeta>,
+    ) {
+        let raft_node_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap();
+        store.lock().await.state_mut().membership_operations.insert(
+            "join-operation".to_string(),
+            crate::state::MembershipOperation {
+                operation_id: "join-operation".to_string(),
+                kind: crate::state::MembershipOperationKind::Join,
+                raft_node_id,
+                node_id: Some(xp_test_fixtures::identifier_ulid_b().to_owned()),
+                expected_membership: crate::raft_membership_guard::membership_revision(metrics)
+                    .unwrap(),
+                phase: crate::state::MembershipOperationPhase::Prepared,
+                legacy: false,
+                delete_endpoints: false,
+                expected_endpoint_ids: Vec::new(),
+                expected_endpoint_tags: Vec::new(),
+                created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                next_retry_at: None,
+                terminal_at: None,
+                evidence: Some("test join operation".to_string()),
+            },
+        );
     }
 
     impl RaftFacade for RecoveringRaft {
@@ -274,7 +639,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failover_re_registers_a_durable_reserved_learner() {
+    async fn failover_keeps_a_durable_reservation_until_metrics_observe_the_learner() {
         let tmp = tempfile::tempdir().unwrap();
         let leader_id = xp_test_fixtures::identifier_ulid_a().to_owned();
         let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
@@ -334,6 +699,7 @@ mod tests {
                 )]),
             ),
         ));
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let calls = Arc::new(AtomicUsize::new(0));
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
@@ -355,8 +721,81 @@ mod tests {
                 .next()
                 .unwrap()
                 .status,
-            JoinSessionStatus::LearnerRegistered
+            JoinSessionStatus::Reserved,
+            "a nonblocking learner registration acknowledgement must not advance the session"
         );
+        assert_eq!(
+            store
+                .lock()
+                .await
+                .state()
+                .active_membership_operation()
+                .unwrap()
+                .phase,
+            crate::state::MembershipOperationPhase::Prepared,
+            concat!(
+                "a nonblocking add_learner acknowledgement must not advance the operation ",
+                "before metrics observe the learner"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_pending_session_never_registers_or_promotes_without_operation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let learner_id = xp_test_fixtures::identifier_ulid_b().to_owned();
+        let store = Arc::new(Mutex::new(
+            JsonSnapshotStore::load_or_init(StoreInit {
+                data_dir: tmp.path().to_owned(),
+                bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
+                bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+                bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+                bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            })
+            .unwrap(),
+        ));
+        {
+            let mut store = store.lock().await;
+            store.state_mut().nodes.insert(
+                learner_id.clone(),
+                Node {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                    access_host: xp_test_fixtures::secondary_host().to_owned(),
+                    api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                    quota_limit_bytes: 0,
+                    quota_reset: NodeQuotaReset::default(),
+                },
+            );
+            store.state_mut().join_sessions.insert(
+                learner_id.clone(),
+                JoinSession {
+                    node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                    request_fingerprint: "fingerprint".into(),
+                    signed_cert_pem: "certificate".into(),
+                    token_expires_at: (Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+                    activation_deadline: (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339(),
+                    required_log_index: 1,
+                    status: JoinSessionStatus::Reserved,
+                    terminal_at: None,
+                },
+            );
+        }
+        let leader_id = raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_a()).unwrap();
+        let mut metrics = openraft::RaftMetrics::new_initial(leader_id);
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(leader_id);
+        let (_tx, rx) = watch::channel(metrics);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
+            inner: LocalRaft::new(store.clone(), rx),
+            add_learner_calls: calls.clone(),
+            wait_required_log_index: Arc::new(AtomicUsize::new(0)),
+        });
+
+        reconcile_once(raft, store).await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -432,6 +871,7 @@ mod tests {
                 ]),
             ),
         ));
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let observed = Arc::new(AtomicUsize::new(0));
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
@@ -503,6 +943,7 @@ mod tests {
         let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
         metrics.state = openraft::ServerState::Leader;
         metrics.current_leader = Some(raft_id);
+        insert_join_operation(&store, &metrics).await;
         let (_tx, rx) = watch::channel(metrics);
         let raft: Arc<dyn RaftFacade> = Arc::new(RecoveringRaft {
             inner: LocalRaft::new(store.clone(), rx),

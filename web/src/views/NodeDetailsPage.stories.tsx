@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
-import type { AdminNode } from "../api/adminNodes";
+import type { AdminMembershipOperation, AdminNode } from "../api/adminNodes";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
@@ -54,11 +54,36 @@ const nodeEndpoints: AdminEndpoint[] = [
 	},
 ];
 
+const pendingDeleteOperation: AdminMembershipOperation = {
+	operation_id: "e9a42d3c-9812-4a38-8a23-2d8cb7770001",
+	kind: "remove_node",
+	raft_node_id: 42,
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	expected_membership: "storybook-membership-revision",
+	phase: "prepared",
+	delete_endpoints: false,
+	expected_endpoint_ids: [],
+	created_at: fixtureCatalog.timestamp.t20260308T005900(),
+	next_retry_at: fixtureCatalog.timestamp.t20260308T000100(),
+	terminal_at: null,
+	evidence: "waiting for Raft membership removal",
+};
+
+const blockedDeleteOperation: AdminMembershipOperation = {
+	...pendingDeleteOperation,
+	operation_id: "43c32c41-c0f4-4240-b51d-f44e68f3f1f1",
+	phase: "blocked",
+	next_retry_at: null,
+	terminal_at: fixtureCatalog.timestamp.t20260308T000200(),
+	evidence: "membership revision changed while the operation was pending",
+};
+
 const ipUsageReports = buildDenseNodeIpUsageStories();
 const tcpConnectionReports = buildDenseNodeTcpConnectionStories();
 
 const meta = {
 	title: "Pages/NodeDetailsPage",
+	tags: ["autodocs"],
 	render: () => <div />,
 	parameters: {
 		router: {
@@ -211,6 +236,72 @@ export const DeleteWithEndpointCleanup: Story = {
 			await screen.findByRole("button", {
 				name: "Delete node and endpoints",
 			}),
+		).toBeVisible();
+	},
+};
+
+export const DeletePending: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [node],
+			},
+			nodeDeleteAccepted: {
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
+				operation: pendingDeleteOperation,
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Danger zone" }),
+		);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Delete node" }),
+		);
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Delete" }),
+		);
+		await expect(await canvas.findByRole("status")).toHaveTextContent(
+			"Node deletion is continuing.",
+		);
+		await expect(
+			await canvas.findByRole("button", { name: "Delete node" }),
+		).toBeDisabled();
+	},
+};
+
+export const DeleteBlocked: Story = {
+	parameters: {
+		mockApi: {
+			data: {
+				nodes: [node],
+			},
+			nodeDeleteAccepted: {
+				nodeId: fixtureCatalog.identifier.nodePrimary(),
+				operation: blockedDeleteOperation,
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Danger zone" }),
+		);
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Delete node" }),
+		);
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Delete" }),
+		);
+		await expect(await canvas.findByRole("status")).toHaveTextContent(
+			"Node deletion is blocked.",
+		);
+		await expect(
+			await canvas.findByText(
+				"membership revision changed while the operation was pending",
+			),
 		).toBeVisible();
 	},
 };

@@ -17,6 +17,7 @@ import {
 } from "../api/adminNodeRuntime";
 import {
 	deleteAdminNode,
+	fetchAdminMembershipOperation,
 	fetchAdminNode,
 	fetchAdminNodeDeletePreview,
 	patchAdminNode,
@@ -24,6 +25,7 @@ import {
 } from "../api/adminNodes";
 import { fetchAdminRepositoryHistory } from "../api/adminRepositoryHistory";
 import { fetchAdminNodeTcpConnections } from "../api/adminTcpConnections";
+import { BackendApiError } from "../api/backendError";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -153,7 +155,7 @@ function setupMocks(args?: {
 		node_id: fixtureCatalog.nodeId.fixture17(),
 		endpoints: [],
 	});
-	vi.mocked(deleteAdminNode).mockResolvedValue(undefined);
+	vi.mocked(deleteAdminNode).mockResolvedValue({ status: "completed" });
 	vi.mocked(fetchAdminNodeRuntime).mockResolvedValue({
 		node,
 		summary: {
@@ -348,6 +350,7 @@ function setupMocks(args?: {
 describe("<NodeDetailsPage />", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		sessionStorage.clear();
 		vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-03-08T00:59:30Z"));
 		mockReadAdminToken.mockReturnValue("admintoken");
 		mockRouteParams.nodeId = fixtureCatalog.nodeId.fixture134();
@@ -661,6 +664,70 @@ describe("<NodeDetailsPage />", () => {
 			])?.items,
 		).toEqual([]);
 		expect(mockNavigate).toHaveBeenCalledWith({ to: "/nodes" });
+	});
+
+	it("keeps a 202 node deletion operation visible and disables duplicate deletion", async () => {
+		setupMocks();
+		const operationId = "e9a42d3c-9812-4a38-8a23-2d8cb7770001";
+		vi.mocked(deleteAdminNode).mockResolvedValueOnce({
+			status: "accepted",
+			operationId,
+			phase: "prepared",
+		});
+		vi.mocked(fetchAdminMembershipOperation).mockResolvedValue({
+			operation_id: operationId,
+			kind: "remove_node",
+			raft_node_id: 42,
+			node_id: fixtureCatalog.nodeId.fixture134(),
+			expected_membership: "membership-revision",
+			phase: "prepared",
+			delete_endpoints: false,
+			expected_endpoint_ids: [],
+			created_at: fixtureCatalog.timestamp.t20260308T005900(),
+			next_retry_at: null,
+			terminal_at: null,
+			evidence: "admin node deletion accepted",
+		});
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("button", "Delete node"));
+		fireEvent.click(await screenByRole("button", "Delete"));
+
+		await waitFor(() => {
+			expect(fetchAdminMembershipOperation).toHaveBeenCalledWith(
+				"admintoken",
+				operationId,
+				expect.any(AbortSignal),
+			);
+		});
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"Node deletion is continuing.",
+		);
+		expect(await screenByRole("button", "Delete node")).toBeDisabled();
+	});
+
+	it("clears an expired stored node deletion operation after a 404", async () => {
+		setupMocks();
+		const operationId = "e9a42d3c-9812-4a38-8a23-2d8cb7770001";
+		sessionStorage.setItem(
+			`xp_node_delete_operation_v1:${fixtureCatalog.nodeId.fixture134()}`,
+			operationId,
+		);
+		vi.mocked(fetchAdminMembershipOperation).mockRejectedValue(
+			new BackendApiError({ status: 404, message: "operation not found" }),
+		);
+		renderPage();
+
+		await waitFor(() => {
+			expect(
+				sessionStorage.getItem(
+					`xp_node_delete_operation_v1:${fixtureCatalog.nodeId.fixture134()}`,
+				),
+			).toBeNull();
+		});
+		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		expect(await screenByRole("button", "Delete node")).toBeEnabled();
 	});
 
 	it("shows online stats warning state when snapshots are unavailable", async () => {

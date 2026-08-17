@@ -93,6 +93,20 @@ function safeLocalStorageRemove(key: string) {
 	}
 }
 
+function clearStorybookNodeDeleteOperations() {
+	try {
+		const prefix = "xp_node_delete_operation_v1:";
+		for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+			const key = sessionStorage.key(index);
+			if (key?.startsWith(prefix)) {
+				sessionStorage.removeItem(key);
+			}
+		}
+	} catch {
+		// ignore
+	}
+}
+
 export const globalTypes = {
 	theme: {
 		name: "Theme",
@@ -168,6 +182,7 @@ const preview: Preview = {
 			}
 			safeLocalStorageRemove(getDemoStorageKey());
 			clearDemoFallbackState();
+			clearStorybookNodeDeleteOperations();
 
 			const history = createMemoryHistory({
 				initialEntries: [routerParams?.initialEntry ?? "/__story"],

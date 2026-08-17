@@ -35,6 +35,9 @@ pub enum DomainError {
     NodeEndpointSetChanged {
         node_id: String,
     },
+    NodeLifecycleOperationActive {
+        node_id: String,
+    },
     InvalidRealityServerName {
         server_name: String,
         reason: String,
@@ -74,6 +77,7 @@ impl DomainError {
             Self::RealityDomainNotFound { .. } => "not_found",
             Self::NodeInUse { .. }
             | Self::NodeEndpointSetChanged { .. }
+            | Self::NodeLifecycleOperationActive { .. }
             | Self::EndpointChanged { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
@@ -115,6 +119,10 @@ impl std::fmt::Display for DomainError {
             Self::NodeEndpointSetChanged { node_id } => write!(
                 f,
                 "node endpoint set changed since delete preview: node_id={node_id}"
+            ),
+            Self::NodeLifecycleOperationActive { node_id } => write!(
+                f,
+                "endpoint changes blocked by membership removal: node_id={node_id}"
             ),
             Self::InvalidRealityServerName {
                 server_name,

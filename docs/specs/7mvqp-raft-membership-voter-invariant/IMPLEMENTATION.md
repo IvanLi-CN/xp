@@ -1,27 +1,41 @@
-# Raft Membership Voter Invariant Implementation
+# Raft membership lifecycle implementation
 
-## Current State
+## Current state
 
-- Cluster join atomically reserves the token with the desired-state node, calls `add_learner`,
-  records `learner_registered`, and returns bootstrap material without waiting for catch-up.
-- The leader coordinator resumes durable pending sessions after restart or failover, waits for the
-  required log index, and then calls `add_voters`. Expiry removes membership and node endpoints,
-  then deletes the desired-state node while recording the terminal tombstone atomically.
-- `raft_membership_guard` scans Raft metrics for `membership.nodes - voter_ids`.
-- The guard promotes non-voter membership nodes only while running on the leader; non-leader states
-  log the divergence and leave disk state untouched.
-- Join/delete/coordinator membership transitions and guard repair share a membership operation gate.
-  The guard excludes learners with pending join sessions and retains legacy learner repair for nodes
-  without a session.
-- Server startup spawns the guard with a periodic interval.
+- `PersistedState.membership_operations` is additive and defaults on old snapshots; the schema
+  version remains 12. Begin and transition state-machine commands validate operation identity,
+  one active operation, monotonic phase transitions, and terminal timestamps.
+- `RaftFacade::ensure_linearizable()` uses OpenRaft's quorum heartbeat in production. Lifecycle
+  writers evaluate mappings and fingerprints only after that check.
+- `raft_membership_guard` never infers a promotion. Its periodic work audits orphan voters,
+  unexpected learners, and missing desired members; it resumes only recorded RemoveNode and
+  Restore operations, and prunes terminal evidence after 24 hours.
+- Join atomically records the Node, JoinSession, and operation before learner registration. The
+  coordinator only promotes the exact recorded target after a fingerprint match; a legacy session
+  cannot cause a promotion until it has passed capability-gated migration into an operation.
+- Delete records RemoveNode intent, uses a single retain=false removal action, verifies absence,
+  and does not compensate by restoring a learner or voter. A five-second incomplete delete returns
+  `202` and leaves a status operation for retry.
+- Orphan voter repair is signed, internal, leader-local CLI/API. Generic internal client-write
+  refuses membership-operation commands.
+
+## Compatibility
+
+- `cluster.membership-lifecycle-v1` is advertised by this build. Before a new lifecycle command,
+  all current voters must advertise it; otherwise the caller receives
+  `coordinated_upgrade_required` and no new command is written.
+- An additive persisted field alone is compatible with old snapshots. The command variants are not
+  compatible with an old binary, which is why the capability barrier precedes the first command.
+- After the barrier, valid legacy JoinSessions become replayable Join operations. Invalid legacy
+  sessions become terminal Blocked evidence; they are not inferred from member shape or promoted.
 
 ## Coverage
 
-- HTTP join tests prove Phase 1 returns before catch-up/promotion and replays the same reservation.
-- Guard tests cover non-voter detection, leader repair, in-flight operation skipping, and
-  follower/no-leader non-repair.
-
-## Remaining Gaps
-
-- Production quorum recovery still requires an explicit owner-approved operation on the selected
-  healthy node.
+- State tests reject overlapping operations, invalid phase jumps, and terminal transitions without
+  evidence timestamps.
+- Membership tests exercise dry-run/apply orphan repair, exact fingerprinting, unique target
+  validation, `RemoveVoters(..., false)`, absent postcondition, and unchanged DesiredState nodes.
+- HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
+  guards, and membership failure paths.
+- Node details tests cover an accepted deletion's persisted operation id, status polling, and
+  duplicate-delete disablement.

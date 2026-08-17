@@ -580,9 +580,16 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             raft_facade.clone(),
         )?;
     let _vless_https_canary_task = vless_https_canary_task;
+    let membership_guard_cleanup = xp::raft_membership_guard::MembershipRemovalCleanup {
+        local_raft_node_id: raft_id,
+        local_node_id: cluster.node_id.clone(),
+        node_history: node_history.clone(),
+        reconcile: reconcile.clone(),
+    };
     let _raft_membership_guard_task = xp::raft_membership_guard::spawn_membership_voter_guard(
         membership_guard_raft_facade,
         store.clone(),
+        membership_guard_cleanup,
         Duration::from_secs(60),
     );
     let _join_coordinator_task =

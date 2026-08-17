@@ -82,6 +82,18 @@ import {
 	buildRepositoryHistory,
 } from "./historyRepositoryMock";
 import {
+	clone,
+	errorResponse,
+	jsonResponse,
+	textResponse,
+} from "./mockResponses";
+import {
+	type StorybookNodeDeleteAccepted,
+	configureNodeDeleteOperationMock,
+	membershipOperationResponse,
+	nodeDeleteAcceptedResponse,
+} from "./nodeDeleteOperationMock";
+import {
 	buildFixtureUserQuotaSummaryItem,
 	buildUserNodeQuotaStatusItem,
 } from "./staticFixtureMappings";
@@ -92,6 +104,7 @@ export type StorybookApiMockConfig = {
 	failAdminConfig?: boolean;
 	failNodeRuntimeNodeIds?: string[];
 	failVersionCheck?: boolean;
+	nodeDeleteAccepted?: StorybookNodeDeleteAccepted;
 	probe?: import("./endpointProbeMock").StorybookEndpointProbeMock;
 };
 
@@ -148,8 +161,6 @@ let lastStoryKey = "";
 let fetchInstalled = false;
 let originalFetch: typeof fetch | null = null;
 
-const JSON_HEADERS = { "Content-Type": "application/json" } as const;
-const TEXT_HEADERS = { "Content-Type": "text/plain" } as const;
 const DEFAULT_GLOBAL_WEIGHT = 100;
 
 function selectWindowedNodeIpUsage(
@@ -236,51 +247,6 @@ function selectWindowedUserTraffic(
 	if (!report)
 		throw new Error(`missing user traffic report for window ${window}`);
 	return { ...clone(report), traffic: { ...clone(report.traffic), window } };
-}
-
-function clone<T>(value: T): T {
-	if (typeof structuredClone === "function") {
-		return structuredClone(value);
-	}
-	return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function jsonResponse(
-	data: unknown,
-	init?: { status?: number; headers?: Record<string, string> },
-): Response {
-	return new Response(JSON.stringify(data), {
-		status: init?.status ?? 200,
-		headers: { ...JSON_HEADERS, ...init?.headers },
-	});
-}
-
-function textResponse(
-	data: string,
-	init?: { status?: number; headers?: Record<string, string> },
-): Response {
-	return new Response(data, {
-		status: init?.status ?? 200,
-		headers: { ...TEXT_HEADERS, ...init?.headers },
-	});
-}
-
-function errorResponse(
-	status: number,
-	code: string,
-	message: string,
-	details: Record<string, unknown> = {},
-): Response {
-	return jsonResponse(
-		{
-			error: {
-				code,
-				message,
-				details,
-			},
-		},
-		{ status },
-	);
 }
 
 function sseResponse(
@@ -1128,6 +1094,7 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		nextUserId,
 	};
 
+	configureNodeDeleteOperationMock(state, config?.nodeDeleteAccepted);
 	refreshGlobalEndpointReality(state);
 	return state;
 }
@@ -1398,6 +1365,15 @@ async function handleRequest(
 	if (path === "/api/admin/nodes" && method === "GET") {
 		return jsonResponse({ items: clone(state.nodes) });
 	}
+
+	const operationResponse = membershipOperationResponse(
+		state,
+		path,
+		method,
+		jsonResponse,
+		errorResponse,
+	);
+	if (operationResponse) return operationResponse;
 
 	const nodeDeletePreviewMatch = path.match(
 		/^\/api\/admin\/nodes\/([^/]+)\/delete-preview$/,
@@ -1837,6 +1813,8 @@ async function handleRequest(
 			return jsonResponse(clone(updated));
 		}
 		if (method === "DELETE") {
+			const accepted = nodeDeleteAcceptedResponse(state, nodeId, jsonResponse);
+			if (accepted) return accepted;
 			const deleteEndpoints =
 				url.searchParams.get("delete_endpoints") === "true";
 			const endpoints = state.endpoints.filter(

@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     convert::Infallible,
-    future::Future,
     sync::Arc,
     time::Instant as StdInstant,
 };
@@ -114,6 +113,8 @@ mod capabilities;
 mod history_repository;
 mod join_capability;
 mod join_protocol;
+mod membership_restore;
+mod node_metadata;
 mod version_check;
 mod web_assets;
 use capabilities::api_capabilities;
@@ -217,11 +218,19 @@ impl From<StoreError> for ApiError {
                 | crate::domain::DomainError::NodeInUse { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
+                crate::domain::DomainError::NodeEndpointSetChanged { .. }
+                | crate::domain::DomainError::NodeLifecycleOperationActive { .. }
+                | crate::domain::DomainError::EndpointChanged { .. } => {
+                    ApiError::conflict(domain.to_string())
+                }
                 _ => ApiError::invalid_request(domain.to_string()),
             },
             StoreError::SchemaVersionMismatch { .. } => ApiError::internal(value.to_string()),
             StoreError::Migration { .. } => ApiError::internal(value.to_string()),
-            StoreError::InvalidJoinSession { .. } => ApiError::conflict(value.to_string()),
+            StoreError::InvalidJoinSession { .. }
+            | StoreError::InvalidMembershipOperation { .. } => {
+                ApiError::conflict(value.to_string())
+            }
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
     }
@@ -675,8 +684,34 @@ struct AdminNodeDeletePreviewResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct InternalRestoreExistingNodeMembershipRequest {
-    node_id: String,
+#[serde(deny_unknown_fields)]
+struct InternalRepairOrphanVoterRequest {
+    raft_node_id: RaftNodeId,
+    #[serde(default)]
+    apply: bool,
+    #[serde(default)]
+    expected_membership: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MembershipOperationResponse {
+    operation: crate::state::MembershipOperation,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InternalRepairOrphanVoterResponse {
+    dry_run: bool,
+    raft_node_id: RaftNodeId,
+    expected_membership: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<crate::state::MembershipOperation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminNodeDeleteAcceptedResponse {
+    operation_id: String,
+    phase: crate::state::MembershipOperationPhase,
+    status_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -985,17 +1020,21 @@ pub fn build_router_with_mesh_telemetry(
             post(admin_internal_raft_client_write),
         )
         .route(
-            "/_internal/raft/change-membership",
-            post(admin_internal_raft_change_membership),
+            "/_internal/raft/repair-orphan-voter",
+            post(admin_internal_repair_orphan_voter),
         )
         .route(
-            "/_internal/raft/set-nodes",
-            post(admin_internal_raft_set_nodes),
+            "/_internal/raft/membership-operations/{operation_id}",
+            get(admin_internal_get_membership_operation),
+        )
+        .route(
+            "/_internal/raft/node-metadata",
+            post(node_metadata::admin_internal_update_node_metadata),
         )
         .route("/_internal/mesh/health", get(admin_internal_mesh_health))
         .route(
-            "/_internal/raft/restore-existing-node",
-            post(admin_internal_restore_existing_node_membership),
+            "/_internal/raft/restore-node",
+            post(membership_restore::admin_internal_restore_node),
         )
         .route(
             "/_internal/users/quota-summaries",
@@ -1059,6 +1098,10 @@ pub fn build_router_with_mesh_telemetry(
         .route("/mesh/probes", post(admin_run_mesh_probes))
         .route("/status/events", get(admin_stream_status_events))
         .route("/nodes", get(admin_list_nodes))
+        .route(
+            "/membership-operations/{operation_id}",
+            get(admin_get_membership_operation),
+        )
         .route(
             "/nodes/{node_id}/delete-preview",
             get(admin_get_node_delete_preview),
@@ -1639,7 +1682,7 @@ async fn cluster_info(
 
 const CLUSTER_RUNTIME_FANOUT_TIMEOUT: Duration = Duration::from_secs(8);
 #[cfg(not(test))]
-const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_secs(20);
+const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -1693,256 +1736,86 @@ async fn admin_internal_mesh_health(
     })))
 }
 
-#[derive(Deserialize)]
-struct InternalChangeMembershipRequest {
-    retain: bool,
-    changes: InternalChangeMembers,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum InternalChangeMembers {
-    AddVoters { nodes: Vec<InternalSetNode> },
-    AddNodes { nodes: Vec<InternalSetNode> },
-    RemoveVoters { node_ids: Vec<RaftNodeId> },
-    RemoveNodes { node_ids: Vec<RaftNodeId> },
-}
-
-fn internal_set_node_map(
-    nodes: Vec<InternalSetNode>,
-) -> Result<std::collections::BTreeMap<RaftNodeId, RaftNodeMeta>, ApiError> {
-    if nodes.is_empty() {
-        return Err(ApiError::invalid_request("nodes is empty"));
-    }
-
-    let mut map = std::collections::BTreeMap::new();
-    for n in nodes {
-        if n.node_id.trim().is_empty() {
-            return Err(ApiError::invalid_request("node_id is empty"));
-        }
-        if n.node_name.trim().is_empty() {
-            return Err(ApiError::invalid_request("node_name is empty"));
-        }
-        validate_https_origin(&n.api_base_url)?;
-
-        let raft_node_id = raft_node_id_from_ulid(&n.node_id)
-            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
-        if map.contains_key(&raft_node_id) {
-            return Err(ApiError::invalid_request(format!(
-                "duplicate node_id: {}",
-                n.node_id
-            )));
-        }
-
-        map.insert(
-            raft_node_id,
-            RaftNodeMeta {
-                name: n.node_name,
-                api_base_url: n.api_base_url.clone(),
-                raft_endpoint: n.api_base_url,
-            },
-        );
-    }
-
-    Ok(map)
-}
-
-async fn admin_internal_raft_change_membership(
+async fn admin_internal_repair_orphan_voter(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
-    ApiJson(req): ApiJson<InternalChangeMembershipRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+    ApiJson(req): ApiJson<InternalRepairOrphanVoterRequest>,
+) -> Result<Json<InternalRepairOrphanVoterResponse>, ApiError> {
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
+    join_capability::require_membership_lifecycle_on_voters(&state).await?;
 
-    let node_ids: BTreeSet<RaftNodeId> = match &req.changes {
-        InternalChangeMembers::AddVoters { nodes } | InternalChangeMembers::AddNodes { nodes } => {
-            let node_ids = nodes
-                .iter()
-                .map(|node| {
-                    raft_node_id_from_ulid(&node.node_id)
-                        .map_err(|e| ApiError::invalid_request(e.to_string()))
-                })
-                .collect::<Result<BTreeSet<_>, _>>()?;
-            if node_ids.len() != nodes.len() {
-                return Err(ApiError::invalid_request("duplicate node_id"));
-            }
-            node_ids
-        }
-        InternalChangeMembers::RemoveVoters { node_ids } => node_ids.iter().cloned().collect(),
-        InternalChangeMembers::RemoveNodes { node_ids } => node_ids.iter().cloned().collect(),
-    };
-    if node_ids.is_empty() {
-        return Err(ApiError::invalid_request("node_ids is empty"));
-    }
-
-    let metrics = raft_metrics(&state);
-    if !is_leader(&metrics) {
-        return Err(ApiError::invalid_request("not leader"));
-    }
-
-    let changes = match req.changes {
-        InternalChangeMembers::AddVoters { nodes } => {
-            openraft::ChangeMembers::AddVoters(internal_set_node_map(nodes)?)
-        }
-        InternalChangeMembers::AddNodes { nodes } => {
-            openraft::ChangeMembers::AddNodes(internal_set_node_map(nodes)?)
-        }
-        InternalChangeMembers::RemoveVoters { .. } => {
-            openraft::ChangeMembers::RemoveVoters(node_ids)
-        }
-        InternalChangeMembers::RemoveNodes { .. } => openraft::ChangeMembers::RemoveNodes(node_ids),
-    };
-
-    state
-        .raft
-        .change_membership(changes, req.retain)
+    if !req.apply {
+        let preview = crate::raft_membership_guard::preview_orphan_voter_repair(
+            state.raft.clone(),
+            state.store.clone(),
+            req.raft_node_id,
+        )
         .await
-        .map_err(|e| ApiError::internal(format!("change_membership: {e}")))?;
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+        return Ok(Json(InternalRepairOrphanVoterResponse {
+            dry_run: true,
+            raft_node_id: preview.raft_node_id,
+            expected_membership: preview.expected_membership,
+            operation: None,
+        }));
+    }
 
-    Ok(Json(json!({ "ok": true })))
+    let expected_membership = req
+        .expected_membership
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| ApiError::invalid_request("--apply requires expected_membership"))?;
+    let operation = crate::raft_membership_guard::repair_orphan_voter(
+        state.raft.clone(),
+        state.store.clone(),
+        req.raft_node_id,
+        &expected_membership,
+    )
+    .await
+    .map_err(|error| ApiError::conflict(error.to_string()))?;
+    Ok(Json(InternalRepairOrphanVoterResponse {
+        dry_run: false,
+        raft_node_id: req.raft_node_id,
+        expected_membership: operation.expected_membership.clone(),
+        operation: Some(operation),
+    }))
 }
 
-async fn admin_internal_restore_existing_node_membership(
+async fn membership_operation_response(
+    state: &AppState,
+    operation_id: &str,
+) -> Result<Json<MembershipOperationResponse>, ApiError> {
+    let operation = state
+        .store
+        .lock()
+        .await
+        .state()
+        .membership_operations
+        .get(operation_id)
+        .cloned()
+        .ok_or_else(|| {
+            ApiError::not_found(format!("membership operation not found: {operation_id}"))
+        })?;
+    Ok(Json(MembershipOperationResponse { operation }))
+}
+
+async fn admin_internal_get_membership_operation(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
-    ApiJson(req): ApiJson<InternalRestoreExistingNodeMembershipRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+    Path(operation_id): Path<String>,
+) -> Result<Json<MembershipOperationResponse>, ApiError> {
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-
-    let node = {
-        let store = state.store.lock().await;
-        store
-            .get_node(&req.node_id)
-            .ok_or_else(|| ApiError::not_found(format!("node not found: {}", req.node_id)))?
-    };
-    let raft_node_id = raft_node_id_from_ulid(&node.node_id)
-        .map_err(|e| ApiError::invalid_request(e.to_string()))?;
-
-    let metrics = raft_metrics(&state);
-    if !is_leader(&metrics) {
-        return Err(ApiError::invalid_request("not leader"));
-    }
-
-    let membership = metrics.membership_config.membership();
-    if membership
-        .voter_ids()
-        .any(|voter_id| voter_id == raft_node_id)
-    {
-        return Ok(Json(json!({ "ok": true, "already_voter": true })));
-    }
-
-    let meta = RaftNodeMeta {
-        name: node.node_name.clone(),
-        api_base_url: node.api_base_url.clone(),
-        raft_endpoint: node.api_base_url.clone(),
-    };
-
-    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
-        .lock_owned()
-        .await;
-
-    state
-        .raft
-        .add_learner(raft_node_id, meta)
-        .await
-        .map_err(|e| ApiError::internal(format!("restore add_learner failed: {e}")))?;
-
-    let required_log_index = raft_metrics(&state).last_log_index.unwrap_or(0);
-    state
-        .raft
-        .wait_learner_caught_up(raft_node_id, required_log_index, Duration::from_secs(30))
-        .await
-        .map_err(|e| ApiError::internal(format!("restore learner catch-up failed: {e}")))?;
-
-    state
-        .raft
-        .add_voters(BTreeSet::from([raft_node_id]))
-        .await
-        .map_err(|e| ApiError::internal(format!("restore add_voters failed: {e}")))?;
-
-    Ok(Json(json!({ "ok": true, "already_voter": false })))
+    membership_operation_response(&state, &operation_id).await
 }
 
-#[derive(Deserialize)]
-struct InternalSetNodesRequest {
-    nodes: Vec<InternalSetNode>,
-}
-
-#[derive(Deserialize)]
-struct InternalSetNode {
-    node_id: String,
-    node_name: String,
-    api_base_url: String,
-}
-
-async fn admin_internal_raft_set_nodes(
+async fn admin_get_membership_operation(
     Extension(state): Extension<AppState>,
-    internal: Option<Extension<InternalSignatureAuth>>,
-    ApiJson(req): ApiJson<InternalSetNodesRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    if internal.is_none() {
-        return Err(ApiError::unauthorized("internal auth required"));
-    }
-    if req.nodes.is_empty() {
-        return Err(ApiError::invalid_request("nodes is empty"));
-    }
-
-    let metrics = raft_metrics(&state);
-    if !is_leader(&metrics) {
-        return Err(ApiError::invalid_request("not leader"));
-    }
-
-    let mut map = std::collections::BTreeMap::new();
-    for n in req.nodes {
-        if n.node_id.trim().is_empty() {
-            return Err(ApiError::invalid_request("node_id is empty"));
-        }
-        if n.node_name.trim().is_empty() {
-            return Err(ApiError::invalid_request("node_name is empty"));
-        }
-        validate_https_origin(&n.api_base_url)?;
-
-        let raft_node_id = raft_node_id_from_ulid(&n.node_id)
-            .map_err(|e| ApiError::invalid_request(e.to_string()))?;
-        let exists = metrics
-            .membership_config
-            .nodes()
-            .any(|(id, _node)| *id == raft_node_id);
-        if !exists {
-            return Err(ApiError::invalid_request(format!(
-                "node is not in membership: {}",
-                n.node_id
-            )));
-        }
-
-        if map.contains_key(&raft_node_id) {
-            return Err(ApiError::invalid_request(format!(
-                "duplicate node_id: {}",
-                n.node_id
-            )));
-        }
-
-        map.insert(
-            raft_node_id,
-            RaftNodeMeta {
-                name: n.node_name,
-                api_base_url: n.api_base_url.clone(),
-                raft_endpoint: n.api_base_url,
-            },
-        );
-    }
-
-    state
-        .raft
-        .change_membership(openraft::ChangeMembers::SetNodes(map), true)
-        .await
-        .map_err(|e| ApiError::internal(format!("change_membership set_nodes: {e}")))?;
-
-    Ok(Json(json!({ "ok": true })))
+    Path(operation_id): Path<String>,
+) -> Result<Json<MembershipOperationResponse>, ApiError> {
+    membership_operation_response(&state, &operation_id).await
 }
 
 async fn admin_create_join_token(
@@ -2017,8 +1890,17 @@ async fn cluster_join(
     let activation_deadline = reservation.activation_deadline;
     let signed_cert_pem = reservation.signed_cert_pem;
     let bootstrap_sender_ids = join_protocol::bootstrap_sender_ids(&state).await;
+    join_capability::require_membership_lifecycle_on_voters(&state).await?;
+    crate::join_coordinator::migrate_one_legacy_join_session(&state.raft, &state.store)
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
     if existing_session.is_none() {
-        join_capability::require_on_voters(&state).await?;
+        crate::raft_membership_guard::require_clean_membership_for_write(
+            state.raft.clone(),
+            state.store.clone(),
+        )
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
     }
     if existing_session.as_ref().is_some_and(|session| {
         matches!(
@@ -2038,30 +1920,36 @@ async fn cluster_join(
             xp_admin_token_hash: state.config.admin_token_hash.clone(),
         }));
     }
-
-    // Ensure the current leader exists in the Raft state machine so joiners can replicate the
-    // full node list (including the bootstrap node).
-    let leader_node = {
-        let store = state.store.lock().await;
-        store
-            .get_node(&state.cluster.node_id)
-            .unwrap_or_else(|| Node {
-                node_id: state.cluster.node_id.clone(),
-                node_name: state.config.node_name.clone(),
-                access_host: state.config.access_host.clone(),
-                api_base_url: state.config.api_base_url.clone(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            })
-    };
-    let _ = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::UpsertNode {
-            node: leader_node.clone(),
-            join_session: None,
-        },
-    )
-    .await?;
+    if existing_session.is_some() {
+        let has_join_operation = state
+            .store
+            .lock()
+            .await
+            .state()
+            .active_membership_operation()
+            .is_some_and(|operation| {
+                operation.kind == crate::state::MembershipOperationKind::Join
+                    && operation.raft_node_id == raft_node_id
+                    && operation.node_id.as_deref() == Some(node_id.as_str())
+            });
+        if !has_join_operation {
+            return Err(ApiError::conflict(
+                "pending join session has no durable lifecycle operation; promotion is blocked",
+            ));
+        }
+        // The coordinator alone advances a reservation after it observes the exact learner
+        // membership shape. Retrying the same request only replays bootstrap material.
+        return Ok(Json(ClusterJoinResponse {
+            node_id,
+            leader_node_id: state.cluster.node_id.clone(),
+            bootstrap_sender_ids,
+            activation_deadline,
+            signed_cert_pem,
+            cluster_ca_pem: (*state.cluster_ca_pem).clone(),
+            cluster_ca_key_pem: ca_key_pem,
+            xp_admin_token_hash: state.config.admin_token_hash.clone(),
+        }));
+    }
 
     let node = Node {
         node_id: node_id.clone(),
@@ -2072,28 +1960,67 @@ async fn cluster_join(
         quota_reset: NodeQuotaReset::default(),
     };
 
-    if existing_session.is_none() {
-        let reservation_log_index = raft_metrics(&state)
-            .last_log_index
-            .unwrap_or(0)
-            .saturating_add(1);
-        let _ = raft_write(
+    let expected_membership =
+        crate::raft_membership_guard::membership_revision(&raft_metrics(&state))
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::Join,
+        raft_node_id,
+        node_id: Some(node_id.clone()),
+        expected_membership: expected_membership.clone(),
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: false,
+        expected_endpoint_ids: Vec::new(),
+        expected_endpoint_tags: Vec::new(),
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("join reservation accepted".to_string()),
+    };
+    let reservation_log_index = raft_metrics(&state)
+        .last_log_index
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation),
+            node: Some(node.clone()),
+            join_session: Some(crate::join_session::JoinSession {
+                node_id: node_id.clone(),
+                request_fingerprint: request_fingerprint.clone(),
+                signed_cert_pem: signed_cert_pem.clone(),
+                token_expires_at: token.expires_at.to_rfc3339(),
+                activation_deadline: activation_deadline.clone(),
+                required_log_index: reservation_log_index,
+                status: crate::join_session::JoinSessionStatus::Reserved,
+                terminal_at: None,
+            }),
+        },
+    )
+    .await?;
+
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    if crate::raft_membership_guard::membership_revision(&raft_metrics(&state))
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        != expected_membership
+    {
+        let _ = transition_membership_operation(
             &state,
-            crate::state::DesiredStateCommand::UpsertNode {
-                node: node.clone(),
-                join_session: Some(crate::join_session::JoinSession {
-                    node_id: node_id.clone(),
-                    request_fingerprint: request_fingerprint.clone(),
-                    signed_cert_pem: signed_cert_pem.clone(),
-                    token_expires_at: token.expires_at.to_rfc3339(),
-                    activation_deadline: activation_deadline.clone(),
-                    required_log_index: reservation_log_index,
-                    status: crate::join_session::JoinSessionStatus::Reserved,
-                    terminal_at: None,
-                }),
-            },
+            raft_node_id,
+            crate::state::MembershipOperationPhase::Blocked,
+            "membership revision changed before learner registration",
         )
         .await?;
+        return Err(ApiError::conflict(
+            "membership revision changed before learner registration",
+        ));
     }
 
     state
@@ -2109,21 +2036,6 @@ async fn cluster_join(
         .await
         .map_err(|e| ApiError::internal(format!("join add_learner failed: {e}")))?;
 
-    let upsert_result = raft_write(
-        &state,
-        crate::state::DesiredStateCommand::UpsertNode {
-            node: node.clone(),
-            join_session: None,
-        },
-    )
-    .await;
-    if let Err(err) = upsert_result {
-        rollback_joined_learner(&state, raft_node_id, &node_id, false, false).await;
-        return Err(err);
-    }
-
-    join_protocol::mark_learner_registered(&state, node).await?;
-
     Ok(Json(ClusterJoinResponse {
         node_id,
         leader_node_id: state.cluster.node_id.clone(),
@@ -2136,62 +2048,41 @@ async fn cluster_join(
     }))
 }
 
-async fn rollback_joined_learner(
+async fn transition_membership_operation(
     state: &AppState,
     raft_node_id: RaftNodeId,
-    node_id: &str,
-    remove_state_node: bool,
-    remove_possible_voter: bool,
-) {
-    if remove_possible_voter
-        && let Err(err) = state
-            .raft
-            .change_membership(
-                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
-                true,
-            )
-            .await
-    {
-        tracing::warn!(
-            raft_node_id,
-            error = %err,
-            "join rollback failed to demote possibly promoted voter"
-        );
-    }
-
-    if let Err(err) = state
-        .raft
-        .change_membership(
-            openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
-            true,
-        )
+    phase: crate::state::MembershipOperationPhase,
+    evidence: &str,
+) -> Result<Option<crate::state::MembershipOperation>, ApiError> {
+    let Some(mut operation) = state
+        .store
+        .lock()
         .await
-    {
-        tracing::warn!(
-            raft_node_id,
-            error = %err,
-            "join rollback failed to remove learner from raft membership"
-        );
+        .state()
+        .active_membership_operation()
+        .filter(|operation| operation.raft_node_id == raft_node_id)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    if phase != crate::state::MembershipOperationPhase::Blocked {
+        operation.expected_membership =
+            crate::raft_membership_guard::membership_revision(&raft_metrics(state))
+                .map_err(|error| ApiError::internal(error.to_string()))?;
     }
-
-    if remove_state_node
-        && let Err(err) = raft_write(
-            state,
-            crate::state::DesiredStateCommand::DeleteNode {
-                node_id: node_id.to_string(),
-                delete_endpoints: false,
-                expected_endpoint_ids: Vec::new(),
-                join_session: None,
-            },
-        )
-        .await
-    {
-        tracing::warn!(
-            node_id,
-            error = %err.message,
-            "join rollback failed to remove node from desired state"
-        );
+    operation.phase = phase;
+    operation.evidence = Some(evidence.to_string());
+    if operation.phase.is_terminal() {
+        operation.terminal_at = Some(Utc::now().to_rfc3339());
     }
+    let _ = raft_write(
+        state,
+        crate::state::DesiredStateCommand::TransitionMembershipOperation {
+            operation: operation.clone(),
+        },
+    )
+    .await?;
+    Ok(Some(operation))
 }
 
 #[derive(Debug, Deserialize)]
@@ -4031,99 +3922,118 @@ async fn admin_patch_node(
     Ok(Json(admin_node_response(node, probe)))
 }
 
-struct RemovedRaftNodeMembership {
-    node_meta: crate::raft::types::NodeMeta,
-    was_voter: bool,
-}
-
 async fn remove_raft_node_membership(
     state: &AppState,
     raft_node_id: u64,
-    metrics: &openraft::RaftMetrics<u64, crate::raft::types::NodeMeta>,
-) -> Result<Option<RemovedRaftNodeMembership>, ApiError> {
-    let membership = metrics.membership_config.membership();
-    if let Some(node_meta) = membership.get_node(&raft_node_id).cloned() {
-        let is_voter = membership
-            .voter_ids()
-            .any(|voter_id| voter_id == raft_node_id);
-
-        if is_voter {
-            state
-                .raft
-                .change_membership(
-                    openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
-                    true,
-                )
-                .await
-                .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
-        }
-
-        state
-            .raft
-            .change_membership(
-                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([raft_node_id])),
-                true,
-            )
-            .await
-            .map_err(|e| ApiError::internal(format!("change_membership remove_nodes: {e}")))?;
-
-        return Ok(Some(RemovedRaftNodeMembership {
-            node_meta,
-            was_voter: is_voter,
-        }));
-    }
-
-    Ok(None)
-}
-
-async fn restore_raft_node_membership(
-    state: &AppState,
-    raft_node_id: u64,
-    removed: RemovedRaftNodeMembership,
+    expected_membership: &str,
 ) -> Result<(), ApiError> {
     state
         .raft
-        .add_learner(raft_node_id, removed.node_meta)
+        .ensure_linearizable()
         .await
-        .map_err(|e| ApiError::internal(format!("restore membership add_learner: {e}")))?;
-
-    if removed.was_voter {
-        state
-            .raft
-            .add_voters(BTreeSet::from([raft_node_id]))
-            .await
-            .map_err(|e| ApiError::internal(format!("restore membership add_voters: {e}")))?;
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let metrics = raft_metrics(state);
+    let current_membership = crate::raft_membership_guard::membership_revision(&metrics)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if current_membership != expected_membership {
+        return Err(ApiError::conflict(
+            "membership revision changed before node removal",
+        ));
     }
-
+    let membership = metrics.membership_config.membership();
+    if !membership
+        .voter_ids()
+        .any(|voter_id| voter_id == raft_node_id)
+    {
+        return Err(ApiError::conflict(
+            "node deletion target is no longer a current voter",
+        ));
+    }
+    state
+        .raft
+        .change_membership(
+            openraft::ChangeMembers::RemoveVoters(BTreeSet::from([raft_node_id])),
+            false,
+        )
+        .await
+        .map_err(|e| ApiError::internal(format!("change_membership remove_voters: {e}")))?;
+    if raft_metrics(state)
+        .membership_config
+        .membership()
+        .get_node(&raft_node_id)
+        .is_some()
+    {
+        return Err(ApiError::internal(
+            "membership removal did not make the deletion target absent",
+        ));
+    }
     Ok(())
 }
 
-async fn admin_delete_node_raft_op<T>(
-    operation: &'static str,
-    future: impl Future<Output = Result<T, ApiError>>,
-) -> Result<T, ApiError> {
-    tokio::time::timeout(ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT, future)
+fn admin_node_delete_accepted_response(
+    operation_id: String,
+    phase: crate::state::MembershipOperationPhase,
+) -> Response {
+    (
+        StatusCode::ACCEPTED,
+        Json(AdminNodeDeleteAcceptedResponse {
+            status_url: format!("/api/admin/membership-operations/{operation_id}"),
+            operation_id,
+            phase,
+        }),
+    )
+        .into_response()
+}
+
+fn membership_removal_cleanup(
+    state: &AppState,
+) -> crate::raft_membership_guard::MembershipRemovalCleanup {
+    crate::raft_membership_guard::MembershipRemovalCleanup {
+        local_raft_node_id: raft_node_id_from_ulid(&state.cluster.node_id)
+            .expect("cluster node id must be a valid raft node id"),
+        local_node_id: state.cluster.node_id.clone(),
+        node_history: state.node_history.clone(),
+        reconcile: state.reconcile.clone(),
+    }
+}
+
+fn spawn_admin_node_delete_resume(state: AppState) {
+    tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        // A remove-node operation has two durable Raft steps before cleanup. Advance both
+        // immediately when possible; the periodic guard owns any later retry.
+        for _ in 0..2 {
+            if let Err(error) = crate::raft_membership_guard::resume_membership_operations_once(
+                state.raft.clone(),
+                state.store.clone(),
+            )
+            .await
+            {
+                tracing::warn!(%error, "admin node deletion resume failed");
+                return;
+            }
+        }
+        let cleanup = membership_removal_cleanup(&state);
+        if let Err(error) = crate::raft_membership_guard::finalize_remove_node_cleanup_once(
+            state.raft.clone(),
+            state.store.clone(),
+            &cleanup,
+        )
         .await
-        .map_err(|_| {
-            ApiError::gateway_timeout(format!(
-                "delete node timed out while {operation}; check Raft peer reachability"
-            ))
-        })?
+        {
+            tracing::warn!(%error, "admin node deletion cleanup failed");
+        }
+    });
 }
 
 async fn admin_delete_node(
     Extension(state): Extension<AppState>,
     Path(node_id): Path<String>,
     Query(query): Query<DeleteNodeQuery>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     if node_id == state.cluster.node_id {
         return Err(ApiError::invalid_request("cannot delete local node"));
     }
-
-    let cleanup_nodes = {
-        let store = state.store.lock().await;
-        store.list_nodes()
-    };
 
     let expected_endpoint_ids = query
         .expected_endpoint_ids
@@ -4134,16 +4044,19 @@ async fn admin_delete_node(
         .collect::<Vec<_>>();
 
     // Preflight validation before touching Raft membership, to avoid partial updates.
-    {
+    let expected_endpoint_tags = {
         let store = state.store.lock().await;
         if store.get_node(&node_id).is_none() {
             return Err(ApiError::not_found(format!("node not found: {node_id}")));
         }
-        let node_endpoint_ids = store
+        let node_endpoints = store
             .list_endpoints()
             .into_iter()
             .filter(|endpoint| endpoint.node_id == node_id)
-            .map(|endpoint| endpoint.endpoint_id)
+            .collect::<Vec<_>>();
+        let node_endpoint_ids = node_endpoints
+            .iter()
+            .map(|endpoint| endpoint.endpoint_id.clone())
             .collect::<Vec<_>>();
         let actual_endpoint_ids = node_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>();
         let expected_endpoint_ids_set = expected_endpoint_ids
@@ -4168,7 +4081,15 @@ async fn admin_delete_node(
                 .to_string(),
             ));
         }
-    }
+        if query.delete_endpoints {
+            node_endpoints
+                .into_iter()
+                .map(|endpoint| endpoint.tag)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    };
 
     let raft_node_id =
         raft_node_id_from_ulid(&node_id).map_err(|e| ApiError::invalid_request(e.to_string()))?;
@@ -4178,18 +4099,93 @@ async fn admin_delete_node(
         return Err(ApiError::invalid_request("cannot delete current leader"));
     }
 
+    join_capability::require_membership_lifecycle_on_voters(&state).await?;
+    crate::raft_membership_guard::require_clean_membership_for_remove_node(
+        state.raft.clone(),
+        state.store.clone(),
+    )
+    .await
+    .map_err(|error| ApiError::conflict(error.to_string()))?;
+
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
         .await;
 
-    let mut removed_membership = admin_delete_node_raft_op(
-        "removing raft membership",
-        remove_raft_node_membership(&state, raft_node_id, &metrics),
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let metrics = raft_metrics(&state);
+    if metrics.current_leader == Some(raft_node_id) {
+        return Err(ApiError::invalid_request("cannot delete current leader"));
+    }
+    if !metrics
+        .membership_config
+        .membership()
+        .voter_ids()
+        .any(|voter_id| voter_id == raft_node_id)
+    {
+        return Err(ApiError::conflict(
+            "node deletion requires a mapped current voter; absent and learner targets are blocked",
+        ));
+    }
+
+    let expected_membership = crate::raft_membership_guard::membership_revision(&metrics)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::RemoveNode,
+        raft_node_id,
+        node_id: Some(node_id.clone()),
+        expected_membership: expected_membership.clone(),
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: query.delete_endpoints,
+        expected_endpoint_ids: expected_endpoint_ids.clone(),
+        expected_endpoint_tags,
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("admin node deletion accepted".to_string()),
+    };
+    let operation_id = operation.operation_id.clone();
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation),
+            node: None,
+            join_session: None,
+        },
     )
     .await?;
 
-    let out = match admin_delete_node_raft_op(
-        "applying desired-state delete",
+    match tokio::time::timeout(
+        ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT,
+        remove_raft_node_membership(&state, raft_node_id, &expected_membership),
+    )
+    .await
+    {
+        Ok(result) => result?,
+        Err(_) => {
+            drop(_membership_operation_guard);
+            spawn_admin_node_delete_resume(state.clone());
+            return Ok(admin_node_delete_accepted_response(
+                operation_id,
+                crate::state::MembershipOperationPhase::Prepared,
+            ));
+        }
+    }
+    transition_membership_operation(
+        &state,
+        raft_node_id,
+        crate::state::MembershipOperationPhase::MembershipRemoved,
+        "target made absent from Raft membership",
+    )
+    .await?;
+
+    let out = match tokio::time::timeout(
+        ADMIN_NODE_DELETE_RAFT_OP_TIMEOUT,
         raft_write(
             &state,
             crate::state::DesiredStateCommand::DeleteNode {
@@ -4202,51 +4198,57 @@ async fn admin_delete_node(
     )
     .await
     {
-        Ok(out) => out,
-        Err(err) => {
-            if let Some(removed) = removed_membership.take() {
-                admin_delete_node_raft_op(
-                    "restoring raft membership",
-                    restore_raft_node_membership(&state, raft_node_id, removed),
-                )
-                .await?;
-            }
-            return Err(err);
-        }
-    };
-    let crate::state::DesiredStateApplyResult::NodeDeleted {
-        deleted,
-        deleted_endpoint_tags,
-    } = out
-    else {
-        if let Some(removed) = removed_membership.take() {
-            admin_delete_node_raft_op(
-                "restoring raft membership",
-                restore_raft_node_membership(&state, raft_node_id, removed),
+        Ok(Ok(result)) => result,
+        Ok(Err(error))
+            if error.code == "conflict"
+                && error
+                    .message
+                    .contains("node endpoint set changed since delete preview") =>
+        {
+            transition_membership_operation(
+                &state,
+                raft_node_id,
+                crate::state::MembershipOperationPhase::Blocked,
+                "node endpoint set changed after membership removal; manual recovery required",
             )
             .await?;
+            drop(_membership_operation_guard);
+            return Ok(admin_node_delete_accepted_response(
+                operation_id,
+                crate::state::MembershipOperationPhase::Blocked,
+            ));
         }
+        Ok(Err(error)) => return Err(error),
+        Err(_) => {
+            drop(_membership_operation_guard);
+            spawn_admin_node_delete_resume(state.clone());
+            return Ok(admin_node_delete_accepted_response(
+                operation_id,
+                crate::state::MembershipOperationPhase::MembershipRemoved,
+            ));
+        }
+    };
+    let crate::state::DesiredStateApplyResult::NodeDeleted { deleted, .. } = out else {
         return Err(ApiError::internal("unexpected raft apply result"));
     };
     if !deleted {
-        if let Some(removed) = removed_membership.take() {
-            admin_delete_node_raft_op(
-                "restoring raft membership",
-                restore_raft_node_membership(&state, raft_node_id, removed),
-            )
-            .await?;
-        }
         return Err(ApiError::not_found(format!("node not found: {node_id}")));
     }
-
-    for tag in deleted_endpoint_tags {
-        state.reconcile.request_remove_inbound(tag);
+    drop(_membership_operation_guard);
+    let cleanup = membership_removal_cleanup(&state);
+    match crate::raft_membership_guard::finalize_remove_node_cleanup_once(
+        state.raft.clone(),
+        state.store.clone(),
+        &cleanup,
+    )
+    .await
+    {
+        Ok(true) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Ok(false) | Err(_) => Ok(admin_node_delete_accepted_response(
+            operation_id,
+            crate::state::MembershipOperationPhase::MembershipRemoved,
+        )),
     }
-    state.node_history.clear_node(&node_id).await;
-    clear_node_history_on_cluster(&state, &node_id, &cleanup_nodes).await;
-    state.reconcile.request_full();
-
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn build_admin_service_config_response(
@@ -6553,18 +6555,6 @@ async fn clear_user_history_on_cluster(state: &AppState, user_id: &str) {
             state
                 .node_history
                 .queue_user_traffic_cleanup(&node.node_id, user_id)
-                .await;
-        }
-    }
-}
-
-async fn clear_node_history_on_cluster(state: &AppState, node_id: &str, nodes: &[Node]) {
-    let local_node_id = state.cluster.node_id.clone();
-    for destination in nodes {
-        if destination.node_id != local_node_id && destination.node_id != node_id {
-            state
-                .node_history
-                .queue_node_history_cleanup(&destination.node_id, node_id)
                 .await;
         }
     }
