@@ -22,9 +22,11 @@
 ## Compatibility
 
 - `cluster.membership-lifecycle-v1` is advertised by this build. Before a new lifecycle command,
-  every retained DesiredState-mapped voter must advertise it through signed Mesh capability reads,
-  with public-origin transport only as a fallback. An unreachable public URL is therefore not a
-  separate rejection condition; a retained voter that cannot verify still returns
+  every retained DesiredState-mapped voter must advertise it through a signed Mesh capability read.
+  A verified `404` means a predecessor lacks that route, so its legacy public
+  `/api/capabilities` is tried within the same probe budget. Other signed status, authentication,
+  and transport failures do not downgrade. An unreachable public URL is therefore not a separate
+  rejection condition for current peers; a retained voter that cannot verify still returns
   `coordinated_upgrade_required` and no new command is written.
 - An additive persisted field alone is compatible with old snapshots. The command variants are not
   compatible with an old binary, which is why the capability barrier precedes the first command.
@@ -41,7 +43,8 @@
 - Membership tests exercise dry-run/apply orphan repair, exact fingerprinting, unique target
   validation, `RemoveVoters(..., false)`, absent postcondition, and unchanged DesiredState nodes.
 - HTTP coverage exercises a dry-run with unavailable public peer URLs and a signed Mesh capability
-  response, while retaining the existing rejection paths for invalid repair targets.
+  response, plus the verified-404 legacy capability fallback for a predecessor, while retaining
+  the existing rejection paths for invalid repair targets.
 - HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
   guards, and membership failure paths.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and

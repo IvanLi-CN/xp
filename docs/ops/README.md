@@ -962,10 +962,11 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 ```
 
 The dry-run proves the exact target before capability verification excludes it. Its advertised
-public API URL is not a repair prerequisite: every retained DesiredState-mapped voter must verify
-`cluster.membership-lifecycle-v1` through signed Mesh transport, with its public origin used only
-as a compatibility fallback. If a retained voter cannot verify, stop and complete the rolling
-upgrade; do not bypass the barrier with raw Raft edits or internal API calls.
+public API URL is not a repair prerequisite: every retained DesiredState-mapped voter first
+verifies `cluster.membership-lifecycle-v1` through signed Mesh transport. Only a verified `404`
+from that new route uses the predecessor's legacy public `/api/capabilities` within the same probe
+budget. If a retained voter cannot verify, stop and complete the rolling upgrade; do not bypass
+the barrier with raw Raft edits or internal API calls.
 
 Copy the returned `expected_membership` exactly into the explicit apply command:
 

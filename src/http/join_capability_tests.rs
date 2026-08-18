@@ -49,6 +49,7 @@ use crate::{
 };
 
 const CAPABILITIES_PATH: &str = "/api/admin/_internal/capabilities";
+const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 
 #[derive(Clone)]
@@ -58,7 +59,9 @@ struct MeshCapabilityServerState {
     expected_cluster_id: String,
     sender_id: String,
     target_id: String,
+    internal_capabilities_status: StatusCode,
     capability_requests: Arc<AtomicUsize>,
+    legacy_capability_requests: Arc<AtomicUsize>,
 }
 
 async fn mesh_capability_response(
@@ -68,6 +71,20 @@ async fn mesh_capability_response(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response<Body> {
+    if uri.path() == LEGACY_CAPABILITIES_PATH {
+        assert_eq!(method, Method::GET);
+        state
+            .legacy_capability_requests
+            .fetch_add(1, Ordering::SeqCst);
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#,
+            ))
+            .expect("legacy capability response");
+    }
+
     let verified = internal_auth::verify_request_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
@@ -81,17 +98,20 @@ async fn mesh_capability_response(
     .expect("valid signed Mesh request");
     assert_eq!(verified.context.sender_id, state.sender_id);
 
-    let response_body = match uri.path() {
+    let (response_status, response_body) = match uri.path() {
         CAPABILITIES_PATH => {
             assert_eq!(method, Method::GET);
             assert_eq!(verified.context.route, InternalRoute::MeshV2);
             state.capability_requests.fetch_add(1, Ordering::SeqCst);
-            r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#
+            (
+                state.internal_capabilities_status,
+                r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#,
+            )
         }
         MESH_HEALTH_PATH => {
             assert_eq!(method, Method::GET);
             assert_eq!(verified.context.route, InternalRoute::HealthV2);
-            r#"{"ok":true}"#
+            (StatusCode::OK, r#"{"ok":true}"#)
         }
         path => panic!("unexpected Mesh path: {path}"),
     };
@@ -100,12 +120,12 @@ async fn mesh_capability_response(
         &state.ca_cert_pem,
         &verified,
         &state.target_id,
-        StatusCode::OK.as_u16(),
+        response_status.as_u16(),
     )
     .expect("sign Mesh acknowledgement");
 
     Response::builder()
-        .status(StatusCode::OK)
+        .status(response_status)
         .header(internal_auth::INTERNAL_ACK_HEADER, acknowledgement)
         .body(Body::from(response_body))
         .expect("Mesh response")
@@ -170,6 +190,7 @@ fn mesh_client(
             reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes()).expect("cluster CA"),
         )
         .identity(reqwest::Identity::from_pem(identity_pem.as_bytes()).expect("node identity"))
+        .resolve(mesh_host, mesh_address)
         .build()
         .expect("public client");
     MeshAwareHttpClient::from_transport_clients(mesh, public)
@@ -284,8 +305,10 @@ fn build_test_router(
     )
 }
 
-#[tokio::test]
-async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
+async fn run_orphan_repair_dry_run(
+    internal_capabilities_status: StatusCode,
+    public_url_available: bool,
+) -> (StatusCode, serde_json::Value, u64, usize, usize) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let tmp = TempDir::new().unwrap();
@@ -302,7 +325,7 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
         .read_cluster_ca_key_pem(tmp.path())
         .unwrap()
         .expect("cluster CA key");
-    let remote_node = Node {
+    let mut remote_node = Node {
         node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
         node_name: xp_test_fixtures::label_node_remote().to_owned(),
         access_host: xp_test_fixtures::host_fixture575().to_owned(),
@@ -311,6 +334,7 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
         quota_reset: NodeQuotaReset::default(),
     };
     let requests = Arc::new(AtomicUsize::new(0));
+    let legacy_requests = Arc::new(AtomicUsize::new(0));
     let (mesh_address, mesh_server) = spawn_mesh_capability_server(
         MeshCapabilityServerState {
             ca_key_pem: cluster_ca_key_pem.clone(),
@@ -318,12 +342,21 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
             expected_cluster_id: cluster.cluster_id.clone(),
             sender_id: cluster.node_id.clone(),
             target_id: remote_node.node_id.clone(),
+            internal_capabilities_status,
             capability_requests: requests.clone(),
+            legacy_capability_requests: legacy_requests.clone(),
         },
         xp_test_fixtures::host_fixture575(),
     )
     .await;
     tokio::task::yield_now().await;
+    if public_url_available {
+        remote_node.api_base_url = format!(
+            "https://{}:{}",
+            xp_test_fixtures::host_fixture575(),
+            mesh_address.port()
+        );
+    }
 
     let store = JsonSnapshotStore::load_or_init(StoreInit {
         data_dir: config.data_dir.clone(),
@@ -451,13 +484,52 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
     let response = app.oneshot(request).await.unwrap();
     mesh_server.abort();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
         .await
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    (
+        status,
+        body,
+        orphan_node_id,
+        requests.load(Ordering::SeqCst),
+        legacy_requests.load(Ordering::SeqCst),
+    )
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
+    let (status, body, orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(StatusCode::OK, false).await;
+
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(body["dry_run"], true);
     assert_eq!(body["raft_node_id"], orphan_node_id);
     assert!(body["expected_membership"].as_str().is_some());
-    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_falls_back_to_legacy_capabilities() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(StatusCode::NOT_FOUND, true).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 1);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(StatusCode::INTERNAL_SERVER_ERROR, true).await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "coordinated_upgrade_required");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
 }

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::http::StatusCode;
@@ -10,6 +10,8 @@ use super::{ApiError, AppState, raft_metrics, send_mesh_internal_read};
 use crate::domain::Node;
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
+const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
+const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 
 #[derive(Deserialize)]
 struct Response {
@@ -97,12 +99,13 @@ async fn require_capability_on_voters(
         return Ok(());
     }
     for peer in peers {
+        let started = Instant::now();
         let response = send_mesh_internal_read(
             state,
             &state.mesh_client,
             &peer.node,
             "/api/admin/_internal/capabilities".to_string(),
-            Duration::from_secs(5),
+            CAPABILITY_PROBE_BUDGET,
         )
         .await
         .map_err(|error| {
@@ -115,6 +118,48 @@ async fn require_capability_on_voters(
                 ),
             )
         })?;
+        // A predecessor can have the lifecycle capability but predate the signed
+        // internal route. Keep its rolling-upgrade path compatible without
+        // weakening the Mesh-first probe for current voters.
+        let response = if response.status() == StatusCode::NOT_FOUND {
+            let remaining = CAPABILITY_PROBE_BUDGET.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err(ApiError::new(
+                    "staged_join_capability_unavailable",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!(
+                        "cannot verify staged join support on {} through legacy public API: \
+                         probe budget exhausted",
+                        peer.raft_node_id
+                    ),
+                ));
+            }
+            let url = format!(
+                "{}{}",
+                peer.node.api_base_url.trim().trim_end_matches('/'),
+                LEGACY_CAPABILITIES_PATH
+            );
+            state
+                .mesh_client
+                .direct()
+                .get(url)
+                .timeout(remaining)
+                .send()
+                .await
+                .map_err(|error| {
+                    ApiError::new(
+                        "staged_join_capability_unavailable",
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!(
+                            "cannot verify staged join support on {} through legacy public API: \
+                             {error}",
+                            peer.raft_node_id
+                        ),
+                    )
+                })?
+        } else {
+            response
+        };
         if !response.status().is_success()
             || !response
                 .json::<Response>()
