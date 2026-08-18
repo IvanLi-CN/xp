@@ -229,7 +229,7 @@ fn mesh_target(addr: std::net::SocketAddr) -> MeshPeerTarget {
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url: Some(format!("https://{addr}")),
         mesh_reason: crate::mesh_telemetry::MeshPeerReason::MeshAvailable,
-        api_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+        public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }
 }
 
@@ -417,7 +417,7 @@ async fn h2_transport_failure_uses_the_compatible_public_client() {
         .mesh_client()
         .with_mesh_observability(telemetry.clone());
     let target = MeshPeerTarget {
-        api_base_url: format!("http://{}", server.addr),
+        public_base_url: format!("http://{}", server.addr),
         ..mesh_target(server.addr)
     };
 

@@ -127,7 +127,7 @@ pub struct MeshPeerTarget {
     pub node_name: String,
     pub mesh_base_url: Option<String>,
     pub mesh_reason: MeshPeerReason,
-    pub api_base_url: String,
+    pub public_base_url: String,
 }
 pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTarget {
     let access_host = node.access_host.trim().trim_end_matches('.');
@@ -151,7 +151,7 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         node_name: node.node_name.clone(),
         mesh_base_url,
         mesh_reason,
-        api_base_url: node.api_base_url.clone(),
+        public_base_url: node.api_base_url.clone(),
     }
 }
 #[derive(Debug, Clone)]
@@ -273,7 +273,7 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
             })?,
-            PeerDirectPath::ApiBaseUrl => &peer.api_base_url,
+            PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
         let url = join_url(base_url, &request.path_and_query)?;
         let context = RequestContext::now(
@@ -537,7 +537,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
-        let public_url = join_url(&peer.api_base_url, &request.path_and_query)?;
+        let public_url = join_url(&peer.public_base_url, &request.path_and_query)?;
         let response = match self
             .send_public_signed(
                 &public_url,

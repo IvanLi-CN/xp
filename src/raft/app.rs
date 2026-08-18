@@ -654,7 +654,7 @@ async fn leader_supports_conditional_endpoint_update(
 ) -> anyhow::Result<bool> {
     let url = format!(
         "{}/api/capabilities",
-        peer.api_base_url.trim_end_matches('/')
+        peer.public_base_url.trim_end_matches('/')
     );
     let response = tokio::time::timeout(Duration::from_secs(5), client.direct().get(url).send())
         .await

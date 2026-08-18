@@ -220,7 +220,7 @@ async fn mesh_target_for_raft(
             node_name: target_node.name.clone(),
             mesh_base_url: None,
             mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
-            api_base_url: raft_base_url.to_string(),
+            public_base_url: raft_base_url.to_string(),
         };
     };
     peer_target_from_node(&peer, &store.list_endpoints())
