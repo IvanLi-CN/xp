@@ -965,7 +965,7 @@ The dry-run proves the exact target before capability verification excludes it. 
 public API URL is not a repair prerequisite: every retained DesiredState-mapped voter first
 verifies `cluster.membership-lifecycle-v1` through signed Mesh transport. Only a verified `404`
 from that new route uses the predecessor's legacy public `/api/capabilities` within the same probe
-budget. If a retained voter cannot verify, stop and complete the rolling upgrade; do not bypass
+budget, including its response body. If a retained voter cannot verify, stop and complete the rolling upgrade; do not bypass
 the barrier with raw Raft edits or internal API calls.
 
 Copy the returned `expected_membership` exactly into the explicit apply command:

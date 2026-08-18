@@ -6,6 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use axum::{
@@ -16,6 +17,7 @@ use axum::{
     response::Response,
     routing::any,
 };
+use futures_util::stream;
 use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use tempfile::TempDir;
 use tokio::{
@@ -52,6 +54,12 @@ const CAPABILITIES_PATH: &str = "/api/admin/_internal/capabilities";
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 
+#[derive(Clone, Copy)]
+enum InternalCapabilitiesBody {
+    Json,
+    Pending,
+}
+
 #[derive(Clone)]
 struct MeshCapabilityServerState {
     ca_key_pem: String,
@@ -60,6 +68,7 @@ struct MeshCapabilityServerState {
     sender_id: String,
     target_id: String,
     internal_capabilities_status: StatusCode,
+    internal_capabilities_body: InternalCapabilitiesBody,
     capability_requests: Arc<AtomicUsize>,
     legacy_capability_requests: Arc<AtomicUsize>,
 }
@@ -103,15 +112,20 @@ async fn mesh_capability_response(
             assert_eq!(method, Method::GET);
             assert_eq!(verified.context.route, InternalRoute::MeshV2);
             state.capability_requests.fetch_add(1, Ordering::SeqCst);
-            (
-                state.internal_capabilities_status,
-                r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#,
-            )
+            let response_body = match state.internal_capabilities_body {
+                InternalCapabilitiesBody::Json => {
+                    Body::from(r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#)
+                }
+                InternalCapabilitiesBody::Pending => {
+                    Body::from_stream(stream::pending::<Result<Bytes, std::io::Error>>())
+                }
+            };
+            (state.internal_capabilities_status, response_body)
         }
         MESH_HEALTH_PATH => {
             assert_eq!(method, Method::GET);
             assert_eq!(verified.context.route, InternalRoute::HealthV2);
-            (StatusCode::OK, r#"{"ok":true}"#)
+            (StatusCode::OK, Body::from(r#"{"ok":true}"#))
         }
         path => panic!("unexpected Mesh path: {path}"),
     };
@@ -308,6 +322,7 @@ fn build_test_router(
 async fn run_orphan_repair_dry_run(
     internal_capabilities_status: StatusCode,
     public_url_available: bool,
+    internal_capabilities_body: InternalCapabilitiesBody,
 ) -> (StatusCode, serde_json::Value, u64, usize, usize) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -343,6 +358,7 @@ async fn run_orphan_repair_dry_run(
             sender_id: cluster.node_id.clone(),
             target_id: remote_node.node_id.clone(),
             internal_capabilities_status,
+            internal_capabilities_body,
             capability_requests: requests.clone(),
             legacy_capability_requests: legacy_requests.clone(),
         },
@@ -502,7 +518,7 @@ async fn run_orphan_repair_dry_run(
 #[tokio::test]
 async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
     let (status, body, orphan_node_id, mesh_requests, legacy_requests) =
-        run_orphan_repair_dry_run(StatusCode::OK, false).await;
+        run_orphan_repair_dry_run(StatusCode::OK, false, InternalCapabilitiesBody::Json).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["dry_run"], true);
@@ -515,7 +531,8 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
 #[tokio::test]
 async fn orphan_repair_dry_run_falls_back_to_legacy_capabilities() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
-        run_orphan_repair_dry_run(StatusCode::NOT_FOUND, true).await;
+        run_orphan_repair_dry_run(StatusCode::NOT_FOUND, true, InternalCapabilitiesBody::Json)
+            .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["dry_run"], true);
@@ -526,7 +543,28 @@ async fn orphan_repair_dry_run_falls_back_to_legacy_capabilities() {
 #[tokio::test]
 async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
-        run_orphan_repair_dry_run(StatusCode::INTERNAL_SERVER_ERROR, true).await;
+        run_orphan_repair_dry_run(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            true,
+            InternalCapabilitiesBody::Json,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "coordinated_upgrade_required");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_bounds_capability_response_body() {
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        run_orphan_repair_dry_run(StatusCode::OK, false, InternalCapabilitiesBody::Pending),
+    )
+    .await
+    .expect("capability response body stays within the probe budget");
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) = result;
 
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["error"]["code"], "coordinated_upgrade_required");

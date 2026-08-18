@@ -72,7 +72,8 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - The dry-run establishes the unique orphan before the capability barrier excludes that exact
   target. Its advertised public API URL is not a repair prerequisite. Every retained mapped voter
   verifies the lifecycle capability through signed Mesh transport; only a verified `404` from that
-  new route uses the predecessor's legacy public `/api/capabilities` within the same probe budget.
+  new route uses the predecessor's legacy public `/api/capabilities`, including its response body,
+  within the same probe budget.
 - Apply issues only `RemoveVoters({target}, false)` and verifies `absent`. It does not edit Nodes,
   endpoints, users, traffic configuration, or Raft files. A failed or mismatched precondition is a
   blocked incident, not an automated recovery signal.

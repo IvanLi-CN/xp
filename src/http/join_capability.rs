@@ -13,6 +13,11 @@ pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lif
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 
+fn remaining_probe_budget(started: Instant) -> Option<Duration> {
+    let remaining = CAPABILITY_PROBE_BUDGET.saturating_sub(started.elapsed());
+    (!remaining.is_zero()).then_some(remaining)
+}
+
 #[derive(Deserialize)]
 struct Response {
     capabilities: Vec<String>,
@@ -122,8 +127,7 @@ async fn require_capability_on_voters(
         // internal route. Keep its rolling-upgrade path compatible without
         // weakening the Mesh-first probe for current voters.
         let response = if response.status() == StatusCode::NOT_FOUND {
-            let remaining = CAPABILITY_PROBE_BUDGET.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
+            let Some(remaining) = remaining_probe_budget(started) else {
                 return Err(ApiError::new(
                     "staged_join_capability_unavailable",
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -133,7 +137,7 @@ async fn require_capability_on_voters(
                         peer.raft_node_id
                     ),
                 ));
-            }
+            };
             let url = format!(
                 "{}{}",
                 peer.node.api_base_url.trim().trim_end_matches('/'),
@@ -160,12 +164,19 @@ async fn require_capability_on_voters(
         } else {
             response
         };
-        if !response.status().is_success()
-            || !response
-                .json::<Response>()
-                .await
-                .is_ok_and(|body| body.capabilities.iter().any(|item| item == capability))
-        {
+        let supports_capability = if response.status().is_success() {
+            match remaining_probe_budget(started) {
+                Some(remaining) => tokio::time::timeout(remaining, response.json::<Response>())
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .is_some_and(|body| body.capabilities.iter().any(|item| item == capability)),
+                None => false,
+            }
+        } else {
+            false
+        };
+        if !supports_capability {
             return Err(ApiError::new(
                 "coordinated_upgrade_required",
                 StatusCode::CONFLICT,
