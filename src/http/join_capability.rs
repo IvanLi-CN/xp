@@ -7,7 +7,10 @@ use axum::http::StatusCode;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use super::{ApiError, AppState, raft_metrics, send_mesh_internal_capability_read};
+use super::{
+    ApiError, AppState, MeshCapabilityProbeResponse, raft_metrics,
+    send_mesh_internal_capability_read,
+};
 use crate::domain::Node;
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
@@ -149,54 +152,55 @@ async fn require_capability_on_voters(
                 ),
             )
         })?;
-        // A predecessor can have the lifecycle capability but predate the signed
-        // internal route. Keep its rolling-upgrade path compatible without
-        // weakening the Mesh-first probe for current voters.
-        let response = if response.status() == StatusCode::NOT_FOUND {
-            let Some(remaining) = remaining_probe_budget(started) else {
-                return Err(ApiError::new(
-                    "staged_join_capability_unavailable",
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!(
-                        "cannot verify staged join support on {} through legacy public API: \
-                         probe budget exhausted",
-                        peer.raft_node_id
-                    ),
-                ));
-            };
-            let api_base_url = peer.node.api_base_url.trim().trim_end_matches('/');
-            if api_base_url.is_empty() {
-                return Err(ApiError::new(
-                    "staged_join_capability_unavailable",
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!(
-                        "cannot verify staged join support on {} through legacy public API: \
-                         public API URL is not configured",
-                        peer.raft_node_id
-                    ),
-                ));
-            }
-            let url = format!("{api_base_url}{LEGACY_CAPABILITIES_PATH}");
-            state
-                .mesh_client
-                .direct()
-                .get(url)
-                .timeout(remaining)
-                .send()
-                .await
-                .map_err(|error| {
-                    ApiError::new(
+        // Only a predecessor's unsigned 404 proves that it predates the signed
+        // route. A signed 404, a protocol error, or a Mesh transport failure is
+        // terminal and must not move this probe onto a public path.
+        let response = match response {
+            MeshCapabilityProbeResponse::Verified(response) => response,
+            MeshCapabilityProbeResponse::PredecessorNotFound => {
+                let Some(remaining) = remaining_probe_budget(started) else {
+                    return Err(ApiError::new(
+                        "staged_join_capability_unavailable",
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!(
+                            "cannot verify staged join support on {} through \
+                             legacy public API: probe budget exhausted",
+                            peer.raft_node_id
+                        ),
+                    ));
+                };
+                let api_base_url = peer.node.api_base_url.trim().trim_end_matches('/');
+                if api_base_url.is_empty() {
+                    return Err(ApiError::new(
                         "staged_join_capability_unavailable",
                         StatusCode::SERVICE_UNAVAILABLE,
                         format!(
                             "cannot verify staged join support on {} through legacy public API: \
-                             {error}",
+                             public API URL is not configured",
                             peer.raft_node_id
                         ),
-                    )
-                })?
-        } else {
-            response
+                    ));
+                }
+                let url = format!("{api_base_url}{LEGACY_CAPABILITIES_PATH}");
+                state
+                    .mesh_client
+                    .direct()
+                    .get(url)
+                    .timeout(remaining)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        ApiError::new(
+                            "staged_join_capability_unavailable",
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            format!(
+                                "cannot verify staged join support on {} through \
+                                 legacy public API: {error}",
+                                peer.raft_node_id
+                            ),
+                        )
+                    })?
+            }
         };
         let supports_capability = if response.status().is_success() {
             match remaining_probe_budget(started) {

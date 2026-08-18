@@ -30,9 +30,9 @@ mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
 use mesh::{
-    admin_get_mesh_status, admin_internal_raft_client_write, admin_run_mesh_probes,
-    send_mesh_internal_capability_read, send_mesh_internal_read, send_mesh_internal_request,
-    spawn_mesh_probe_worker,
+    MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
+    admin_run_mesh_probes, send_mesh_internal_capability_read, send_mesh_internal_read,
+    send_mesh_internal_request, spawn_mesh_probe_worker,
 };
 
 use crate::{

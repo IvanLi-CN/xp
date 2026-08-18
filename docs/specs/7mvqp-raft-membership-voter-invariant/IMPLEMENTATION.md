@@ -45,9 +45,9 @@
 - Membership tests exercise dry-run/apply orphan repair, exact fingerprinting, unique target
   validation, `RemoveVoters(..., false)`, absent postcondition, and unchanged DesiredState nodes.
 - HTTP coverage exercises a dry-run with unavailable or empty public peer URLs and a signed Mesh
-  capability response, plus the predecessor's unacknowledged-404 legacy capability fallback while
-  retaining rejection paths for invalid acknowledgements and repair targets and the bounded
-  capability-body read.
+  capability response, plus the predecessor's unacknowledged-404 legacy capability fallback. A
+  signed `404` or unreachable Mesh transport cannot invoke a public fallback; invalid
+  acknowledgements, repair-target rejections, and bounded capability-body reads remain covered.
 - HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
   guards, and membership failure paths.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and

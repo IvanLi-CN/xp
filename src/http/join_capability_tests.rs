@@ -53,6 +53,7 @@ use crate::{
 const CAPABILITIES_PATH: &str = "/api/admin/_internal/capabilities";
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
+const CAPABILITY_RESPONSE_TEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Copy)]
 enum InternalCapabilitiesBody {
@@ -74,6 +75,12 @@ enum PublicApiAvailability {
     Available,
     Unreachable,
     Missing,
+}
+
+#[derive(Clone, Copy)]
+enum MeshTransportAvailability {
+    Available,
+    Unreachable,
 }
 
 #[derive(Clone)]
@@ -378,6 +385,23 @@ async fn run_orphan_repair_dry_run(
     internal_capabilities_body: InternalCapabilitiesBody,
     internal_capabilities_acknowledgement: InternalCapabilitiesAcknowledgement,
 ) -> (StatusCode, serde_json::Value, u64, usize, usize) {
+    run_orphan_repair_dry_run_with_mesh_transport(
+        internal_capabilities_status,
+        MeshTransportAvailability::Available,
+        public_api,
+        internal_capabilities_body,
+        internal_capabilities_acknowledgement,
+    )
+    .await
+}
+
+async fn run_orphan_repair_dry_run_with_mesh_transport(
+    internal_capabilities_status: StatusCode,
+    mesh_transport: MeshTransportAvailability,
+    public_api: PublicApiAvailability,
+    internal_capabilities_body: InternalCapabilitiesBody,
+    internal_capabilities_acknowledgement: InternalCapabilitiesAcknowledgement,
+) -> (StatusCode, serde_json::Value, u64, usize, usize) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let tmp = TempDir::new().unwrap();
@@ -421,6 +445,18 @@ async fn run_orphan_repair_dry_run(
     )
     .await;
     tokio::task::yield_now().await;
+    let (mesh_endpoint_port, _unreachable_mesh_listener) = match mesh_transport {
+        MeshTransportAvailability::Available => (mesh_address.port(), None),
+        MeshTransportAvailability::Unreachable => {
+            let listener =
+                std::net::TcpListener::bind("127.0.0.1:0").expect("unreachable Mesh listener");
+            let port = listener
+                .local_addr()
+                .expect("unreachable Mesh listener address")
+                .port();
+            (port, Some(listener))
+        }
+    };
     match public_api {
         PublicApiAvailability::Available => {
             remote_node.api_base_url = format!(
@@ -448,7 +484,7 @@ async fn run_orphan_repair_dry_run(
         locked.upsert_node(remote_node.clone()).unwrap();
         let endpoint = build_managed_default_vless_endpoint(
             &DefaultVlessEndpointSpec {
-                port: mesh_address.port(),
+                port: mesh_endpoint_port,
                 reality_dest: "origin.example.test:443".to_string(),
                 server_names: xp_test_fixtures::host_list_edge1(),
                 server_names_source: RealityServerNamesSource::Manual,
@@ -678,9 +714,44 @@ async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() 
 }
 
 #[tokio::test]
+async fn orphan_repair_dry_run_does_not_fall_back_after_signed_not_found() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(
+            StatusCode::NOT_FOUND,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "coordinated_upgrade_required");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_does_not_fall_back_when_mesh_is_unreachable() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run_with_mesh_transport(
+            StatusCode::OK,
+            MeshTransportAvailability::Unreachable,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    assert_eq!(mesh_requests, 0);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
 async fn orphan_repair_dry_run_bounds_capability_response_body() {
     let result = tokio::time::timeout(
-        Duration::from_secs(10),
+        CAPABILITY_RESPONSE_TEST_TIMEOUT,
         run_orphan_repair_dry_run(
             StatusCode::OK,
             PublicApiAvailability::Unreachable,
