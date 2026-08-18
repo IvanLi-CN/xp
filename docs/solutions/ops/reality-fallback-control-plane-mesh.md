@@ -10,8 +10,14 @@ outcome question.
 
 ## Decision
 
-- Derive a Mesh origin only from exactly one peer `managed_default` VLESS-REALITY
-  endpoint. Treat absent or ambiguous endpoint state as public-only.
+- For general Mesh calls, derive a Mesh origin only from exactly one peer
+  `managed_default` VLESS-REALITY endpoint. Treat absent or ambiguous endpoint
+  state as public-only.
+- Membership-lifecycle capability reads are stricter: a peer with a Mesh endpoint
+  uses Mesh exclusively, while a peer with no endpoint uses its registered API
+  control-plane origin only with the same signed `mesh-v2` request and acknowledgement.
+  An ambiguous endpoint or invalid access host remains unavailable; it must not
+  silently take the direct path.
 - Send signed `health-v2` and `mesh-v2` requests through the canary's reserved
   routes. Normal `/generate_204` and authority-based camouflage requests never
   share that forwarding path.
@@ -68,6 +74,9 @@ outcome question.
 - Test Mesh-only, public-only and dual-path faults separately. The first should
   show fallback; the second should surface a Mesh success with standby failure;
   the third should mark the peer unavailable.
+- Test lifecycle capability reads with no Mesh endpoint and a valid signed
+  control-plane origin, then prove that an unreachable origin, an invalid Mesh
+  target, and a Mesh transport failure remain blocking results.
 - For a read-only cluster audit, collect the managed endpoint count, validated access host, canary
   readiness, Xray listener, DNS/port reachability, and signed `health-v2` acknowledgement for every
   directed edge. Do not change configuration, restart services, reset breakers, or infer Mesh

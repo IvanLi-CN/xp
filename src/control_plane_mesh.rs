@@ -183,7 +183,7 @@ enum PeerRequestResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerDirectPath {
     RealityMesh,
-    CloudflareTunnel,
+    ApiBaseUrl,
 }
 #[derive(Debug)]
 pub enum MeshRequestError {
@@ -273,7 +273,7 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
             })?,
-            PeerDirectPath::CloudflareTunnel => &peer.public_base_url,
+            PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
         let url = join_url(base_url, &request.path_and_query)?;
         let context = RequestContext::now(
@@ -285,7 +285,7 @@ impl MeshAwareHttpClient {
         );
         let client = match path {
             PeerDirectPath::RealityMesh => &self.mesh,
-            PeerDirectPath::CloudflareTunnel => &self.public_direct,
+            PeerDirectPath::ApiBaseUrl => &self.public_direct,
         };
         let (response, verified) = tokio::time::timeout(
             request.total_budget,

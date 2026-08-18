@@ -694,15 +694,34 @@ pub(super) async fn send_mesh_internal_capability_read(
         sender_id: state.cluster.node_id.clone(),
         updates_active_path: true,
     };
-    let response = client
-        .send_peer_request_allowing_legacy_not_found(
-            &peer,
-            request,
-            ca_key_pem,
-            &state.cluster_ca_pem,
-        )
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    let response = if matches!(
+        peer.mesh_reason,
+        crate::mesh_telemetry::MeshPeerReason::MissingEndpoint
+    ) {
+        // A voter without a VLESS/REALITY Mesh endpoint must still prove capability through its
+        // registered control-plane origin using the same Mesh-v2 request signature and
+        // acknowledgement checks; a Mesh-capable peer never takes this path.
+        client
+            .send_peer_direct_request(
+                &peer,
+                crate::control_plane_mesh::PeerDirectPath::ApiBaseUrl,
+                request,
+                ca_key_pem,
+                &state.cluster_ca_pem,
+            )
+            .await
+            .map(crate::control_plane_mesh::CapabilityProbeResponse::Verified)
+    } else {
+        client
+            .send_peer_request_allowing_legacy_not_found(
+                &peer,
+                request,
+                ca_key_pem,
+                &state.cluster_ca_pem,
+            )
+            .await
+    }
+    .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(match response {
         crate::control_plane_mesh::CapabilityProbeResponse::Verified(response) => {
             MeshCapabilityProbeResponse::Verified(response)

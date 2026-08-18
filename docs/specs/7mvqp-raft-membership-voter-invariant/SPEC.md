@@ -49,9 +49,13 @@ metadata into an orphan voter without a DesiredState Node mapping.
   an unknown member, or uses a speculative rollback.
 - Any retained DesiredState-mapped voter lacking `cluster.membership-lifecycle-v1` freezes fresh
   join, delete, restore, and repair lifecycle writes with `coordinated_upgrade_required`.
-  Capability reads use signed Mesh transport. The legacy public capability endpoint is a
-  predecessor-only fallback after the signed route returns an unacknowledged `404`; public API
-  availability is not a separate lifecycle prerequisite for current peers.
+  A voter with an eligible Mesh endpoint verifies that capability only through signed Mesh
+  transport. A voter without an eligible Mesh endpoint verifies through its registered
+  control-plane origin using the same signed `mesh-v2` request and acknowledgement; it remains
+  unavailable until that signed origin responds. A Mesh-capable voter never falls back to that
+  origin after a Mesh failure. The legacy public capability endpoint is a predecessor-only fallback
+  after the signed route returns an unacknowledged `404`; public API availability is not a separate
+  lifecycle prerequisite for current peers.
   Upgrade one voter at a time while retaining serving quorum. After that barrier, a replayable
   legacy JoinSession converts to a Join operation; malformed legacy material records a terminal
   Blocked operation. New binaries do not fall back to the old auto-promotion behavior.
@@ -72,10 +76,11 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
   pending join session, and the target being the unique orphan voter.
 - The dry-run establishes the unique orphan before the capability barrier excludes that exact
   target. Its advertised public API URL is not a repair prerequisite. Every retained mapped voter
-  verifies the lifecycle capability through signed Mesh transport; only a predecessor's
-  unacknowledged `404` for that signed new route uses the legacy public `/api/capabilities`. Other
-  missing or invalid acknowledgements remain terminal. Both responses share one probe budget, and
-  each body is limited to 64 KiB.
+  verifies the lifecycle capability through its required signed control-plane path. Mesh-capable
+  voters use Mesh exclusively; a voter without an eligible Mesh endpoint uses its registered
+  signed control-plane origin. Only a predecessor's unacknowledged `404` for the signed Mesh route
+  uses the legacy public `/api/capabilities`. Other missing or invalid acknowledgements remain
+  terminal. Both responses share one probe budget, and each body is limited to 64 KiB.
 - Apply issues only `RemoveVoters({target}, false)` and verifies `absent`. It does not edit Nodes,
   endpoints, users, traffic configuration, or Raft files. A failed or mismatched precondition is a
   blocked incident, not an automated recovery signal.

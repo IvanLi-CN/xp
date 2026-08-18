@@ -174,6 +174,12 @@ last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect the
 `GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
 accepts only current remote member IDs.
 
+An owner-approved private ingress exception may intentionally have no managed-default
+VLESS/REALITY endpoint. Its registered `api_base_url` is then a private control-plane origin for
+the lifecycle capability barrier only: XP sends the same signed `mesh-v2` request and requires a
+valid signed acknowledgement. It does not create a public ingress requirement, and a node that
+has a Mesh endpoint never falls back to this origin after a Mesh failure.
+
 Raft, leader forwarding, node history, probes, runtime, alerts, quota, traffic, IP usage, TCP
 history, endpoint probes and SSE share one process-wide Mesh client. Its managed route is
 HTTP/2-only, retains at most one idle connection per origin for 120 seconds, and does not send H2
