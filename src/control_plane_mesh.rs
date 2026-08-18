@@ -480,6 +480,8 @@ impl MeshAwareHttpClient {
                             .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
+                    // An unknown nested admin route bypasses `admin_auth`, so a predecessor's
+                    // route miss is intentionally the only accepted acknowledgement-less reply.
                     if allow_unsigned_not_found
                         && response.status() == reqwest::StatusCode::NOT_FOUND
                     {
