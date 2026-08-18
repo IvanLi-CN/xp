@@ -13,7 +13,7 @@ use axum::{
     Router,
     body::{Body, Bytes},
     extract::State,
-    http::{HeaderMap, Method, Request, StatusCode, Uri, header},
+    http::{HeaderMap, HeaderValue, Method, Request, StatusCode, Uri, header},
     response::Response,
     routing::any,
 };
@@ -66,6 +66,14 @@ enum InternalCapabilitiesAcknowledgement {
     Signed,
     Omitted,
     Invalid,
+    Malformed,
+}
+
+#[derive(Clone, Copy)]
+enum PublicApiAvailability {
+    Available,
+    Unreachable,
+    Missing,
 }
 
 #[derive(Clone)]
@@ -180,6 +188,10 @@ async fn mesh_capability_response(
         InternalCapabilitiesAcknowledgement::Invalid => {
             response.header(internal_auth::INTERNAL_ACK_HEADER, "invalid")
         }
+        InternalCapabilitiesAcknowledgement::Malformed => response.header(
+            internal_auth::INTERNAL_ACK_HEADER,
+            HeaderValue::from_bytes(&[0xff]).expect("malformed acknowledgement"),
+        ),
     };
     response
         .body(Body::from(response_body))
@@ -362,7 +374,7 @@ fn build_test_router(
 
 async fn run_orphan_repair_dry_run(
     internal_capabilities_status: StatusCode,
-    public_url_available: bool,
+    public_api: PublicApiAvailability,
     internal_capabilities_body: InternalCapabilitiesBody,
     internal_capabilities_acknowledgement: InternalCapabilitiesAcknowledgement,
 ) -> (StatusCode, serde_json::Value, u64, usize, usize) {
@@ -409,12 +421,16 @@ async fn run_orphan_repair_dry_run(
     )
     .await;
     tokio::task::yield_now().await;
-    if public_url_available {
-        remote_node.api_base_url = format!(
-            "https://{}:{}",
-            xp_test_fixtures::host_fixture575(),
-            mesh_address.port()
-        );
+    match public_api {
+        PublicApiAvailability::Available => {
+            remote_node.api_base_url = format!(
+                "https://{}:{}",
+                xp_test_fixtures::host_fixture575(),
+                mesh_address.port()
+            );
+        }
+        PublicApiAvailability::Unreachable => {}
+        PublicApiAvailability::Missing => remote_node.api_base_url.clear(),
     }
 
     let store = JsonSnapshotStore::load_or_init(StoreInit {
@@ -562,7 +578,7 @@ async fn run_orphan_repair_dry_run(
 async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
     let (status, body, orphan_node_id, mesh_requests, legacy_requests) = run_orphan_repair_dry_run(
         StatusCode::OK,
-        false,
+        PublicApiAvailability::Unreachable,
         InternalCapabilitiesBody::Json,
         InternalCapabilitiesAcknowledgement::Signed,
     )
@@ -577,11 +593,28 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
 }
 
 #[tokio::test]
+async fn orphan_repair_dry_run_uses_mesh_when_public_url_is_empty() {
+    let (status, body, orphan_node_id, mesh_requests, legacy_requests) = run_orphan_repair_dry_run(
+        StatusCode::OK,
+        PublicApiAvailability::Missing,
+        InternalCapabilitiesBody::Json,
+        InternalCapabilitiesAcknowledgement::Signed,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(body["raft_node_id"], orphan_node_id);
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
 async fn orphan_repair_dry_run_falls_back_to_legacy_capabilities() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
         run_orphan_repair_dry_run(
             StatusCode::NOT_FOUND,
-            true,
+            PublicApiAvailability::Available,
             InternalCapabilitiesBody::Json,
             InternalCapabilitiesAcknowledgement::Omitted,
         )
@@ -598,9 +631,26 @@ async fn orphan_repair_dry_run_rejects_invalid_capability_acknowledgement() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
         run_orphan_repair_dry_run(
             StatusCode::NOT_FOUND,
-            true,
+            PublicApiAvailability::Available,
             InternalCapabilitiesBody::Json,
             InternalCapabilitiesAcknowledgement::Invalid,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_rejects_malformed_capability_acknowledgement() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(
+            StatusCode::NOT_FOUND,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Malformed,
         )
         .await;
 
@@ -615,7 +665,7 @@ async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() 
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
         run_orphan_repair_dry_run(
             StatusCode::INTERNAL_SERVER_ERROR,
-            true,
+            PublicApiAvailability::Available,
             InternalCapabilitiesBody::Json,
             InternalCapabilitiesAcknowledgement::Signed,
         )
@@ -633,7 +683,7 @@ async fn orphan_repair_dry_run_bounds_capability_response_body() {
         Duration::from_secs(10),
         run_orphan_repair_dry_run(
             StatusCode::OK,
-            false,
+            PublicApiAvailability::Unreachable,
             InternalCapabilitiesBody::Pending,
             InternalCapabilitiesAcknowledgement::Signed,
         ),
@@ -653,7 +703,7 @@ async fn orphan_repair_dry_run_bounds_capability_response_size() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
         run_orphan_repair_dry_run(
             StatusCode::OK,
-            false,
+            PublicApiAvailability::Unreachable,
             InternalCapabilitiesBody::Oversized,
             InternalCapabilitiesAcknowledgement::Signed,
         )

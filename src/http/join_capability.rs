@@ -119,11 +119,7 @@ async fn require_capability_on_voters(
             })
         })
         .collect::<Vec<_>>();
-    if peers.len() != voter_ids.len()
-        || peers
-            .iter()
-            .any(|peer| peer.node.api_base_url.trim().is_empty())
-    {
+    if peers.len() != voter_ids.len() {
         return Err(ApiError::new(
             "coordinated_upgrade_required",
             StatusCode::CONFLICT,
@@ -168,11 +164,19 @@ async fn require_capability_on_voters(
                     ),
                 ));
             };
-            let url = format!(
-                "{}{}",
-                peer.node.api_base_url.trim().trim_end_matches('/'),
-                LEGACY_CAPABILITIES_PATH
-            );
+            let api_base_url = peer.node.api_base_url.trim().trim_end_matches('/');
+            if api_base_url.is_empty() {
+                return Err(ApiError::new(
+                    "staged_join_capability_unavailable",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!(
+                        "cannot verify staged join support on {} through legacy public API: \
+                         public API URL is not configured",
+                        peer.raft_node_id
+                    ),
+                ));
+            }
+            let url = format!("{api_base_url}{LEGACY_CAPABILITIES_PATH}");
             state
                 .mesh_client
                 .direct()

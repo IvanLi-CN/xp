@@ -420,11 +420,21 @@ impl MeshAwareHttpClient {
                             "Mesh response did not use HTTP/2".to_string(),
                         ));
                     }
-                    if let Some(ack) = response
-                        .headers()
-                        .get(internal_auth::INTERNAL_ACK_HEADER)
-                        .and_then(|value| value.to_str().ok())
+                    if let Some(acknowledgement) =
+                        response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
                     {
+                        let ack = match acknowledgement.to_str() {
+                            Ok(ack) => ack,
+                            Err(_) => {
+                                self.circuits.release_half_open_probe(&peer.node_id).await;
+                                self.record_mesh_protocol_failure(peer).await;
+                                self.record_terminal_failure(peer).await;
+                                return Err(MeshRequestError::Protocol(
+                                    "Mesh response carries a malformed signed acknowledgement"
+                                        .to_string(),
+                                ));
+                            }
+                        };
                         if let Err(error) = internal_auth::verify_ack_v2(
                             cluster_ca_key_pem,
                             cluster_ca_cert_pem,
@@ -590,17 +600,22 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
-        let Some(ack) = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-        else {
-            if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
+        let ack = match response.headers().get(internal_auth::INTERNAL_ACK_HEADER) {
+            Some(acknowledgement) => acknowledgement.to_str().map_err(|_| {
+                MeshRequestError::Protocol(
+                    "public response carries a malformed signed acknowledgement".to_string(),
+                )
+            })?,
+            None if allow_unsigned_not_found
+                && response.status() == reqwest::StatusCode::NOT_FOUND =>
+            {
                 return Ok(response);
             }
-            return Err(MeshRequestError::Protocol(
-                "public response has no signed acknowledgement".to_string(),
-            ));
+            None => {
+                return Err(MeshRequestError::Protocol(
+                    "public response has no signed acknowledgement".to_string(),
+                ));
+            }
         };
         if let Err(error) = internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
