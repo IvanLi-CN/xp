@@ -1019,6 +1019,7 @@ pub fn build_router_with_mesh_telemetry(
             "/_internal/raft/client-write",
             post(admin_internal_raft_client_write),
         )
+        .route("/_internal/capabilities", get(admin_internal_capabilities))
         .route(
             "/_internal/raft/repair-orphan-voter",
             post(admin_internal_repair_orphan_voter),
@@ -1736,6 +1737,15 @@ async fn admin_internal_mesh_health(
     })))
 }
 
+async fn admin_internal_capabilities(
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<capabilities::ApiCapabilitiesResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    Ok(api_capabilities().await)
+}
+
 async fn admin_internal_repair_orphan_voter(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -1744,16 +1754,17 @@ async fn admin_internal_repair_orphan_voter(
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    join_capability::require_membership_lifecycle_on_voters(&state).await?;
+    let preview = crate::raft_membership_guard::preview_orphan_voter_repair(
+        state.raft.clone(),
+        state.store.clone(),
+        req.raft_node_id,
+    )
+    .await
+    .map_err(|error| ApiError::conflict(error.to_string()))?;
+    join_capability::require_membership_lifecycle_on_retained_voters(&state, preview.raft_node_id)
+        .await?;
 
     if !req.apply {
-        let preview = crate::raft_membership_guard::preview_orphan_voter_repair(
-            state.raft.clone(),
-            state.store.clone(),
-            req.raft_node_id,
-        )
-        .await
-        .map_err(|error| ApiError::conflict(error.to_string()))?;
         return Ok(Json(InternalRepairOrphanVoterResponse {
             dry_run: true,
             raft_node_id: preview.raft_node_id,

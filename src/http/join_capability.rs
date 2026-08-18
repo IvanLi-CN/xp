@@ -1,9 +1,13 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use axum::http::StatusCode;
 use serde::Deserialize;
 
-use super::{ApiError, AppState, raft_metrics};
+use super::{ApiError, AppState, raft_metrics, send_mesh_internal_read};
+use crate::domain::Node;
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 
@@ -15,68 +19,98 @@ struct Response {
 #[derive(Debug, Clone)]
 struct VoterCapabilityPeer {
     raft_node_id: u64,
-    api_base_url: String,
+    node: Node,
 }
 
 pub(super) async fn require_membership_lifecycle_on_voters(
     state: &AppState,
 ) -> Result<(), ApiError> {
-    require_capability_on_voters(state, MEMBERSHIP_LIFECYCLE_CAPABILITY).await
+    require_capability_on_voters(state, MEMBERSHIP_LIFECYCLE_CAPABILITY, None).await
 }
 
-async fn require_capability_on_voters(state: &AppState, capability: &str) -> Result<(), ApiError> {
+pub(super) async fn require_membership_lifecycle_on_retained_voters(
+    state: &AppState,
+    excluded_voter_id: u64,
+) -> Result<(), ApiError> {
+    require_capability_on_voters(
+        state,
+        MEMBERSHIP_LIFECYCLE_CAPABILITY,
+        Some(excluded_voter_id),
+    )
+    .await
+}
+
+async fn require_capability_on_voters(
+    state: &AppState,
+    capability: &str,
+    excluded_voter_id: Option<u64>,
+) -> Result<(), ApiError> {
     let metrics = raft_metrics(state);
     let membership = metrics.membership_config.membership();
     let mut voter_ids = membership.voter_ids().collect::<BTreeSet<_>>();
     let local_node_id = crate::raft::types::raft_node_id_from_ulid(&state.cluster.node_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     voter_ids.remove(&local_node_id);
+    if let Some(excluded_voter_id) = excluded_voter_id {
+        voter_ids.remove(&excluded_voter_id);
+    }
+
+    let nodes_by_raft_node_id = {
+        let store = state.store.lock().await;
+        store
+            .list_nodes()
+            .into_iter()
+            .filter_map(|node| {
+                crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+                    .ok()
+                    .map(|raft_node_id| (raft_node_id, node))
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
     let peers = voter_ids
         .iter()
         .filter_map(|raft_node_id| {
-            membership
-                .get_node(raft_node_id)
-                .map(|node| VoterCapabilityPeer {
-                    raft_node_id: *raft_node_id,
-                    api_base_url: node.api_base_url.clone(),
-                })
+            membership.get_node(raft_node_id).and_then(|_| {
+                nodes_by_raft_node_id
+                    .get(raft_node_id)
+                    .cloned()
+                    .map(|node| VoterCapabilityPeer {
+                        raft_node_id: *raft_node_id,
+                        node,
+                    })
+            })
         })
         .collect::<Vec<_>>();
-    if peers.len() != voter_ids.len()
-        || peers.iter().any(|peer| peer.api_base_url.trim().is_empty())
-    {
+    if peers.len() != voter_ids.len() {
         return Err(ApiError::new(
             "coordinated_upgrade_required",
             StatusCode::CONFLICT,
-            "every voter must expose valid Raft member metadata before membership changes",
+            "every retained voter must expose valid Raft member metadata and DesiredState \
+             mapping before membership changes",
         ));
     }
     if voter_ids.is_empty() {
         return Ok(());
     }
-    let client =
-        crate::ops::build_xp_ops_http_client(&peers[0].api_base_url, state.cluster_ca_pem.as_str())
-            .map_err(|error| ApiError::internal(error.message))?;
     for peer in peers {
-        let url = format!(
-            "{}/api/capabilities",
-            peer.api_base_url.trim_end_matches('/')
-        );
-        let response = client
-            .get(&url)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|error| {
-                ApiError::new(
-                    "staged_join_capability_unavailable",
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!(
-                        "cannot verify staged join support on {}: {error}",
-                        peer.raft_node_id
-                    ),
-                )
-            })?;
+        let response = send_mesh_internal_read(
+            state,
+            &state.mesh_client,
+            &peer.node,
+            "/api/admin/_internal/capabilities".to_string(),
+            Duration::from_secs(5),
+        )
+        .await
+        .map_err(|error| {
+            ApiError::new(
+                "staged_join_capability_unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "cannot verify staged join support on {} through Mesh: {}",
+                    peer.raft_node_id, error.message
+                ),
+            )
+        })?;
         if !response.status().is_success()
             || !response
                 .json::<Response>()
@@ -92,3 +126,7 @@ async fn require_capability_on_voters(state: &AppState, capability: &str) -> Res
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "join_capability_tests.rs"]
+mod tests;

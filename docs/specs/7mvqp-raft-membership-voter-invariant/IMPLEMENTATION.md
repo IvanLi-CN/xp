@@ -22,12 +22,17 @@
 ## Compatibility
 
 - `cluster.membership-lifecycle-v1` is advertised by this build. Before a new lifecycle command,
-  all current voters must advertise it; otherwise the caller receives
+  every retained DesiredState-mapped voter must advertise it through signed Mesh capability reads,
+  with public-origin transport only as a fallback. An unreachable public URL is therefore not a
+  separate rejection condition; a retained voter that cannot verify still returns
   `coordinated_upgrade_required` and no new command is written.
 - An additive persisted field alone is compatible with old snapshots. The command variants are not
   compatible with an old binary, which is why the capability barrier precedes the first command.
 - After the barrier, valid legacy JoinSessions become replayable Join operations. Invalid legacy
   sessions become terminal Blocked evidence; they are not inferred from member shape or promoted.
+- Orphan repair first performs its existing leader-local, linearizable preview. Only the previewed
+  unique orphan is excluded from the retained-voter capability probe, so a stale orphan public URL
+  cannot bypass or block the capability barrier.
 
 ## Coverage
 
@@ -35,6 +40,8 @@
   evidence timestamps.
 - Membership tests exercise dry-run/apply orphan repair, exact fingerprinting, unique target
   validation, `RemoveVoters(..., false)`, absent postcondition, and unchanged DesiredState nodes.
+- HTTP coverage exercises a dry-run with unavailable public peer URLs and a signed Mesh capability
+  response, while retaining the existing rejection paths for invalid repair targets.
 - HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
   guards, and membership failure paths.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and

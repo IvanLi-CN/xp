@@ -47,11 +47,13 @@ metadata into an orphan voter without a DesiredState Node mapping.
   and resumes a recorded RemoveNode or Restore operation. The Join coordinator advances only a
   matching recorded Join operation. None of them calls `add_voters` for an unknown session, deletes
   an unknown member, or uses a speculative rollback.
-- Any voter lacking `cluster.membership-lifecycle-v1` freezes fresh join, delete, restore, and
-  repair lifecycle writes with `coordinated_upgrade_required`. Upgrade one voter at a time while
-  retaining serving quorum. After that barrier, a replayable legacy JoinSession converts to a Join
-  operation; malformed legacy material records a terminal Blocked operation. New binaries do not
-  fall back to the old auto-promotion behavior.
+- Any retained DesiredState-mapped voter lacking `cluster.membership-lifecycle-v1` freezes fresh
+  join, delete, restore, and repair lifecycle writes with `coordinated_upgrade_required`.
+  Capability reads use signed Mesh transport first, with the normal public origin only as a
+  compatibility fallback; public API availability is not a separate lifecycle prerequisite.
+  Upgrade one voter at a time while retaining serving quorum. After that barrier, a replayable
+  legacy JoinSession converts to a Join operation; malformed legacy material records a terminal
+  Blocked operation. New binaries do not fall back to the old auto-promotion behavior.
 
 ## Orphan voter repair
 
@@ -67,6 +69,9 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - The service rechecks signed internal authentication, leader ownership, linearizability, no joint
   configuration, no active operation, the target not being leader, no DesiredState mapping or
   pending join session, and the target being the unique orphan voter.
+- The dry-run establishes the unique orphan before the capability barrier excludes that exact
+  target. Its advertised public API URL is not a repair prerequisite; every retained mapped voter
+  must still verify the lifecycle capability through signed Mesh transport or its public fallback.
 - Apply issues only `RemoveVoters({target}, false)` and verifies `absent`. It does not edit Nodes,
   endpoints, users, traffic configuration, or Raft files. A failed or mismatched precondition is a
   blocked incident, not an automated recovery signal.
@@ -87,6 +92,9 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - Unknown learners are never automatically promoted.
 - Dry-run repair performs zero writes; a stale fingerprint, leader target, joint membership, active
   operation, mapping conflict, or multiple orphan voters is rejected.
+- An unreachable public URL on the proven orphan does not block repair when retained mapped voters
+  verify the capability through Mesh; unavailable retained voters remain a coordinated-upgrade
+  blocker.
 - Delete returns `204` when completed within five seconds; otherwise it returns `202` with an
   operation id and status URL. The Web resumes polling the same operation after refresh and only
   refreshes inventory after a terminal completion.
