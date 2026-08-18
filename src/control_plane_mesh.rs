@@ -31,6 +31,7 @@ pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(240),
     Duration::from_secs(300),
 ];
+const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshAttemptDecision {
@@ -166,6 +167,17 @@ pub struct MeshRequest {
     pub cluster_id: String,
     pub sender_id: String,
     pub updates_active_path: bool,
+}
+
+/// The only compatibility result accepted from the signed capability probe.
+pub(crate) enum CapabilityProbeResponse {
+    Verified(reqwest::Response),
+    PredecessorNotFound,
+}
+
+enum PeerRequestResponse {
+    Verified(reqwest::Response),
+    PredecessorNotFound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +336,70 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        match self
+            .send_peer_request_with_legacy_not_found(
+                peer,
+                request,
+                cluster_ca_key_pem,
+                cluster_ca_cert_pem,
+                false,
+                true,
+            )
+            .await?
+        {
+            PeerRequestResponse::Verified(response) => Ok(response),
+            PeerRequestResponse::PredecessorNotFound => Err(MeshRequestError::Protocol(
+                "unexpected predecessor capability response".to_string(),
+            )),
+        }
+    }
+
+    /// Allows a predecessor's unsigned 404 only for an explicit compatibility probe.
+    pub(crate) async fn send_peer_request_allowing_legacy_not_found(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<CapabilityProbeResponse, MeshRequestError> {
+        if request.method != reqwest::Method::GET
+            || request.path_and_query != LEGACY_CAPABILITIES_PROBE_PATH
+            || request.content_type.is_some()
+            || !request.body.is_empty()
+            || request.route != InternalRoute::MeshV2
+        {
+            return Err(MeshRequestError::Protocol(
+                "legacy capability response policy is only valid for the capability probe"
+                    .to_string(),
+            ));
+        }
+        let response = self
+            .send_peer_request_with_legacy_not_found(
+                peer,
+                request,
+                cluster_ca_key_pem,
+                cluster_ca_cert_pem,
+                true,
+                false,
+            )
+            .await?;
+        Ok(match response {
+            PeerRequestResponse::Verified(response) => CapabilityProbeResponse::Verified(response),
+            PeerRequestResponse::PredecessorNotFound => {
+                CapabilityProbeResponse::PredecessorNotFound
+            }
+        })
+    }
+
+    async fn send_peer_request_with_legacy_not_found(
+        &self,
+        peer: &MeshPeerTarget,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+        allow_unsigned_not_found: bool,
+        allow_public_fallback: bool,
+    ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
         let context = RequestContext::now(
             request.route,
@@ -372,11 +448,21 @@ impl MeshAwareHttpClient {
                             "Mesh response did not use HTTP/2".to_string(),
                         ));
                     }
-                    if let Some(ack) = response
-                        .headers()
-                        .get(internal_auth::INTERNAL_ACK_HEADER)
-                        .and_then(|value| value.to_str().ok())
+                    if let Some(acknowledgement) =
+                        response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
                     {
+                        let ack = match acknowledgement.to_str() {
+                            Ok(ack) => ack,
+                            Err(_) => {
+                                self.circuits.release_half_open_probe(&peer.node_id).await;
+                                self.record_mesh_protocol_failure(peer).await;
+                                self.record_terminal_failure(peer).await;
+                                return Err(MeshRequestError::Protocol(
+                                    "Mesh response carries a malformed signed acknowledgement"
+                                        .to_string(),
+                                ));
+                            }
+                        };
                         if let Err(error) = internal_auth::verify_ack_v2(
                             cluster_ca_key_pem,
                             cluster_ca_cert_pem,
@@ -390,25 +476,18 @@ impl MeshAwareHttpClient {
                             self.record_terminal_failure(peer).await;
                             return Err(error.into());
                         }
-                        let breaker_state = self.circuits.record_success(&peer.node_id).await;
-                        if let Some(telemetry) = &self.telemetry {
-                            let _ = telemetry
-                                .set_breaker(&peer.node_id, breaker_state, None)
-                                .await;
-                        }
-                        self.record_sample(
-                            peer,
-                            telemetry_sample(
-                                TelemetryPath::Mesh,
-                                true,
-                                started.elapsed(),
-                                false,
-                                request.updates_active_path,
-                                Some(transport),
-                            ),
-                        )
-                        .await;
-                        return Ok(response);
+                        self.record_mesh_success(peer, started, &request, transport)
+                            .await;
+                        return Ok(PeerRequestResponse::Verified(response));
+                    }
+                    // An unknown nested admin route bypasses `admin_auth`, so a predecessor's
+                    // route miss is intentionally the only accepted acknowledgement-less reply.
+                    if allow_unsigned_not_found
+                        && response.status() == reqwest::StatusCode::NOT_FOUND
+                    {
+                        self.record_mesh_success(peer, started, &request, transport)
+                            .await;
+                        return Ok(PeerRequestResponse::PredecessorNotFound);
                     }
                     self.circuits.release_half_open_probe(&peer.node_id).await;
                     self.record_mesh_protocol_failure(peer).await;
@@ -440,6 +519,14 @@ impl MeshAwareHttpClient {
             }
         }
 
+        if !allow_public_fallback {
+            self.record_terminal_failure(peer).await;
+            return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
+                MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
+            } else {
+                MeshRequestError::OutcomeUnknown
+            });
+        }
         if !request.allow_ambiguous_fallback && mesh_outcome_ambiguous {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
@@ -495,9 +582,37 @@ impl MeshAwareHttpClient {
             self.record_mesh_reason(peer, MeshPeerReason::FallbackActive)
                 .await;
         }
-        Ok(response)
+        Ok(PeerRequestResponse::Verified(response))
     }
 
+    async fn record_mesh_success(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        transport: MeshTransportObservation,
+    ) {
+        let breaker_state = self.circuits.record_success(&peer.node_id).await;
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .set_breaker(&peer.node_id, breaker_state, None)
+                .await;
+        }
+        self.record_sample(
+            peer,
+            telemetry_sample(
+                TelemetryPath::Mesh,
+                true,
+                started.elapsed(),
+                false,
+                request.updates_active_path,
+                Some(transport),
+            ),
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn send_public_signed(
         &self,
         url: &str,
@@ -521,15 +636,19 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
-        let Some(ack) = response
+        let acknowledgement = response
             .headers()
             .get(internal_auth::INTERNAL_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(MeshRequestError::Protocol(
-                "public response has no signed acknowledgement".to_string(),
-            ));
-        };
+            .ok_or_else(|| {
+                MeshRequestError::Protocol(
+                    "public response has no signed acknowledgement".to_string(),
+                )
+            })?;
+        let ack = acknowledgement.to_str().map_err(|_| {
+            MeshRequestError::Protocol(
+                "public response carries a malformed signed acknowledgement".to_string(),
+            )
+        })?;
         if let Err(error) = internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,

@@ -20,6 +20,8 @@ use tower::util::ServiceExt;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+#[path = "tests/admin_auth_tests.rs"]
+mod admin_auth_tests;
 #[path = "tests/history_repository.rs"]
 mod history_repository;
 mod managed_vless_create;

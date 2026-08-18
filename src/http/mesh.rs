@@ -664,6 +664,55 @@ pub(super) async fn send_mesh_internal_read(
     .await
 }
 
+/// Reads the one predecessor-compatible capability route.
+pub(super) enum MeshCapabilityProbeResponse {
+    Verified(reqwest::Response),
+    PredecessorNotFound,
+}
+
+pub(super) async fn send_mesh_internal_capability_read(
+    state: &AppState,
+    client: &MeshAwareHttpClient,
+    node: &Node,
+    budget: Duration,
+) -> Result<MeshCapabilityProbeResponse, ApiError> {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_deref()
+        .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
+    let peer = mesh_peer_target(state, &node.node_id).await?;
+    let request = MeshRequest {
+        method: Method::GET,
+        path_and_query: "/api/admin/_internal/capabilities".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: budget,
+        allow_ambiguous_fallback: false,
+        request_id: crate::id::new_ulid_string(),
+        route: internal_auth::InternalRoute::MeshV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: true,
+    };
+    let response = client
+        .send_peer_request_allowing_legacy_not_found(
+            &peer,
+            request,
+            ca_key_pem,
+            &state.cluster_ca_pem,
+        )
+        .await
+        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    Ok(match response {
+        crate::control_plane_mesh::CapabilityProbeResponse::Verified(response) => {
+            MeshCapabilityProbeResponse::Verified(response)
+        }
+        crate::control_plane_mesh::CapabilityProbeResponse::PredecessorNotFound => {
+            MeshCapabilityProbeResponse::PredecessorNotFound
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn send_mesh_internal_request(
     state: &AppState,
@@ -682,25 +731,21 @@ pub(super) async fn send_mesh_internal_request(
         .as_deref()
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let peer = mesh_peer_target(state, &node.node_id).await?;
+    let request = MeshRequest {
+        method,
+        path_and_query,
+        content_type,
+        body,
+        total_budget: budget,
+        allow_ambiguous_fallback,
+        request_id,
+        route: internal_auth::InternalRoute::MeshV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: true,
+    };
     client
-        .send_peer_request(
-            &peer,
-            MeshRequest {
-                method,
-                path_and_query,
-                content_type,
-                body,
-                total_budget: budget,
-                allow_ambiguous_fallback,
-                request_id,
-                route: internal_auth::InternalRoute::MeshV2,
-                cluster_id: state.cluster.cluster_id.clone(),
-                sender_id: state.cluster.node_id.clone(),
-                updates_active_path: true,
-            },
-            ca_key_pem,
-            &state.cluster_ca_pem,
-        )
+        .send_peer_request(&peer, request, ca_key_pem, &state.cluster_ca_pem)
         .await
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))
 }

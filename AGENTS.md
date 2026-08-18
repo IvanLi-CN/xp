@@ -117,11 +117,17 @@
   only that recorded learner. Same-request retries replay the reservation without extending its
   10-minute activation deadline. Expired sessions are cleaned by the leader; existing-node recovery
   remains separate.
-- Fresh join, restore, delete and orphan-voter repair require every current voter to expose
-  `cluster.membership-lifecycle-v1`; operators must finish the XP rolling upgrade one voter at a
+- Fresh join, restore and delete require every current voter to expose
+  `cluster.membership-lifecycle-v1`. Orphan-voter repair first proves one exact non-leader orphan,
+  then requires that capability only from every retained DesiredState-mapped voter; the proven
+  orphan is excluded only from its own repair preflight. Retained voters use signed Mesh capability
+  reads, with the predecessor's legacy public capability endpoint only after the signed capability
+  probe receives that predecessor's `404` from the missing new route. Other missing or invalid
+  acknowledgements remain terminal. Operators must finish the XP rolling upgrade one voter at a
   time while maintaining quorum before lifecycle writes resume. The pristine learner accepts only
-  signed internal-auth v2 Raft traffic, but any elected leader in the authenticated cluster may
-  complete its initial replication after failover.
+  signed internal-auth v2
+  Raft traffic, but any elected leader in the authenticated cluster may complete its initial
+  replication after failover.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the

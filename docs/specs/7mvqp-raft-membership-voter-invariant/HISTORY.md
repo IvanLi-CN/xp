@@ -10,3 +10,9 @@
   non-leader voter with retain=false and never rewrites local Raft files or desired/user data.
 - Mixed-version voters cannot safely decode the new state-machine command variants. Lifecycle work
   freezes until the whole voter set advertises the capability.
+- Capability verification follows the signed Mesh control-plane path. Only a predecessor's
+  unacknowledged `404` for that signed route falls back to the legacy public capability endpoint;
+  other missing or invalid acknowledgements remain terminal. Every response body stays within the
+  same probe budget and a 64 KiB limit. A locally previewed unique orphan is excluded only from
+  its own repair preflight, so stale public metadata cannot weaken the retained-voter upgrade
+  barrier.
