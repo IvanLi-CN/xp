@@ -106,7 +106,7 @@ where
     };
     let preferred_path = peer_direct_path(preferred);
     let alternate_path = match preferred {
-        DirectPath::RealityMesh => PeerDirectPath::CloudflareTunnel,
+        DirectPath::RealityMesh => PeerDirectPath::ApiBaseUrl,
         DirectPath::CloudflareTunnel => PeerDirectPath::RealityMesh,
     };
     let mut last_error = None::<RepositoryDirectError>;
@@ -163,14 +163,14 @@ where
 fn peer_direct_path(path: DirectPath) -> PeerDirectPath {
     match path {
         DirectPath::RealityMesh => PeerDirectPath::RealityMesh,
-        DirectPath::CloudflareTunnel => PeerDirectPath::CloudflareTunnel,
+        DirectPath::CloudflareTunnel => PeerDirectPath::ApiBaseUrl,
     }
 }
 
 fn history_direct_path(path: PeerDirectPath) -> DirectPath {
     match path {
         PeerDirectPath::RealityMesh => DirectPath::RealityMesh,
-        PeerDirectPath::CloudflareTunnel => DirectPath::CloudflareTunnel,
+        PeerDirectPath::ApiBaseUrl => DirectPath::CloudflareTunnel,
     }
 }
 

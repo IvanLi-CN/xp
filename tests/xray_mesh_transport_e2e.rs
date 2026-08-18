@@ -224,7 +224,7 @@ fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
             proxy.addr.port()
         )),
         mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+        api_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
     }
 }
 

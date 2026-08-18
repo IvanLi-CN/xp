@@ -81,6 +81,8 @@ enum PublicApiAvailability {
 enum MeshTransportAvailability {
     Available,
     Unreachable,
+    MissingEndpoint,
+    InvalidAccessHost,
 }
 
 #[derive(Clone)]
@@ -426,6 +428,9 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
+    if matches!(mesh_transport, MeshTransportAvailability::InvalidAccessHost) {
+        remote_node.access_host.clear();
+    }
     let requests = Arc::new(AtomicUsize::new(0));
     let legacy_requests = Arc::new(AtomicUsize::new(0));
     let (mesh_address, mesh_server) = spawn_mesh_capability_server(
@@ -446,7 +451,7 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
     .await;
     tokio::task::yield_now().await;
     let (mesh_endpoint_port, _unreachable_mesh_listener) = match mesh_transport {
-        MeshTransportAvailability::Available => (mesh_address.port(), None),
+        MeshTransportAvailability::Available => (Some(mesh_address.port()), None),
         MeshTransportAvailability::Unreachable => {
             let listener =
                 std::net::TcpListener::bind("127.0.0.1:0").expect("unreachable Mesh listener");
@@ -454,8 +459,10 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
                 .local_addr()
                 .expect("unreachable Mesh listener address")
                 .port();
-            (port, Some(listener))
+            (Some(port), Some(listener))
         }
+        MeshTransportAvailability::MissingEndpoint => (None, None),
+        MeshTransportAvailability::InvalidAccessHost => (Some(mesh_address.port()), None),
     };
     match public_api {
         PublicApiAvailability::Available => {
@@ -482,23 +489,25 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
     {
         let mut locked = store.lock().await;
         locked.upsert_node(remote_node.clone()).unwrap();
-        let endpoint = build_managed_default_vless_endpoint(
-            &DefaultVlessEndpointSpec {
-                port: mesh_endpoint_port,
-                reality_dest: "origin.example.test:443".to_string(),
-                server_names: xp_test_fixtures::host_list_edge1(),
-                server_names_source: RealityServerNamesSource::Manual,
-                fingerprint: DEFAULT_VLESS_FINGERPRINT.to_string(),
-            },
-            remote_node.node_id.clone(),
-        )
-        .unwrap();
-        DesiredStateCommand::UpsertEndpoint {
-            endpoint,
-            expected: None,
+        if let Some(mesh_endpoint_port) = mesh_endpoint_port {
+            let endpoint = build_managed_default_vless_endpoint(
+                &DefaultVlessEndpointSpec {
+                    port: mesh_endpoint_port,
+                    reality_dest: "origin.example.test:443".to_string(),
+                    server_names: xp_test_fixtures::host_list_edge1(),
+                    server_names_source: RealityServerNamesSource::Manual,
+                    fingerprint: DEFAULT_VLESS_FINGERPRINT.to_string(),
+                },
+                remote_node.node_id.clone(),
+            )
+            .unwrap();
+            DesiredStateCommand::UpsertEndpoint {
+                endpoint,
+                expected: None,
+            }
+            .apply(locked.state_mut())
+            .unwrap();
         }
-        .apply(locked.state_mut())
-        .unwrap();
     }
 
     let local_node_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
@@ -642,6 +651,61 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_url_is_empty() {
     assert_eq!(body["dry_run"], true);
     assert_eq!(body["raft_node_id"], orphan_node_id);
     assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_uses_signed_control_plane_origin_without_mesh_endpoint() {
+    let (status, body, orphan_node_id, capability_requests, legacy_requests) =
+        run_orphan_repair_dry_run_with_mesh_transport(
+            StatusCode::OK,
+            MeshTransportAvailability::MissingEndpoint,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(body["raft_node_id"], orphan_node_id);
+    assert_eq!(capability_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_rejects_unreachable_control_plane_origin_without_mesh_endpoint() {
+    let (status, body, _orphan_node_id, capability_requests, legacy_requests) =
+        run_orphan_repair_dry_run_with_mesh_transport(
+            StatusCode::OK,
+            MeshTransportAvailability::MissingEndpoint,
+            PublicApiAvailability::Unreachable,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    assert_eq!(capability_requests, 0);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_rejects_invalid_mesh_target_without_direct_downgrade() {
+    let (status, body, _orphan_node_id, capability_requests, legacy_requests) =
+        run_orphan_repair_dry_run_with_mesh_transport(
+            StatusCode::OK,
+            MeshTransportAvailability::InvalidAccessHost,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    assert_eq!(capability_requests, 0);
     assert_eq!(legacy_requests, 0);
 }
 

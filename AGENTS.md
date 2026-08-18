@@ -101,6 +101,10 @@
   release tag and local endpoint fingerprints. Missing profile capabilities degrade only their
   feature, while declared capability 404/schema failures remain regressions.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
+- An owner-approved private Docker follower may omit the managed-default VLESS/REALITY endpoint.
+  It remains a voter and must expose its registered private `api_base_url` to the serving voters
+  for signed lifecycle-capability verification; this exception never permits skipping that voter
+  or falling back from a configured Mesh endpoint.
 - Host-managed initial joins provision Tunnel/DNS without starting `cloudflared`, then join the
   cluster and write `/etc/xp/xp.env` before enabling then starting or restarting `xray`, `xp`,
   and optional `cloudflared` in order with readiness checks. A joined node is successful only

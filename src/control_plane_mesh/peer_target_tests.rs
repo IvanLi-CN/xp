@@ -43,7 +43,7 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
         )
     );
     assert_eq!(unique.mesh_reason, MeshPeerReason::MeshAvailable);
-    assert_eq!(unique.public_base_url, node.api_base_url);
+    assert_eq!(unique.api_base_url, node.api_base_url);
     let missing = peer_target_from_node(&node, &[]);
     assert!(missing.mesh_base_url.is_none());
     assert_eq!(missing.mesh_reason, MeshPeerReason::MissingEndpoint);
