@@ -436,23 +436,27 @@ async fn remove_node_recovery_blocks_a_legacy_stale_endpoint_snapshot() {
         },
     );
 
-    for _ in 0..100 {
-        resume_membership_operations_once(raft.clone(), store.clone())
-            .await
-            .unwrap();
-        if store
-            .lock()
-            .await
-            .state()
-            .membership_operations
-            .get("remove-node")
-            .is_some_and(|operation| operation.phase == MembershipOperationPhase::Blocked)
-        {
-            break;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            resume_membership_operations_once(raft.clone(), store.clone())
+                .await
+                .unwrap();
+            if store
+                .lock()
+                .await
+                .state()
+                .membership_operations
+                .get("remove-node")
+                .is_some_and(|operation| operation.phase == MembershipOperationPhase::Blocked)
+            {
+                break;
+            }
+            // Resume deliberately skips a busy shared lifecycle gate; periodic work retries it.
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        // Resume deliberately skips a busy shared lifecycle gate; periodic work retries it.
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .expect("stale endpoint recovery should reach its terminal block");
 
     let operation = store
         .lock()
