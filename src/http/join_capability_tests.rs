@@ -48,7 +48,6 @@ use crate::{
     xray_supervisor::XrayHealthHandle,
 };
 
-const MESH_HOST: &str = "mesh-capability.example.test";
 const CAPABILITIES_PATH: &str = "/api/admin/_internal/capabilities";
 const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 
@@ -56,7 +55,7 @@ const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 struct MeshCapabilityServerState {
     ca_key_pem: String,
     ca_cert_pem: String,
-    cluster_id: String,
+    expected_cluster_id: String,
     sender_id: String,
     target_id: String,
     capability_requests: Arc<AtomicUsize>,
@@ -76,7 +75,7 @@ async fn mesh_capability_response(
         &uri,
         &headers,
         &body,
-        &state.cluster_id,
+        &state.expected_cluster_id,
         &state.target_id,
     )
     .expect("valid signed Mesh request");
@@ -114,11 +113,12 @@ async fn mesh_capability_response(
 
 async fn spawn_mesh_capability_server(
     state: MeshCapabilityServerState,
+    mesh_host: &str,
 ) -> (SocketAddr, JoinHandle<()>) {
     let ca_key = KeyPair::from_pem(&state.ca_key_pem).expect("cluster CA key");
     let ca = Issuer::from_ca_cert_pem(&state.ca_cert_pem, ca_key).expect("cluster CA certificate");
     let server_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("server key");
-    let certificate = CertificateParams::new(vec![MESH_HOST.to_string()])
+    let certificate = CertificateParams::new(vec![mesh_host.to_string()])
         .expect("certificate parameters")
         .signed_by(&server_key, &ca)
         .expect("server certificate");
@@ -151,6 +151,7 @@ fn mesh_client(
     cluster_ca_pem: &str,
     node_cert_pem: &str,
     node_key_pem: &str,
+    mesh_host: &str,
     mesh_address: SocketAddr,
 ) -> MeshAwareHttpClient {
     let identity_pem = format!("{node_cert_pem}\n{node_key_pem}");
@@ -159,7 +160,7 @@ fn mesh_client(
             reqwest::Certificate::from_pem(cluster_ca_pem.as_bytes()).expect("cluster CA"),
         )
         .identity(reqwest::Identity::from_pem(identity_pem.as_bytes()).expect("node identity"))
-        .resolve(MESH_HOST, mesh_address)
+        .resolve(mesh_host, mesh_address)
         .http2_prior_knowledge()
         .http2_adaptive_window(true)
         .build()
@@ -303,21 +304,24 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
         .expect("cluster CA key");
     let remote_node = Node {
         node_id: xp_test_fixtures::identifier_ulid_a().to_owned(),
-        node_name: "mesh-capability-peer".to_string(),
-        access_host: MESH_HOST.to_string(),
-        api_base_url: "https://public-peer-unavailable.invalid".to_string(),
+        node_name: xp_test_fixtures::label_node_remote().to_owned(),
+        access_host: xp_test_fixtures::host_fixture575().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
     let requests = Arc::new(AtomicUsize::new(0));
-    let (mesh_address, mesh_server) = spawn_mesh_capability_server(MeshCapabilityServerState {
-        ca_key_pem: cluster_ca_key_pem.clone(),
-        ca_cert_pem: cluster_ca_pem.clone(),
-        cluster_id: cluster.cluster_id.clone(),
-        sender_id: cluster.node_id.clone(),
-        target_id: remote_node.node_id.clone(),
-        capability_requests: requests.clone(),
-    })
+    let (mesh_address, mesh_server) = spawn_mesh_capability_server(
+        MeshCapabilityServerState {
+            ca_key_pem: cluster_ca_key_pem.clone(),
+            ca_cert_pem: cluster_ca_pem.clone(),
+            expected_cluster_id: cluster.cluster_id.clone(),
+            sender_id: cluster.node_id.clone(),
+            target_id: remote_node.node_id.clone(),
+            capability_requests: requests.clone(),
+        },
+        xp_test_fixtures::host_fixture575(),
+    )
     .await;
     tokio::task::yield_now().await;
 
@@ -338,7 +342,7 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
             &DefaultVlessEndpointSpec {
                 port: mesh_address.port(),
                 reality_dest: "origin.example.test:443".to_string(),
-                server_names: vec![MESH_HOST.to_string()],
+                server_names: xp_test_fixtures::host_list_edge1(),
                 server_names_source: RealityServerNamesSource::Manual,
                 fingerprint: DEFAULT_VLESS_FINGERPRINT.to_string(),
             },
@@ -364,24 +368,24 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
         local_node_id,
         RaftNodeMeta {
             name: cluster.node_name.clone(),
-            api_base_url: cluster.api_base_url.clone(),
-            raft_endpoint: cluster.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
+            raft_endpoint: xp_test_fixtures::url_loopback62416().to_owned(),
         },
     );
     nodes.insert(
         remote_raft_node_id,
         RaftNodeMeta {
             name: remote_node.node_name.clone(),
-            api_base_url: remote_node.api_base_url.clone(),
-            raft_endpoint: remote_node.api_base_url.clone(),
+            api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
+            raft_endpoint: xp_test_fixtures::url_loopback1().to_owned(),
         },
     );
     nodes.insert(
         orphan_node_id,
         RaftNodeMeta {
             name: "stale-orphan".to_string(),
-            api_base_url: "https://orphan-public-unavailable.invalid".to_string(),
-            raft_endpoint: "https://orphan-public-unavailable.invalid".to_string(),
+            api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
+            raft_endpoint: xp_test_fixtures::url_loopback1().to_owned(),
         },
     );
     let membership = openraft::Membership::new(
@@ -404,6 +408,7 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
             &cluster_ca_pem,
             &cluster.read_node_cert_pem(tmp.path()).unwrap(),
             &cluster.read_node_key_pem(tmp.path()).unwrap(),
+            xp_test_fixtures::host_fixture575(),
             mesh_address,
         ),
     );

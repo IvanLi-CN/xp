@@ -81,7 +81,11 @@ async fn require_capability_on_voters(
             })
         })
         .collect::<Vec<_>>();
-    if peers.len() != voter_ids.len() {
+    if peers.len() != voter_ids.len()
+        || peers
+            .iter()
+            .any(|peer| peer.node.api_base_url.trim().is_empty())
+    {
         return Err(ApiError::new(
             "coordinated_upgrade_required",
             StatusCode::CONFLICT,
