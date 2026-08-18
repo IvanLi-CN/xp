@@ -58,6 +58,14 @@ const MESH_HEALTH_PATH: &str = "/api/admin/_internal/mesh/health";
 enum InternalCapabilitiesBody {
     Json,
     Pending,
+    Oversized,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InternalCapabilitiesAcknowledgement {
+    Signed,
+    Omitted,
+    Invalid,
 }
 
 #[derive(Clone)]
@@ -69,6 +77,7 @@ struct MeshCapabilityServerState {
     target_id: String,
     internal_capabilities_status: StatusCode,
     internal_capabilities_body: InternalCapabilitiesBody,
+    internal_capabilities_acknowledgement: InternalCapabilitiesAcknowledgement,
     capability_requests: Arc<AtomicUsize>,
     legacy_capability_requests: Arc<AtomicUsize>,
 }
@@ -92,6 +101,19 @@ async fn mesh_capability_response(
                 r#"{"capabilities":["cluster.membership-lifecycle-v1"]}"#,
             ))
             .expect("legacy capability response");
+    }
+    let predecessor_missing_capabilities_route = matches!(
+        state.internal_capabilities_acknowledgement,
+        InternalCapabilitiesAcknowledgement::Omitted
+    );
+    if uri.path() == CAPABILITIES_PATH && predecessor_missing_capabilities_route {
+        assert_eq!(method, Method::GET);
+        assert_eq!(state.internal_capabilities_status, StatusCode::NOT_FOUND);
+        state.capability_requests.fetch_add(1, Ordering::SeqCst);
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("not found"))
+            .expect("predecessor capability response");
     }
 
     let verified = internal_auth::verify_request_v2(
@@ -119,6 +141,17 @@ async fn mesh_capability_response(
                 InternalCapabilitiesBody::Pending => {
                     Body::from_stream(stream::pending::<Result<Bytes, std::io::Error>>())
                 }
+                InternalCapabilitiesBody::Oversized => {
+                    let padding = "x".repeat(super::MAX_CAPABILITY_RESPONSE_BYTES);
+                    let body = serde_json::json!({
+                        "capabilities": ["cluster.membership-lifecycle-v1"],
+                        "padding": padding,
+                    })
+                    .to_string();
+                    Body::from_stream(stream::iter([Ok::<Bytes, std::io::Error>(Bytes::from(
+                        body,
+                    ))]))
+                }
             };
             (state.internal_capabilities_status, response_body)
         }
@@ -138,9 +171,17 @@ async fn mesh_capability_response(
     )
     .expect("sign Mesh acknowledgement");
 
-    Response::builder()
-        .status(response_status)
-        .header(internal_auth::INTERNAL_ACK_HEADER, acknowledgement)
+    let response = Response::builder().status(response_status);
+    let response = match state.internal_capabilities_acknowledgement {
+        InternalCapabilitiesAcknowledgement::Signed => {
+            response.header(internal_auth::INTERNAL_ACK_HEADER, acknowledgement)
+        }
+        InternalCapabilitiesAcknowledgement::Omitted => response,
+        InternalCapabilitiesAcknowledgement::Invalid => {
+            response.header(internal_auth::INTERNAL_ACK_HEADER, "invalid")
+        }
+    };
+    response
         .body(Body::from(response_body))
         .expect("Mesh response")
 }
@@ -323,6 +364,7 @@ async fn run_orphan_repair_dry_run(
     internal_capabilities_status: StatusCode,
     public_url_available: bool,
     internal_capabilities_body: InternalCapabilitiesBody,
+    internal_capabilities_acknowledgement: InternalCapabilitiesAcknowledgement,
 ) -> (StatusCode, serde_json::Value, u64, usize, usize) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -359,6 +401,7 @@ async fn run_orphan_repair_dry_run(
             target_id: remote_node.node_id.clone(),
             internal_capabilities_status,
             internal_capabilities_body,
+            internal_capabilities_acknowledgement,
             capability_requests: requests.clone(),
             legacy_capability_requests: legacy_requests.clone(),
         },
@@ -517,8 +560,13 @@ async fn run_orphan_repair_dry_run(
 
 #[tokio::test]
 async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
-    let (status, body, orphan_node_id, mesh_requests, legacy_requests) =
-        run_orphan_repair_dry_run(StatusCode::OK, false, InternalCapabilitiesBody::Json).await;
+    let (status, body, orphan_node_id, mesh_requests, legacy_requests) = run_orphan_repair_dry_run(
+        StatusCode::OK,
+        false,
+        InternalCapabilitiesBody::Json,
+        InternalCapabilitiesAcknowledgement::Signed,
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["dry_run"], true);
@@ -531,13 +579,35 @@ async fn orphan_repair_dry_run_uses_mesh_when_public_urls_are_unavailable() {
 #[tokio::test]
 async fn orphan_repair_dry_run_falls_back_to_legacy_capabilities() {
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
-        run_orphan_repair_dry_run(StatusCode::NOT_FOUND, true, InternalCapabilitiesBody::Json)
-            .await;
+        run_orphan_repair_dry_run(
+            StatusCode::NOT_FOUND,
+            true,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Omitted,
+        )
+        .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["dry_run"], true);
     assert_eq!(mesh_requests, 1);
     assert_eq!(legacy_requests, 1);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_rejects_invalid_capability_acknowledgement() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(
+            StatusCode::NOT_FOUND,
+            true,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Invalid,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
 }
 
 #[tokio::test]
@@ -547,6 +617,7 @@ async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() 
             StatusCode::INTERNAL_SERVER_ERROR,
             true,
             InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
         )
         .await;
 
@@ -560,11 +631,33 @@ async fn orphan_repair_dry_run_does_not_fall_back_after_other_internal_status() 
 async fn orphan_repair_dry_run_bounds_capability_response_body() {
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        run_orphan_repair_dry_run(StatusCode::OK, false, InternalCapabilitiesBody::Pending),
+        run_orphan_repair_dry_run(
+            StatusCode::OK,
+            false,
+            InternalCapabilitiesBody::Pending,
+            InternalCapabilitiesAcknowledgement::Signed,
+        ),
     )
     .await
     .expect("capability response body stays within the probe budget");
     let (status, body, _orphan_node_id, mesh_requests, legacy_requests) = result;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "coordinated_upgrade_required");
+    assert_eq!(mesh_requests, 1);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_bounds_capability_response_size() {
+    let (status, body, _orphan_node_id, mesh_requests, legacy_requests) =
+        run_orphan_repair_dry_run(
+            StatusCode::OK,
+            false,
+            InternalCapabilitiesBody::Oversized,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
 
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["error"]["code"], "coordinated_upgrade_required");

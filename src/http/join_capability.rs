@@ -4,18 +4,49 @@ use std::{
 };
 
 use axum::http::StatusCode;
+use futures_util::StreamExt;
 use serde::Deserialize;
 
-use super::{ApiError, AppState, raft_metrics, send_mesh_internal_read};
+use super::{ApiError, AppState, raft_metrics, send_mesh_internal_capability_read};
 use crate::domain::Node;
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
+const MAX_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
 
 fn remaining_probe_budget(started: Instant) -> Option<Duration> {
     let remaining = CAPABILITY_PROBE_BUDGET.saturating_sub(started.elapsed());
     (!remaining.is_zero()).then_some(remaining)
+}
+
+async fn read_capability_response(
+    response: reqwest::Response,
+    budget: Duration,
+) -> Option<Response> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_CAPABILITY_RESPONSE_BYTES as u64)
+    {
+        return None;
+    }
+    let bytes = tokio::time::timeout(budget, async move {
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.ok()?;
+            let next_len = bytes.len().checked_add(chunk.len())?;
+            if next_len > MAX_CAPABILITY_RESPONSE_BYTES {
+                return None;
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Some(bytes)
+    })
+    .await
+    .ok()
+    .flatten()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 #[derive(Deserialize)]
@@ -105,11 +136,10 @@ async fn require_capability_on_voters(
     }
     for peer in peers {
         let started = Instant::now();
-        let response = send_mesh_internal_read(
+        let response = send_mesh_internal_capability_read(
             state,
             &state.mesh_client,
             &peer.node,
-            "/api/admin/_internal/capabilities".to_string(),
             CAPABILITY_PROBE_BUDGET,
         )
         .await
@@ -166,10 +196,8 @@ async fn require_capability_on_voters(
         };
         let supports_capability = if response.status().is_success() {
             match remaining_probe_budget(started) {
-                Some(remaining) => tokio::time::timeout(remaining, response.json::<Response>())
+                Some(remaining) => read_capability_response(response, remaining)
                     .await
-                    .ok()
-                    .and_then(Result::ok)
                     .is_some_and(|body| body.capabilities.iter().any(|item| item == capability)),
                 None => false,
             }

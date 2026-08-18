@@ -23,10 +23,12 @@
 
 - `cluster.membership-lifecycle-v1` is advertised by this build. Before a new lifecycle command,
   every retained DesiredState-mapped voter must advertise it through a signed Mesh capability read.
-  A verified `404` means a predecessor lacks that route, so its legacy public
-  `/api/capabilities` and its response body are tried within the same probe budget. Other signed
-  status, authentication, and transport failures do not downgrade. An unreachable public URL is
-  therefore not a separate rejection condition for current peers. A retained voter that cannot
+  A predecessor's unacknowledged `404` for that signed route means it lacks the route, so its
+  legacy public `/api/capabilities` is tried within the same probe budget. Only that response may
+  omit an acknowledgement; other missing or invalid acknowledgements, non-`404` status,
+  authentication, and transport failures do not downgrade. Each capability body is limited to
+  64 KiB. An unreachable public URL is therefore not a separate rejection condition for current
+  peers. A retained voter that cannot
   verify still returns `coordinated_upgrade_required` and no new command is written.
 - An additive persisted field alone is compatible with old snapshots. The command variants are not
   compatible with an old binary, which is why the capability barrier precedes the first command.

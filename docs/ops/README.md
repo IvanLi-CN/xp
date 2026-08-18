@@ -945,17 +945,18 @@ observer nodes, `can_vote` flags, or `voter=false` configuration are not support
 must map to a DesiredState Node. A 2-voter topology is not an acceptable production shape because
 losing either voter removes writable quorum; use at least 3 stable voters for production clusters.
 
-Before fresh join, restore, delete, or repair, upgrade every voter to a build that exposes
+Before fresh join, restore, or delete, upgrade every voter to a build that exposes
 `cluster.membership-lifecycle-v1`. Upgrade one voter at a time and preserve serving quorum. During
 the mixed-version interval lifecycle writes return `coordinated_upgrade_required`; do not work
-around that freeze by calling internal membership APIs or editing Raft files.
+around that freeze by calling internal membership APIs or editing Raft files. Orphan-voter repair
+first proves the exact target, then applies this capability barrier only to retained
+DesiredState-mapped voters.
 
 ### Orphan voter incident
 
 An orphan voter is a current voter without a DesiredState Node mapping. It is not a learner and it
-must never be converted or removed by a periodic scan. First finish the rolling upgrade barrier,
-confirm the target is the only orphan and that the local node is leader, then run the local
-signed-CLI dry-run:
+must never be converted or removed by a periodic scan. Confirm the target is the only orphan and
+that the local node is leader, then run the local signed-CLI dry-run:
 
 ```bash
 sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-node-id <id>
@@ -963,10 +964,11 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 
 The dry-run proves the exact target before capability verification excludes it. Its advertised
 public API URL is not a repair prerequisite: every retained DesiredState-mapped voter first
-verifies `cluster.membership-lifecycle-v1` through signed Mesh transport. Only a verified `404`
-from that new route uses the predecessor's legacy public `/api/capabilities` within the same probe
-budget, including its response body. If a retained voter cannot verify, stop and complete the rolling upgrade; do not bypass
-the barrier with raw Raft edits or internal API calls.
+verifies `cluster.membership-lifecycle-v1` through signed Mesh transport. Only a predecessor's
+unacknowledged `404` for that signed route uses the legacy public `/api/capabilities`; other
+missing or invalid acknowledgements remain terminal. Both responses share one probe budget, and
+each body is limited to 64 KiB. If a retained voter cannot verify, stop and complete the rolling
+upgrade; do not bypass the barrier with raw Raft edits or internal API calls.
 
 Copy the returned `expected_membership` exactly into the explicit apply command:
 
