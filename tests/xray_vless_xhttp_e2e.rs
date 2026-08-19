@@ -26,7 +26,7 @@ use tokio::{
     process::{Child, Command},
     sync::broadcast,
     task::JoinHandle,
-    time::{Instant, sleep},
+    time::{Instant, sleep, timeout_at},
 };
 
 use xp::{
@@ -166,6 +166,14 @@ fn mihomo_controller_proxy_url(controller_addr: SocketAddr, proxy_name: &str) ->
     url
 }
 
+fn mihomo_proxy_is_selected(value: &serde_json::Value, expected: &str) -> bool {
+    value
+        .get("all")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|candidates| candidates.len() == 1 && candidates[0].as_str() == Some(expected))
+        && value.get("now").and_then(serde_json::Value::as_str) == Some(expected)
+}
+
 async fn wait_for_mihomo_proxy_api<F>(
     client: &reqwest::Client,
     controller_addr: SocketAddr,
@@ -179,16 +187,20 @@ where
     let url = mihomo_controller_proxy_url(controller_addr, proxy_name);
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let last_error = match client.get(url.clone()).send().await {
-            Ok(response) if response.status().is_success() => {
-                match response.json::<serde_json::Value>().await {
-                    Ok(value) if ready(&value) => return value,
-                    Ok(value) => format!("unexpected proxy payload: {value}"),
-                    Err(error) => format!("decode proxy payload: {error}"),
-                }
+        let request = async {
+            let response = client.get(url.clone()).send().await?;
+            let status = response.status();
+            let value = response.json::<serde_json::Value>().await?;
+            Ok::<_, reqwest::Error>((status, value))
+        };
+        let last_error = match timeout_at(deadline, request).await {
+            Ok(Ok((status, value))) if status.is_success() && ready(&value) => return value,
+            Ok(Ok((status, value))) if status.is_success() => {
+                format!("unexpected proxy payload: {value}")
             }
-            Ok(response) => format!("controller status: {}", response.status()),
-            Err(error) => format!("controller request: {error}"),
+            Ok(Ok((status, _))) => format!("controller status: {status}"),
+            Ok(Err(error)) => format!("controller request: {error}"),
+            Err(_) => "controller request deadline exceeded".to_string(),
         };
         if Instant::now() >= deadline {
             panic!(
@@ -197,7 +209,12 @@ where
                 mihomo.logs()
             );
         }
-        sleep(Duration::from_millis(100)).await;
+        sleep(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(100)),
+        )
+        .await;
     }
 }
 
@@ -854,14 +871,7 @@ proxies:
         controller_addr,
         &relay_group_name,
         &mihomo,
-        |value| {
-            value
-                .get("all")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|candidates| {
-                    candidates.len() == 1 && candidates[0].as_str() == Some("REJECT")
-                })
-        },
+        |value| mihomo_proxy_is_selected(value, "REJECT"),
     )
     .await;
     assert_eq!(
@@ -895,14 +905,7 @@ proxies:
         controller_addr,
         &relay_group_name,
         &mihomo,
-        |value| {
-            value
-                .get("all")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|candidates| {
-                    candidates.len() == 1 && candidates[0].as_str() == Some("Japan smoke")
-                })
-        },
+        |value| mihomo_proxy_is_selected(value, "Japan smoke"),
     )
     .await;
     let relay_candidates = relay
@@ -917,24 +920,16 @@ proxies:
         vec!["Japan smoke"],
         "a matching provider candidate must remain selectable without a static REJECT"
     );
-    assert_ne!(
+    assert_eq!(
         relay.get("now").and_then(serde_json::Value::as_str),
-        Some("COMPATIBLE")
+        Some("Japan smoke")
     );
     let empty_filter_relay = wait_for_mihomo_proxy_api(
         &client,
         controller_addr,
         empty_filter_group_name,
         &mihomo,
-        |value| {
-            value
-                .get("all")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|candidates| {
-                    candidates.len() == 1 && candidates[0].as_str() == Some("REJECT")
-                })
-                && value.get("now").and_then(serde_json::Value::as_str) == Some("REJECT")
-        },
+        |value| mihomo_proxy_is_selected(value, "REJECT"),
     )
     .await;
     let empty_filter_candidates = empty_filter_relay
