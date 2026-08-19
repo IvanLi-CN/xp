@@ -108,6 +108,17 @@ pub struct ReverseMeshCandidate {
 }
 
 impl ReverseMeshCandidate {
+    #[cfg(test)]
+    pub(crate) fn fully_capable(node_id: impl Into<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            assignment_capable: true,
+            relay_capable: true,
+            signed_xray_ready: true,
+            managed_vless_endpoint: true,
+        }
+    }
+
     pub fn eligible(&self) -> bool {
         !self.node_id.is_empty()
             && self.assignment_capable
@@ -631,13 +642,7 @@ mod tests {
     use super::*;
 
     fn candidate(id: &str) -> ReverseMeshCandidate {
-        ReverseMeshCandidate {
-            node_id: id.to_string(),
-            assignment_capable: true,
-            relay_capable: true,
-            signed_xray_ready: true,
-            managed_vless_endpoint: true,
-        }
+        ReverseMeshCandidate::fully_capable(id)
     }
 
     #[test]

@@ -6,7 +6,6 @@ use tokio::{net::TcpListener, time::sleep};
 
 use xp::{domain, protocol::VlessRealityTransport, reverse_mesh, xray};
 
-const PORTAL_TAG: &str = "xp-reverse-portal-spike";
 const PORTAL_PASSWORD: &str = "spike-password";
 
 #[tokio::test]
@@ -40,8 +39,9 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
         .expect("serve H2C");
     });
 
+    let portal_tag = xp_test_fixtures::primary_endpoint_tag();
     let portal = xray::builder::build_reverse_socks_inbound_request_on_address(
-        PORTAL_TAG,
+        portal_tag,
         reverse_mesh::REVERSE_SOCKS_USERNAME,
         PORTAL_PASSWORD,
         [0, 0, 0, 0],
@@ -86,7 +86,7 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
     rendezvous
         .remove_inbound(
             xray::proto::xray::app::proxyman::command::RemoveInboundRequest {
-                tag: PORTAL_TAG.to_string(),
+                tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
             },
         )
         .await
@@ -99,7 +99,7 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
         !listed
             .inbounds
             .iter()
-            .any(|inbound| inbound.tag == PORTAL_TAG),
+            .any(|inbound| inbound.tag == portal_tag),
         "portal must be isolated after cleanup"
     );
 
@@ -118,36 +118,34 @@ async fn exercise_transport(
     label: &str,
     h2c_port: u16,
 ) {
-    let endpoint = domain::Endpoint {
-        endpoint_id: format!("spike-{label}-endpoint"),
-        node_id: "rendezvous".to_string(),
-        tag: format!("vless-{label}-entry"),
-        kind: domain::EndpointKind::VlessRealityVisionTcp,
-        port,
-        meta: serde_json::json!({
-            "reality": {
-                "dest": "www.example.com:443",
-                "server_names": ["www.example.com"],
-                "fingerprint": "chrome"
-            },
-            "reality_keys": {
-                "private_key": "",
-                "public_key": "Pf8FreUQ5qeklEqp0sUrQPztRLmqQacHXfCfhxmmKm4"
-            },
-            "short_ids": ["0123456789abcdef"],
-            "active_short_id": "0123456789abcdef",
-            "transport": transport
-        }),
+    let endpoint = if label == "vision" {
+        domain::Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_reverse_spike_vision().to_owned(),
+            kind: domain::EndpointKind::VlessRealityVisionTcp,
+            port,
+            meta: vless_meta(transport),
+        }
+    } else {
+        domain::Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::endpoint_tag_reverse_spike_xhttp().to_owned(),
+            kind: domain::EndpointKind::VlessRealityVisionTcp,
+            port,
+            meta: vless_meta(transport),
+        }
     };
     let origin = format!("rvs-{label}.mesh.invalid:443");
-    let outbound_tag = format!("xp-reverse-outbound-spike-{label}");
-    let freedom_tag = format!("xp-reverse-freedom-spike-{label}");
+    let outbound_tag = xp_test_fixtures::secondary_endpoint_tag();
+    let freedom_tag = xp_test_fixtures::tertiary_endpoint_tag();
     let target_rule_tag = format!("xp-reverse-target-rule-spike-{label}");
     let rendezvous_rule_tag = format!("xp-reverse-rendezvous-rule-spike-{label}");
     let reverse_email = format!("reverse-spike-{label}");
 
     let reverse_endpoint = xray::builder::ReverseVlessEndpoint {
-        access_host: "rendezvous".to_string(),
+        access_host: xp_test_fixtures::primary_host().to_owned(),
         endpoint: endpoint.clone(),
         target_port: port,
         target_public_key_b64url_nopad: "Pf8FreUQ5qeklEqp0sUrQPztRLmqQacHXfCfhxmmKm4".to_string(),
@@ -155,7 +153,7 @@ async fn exercise_transport(
         server_name: "www.example.com".to_string(),
     };
     let outbound = xray::builder::build_reverse_vless_outbound_request(
-        &outbound_tag,
+        outbound_tag,
         target_reverse_tag,
         uuid,
         &reverse_endpoint,
@@ -168,13 +166,7 @@ async fn exercise_transport(
         rendezvous_reverse_tag,
     )
     .expect("build dynamic Rendezvous reverse user");
-    rendezvous
-        .alter_inbound(
-            xray::proto::xray::app::proxyman::command::AlterInboundRequest {
-                tag: endpoint.tag.clone(),
-                operation: Some(reverse_user),
-            },
-        )
+    alter_reverse_user(rendezvous, label, reverse_user)
         .await
         .expect("add dynamic Rendezvous reverse user");
     target
@@ -183,7 +175,7 @@ async fn exercise_transport(
         .expect("add target-side VLESS Reverse outbound");
     target
         .add_outbound(xray::builder::build_reverse_freedom_outbound_request(
-            &freedom_tag,
+            freedom_tag,
             "host.docker.internal",
             h2c_port,
         ))
@@ -194,7 +186,7 @@ async fn exercise_transport(
             &target_rule_tag,
             target_reverse_tag,
             &origin,
-            &freedom_tag,
+            freedom_tag,
         ))
         .await
         .expect("route target reverse inbound to local H2C");
@@ -202,7 +194,7 @@ async fn exercise_transport(
     rendezvous
         .add_rule(xray::builder::build_reverse_route_rule(
             &rendezvous_rule_tag,
-            PORTAL_TAG,
+            xp_test_fixtures::primary_endpoint_tag(),
             &origin,
             rendezvous_reverse_tag,
         ))
@@ -261,23 +253,50 @@ async fn exercise_transport(
         .expect("remove target route");
     target
         .remove_outbound(
-            xray::proto::xray::app::proxyman::command::RemoveOutboundRequest { tag: freedom_tag },
+            xray::proto::xray::app::proxyman::command::RemoveOutboundRequest {
+                tag: xp_test_fixtures::tertiary_endpoint_tag().to_owned(),
+            },
         )
         .await
         .expect("remove target Freedom outbound");
     target
         .remove_outbound(
-            xray::proto::xray::app::proxyman::command::RemoveOutboundRequest { tag: outbound_tag },
-        )
-        .await
-        .expect("remove target VLESS outbound");
-    rendezvous
-        .alter_inbound(
-            xray::proto::xray::app::proxyman::command::AlterInboundRequest {
-                tag: endpoint.tag,
-                operation: Some(xray::builder::build_remove_user_operation(&reverse_email)),
+            xray::proto::xray::app::proxyman::command::RemoveOutboundRequest {
+                tag: xp_test_fixtures::secondary_endpoint_tag().to_owned(),
             },
         )
         .await
-        .expect("remove dynamic Rendezvous reverse user");
+        .expect("remove target VLESS outbound");
+    alter_reverse_user(
+        rendezvous,
+        label,
+        xray::builder::build_remove_user_operation(&reverse_email),
+    )
+    .await
+    .expect("remove dynamic Rendezvous reverse user");
+}
+
+fn vless_meta(transport: VlessRealityTransport) -> serde_json::Value {
+    let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    meta["transport"] = serde_json::to_value(transport).expect("serialize transport");
+    meta
+}
+
+async fn alter_reverse_user(
+    rendezvous: &mut xray::XrayClient,
+    label: &str,
+    operation: xray::proto::xray::common::serial::TypedMessage,
+) -> Result<(), tonic::Status> {
+    let request = match label {
+        "vision" => xray::proto::xray::app::proxyman::command::AlterInboundRequest {
+            tag: xp_test_fixtures::endpoint_tag_reverse_spike_vision().to_owned(),
+            operation: Some(operation),
+        },
+        "xhttp" => xray::proto::xray::app::proxyman::command::AlterInboundRequest {
+            tag: xp_test_fixtures::endpoint_tag_reverse_spike_xhttp().to_owned(),
+            operation: Some(operation),
+        },
+        _ => unreachable!("unknown spike transport"),
+    };
+    rendezvous.alter_inbound(request).await.map(|_| ())
 }

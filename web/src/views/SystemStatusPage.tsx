@@ -139,7 +139,7 @@ function rendezvousRolesByPeer(peers: AdminMeshPeer[]) {
 
 	for (const peer of peers) {
 		const route = peer.active_route;
-		if (route?.kind !== "reverse_relay") continue;
+		if (!route) continue;
 		add(route.primary_rendezvous, "primary");
 		add(route.standby_rendezvous, "standby");
 	}

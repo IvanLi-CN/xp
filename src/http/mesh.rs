@@ -3,6 +3,8 @@ use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
 mod bootstrap;
+#[path = "mesh/status.rs"]
+mod status;
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
@@ -995,9 +997,13 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints) = {
+    let (nodes, endpoints, assignments) = {
         let store = state.store.lock().await;
-        (store.list_nodes(), store.list_endpoints())
+        (
+            store.list_nodes(),
+            store.list_endpoints(),
+            store.state().reverse_mesh_assignments.clone(),
+        )
     };
     let peers = nodes
         .into_iter()
@@ -1045,7 +1051,10 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 ),
                 mesh_reason,
                 current_path: peer.and_then(|peer| peer.last_path),
-                active_route: peer.and_then(|peer| peer.active_route.clone()),
+                active_route: status::with_assignment(
+                    peer.and_then(|peer| peer.active_route.clone()),
+                    assignments.get(&node.node_id),
+                ),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: is_mesh_peer_stale(peer, now),
                 breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
@@ -1056,7 +1065,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 mesh_availability_24h,
                 latency_p50_ms,
                 latency_p95_ms,
-                mesh_transport: mesh_transport_status_for(mesh_enabled, peer, now),
+                mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -1086,33 +1095,6 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         peers,
         events: telemetry.events,
     }
-}
-
-fn mesh_transport_status_for(
-    mesh_enabled: bool,
-    peer: Option<&crate::mesh_telemetry::MeshPeerTelemetry>,
-    now: DateTime<Utc>,
-) -> Option<AdminMeshTransportStatus> {
-    if !mesh_enabled {
-        return None;
-    }
-    let (requests_5m, connection_starts_5m) = peer
-        .map(|peer| mesh_transport_counts_for(peer, 5, now))
-        .unwrap_or_default();
-    let (requests_1h, connection_starts_1h) = peer
-        .map(|peer| mesh_transport_counts_for(peer, 60, now))
-        .unwrap_or_default();
-    Some(AdminMeshTransportStatus {
-        protocol: peer.and_then(|peer| peer.last_mesh_protocol),
-        health: mesh_transport_health_for(peer, now),
-        connection_generation: peer.map_or(0, |peer| peer.connection_generation),
-        current_connection_requests: peer.map_or(0, |peer| peer.current_connection_requests),
-        requests_5m,
-        connection_starts_5m,
-        requests_1h,
-        connection_starts_1h,
-        last_connection_started_at: peer.and_then(|peer| peer.last_connection_started_at.clone()),
-    })
 }
 
 fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -> BreakerState {
@@ -1165,9 +1147,9 @@ mod tests {
     #[test]
     fn mesh_transport_status_is_optional_and_preserves_unknown_state() {
         let now = Utc::now();
-        assert!(mesh_transport_status_for(false, None, now).is_none());
+        assert!(status::mesh_transport_status_for(false, None, now).is_none());
 
-        let unknown = mesh_transport_status_for(true, None, now).unwrap();
+        let unknown = status::mesh_transport_status_for(true, None, now).unwrap();
         assert_eq!(unknown.health, MeshTransportHealth::Unknown);
         assert_eq!(unknown.protocol, None);
         assert_eq!(unknown.connection_generation, 0);
@@ -1186,7 +1168,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let healthy = mesh_transport_status_for(true, Some(&peer), now).unwrap();
+        let healthy = status::mesh_transport_status_for(true, Some(&peer), now).unwrap();
         assert_eq!(healthy.health, MeshTransportHealth::Healthy);
         assert_eq!(healthy.requests_5m, 12);
         assert_eq!(healthy.connection_starts_5m, 1);

@@ -333,9 +333,9 @@ mod tests {
             primary_node_id: "primary".to_string(),
             standby_node_id: Some("standby".to_string()),
             primary_endpoint: crate::reverse_mesh::ReverseMeshBootstrapEndpoint {
-                access_host: "rvs.example.test".to_string(),
+                access_host: xp_test_fixtures::primary_host().to_owned(),
                 port: 443,
-                server_name: "rvs.example.test".to_string(),
+                server_name: xp_test_fixtures::primary_server_name().to_owned(),
                 public_key: "public".to_string(),
                 short_id: "0123456789abcdef".to_string(),
                 transport: "vision_tcp".to_string(),

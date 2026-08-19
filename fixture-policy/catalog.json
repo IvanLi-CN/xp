@@ -747,6 +747,8 @@
 				"fixture582": "host-582.fixture.test"
 			},
 			"endpointTag": {
+				"fixtureReverseSpikeVision": "vless-vision-entry",
+				"fixtureReverseSpikeXhttp": "vless-xhttp-entry",
 				"fixture28": "endpoint-tag-fixture-28",
 				"fixture41": "endpoint-tag-fixture-41",
 				"fixture44": "endpoint-tag-fixture-44",

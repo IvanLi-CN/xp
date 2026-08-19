@@ -37,14 +37,14 @@ mod tests {
             operation_id: "join-operation".to_string(),
             kind: crate::state::MembershipOperationKind::Join,
             raft_node_id: 7,
-            node_id: Some("joining-node".to_string()),
+            node_id: Some(xp_test_fixtures::tertiary_node_id().to_owned()),
             expected_membership: "membership".to_string(),
             phase,
             legacy: false,
             delete_endpoints: false,
             expected_endpoint_ids: Vec::new(),
             expected_endpoint_tags: Vec::new(),
-            created_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
             next_retry_at: None,
             terminal_at: None,
             evidence: None,
@@ -56,22 +56,22 @@ mod tests {
         let promoted = join_operation(crate::state::MembershipOperationPhase::VoterPromoted);
         assert!(is_bootstrap_reverse_role_target(
             Some(&promoted),
-            "joining-node",
+            xp_test_fixtures::tertiary_node_id(),
             true,
         ));
         assert!(!is_bootstrap_reverse_role_target(
             Some(&promoted),
-            "joining-node",
+            xp_test_fixtures::tertiary_node_id(),
             false,
         ));
 
         let mut completed = promoted;
         completed.phase = crate::state::MembershipOperationPhase::Completed;
-        completed.terminal_at = Some("2026-01-01T00:00:01Z".to_string());
+        completed.terminal_at = Some(xp_test_fixtures::recent_timestamp().to_owned());
         completed.evidence = Some("join completed".to_string());
         assert!(!is_bootstrap_reverse_role_target(
             Some(&completed),
-            "joining-node",
+            xp_test_fixtures::tertiary_node_id(),
             true,
         ));
     }

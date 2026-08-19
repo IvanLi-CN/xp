@@ -222,6 +222,35 @@ export const ReverseRelay: Story = {
 	},
 };
 
+export const DirectAssignedTarget: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			peers: demoReverseMeshStatus.peers.map((peer) =>
+				peer.node_id === "node-osaka-1" || peer.node_id === "node-seoul-1"
+					? {
+							...peer,
+							active_route: {
+								kind: "reality_direct" as const,
+								rendezvous: null,
+								rendezvous_role: null,
+								primary_rendezvous: "node-sgp-1",
+								standby_rendezvous: "node-syd-1",
+								generation: 7,
+								readiness: null,
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const row = canvasElement.querySelector('[data-peer-row="node-sgp-1"]');
+		await expect(row).toHaveTextContent("Reality direct");
+		await expect(row).toHaveTextContent("Rendezvous · primary");
+	},
+};
+
 export const Down: Story = {
 	args: {
 		status: {
