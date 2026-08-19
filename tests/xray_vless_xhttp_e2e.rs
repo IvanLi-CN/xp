@@ -634,7 +634,6 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
         "warm-up plus 32 sequential and 64 concurrent proxy streams must share one external TCP"
     );
     assert_eq!(proxy.active.load(Ordering::SeqCst), 1);
-
     proxy.disconnect_all().await;
     fetch(&client, &target_url)
         .await
@@ -645,7 +644,6 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
         "the first request after a forced transport cut must reconnect exactly once"
     );
     assert_eq!(proxy.active.load(Ordering::SeqCst), 1);
-
     mihomo.stop().await;
     xray.remove_inbound(
         xp::xray::proto::xray::app::proxyman::command::RemoveInboundRequest { tag: endpoint.tag },
@@ -653,7 +651,6 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
     .await
     .expect("remove Xray XHTTP inbound");
 }
-
 #[tokio::test]
 #[ignore]
 async fn mihomo_provider_chain_has_no_direct_fallback() {
@@ -933,7 +930,10 @@ proxies:
             value
                 .get("all")
                 .and_then(serde_json::Value::as_array)
-                .is_some()
+                .is_some_and(|candidates| {
+                    candidates.len() == 1 && candidates[0].as_str() == Some("REJECT")
+                })
+                && value.get("now").and_then(serde_json::Value::as_str) == Some("REJECT")
         },
     )
     .await;
