@@ -750,6 +750,21 @@ proxies:
         relay_group.get("proxies").is_none(),
         "external relay groups must not contain a DIRECT fallback"
     );
+    let relay_provider_names = relay_group
+        .get("use")
+        .and_then(Value::as_sequence)
+        .expect("external relay group provider wiring")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(relay_provider_names, vec!["providerA"]);
+    let relay_filter = relay_group
+        .get("filter")
+        .and_then(Value::as_str)
+        .expect("external relay group filter");
+    assert!(relay_filter.contains("Japan"));
+    assert!(relay_filter.contains("Singapore"));
+    assert!(!relay_filter.contains("Germany"));
 
     let system_root: Value = serde_yaml::from_str(&system_yaml).expect("system provider YAML");
     let direct_name = system_root
@@ -847,6 +862,8 @@ proxies:
         .get("all")
         .and_then(serde_json::Value::as_array)
         .expect("Mihomo relay candidates");
+    assert_eq!(relay_candidates.len(), 1);
+    assert_eq!(relay_candidates[0].as_str(), Some("COMPATIBLE"));
     assert!(
         relay_candidates.iter().all(|candidate| {
             matches!(candidate.as_str(), Some(name) if name != "DIRECT" && name != "Germany smoke")
