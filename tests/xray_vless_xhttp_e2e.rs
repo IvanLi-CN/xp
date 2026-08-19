@@ -201,6 +201,37 @@ where
     }
 }
 
+async fn wait_for_mihomo_provider_yaml<F>(
+    home: &Path,
+    provider_name: &str,
+    mihomo: &MihomoProcess,
+    ready: F,
+) -> Value
+where
+    F: Fn(&Value) -> bool,
+{
+    let path = home.join("providers").join(format!("{provider_name}.yaml"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let last_error = match std::fs::read_to_string(&path) {
+            Ok(contents) => match serde_yaml::from_str::<Value>(&contents) {
+                Ok(value) if ready(&value) => return value,
+                Ok(value) => format!("unexpected provider payload: {value:?}"),
+                Err(error) => format!("decode provider payload: {error}"),
+            },
+            Err(error) => format!("read provider cache: {error}"),
+        };
+        if Instant::now() >= deadline {
+            panic!(
+                "Mihomo provider {provider_name:?} did not become ready: {}; {}",
+                last_error,
+                mihomo.logs()
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn spawn_plain_http_server() -> TestServer {
     async fn response() -> Response<Body> {
         Response::builder()
@@ -648,8 +679,8 @@ async fn mihomo_provider_chain_has_no_direct_fallback() {
     let endpoint = xhttp_endpoint(8443);
     let membership = NodeUserEndpointMembership {
         user_id: user.user_id.clone(),
-        node_id: node.node_id.clone(),
-        endpoint_id: endpoint.endpoint_id.clone(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
     };
     let provider_port = free_loopback_port().await;
     let provider_addr = SocketAddr::from(([127, 0, 0, 1], provider_port));
@@ -676,7 +707,7 @@ async fn mihomo_provider_chain_has_no_direct_fallback() {
     .expect("render Mihomo system provider");
     let external_yaml = r#"
 proxies:
-  - name: "Japan smoke"
+  - name: "Germany smoke"
     type: http
     server: 127.0.0.1
     port: 1
@@ -786,6 +817,19 @@ proxies:
     .await;
     let controller_addr = SocketAddr::from(([127, 0, 0, 1], controller_port));
     let client = reqwest::Client::new();
+    let loaded_external =
+        wait_for_mihomo_provider_yaml(mihomo_home.path(), "provider-a", &mihomo, |value| {
+            value.get("proxies").and_then(Value::as_sequence).is_some()
+        })
+        .await;
+    assert!(
+        loaded_external
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .is_some_and(|proxies| proxies.iter().any(|proxy| {
+                proxy.get("name").and_then(Value::as_str) == Some("Germany smoke")
+            }))
+    );
     let relay = wait_for_mihomo_proxy_api(
         &client,
         controller_addr,
@@ -795,10 +839,7 @@ proxies:
             value
                 .get("all")
                 .and_then(serde_json::Value::as_array)
-                .is_some_and(|all| {
-                    all.iter()
-                        .any(|candidate| candidate.as_str() == Some("Japan smoke"))
-                })
+                .is_some()
         },
     )
     .await;
@@ -807,21 +848,30 @@ proxies:
         .and_then(serde_json::Value::as_array)
         .expect("Mihomo relay candidates");
     assert!(
-        relay_candidates
-            .iter()
-            .all(|candidate| candidate.as_str() != Some("DIRECT")),
-        "Mihomo relay candidates must never include DIRECT"
+        relay_candidates.iter().all(|candidate| {
+            matches!(candidate.as_str(), Some(name) if name != "DIRECT" && name != "Germany smoke")
+        }),
+        "Mihomo relay candidates must exclude DIRECT and non-matching provider candidates"
     );
 
-    let loaded_system_yaml = std::fs::read_to_string(
-        mihomo_home
-            .path()
-            .join("providers")
-            .join("xp-system-generated.yaml"),
+    let loaded_system = wait_for_mihomo_provider_yaml(
+        mihomo_home.path(),
+        "xp-system-generated",
+        &mihomo,
+        |value| {
+            value
+                .get("proxies")
+                .and_then(Value::as_sequence)
+                .is_some_and(|proxies| {
+                    proxies.iter().any(|proxy| {
+                        proxy.get("name").and_then(Value::as_str) == Some(direct_name.as_str())
+                    }) && proxies.iter().any(|proxy| {
+                        proxy.get("name").and_then(Value::as_str) == Some(chain_name.as_str())
+                    })
+                })
+        },
     )
-    .expect("Mihomo should download the system provider");
-    let loaded_system: Value =
-        serde_yaml::from_str(&loaded_system_yaml).expect("loaded system provider YAML");
+    .await;
     let loaded_direct = loaded_system
         .get("proxies")
         .and_then(Value::as_sequence)

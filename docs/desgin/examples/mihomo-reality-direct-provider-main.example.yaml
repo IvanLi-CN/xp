@@ -292,21 +292,21 @@ proxy-groups:
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
-    proxies: [DIRECT]
+    proxies: [REJECT]
   - name: 🛣️ hk2-example-invalid
     type: url-test
     hidden: true
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
-    proxies: [DIRECT]
+    proxies: [REJECT]
   - name: 🛣️ sg-example-invalid
     type: url-test
     hidden: true
     url: https://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
-    proxies: [DIRECT]
+    proxies: [REJECT]
 
 rules:
   - MATCH,DIRECT
