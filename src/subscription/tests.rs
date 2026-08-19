@@ -557,7 +557,12 @@ providerB:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK])
+        None,
+        "provider-backed relay groups must let provider candidates seed url-test"
+    );
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
     );
     assert_eq!(
         relay_group.get("url").and_then(Value::as_str),
@@ -2537,8 +2542,8 @@ providerA:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
-        "external relay groups must carry an explicit REJECT sentinel"
+        None,
+        "external relay groups must let provider candidates seed url-test"
     );
     assert_eq!(
         relay.get("empty-fallback"),

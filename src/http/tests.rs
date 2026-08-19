@@ -6293,9 +6293,12 @@ rules: []
         .expect("relay group missing");
     assert_eq!(
         relay_group.get("proxies"),
-        Some(&YamlValue::Sequence(vec![YamlValue::String(
-            "REJECT".to_string()
-        )]))
+        None,
+        "provider-backed relay groups must let provider candidates seed url-test"
+    );
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&YamlValue::String("REJECT".to_string()))
     );
     assert_eq!(
         relay_group.get("url").and_then(YamlValue::as_str),

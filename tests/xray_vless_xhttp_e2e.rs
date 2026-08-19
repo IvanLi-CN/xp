@@ -751,8 +751,8 @@ proxies:
             .get("proxies")
             .and_then(Value::as_sequence)
             .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["REJECT"]),
-        "external relay groups must carry an explicit REJECT sentinel"
+        None,
+        "external relay groups must let provider candidates seed url-test"
     );
     assert_eq!(
         relay_group.get("empty-fallback").and_then(Value::as_str),
@@ -816,15 +816,6 @@ proxies:
         format!("127.0.0.1:{controller_port}").into(),
     );
     let config_yaml = serde_yaml::to_string(&root).expect("serialize Mihomo provider config");
-    let _provider_server = spawn_mihomo_provider_server(
-        provider_addr,
-        MihomoProviderPayloads {
-            system: system_yaml,
-            external: external_yaml,
-        },
-    )
-    .await;
-
     let mihomo_temp_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join("mihomo-provider-e2e");
@@ -841,6 +832,48 @@ proxies:
     .await;
     let controller_addr = SocketAddr::from(([127, 0, 0, 1], controller_port));
     let client = reqwest::Client::new();
+    let initial_relay = wait_for_mihomo_proxy_api(
+        &client,
+        controller_addr,
+        &relay_group_name,
+        &mihomo,
+        |value| {
+            value
+                .get("all")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+        },
+    )
+    .await;
+    let initial_relay_candidates = initial_relay
+        .get("all")
+        .and_then(serde_json::Value::as_array)
+        .expect("initial Mihomo relay candidates")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        initial_relay_candidates,
+        vec!["REJECT"],
+        "an unavailable provider must expose only the explicit REJECT fallback"
+    );
+    assert_eq!(
+        initial_relay.get("now").and_then(serde_json::Value::as_str),
+        Some("REJECT"),
+        "an unavailable provider must use the explicit empty fallback"
+    );
+    assert_ne!(
+        initial_relay.get("now").and_then(serde_json::Value::as_str),
+        Some("COMPATIBLE")
+    );
+    let _provider_server = spawn_mihomo_provider_server(
+        provider_addr,
+        MihomoProviderPayloads {
+            system: system_yaml,
+            external: external_yaml,
+        },
+    )
+    .await;
     let loaded_external =
         wait_for_mihomo_provider_yaml(mihomo_home.path(), "provider-a", &mihomo, |value| {
             value.get("proxies").and_then(Value::as_sequence).is_some()
