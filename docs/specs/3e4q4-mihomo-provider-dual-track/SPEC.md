@@ -85,7 +85,7 @@
   - `💎 高质量` 是 hidden `fallback`
   - `🤯 All` 是 hidden `url-test`
   - `💎 节点选择` 是 hidden `fallback`
-- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；健康检查 URL 选择顺序必须是：
+- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，不得保留 `DIRECT` 兜底；无外部 provider 时只能使用 `REJECT` 拒绝哨兵，provider 候选被 filter 筛空时不得回落直连；健康检查 URL 选择顺序必须是：
   - 同一 `access_host` 下存在至少一个托管 VLESS endpoint 时，使用最小 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`
   - 否则当同一 `access_host` 下只有一个公开 `api_base_url` 时，使用该 API health URL
   - 否则回退到 `https://www.gstatic.com/generate_204`
@@ -178,6 +178,10 @@
   节点到权威 DNS 的 UDP/TCP 53 不可达不得阻断签发或续期。
 - Given 同一 `access_host` 下不存在托管 VLESS endpoint，When 请求 provider 主配置，Then relay 组必须回退到“唯一公开 `api_base_url` 的 `/api/health`”，若仍不能唯一确定，则回退到 `https://www.gstatic.com/generate_204`。
 - Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
+- Given per-base relay 组存在外部第三方 provider，When 渲染链式节点，Then relay 组只能通过外部 provider 的 filter/use 候选转发；
+  不得包含 `DIRECT` 兜底。
+- Given per-base relay 组不存在外部第三方 provider，When 渲染 Mihomo 配置，Then relay 组只能使用 `REJECT` 作为拒绝哨兵；
+  所有 `*-chain` 路径保持不可用，且对应 `{base}-reality` 直连入口仍然可用。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。
 - Given provider 主配置，When 检查 `proxy-groups` 与用户组引用，Then 不再出现 `🛣️ {Region}` 兼容地区别名，也不再出现共享 `🛣️ JP/HK/SG` 主路径。
 - Given 任何 Mihomo profile，When 最终 provider 主配置或 system payload 中存在未定义引用，Then `PUT` 必须返回 `400 invalid_request`，并指出未定义引用所在字段/组名。
@@ -239,7 +243,8 @@
 - Rust unit/integration tests：覆盖 provider-only 订阅路径、provider payload、origin 解析、保留名冲突与 legacy 路由移除。
 - Web tests：覆盖 provider-only service config 状态与 user details canonical Mihomo URL。
 - Storybook：为 `ServiceConfigPage` / `UserDetailsPage` 增加 provider-only 状态与交互覆盖。
-- Mihomo smoke：至少一次真实 Mihomo provider 装载与 provider 内链式 `dialer-proxy` 验证。
+- Mihomo smoke：至少一次真实 Mihomo provider 装载与 provider 内链式 `dialer-proxy` 验证，
+  并确认 per-base relay 候选不包含 `DIRECT`。
 
 ### Quality checks
 

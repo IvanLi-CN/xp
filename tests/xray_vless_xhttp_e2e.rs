@@ -12,8 +12,9 @@ use std::{
 use axum::{
     Router,
     body::Body,
-    http::{Response, StatusCode, header},
-    routing::get,
+    extract::State,
+    http::{Response, StatusCode, Uri, header},
+    routing::{any, get},
 };
 use futures_util::future::join_all;
 use rand::rngs::OsRng;
@@ -37,7 +38,7 @@ use xp::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
         VlessRealityTransport, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
-    state::{NodeUserEndpointMembership, membership_xray_email},
+    state::{NodeUserEndpointMembership, UserMihomoProfile, membership_xray_email},
     subscription, xray,
 };
 
@@ -109,6 +110,94 @@ impl Drop for MihomoProcess {
         if let Some(child) = self.child.as_mut() {
             let _ = child.start_kill();
         }
+    }
+}
+
+#[derive(Clone)]
+struct MihomoProviderPayloads {
+    system: String,
+    external: String,
+}
+
+async fn mihomo_provider_payload(
+    State(payloads): State<MihomoProviderPayloads>,
+    uri: Uri,
+) -> Response<Body> {
+    let payload = if uri.path().ends_with("system.yaml") {
+        payloads.system
+    } else {
+        payloads.external
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/yaml")
+        .body(Body::from(payload))
+        .expect("provider response")
+}
+
+async fn spawn_mihomo_provider_server(
+    addr: SocketAddr,
+    payloads: MihomoProviderPayloads,
+) -> TestServer {
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Mihomo provider listener");
+    let addr = listener.local_addr().expect("Mihomo provider address");
+    let app = Router::new()
+        .fallback(any(mihomo_provider_payload))
+        .with_state(payloads);
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("Mihomo provider server");
+    });
+    TestServer { addr, task }
+}
+
+fn mihomo_controller_proxy_url(controller_addr: SocketAddr, proxy_name: &str) -> reqwest::Url {
+    let mut url =
+        reqwest::Url::parse(&format!("http://{controller_addr}")).expect("Mihomo controller URL");
+    let mut segments = url
+        .path_segments_mut()
+        .expect("Mihomo controller URL supports path segments");
+    segments.push("proxies");
+    segments.push(proxy_name);
+    drop(segments);
+    url
+}
+
+async fn wait_for_mihomo_proxy_api<F>(
+    client: &reqwest::Client,
+    controller_addr: SocketAddr,
+    proxy_name: &str,
+    mihomo: &MihomoProcess,
+    ready: F,
+) -> serde_json::Value
+where
+    F: Fn(&serde_json::Value) -> bool,
+{
+    let url = mihomo_controller_proxy_url(controller_addr, proxy_name);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let last_error = match client.get(url.clone()).send().await {
+            Ok(response) if response.status().is_success() => {
+                match response.json::<serde_json::Value>().await {
+                    Ok(value) if ready(&value) => return value,
+                    Ok(value) => format!("unexpected proxy payload: {value}"),
+                    Err(error) => format!("decode proxy payload: {error}"),
+                }
+            }
+            Ok(response) => format!("controller status: {}", response.status()),
+            Err(error) => format!("controller request: {error}"),
+        };
+        if Instant::now() >= deadline {
+            panic!(
+                "Mihomo proxy {proxy_name:?} did not become ready: {}; {}",
+                last_error,
+                mihomo.logs()
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -532,4 +621,229 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
     )
     .await
     .expect("remove Xray XHTTP inbound");
+}
+
+#[tokio::test]
+#[ignore]
+async fn mihomo_provider_chain_has_no_direct_fallback() {
+    let mihomo_binary = std::env::var("XP_E2E_MIHOMO_BIN")
+        .expect("XP_E2E_MIHOMO_BIN for the real Mihomo provider smoke");
+
+    let user = User {
+        user_id: xp_test_fixtures::primary_user_id().to_owned(),
+        display_name: "mihomo-provider-e2e".to_string(),
+        subscription_token: xp_test_fixtures::primary_token().to_owned(),
+        credential_epoch: 0,
+        priority_tier: UserPriorityTier::P2,
+        quota_reset: UserQuotaReset::default(),
+    };
+    let node = Node {
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        node_name: xp_test_fixtures::primary_node_name().to_owned(),
+        access_host: xp_test_fixtures::address_loopback().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let endpoint = xhttp_endpoint(8443);
+    let membership = NodeUserEndpointMembership {
+        user_id: user.user_id.clone(),
+        node_id: node.node_id.clone(),
+        endpoint_id: endpoint.endpoint_id.clone(),
+    };
+    let provider_port = free_loopback_port().await;
+    let provider_addr = SocketAddr::from(([127, 0, 0, 1], provider_port));
+    let system_provider_url = format!("http://{provider_addr}/system.yaml");
+    let external_provider_url = format!("http://{provider_addr}/provider-a.yaml");
+    let profile = UserMihomoProfile {
+        mixin_yaml: "port: 0\nrules: []\n".to_string(),
+        extra_proxies_yaml: String::new(),
+        extra_proxy_providers_yaml: format!(
+            "providerA:\n  type: http\n  path: ./providers/provider-a.yaml\n  url: {}\n",
+            external_provider_url
+        ),
+    };
+    let memberships = vec![membership.clone()];
+    let endpoints = vec![endpoint.clone()];
+    let nodes = vec![node.clone()];
+    let system_yaml = subscription::build_mihomo_provider_system_yaml(
+        "seed",
+        &user,
+        &memberships,
+        &endpoints,
+        &nodes,
+    )
+    .expect("render Mihomo system provider");
+    let external_yaml = r#"
+proxies:
+  - name: "Japan smoke"
+    type: http
+    server: 127.0.0.1
+    port: 1
+"#
+    .to_string();
+    let rendered = subscription::build_mihomo_provider_yaml(
+        "seed",
+        &user,
+        &memberships,
+        &endpoints,
+        &nodes,
+        &profile,
+        &system_provider_url,
+    )
+    .expect("render Mihomo provider config");
+    let mut root: serde_yaml::Mapping = serde_yaml::from_str(&rendered).expect("provider YAML");
+    let relay_group_name = root
+        .get("proxy-groups")
+        .and_then(Value::as_sequence)
+        .and_then(|groups| {
+            groups.iter().find_map(|group| {
+                group
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| name.starts_with("🛣️ "))
+                    .map(str::to_owned)
+            })
+        })
+        .expect("generated relay group");
+    let relay_group = root
+        .get("proxy-groups")
+        .and_then(Value::as_sequence)
+        .and_then(|groups| {
+            groups.iter().find(|group| {
+                group.get("name").and_then(Value::as_str) == Some(relay_group_name.as_str())
+            })
+        })
+        .expect("generated relay group definition");
+    assert!(
+        relay_group.get("proxies").is_none(),
+        "external relay groups must not contain a DIRECT fallback"
+    );
+
+    let system_root: Value = serde_yaml::from_str(&system_yaml).expect("system provider YAML");
+    let direct_name = system_root
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find_map(|proxy| {
+                proxy
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| name.ends_with("-reality"))
+                    .map(str::to_owned)
+            })
+        })
+        .expect("direct Reality proxy");
+    let chain_name = system_root
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find_map(|proxy| {
+                proxy
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| name.ends_with("-reality-chain"))
+                    .map(str::to_owned)
+            })
+        })
+        .expect("chain Reality proxy");
+    assert!(!system_yaml.contains("dialer-proxy: DIRECT"));
+
+    let socks_port = free_loopback_port().await;
+    let controller_port = free_loopback_port().await;
+    root.insert("socks-port".into(), (socks_port as u64).into());
+    root.insert("allow-lan".into(), false.into());
+    root.insert("mode".into(), "rule".into());
+    root.insert("log-level".into(), "warning".into());
+    root.insert("ipv6".into(), false.into());
+    root.insert(
+        "external-controller".into(),
+        format!("127.0.0.1:{controller_port}").into(),
+    );
+    let config_yaml = serde_yaml::to_string(&root).expect("serialize Mihomo provider config");
+    let _provider_server = spawn_mihomo_provider_server(
+        provider_addr,
+        MihomoProviderPayloads {
+            system: system_yaml,
+            external: external_yaml,
+        },
+    )
+    .await;
+
+    let mihomo_temp_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("mihomo-provider-e2e");
+    std::fs::create_dir_all(&mihomo_temp_root).expect("create Mihomo provider temp root");
+    let mihomo_home = tempfile::tempdir_in(mihomo_temp_root).expect("Mihomo provider temp dir");
+    std::fs::create_dir_all(mihomo_home.path().join("providers"))
+        .expect("create Mihomo provider directory");
+    let mihomo = spawn_mihomo(
+        Path::new(&mihomo_binary),
+        mihomo_home.path(),
+        &config_yaml,
+        socks_port,
+    )
+    .await;
+    let controller_addr = SocketAddr::from(([127, 0, 0, 1], controller_port));
+    let client = reqwest::Client::new();
+    let relay = wait_for_mihomo_proxy_api(
+        &client,
+        controller_addr,
+        &relay_group_name,
+        &mihomo,
+        |value| {
+            value
+                .get("all")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|all| {
+                    all.iter()
+                        .any(|candidate| candidate.as_str() == Some("Japan smoke"))
+                })
+        },
+    )
+    .await;
+    let relay_candidates = relay
+        .get("all")
+        .and_then(serde_json::Value::as_array)
+        .expect("Mihomo relay candidates");
+    assert!(
+        relay_candidates
+            .iter()
+            .all(|candidate| candidate.as_str() != Some("DIRECT")),
+        "Mihomo relay candidates must never include DIRECT"
+    );
+
+    let loaded_system_yaml = std::fs::read_to_string(
+        mihomo_home
+            .path()
+            .join("providers")
+            .join("xp-system-generated.yaml"),
+    )
+    .expect("Mihomo should download the system provider");
+    let loaded_system: Value =
+        serde_yaml::from_str(&loaded_system_yaml).expect("loaded system provider YAML");
+    let loaded_direct = loaded_system
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find(|proxy| {
+                proxy.get("name").and_then(Value::as_str) == Some(direct_name.as_str())
+            })
+        })
+        .expect("loaded direct Reality proxy");
+    assert!(loaded_direct.get("dialer-proxy").is_none());
+    let loaded_chain = loaded_system
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find(|proxy| {
+                proxy.get("name").and_then(Value::as_str) == Some(chain_name.as_str())
+            })
+        })
+        .expect("loaded chain Reality proxy");
+    assert_eq!(
+        loaded_chain.get("dialer-proxy").and_then(Value::as_str),
+        Some(relay_group_name.as_str())
+    );
+    mihomo.stop().await;
 }

@@ -106,7 +106,7 @@ Response:
 - `🔒 高质量` 与 `🔒 {Region}` 通过 `use: [xp-system-generated]` 与 `filter` 动态包含 `{base}-reality` 接入点，并通过 `exclude-filter` 排除系统 `{base}-ss` 直连接入候选。
 - `💎 高质量` 作为 owner-facing 高质量入口不得失去兜底层；最终主配置必须稳定提供“高质量入口 + 全局兜底入口”两层语义。若 `💎 高质量` 本身不直接引用 `🤯 All`，则必须存在另一个稳定 owner-facing 包装组同时暴露 `💎 高质量` 与 `🤯 All`，不能让最终入口仅剩 `🔒 高质量` 单一路径。
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
-- per-base relay 组只消费外部第三方 provider；无外部 provider 时回落 `DIRECT`，不得 `use` `xp-system-generated`。有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test` 主动探测，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空；健康检查 URL 的选择顺序是：最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204` -> 唯一公开 `api_base_url + /api/health` -> `https://www.gstatic.com/generate_204`。
+- per-base relay 组只消费外部第三方 provider，不得使用 `DIRECT` 兜底，也不得 `use` `xp-system-generated`。有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test` 主动探测；无外部 provider 时 relay 组只能使用 `REJECT` 拒绝哨兵，provider 候选被 filter 筛空时不得回落直连。健康检查 URL 的选择顺序是：最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204` -> 唯一公开 `api_base_url + /api/health` -> `https://www.gstatic.com/generate_204`。
 - `POST /api/admin/endpoints` 在 `kind=vless_reality_vision_tcp` 时支持两种形状：
   legacy 非托管创建继续显式提交 `reality`；托管创建则省略 `reality`，只允许可选
   `canary_upstream` 与 `accepted_authorities`。托管创建成功后，服务端必须派生

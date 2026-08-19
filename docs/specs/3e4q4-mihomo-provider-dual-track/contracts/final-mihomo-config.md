@@ -85,6 +85,18 @@ Required constraints:
 - User-defined groups must remain outside that system-owned sequence.
 - Hidden relay groups must not be interleaved into the high-quality / region / landing / node-selector sequence.
 
+## Per-Base Relay Fail-Closed Contract
+
+Per-base relay groups are transit-only groups for generated `*-chain` proxies.
+
+- A relay group may consume only external third-party providers through `use` and its region
+  filter. It must never add `DIRECT` as a candidate.
+- With no external third-party provider, the relay group must contain only `REJECT`. The chain
+  proxy remains fail-closed and cannot become equivalent to its direct Reality proxy.
+- If the external provider filter yields no candidates, the relay group must not use `DIRECT`.
+- The explicit `{base}-reality` direct proxy remains available independently of relay-group
+  candidates.
+
 ## User Mixin Normalization
 
 System normalization must preserve user intent while mapping legacy region references onto the current visible contract.
