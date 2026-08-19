@@ -85,6 +85,22 @@ Required constraints:
 - User-defined groups must remain outside that system-owned sequence.
 - Hidden relay groups must not be interleaved into the high-quality / region / landing / node-selector sequence.
 
+## Per-Base Relay Fail-Closed Contract
+
+Per-base relay groups are transit-only groups for generated `*-chain` proxies.
+
+- With external third-party providers, a relay group consumes only the provider candidates
+  selected by `use` and its region filter. It must omit a static `proxies` fallback, set
+  `empty-fallback: REJECT` for the empty or initializing filtered state, and never add `DIRECT`
+  as a candidate. The explicit empty fallback overrides Mihomo's default `COMPATIBLE` value.
+- With no external third-party provider, the relay group must contain only static `REJECT` and
+  set `empty-fallback: REJECT`. The chain proxy remains fail-closed and cannot become equivalent
+  to its direct Reality proxy.
+- If the external provider filter yields no candidates, the relay group must resolve only to
+  `REJECT`; it must not expose Mihomo's `COMPATIBLE` placeholder or use `DIRECT`.
+- The explicit `{base}-reality` direct proxy remains available independently of relay-group
+  candidates.
+
 ## User Mixin Normalization
 
 System normalization must preserve user intent while mapping legacy region references onto the current visible contract.

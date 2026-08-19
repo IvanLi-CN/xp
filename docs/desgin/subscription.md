@@ -190,7 +190,7 @@ MVP 建议输出“可直接导入”的最小 YAML：
   - `proxies` = `extra_proxies_yaml`
 - `🔒 高质量` 与地区组继续通过 `use:` 消费 provider；`🔒 高质量` / `🔒 {Region}` 必须能动态包含系统 `{base}-reality` 接入点，`{base}-ss` 不作为接入点目标。
 - per-base relay 组按 `Node.access_host` 聚合生成，命名为 `🛣️ {relay-base}`；同一 `access_host` 下的多个落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 的 host slug 会保留 `.` 与 `-` 等分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 随当前订阅集合发生计数式重命名；若等于历史地区 alias 基名，会加内部前缀消歧，避免重新输出 `🛣️ {Region}`。
-- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，并保留 `DIRECT` 兜底以防 provider 候选被 filter 筛空。无外部 provider 时同样回落 `DIRECT`。健康检查 URL 选择顺序为：
+- per-base relay 组只消费外部第三方 provider，避免系统 `*-chain` 递归指回自身；有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test`，不得设置静态 `proxies` 或 `REJECT` 候选，只设置 `empty-fallback: REJECT` 覆盖过滤为空或初始化状态，绝不得保留 `DIRECT` 兜底；无外部 provider 时 relay 组静态 `proxies` 只能为 `[REJECT]`，provider 候选被 filter 筛空时也不得回落直连。健康检查 URL 选择顺序为：
   - 同一 `access_host` 下存在托管 VLESS endpoint 时，选择最小 VLESS 端口，并使用 `https://<access_host[:port]>/generate_204`
   - 否则当同组只有一个公开 `api_base_url` 时，使用 `<api_base_url>/api/health`
   - 否则使用 Mihomo 通用 `https://www.gstatic.com/generate_204`

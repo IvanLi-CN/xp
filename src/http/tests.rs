@@ -6291,14 +6291,15 @@ rules: []
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
         .expect("relay group missing");
-    let relay_proxies = relay_group
-        .get("proxies")
-        .and_then(YamlValue::as_sequence)
-        .expect("relay group proxies missing")
-        .iter()
-        .filter_map(YamlValue::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(relay_proxies, vec!["DIRECT"]);
+    assert_eq!(
+        relay_group.get("proxies"),
+        None,
+        "provider-backed relay groups must let provider candidates seed url-test"
+    );
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&YamlValue::String("REJECT".to_string()))
+    );
     assert_eq!(
         relay_group.get("url").and_then(YamlValue::as_str),
         Some("https://www.gstatic.com/generate_204")
@@ -6494,15 +6495,15 @@ rules: []
     let relay_group = groups
         .iter()
         .find(|g| g.get("name").and_then(YamlValue::as_str) == Some("🛣️ example-com"))
-        .expect("relay group should still exist as a DIRECT fallback");
+        .expect("relay group should still exist as a fail-closed group");
     let relay_proxies = relay_group
         .get("proxies")
         .and_then(YamlValue::as_sequence)
-        .expect("relay group proxies missing")
+        .expect("relay group should contain the REJECT sentinel")
         .iter()
         .filter_map(YamlValue::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(relay_proxies, vec!["DIRECT"]);
+    assert_eq!(relay_proxies, vec!["REJECT"]);
     assert!(relay_group.get("use").is_none());
 
     let provider_system_res = app

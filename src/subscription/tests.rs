@@ -553,6 +553,18 @@ providerB:
         std::collections::BTreeSet::from(["providerA", "providerB"])
     );
     assert_eq!(
+        relay_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+        None,
+        "provider-backed relay groups must let provider candidates seed url-test"
+    );
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+    );
+    assert_eq!(
         relay_group.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
@@ -2525,14 +2537,19 @@ providerA:
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert_eq!(use_values, vec!["providerA"]);
-    let proxy_values = relay
-        .get("proxies")
-        .and_then(Value::as_sequence)
-        .expect("relay group must keep DIRECT fallback")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(proxy_values, vec!["DIRECT"]);
+    assert_eq!(
+        relay
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+        None,
+        "external relay groups must let provider candidates seed url-test"
+    );
+    assert_eq!(
+        relay.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())),
+        "external relay groups must override Mihomo's COMPATIBLE empty fallback"
+    );
     assert_eq!(
         relay.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
@@ -2709,11 +2726,15 @@ rules: []
     let relay_proxy_names = relay_group
         .get("proxies")
         .and_then(Value::as_sequence)
-        .expect("relay group should fall back to DIRECT")
+        .expect("relay group should fail closed with REJECT")
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(relay_proxy_names, vec!["DIRECT"]);
+    assert_eq!(relay_proxy_names, vec![MIHOMO_RELAY_REJECT_FALLBACK]);
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+    );
 }
 
 #[test]
@@ -4763,17 +4784,14 @@ rules: []
 }
 
 #[test]
-fn build_mihomo_yaml_injects_direct_when_relay_group_has_no_provider_candidates() {
+fn build_mihomo_yaml_rejects_chain_when_relay_group_has_no_external_provider() {
     let u = user("alice");
     let n = node(fixture_node_n1(), fixture_label_only_us, fixture_host_us());
-    let endpoints = vec![endpoint_ss(
-        "e1",
-        "n1",
-        "ss",
-        443,
-        endpoint_server_psk_b64(),
-    )];
-    let memberships = vec![membership("n1", "e1")];
+    let endpoints = vec![
+        endpoint_ss("e1", "n1", "ss", 443, endpoint_server_psk_b64()),
+        endpoint_vless("e2", "n1", "vless", 8443, VlessFixtureMode::Standard),
+    ];
+    let memberships = vec![membership("n1", "e1"), membership("n1", "e2")];
     let profile = UserMihomoProfile {
         mixin_yaml: "port: 0
 rules: []
@@ -4793,7 +4811,7 @@ rules: []
         &probes,
         &profile,
     )
-    .expect("build mihomo yaml should succeed");
+    .expect("build Mihomo YAML should succeed");
     let root: Value = serde_yaml::from_str(&yaml).expect("result should be valid yaml");
     let groups = root
         .get("proxy-groups")
@@ -4807,8 +4825,47 @@ rules: []
     let proxies = relay
         .get("proxies")
         .and_then(Value::as_sequence)
-        .expect("relay group should receive DIRECT fallback");
-    assert_eq!(proxies, &vec![Value::String("DIRECT".to_string())]);
+        .expect("relay group should receive the REJECT sentinel");
+    assert_eq!(
+        proxies,
+        &vec![Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())]
+    );
+    assert_eq!(
+        relay.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+    );
+
+    let reality = root
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find(|proxy| {
+                proxy
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.ends_with("-reality"))
+            })
+        })
+        .expect("direct Reality proxy should remain available");
+    assert!(reality.get("dialer-proxy").is_none());
+
+    let chain = root
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .and_then(|proxies| {
+            proxies.iter().find(|proxy| {
+                proxy
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.ends_with("-reality-chain"))
+            })
+        })
+        .expect("chain Reality proxy should remain explicitly represented");
+    assert_eq!(
+        chain.get("dialer-proxy").and_then(Value::as_str),
+        Some("🛣️ us-fixture-test")
+    );
+    assert!(!yaml.contains("dialer-proxy: DIRECT"));
 }
 
 #[test]

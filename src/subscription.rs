@@ -1330,6 +1330,7 @@ const MIHOMO_LEGACY_OUTER_GROUP: &str = "🛣️ JP/HK/TW";
 const MIHOMO_OUTER_FILTER: &str =
     "(?i)(日本|🇯🇵|Japan|JP|香港|🇭🇰|HongKong|Hong Kong|HK|新加坡|🇸🇬|Singapore|SG)";
 const MIHOMO_OUTER_URL_TEST_TOLERANCE: i64 = 50;
+const MIHOMO_RELAY_REJECT_FALLBACK: &str = "REJECT";
 const MIHOMO_PROXY_GROUP_HELPER_KEY: &str = "proxy-group";
 const MIHOMO_PROXY_GROUP_WITH_RELAY_HELPER_KEY: &str = "proxy-group_with_relay";
 const MIHOMO_APP_PROXY_GROUP_HELPER_KEY: &str = "app-proxy-group";
@@ -1907,10 +1908,16 @@ fn build_mihomo_relay_group(
         serde_yaml::Value::String("hidden".to_string()),
         serde_yaml::Value::Bool(true),
     );
+    map.insert(
+        serde_yaml::Value::String("empty-fallback".to_string()),
+        serde_yaml::Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()),
+    );
     if provider_values.is_empty() {
         map.insert(
             serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("DIRECT".to_string())]),
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
+            )]),
         );
     } else {
         map.insert(
@@ -1920,10 +1927,6 @@ fn build_mihomo_relay_group(
         map.insert(
             serde_yaml::Value::String("use".to_string()),
             serde_yaml::Value::Sequence(provider_values.to_vec()),
-        );
-        map.insert(
-            serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("DIRECT".to_string())]),
         );
     }
     map
