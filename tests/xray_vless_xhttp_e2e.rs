@@ -861,7 +861,9 @@ proxies:
             value
                 .get("all")
                 .and_then(serde_json::Value::as_array)
-                .is_some()
+                .is_some_and(|candidates| {
+                    candidates.len() == 1 && candidates[0].as_str() == Some("REJECT")
+                })
         },
     )
     .await;
@@ -922,7 +924,6 @@ proxies:
         relay.get("now").and_then(serde_json::Value::as_str),
         Some("COMPATIBLE")
     );
-
     let empty_filter_relay = wait_for_mihomo_proxy_api(
         &client,
         controller_addr,
@@ -954,7 +955,6 @@ proxies:
             .and_then(serde_json::Value::as_str),
         Some("REJECT")
     );
-
     let loaded_system = wait_for_mihomo_provider_yaml(
         mihomo_home.path(),
         "xp-system-generated",
