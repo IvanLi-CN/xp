@@ -871,8 +871,10 @@ proxies:
             matches!(candidate.as_str(), Some(name)
                 if name != "DIRECT" && name != "COMPATIBLE" && name != "Germany smoke")
         }),
-        "Mihomo relay candidates must exclude DIRECT, COMPATIBLE, and non-matching"
-            " provider candidates"
+        concat!(
+            "Mihomo relay candidates must exclude DIRECT, COMPATIBLE, and non-matching ",
+            "provider candidates"
+        )
     );
     assert_eq!(
         relay_candidates

@@ -1908,20 +1908,13 @@ fn build_mihomo_relay_group(
         serde_yaml::Value::String("hidden".to_string()),
         serde_yaml::Value::Bool(true),
     );
-    if provider_values.is_empty() {
-        map.insert(
-            serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
-            )]),
-        );
-    } else {
-        map.insert(
-            serde_yaml::Value::String("proxies".to_string()),
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
-            )]),
-        );
+    map.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+            MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
+        )]),
+    );
+    if !provider_values.is_empty() {
         map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(MIHOMO_OUTER_FILTER.to_string()),
