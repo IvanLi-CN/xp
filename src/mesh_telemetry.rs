@@ -14,7 +14,9 @@ const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
 const MAX_BUCKETS: usize = 24 * 60;
 
+mod reverse;
 mod transport;
+pub use reverse::ReverseRelayTelemetrySample;
 use transport::MeshConnectionTrackers;
 pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
 pub use transport::{
@@ -42,6 +44,12 @@ pub struct MeshActiveRoute {
     pub kind: ActiveRouteKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rendezvous: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rendezvous_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_rendezvous: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standby_rendezvous: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,6 +251,9 @@ impl MeshTelemetryHandle {
                     TelemetryPath::Public => ActiveRouteKind::Public,
                 },
                 rendezvous: None,
+                rendezvous_role: None,
+                primary_rendezvous: None,
+                standby_rendezvous: None,
                 generation: None,
                 readiness: None,
             });
@@ -297,31 +308,6 @@ impl MeshTelemetryHandle {
         }
         state.revision += 1;
         persist(&self.history_storage, &state)
-    }
-
-    pub async fn record_reverse_sample(
-        &self,
-        peer_id: impl Into<String>,
-        peer_name: impl Into<String>,
-        rendezvous: impl Into<String>,
-        generation: u64,
-        sample: MeshTelemetrySample,
-    ) -> anyhow::Result<()> {
-        let peer_id = peer_id.into();
-        self.record_sample(peer_id.clone(), peer_name, sample)
-            .await?;
-        let mut state = self.state.lock().await;
-        if let Some(peer) = state.peers.get_mut(&peer_id) {
-            peer.active_route = Some(MeshActiveRoute {
-                kind: ActiveRouteKind::ReverseRelay,
-                rendezvous: Some(rendezvous.into()),
-                generation: Some(generation),
-                readiness: Some("active".to_string()),
-            });
-            state.revision += 1;
-            persist(&self.history_storage, &state)?;
-        }
-        Ok(())
     }
 
     pub async fn set_breaker(

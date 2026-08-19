@@ -1,6 +1,8 @@
 use super::*;
 use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
+#[path = "mesh/bootstrap.rs"]
+mod bootstrap;
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
@@ -167,9 +169,9 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay requires a current voter rendezvous and sender",
         ));
     }
-    let bootstrap_learner_target = is_current_learner(&envelope.target_node_id)
-        && (relay_route == internal_auth::InternalRoute::HealthV2
-            || uri.path().starts_with("/raft/"));
+    let bootstrap_route =
+        relay_route == internal_auth::InternalRoute::HealthV2 || uri.path().starts_with("/raft/");
+    let bootstrap_learner_target = is_current_learner(&envelope.target_node_id) && bootstrap_route;
 
     let (assignment, role, reverse_epoch) = {
         let store = state.store.lock().await;
@@ -197,14 +199,12 @@ pub(super) async fn admin_internal_reverse_relay(
         {
             return Err(ApiError::conflict("reverse relay assignment is stale"));
         }
-        // Fresh joins use a separate derivation domain until the Join operation reaches its
-        // terminal log index. The target's temporary bootstrap worker must therefore be selected
-        // here as well as in the Xray reconciler; using the formal role would hit the exact-match
-        // block rule and fail closed before Raft catch-up can begin.
-        let role = crate::reverse_mesh::reverse_assignment_role(
+        let role = bootstrap::reverse_role_for_relay(
+            store.state().active_membership_operation(),
             &assignment,
             &state.cluster.node_id,
-            bootstrap_learner_target,
+            &envelope.target_node_id,
+            bootstrap_route,
         )
         .ok_or_else(|| {
             ApiError::unauthorized("this node is not the assigned reverse Rendezvous")

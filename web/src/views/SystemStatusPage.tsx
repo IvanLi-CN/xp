@@ -79,17 +79,12 @@ function timestamp(value: string | null) {
 		: value;
 }
 
-function routeLabel(peer: AdminMeshPeer) {
-	if (peer.active_route?.kind === "reverse_relay") {
-		const rendezvous = peer.active_route.rendezvous ?? "Rendezvous";
-		const generation = peer.active_route.generation;
-		return `Reverse relay · ${rendezvous} · gen ${generation ?? "-"}`;
-	}
-	if (peer.active_route?.kind === "reality_direct") return "Reality Mesh";
-	if (peer.active_route?.kind === "public") return "Public fallback";
-	if (!peer.current_path) return "Awaiting sample";
-	return peer.current_path === "mesh" ? "Reality Mesh" : "Public fallback";
-}
+type PeerRouteSummary = {
+	primary: string;
+	secondary?: string;
+};
+
+type RendezvousRole = "primary" | "standby";
 
 const meshReasonLabel: Record<
 	NonNullable<AdminMeshPeer["mesh_reason"]>,
@@ -121,18 +116,68 @@ function meshTransportLabel(peer: AdminMeshPeer) {
 	) {
 		return "Reuse data unavailable";
 	}
-	const prefix = transport.health === "churning" ? "Churning · " : "";
-	return (
-		`${prefix}H2 · ${transport.requests_5m} req / ` +
-		`${transport.connection_starts_5m} starts · gen ${transport.connection_generation}`
-	);
+	const health = transport.health === "churning" ? "H2 churning" : "H2";
+	return `${health} · ${transport.requests_5m} req · gen ${transport.connection_generation}`;
 }
 
-function meshTransportTitle(peer: AdminMeshPeer) {
-	const transport = peer.mesh_transport;
-	return transport
-		? `1h: ${transport.requests_1h} requests / ${transport.connection_starts_1h} starts`
-		: undefined;
+function peerDisplayName(
+	peerId: string | null | undefined,
+	peers: ReadonlyMap<string, string>,
+) {
+	if (!peerId) return "Rendezvous";
+	return peers.get(peerId) ?? peerId;
+}
+
+function rendezvousRolesByPeer(peers: AdminMeshPeer[]) {
+	const roles = new Map<string, Set<RendezvousRole>>();
+	const add = (nodeId: string | null | undefined, role: RendezvousRole) => {
+		if (!nodeId) return;
+		const assigned = roles.get(nodeId) ?? new Set<RendezvousRole>();
+		assigned.add(role);
+		roles.set(nodeId, assigned);
+	};
+
+	for (const peer of peers) {
+		const route = peer.active_route;
+		if (route?.kind !== "reverse_relay") continue;
+		add(route.primary_rendezvous, "primary");
+		add(route.standby_rendezvous, "standby");
+	}
+
+	return roles;
+}
+
+function rendezvousRoleLabel(roles: ReadonlySet<RendezvousRole> | undefined) {
+	if (!roles?.size) return undefined;
+	if (roles.size === 2) return "Rendezvous · primary + standby";
+	return `Rendezvous · ${roles.has("primary") ? "primary" : "standby"}`;
+}
+
+function routeSummary(
+	peer: AdminMeshPeer,
+	peers: ReadonlyMap<string, string>,
+	rendezvousRoles: ReadonlyMap<string, ReadonlySet<RendezvousRole>>,
+): PeerRouteSummary {
+	const route = peer.active_route;
+	if (route?.kind === "reverse_relay") {
+		const activeName = peerDisplayName(route.rendezvous, peers);
+		return {
+			primary: "Reverse relay",
+			secondary: `via ${activeName} · g${route.generation ?? "-"}`,
+		};
+	}
+	if (route?.kind === "reality_direct" || peer.current_path === "mesh") {
+		return {
+			primary: "Reality direct",
+			secondary:
+				rendezvousRoleLabel(rendezvousRoles.get(peer.node_id)) ??
+				meshTransportLabel(peer),
+		};
+	}
+	if (route?.kind === "public" || peer.current_path === "public") {
+		return { primary: "Public fallback", secondary: meshTransportLabel(peer) };
+	}
+	return { primary: "Awaiting sample", secondary: reasonLabel(peer) };
 }
 
 function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
@@ -161,18 +206,24 @@ function PeerRows({
 	onProbe,
 	probeDisabled,
 	showMeshTransportReuse,
+	peerNames,
+	rendezvousRoles,
 }: {
 	peer: AdminMeshPeer;
 	onProbe?: () => void;
 	probeDisabled?: boolean;
 	showMeshTransportReuse?: boolean;
+	peerNames: ReadonlyMap<string, string>;
+	rendezvousRoles: ReadonlyMap<string, ReadonlySet<RendezvousRole>>;
 }) {
-	const showTransport =
-		showMeshTransportReuse && peer.mesh_capability === "enabled";
+	const route = routeSummary(peer, peerNames, rendezvousRoles);
+	const secondaryRoute = showMeshTransportReuse
+		? route.secondary
+		: reasonLabel(peer);
 	const content = (
 		<>
-			<div className="min-w-0">
-				<div className="flex items-center gap-2">
+			<div className="min-w-0" data-peer-cell="identity">
+				<div className="flex h-5 min-w-0 items-center gap-2">
 					<span className="truncate font-medium">{peer.node_name}</span>
 					<Badge variant={qualityVariant[peer.quality]} size="sm">
 						{qualityLabel[peer.quality]}
@@ -183,58 +234,61 @@ function PeerRows({
 						</Badge>
 					) : null}
 				</div>
-				<p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+				<p className="mt-1 truncate whitespace-nowrap font-mono text-xs text-muted-foreground">
 					{peer.mesh_url ?? peer.api_base_url}
 				</p>
 			</div>
-			<div className="min-w-0 text-sm">
-				<p className="truncate" title={routeLabel(peer)}>
-					{routeLabel(peer)}
+			<div className="min-w-0 text-sm" data-peer-cell="route">
+				<p
+					aria-label={route.primary}
+					className="truncate whitespace-nowrap"
+					data-peer-route-line
+				>
+					{route.primary}
 				</p>
-				<p className="mt-1 truncate text-xs text-muted-foreground">
-					{reasonLabel(peer)}
-				</p>
-				{showTransport ? (
+				{secondaryRoute ? (
 					<p
-						data-mesh-transport={peer.mesh_transport?.health ?? "unknown"}
-						className={`mt-1 break-words text-xs leading-5 ${
-							peer.mesh_transport?.health === "churning"
+						aria-label={secondaryRoute}
+						className={`mt-1 truncate whitespace-nowrap text-xs ${
+							peer.mesh_transport?.health === "churning" &&
+							showMeshTransportReuse
 								? "font-medium text-warning"
 								: "text-muted-foreground"
 						}`}
-						title={meshTransportTitle(peer)}
+						data-peer-route-line
 					>
-						{meshTransportLabel(peer)}
+						{secondaryRoute}
 					</p>
 				) : null}
-				<p className="mt-1 text-xs text-muted-foreground">
-					{timestamp(peer.last_transition_at)}
-				</p>
 			</div>
-			<div className="min-w-0">
+			<div className="min-w-0" data-peer-cell="uptime">
 				<MeshUptimeStrip
 					buckets={peer.buckets}
 					quality={peer.quality}
 					label={`${peer.node_name} 24 hour uptime`}
 				/>
-				<div className="mt-1 flex justify-between text-xs text-muted-foreground">
-					<span>24h uptime {percent(peer.availability_24h)}</span>
-					<span>Mesh {percent(peer.mesh_availability_24h)}</span>
-				</div>
-			</div>
-			<div className="min-w-0 text-sm">
-				<p>{percent(peer.availability_1h)}</p>
-				<p className="mt-1 text-xs text-muted-foreground">1h availability</p>
-			</div>
-			<div className="min-w-0 font-mono text-sm">
-				<p>
-					{peer.latency_p50_ms ?? "-"} / {peer.latency_p95_ms ?? "-"}
-				</p>
-				<p className="mt-1 text-xs font-sans text-muted-foreground">
-					p50 / p95 ms
+				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
+					24h {percent(peer.availability_24h)} · Mesh{" "}
+					{percent(peer.mesh_availability_24h)}
 				</p>
 			</div>
-			<div className="min-w-0">
+			<div className="min-w-0 text-sm" data-peer-cell="availability">
+				<p className="truncate whitespace-nowrap">
+					1h {percent(peer.availability_1h)}
+				</p>
+				<p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
+					{timestamp(peer.last_transition_at)}
+				</p>
+			</div>
+			<div className="min-w-0 font-mono text-sm" data-peer-cell="latency">
+				<p className="truncate whitespace-nowrap">
+					{peer.latency_p50_ms ?? "-"} / {peer.latency_p95_ms ?? "-"} ms
+				</p>
+				<p className="mt-1 truncate whitespace-nowrap text-xs font-sans text-muted-foreground">
+					p50 / p95
+				</p>
+			</div>
+			<div className="min-w-0" data-peer-cell="breaker">
 				<BreakerBadge state={peer.breaker} />
 			</div>
 		</>
@@ -246,8 +300,8 @@ function PeerRows({
 				className="hidden items-center gap-3 border-b border-border/70 py-3 xl:grid"
 				style={{
 					gridTemplateColumns:
-						"minmax(9rem,1.35fr) minmax(7rem,.9fr) minmax(12rem,2fr) " +
-						"minmax(6rem,.65fr) minmax(6rem,.75fr) minmax(5.5rem,.6fr) 4.25rem",
+						"minmax(9rem,1.25fr) minmax(11.5rem,1.6fr) minmax(10rem,1.6fr) " +
+						"minmax(5.25rem,.6fr) minmax(5.75rem,.7fr) minmax(4.75rem,.5fr) 4.25rem",
 				}}
 			>
 				{content}
@@ -310,19 +364,24 @@ export function SystemStatusSurface({
 }: SystemStatusSurfaceProps) {
 	const summary = useMemo(() => {
 		const total = status.peers.length;
-		const meshReady = status.peers.filter(
-			(peer) => peer.current_path === "mesh",
-		).length;
 		const fallback = status.peers.filter(
 			(peer) => peer.current_path === "public",
 		).length;
-		return { total, meshReady, fallback };
+		return { clusterNodes: total + 1, total, fallback };
 	}, [status.peers]);
 	const canaryStatus = !status.local.canary.enabled
 		? "disabled"
 		: status.local.canary.last_error
 			? "degraded"
 			: "ready";
+	const peerNames = useMemo(
+		() => new Map(status.peers.map((peer) => [peer.node_id, peer.node_name])),
+		[status.peers],
+	);
+	const rendezvousRoles = useMemo(
+		() => rendezvousRolesByPeer(status.peers),
+		[status.peers],
+	);
 
 	return (
 		<div className="space-y-7">
@@ -380,9 +439,9 @@ export function SystemStatusSurface({
 						}
 					/>
 					<StatusFact
-						label="Mesh peers"
-						value={`${summary.meshReady}/${summary.total}`}
-						detail="on Reality Mesh"
+						label="Cluster nodes"
+						value={String(summary.clusterNodes)}
+						detail={`1 local · ${summary.total} remote`}
 					/>
 					<StatusFact
 						label="Public fallback"
@@ -398,16 +457,7 @@ export function SystemStatusSurface({
 			</section>
 
 			<section>
-				<div className="mb-3 flex items-end justify-between gap-4">
-					<div>
-						<h2 className="text-lg font-semibold">Peer transport</h2>
-						<p className="mt-1 text-sm text-muted-foreground">
-							A blue edge on a timeline marks end-to-end success through public
-							fallback.
-						</p>
-					</div>
-					<span className="text-xs text-muted-foreground">No pagination</span>
-				</div>
+				<h2 className="mb-3 text-lg font-semibold">Peer transport</h2>
 				{status.peers.length === 0 ? (
 					<div
 						className={
@@ -423,6 +473,8 @@ export function SystemStatusSurface({
 							<PeerRows
 								key={peer.node_id}
 								peer={peer}
+								peerNames={peerNames}
+								rendezvousRoles={rendezvousRoles}
 								showMeshTransportReuse={showMeshTransportReuse}
 								probeDisabled={readOnly}
 								onProbe={

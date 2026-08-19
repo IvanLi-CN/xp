@@ -4,7 +4,8 @@
 
 ## 背景
 
-Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoint。位于单向防火墙、运营商 NAT 或仅允许出站连接的节点，无法作为 Mesh server，导致控制面只能退回 Public/API。反向中继让目标节点主动经一个可访问的 Rendezvous 建立受限的 VLESS Reverse 链路，同时保留现有 Reality Direct 与 Public fallback。
+Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoint。位于单向防火墙、运营商 NAT 或仅允许出站连接的节点，无法作为 Mesh server，导致控制面只能退回 Public/API。反向中继让目标节点主动经一个可访问的 Rendezvous 建立受限的 VLESS Reverse 链路，
+同时保留现有 Reality Direct 与 Public fallback。
 
 ## 目标
 
@@ -43,7 +44,8 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 ### Relay wire 与路径
 
 - 新增 `POST /api/admin/_internal/mesh/reverse-relay` 与 signed runtime report endpoint。caller 非 Rendezvous 时，先用独立 outer request 到 R；R 只允许通过 Reality 后 Public 访问，禁止 Reverse 递归。
-- outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
+- outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。
+  R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
 - 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
 - Direct/Reverse/Public 顺序固定。Reality 与 Reverse 各占 `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/首字节后不换路；不安全重试返回 `outcome_unknown`。
 - 普通 body 上限 1 MiB，Raft/snapshot 8 MiB；请求缓冲、响应流式。history 保留 Reality/Public direct 两条等价路径，再试 Reverse，最后使用现有加密 dynamic relay。
@@ -58,12 +60,40 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   capability barrier 或无
   可用候选时，marker 缺省且沿用现有 Direct/Public join。
 - public health 优先；signed Reverse health 200 后可标记 `reverse-dependent`。systemd/OpenRC/container 首次启用、滚动升级、restart fallback 和 operator intervention 必须保持 Direct/Public 可用。
-- 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`、Rendezvous、generation、readiness 和汇总计数；旧客户端可继续解析旧字段，UI 只增加只读诊断行。
+- 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`。
+  route 提供当前 Rendezvous、其 `primary|standby|bootstrap` 角色与成员、generation、readiness 和汇总计数；旧客户端可继续解析旧字段。
+  System Status 由当前 assignments 标明直连 Rendezvous 的 primary/standby 角色。
+  每个 Reverse target 用两条单行摘要显示 `Reverse relay` 与当前活动 Rendezvous/generation，不重复 standby。
+  Cluster nodes 计数包含本机，所有 remote member 各有一行；每个状态单元最多显示两条单行摘要，不新增手动选路控件。
 
 ## 验收
 
-- 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。XP 还会对已分配 target 发起只走 Reverse 的 signed `health-v2` 请求，Rendezvous 在 target ACK 通过后保存短期健康证据。重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得启用生产 epoch。
+- 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。
+  XP 还会对已分配 target 发起只走 Reverse 的 signed `health-v2` 请求，Rendezvous 在 target ACK 通过后保存短期健康证据。
+  重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得启用生产 epoch。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
 - 非对称防火墙下 Direct -> Reverse -> Public、R/Xray 故障、120 秒 drain、1 MiB/8 MiB、SSE、response-start failure、fresh join、三种部署和受控重启符合合同；tombstone 不超过 2。
 - managed stack 20 节点与既有 50-peer 压测总 PSS 不超过 65,536 KiB；Rust/Web/Storybook/E2E/style/spec drift/required CI 通过，交付停在 `merge-ready / Step 5C Ready`。
+
+## Visual Evidence
+
+PR: include
+
+5 节点桌面状态：本机、两台直连 Rendezvous 与两台 Reverse target 均可见。
+每个 Reverse target 使用两条单行摘要。
+
+![五节点 System Status 桌面](./assets/system-status-five-node-desktop.png)
+
+PR: include
+
+393x852 移动端总览：集群计数包含本机，显示 `1 local · 4 remote`。
+
+![五节点 System Status 移动端总览](./assets/system-status-five-node-mobile-overview.png)
+
+PR: include
+
+393x852 移动端目标区：每个 Reverse target 分别显示 `Reverse relay`。
+下一行显示当前 Rendezvous/generation。
+
+![移动端反向目标](./assets/system-status-five-node-mobile-targets.png)

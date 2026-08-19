@@ -29,6 +29,12 @@
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale
   bootstrap users/rules then drain for 120 seconds under the same Xray reconciler.
+- Mesh status now adds the active Rendezvous role plus the primary and standby members to
+  `active_route`. System Status resolves those IDs to current member names and limits every peer
+  status cell to at most two single-line summaries. It derives the primary/standby label for each
+  direct Rendezvous from current assignments, gives each Reverse target separate `Reverse relay`
+  and active Rendezvous/generation lines, counts the local node with all remote members, and
+  retains the existing Details entry for the full diagnostic path.
 - Fixed Xray spike: `RUN_ID=20260819_102353_be14b3bf_reverse`, Xray `26.3.27`, image digest
   `sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7`. Two Xray
   instances completed dynamic VLESS Reverse registration over both Vision TCP + Reality and

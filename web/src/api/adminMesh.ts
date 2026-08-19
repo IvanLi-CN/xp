@@ -11,6 +11,12 @@ export const MeshActiveRouteKindSchema = z.enum([
 export const AdminMeshActiveRouteSchema = z.object({
 	kind: MeshActiveRouteKindSchema,
 	rendezvous: z.string().nullable().optional(),
+	rendezvous_role: z
+		.enum(["primary", "standby", "bootstrap"])
+		.nullable()
+		.optional(),
+	primary_rendezvous: z.string().nullable().optional(),
+	standby_rendezvous: z.string().nullable().optional(),
 	generation: z.number().int().nonnegative().nullable().optional(),
 	readiness: z.string().nullable().optional(),
 });

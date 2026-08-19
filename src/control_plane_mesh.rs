@@ -953,7 +953,6 @@ impl MeshAwareHttpClient {
         )?;
         Ok(response)
     }
-
     async fn record_reverse_sample(
         &self,
         peer: &MeshPeerTarget,
@@ -963,12 +962,15 @@ impl MeshAwareHttpClient {
     ) {
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
-                .record_reverse_sample(
-                    &peer.node_id,
-                    &peer.node_name,
-                    &route.rendezvous.node_id,
-                    route.assignment.generation,
-                    telemetry_sample(
+                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
+                    peer_id: peer.node_id.clone(),
+                    peer_name: peer.node_name.clone(),
+                    rendezvous: route.rendezvous.node_id.clone(),
+                    rendezvous_role: route.role.as_str().to_string(),
+                    primary_rendezvous: route.assignment.primary_node_id.clone(),
+                    standby_rendezvous: route.assignment.standby_node_id.clone(),
+                    generation: route.assignment.generation,
+                    sample: telemetry_sample(
                         TelemetryPath::Mesh,
                         true,
                         started.elapsed(),
@@ -976,11 +978,10 @@ impl MeshAwareHttpClient {
                         request.updates_active_path,
                         None,
                     ),
-                )
+                })
                 .await;
         }
     }
-
     async fn record_mesh_transport_failure(
         &self,
         peer: &MeshPeerTarget,
@@ -1016,7 +1017,6 @@ impl MeshAwareHttpClient {
                 .await;
         }
     }
-
     async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
         self.record_sample(
             peer,
