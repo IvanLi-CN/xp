@@ -659,7 +659,6 @@ async fn mihomo_xhttp_xmux_reuses_one_connection_and_recovers_after_disconnect()
 async fn mihomo_provider_chain_has_no_direct_fallback() {
     let mihomo_binary = std::env::var("XP_E2E_MIHOMO_BIN")
         .expect("XP_E2E_MIHOMO_BIN for the real Mihomo provider smoke");
-
     let user = User {
         user_id: xp_test_fixtures::primary_user_id().to_owned(),
         display_name: "mihomo-provider-e2e".to_string(),
@@ -794,7 +793,6 @@ proxies:
     assert!(relay_filter.contains("Japan"));
     assert!(relay_filter.contains("Singapore"));
     assert!(!relay_filter.contains("Germany"));
-
     let system_root: Value = serde_yaml::from_str(&system_yaml).expect("system provider YAML");
     let direct_name = system_root
         .get("proxies")
@@ -823,7 +821,6 @@ proxies:
         })
         .expect("chain Reality proxy");
     assert!(!system_yaml.contains("dialer-proxy: DIRECT"));
-
     let socks_port = free_loopback_port().await;
     let controller_port = free_loopback_port().await;
     root.insert("socks-port".into(), (socks_port as u64).into());
@@ -851,7 +848,10 @@ proxies:
     )
     .await;
     let controller_addr = SocketAddr::from(([127, 0, 0, 1], controller_port));
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
     let initial_relay = wait_for_mihomo_proxy_api(
         &client,
         controller_addr,
@@ -900,7 +900,9 @@ proxies:
             value
                 .get("all")
                 .and_then(serde_json::Value::as_array)
-                .is_some()
+                .is_some_and(|candidates| {
+                    candidates.len() == 1 && candidates[0].as_str() == Some("Japan smoke")
+                })
         },
     )
     .await;
