@@ -853,7 +853,7 @@ async fn verify_reverse_assignment(state: &AppState, target_id: &str) -> Result<
                 content_type: None,
                 body: Vec::new(),
                 total_budget: Duration::from_secs(5),
-                allow_ambiguous_fallback: false,
+                allow_ambiguous_fallback: true,
                 request_id: crate::id::new_ulid_string(),
                 route: internal_auth::InternalRoute::HealthV2,
                 cluster_id: state.cluster.cluster_id.clone(),

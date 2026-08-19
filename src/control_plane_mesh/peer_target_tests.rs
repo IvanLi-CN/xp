@@ -4,10 +4,16 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::sleep};
 
 async fn count_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
     requests.fetch_add(1, Ordering::SeqCst);
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+async fn stall_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
+    requests.fetch_add(1, Ordering::SeqCst);
+    sleep(Duration::from_secs(1)).await;
     StatusCode::SERVICE_UNAVAILABLE
 }
 
@@ -23,6 +29,26 @@ async fn spawn_reverse_relay_counter() -> (String, Arc<AtomicUsize>, JoinHandle<
         .await
         .expect("reverse relay listener");
     let address = listener.local_addr().expect("reverse relay address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), requests, task)
+}
+
+async fn spawn_stalling_reverse_relay() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route(
+            "/api/admin/_internal/mesh/reverse-relay",
+            post(stall_reverse_relay),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("stalling reverse relay listener");
+    let address = listener
+        .local_addr()
+        .expect("stalling reverse relay address");
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -264,6 +290,34 @@ async fn reverse_outer_request_prefers_rendezvous_reality_mesh() {
 
     assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
+    mesh_task.abort();
+    public_task.abort();
+}
+
+#[tokio::test]
+async fn reverse_outer_request_falls_back_public_after_reality_timeout() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_reverse_relay().await;
+    let (public_base_url, public_requests, public_task) = spawn_reverse_relay_counter().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let assignment = reverse_assignment();
+    let rendezvous = secondary_reverse_target(Some(mesh_base_url), public_base_url);
+    let peer = primary_reverse_target(None, "http://127.0.0.1:1".to_string());
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(rendezvous, None, assignment),
+        )
+        .await;
+    client
+        .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
+        .await
+        .expect_err("public counter response omits relay acknowledgements");
+
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     mesh_task.abort();
     public_task.abort();
 }

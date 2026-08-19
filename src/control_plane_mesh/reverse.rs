@@ -157,8 +157,13 @@ pub(super) async fn send_outer_request(
     for (name, value) in headers {
         builder = builder.header(name, value);
     }
-    tokio::time::timeout(budget, builder.send())
-        .await
-        .map_err(|_| MeshRequestError::OutcomeUnknown)?
-        .map_err(|error| public_transport_error(error, allow_ambiguous_fallback))
+    match tokio::time::timeout(budget, builder.send()).await {
+        Ok(result) => {
+            result.map_err(|error| public_transport_error(error, allow_ambiguous_fallback))
+        }
+        Err(_) if allow_ambiguous_fallback => Err(MeshRequestError::Reverse(
+            "reverse outer request timed out before response headers".to_string(),
+        )),
+        Err(_) => Err(MeshRequestError::OutcomeUnknown),
+    }
 }

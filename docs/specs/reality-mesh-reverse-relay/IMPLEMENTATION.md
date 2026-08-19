@@ -26,7 +26,8 @@
   before Public/API; when the caller is itself the Rendezvous, it uses the signed local XP loopback
   portal instead of its public address. Each Rendezvous validates both outer and target ACKs before
   retaining a bounded health observation; local Xray/portal readiness remains the admission gate
-  and a failed probe never disables Direct/Public.
+  and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
+  retryable Reality timeout also proceeds to the Rendezvous Public/API path.
 - Fresh-join bootstrap links use the domain-separated `ReverseRole::Bootstrap` tag/UUID/origin
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale
