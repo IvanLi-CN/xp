@@ -746,9 +746,13 @@ proxies:
             })
         })
         .expect("generated relay group definition");
-    assert!(
-        relay_group.get("proxies").is_none(),
-        "external relay groups must not contain a DIRECT fallback"
+    assert_eq!(
+        relay_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+        Some(vec!["REJECT"]),
+        "external relay groups must carry an explicit REJECT sentinel"
     );
     let relay_provider_names = relay_group
         .get("use")
@@ -862,13 +866,25 @@ proxies:
         .get("all")
         .and_then(serde_json::Value::as_array)
         .expect("Mihomo relay candidates");
-    assert_eq!(relay_candidates.len(), 1);
-    assert_eq!(relay_candidates[0].as_str(), Some("COMPATIBLE"));
     assert!(
         relay_candidates.iter().all(|candidate| {
-            matches!(candidate.as_str(), Some(name) if name != "DIRECT" && name != "Germany smoke")
+            matches!(candidate.as_str(), Some(name)
+                if name != "DIRECT" && name != "COMPATIBLE" && name != "Germany smoke")
         }),
-        "Mihomo relay candidates must exclude DIRECT and non-matching provider candidates"
+        "Mihomo relay candidates must exclude DIRECT, COMPATIBLE, and non-matching"
+            " provider candidates"
+    );
+    assert_eq!(
+        relay_candidates
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>(),
+        vec!["REJECT"],
+        "an empty external provider filter must expose only the explicit REJECT sentinel"
+    );
+    assert_eq!(
+        relay.get("now").and_then(serde_json::Value::as_str),
+        Some("REJECT")
     );
 
     let loaded_system = wait_for_mihomo_provider_yaml(

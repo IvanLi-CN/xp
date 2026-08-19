@@ -85,7 +85,7 @@
   - `💎 高质量` 是 hidden `fallback`
   - `🤯 All` 是 hidden `url-test`
   - `💎 节点选择` 是 hidden `fallback`
-- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，不得保留 `DIRECT` 兜底；无外部 provider 时只能使用 `REJECT` 拒绝哨兵，provider 候选被 filter 筛空时不得回落直连；健康检查 URL 选择顺序必须是：
+- per-base relay 组不得消费 `xp-system-generated`，避免链式节点的 `dialer-proxy` 递归选中自身；有外部 provider 时使用日本/香港/新加坡 filter 做 `url-test`，并显式保留 `REJECT` 哨兵以覆盖过滤为空或初始化状态，绝不得保留 `DIRECT` 兜底；无外部 provider 时只能使用 `REJECT` 拒绝哨兵，provider 候选被 filter 筛空时不得回落直连；健康检查 URL 选择顺序必须是：
   - 同一 `access_host` 下存在至少一个托管 VLESS endpoint 时，使用最小 VLESS 端口对应的 `https://<access_host[:port]>/generate_204`
   - 否则当同一 `access_host` 下只有一个公开 `api_base_url` 时，使用该 API health URL
   - 否则回退到 `https://www.gstatic.com/generate_204`
@@ -179,7 +179,7 @@
 - Given 同一 `access_host` 下不存在托管 VLESS endpoint，When 请求 provider 主配置，Then relay 组必须回退到“唯一公开 `api_base_url` 的 `/api/health`”，若仍不能唯一确定，则回退到 `https://www.gstatic.com/generate_204`。
 - Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
 - Given per-base relay 组存在外部第三方 provider，When 渲染链式节点，Then relay 组只能通过外部 provider 的 filter/use 候选转发；
-  不得包含 `DIRECT` 兜底。
+  并保留显式 `REJECT` 哨兵覆盖 filter 为空或初始化状态，不得包含 `DIRECT` 兜底或暴露 `COMPATIBLE`。
 - Given per-base relay 组不存在外部第三方 provider，When 渲染 Mihomo 配置，Then relay 组只能使用 `REJECT` 作为拒绝哨兵；
   所有 `*-chain` 路径保持不可用，且对应 `{base}-reality` 直连入口仍然可用。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。

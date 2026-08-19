@@ -553,6 +553,13 @@ providerB:
         std::collections::BTreeSet::from(["providerA", "providerB"])
     );
     assert_eq!(
+        relay_group
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK])
+    );
+    assert_eq!(
         relay_group.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
@@ -2525,9 +2532,13 @@ providerA:
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert_eq!(use_values, vec!["providerA"]);
-    assert!(
-        relay.get("proxies").is_none(),
-        "external relay groups must not add a DIRECT fallback"
+    assert_eq!(
+        relay
+            .get("proxies")
+            .and_then(Value::as_sequence)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+        Some(vec![MIHOMO_RELAY_REJECT_FALLBACK]),
+        "external relay groups must carry an explicit REJECT sentinel"
     );
     assert_eq!(
         relay.get("url").and_then(Value::as_str),

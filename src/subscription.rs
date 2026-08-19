@@ -1917,6 +1917,12 @@ fn build_mihomo_relay_group(
         );
     } else {
         map.insert(
+            serde_yaml::Value::String("proxies".to_string()),
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+                MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
+            )]),
+        );
+        map.insert(
             serde_yaml::Value::String("filter".to_string()),
             serde_yaml::Value::String(MIHOMO_OUTER_FILTER.to_string()),
         );
