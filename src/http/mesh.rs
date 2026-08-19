@@ -79,9 +79,12 @@ pub(super) async fn admin_internal_reverse_relay(
     let Some(outer) = internal.verified.as_ref() else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
+    let envelope = crate::reverse_mesh::ReverseRelayEnvelope::from_headers(&headers)
+        .map_err(ApiError::invalid_request)?;
     if outer.context.route != internal_auth::InternalRoute::MeshV2
         || outer.context.target_id != state.cluster.node_id
-        || outer.context.sender_id == state.cluster.node_id
+        || (outer.context.sender_id == state.cluster.node_id
+            && envelope.target_node_id == state.cluster.node_id)
     {
         return Err(ApiError::unauthorized(
             "reverse relay outer route is invalid",
@@ -92,8 +95,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay is disabled until local Xray readiness recovers",
         ));
     }
-    let envelope = crate::reverse_mesh::ReverseRelayEnvelope::from_headers(&headers)
-        .map_err(ApiError::invalid_request)?;
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_deref()
@@ -842,9 +843,9 @@ async fn verify_reverse_assignment(state: &AppState, target_id: &str) -> Result<
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let target = mesh_peer_target(state, target_id).await?;
     configure_reverse_route(state, &state.mesh_client, &target).await;
-    let response = state
+    state
         .mesh_client
-        .send_peer_reverse_request(
+        .send_peer_reverse_health_request(
             &target,
             crate::control_plane_mesh::MeshRequest {
                 method: Method::GET,
@@ -864,12 +865,6 @@ async fn verify_reverse_assignment(state: &AppState, target_id: &str) -> Result<
         )
         .await
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
-    if !response.status().is_success() {
-        return Err(ApiError::gateway_timeout(format!(
-            "reverse health returned {}",
-            response.status()
-        )));
-    }
     Ok(())
 }
 

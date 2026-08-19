@@ -411,10 +411,13 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             store: store.clone(),
         },
     )?
-    .with_mesh_observability(mesh_telemetry.clone());
-    let mesh_client = raft_network
-        .mesh_client()
-        .with_reverse_gate(reconcile.reverse_gate());
+    .with_mesh_observability(mesh_telemetry.clone())
+    .with_local_reverse_relay(
+        cluster.node_id.clone(),
+        format!("http://127.0.0.1:{}", config.bind.port()),
+    )
+    .with_reverse_gate(reconcile.reverse_gate());
+    let mesh_client = raft_network.mesh_client();
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),

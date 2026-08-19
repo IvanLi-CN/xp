@@ -20,6 +20,7 @@ use openraft::{
     },
 };
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -78,6 +79,20 @@ impl HttpNetworkFactory {
 
     pub fn with_mesh_observability(mut self, telemetry: MeshTelemetryHandle) -> Self {
         self.client = self.client.with_mesh_observability(telemetry);
+        self
+    }
+
+    pub fn with_local_reverse_relay(
+        mut self,
+        node_id: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        self.client = self.client.with_local_reverse_relay(node_id, base_url);
+        self
+    }
+
+    pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.client = self.client.with_reverse_gate(gate);
         self
     }
 

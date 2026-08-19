@@ -43,11 +43,18 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 ### Relay wire 与路径
 
-- 新增 `POST /api/admin/_internal/mesh/reverse-relay` 与 signed runtime report endpoint。caller 非 Rendezvous 时，先用独立 outer request 到 R；R 只允许通过 Reality 后 Public 访问，禁止 Reverse 递归。
+- 新增 `POST /api/admin/_internal/mesh/reverse-relay` 与 signed runtime report endpoint。
+  caller 非 Rendezvous 时，先用独立 outer request 到 R。
+  远端 R 固定按 Reality Mesh 后 Public/API 的顺序访问。
+  caller 自身就是 R 时，固定走其受签名保护的 XP loopback portal，避免两 voter 拓扑回绕公网地址。
+  outer request 禁止 Reverse 递归。
 - outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。
   R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
 - 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
 - Direct/Reverse/Public 顺序固定。Reality 与 Reverse 各占 `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/首字节后不换路；不安全重试返回 `outcome_unknown`。
+- assignment worker 对每个 target 的 primary 和 standby Rendezvous 分别发送 signed Reverse `health-v2`。
+  只有各自收到 target ACK 的 Rendezvous 才可转发该 generation 的非 health 请求；因此 standby
+  在故障切换前已完成预热验证。
 - 普通 body 上限 1 MiB，Raft/snapshot 8 MiB；请求缓冲、响应流式。history 保留 Reality/Public direct 两条等价路径，再试 Reverse，最后使用现有加密 dynamic relay。
 
 ### Join、部署与状态 API
@@ -69,7 +76,7 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 ## 验收
 
 - 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。
-  XP 还会对已分配 target 发起只走 Reverse 的 signed `health-v2` 请求，Rendezvous 在 target ACK 通过后保存短期健康证据。
+  XP 还会对已分配 target 的 primary 与 standby 分别发起只走 Reverse 的 signed `health-v2` 请求；各 Rendezvous 在 target ACK 通过后保存短期健康证据。
   重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得启用生产 epoch。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。

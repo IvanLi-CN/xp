@@ -21,10 +21,12 @@
   generation/assignment in Raft; `xp join` stores only the public endpoint parameters, epoch and
   generation in the existing mode-0600 `raft_bootstrap_sender` marker. Unsupported or candidate-less
   clusters retain the existing Direct/Public bootstrap path.
-- Assignment reconciliation runs a reverse-only signed `health-v2` probe for each assigned target.
-  The Rendezvous validates both outer and target ACKs before retaining a bounded health observation;
-  local Xray/portal readiness remains the admission gate and a failed probe never disables
-  Direct/Public.
+- Assignment reconciliation runs a reverse-only signed `health-v2` probe through every assigned
+  primary and standby Rendezvous. Remote outer delivery tries that Rendezvous through Reality Mesh
+  before Public/API; when the caller is itself the Rendezvous, it uses the signed local XP loopback
+  portal instead of its public address. Each Rendezvous validates both outer and target ACKs before
+  retaining a bounded health observation; local Xray/portal readiness remains the admission gate
+  and a failed probe never disables Direct/Public.
 - Fresh-join bootstrap links use the domain-separated `ReverseRole::Bootstrap` tag/UUID/origin
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale

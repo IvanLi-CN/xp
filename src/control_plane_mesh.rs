@@ -255,6 +255,7 @@ pub struct MeshAwareHttpClient {
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
+    local_reverse_relay: Option<reverse::LocalReverseRelay>,
 }
 
 impl MeshAwareHttpClient {
@@ -270,6 +271,7 @@ impl MeshAwareHttpClient {
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
+            local_reverse_relay: None,
         }
     }
 
@@ -852,21 +854,70 @@ impl MeshAwareHttpClient {
         envelope
             .insert_headers(&mut outer_headers)
             .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
-        let outer_url = join_url(
-            &route.rendezvous.public_base_url,
-            &outer_request.path_and_query,
-        )?;
-        let mut builder = self
-            .public_direct
-            .request(outer_request.method.clone(), outer_url)
-            .body(outer_request.body.clone());
-        for (name, value) in &outer_headers {
-            builder = builder.header(name, value);
-        }
-        let response = tokio::time::timeout(budget, builder.send())
+        let outer_started = Instant::now();
+        let local_rendezvous = self
+            .local_reverse_relay
+            .as_ref()
+            .filter(|local| local.node_id == route.rendezvous.node_id);
+        let mut response = None;
+        if let Some(local) = local_rendezvous {
+            let local_url = join_url(&local.base_url, &outer_request.path_and_query)?;
+            response = Some(
+                reverse::send_outer_request(
+                    &self.public_direct,
+                    &outer_request,
+                    &local_url,
+                    &outer_headers,
+                    budget,
+                    request.allow_ambiguous_fallback,
+                )
+                .await?,
+            );
+        } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
+            let mesh_budget = mesh_attempt_budget(budget).min(budget);
+            let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query)?;
+            match reverse::send_outer_request(
+                &self.mesh,
+                &outer_request,
+                &mesh_url,
+                &outer_headers,
+                mesh_budget,
+                request.allow_ambiguous_fallback,
+            )
             .await
-            .map_err(|_| MeshRequestError::OutcomeUnknown)?
-            .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+            {
+                Ok(mesh_response) => response = Some(mesh_response),
+                Err(MeshRequestError::OutcomeUnknown) => {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Err(MeshRequestError::Public(_)) if !request.allow_ambiguous_fallback => {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Err(_) => {}
+            }
+        }
+        let response = match response {
+            Some(response) => response,
+            None => {
+                let remaining = budget.saturating_sub(outer_started.elapsed());
+                if remaining.is_zero() {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                let outer_url = join_url(
+                    &route.rendezvous.public_base_url,
+                    &outer_request.path_and_query,
+                )?;
+                reverse::send_outer_request(
+                    &self.public_direct,
+                    &outer_request,
+                    &outer_url,
+                    &outer_headers,
+                    remaining,
+                    request.allow_ambiguous_fallback,
+                )
+                .await?
+            }
+        };
         let outer_ack = response
             .headers()
             .get(internal_auth::INTERNAL_ACK_HEADER)

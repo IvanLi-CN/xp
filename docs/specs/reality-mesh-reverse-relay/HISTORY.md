@@ -18,6 +18,9 @@
   bootstrap marker；不满足条件时不建立 epoch，继续使用既有 Direct/Public bootstrap。
 - assignment worker 对每个 target 发起 reverse-only signed health probe；健康结果只作为短期
   运行态证据，Xray/portal gate 或 probe 失败不会影响 Direct/Public 和成员资格。
+- remote Rendezvous 的 outer request 先使用 Reality Mesh，再按既有安全重试语义退回 Public/API；
+  caller 与 Rendezvous 为同一节点时使用签名 XP loopback portal，以支持两 voter degraded
+  拓扑而不依赖公网回环。primary 与 standby 分别完成 signed health，避免故障切换时才首次验证。
 - bootstrap 期间使用独立 `ReverseRole::Bootstrap` 派生域；join operation 完成后双方切回正式
   Primary/Standby，旧 bootstrap worker 进入 120 秒 drain。
 
