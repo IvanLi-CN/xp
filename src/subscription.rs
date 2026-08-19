@@ -1914,6 +1914,10 @@ fn build_mihomo_relay_group(
             MIHOMO_RELAY_REJECT_FALLBACK.to_string(),
         )]),
     );
+    map.insert(
+        serde_yaml::Value::String("empty-fallback".to_string()),
+        serde_yaml::Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()),
+    );
     if !provider_values.is_empty() {
         map.insert(
             serde_yaml::Value::String("filter".to_string()),

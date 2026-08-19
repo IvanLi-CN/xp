@@ -754,6 +754,11 @@ proxies:
         Some(vec!["REJECT"]),
         "external relay groups must carry an explicit REJECT sentinel"
     );
+    assert_eq!(
+        relay_group.get("empty-fallback").and_then(Value::as_str),
+        Some("REJECT"),
+        "external relay groups must override Mihomo's COMPATIBLE empty fallback"
+    );
     let relay_provider_names = relay_group
         .get("use")
         .and_then(Value::as_sequence)

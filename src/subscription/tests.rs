@@ -2541,6 +2541,11 @@ providerA:
         "external relay groups must carry an explicit REJECT sentinel"
     );
     assert_eq!(
+        relay.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())),
+        "external relay groups must override Mihomo's COMPATIBLE empty fallback"
+    );
+    assert_eq!(
         relay.get("url").and_then(Value::as_str),
         Some(MIHOMO_DEFAULT_HEALTH_CHECK_URL)
     );
@@ -2721,6 +2726,10 @@ rules: []
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert_eq!(relay_proxy_names, vec![MIHOMO_RELAY_REJECT_FALLBACK]);
+    assert_eq!(
+        relay_group.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
+    );
 }
 
 #[test]
@@ -4815,6 +4824,10 @@ rules: []
     assert_eq!(
         proxies,
         &vec![Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string())]
+    );
+    assert_eq!(
+        relay.get("empty-fallback"),
+        Some(&Value::String(MIHOMO_RELAY_REJECT_FALLBACK.to_string()))
     );
 
     let reality = root

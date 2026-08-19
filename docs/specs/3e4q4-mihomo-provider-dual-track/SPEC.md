@@ -179,7 +179,7 @@
 - Given 同一 `access_host` 下不存在托管 VLESS endpoint，When 请求 provider 主配置，Then relay 组必须回退到“唯一公开 `api_base_url` 的 `/api/health`”，若仍不能唯一确定，则回退到 `https://www.gstatic.com/generate_204`。
 - Given 落地节点基名恰好是 `Japan` / `HongKong` / `Singapore` 等历史地区名，When 请求 provider 主配置与 system payload，Then per-base relay 组必须消歧为内部 relay 名，不得重新输出 `🛣️ {Region}`。
 - Given per-base relay 组存在外部第三方 provider，When 渲染链式节点，Then relay 组只能通过外部 provider 的 filter/use 候选转发；
-  并保留显式 `REJECT` 哨兵覆盖 filter 为空或初始化状态，不得包含 `DIRECT` 兜底或暴露 `COMPATIBLE`。
+  并保留显式 `REJECT` 哨兵且设置 `empty-fallback: REJECT` 覆盖 filter 为空或初始化状态，不得包含 `DIRECT` 兜底或暴露 `COMPATIBLE`。
 - Given per-base relay 组不存在外部第三方 provider，When 渲染 Mihomo 配置，Then relay 组只能使用 `REJECT` 作为拒绝哨兵；
   所有 `*-chain` 路径保持不可用，且对应 `{base}-reality` 直连入口仍然可用。
 - Given provider 主配置，When 检查顶层 `proxies`，Then 不包含系统生成的 `{base}-ss` / `{base}-reality` / `{base}-ss-chain` / `{base}-reality-chain`。

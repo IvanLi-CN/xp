@@ -90,8 +90,9 @@ Required constraints:
 Per-base relay groups are transit-only groups for generated `*-chain` proxies.
 
 - A relay group may consume only external third-party providers through `use` and its region
-  filter. It must also include an explicit `REJECT` sentinel for the empty or initializing
-  filtered state. It must never add `DIRECT` as a candidate.
+  filter. It must include an explicit `REJECT` sentinel and set `empty-fallback: REJECT` for
+  the empty or initializing filtered state. The explicit empty fallback overrides Mihomo's
+  default `COMPATIBLE` value. It must never add `DIRECT` as a candidate.
 - With no external third-party provider, the relay group must contain only `REJECT`. The chain
   proxy remains fail-closed and cannot become equivalent to its direct Reality proxy.
 - If the external provider filter yields no candidates, the relay group must resolve only to

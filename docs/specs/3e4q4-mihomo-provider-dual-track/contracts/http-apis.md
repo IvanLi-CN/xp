@@ -108,7 +108,7 @@ Response:
 - per-base relay 组 `🛣️ {relay-base}` 按 `Node.access_host` 聚合生成；同一 `access_host` 下的落地节点共享一个 relay 组，不同 `access_host` 生成不同 relay 组。`relay-base` 必须保留 access host 分隔符差异，避免 `a.b.example.com` / `a-b.example.com` 这类 host 退化成同一 slug 后按当前集合计数重命名。若 `relay-base` 等于历史地区 alias 基名，则输出必须加内部前缀消歧，不得重新生成 `🛣️ {Region}`。
 - per-base relay 组只消费外部第三方 provider，不得使用 `DIRECT` 兜底，也不得 `use` `xp-system-generated`。
   有外部 provider 时通过日本/香港/新加坡 filter 做 `url-test` 主动探测，并显式保留 `REJECT`
-  哨兵覆盖过滤为空或初始化状态；无外部 provider 时 relay 组只能使用 `REJECT` 拒绝哨兵，
+  哨兵且设置 `empty-fallback: REJECT` 覆盖过滤为空或初始化状态；无外部 provider 时 relay 组只能使用 `REJECT` 拒绝哨兵，
   provider 候选被 filter 筛空时不得回落直连或暴露 `COMPATIBLE`。健康检查 URL 的选择顺序是：
   最小托管 VLESS 端口对应的 `https://<access_host[:port]>/generate_204` -> 唯一公开
   `api_base_url + /api/health` -> `https://www.gstatic.com/generate_204`。
