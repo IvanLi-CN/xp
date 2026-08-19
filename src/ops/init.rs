@@ -133,7 +133,7 @@ pub fn write_static_xray_config(paths: &Paths) -> Result<(), ExitError> {
       "log": { "loglevel": "warning" },
       "api": {
         "tag": "api",
-        "services": ["HandlerService", "StatsService"]
+        "services": ["HandlerService", "RoutingService", "StatsService"]
       },
       "stats": {},
       "policy": {

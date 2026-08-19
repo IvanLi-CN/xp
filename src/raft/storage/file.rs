@@ -680,6 +680,21 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 std::io::Error::other("invalid snapshot payload: missing `state` field"),
             )
         })?;
+        let incoming_schema_version = raw_state
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u32;
+        let active_reverse_epoch = self.store.lock().await.state().reverse_mesh_epoch;
+        if active_reverse_epoch != 0 && incoming_schema_version < crate::state::SCHEMA_VERSION {
+            return Err(io_err(
+                ErrorSubject::Snapshot(None),
+                ErrorVerb::Read,
+                std::io::Error::other(format!(
+                    "snapshot schema rollback is blocked after Reverse Mesh epoch {active_reverse_epoch} was written (incoming schema {incoming_schema_version}, required {})",
+                    crate::state::SCHEMA_VERSION
+                )),
+            ));
+        }
         let state = crate::state::migrate_state_value_to_latest(raw_state).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),

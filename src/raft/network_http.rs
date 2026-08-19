@@ -1,7 +1,7 @@
 use crate::{
     control_plane_mesh::{
-        MeshAwareHttpClient, MeshPeerTarget, MeshRequest, build_mesh_http_client,
-        build_unauthenticated_mesh_http_client, peer_target_from_node,
+        MeshAwareHttpClient, MeshPeerTarget, MeshRequest, ReverseRelayRoute,
+        build_mesh_http_client, build_unauthenticated_mesh_http_client, peer_target_from_node,
     },
     internal_auth::InternalRoute,
     mesh_telemetry::MeshTelemetryHandle,
@@ -162,6 +162,7 @@ impl HttpNetwork {
             let body = serde_json::to_vec(req).context("serialize raft rpc")?;
             let target =
                 mesh_target_for_raft(&mesh_auth.store, &self.base, &self.target_node).await;
+            configure_reverse_route_for_raft(&mesh_auth.store, &self.client, &target).await;
             self.client
                 .send_peer_request(
                     &target,
@@ -224,6 +225,55 @@ async fn mesh_target_for_raft(
         };
     };
     peer_target_from_node(&peer, &store.list_endpoints())
+}
+
+async fn configure_reverse_route_for_raft(
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    client: &MeshAwareHttpClient,
+    target: &MeshPeerTarget,
+) {
+    let route = {
+        let store = store.lock().await;
+        (|| {
+            let assignment = store
+                .state()
+                .reverse_mesh_assignments
+                .get(&target.node_id)
+                .cloned()?;
+            let rendezvous = store.get_node(&assignment.primary_node_id)?;
+            let standby_rendezvous = assignment
+                .standby_node_id
+                .as_deref()
+                .and_then(|standby_id| store.get_node(standby_id))
+                .map(|standby| {
+                    let endpoints = store
+                        .list_endpoints()
+                        .into_iter()
+                        .filter(|endpoint| endpoint.node_id == standby.node_id)
+                        .collect::<Vec<_>>();
+                    crate::control_plane_mesh::peer_target_from_node(&standby, &endpoints)
+                });
+            let endpoints = store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == rendezvous.node_id)
+                .collect::<Vec<_>>();
+            Some(ReverseRelayRoute {
+                rendezvous: peer_target_from_node(&rendezvous, &endpoints),
+                standby_rendezvous,
+                assignment,
+                role: crate::reverse_mesh::ReverseRole::Primary,
+            })
+        })()
+    };
+    match route {
+        Some(route) => {
+            client
+                .set_reverse_route(target.node_id.clone(), route)
+                .await
+        }
+        None => client.clear_reverse_route(&target.node_id).await,
+    }
 }
 
 impl RaftNetworkFactory<TypeConfig> for HttpNetworkFactory {

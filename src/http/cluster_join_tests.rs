@@ -260,6 +260,7 @@ fn signed_join_token(cluster: &ClusterMetadata, ca_pem: &str, ca_key_pem: &str) 
     )
 }
 
+#[allow(clippy::type_complexity)]
 fn app_with_deferred_promotion(
     tmp: &TempDir,
 ) -> (
@@ -359,6 +360,7 @@ fn app_with_deferred_promotion(
     (router, store, join_token, membership_changes)
 }
 
+#[allow(clippy::type_complexity)]
 fn app_with_blocking_catch_up(
     tmp: &TempDir,
 ) -> (

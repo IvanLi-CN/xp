@@ -289,6 +289,11 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing xp_admin_token_hash in join response"))?
         .to_string();
+    let reverse_mesh_bootstrap = resp
+        .get("reverse_mesh_bootstrap")
+        .cloned()
+        .map(serde_json::from_value::<xp::reverse_mesh::ReverseMeshBootstrapMarker>)
+        .transpose()?;
 
     if node_id != expected_node_id {
         anyhow::bail!(
@@ -310,9 +315,10 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
     xp::cluster_metadata::write_atomic_private(&paths.node_key_pem, pending.key_pem.as_bytes())?;
     xp::cluster_metadata::write_atomic(&paths.node_csr_pem, pending.csr_pem.as_bytes())?;
     xp::cluster_metadata::write_atomic(&paths.node_cert_pem, signed_cert_pem.as_bytes())?;
-    let bootstrap_marker = xp::raft::http_rpc::encode_bootstrap_sender_marker(
+    let bootstrap_marker = xp::raft::http_rpc::encode_bootstrap_sender_marker_with_reverse(
         &bootstrap_sender_ids,
         &activation_deadline,
+        reverse_mesh_bootstrap.as_ref(),
     )?;
     xp::cluster_metadata::write_atomic_private(&paths.raft_bootstrap_sender, &bootstrap_marker)?;
 
@@ -406,7 +412,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         },
     )?
     .with_mesh_observability(mesh_telemetry.clone());
-    let mesh_client = raft_network.mesh_client();
+    let mesh_client = raft_network
+        .mesh_client()
+        .with_reverse_gate(reconcile.reverse_gate());
     let raft = xp::raft::runtime::start_raft(
         &config.data_dir,
         cluster.cluster_id.clone(),

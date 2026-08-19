@@ -14,6 +14,7 @@ use crate::{
     protocol::{
         RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
     },
+    reverse_mesh::ReverseMeshAssignment,
 };
 
 mod legacy_smux;
@@ -2430,3 +2431,42 @@ fn desired_state_apply_set_geo_db_update_settings_is_noop() {
 }
 
 mod endpoint_meta;
+
+#[test]
+fn reverse_assignment_generation_floor_rejects_reuse_after_delete() {
+    let mut state = PersistedState::empty();
+    state.reverse_mesh_epoch = 7;
+    state
+        .reverse_mesh_generation_counters
+        .insert("target".to_string(), 4);
+    for node_id in ["target", "rendezvous"] {
+        state.nodes.insert(
+            node_id.to_string(),
+            Node {
+                node_id: node_id.to_string(),
+                node_name: node_id.to_string(),
+                access_host: "127.0.0.1".to_string(),
+                api_base_url: "https://127.0.0.1".to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+    }
+
+    let error = DesiredStateCommand::UpsertReverseMeshAssignment {
+        assignment: ReverseMeshAssignment {
+            target_node_id: "target".to_string(),
+            generation: 4,
+            membership_revision: 1,
+            primary_node_id: "rendezvous".to_string(),
+            standby_node_id: None,
+            credential_epoch: 7,
+        },
+        expected_generation: None,
+    }
+    .apply(&mut state)
+    .expect_err("a deleted generation must not be reusable");
+
+    assert!(error.to_string().contains("below durable floor"));
+    assert!(!state.reverse_mesh_assignments.contains_key("target"));
+}

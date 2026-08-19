@@ -403,6 +403,18 @@
     "long_line_count": 43,
     "max_line_length": 486
   },
+  "docs/specs/reality-mesh-reverse-relay/HISTORY.md": {
+    "long_line_count": 2,
+    "max_line_length": 144
+  },
+  "docs/specs/reality-mesh-reverse-relay/IMPLEMENTATION.md": {
+    "long_line_count": 2,
+    "max_line_length": 101
+  },
+  "docs/specs/reality-mesh-reverse-relay/SPEC.md": {
+    "long_line_count": 23,
+    "max_line_length": 372
+  },
   "docs/specs/c8qtw-docker-single-image-cluster-node-deploy/SPEC.md": {
     "long_line_count": 34,
     "max_line_length": 162
@@ -543,6 +555,10 @@
     "long_line_count": 3,
     "max_line_length": 120
   },
+  "scripts/testbox/reverse-xray-spike-compose.yml": {
+    "long_line_count": 2,
+    "max_line_length": 105
+  },
   "src/ddns.rs": {
     "long_line_count": 1,
     "max_line_length": 104
@@ -563,7 +579,12 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8410
+    "source_lines": 8512
+  },
+  "src/http/mesh.rs": {
+    "long_line_count": 2,
+    "max_line_length": 109,
+    "source_lines": 1643
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
@@ -573,6 +594,9 @@
   "src/inbound_ip_usage.rs": {
     "long_line_count": 1,
     "max_line_length": 125
+  },
+  "src/control_plane_mesh.rs": {
+    "source_lines": 1206
   },
   "src/ip_geo_db.rs": {
     "long_line_count": 2,
@@ -599,6 +623,9 @@
   },
   "src/node_history.rs": {
     "source_lines": 3676
+  },
+  "src/mesh_telemetry.rs": {
+    "source_lines": 1052
   },
   "src/openrc_process.rs": {
     "long_line_count": 1,
@@ -658,6 +685,10 @@
     "long_line_count": 1,
     "max_line_length": 103
   },
+  "src/reverse_mesh_runtime.rs": {
+    "long_line_count": 1,
+    "max_line_length": 102
+  },
   "src/public_ip_probe.rs": {
     "long_line_count": 1,
     "max_line_length": 112
@@ -677,7 +708,7 @@
     "max_line_length": 263
   },
   "src/raft/storage/file.rs": {
-    "long_line_count": 2,
+    "long_line_count": 3,
     "max_line_length": 201
   },
   "src/raft/storage/snapshot.rs": {
@@ -691,19 +722,19 @@
   "src/reconcile.rs": {
     "long_line_count": 5,
     "max_line_length": 125,
-    "source_lines": 1087
+    "source_lines": 1291
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,
     "max_line_length": 237
   },
   "src/state.rs": {
-    "long_line_count": 2,
+    "long_line_count": 4,
     "max_line_length": 129,
-    "source_lines": 4460
+    "source_lines": 4548
   },
   "src/state/tests.rs": {
-    "source_lines": 2448
+    "source_lines": 2472
   },
   "src/subscription.rs": {
     "long_line_count": 5,
@@ -725,12 +756,13 @@
     "max_line_length": 111
   },
   "src/xray/builder.rs": {
-    "long_line_count": 5,
-    "max_line_length": 114
+    "long_line_count": 1,
+    "max_line_length": 114,
+    "source_lines": 1116
   },
   "src/xray_supervisor.rs": {
-    "long_line_count": 2,
-    "max_line_length": 109
+    "long_line_count": 3,
+    "max_line_length": 112
   },
   "tests/forwarding_raft_facade_forwarding.rs": {
     "long_line_count": 1,

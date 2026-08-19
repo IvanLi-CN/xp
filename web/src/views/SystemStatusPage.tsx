@@ -80,6 +80,13 @@ function timestamp(value: string | null) {
 }
 
 function routeLabel(peer: AdminMeshPeer) {
+	if (peer.active_route?.kind === "reverse_relay") {
+		const rendezvous = peer.active_route.rendezvous ?? "Rendezvous";
+		const generation = peer.active_route.generation;
+		return `Reverse relay · ${rendezvous} · gen ${generation ?? "-"}`;
+	}
+	if (peer.active_route?.kind === "reality_direct") return "Reality Mesh";
+	if (peer.active_route?.kind === "public") return "Public fallback";
 	if (!peer.current_path) return "Awaiting sample";
 	return peer.current_path === "mesh" ? "Reality Mesh" : "Public fallback";
 }
@@ -181,7 +188,9 @@ function PeerRows({
 				</p>
 			</div>
 			<div className="min-w-0 text-sm">
-				<p>{routeLabel(peer)}</p>
+				<p className="truncate" title={routeLabel(peer)}>
+					{routeLabel(peer)}
+				</p>
 				<p className="mt-1 truncate text-xs text-muted-foreground">
 					{reasonLabel(peer)}
 				</p>

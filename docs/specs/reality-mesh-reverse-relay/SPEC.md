@@ -1,0 +1,69 @@
+# Reality Mesh 反向中继
+
+> 当前有效合同。实现状态见 `./IMPLEMENTATION.md`，决策缘由见 `./HISTORY.md`。
+
+## 背景
+
+Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoint。位于单向防火墙、运营商 NAT 或仅允许出站连接的节点，无法作为 Mesh server，导致控制面只能退回 Public/API。反向中继让目标节点主动经一个可访问的 Rendezvous 建立受限的 VLESS Reverse 链路，同时保留现有 Reality Direct 与 Public fallback。
+
+## 目标
+
+- 在 Raft DesiredState 中保存一次性的 `reverse_mesh_epoch` 与每个 target 的确定性双 Rendezvous assignment。
+- 只选择当前 voter、具备静态 capability、signed Xray readiness 和 managed VLESS endpoint 的 Rendezvous；target 自身不要求 managed endpoint。
+- 使用上游 Xray 动态 Handler/Routing API、固定本地 SOCKS5 portal 和 reqwest HTTP/2 prior knowledge，不手写 H2C、CONNECT 或 Xray fork。
+- 以 `Reality Direct -> Reverse Relay -> Public/API` 顺序覆盖 health、Raft、内部 Admin fan-out、SSE 和 history direct path；失败时保持现有 `outcome_unknown` 与幂等语义。
+- Reverse 只承载 authenticated XP control-plane HTTP，禁止通用 VPN、任意 TCP/UDP、用户流量和递归中继。
+- 为 generation drain、Xray worker tombstone、受控重启、fresh join、host-managed systemd/OpenRC 与 single-image container 提供确定性降级。
+- 以 additive status API 和紧凑 System Status 行显示 `reality_direct|reverse_relay|public`，不新增手动选路控件。
+
+## 非目标
+
+- 通用 VPN、任意 TCP/UDP 转发、WebSocket、CONNECT passthrough、内层 TLS 或用户流量隧道。
+- 自制 H2/H2C 帧、reqwest connector、静态 Rendezvous 角色、公网监听端口、人工路径 override。
+- 替换 Cloudflare Tunnel/Public fallback，或删除 history repository 的加密 dynamic relay。
+- 放宽 internal-auth、membership、Raft promotion、64 MiB 总 PSS 或现有部署升级合同。
+
+## 稳定契约
+
+### Assignment
+
+- `ReverseMeshAssignment` 包含 `target_node_id`、`generation`、`membership_revision`、`primary_node_id`、可选 `standby_node_id` 与 `credential_epoch`。
+- 1 voter 不分配 Reverse；2 voter 只能形成一条 degraded 链；3+ voter 最多两条链。候选始终排除 target，按 target 排序分配，先选择当前 assignment 负载最少者，HRW 仅用于并列打破；primary 与 standby 不得相同。
+- 所有 voter 声明 `cluster.mesh-reverse-assignment-v1` 前不得写首个 epoch。epoch 写入后，旧 schema 回滚必须被阻止。assignment generation 只由 leader CAS 更新；连续三次验证失败才换 generation，已恢复的旧候选不得抢占健康现任。
+
+### Xray underlay
+
+- Rendezvous 动态创建 password-auth、TCP-only、UDP-disabled 的 `127.0.0.1:10086` SOCKS5 inbound；端口冲突时 fail closed。
+- target 动态创建独立 Reverse account 的 VLESS outbound，经 Rendezvous 的现有 Reality/XHTTP 或 Reality/Vision TCP endpoint 主动建链。Rendezvous 的 VLESS inbound 首次握手按 generation 创建 reverse handler。
+- XP 通过 `socks5h` 与 `http2_prior_knowledge()` 请求 `http://rvs-<128-bit-id>.mesh.invalid:443`。target 仅允许精确 origin 路由到固定 XP loopback；未匹配 SOCKS 流量 block。target 不需要 managed VLESS endpoint。
+- 进程内 Xray reconciler 串行全量重载 XP-owned rule，顺序固定为 API、target bridge、portal exact-match、portal block。旧 handler 进入 120 秒 drain，禁止新请求但允许已开始的 response stream 完成。
+- 本地状态机为 `desired -> connecting -> health_verified -> active -> draining -> closed|retired_pending_restart|failed`。tag、origin、UUID 按 cluster epoch、target、Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、local node、portal epoch 派生，不新增持久 secret。
+- 固定版 Xray 不能证明 worker 已关闭时写 tombstone；每进程最多两个。产生第三个前由 systemd/OpenRC/supervisor 受控重启 Xray，并只重建当前 generation。重启不可用或失败只禁用 Reverse，Direct/Public 和 membership 继续可用。
+
+### Relay wire 与路径
+
+- 新增 `POST /api/admin/_internal/mesh/reverse-relay` 与 signed runtime report endpoint。caller 非 Rendezvous 时，先用独立 outer request 到 R；R 只允许通过 Reality 后 Public 访问，禁止 Reverse 递归。
+- outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
+- 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
+- Direct/Reverse/Public 顺序固定。Reality 与 Reverse 各占 `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/首字节后不换路；不安全重试返回 `outcome_unknown`。
+- 普通 body 上限 1 MiB，Raft/snapshot 8 MiB；请求缓冲、响应流式。history 保留 Reality/Public direct 两条等价路径，再试 Reverse，最后使用现有加密 dynamic relay。
+
+### Join、部署与状态 API
+
+- fresh join 在响应前向 leader 与确定性 standby 预注册短期 Reverse；响应中的
+  `reverse_mesh_bootstrap` 与现有 0600 `raft_bootstrap_sender` marker 只保存 generation、公开
+  endpoint 参数和 epoch，不保存 secret。启动 Xray 后仅承载 bootstrap/Raft；bootstrap 使用独立
+  `ReverseRole::Bootstrap` 派生域，join operation 进入 terminal phase 后才建立正式
+  Primary/Standby 双链并 drain 临时链，promotion 仍遵循已有 log-index 条件。尚未完成
+  capability barrier 或无
+  可用候选时，marker 缺省且沿用现有 Direct/Public join。
+- public health 优先；signed Reverse health 200 后可标记 `reverse-dependent`。systemd/OpenRC/container 首次启用、滚动升级、restart fallback 和 operator intervention 必须保持 Direct/Public 可用。
+- 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`、Rendezvous、generation、readiness 和汇总计数；旧客户端可继续解析旧字段，UI 只增加只读诊断行。
+
+## 验收
+
+- 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。XP 还会对已分配 target 发起只走 Reverse 的 signed `health-v2` 请求，Rendezvous 在 target ACK 通过后保存短期健康证据。重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得启用生产 epoch。
+- assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
+- relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
+- 非对称防火墙下 Direct -> Reverse -> Public、R/Xray 故障、120 秒 drain、1 MiB/8 MiB、SSE、response-start failure、fresh join、三种部署和受控重启符合合同；tombstone 不超过 2。
+- managed stack 20 节点与既有 50-peer 压测总 PSS 不超过 65,536 KiB；Rust/Web/Storybook/E2E/style/spec drift/required CI 通过，交付停在 `merge-ready / Step 5C Ready`。

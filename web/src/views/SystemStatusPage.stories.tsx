@@ -145,6 +145,50 @@ export const PartialAndFallback: Story = {
 	},
 };
 
+export const ReverseRelay: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "reverseRelayDesktop",
+			viewports: {
+				reverseRelayDesktop: {
+					name: "Reverse relay desktop (1280x900)",
+					styles: { width: "1280px", height: "900px" },
+					type: "desktop",
+				},
+				reverseRelayMobile: {
+					name: "Reverse relay mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	args: {
+		status: {
+			...demoMeshStatus,
+			peers: demoMeshStatus.peers.map((peer, index) =>
+				index === 0
+					? {
+							...peer,
+							active_route: {
+								kind: "reverse_relay" as const,
+								rendezvous: "node-rvs-01",
+								generation: 7,
+								readiness: "active",
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			(await canvas.findAllByText(/Reverse relay/)).length,
+		).toBeGreaterThan(0);
+	},
+};
+
 export const Down: Story = {
 	args: {
 		status: {

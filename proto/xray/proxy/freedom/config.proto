@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package xray.proxy.freedom;
+option csharp_namespace = "Xray.Proxy.Freedom";
+option go_package = "github.com/xtls/xray-core/proxy/freedom";
+option java_package = "com.xray.proxy.freedom";
+option java_multiple_files = true;
+
+import "common/protocol/server_spec.proto";
+import "transport/internet/config.proto";
+
+message DestinationOverride {
+  xray.common.protocol.ServerEndpoint server = 1;
+}
+
+message Config {
+  xray.transport.internet.DomainStrategy domain_strategy = 1;
+  DestinationOverride destination_override = 3;
+  uint32 user_level = 4;
+}

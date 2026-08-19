@@ -22,6 +22,7 @@ use crate::{
         normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
         validate_reality_dest, validate_reality_server_name,
     },
+    reverse_mesh::ReverseMeshAssignment,
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
         control::{
@@ -48,7 +49,8 @@ pub(crate) mod history_repository;
 #[path = "history_storage/mod.rs"]
 pub(crate) mod history_storage;
 
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
+const SCHEMA_VERSION_V12: u32 = 12;
 const SCHEMA_VERSION_V11: u32 = 11;
 const SCHEMA_VERSION_V10: u32 = 10;
 const SCHEMA_VERSION_V9: u32 = 9;
@@ -62,7 +64,7 @@ const USAGE_SCHEMA_VERSION_V1: u32 = 1;
 const NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX: &str = "node_egress_probe_state:";
 const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
-/// Migrate any historical state payload into the latest schema (v12).
+/// Migrate any historical state payload into the latest schema (v13).
 ///
 /// This is used by Raft snapshot installation to support upgrades without requiring operators
 /// to start an older binary for snapshot/purge first.
@@ -76,10 +78,13 @@ pub(crate) fn migrate_state_value_to_latest(
 
     let mut state = match schema_version {
         SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
-        SCHEMA_VERSION_V11 => migrate_v11_to_v12(serde_json::from_value::<PersistedState>(raw)?)?,
+        SCHEMA_VERSION_V12 => migrate_v12_to_v13(serde_json::from_value::<PersistedState>(raw)?)?,
+        SCHEMA_VERSION_V11 => migrate_v12_to_v13(migrate_v11_to_v12(serde_json::from_value::<
+            PersistedState,
+        >(raw)?)?)?,
         SCHEMA_VERSION_V10 => {
             let v11 = migrate_v10_to_v11(serde_json::from_value::<PersistedState>(raw)?)?;
-            migrate_v11_to_v12(v11)?
+            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
         }
         SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7 | SCHEMA_VERSION_V6
         | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
@@ -114,7 +119,7 @@ pub(crate) fn migrate_state_value_to_latest(
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(legacy)?;
             let v11 = migrate_v10_to_v11(v10)?;
-            migrate_v11_to_v12(v11)?
+            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
         }
         2 | 1 => {
             let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
@@ -126,7 +131,7 @@ pub(crate) fn migrate_state_value_to_latest(
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(v8)?;
             let v11 = migrate_v10_to_v11(v10)?;
-            migrate_v11_to_v12(v11)?
+            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
         }
         got => {
             return Err(StoreError::SchemaVersionMismatch {
@@ -353,6 +358,15 @@ pub struct PersistedState {
     pub mihomo_delivery_mode: MihomoDeliveryMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_membership: Option<RepositoryMembership>,
+    /// Raft-authoritative reverse relay epoch. Runtime link state is intentionally not persisted.
+    #[serde(default)]
+    pub reverse_mesh_epoch: u64,
+    #[serde(default)]
+    pub reverse_mesh_assignments: BTreeMap<String, ReverseMeshAssignment>,
+    /// Highest generation ever issued for a target. It is retained when an assignment is
+    /// removed so tags, UUIDs and origins are never reused after a membership transition.
+    #[serde(default)]
+    pub reverse_mesh_generation_counters: BTreeMap<String, u64>,
     /// Compatibility placeholder for rolling upgrades: older binaries may still expect this field
     /// to exist in Raft snapshots/state.json, but newer binaries do not use it at runtime.
     #[serde(default, rename = "geo_db_update_settings")]
@@ -382,6 +396,9 @@ impl PersistedState {
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
             repository_membership: None,
+            reverse_mesh_epoch: 0,
+            reverse_mesh_assignments: BTreeMap::new(),
+            reverse_mesh_generation_counters: BTreeMap::new(),
             geo_db_update_settings_compat: GeoDbUpdateSettingsCompat::default(),
         }
     }
@@ -1246,8 +1263,23 @@ fn migrate_v11_to_v12(mut input: PersistedState) -> Result<PersistedState, Store
         input.node_user_endpoint_memberships.clone(),
     );
     input.user_auto_assign_endpoint_kinds = infer_user_auto_assign_endpoint_kinds(&input);
-    input.schema_version = SCHEMA_VERSION;
+    input.schema_version = SCHEMA_VERSION_V12;
     sync_node_user_endpoint_memberships(&mut input);
+    Ok(input)
+}
+
+fn migrate_v12_to_v13(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V12 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "expected v12 state during migration, got schema_version {}",
+                input.schema_version
+            ),
+        });
+    }
+    // The Reverse Mesh epoch is intentionally behind the schema barrier. Older binaries must
+    // reject this state rather than silently rolling back after the first assignment is written.
+    input.schema_version = SCHEMA_VERSION;
     Ok(input)
 }
 
@@ -1846,7 +1878,7 @@ mod migrate_tests {
 
         let v12 = migrate_v11_to_v12(v11).unwrap();
 
-        assert_eq!(v12.schema_version, SCHEMA_VERSION);
+        assert_eq!(v12.schema_version, SCHEMA_VERSION_V12);
         assert_eq!(
             v12.user_auto_assign_endpoint_kinds.get("user_all"),
             Some(&BTreeSet::from([EndpointKind::Ss2022_2022Blake3Aes128Gcm]))
@@ -1991,6 +2023,19 @@ pub enum DesiredStateCommand {
         membership: RepositoryMembership,
     },
     UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
+    SetReverseMeshEpoch {
+        epoch: u64,
+    },
+    UpsertReverseMeshAssignment {
+        assignment: ReverseMeshAssignment,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_generation: Option<u64>,
+    },
+    DeleteReverseMeshAssignment {
+        target_node_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_generation: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -2141,6 +2186,19 @@ enum DesiredStateCommandCompat {
         membership: RepositoryMembership,
     },
     UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
+    SetReverseMeshEpoch {
+        epoch: u64,
+    },
+    UpsertReverseMeshAssignment {
+        assignment: ReverseMeshAssignment,
+        #[serde(default)]
+        expected_generation: Option<u64>,
+    },
+    DeleteReverseMeshAssignment {
+        target_node_id: String,
+        #[serde(default)]
+        expected_generation: Option<u64>,
+    },
     ReplaceUserGrants {
         user_id: String,
         grants: Vec<LegacyGrantCompat>,
@@ -2457,6 +2515,13 @@ impl DesiredStateCommand {
                     .endpoint_probe_participants_by_hour
                     .retain(|_hour, participants| !participants.is_empty());
                 state.node_egress_probes.remove(node_id);
+                state
+                    .reverse_mesh_assignments
+                    .retain(|target_id, assignment| {
+                        target_id != node_id
+                            && assignment.target_node_id != *node_id
+                            && !assignment.contains_rendezvous(node_id)
+                    });
 
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::NodeDeleted {
@@ -2579,6 +2644,104 @@ impl DesiredStateCommand {
                     .endpoints
                     .insert(endpoint.endpoint_id.clone(), endpoint);
                 sync_node_user_endpoint_memberships(state);
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetReverseMeshEpoch { epoch } => {
+                if *epoch < state.reverse_mesh_epoch {
+                    return Err(StoreError::Migration {
+                        message: format!(
+                            "reverse mesh epoch cannot move backwards: current={}, requested={epoch}",
+                            state.reverse_mesh_epoch
+                        ),
+                    });
+                }
+                state.reverse_mesh_epoch = *epoch;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::UpsertReverseMeshAssignment {
+                assignment,
+                expected_generation,
+            } => {
+                if !assignment.is_valid()
+                    || assignment.generation == 0
+                    || assignment.membership_revision == 0
+                {
+                    return Err(StoreError::Migration {
+                        message: "invalid reverse mesh assignment".to_string(),
+                    });
+                }
+                if !state.nodes.contains_key(&assignment.target_node_id)
+                    || !state.nodes.contains_key(&assignment.primary_node_id)
+                    || assignment.target_node_id == assignment.primary_node_id
+                    || assignment.standby_node_id.as_ref().is_some_and(|standby| {
+                        !state.nodes.contains_key(standby)
+                            || standby == &assignment.target_node_id
+                            || standby == &assignment.primary_node_id
+                    })
+                {
+                    return Err(StoreError::Migration {
+                        message: "reverse mesh assignment references an invalid cluster node"
+                            .to_string(),
+                    });
+                }
+                if assignment.credential_epoch != state.reverse_mesh_epoch {
+                    return Err(StoreError::Migration {
+                        message: format!(
+                            "reverse mesh assignment credential epoch {} does not match state epoch {}",
+                            assignment.credential_epoch, state.reverse_mesh_epoch
+                        ),
+                    });
+                }
+                let current = state
+                    .reverse_mesh_assignments
+                    .get(&assignment.target_node_id);
+                if expected_generation
+                    .is_some_and(|expected| current.map(|item| item.generation) != Some(expected))
+                {
+                    return Err(StoreError::Migration {
+                        message: "reverse mesh assignment generation CAS failed".to_string(),
+                    });
+                }
+                let generation_floor = state
+                    .reverse_mesh_generation_counters
+                    .get(&assignment.target_node_id)
+                    .copied()
+                    .unwrap_or_default();
+                let is_same_current_generation =
+                    current.is_some_and(|current| current.generation == assignment.generation);
+                if assignment.generation < generation_floor
+                    || (!is_same_current_generation && assignment.generation <= generation_floor)
+                {
+                    return Err(StoreError::Migration {
+                        message: format!(
+                            "reverse mesh assignment generation {} is below durable floor {}",
+                            assignment.generation, generation_floor
+                        ),
+                    });
+                }
+                state
+                    .reverse_mesh_assignments
+                    .insert(assignment.target_node_id.clone(), assignment.clone());
+                state
+                    .reverse_mesh_generation_counters
+                    .entry(assignment.target_node_id.clone())
+                    .and_modify(|generation| *generation = (*generation).max(assignment.generation))
+                    .or_insert(assignment.generation);
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteReverseMeshAssignment {
+                target_node_id,
+                expected_generation,
+            } => {
+                let current = state.reverse_mesh_assignments.get(target_node_id);
+                if expected_generation
+                    .is_some_and(|expected| current.map(|item| item.generation) != Some(expected))
+                {
+                    return Err(StoreError::Migration {
+                        message: "reverse mesh assignment deletion CAS failed".to_string(),
+                    });
+                }
+                state.reverse_mesh_assignments.remove(target_node_id);
                 Ok(DesiredStateApplyResult::Applied)
             }
             Self::DeleteEndpoint { endpoint_id } => {
@@ -3246,17 +3409,31 @@ impl JsonSnapshotStore {
 
                 match schema_version {
                     SCHEMA_VERSION => {
+                        let v13: PersistedState = serde_json::from_value(raw)?;
+                        (v13, None, false, false)
+                    }
+                    SCHEMA_VERSION_V12 => {
                         let v12: PersistedState = serde_json::from_value(raw)?;
-                        (v12, None, false, false)
+                        (migrate_v12_to_v13(v12)?, None, false, true)
                     }
                     SCHEMA_VERSION_V11 => {
                         let v11: PersistedState = serde_json::from_value(raw)?;
-                        (migrate_v11_to_v12(v11)?, None, false, true)
+                        (
+                            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?,
+                            None,
+                            false,
+                            true,
+                        )
                     }
                     SCHEMA_VERSION_V10 => {
                         let v10: PersistedState = serde_json::from_value(raw)?;
                         let v11 = migrate_v10_to_v11(v10)?;
-                        (migrate_v11_to_v12(v11)?, None, false, true)
+                        (
+                            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?,
+                            None,
+                            false,
+                            true,
+                        )
                     }
                     SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7
                     | SCHEMA_VERSION_V6 | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
@@ -3298,7 +3475,7 @@ impl JsonSnapshotStore {
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(legacy)?;
                         let v11 = migrate_v10_to_v11(v10)?;
-                        let v12 = migrate_v11_to_v12(v11)?;
+                        let v12 = migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?;
                         // Best-effort migration stats (logs are useful in production upgrades).
                         tracing::info!(
                             grants_total = stats.grants_total,
@@ -3322,7 +3499,7 @@ impl JsonSnapshotStore {
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(v8)?;
                         let v11 = migrate_v10_to_v11(v10)?;
-                        let v12 = migrate_v11_to_v12(v11)?;
+                        let v12 = migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?;
                         tracing::info!(
                             grants_total = stats.grants_total,
                             grants_orphan_dropped = stats.grants_orphan_dropped,

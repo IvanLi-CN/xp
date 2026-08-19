@@ -31,6 +31,25 @@ pub enum TelemetryPath {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum ActiveRouteKind {
+    RealityDirect,
+    ReverseRelay,
+    Public,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeshActiveRoute {
+    pub kind: ActiveRouteKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendezvous: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum MeshQuality {
     Good,
     Slow,
@@ -92,6 +111,8 @@ pub struct MeshPeerTelemetry {
     pub peer_id: String,
     pub peer_name: String,
     pub last_path: Option<TelemetryPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_route: Option<MeshActiveRoute>,
     pub last_sample_at: Option<String>,
     pub last_mesh_target: Option<String>,
     pub last_transition_at: Option<String>,
@@ -216,6 +237,15 @@ impl MeshTelemetryHandle {
         let updates_active_path = sample.updates_active_path && sample.success;
         if updates_active_path {
             peer.last_path = Some(sample.path);
+            peer.active_route = Some(MeshActiveRoute {
+                kind: match sample.path {
+                    TelemetryPath::Mesh => ActiveRouteKind::RealityDirect,
+                    TelemetryPath::Public => ActiveRouteKind::Public,
+                },
+                rendezvous: None,
+                generation: None,
+                readiness: None,
+            });
         }
         peer.last_sample_at = Some(timestamp(now));
         if updates_active_path && previous_path != Some(sample.path) {
@@ -267,6 +297,31 @@ impl MeshTelemetryHandle {
         }
         state.revision += 1;
         persist(&self.history_storage, &state)
+    }
+
+    pub async fn record_reverse_sample(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        rendezvous: impl Into<String>,
+        generation: u64,
+        sample: MeshTelemetrySample,
+    ) -> anyhow::Result<()> {
+        let peer_id = peer_id.into();
+        self.record_sample(peer_id.clone(), peer_name, sample)
+            .await?;
+        let mut state = self.state.lock().await;
+        if let Some(peer) = state.peers.get_mut(&peer_id) {
+            peer.active_route = Some(MeshActiveRoute {
+                kind: ActiveRouteKind::ReverseRelay,
+                rendezvous: Some(rendezvous.into()),
+                generation: Some(generation),
+                readiness: Some("active".to_string()),
+            });
+            state.revision += 1;
+            persist(&self.history_storage, &state)?;
+        }
+        Ok(())
     }
 
     pub async fn set_breaker(

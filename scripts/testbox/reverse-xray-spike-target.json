@@ -6,22 +6,10 @@
     "services": ["HandlerService", "RoutingService", "StatsService"]
   },
   "stats": {},
-  "policy": {
-    "levels": {
-      "0": {
-        "handshake": 4,
-        "connIdle": 300,
-        "uplinkOnly": 2,
-        "downlinkOnly": 5,
-        "statsUserUplink": true,
-        "statsUserDownlink": true,
-        "statsUserOnline": true
-      }
-    }
-  },
   "inbounds": [],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": {} },
     { "tag": "block", "protocol": "blackhole", "settings": {} }
-  ]
+  ],
+  "routing": { "domainStrategy": "AsIs", "rules": [] }
 }

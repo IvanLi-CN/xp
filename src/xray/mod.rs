@@ -4,8 +4,16 @@ use tonic::transport::{Channel, Endpoint};
 
 use crate::xray::proto::xray::app::proxyman::command::handler_service_client::HandlerServiceClient;
 use crate::xray::proto::xray::app::proxyman::command::{
-    AddInboundRequest, AddInboundResponse, AlterInboundRequest, AlterInboundResponse,
-    RemoveInboundRequest, RemoveInboundResponse,
+    AddInboundRequest, AddInboundResponse, AddOutboundRequest, AddOutboundResponse,
+    AlterInboundRequest, AlterInboundResponse, AlterOutboundRequest, AlterOutboundResponse,
+    GetInboundUserRequest, GetInboundUserResponse, ListInboundsRequest, ListInboundsResponse,
+    ListOutboundsRequest, ListOutboundsResponse, RemoveInboundRequest, RemoveInboundResponse,
+    RemoveOutboundRequest, RemoveOutboundResponse,
+};
+use crate::xray::proto::xray::app::router::command::routing_service_client::RoutingServiceClient;
+use crate::xray::proto::xray::app::router::command::{
+    AddRuleRequest, AddRuleResponse, ListRuleRequest, ListRuleResponse, RemoveRuleRequest,
+    RemoveRuleResponse,
 };
 use crate::xray::proto::xray::app::stats::command::stats_service_client::StatsServiceClient;
 use crate::xray::proto::xray::app::stats::command::{
@@ -40,6 +48,7 @@ impl From<tonic::transport::Error> for XrayError {
 #[derive(Debug, Clone)]
 pub struct XrayClient {
     handler: HandlerServiceClient<Channel>,
+    router: RoutingServiceClient<Channel>,
     stats: StatsServiceClient<Channel>,
 }
 
@@ -48,6 +57,7 @@ pub async fn connect(addr: SocketAddr) -> Result<XrayClient, XrayError> {
     let channel = endpoint.connect().await?;
     Ok(XrayClient {
         handler: HandlerServiceClient::new(channel.clone()),
+        router: RoutingServiceClient::new(channel.clone()),
         stats: StatsServiceClient::new(channel),
     })
 }
@@ -69,11 +79,88 @@ impl XrayClient {
         Ok(resp.into_inner())
     }
 
+    pub async fn list_inbounds(
+        &mut self,
+        only_tags: bool,
+    ) -> Result<ListInboundsResponse, tonic::Status> {
+        let resp = self
+            .handler
+            .list_inbounds(ListInboundsRequest {
+                is_only_tags: only_tags,
+            })
+            .await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_outbounds(&mut self) -> Result<ListOutboundsResponse, tonic::Status> {
+        let resp = self.handler.list_outbounds(ListOutboundsRequest {}).await?;
+        Ok(resp.into_inner())
+    }
+
     pub async fn alter_inbound(
         &mut self,
         req: AlterInboundRequest,
     ) -> Result<AlterInboundResponse, tonic::Status> {
         let resp = self.handler.alter_inbound(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn get_inbound_users(
+        &mut self,
+        tag: impl Into<String>,
+    ) -> Result<GetInboundUserResponse, tonic::Status> {
+        let resp = self
+            .handler
+            .get_inbound_users(GetInboundUserRequest {
+                tag: tag.into(),
+                email: String::new(),
+            })
+            .await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn add_outbound(
+        &mut self,
+        req: AddOutboundRequest,
+    ) -> Result<AddOutboundResponse, tonic::Status> {
+        let resp = self.handler.add_outbound(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn remove_outbound(
+        &mut self,
+        req: RemoveOutboundRequest,
+    ) -> Result<RemoveOutboundResponse, tonic::Status> {
+        let resp = self.handler.remove_outbound(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn alter_outbound(
+        &mut self,
+        req: AlterOutboundRequest,
+    ) -> Result<AlterOutboundResponse, tonic::Status> {
+        let resp = self.handler.alter_outbound(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn add_rule(
+        &mut self,
+        req: AddRuleRequest,
+    ) -> Result<AddRuleResponse, tonic::Status> {
+        let resp = self.router.add_rule(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn remove_rule(
+        &mut self,
+        req: RemoveRuleRequest,
+    ) -> Result<RemoveRuleResponse, tonic::Status> {
+        let resp = self.router.remove_rule(req).await?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_rules(&mut self) -> Result<ListRuleResponse, tonic::Status> {
+        let resp = self.router.list_rule(ListRuleRequest {}).await?;
         Ok(resp.into_inner())
     }
 

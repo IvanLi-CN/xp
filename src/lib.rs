@@ -41,6 +41,9 @@ mod raft_membership_guard_invariant_tests;
 #[cfg(test)]
 mod raft_membership_guard_tests;
 pub mod reconcile;
+pub mod reverse_mesh;
+pub mod reverse_mesh_runtime;
+pub mod reverse_relay;
 pub mod state;
 mod state_join_command;
 pub mod subscription;

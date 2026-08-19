@@ -202,9 +202,7 @@ async fn mesh_capability_response(
             HeaderValue::from_bytes(&[0xff]).expect("malformed acknowledgement"),
         ),
     };
-    response
-        .body(Body::from(response_body))
-        .expect("Mesh response")
+    response.body(response_body).expect("Mesh response")
 }
 
 async fn spawn_mesh_capability_server(

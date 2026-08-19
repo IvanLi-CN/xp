@@ -185,10 +185,12 @@ export const demoMeshStatus: AdminMeshStatus = {
 	],
 };
 
-export function DemoSystemStatusPage() {
+export function DemoSystemStatusPage({
+	status = demoMeshStatus,
+}: { status?: AdminMeshStatus }) {
 	return (
 		<SystemStatusSurface
-			status={demoMeshStatus}
+			status={status}
 			showMeshTransportReuse
 			components={[
 				{ component: "xp", status: "up" },
@@ -199,6 +201,23 @@ export function DemoSystemStatusPage() {
 		/>
 	);
 }
+
+const demoReverseMeshStatus: AdminMeshStatus = {
+	...demoMeshStatus,
+	peers: demoMeshStatus.peers.map((peer, index) =>
+		index === 0
+			? {
+					...peer,
+					active_route: {
+						kind: "reverse_relay",
+						rendezvous: "node-rvs-01",
+						generation: 7,
+						readiness: "active",
+					},
+				}
+			: peer,
+	),
+};
 
 export function UiDemoSystemStatusPage() {
 	return (
@@ -251,7 +270,7 @@ export function UiDemoSystemStatusPage() {
 							<DemoNavigation title="Settings" items={demoSettingsNavigation} />
 						</aside>
 						<main className="xp-panel min-w-0 p-[var(--xp-page-padding)]">
-							<DemoSystemStatusPage />
+							<DemoSystemStatusPage status={demoReverseMeshStatus} />
 						</main>
 					</div>
 				</div>

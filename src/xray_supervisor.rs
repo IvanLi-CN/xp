@@ -187,6 +187,8 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
     let automatic_restart_enabled = restarter.is_some();
 
     let task = tokio::spawn(async move {
+        // Reverse relay is opt-in only after the local Xray API has been observed healthy.
+        reconcile.set_reverse_enabled(false);
         let mut interval = tokio::time::interval(opts.interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -205,6 +207,18 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
             let mut request_full = false;
             let mut restart_due = false;
             let mut restart_trigger = None::<&'static str>;
+            let reverse_restart_requested = reconcile.take_xray_restart_request();
+            if reverse_restart_requested {
+                reconcile.set_reverse_enabled(false);
+                restart_due = true;
+                restart_trigger = Some("reverse_tombstone_limit");
+            }
+
+            if probe.is_ok() && !reverse_restart_requested {
+                reconcile.set_reverse_enabled(true);
+            } else if probe.is_err() {
+                reconcile.set_reverse_enabled(false);
+            }
 
             {
                 let mut snap = health_clone.inner.write().await;
@@ -308,7 +322,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                 reconcile.request_full();
             }
 
-            if automatic_restart_enabled {
+            if automatic_restart_enabled && !reverse_restart_requested {
                 let now_i = Instant::now();
                 let can_restart = next_restart_allowed_at.map(|t| now_i >= t).unwrap_or(true);
                 if can_restart {
@@ -343,6 +357,10 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                     .ok();
                 match result {
                     Ok(()) => {
+                        if reverse_restart_requested {
+                            reconcile.request_reverse_restart_recovery();
+                            reconcile.set_reverse_enabled(true);
+                        }
                         info!(
                             restarter = restarter.name(),
                             trigger = restart_trigger.unwrap_or("unknown"),
@@ -350,6 +368,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                         );
                     }
                     Err(err) => {
+                        reconcile.set_reverse_enabled(false);
                         snap.last_restart_fail_at = Some(attempt_at);
                         warn!(
                             restarter = restarter.name(),
@@ -359,6 +378,12 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                         );
                     }
                 }
+            } else if restart_due {
+                reconcile.set_reverse_enabled(false);
+                warn!(
+                    trigger = restart_trigger.unwrap_or("unknown"),
+                    "Xray restart was requested but no managed restarter is available; Reverse remains disabled"
+                );
             }
         }
     });

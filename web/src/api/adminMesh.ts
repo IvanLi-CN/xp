@@ -3,6 +3,17 @@ import { z } from "zod";
 import { throwIfNotOk } from "./backendError";
 
 export const MeshTelemetryPathSchema = z.enum(["mesh", "public"]);
+export const MeshActiveRouteKindSchema = z.enum([
+	"reality_direct",
+	"reverse_relay",
+	"public",
+]);
+export const AdminMeshActiveRouteSchema = z.object({
+	kind: MeshActiveRouteKindSchema,
+	rendezvous: z.string().nullable().optional(),
+	generation: z.number().int().nonnegative().nullable().optional(),
+	readiness: z.string().nullable().optional(),
+});
 export const MeshQualitySchema = z.enum([
 	"good",
 	"slow",
@@ -62,6 +73,7 @@ export const AdminMeshPeerSchema = z.object({
 	mesh_capability: z.enum(["enabled", "disabled"]).optional(),
 	mesh_reason: MeshPeerReasonSchema.optional(),
 	current_path: MeshTelemetryPathSchema.nullable(),
+	active_route: AdminMeshActiveRouteSchema.optional(),
 	quality: MeshQualitySchema,
 	stale: z.boolean(),
 	breaker: MeshBreakerStateSchema,

@@ -192,6 +192,36 @@ async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
 }
 
 #[tokio::test]
+async fn install_snapshot_blocks_reverse_mesh_schema_rollback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    {
+        let mut guard = store.lock().await;
+        guard.state_mut().reverse_mesh_epoch = 7;
+    }
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+        .await
+        .unwrap();
+    let mut old_state = store.lock().await.state().clone();
+    old_state.schema_version = crate::state::SCHEMA_VERSION - 1;
+    old_state.reverse_mesh_epoch = 0;
+    let bytes = serde_json::to_vec(&json!({ "state": old_state })).unwrap();
+    let meta = SnapshotMeta {
+        last_log_id: None,
+        last_membership: StoredMembership::default(),
+        snapshot_id: "snapshot-reverse-rollback".to_string(),
+    };
+
+    let error = state_machine
+        .install_snapshot(&meta, Box::new(std::io::Cursor::new(bytes)))
+        .await
+        .expect_err("old schema must not replace an active reverse epoch");
+    assert!(error.to_string().contains("schema rollback is blocked"));
+}
+
+#[tokio::test]
 async fn read_wal_with_compat_rejects_non_array_entries() {
     let tmp = tempfile::tempdir().unwrap();
     let wal_path = tmp.path().join("wal.json");
