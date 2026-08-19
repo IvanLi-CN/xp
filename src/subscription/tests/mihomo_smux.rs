@@ -186,11 +186,6 @@ fn mihomo_system_payload_limits_endpoint_smux_to_ss2022_and_keeps_raw_uris_stand
     .unwrap();
     let root: Value = serde_yaml::from_str(&yaml).unwrap();
     for proxy in root["proxies"].as_sequence().unwrap() {
-        let name = proxy["name"].as_str().unwrap();
-        if name.contains("-ss") {
-            assert!(proxy.get("smux").is_none());
-        } else {
-            assert!(proxy.get("smux").is_none());
-        }
+        assert!(proxy.get("smux").is_none());
     }
 }

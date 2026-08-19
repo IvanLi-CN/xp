@@ -1,5 +1,10 @@
 use super::*;
+use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
+#[path = "mesh/bootstrap.rs"]
+mod bootstrap;
+#[path = "mesh/status.rs"]
+mod status;
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
@@ -32,6 +37,8 @@ struct AdminMeshPeerStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     mesh_reason: Option<crate::mesh_telemetry::MeshPeerReason>,
     current_path: Option<TelemetryPath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_route: Option<crate::mesh_telemetry::MeshActiveRoute>,
     quality: MeshQuality,
     stale: bool,
     breaker: BreakerState,
@@ -58,6 +65,367 @@ struct AdminMeshTransportStatus {
     requests_1h: u32,
     connection_starts_1h: u32,
     last_connection_started_at: Option<String>,
+}
+
+pub(super) async fn admin_internal_reverse_relay(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    body: axum::body::Bytes,
+) -> Result<Response, ApiError> {
+    let Some(Extension(internal)) = internal else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    let Some(outer) = internal.verified.as_ref() else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    let envelope = crate::reverse_mesh::ReverseRelayEnvelope::from_headers(&headers)
+        .map_err(ApiError::invalid_request)?;
+    if outer.context.route != internal_auth::InternalRoute::MeshV2
+        || outer.context.target_id != state.cluster.node_id
+        || (outer.context.sender_id == state.cluster.node_id
+            && envelope.target_node_id == state.cluster.node_id)
+    {
+        return Err(ApiError::unauthorized(
+            "reverse relay outer route is invalid",
+        ));
+    }
+    if !state.reconcile.reverse_gate().load(Ordering::Acquire) {
+        return Err(ApiError::conflict(
+            "reverse relay is disabled until local Xray readiness recovers",
+        ));
+    }
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_deref()
+        .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
+    let relay_route = match envelope.route.as_str() {
+        route if route == internal_auth::InternalRoute::MeshV2.as_str() => {
+            internal_auth::InternalRoute::MeshV2
+        }
+        route if route == internal_auth::InternalRoute::HealthV2.as_str() => {
+            internal_auth::InternalRoute::HealthV2
+        }
+        _ => {
+            return Err(ApiError::unauthorized(
+                "reverse relay inner route is not permitted",
+            ));
+        }
+    };
+    if !envelope.verify(ca_key_pem)
+        || envelope.sender_node_id != outer.context.sender_id
+        || envelope.request_id != outer.context.request_id
+    {
+        return Err(ApiError::unauthorized("reverse relay envelope is invalid"));
+    }
+    if envelope.content_length != body.len()
+        || body.len() > crate::reverse_mesh::relay_body_limit(&envelope.uri)
+        || envelope.uri.contains("/mesh/reverse-relay")
+    {
+        return Err(ApiError::invalid_request(
+            "reverse relay body or route is invalid",
+        ));
+    }
+    let method = Method::from_bytes(envelope.method.as_bytes())
+        .map_err(|_| ApiError::invalid_request("reverse relay method is invalid"))?;
+    let uri = envelope
+        .uri
+        .parse::<axum::http::Uri>()
+        .map_err(|_| ApiError::invalid_request("reverse relay URI is invalid"))?;
+    if !(uri.path().starts_with("/api/admin/_internal/") || uri.path().starts_with("/raft/")) {
+        return Err(ApiError::unauthorized(
+            "reverse relay path is not permitted",
+        ));
+    }
+    if relay_route == internal_auth::InternalRoute::HealthV2
+        && (method != Method::GET
+            || uri.path() != "/api/admin/_internal/mesh/health"
+            || !body.is_empty())
+    {
+        return Err(ApiError::unauthorized(
+            "reverse health relay must be a bodyless health GET",
+        ));
+    }
+
+    let current_voter_ids = raft_metrics(&state)
+        .membership_config
+        .membership()
+        .voter_ids()
+        .collect::<BTreeSet<_>>();
+    let current_learner_ids = raft_metrics(&state)
+        .membership_config
+        .membership()
+        .learner_ids()
+        .collect::<BTreeSet<_>>();
+    let is_current_voter = |node_id: &str| {
+        raft_node_id_from_ulid(node_id)
+            .ok()
+            .is_some_and(|raft_id| current_voter_ids.contains(&raft_id))
+    };
+    let is_current_learner = |node_id: &str| {
+        raft_node_id_from_ulid(node_id)
+            .ok()
+            .is_some_and(|raft_id| current_learner_ids.contains(&raft_id))
+    };
+    if !is_current_voter(&state.cluster.node_id) || !is_current_voter(&envelope.sender_node_id) {
+        return Err(ApiError::conflict(
+            "reverse relay requires a current voter rendezvous and sender",
+        ));
+    }
+    let bootstrap_route =
+        relay_route == internal_auth::InternalRoute::HealthV2 || uri.path().starts_with("/raft/");
+    let bootstrap_learner_target = is_current_learner(&envelope.target_node_id) && bootstrap_route;
+
+    let (assignment, role, reverse_epoch) = {
+        let store = state.store.lock().await;
+        let Some(assignment) = store
+            .state()
+            .reverse_mesh_assignments
+            .get(&envelope.target_node_id)
+            .cloned()
+        else {
+            return Err(ApiError::conflict(
+                "reverse relay assignment is unavailable",
+            ));
+        };
+        if !assignment.is_valid()
+            || assignment.generation != envelope.assignment_generation
+            || assignment.credential_epoch != store.state().reverse_mesh_epoch
+            || (!is_current_voter(&assignment.target_node_id) && !bootstrap_learner_target)
+            || !is_current_voter(&assignment.primary_node_id)
+            || assignment
+                .standby_node_id
+                .as_deref()
+                .is_some_and(|node_id| !is_current_voter(node_id))
+            || store.get_node(&envelope.target_node_id).is_none()
+            || store.get_node(&envelope.sender_node_id).is_none()
+        {
+            return Err(ApiError::conflict("reverse relay assignment is stale"));
+        }
+        let role = bootstrap::reverse_role_for_relay(
+            store.state().active_membership_operation(),
+            &assignment,
+            &state.cluster.node_id,
+            &envelope.target_node_id,
+            bootstrap_route,
+        )
+        .ok_or_else(|| {
+            ApiError::unauthorized("this node is not the assigned reverse Rendezvous")
+        })?;
+        (assignment, role, store.state().reverse_mesh_epoch)
+    };
+
+    if relay_route != internal_auth::InternalRoute::HealthV2
+        && !bootstrap_learner_target
+        && !state
+            .reverse_relay
+            .has_health_verified(&assignment.target_node_id, assignment.generation)
+            .await
+    {
+        return Err(ApiError::conflict(
+            "reverse relay generation is awaiting signed health verification",
+        ));
+    }
+
+    let mut inner_headers = HeaderMap::new();
+    if !envelope.content_type.is_empty() {
+        inner_headers.insert(
+            header::CONTENT_TYPE,
+            envelope
+                .content_type
+                .parse()
+                .map_err(|_| ApiError::invalid_request("reverse relay content type is invalid"))?,
+        );
+    }
+    inner_headers.insert(
+        header::CONTENT_LENGTH,
+        envelope
+            .content_length
+            .to_string()
+            .parse()
+            .map_err(|_| ApiError::invalid_request("reverse relay content length is invalid"))?,
+    );
+    let issued_at = envelope.issued_at.to_string();
+    for (name, value) in [
+        (
+            internal_auth::INTERNAL_ROUTE_HEADER,
+            envelope.route.as_str(),
+        ),
+        (
+            internal_auth::INTERNAL_CLUSTER_ID_HEADER,
+            outer.context.cluster_id.as_str(),
+        ),
+        (
+            internal_auth::INTERNAL_SENDER_ID_HEADER,
+            envelope.sender_node_id.as_str(),
+        ),
+        (
+            internal_auth::INTERNAL_TARGET_ID_HEADER,
+            envelope.target_node_id.as_str(),
+        ),
+        (
+            internal_auth::INTERNAL_REQUEST_ID_HEADER,
+            envelope.request_id.as_str(),
+        ),
+        (internal_auth::INTERNAL_ISSUED_AT_HEADER, issued_at.as_str()),
+        (
+            internal_auth::INTERNAL_SIGNATURE_HEADER,
+            envelope.inner_signature.as_str(),
+        ),
+    ] {
+        inner_headers.insert(
+            header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| ApiError::invalid_request("reverse relay header is invalid"))?,
+            value
+                .parse()
+                .map_err(|_| ApiError::invalid_request("reverse relay header value is invalid"))?,
+        );
+    }
+    let verified_inner = internal_auth::verify_request_v2(
+        ca_key_pem,
+        &state.cluster_ca_pem,
+        &method,
+        &uri,
+        &inner_headers,
+        &body,
+        &outer.context.cluster_id,
+        &envelope.target_node_id,
+    )
+    .map_err(|_| ApiError::unauthorized("reverse relay inner signature is invalid"))?;
+    if verified_inner.context.sender_id != outer.context.sender_id
+        || verified_inner.context.request_id != outer.context.request_id
+    {
+        return Err(ApiError::unauthorized(
+            "reverse relay inner identity mismatch",
+        ));
+    }
+
+    // The in-memory replay window is fast-path protection; the existing local idempotency ledger
+    // makes the same signed request fail closed across an XP restart without storing request body
+    // or response content. A relay response cannot safely be replayed once its stream has started.
+    let idempotency_request = IdempotencyRequest {
+        sender_id: envelope.sender_node_id.clone(),
+        semantic_sha256: outer.idempotency_sha256.clone(),
+    };
+    match state
+        .internal_idempotency
+        .begin(&envelope.request_id, &idempotency_request)
+        .await
+        .map_err(|error| ApiError::internal(format!("read reverse relay replay ledger: {error}")))?
+    {
+        IdempotencyBegin::New => {}
+        IdempotencyBegin::Existing(_) | IdempotencyBegin::InFlight | IdempotencyBegin::Mismatch => {
+            return Err(ApiError::new(
+                "outcome_unknown",
+                StatusCode::CONFLICT,
+                "reverse relay request was already accepted",
+            ));
+        }
+        IdempotencyBegin::Full => {
+            return Err(ApiError::new(
+                "idempotency_ledger_full",
+                StatusCode::TOO_MANY_REQUESTS,
+                "reverse relay replay ledger is full; retry after records expire",
+            ));
+        }
+    }
+    state
+        .internal_idempotency
+        .finish(
+            &envelope.request_id,
+            &idempotency_request,
+            StoredResult {
+                status: StatusCode::ACCEPTED.as_u16(),
+                body: json!({"accepted": true}),
+            },
+        )
+        .await
+        .map_err(|error| {
+            ApiError::internal(format!("persist reverse relay replay ledger: {error}"))
+        })?;
+    if !state
+        .reverse_relay
+        .accept_request(&envelope.sender_node_id, &envelope.request_id)
+        .await
+    {
+        return Err(ApiError::new(
+            "outcome_unknown",
+            StatusCode::CONFLICT,
+            "reverse relay request was already accepted",
+        ));
+    }
+
+    let password = crate::reverse_mesh::derive_reverse_password(
+        ca_key_pem,
+        &state.cluster.node_id,
+        reverse_epoch,
+    );
+    let origin_id = crate::reverse_mesh::derive_reverse_origin_id(
+        reverse_epoch,
+        &assignment.target_node_id,
+        &state.cluster.node_id,
+        role,
+        assignment.generation,
+    );
+    let origin = crate::reverse_mesh::derive_reverse_origin(&origin_id);
+    let response = state
+        .reverse_relay
+        .forward(
+            crate::reverse_mesh::REVERSE_PORTAL_ADDRESS,
+            crate::reverse_mesh::REVERSE_SOCKS_USERNAME,
+            &password,
+            &origin,
+            method,
+            uri.path_and_query()
+                .map(|value| value.as_str())
+                .unwrap_or(uri.path()),
+            &inner_headers,
+            body.to_vec(),
+            Duration::from_secs(5),
+        )
+        .await
+        .map_err(|error| {
+            ApiError::new(
+                "reverse_relay_unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+                error.to_string(),
+            )
+        })?;
+    let status = response.status();
+    let inner_ack = response
+        .headers()
+        .get(internal_auth::INTERNAL_ACK_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| ApiError::gateway_timeout("reverse target acknowledgement is missing"))?;
+    internal_auth::verify_ack_v2(
+        ca_key_pem,
+        &state.cluster_ca_pem,
+        &verified_inner,
+        &assignment.target_node_id,
+        status.as_u16(),
+        inner_ack,
+    )
+    .map_err(|_| ApiError::gateway_timeout("reverse target acknowledgement is invalid"))?;
+    if relay_route == internal_auth::InternalRoute::HealthV2 {
+        state
+            .reverse_relay
+            .mark_health_verified(&assignment.target_node_id, assignment.generation)
+            .await;
+    }
+    let mut builder = Response::builder().status(status);
+    if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
+        builder = builder.header(header::CONTENT_TYPE, content_type);
+    }
+    builder = builder.header(
+        header::HeaderName::from_static(crate::reverse_mesh::RELAY_INNER_ACK_HEADER),
+        inner_ack,
+    );
+    let stream = response
+        .bytes_stream()
+        .map(|chunk| chunk.map_err(std::io::Error::other));
+    builder
+        .body(Body::from_stream(stream))
+        .map_err(|_| ApiError::internal("build reverse relay response"))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -127,6 +495,390 @@ pub(super) fn spawn_mesh_probe_worker(state: AppState) {
     });
 }
 
+#[derive(Debug, Deserialize)]
+struct ReverseCapabilityResponse {
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default)]
+    reverse_mesh: Option<capabilities::ReverseMeshReadiness>,
+}
+
+pub(super) async fn reverse_candidate_readiness(
+    state: &AppState,
+    node: &Node,
+) -> Result<bool, ApiError> {
+    let managed_vless_endpoint = {
+        let store = state.store.lock().await;
+        store.list_endpoints().into_iter().any(|endpoint| {
+            endpoint.node_id == node.node_id
+                && crate::managed_default_endpoints::managed_default_vless_endpoint(&endpoint)
+                    .is_some()
+        })
+    };
+    if !managed_vless_endpoint {
+        return Ok(false);
+    }
+    if node.node_id == state.cluster.node_id {
+        return Ok(
+            matches!(state.xray_health.snapshot().await.status, XrayStatus::Up)
+                && state.reconcile.reverse_gate().load(Ordering::Acquire),
+        );
+    }
+    let response = match send_mesh_internal_capability_read(
+        state,
+        &state.mesh_client,
+        node,
+        Duration::from_secs(5),
+    )
+    .await?
+    {
+        MeshCapabilityProbeResponse::Verified(response) => response,
+        MeshCapabilityProbeResponse::PredecessorNotFound => return Ok(false),
+    };
+    let body = response
+        .json::<ReverseCapabilityResponse>()
+        .await
+        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    Ok(body
+        .reverse_mesh
+        .as_ref()
+        .is_some_and(|readiness| readiness.reverse_ready))
+}
+
+/// The leader owns Reverse assignment orchestration. Runtime links remain local; only the epoch
+/// and deterministic assignment are replicated through the normal Raft command path.
+pub(super) fn spawn_reverse_assignment_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut failures = BTreeMap::<String, ReverseAssignmentFailure>::new();
+        loop {
+            interval.tick().await;
+            if let Err(error) = reconcile_reverse_assignments(&state, &mut failures).await {
+                tracing::debug!(?error, "reverse assignment reconciliation skipped");
+            }
+        }
+    });
+}
+
+#[derive(Debug)]
+struct ReverseAssignmentFailure {
+    consecutive: u8,
+    next_attempt: StdInstant,
+}
+
+async fn reconcile_reverse_assignments(
+    state: &AppState,
+    failures: &mut BTreeMap<String, ReverseAssignmentFailure>,
+) -> Result<(), ApiError> {
+    let metrics = raft_metrics(state);
+    if !is_leader(&metrics) {
+        return Ok(());
+    }
+    let voter_ids = metrics
+        .membership_config
+        .membership()
+        .voter_ids()
+        .collect::<std::collections::BTreeSet<_>>();
+    if voter_ids.len() < 2 {
+        return Ok(());
+    }
+    let (nodes, endpoints, current_epoch, current_assignments, generation_counters) = {
+        let store = state.store.lock().await;
+        (
+            store.list_nodes(),
+            store.list_endpoints(),
+            store.state().reverse_mesh_epoch,
+            store.state().reverse_mesh_assignments.clone(),
+            store.state().reverse_mesh_generation_counters.clone(),
+        )
+    };
+    // Do not establish the durable epoch until every current voter understands the assignment
+    // command and the relay status surface. Once an epoch exists, an unavailable voter is treated
+    // as a failed candidate so an already assigned standby can take over after backoff.
+    if current_epoch == 0 {
+        require_reverse_assignment_on_voters(state).await?;
+    }
+    let voter_node_ids = nodes
+        .iter()
+        .filter_map(|node| {
+            crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+                .ok()
+                .filter(|raft_id| voter_ids.contains(raft_id))
+                .map(|_| node.node_id.clone())
+        })
+        .collect::<Vec<_>>();
+    if voter_node_ids.len() != voter_ids.len() {
+        return Err(ApiError::conflict(
+            "reverse assignment requires every voter to map to DesiredState",
+        ));
+    }
+    let epoch = if current_epoch != 0 {
+        current_epoch
+    } else {
+        reverse_membership_revision(&metrics)
+    };
+
+    let mut candidates = Vec::new();
+    for node in &nodes {
+        if !voter_node_ids.iter().any(|id| id == &node.node_id) {
+            continue;
+        }
+        let managed_vless = endpoints.iter().any(|endpoint| {
+            endpoint.node_id == node.node_id
+                && crate::managed_default_endpoints::managed_default_vless_endpoint(endpoint)
+                    .is_some()
+        });
+        let (capabilities, signed_xray_ready) = if node.node_id == state.cluster.node_id {
+            (
+                vec![
+                    crate::reverse_mesh::REVERSE_ASSIGNMENT_CAPABILITY.to_string(),
+                    crate::reverse_mesh::REVERSE_RELAY_CAPABILITY.to_string(),
+                ],
+                matches!(state.xray_health.snapshot().await.status, XrayStatus::Up)
+                    && state.reconcile.reverse_gate().load(Ordering::Acquire),
+            )
+        } else {
+            let response = send_mesh_internal_capability_read(
+                state,
+                &state.mesh_client,
+                node,
+                Duration::from_secs(5),
+            )
+            .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(error) if current_epoch != 0 => {
+                    candidates.push(crate::reverse_mesh::ReverseMeshCandidate {
+                        node_id: node.node_id.clone(),
+                        assignment_capable: false,
+                        relay_capable: false,
+                        signed_xray_ready: false,
+                        managed_vless_endpoint: managed_vless,
+                    });
+                    tracing::debug!(node_id = %node.node_id, ?error, "reverse capability probe unavailable");
+                    continue;
+                }
+                Err(error) => return Err(ApiError::gateway_timeout(error.message)),
+            };
+            let response = match response {
+                MeshCapabilityProbeResponse::Verified(response) => response,
+                MeshCapabilityProbeResponse::PredecessorNotFound => {
+                    return Err(ApiError::conflict(
+                        "reverse assignment requires signed capability support on every voter",
+                    ));
+                }
+            };
+            let body = match response.json::<ReverseCapabilityResponse>().await {
+                Ok(body) => body,
+                Err(error) if current_epoch != 0 => {
+                    candidates.push(crate::reverse_mesh::ReverseMeshCandidate {
+                        node_id: node.node_id.clone(),
+                        assignment_capable: false,
+                        relay_capable: false,
+                        signed_xray_ready: false,
+                        managed_vless_endpoint: managed_vless,
+                    });
+                    tracing::debug!(node_id = %node.node_id, ?error, "reverse capability response invalid");
+                    continue;
+                }
+                Err(error) => return Err(ApiError::gateway_timeout(error.to_string())),
+            };
+            let signed_xray_ready = body
+                .reverse_mesh
+                .as_ref()
+                .is_some_and(|readiness| readiness.reverse_ready);
+            (body.capabilities, signed_xray_ready)
+        };
+        candidates.push(crate::reverse_mesh::ReverseMeshCandidate {
+            node_id: node.node_id.clone(),
+            assignment_capable: capabilities
+                .iter()
+                .any(|cap| cap == crate::reverse_mesh::REVERSE_ASSIGNMENT_CAPABILITY),
+            relay_capable: capabilities
+                .iter()
+                .any(|cap| cap == crate::reverse_mesh::REVERSE_RELAY_CAPABILITY),
+            signed_xray_ready: managed_vless && signed_xray_ready,
+            managed_vless_endpoint: managed_vless,
+        });
+    }
+    // Keep a currently assigned Rendezvous through the first two validation failures. This
+    // avoids generation churn on transient Xray restarts; the third failure rotates the link.
+    let now = StdInstant::now();
+    let mut selection_candidates = candidates.clone();
+    let mut forced_targets = BTreeSet::new();
+    for (target, assignment) in &current_assignments {
+        for rendezvous in assignment.rendezvous_ids() {
+            let Some(candidate) = candidates.iter().find(|item| item.node_id == rendezvous) else {
+                continue;
+            };
+            let validation_failed = candidate.managed_vless_endpoint
+                && !candidate.signed_xray_ready
+                && (candidate.assignment_capable && candidate.relay_capable
+                    || assignment.contains_rendezvous(rendezvous));
+            let key = format!("{target}\n{rendezvous}");
+            if !validation_failed {
+                failures.remove(&key);
+                continue;
+            }
+            let failure = failures.entry(key).or_insert(ReverseAssignmentFailure {
+                consecutive: 0,
+                next_attempt: now,
+            });
+            if now >= failure.next_attempt {
+                let attempt = usize::from(failure.consecutive);
+                failure.consecutive = failure.consecutive.saturating_add(1);
+                failure.next_attempt = now + crate::reverse_mesh::reverse_backoff(attempt);
+            }
+            if failure.consecutive >= 3 {
+                forced_targets.insert(target.clone());
+            } else if let Some(selection_candidate) = selection_candidates
+                .iter_mut()
+                .find(|item| item.node_id == rendezvous)
+            {
+                selection_candidate.assignment_capable = true;
+                selection_candidate.relay_capable = true;
+                selection_candidate.signed_xray_ready = true;
+            }
+        }
+    }
+    failures.retain(|key, _| {
+        key.split_once('\n')
+            .is_some_and(|(target, _)| current_assignments.contains_key(target))
+    });
+    let mut current_for_selection = current_assignments.clone();
+    for target in &forced_targets {
+        current_for_selection.remove(target);
+    }
+    let mut assigned = crate::reverse_mesh::assign_reverse_mesh_with_generation_floors(
+        voter_node_ids.clone(),
+        &selection_candidates,
+        &current_for_selection,
+        &generation_counters,
+        reverse_membership_revision(&metrics),
+        epoch,
+    );
+    for target in &forced_targets {
+        if let (Some(current), Some(next)) =
+            (current_assignments.get(target), assigned.get_mut(target))
+        {
+            next.generation =
+                crate::reverse_mesh::reverse_mesh_generation_after_failures(current.generation, 3)
+                    .unwrap_or_else(|| current.generation.saturating_add(1).max(1));
+        }
+    }
+    if current_epoch == 0
+        && candidates
+            .iter()
+            .any(crate::reverse_mesh::ReverseMeshCandidate::eligible)
+    {
+        state
+            .raft
+            .client_write(crate::state::DesiredStateCommand::SetReverseMeshEpoch { epoch })
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+    }
+    for target in &voter_node_ids {
+        match (current_assignments.get(target), assigned.get(target)) {
+            (Some(current), Some(next)) if current == next => {}
+            (current, Some(next)) => {
+                state
+                    .raft
+                    .client_write(
+                        crate::state::DesiredStateCommand::UpsertReverseMeshAssignment {
+                            assignment: next.clone(),
+                            expected_generation: current.map(|item| item.generation),
+                        },
+                    )
+                    .await
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+            }
+            (Some(current), None) => {
+                state
+                    .raft
+                    .client_write(
+                        crate::state::DesiredStateCommand::DeleteReverseMeshAssignment {
+                            target_node_id: target.clone(),
+                            expected_generation: Some(current.generation),
+                        },
+                    )
+                    .await
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+            }
+            (None, None) => {}
+        }
+    }
+    verify_reverse_assignments(state, &assigned).await;
+    Ok(())
+}
+
+async fn verify_reverse_assignments(
+    state: &AppState,
+    assignments: &BTreeMap<String, crate::reverse_mesh::ReverseMeshAssignment>,
+) {
+    let target_ids = assignments.keys().cloned().collect::<Vec<_>>();
+    let state_for_probes = state.clone();
+    stream::iter(target_ids)
+        .map(|target_id| {
+            let state = state_for_probes.clone();
+            async move {
+                if let Err(error) = verify_reverse_assignment(&state, &target_id).await {
+                    tracing::debug!(
+                        target_id = %target_id,
+                        ?error,
+                        "signed reverse health probe failed"
+                    );
+                }
+            }
+        })
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
+}
+
+async fn verify_reverse_assignment(state: &AppState, target_id: &str) -> Result<(), ApiError> {
+    let ca_key_pem = state
+        .cluster_ca_key_pem
+        .as_deref()
+        .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
+    let target = mesh_peer_target(state, target_id).await?;
+    configure_reverse_route(state, &state.mesh_client, &target).await;
+    state
+        .mesh_client
+        .send_peer_reverse_health_request(
+            &target,
+            crate::control_plane_mesh::MeshRequest {
+                method: Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(5),
+                allow_ambiguous_fallback: true,
+                request_id: crate::id::new_ulid_string(),
+                route: internal_auth::InternalRoute::HealthV2,
+                cluster_id: state.cluster.cluster_id.clone(),
+                sender_id: state.cluster.node_id.clone(),
+                updates_active_path: false,
+            },
+            ca_key_pem,
+            &state.cluster_ca_pem,
+        )
+        .await
+        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    Ok(())
+}
+
+fn reverse_membership_revision(metrics: &openraft::RaftMetrics<RaftNodeId, RaftNodeMeta>) -> u64 {
+    let revision = crate::raft_membership_guard::membership_revision(metrics).unwrap_or_default();
+    let digest = Sha256::digest(revision.as_bytes());
+    u64::from_be_bytes(
+        digest[..8]
+            .try_into()
+            .expect("membership digest has eight bytes"),
+    )
+    .max(1)
+}
+
 pub(super) async fn admin_internal_raft_client_write(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -146,6 +898,14 @@ pub(super) async fn admin_internal_raft_client_write(
         return Err(ApiError::not_implemented(
             "node and membership lifecycle commands require dedicated lifecycle endpoints",
         ));
+    }
+    if matches!(
+        &cmd,
+        DesiredStateCommand::SetReverseMeshEpoch { .. }
+            | DesiredStateCommand::UpsertReverseMeshAssignment { .. }
+            | DesiredStateCommand::DeleteReverseMeshAssignment { .. }
+    ) {
+        crate::http::join_capability::require_reverse_assignment_on_voters(&state).await?;
     }
     let idempotency_request = internal
         .verified
@@ -232,9 +992,13 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints) = {
+    let (nodes, endpoints, assignments) = {
         let store = state.store.lock().await;
-        (store.list_nodes(), store.list_endpoints())
+        (
+            store.list_nodes(),
+            store.list_endpoints(),
+            store.state().reverse_mesh_assignments.clone(),
+        )
     };
     let peers = nodes
         .into_iter()
@@ -282,6 +1046,10 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 ),
                 mesh_reason,
                 current_path: peer.and_then(|peer| peer.last_path),
+                active_route: status::with_assignment(
+                    peer.and_then(|peer| peer.active_route.clone()),
+                    assignments.get(&node.node_id),
+                ),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: is_mesh_peer_stale(peer, now),
                 breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
@@ -292,7 +1060,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 mesh_availability_24h,
                 latency_p50_ms,
                 latency_p95_ms,
-                mesh_transport: mesh_transport_status_for(mesh_enabled, peer, now),
+                mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -324,33 +1092,6 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
     }
 }
 
-fn mesh_transport_status_for(
-    mesh_enabled: bool,
-    peer: Option<&crate::mesh_telemetry::MeshPeerTelemetry>,
-    now: DateTime<Utc>,
-) -> Option<AdminMeshTransportStatus> {
-    if !mesh_enabled {
-        return None;
-    }
-    let (requests_5m, connection_starts_5m) = peer
-        .map(|peer| mesh_transport_counts_for(peer, 5, now))
-        .unwrap_or_default();
-    let (requests_1h, connection_starts_1h) = peer
-        .map(|peer| mesh_transport_counts_for(peer, 60, now))
-        .unwrap_or_default();
-    Some(AdminMeshTransportStatus {
-        protocol: peer.and_then(|peer| peer.last_mesh_protocol),
-        health: mesh_transport_health_for(peer, now),
-        connection_generation: peer.map_or(0, |peer| peer.connection_generation),
-        current_connection_requests: peer.map_or(0, |peer| peer.current_connection_requests),
-        requests_5m,
-        connection_starts_5m,
-        requests_1h,
-        connection_starts_1h,
-        last_connection_started_at: peer.and_then(|peer| peer.last_connection_started_at.clone()),
-    })
-}
-
 fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -> BreakerState {
     if mesh_enabled {
         recorded.unwrap_or(BreakerState::Closed)
@@ -360,6 +1101,7 @@ fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -400,9 +1142,9 @@ mod tests {
     #[test]
     fn mesh_transport_status_is_optional_and_preserves_unknown_state() {
         let now = Utc::now();
-        assert!(mesh_transport_status_for(false, None, now).is_none());
+        assert!(status::mesh_transport_status_for(false, None, now).is_none());
 
-        let unknown = mesh_transport_status_for(true, None, now).unwrap();
+        let unknown = status::mesh_transport_status_for(true, None, now).unwrap();
         assert_eq!(unknown.health, MeshTransportHealth::Unknown);
         assert_eq!(unknown.protocol, None);
         assert_eq!(unknown.connection_generation, 0);
@@ -421,7 +1163,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let healthy = mesh_transport_status_for(true, Some(&peer), now).unwrap();
+        let healthy = status::mesh_transport_status_for(true, Some(&peer), now).unwrap();
         assert_eq!(healthy.health, MeshTransportHealth::Healthy);
         assert_eq!(healthy.requests_5m, 12);
         assert_eq!(healthy.connection_starts_5m, 1);
@@ -452,6 +1194,7 @@ mod tests {
                     mesh_capability: Some("enabled".to_string()),
                     mesh_reason: Some(crate::mesh_telemetry::MeshPeerReason::MeshAvailable),
                     current_path: Some(TelemetryPath::Mesh),
+                    active_route: None,
                     quality: MeshQuality::Good,
                     stale: false,
                     breaker: BreakerState::Closed,
@@ -642,6 +1385,63 @@ async fn mesh_peer_target(state: &AppState, node_id: &str) -> Result<MeshPeerTar
     ))
 }
 
+async fn configure_reverse_route(
+    state: &AppState,
+    client: &MeshAwareHttpClient,
+    target: &MeshPeerTarget,
+) {
+    let route = {
+        let store = state.store.lock().await;
+        (|| {
+            let assignment = store
+                .state()
+                .reverse_mesh_assignments
+                .get(&target.node_id)
+                .cloned()?;
+            let rendezvous_id = assignment.primary_node_id.clone();
+            let rendezvous = store.get_node(&rendezvous_id)?;
+            let standby_rendezvous = assignment
+                .standby_node_id
+                .as_deref()
+                .and_then(|standby_id| store.get_node(standby_id))
+                .map(|standby| {
+                    let endpoints = store
+                        .list_endpoints()
+                        .into_iter()
+                        .filter(|endpoint| endpoint.node_id == standby.node_id)
+                        .collect::<Vec<_>>();
+                    crate::control_plane_mesh::peer_target_from_node(&standby, &endpoints)
+                });
+            let endpoints = store
+                .list_endpoints()
+                .into_iter()
+                .filter(|endpoint| endpoint.node_id == rendezvous_id)
+                .collect::<Vec<_>>();
+            let rendezvous_target =
+                crate::control_plane_mesh::peer_target_from_node(&rendezvous, &endpoints);
+            let role = if rendezvous_id == assignment.primary_node_id {
+                crate::reverse_mesh::ReverseRole::Primary
+            } else {
+                crate::reverse_mesh::ReverseRole::Standby
+            };
+            Some(crate::control_plane_mesh::ReverseRelayRoute {
+                rendezvous: rendezvous_target,
+                standby_rendezvous,
+                assignment,
+                role,
+            })
+        })()
+    };
+    match route {
+        Some(route) => {
+            client
+                .set_reverse_route(target.node_id.clone(), route)
+                .await
+        }
+        None => client.clear_reverse_route(&target.node_id).await,
+    }
+}
+
 pub(super) async fn send_mesh_internal_read(
     state: &AppState,
     client: &MeshAwareHttpClient,
@@ -681,6 +1481,7 @@ pub(super) async fn send_mesh_internal_capability_read(
         .as_deref()
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let peer = mesh_peer_target(state, &node.node_id).await?;
+    configure_reverse_route(state, client, &peer).await;
     let request = MeshRequest {
         method: Method::GET,
         path_and_query: "/api/admin/_internal/capabilities".to_string(),
@@ -750,6 +1551,7 @@ pub(super) async fn send_mesh_internal_request(
         .as_deref()
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let peer = mesh_peer_target(state, &node.node_id).await?;
+    configure_reverse_route(state, client, &peer).await;
     let request = MeshRequest {
         method,
         path_and_query,

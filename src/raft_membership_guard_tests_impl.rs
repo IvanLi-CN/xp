@@ -89,7 +89,7 @@ impl RaftFacade for RepairingRaft {
                 .map(|(node_id, node)| (*node_id, node.clone()))
                 .collect::<BTreeMap<_, _>>();
             next.membership_config = Arc::new(openraft::StoredMembership::new(
-                previous.log_id().clone(),
+                *previous.log_id(),
                 openraft::Membership::new(vec![voters], nodes),
             ));
             metrics_tx.send_replace(next);

@@ -21,6 +21,10 @@ const TYPE_SS2022_ACCOUNT: &str = "xray.proxy.shadowsocks_2022.Account";
 const TYPE_TCP_TRANSPORT_CONFIG: &str = "xray.transport.internet.tcp.Config";
 const TYPE_SPLITHTTP_TRANSPORT_CONFIG: &str = "xray.transport.internet.splithttp.Config";
 const TYPE_REALITY_SECURITY_CONFIG: &str = "xray.transport.internet.reality.Config";
+const TYPE_SOCKS_SERVER_CONFIG: &str = "xray.proxy.socks.ServerConfig";
+const TYPE_VLESS_OUTBOUND_CONFIG: &str = "xray.proxy.vless.outbound.Config";
+const TYPE_FREEDOM_CONFIG: &str = "xray.proxy.freedom.Config";
+const TYPE_ROUTING_CONFIG: &str = "xray.app.router.Config";
 
 // In Xray-core, TypedMessage.Type is set to `message.ProtoReflect().Descriptor().FullName()`.
 // Therefore the correct type string is the protobuf full name, e.g. "xray.app.proxyman.command.AddUserOperation".
@@ -304,6 +308,47 @@ pub fn build_add_user_operation(
     }
 }
 
+pub fn build_reverse_add_user_operation(
+    endpoint: &Endpoint,
+    email: &str,
+    vless_uuid: &str,
+    reverse_tag: &str,
+) -> Result<xray::common::serial::TypedMessage, BuildError> {
+    if endpoint.kind != EndpointKind::VlessRealityVisionTcp {
+        return Err(BuildError::InvalidUserCredentials {
+            email: email.to_string(),
+            kind: endpoint.kind.clone(),
+            reason: "reverse relay requires a VLESS endpoint".to_string(),
+        });
+    }
+    let meta = parse_vless_meta(endpoint)?;
+    let account = xray::proxy::vless::Account {
+        id: vless_uuid.to_string(),
+        flow: match meta.transport {
+            VlessRealityTransport::VisionTcp => "xtls-rprx-vision".to_string(),
+            VlessRealityTransport::Xhttp => String::new(),
+        },
+        encryption: "none".to_string(),
+        xor_mode: 0,
+        seconds: 0,
+        padding: String::new(),
+        reverse: Some(xray::proxy::vless::Reverse {
+            tag: reverse_tag.to_string(),
+        }),
+        testpre: 0,
+        testseed: Vec::new(),
+    };
+    let user = xray::common::protocol::User {
+        level: 0,
+        email: email.to_string(),
+        account: Some(to_typed_message(TYPE_VLESS_ACCOUNT, &account)),
+    };
+    Ok(to_typed_message(
+        TYPE_ADD_USER_OPERATION,
+        &xray::app::proxyman::command::AddUserOperation { user: Some(user) },
+    ))
+}
+
 pub fn build_add_inbound_request(
     endpoint: &Endpoint,
 ) -> Result<xray::app::proxyman::command::AddInboundRequest, BuildError> {
@@ -469,6 +514,312 @@ pub fn build_add_inbound_request(
     }
 }
 
+/// Build the loopback-only SOCKS portal used by a Rendezvous. It deliberately disables UDP and
+/// authenticates every connection so an unmatched or unauthenticated socket cannot become a
+/// general-purpose proxy.
+pub fn build_reverse_socks_inbound_request(
+    tag: &str,
+    username: &str,
+    password: &str,
+) -> xray::app::proxyman::command::AddInboundRequest {
+    build_reverse_socks_inbound_request_on_address(tag, username, password, [127, 0, 0, 1])
+}
+
+/// Test-only/spike variant that permits a container bridge address. Production callers must use
+/// `build_reverse_socks_inbound_request`, which is fixed to loopback.
+pub fn build_reverse_socks_inbound_request_on_address(
+    tag: &str,
+    username: &str,
+    password: &str,
+    listen_address: [u8; 4],
+) -> xray::app::proxyman::command::AddInboundRequest {
+    let receiver_settings = xray::app::proxyman::ReceiverConfig {
+        port_list: Some(xray::common::net::PortList {
+            range: vec![xray::common::net::PortRange {
+                from: 10086,
+                to: 10086,
+            }],
+        }),
+        listen: Some(xray::common::net::IpOrDomain {
+            address: Some(xray::common::net::ip_or_domain::Address::Ip(
+                listen_address.to_vec(),
+            )),
+        }),
+        stream_settings: Some(xray::transport::internet::StreamConfig {
+            address: None,
+            port: 0,
+            protocol_name: "tcp".to_string(),
+            transport_settings: vec![tcp_transport_settings()],
+            security_type: String::new(),
+            security_settings: Vec::new(),
+            socket_settings: None,
+        }),
+        // The SOCKS request supplies the destination. Preserving the listener's original
+        // destination would make Xray treat the portal itself as a loopback target.
+        receive_original_destination: false,
+        sniffing_settings: None,
+    };
+    let proxy_settings = xray::proxy::socks::ServerConfig {
+        auth_type: xray::proxy::socks::AuthType::Password as i32,
+        accounts: std::collections::HashMap::from([(username.to_string(), password.to_string())]),
+        address: None,
+        udp_enabled: false,
+        user_level: 0,
+    };
+    xray::app::proxyman::command::AddInboundRequest {
+        inbound: Some(xray::core::InboundHandlerConfig {
+            tag: tag.to_string(),
+            receiver_settings: Some(to_typed_message(
+                TYPE_PROXYMAN_RECEIVER_CONFIG,
+                &receiver_settings,
+            )),
+            proxy_settings: Some(to_typed_message(TYPE_SOCKS_SERVER_CONFIG, &proxy_settings)),
+        }),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReverseVlessEndpoint {
+    pub access_host: String,
+    pub endpoint: Endpoint,
+    pub target_port: u16,
+    pub target_public_key_b64url_nopad: String,
+    pub target_short_id_hex: String,
+    pub server_name: String,
+}
+
+/// Build a target-side VLESS outbound carrying Xray's native Reverse account. The target only
+/// needs the Rendezvous endpoint metadata; it does not need a managed endpoint of its own.
+pub fn build_reverse_vless_outbound_request(
+    tag: &str,
+    reverse_tag: &str,
+    uuid: &str,
+    endpoint: &ReverseVlessEndpoint,
+) -> Result<xray::app::proxyman::command::AddOutboundRequest, BuildError> {
+    let meta = parse_vless_meta(&endpoint.endpoint)?;
+    let public_key = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(endpoint.target_public_key_b64url_nopad.as_bytes())
+        .map_err(|e| BuildError::InvalidEndpointMeta {
+            endpoint_id: endpoint.endpoint.endpoint_id.clone(),
+            kind: endpoint.endpoint.kind.clone(),
+            reason: format!("reverse reality public key decode error: {e}"),
+        })?;
+    let short_id = hex::decode(&endpoint.target_short_id_hex).map_err(|e| {
+        BuildError::InvalidEndpointMeta {
+            endpoint_id: endpoint.endpoint.endpoint_id.clone(),
+            kind: endpoint.endpoint.kind.clone(),
+            reason: format!("reverse reality short id decode error: {e}"),
+        }
+    })?;
+    let reality = xray::transport::internet::reality::Config {
+        show: false,
+        dest: String::new(),
+        r#type: "tcp".to_string(),
+        xver: 0,
+        server_names: Vec::new(),
+        private_key: Vec::new(),
+        min_client_ver: Vec::new(),
+        max_client_ver: Vec::new(),
+        max_time_diff: 0,
+        short_ids: Vec::new(),
+        mldsa65_seed: Vec::new(),
+        limit_fallback_upload: None,
+        limit_fallback_download: None,
+        fingerprint: normalize_reality_fingerprint(&meta.reality.fingerprint),
+        server_name: endpoint.server_name.clone(),
+        public_key,
+        short_id,
+        mldsa65_verify: Vec::new(),
+        spider_x: String::new(),
+        spider_y: Vec::new(),
+        master_key_log: String::new(),
+    };
+    let (protocol_name, transport_settings) = match meta.transport {
+        VlessRealityTransport::VisionTcp => ("tcp".to_string(), vec![tcp_transport_settings()]),
+        VlessRealityTransport::Xhttp => ("splithttp".to_string(), vec![xhttp_transport_settings()]),
+    };
+    let stream_settings = xray::transport::internet::StreamConfig {
+        address: None,
+        port: 0,
+        protocol_name,
+        transport_settings,
+        security_type: TYPE_REALITY_SECURITY_CONFIG.to_string(),
+        security_settings: vec![to_typed_message(TYPE_REALITY_SECURITY_CONFIG, &reality)],
+        socket_settings: Some(xray::transport::internet::SocketConfig {
+            domain_strategy: xray::transport::internet::DomainStrategy::AsIs as i32,
+            ..Default::default()
+        }),
+    };
+    let account = xray::proxy::vless::Account {
+        id: uuid.to_string(),
+        flow: match meta.transport {
+            VlessRealityTransport::VisionTcp => "xtls-rprx-vision".to_string(),
+            VlessRealityTransport::Xhttp => String::new(),
+        },
+        encryption: "none".to_string(),
+        xor_mode: 0,
+        seconds: 0,
+        padding: String::new(),
+        reverse: Some(xray::proxy::vless::Reverse {
+            tag: reverse_tag.to_string(),
+        }),
+        testpre: 0,
+        testseed: Vec::new(),
+    };
+    let user = xray::common::protocol::User {
+        level: 0,
+        email: format!("reverse:{tag}"),
+        account: Some(to_typed_message(TYPE_VLESS_ACCOUNT, &account)),
+    };
+    let vnext = xray::common::protocol::ServerEndpoint {
+        address: Some(xray::common::net::IpOrDomain {
+            address: Some(xray::common::net::ip_or_domain::Address::Domain(
+                endpoint.access_host.clone(),
+            )),
+        }),
+        port: endpoint.target_port as u32,
+        user: Some(user),
+    };
+    let proxy_settings = xray::proxy::vless::outbound::Config { vnext: Some(vnext) };
+    let sender_settings = xray::app::proxyman::SenderConfig {
+        via: None,
+        stream_settings: Some(stream_settings),
+        proxy_settings: None,
+        multiplex_settings: None,
+        via_cidr: String::new(),
+        target_strategy: xray::transport::internet::DomainStrategy::AsIs as i32,
+    };
+    Ok(xray::app::proxyman::command::AddOutboundRequest {
+        outbound: Some(xray::core::OutboundHandlerConfig {
+            tag: tag.to_string(),
+            sender_settings: Some(to_typed_message(
+                TYPE_PROXYMAN_SENDER_CONFIG,
+                &sender_settings,
+            )),
+            proxy_settings: Some(to_typed_message(
+                TYPE_VLESS_OUTBOUND_CONFIG,
+                &proxy_settings,
+            )),
+            expire: 0,
+            comment: "xp reverse mesh".to_string(),
+        }),
+    })
+}
+
+const TYPE_PROXYMAN_SENDER_CONFIG: &str = "xray.app.proxyman.SenderConfig";
+
+pub fn build_reverse_freedom_outbound_request(
+    tag: &str,
+    loopback_host: &str,
+    loopback_port: u16,
+) -> xray::app::proxyman::command::AddOutboundRequest {
+    let destination = xray::common::protocol::ServerEndpoint {
+        address: Some(xray::common::net::IpOrDomain {
+            address: Some(xray::common::net::ip_or_domain::Address::Domain(
+                loopback_host.to_string(),
+            )),
+        }),
+        port: loopback_port as u32,
+        user: None,
+    };
+    let config = xray::proxy::freedom::Config {
+        domain_strategy: xray::transport::internet::DomainStrategy::AsIs as i32,
+        destination_override: Some(xray::proxy::freedom::DestinationOverride {
+            server: Some(destination),
+        }),
+        user_level: 0,
+    };
+    let sender_settings = xray::app::proxyman::SenderConfig {
+        via: None,
+        stream_settings: None,
+        proxy_settings: None,
+        multiplex_settings: None,
+        via_cidr: String::new(),
+        target_strategy: xray::transport::internet::DomainStrategy::AsIs as i32,
+    };
+    xray::app::proxyman::command::AddOutboundRequest {
+        outbound: Some(xray::core::OutboundHandlerConfig {
+            tag: tag.to_string(),
+            sender_settings: Some(to_typed_message(
+                TYPE_PROXYMAN_SENDER_CONFIG,
+                &sender_settings,
+            )),
+            proxy_settings: Some(to_typed_message(TYPE_FREEDOM_CONFIG, &config)),
+            expire: 0,
+            comment: "xp reverse loopback".to_string(),
+        }),
+    }
+}
+
+pub fn build_reverse_route_rule(
+    rule_tag: &str,
+    portal_tag: &str,
+    origin: &str,
+    outbound_tag: &str,
+) -> xray::app::router::command::AddRuleRequest {
+    let (domain, port) = origin
+        .strip_suffix(":443")
+        .map(|domain| (domain, 443))
+        .unwrap_or((origin, 0));
+    let rule = xray::app::router::RoutingRule {
+        target_tag: Some(xray::app::router::routing_rule::TargetTag::Tag(
+            outbound_tag.to_string(),
+        )),
+        rule_tag: rule_tag.to_string(),
+        domain: vec![xray::app::router::Domain {
+            r#type: xray::app::router::domain::Type::Full as i32,
+            value: domain.to_string(),
+        }],
+        ip: Vec::new(),
+        port_list: (port != 0).then(|| xray::common::net::PortList {
+            range: vec![xray::common::net::PortRange {
+                from: port,
+                to: port,
+            }],
+        }),
+        networks: vec![xray::common::net::Network::Tcp as i32],
+        inbound_tag: vec![portal_tag.to_string()],
+        protocol: Vec::new(),
+    };
+    let config = xray::app::router::Config {
+        domain_strategy: xray::app::router::config::DomainStrategy::AsIs as i32,
+        rule: vec![rule],
+        balancing_rule: Vec::new(),
+    };
+    xray::app::router::command::AddRuleRequest {
+        config: Some(to_typed_message(TYPE_ROUTING_CONFIG, &config)),
+        should_append: true,
+    }
+}
+
+pub fn build_reverse_block_rule(
+    rule_tag: &str,
+    portal_tag: &str,
+    block_tag: &str,
+) -> xray::app::router::command::AddRuleRequest {
+    let rule = xray::app::router::RoutingRule {
+        target_tag: Some(xray::app::router::routing_rule::TargetTag::Tag(
+            block_tag.to_string(),
+        )),
+        rule_tag: rule_tag.to_string(),
+        domain: Vec::new(),
+        ip: Vec::new(),
+        port_list: None,
+        networks: vec![xray::common::net::Network::Tcp as i32],
+        inbound_tag: vec![portal_tag.to_string()],
+        protocol: Vec::new(),
+    };
+    let config = xray::app::router::Config {
+        domain_strategy: xray::app::router::config::DomainStrategy::AsIs as i32,
+        rule: vec![rule],
+        balancing_rule: Vec::new(),
+    };
+    xray::app::router::command::AddRuleRequest {
+        config: Some(to_typed_message(TYPE_ROUTING_CONFIG, &config)),
+        should_append: true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -496,6 +847,23 @@ mod tests {
         assert_eq!(tm.r#type, TYPE_REMOVE_USER_OPERATION);
         let decoded: xray::app::proxyman::command::RemoveUserOperation = decode_typed(&tm);
         assert_eq!(decoded.email, "m:u1::e1");
+    }
+
+    #[test]
+    fn reverse_route_requests_wrap_rules_in_router_config() {
+        let request =
+            build_reverse_route_rule("rule", "portal", "rvs-test.mesh.invalid:443", "freedom");
+        let typed = request.config.expect("routing config");
+        assert_eq!(typed.r#type, TYPE_ROUTING_CONFIG);
+        let config: xray::app::router::Config = decode_typed(&typed);
+        assert_eq!(config.rule.len(), 1);
+        assert_eq!(config.rule[0].rule_tag, "rule");
+        assert_eq!(config.rule[0].domain[0].value, "rvs-test.mesh.invalid");
+        assert_eq!(
+            config.rule[0].port_list.as_ref().unwrap().range[0].from,
+            443
+        );
+        assert_eq!(config.rule[0].inbound_tag, vec!["portal".to_string()]);
     }
 
     #[test]

@@ -38,9 +38,16 @@
   rollback is unsupported.
 - Cluster history repositories persist their replica state in `${XP_DATA_DIR}/history.sqlite3` on
   each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
-  sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then an
-  in-memory dynamic relay only after both fail. No static Mesh proxy environment or compatibility
-  path exists.
+  sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then the
+  Raft-assigned Reality Mesh Reverse relay, and only then the in-memory encrypted dynamic relay.
+  Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
+  not add a public listener. No static Mesh proxy environment or compatibility path exists.
+- Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
+  `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
+  listener. Fresh joins may carry a short-lived public-only `reverse_mesh_bootstrap` marker, but
+  learner catch-up and log-index promotion remain authoritative. If container-side Xray restart
+  recovery cannot complete after tombstone overflow, Reverse stays disabled until an operator
+  restarts the container; Direct/Public and membership remain available.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.

@@ -2,7 +2,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     net::SocketAddr,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -19,6 +22,7 @@ use crate::{
     credentials,
     domain::{Endpoint, EndpointKind, User},
     protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
+    reverse_mesh_runtime::{ReverseXrayDesired, ReverseXrayReconciler, build_reverse_desired},
     state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
     xray,
     xray::builder,
@@ -42,6 +46,7 @@ pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
+    ResetReverseTombstones,
     RemoveInbound { tag: String },
     RemoveUser { tag: String, email: String },
     RebuildInbound { endpoint_id: String },
@@ -50,6 +55,7 @@ pub enum ReconcileRequest {
 #[derive(Debug, Default)]
 struct PendingBatch {
     full: bool,
+    reset_reverse_tombstones: bool,
     remove_inbounds: BTreeSet<String>,
     remove_users: BTreeSet<(String, String)>,
     rebuild_inbounds: BTreeSet<String>,
@@ -58,6 +64,7 @@ struct PendingBatch {
 impl PendingBatch {
     fn has_any(&self) -> bool {
         self.full
+            || self.reset_reverse_tombstones
             || !self.remove_inbounds.is_empty()
             || !self.remove_users.is_empty()
             || !self.rebuild_inbounds.is_empty()
@@ -70,6 +77,7 @@ impl PendingBatch {
     fn add(&mut self, req: ReconcileRequest) {
         match req {
             ReconcileRequest::Full => self.full = true,
+            ReconcileRequest::ResetReverseTombstones => self.reset_reverse_tombstones = true,
             ReconcileRequest::RemoveInbound { tag } => {
                 self.remove_inbounds.insert(tag);
             }
@@ -86,16 +94,35 @@ impl PendingBatch {
 #[derive(Debug, Clone)]
 pub struct ReconcileHandle {
     tx: Option<mpsc::UnboundedSender<ReconcileRequest>>,
+    restart_requested: Arc<AtomicBool>,
+    reverse_enabled: Arc<AtomicBool>,
+    reverse_supervisor_enabled: Arc<AtomicBool>,
+    reverse_runtime_ready: Arc<AtomicBool>,
+    reverse_recovery_required: Arc<AtomicBool>,
 }
 
 impl ReconcileHandle {
     pub fn noop() -> Self {
-        Self { tx: None }
+        Self {
+            tx: None,
+            restart_requested: Arc::new(AtomicBool::new(false)),
+            reverse_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
+            reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
-        Self { tx: Some(tx) }
+        Self {
+            tx: Some(tx),
+            restart_requested: Arc::new(AtomicBool::new(false)),
+            reverse_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
+            reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub fn request(&self, req: ReconcileRequest) {
@@ -106,6 +133,46 @@ impl ReconcileHandle {
 
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
+    }
+    pub(crate) fn request_reverse_restart_recovery(&self) {
+        self.reverse_recovery_required
+            .store(false, Ordering::Release);
+        self.refresh_reverse_gate();
+        self.request(ReconcileRequest::ResetReverseTombstones);
+        self.request(ReconcileRequest::Full);
+    }
+    pub(crate) fn request_xray_restart(&self) {
+        self.reverse_recovery_required
+            .store(true, Ordering::Release);
+        self.reverse_runtime_ready.store(false, Ordering::Release);
+        self.refresh_reverse_gate();
+        self.restart_requested.store(true, Ordering::Release);
+    }
+    pub(crate) fn take_xray_restart_request(&self) -> bool {
+        self.restart_requested.swap(false, Ordering::AcqRel)
+    }
+
+    pub fn reverse_gate(&self) -> Arc<AtomicBool> {
+        self.reverse_enabled.clone()
+    }
+    pub(crate) fn set_reverse_enabled(&self, enabled: bool) {
+        self.reverse_supervisor_enabled
+            .store(enabled, Ordering::Release);
+        self.reverse_runtime_ready
+            .fetch_and(enabled, Ordering::AcqRel);
+        self.refresh_reverse_gate();
+    }
+
+    pub(crate) fn set_reverse_runtime_ready(&self, ready: bool) {
+        self.reverse_runtime_ready.store(ready, Ordering::Release);
+        self.refresh_reverse_gate();
+    }
+
+    fn refresh_reverse_gate(&self) {
+        let enabled = self.reverse_supervisor_enabled.load(Ordering::Acquire)
+            && self.reverse_runtime_ready.load(Ordering::Acquire)
+            && !self.reverse_recovery_required.load(Ordering::Acquire);
+        self.reverse_enabled.store(enabled, Ordering::Release);
     }
 
     pub fn request_remove_inbound(&self, tag: impl Into<String>) {
@@ -231,7 +298,15 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
     options: ReconcilerOptions<R>,
 ) -> ReconcileHandle {
     let (tx, rx) = mpsc::unbounded_channel();
-    let handle = ReconcileHandle { tx: Some(tx) };
+    let handle = ReconcileHandle {
+        tx: Some(tx),
+        restart_requested: Arc::new(AtomicBool::new(false)),
+        reverse_enabled: Arc::new(AtomicBool::new(false)),
+        reverse_supervisor_enabled: Arc::new(AtomicBool::new(false)),
+        reverse_runtime_ready: Arc::new(AtomicBool::new(false)),
+        reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+    };
+    let restart_handle = handle.clone();
 
     tokio::spawn(reconciler_task(
         config,
@@ -239,6 +314,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         cluster_ca_key_pem,
         rx,
         options,
+        restart_handle,
     ));
 
     handle
@@ -250,6 +326,7 @@ async fn reconciler_task<R: RngCore>(
     cluster_ca_key_pem: String,
     mut rx: mpsc::UnboundedReceiver<ReconcileRequest>,
     options: ReconcilerOptions<R>,
+    restart_handle: ReconcileHandle,
 ) {
     let mut pending = PendingBatch {
         full: true,
@@ -259,6 +336,7 @@ async fn reconciler_task<R: RngCore>(
     let mut backoff_until: Option<Instant> = None;
     let mut backoff = BackoffState::new(options.backoff, options.rng);
     let mut last_applied_hash_by_endpoint_id = BTreeMap::<String, String>::new();
+    let mut reverse_reconciler = ReverseXrayReconciler::default();
 
     let mut periodic = tokio::time::interval_at(
         Instant::now() + options.periodic_full,
@@ -296,15 +374,18 @@ async fn reconciler_task<R: RngCore>(
                 }
             }, if run_at.is_some() => {
                 debounce_until = None;
-                if let Err(err) = reconcile_once(
+                if let Err(err) = reconcile_once_with_runtime(
                     &config,
                     &store,
                     &pending,
                     &mut last_applied_hash_by_endpoint_id,
                     &cluster_ca_key_pem,
+                    &mut reverse_reconciler,
+                    &restart_handle,
                 )
                 .await
                 {
+                    restart_handle.set_reverse_runtime_ready(false);
                     let delay = backoff.next_delay();
                     debug!(?err, ?delay, "reconcile connect failed; backing off");
                     backoff_until = Some(Instant::now() + delay);
@@ -321,7 +402,12 @@ async fn reconciler_task<R: RngCore>(
 
 #[derive(Debug)]
 struct Snapshot {
+    nodes: Vec<crate::domain::Node>,
     endpoints: Vec<Endpoint>,
+    reverse_mesh_epoch: u64,
+    reverse_mesh_assignments: BTreeMap<String, crate::reverse_mesh::ReverseMeshAssignment>,
+    reverse_mesh_bootstrap: Option<crate::reverse_mesh::ReverseMeshBootstrapMarker>,
+    reverse_mesh_bootstrap_target: Option<String>,
     memberships: Vec<NodeUserEndpointMembership>,
     users_by_id: BTreeMap<String, User>,
     quota_banned_membership_keys: BTreeSet<String>,
@@ -337,6 +423,7 @@ struct ReconcileOutcome {
     rebuilt_inbounds: BTreeSet<String>,
     credential_epochs_applied: BTreeMap<String, u32>,
     endpoint_users_applied: BTreeMap<String, BTreeSet<String>>,
+    reverse_restart_required: bool,
 }
 
 fn endpoint_kind_key(kind: &EndpointKind) -> &'static str {
@@ -375,6 +462,9 @@ fn desired_inbound_hash(endpoint: &Endpoint) -> Option<String> {
     Some(hex::encode(hasher.finalize()))
 }
 
+// The test-only wrapper keeps the existing reconciliation fixture contract while production
+// passes the long-lived reverse Xray reconciler and restart signal.
+#[cfg(test)]
 async fn reconcile_once(
     config: &Arc<Config>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -382,6 +472,32 @@ async fn reconcile_once(
     last_applied_hash_by_endpoint_id: &mut BTreeMap<String, String>,
     cluster_ca_key_pem: &str,
 ) -> Result<(), xray::XrayError> {
+    let mut reverse_reconciler = ReverseXrayReconciler::default();
+    let restart_handle = ReconcileHandle::noop();
+    reconcile_once_with_runtime(
+        config,
+        store,
+        pending,
+        last_applied_hash_by_endpoint_id,
+        cluster_ca_key_pem,
+        &mut reverse_reconciler,
+        &restart_handle,
+    )
+    .await
+}
+
+async fn reconcile_once_with_runtime(
+    config: &Arc<Config>,
+    store: &Arc<Mutex<JsonSnapshotStore>>,
+    pending: &PendingBatch,
+    last_applied_hash_by_endpoint_id: &mut BTreeMap<String, String>,
+    cluster_ca_key_pem: &str,
+    reverse_reconciler: &mut ReverseXrayReconciler,
+    restart_handle: &ReconcileHandle,
+) -> Result<(), xray::XrayError> {
+    if pending.reset_reverse_tombstones {
+        reverse_reconciler.reset_after_restart();
+    }
     let (
         local_node_id,
         local_endpoint_ids,
@@ -398,7 +514,30 @@ async fn reconcile_once(
             );
             return Ok(());
         };
+        let nodes = store.list_nodes();
         let endpoints = store.list_endpoints();
+        let reverse_mesh_epoch = store.state().reverse_mesh_epoch;
+        let reverse_mesh_assignments = store.state().reverse_mesh_assignments.clone();
+        let reverse_mesh_bootstrap_target = store
+            .state()
+            .active_membership_operation()
+            .filter(|operation| {
+                operation.kind == crate::state::MembershipOperationKind::Join
+                    && !operation.phase.is_terminal()
+            })
+            .and_then(|operation| operation.node_id.clone())
+            .filter(|target| reverse_mesh_assignments.contains_key(target));
+        let reverse_mesh_bootstrap = crate::raft::http_rpc::read_bootstrap_sender_marker(
+            config
+                .data_dir
+                .join("cluster")
+                .join("raft_bootstrap_sender"),
+        )
+        .and_then(|marker| marker.reverse_mesh)
+        .filter(|marker| {
+            reverse_mesh_bootstrap_target.as_deref() == Some(marker.target_node_id.as_str())
+                || reverse_mesh_epoch == 0
+        });
         let local_endpoint_ids = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -462,7 +601,12 @@ async fn reconcile_once(
             local_node_id,
             local_endpoint_ids,
             Snapshot {
+                nodes,
                 endpoints,
+                reverse_mesh_epoch,
+                reverse_mesh_assignments,
+                reverse_mesh_bootstrap,
+                reverse_mesh_bootstrap_target,
                 memberships,
                 users_by_id,
                 quota_banned_membership_keys,
@@ -513,8 +657,18 @@ async fn reconcile_once(
         snapshot,
         pending,
         &forced_rebuild_inbounds,
+        reverse_reconciler,
+        restart_handle,
+        config.bind.port(),
     )
     .await;
+
+    if outcome
+        .as_ref()
+        .is_ok_and(|outcome| outcome.reverse_restart_required)
+    {
+        restart_handle.request_xray_restart();
+    }
 
     if let Ok(outcome) = &outcome {
         // Only advance the hash cache when we are confident the inbound was rebuilt. This ensures
@@ -620,6 +774,7 @@ async fn reconcile_once(
     outcome.map(|_o| ())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn reconcile_snapshot(
     xray_api_addr: SocketAddr,
     cluster_ca_key_pem: &str,
@@ -627,13 +782,21 @@ async fn reconcile_snapshot(
     snapshot: Snapshot,
     pending: &PendingBatch,
     forced_rebuild_inbounds: &BTreeSet<String>,
+    reverse_reconciler: &mut ReverseXrayReconciler,
+    restart_handle: &ReconcileHandle,
+    local_xp_port: u16,
 ) -> Result<ReconcileOutcome, xray::XrayError> {
     use crate::xray::proto::xray::app::proxyman::command::{
         AlterInboundRequest, RemoveInboundRequest,
     };
 
     let Snapshot {
+        nodes,
         endpoints,
+        reverse_mesh_epoch,
+        reverse_mesh_assignments,
+        reverse_mesh_bootstrap,
+        reverse_mesh_bootstrap_target,
         memberships,
         users_by_id,
         quota_banned_membership_keys,
@@ -688,15 +851,55 @@ async fn reconcile_snapshot(
             Some(e) => e.node_id == local_node_id,
         });
 
+    let reverse_desired = build_reverse_desired(
+        local_node_id,
+        cluster_ca_key_pem,
+        reverse_mesh_epoch,
+        &reverse_mesh_assignments,
+        &nodes,
+        &endpoints_by_id.values().cloned().collect::<Vec<_>>(),
+        local_xp_port,
+        reverse_mesh_bootstrap.as_ref(),
+        reverse_mesh_bootstrap_target.as_deref(),
+    )
+    .unwrap_or_else(|error| {
+        warn!(%error, "failed to build reverse Xray desired state; keeping Direct/Public only");
+        ReverseXrayDesired::default()
+    });
+    let has_reverse_desired = reverse_desired.portal.is_some()
+        || !reverse_desired.outbound_requests.is_empty()
+        || !reverse_desired.inbound_user_operations.is_empty();
+
     if !(has_local_endpoints
         || has_local_rebuilds
         || has_local_remove_inbounds
-        || has_local_remove_users)
+        || has_local_remove_users
+        || has_reverse_desired
+        || reverse_reconciler.has_managed_state())
     {
         return Ok(ReconcileOutcome::default());
     }
 
     let mut client = xray::connect(xray_api_addr).await?;
+    let mut reverse_restart_required = false;
+
+    match reverse_reconciler
+        .reconcile(&mut client, &reverse_desired)
+        .await
+    {
+        Ok(crate::reverse_mesh_runtime::ReverseReconcileStatus::RestartRequired) => {
+            restart_handle.set_reverse_runtime_ready(false);
+            warn!(
+                "reverse Xray tombstone limit reached; controlled supervisor restart is required"
+            );
+            reverse_restart_required = true;
+        }
+        Ok(_) => restart_handle.set_reverse_runtime_ready(true),
+        Err(status) => {
+            restart_handle.set_reverse_runtime_ready(false);
+            warn!(%status, "reverse Xray reconciliation failed; keeping Direct/Public available")
+        }
+    }
 
     let mut refresh_user_ok: BTreeMap<String, bool> = users_needing_credential_refresh
         .keys()
@@ -919,6 +1122,7 @@ async fn reconcile_snapshot(
         rebuilt_inbounds: rebuilt_ok,
         credential_epochs_applied,
         endpoint_users_applied: next_endpoint_users_applied,
+        reverse_restart_required,
     })
 }
 

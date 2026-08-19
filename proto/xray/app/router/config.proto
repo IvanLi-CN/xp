@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package xray.app.router;
+option csharp_namespace = "Xray.App.Router";
+option go_package = "github.com/xtls/xray-core/app/router";
+option java_package = "com.xray.app.router";
+option java_multiple_files = true;
+
+import "common/net/network.proto";
+import "common/net/port.proto";
+
+message Domain {
+  enum Type {
+    Plain = 0;
+    Regex = 1;
+    Domain = 2;
+    Full = 3;
+  }
+  Type type = 1;
+  string value = 2;
+}
+
+message CIDR {
+  bytes ip = 1;
+  uint32 prefix = 2;
+}
+
+message RoutingRule {
+  oneof target_tag {
+    string tag = 1;
+    string balancing_tag = 12;
+  }
+  string rule_tag = 19;
+  repeated Domain domain = 2;
+  repeated CIDR ip = 3;
+  xray.common.net.PortList port_list = 14;
+  repeated xray.common.net.Network networks = 13;
+  repeated string inbound_tag = 8;
+  repeated string protocol = 9;
+}
+
+message BalancingRule {}
+
+message Config {
+  enum DomainStrategy {
+    AsIs = 0;
+    IpIfNonMatch = 2;
+    IpOnDemand = 3;
+  }
+  DomainStrategy domain_strategy = 1;
+  repeated RoutingRule rule = 2;
+  repeated BalancingRule balancing_rule = 3;
+}

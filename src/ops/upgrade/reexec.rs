@@ -254,6 +254,7 @@ fn restore_transaction_backup(snapshot: &TransactionBackupSnapshot) -> std::io::
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
         ensure_runner_status_writable, finish_upgrade_runner_status_for_runner,

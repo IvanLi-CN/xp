@@ -56,12 +56,21 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. Repository synchronization may use a separate in-memory dynamic relay only after both direct paths fail.
+- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous, control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only, password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener. Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-relay order.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
   `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
   no static Mesh proxy environment, listener or compatibility path.
+- Fresh joins may receive an additive `reverse_mesh_bootstrap` response and 0600 bootstrap marker
+  after the voter capability barrier. The marker contains only public Rendezvous endpoint
+  parameters, assignment generation and epoch; it never replaces learner catch-up or log-index
+  promotion. When the barrier or candidate readiness is unavailable, the join remains on
+  Direct/Public bootstrap.
+- Reverse tombstone overflow is fail-closed. systemd/OpenRC nodes use the controlled Xray restart
+  path; a single-image container without a successful child-process restart keeps Reverse disabled
+  until the operator restarts the container and XP completes reconciliation. Direct/Public and
+  membership lifecycle remain available during that intervention.
 - Nodes exposes the same repository status and a membership editor. The editor selects existing
   cluster nodes; `PUT /api/admin/history-repositories` accepts only `node_ids` and derives pinned
   repository identities server-side. Lifecycle, convergence and capacity remain worker-owned. A
@@ -358,6 +367,10 @@ Container-specific note:
   running container or its data volume by hand.
 - `xp` still reports `xray` health through `GET /api/health`.
 - `cloudflared` is intentionally started outside `xp`'s built-in runtime supervisor, so the Web runtime pages treat `cloudflared` as disabled in container mode.
+- If the Reverse Xray reconciler reaches its two-tombstone limit and the child restart does not
+  complete, Reverse remains disabled by design. Restart the Compose container from the host, then
+  wait for the normal XP/Xray readiness and reconciliation checks; Direct/Public and membership
+  lifecycle stay available while Reverse is disabled.
 
 ## `xp-ops mihomo redact` (subscription/config sanitization)
 

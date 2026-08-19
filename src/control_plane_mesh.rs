@@ -1,10 +1,11 @@
 use std::{
     collections::BTreeMap,
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     domain::{Endpoint, Node},
@@ -15,8 +16,10 @@ use crate::{
         MeshTelemetrySample, MeshTransportObservation, MeshTransportProtocol, TelemetryPath,
     },
     protocol::validate_reality_server_name,
+    reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
+mod reverse;
 mod transport;
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
@@ -129,6 +132,28 @@ pub struct MeshPeerTarget {
     pub mesh_reason: MeshPeerReason,
     pub public_base_url: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct ReverseRelayRoute {
+    pub rendezvous: MeshPeerTarget,
+    pub standby_rendezvous: Option<MeshPeerTarget>,
+    pub assignment: ReverseMeshAssignment,
+    pub role: ReverseRole,
+}
+
+impl ReverseRelayRoute {
+    fn candidates(&self) -> Vec<Self> {
+        let mut routes = vec![self.clone()];
+        if let Some(rendezvous) = self.standby_rendezvous.clone() {
+            let mut standby = self.clone();
+            standby.rendezvous = rendezvous;
+            standby.standby_rendezvous = None;
+            standby.role = ReverseRole::Standby;
+            routes.push(standby);
+        }
+        routes
+    }
+}
 pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTarget {
     let access_host = node.access_host.trim().trim_end_matches('.');
     let managed = endpoints
@@ -191,6 +216,7 @@ pub enum MeshRequestError {
     Auth(internal_auth::AuthError),
     OutcomeUnknown,
     Protocol(String),
+    Reverse(String),
     Public(reqwest::Error),
 }
 impl From<internal_auth::AuthError> for MeshRequestError {
@@ -207,6 +233,7 @@ impl std::fmt::Display for MeshRequestError {
                 f.write_str("Mesh request outcome is unknown; it may already have been applied")
             }
             Self::Protocol(value) => write!(f, "Mesh protocol error: {value}"),
+            Self::Reverse(value) => write!(f, "reverse relay failed: {value}"),
             Self::Public(value) => write!(f, "public fallback failed: {value}"),
         }
     }
@@ -226,6 +253,9 @@ pub struct MeshAwareHttpClient {
     public_direct: reqwest::Client,
     circuits: PeerCircuitBreakers,
     telemetry: Option<MeshTelemetryHandle>,
+    reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
+    reverse_enabled: Arc<AtomicBool>,
+    local_reverse_relay: Option<reverse::LocalReverseRelay>,
 }
 
 impl MeshAwareHttpClient {
@@ -239,6 +269,9 @@ impl MeshAwareHttpClient {
             public_direct,
             circuits: PeerCircuitBreakers::default(),
             telemetry: None,
+            reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
+            reverse_enabled: Arc::new(AtomicBool::new(true)),
+            local_reverse_relay: None,
         }
     }
 
@@ -258,6 +291,31 @@ impl MeshAwareHttpClient {
 
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
+    }
+
+    pub fn with_reverse_routes(mut self, routes: BTreeMap<String, ReverseRelayRoute>) -> Self {
+        self.reverse_routes = Arc::new(RwLock::new(routes));
+        self
+    }
+
+    pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.reverse_enabled = gate;
+        self
+    }
+
+    pub async fn set_reverse_route(
+        &self,
+        target_node_id: impl Into<String>,
+        route: ReverseRelayRoute,
+    ) {
+        self.reverse_routes
+            .write()
+            .await
+            .insert(target_node_id.into(), route);
+    }
+
+    pub async fn clear_reverse_route(&self, target_node_id: &str) {
+        self.reverse_routes.write().await.remove(target_node_id);
     }
 
     /// Sends over exactly one peer-direct transport. It never uses a configured proxy.
@@ -519,6 +577,53 @@ impl MeshAwareHttpClient {
             }
         }
 
+        let should_try_reverse = !request.path_and_query.contains("/mesh/reverse-relay")
+            && (mesh_outcome_ambiguous
+                || !mesh_enabled
+                || matches!(decision, MeshAttemptDecision::SkipOpen));
+        if self.reverse_enabled.load(Ordering::Acquire)
+            && should_try_reverse
+            && (request.allow_ambiguous_fallback || !mesh_outcome_ambiguous)
+            && let Some(reverse_route) =
+                self.reverse_routes.read().await.get(&peer.node_id).cloned()
+        {
+            for candidate in reverse_route.candidates() {
+                let elapsed = started.elapsed();
+                let reverse_budget = route_budget(request.total_budget)
+                    .min(request.total_budget.saturating_sub(elapsed));
+                if reverse_budget.is_zero() {
+                    break;
+                }
+                match self
+                    .send_reverse_relay(
+                        peer,
+                        &candidate,
+                        &request,
+                        cluster_ca_key_pem,
+                        cluster_ca_cert_pem,
+                        reverse_budget,
+                    )
+                    .await
+                {
+                    Ok(response) => {
+                        self.record_reverse_sample(peer, started, &request, &candidate)
+                            .await;
+                        return Ok(PeerRequestResponse::Verified(response));
+                    }
+                    Err(error) => {
+                        tracing::debug!(
+                            peer_id = %peer.node_id,
+                            rendezvous = %candidate.rendezvous.node_id,
+                            role = ?candidate.role,
+                            ?error,
+                            "reverse relay attempt failed"
+                        );
+                        mesh_outcome_ambiguous = true;
+                    }
+                }
+            }
+        }
+
         if !allow_public_fallback {
             self.record_terminal_failure(peer).await;
             return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
@@ -662,6 +767,218 @@ impl MeshAwareHttpClient {
         Ok(response)
     }
 
+    async fn send_reverse_relay(
+        &self,
+        peer: &MeshPeerTarget,
+        route: &ReverseRelayRoute,
+        request: &MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+        budget: Duration,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        if route.assignment.target_node_id != peer.node_id
+            || !route
+                .assignment
+                .contains_rendezvous(&route.rendezvous.node_id)
+            || route.rendezvous.node_id == peer.node_id
+            || request.path_and_query.contains("/mesh/reverse-relay")
+        {
+            return Err(MeshRequestError::Reverse(
+                "invalid reverse assignment or recursive route".to_string(),
+            ));
+        }
+        request
+            .path_and_query
+            .parse::<axum::http::Uri>()
+            .map_err(|error| MeshRequestError::InvalidTarget(error.to_string()))?;
+        let inner_context = RequestContext::now(
+            request.route,
+            request.cluster_id.clone(),
+            request.sender_id.clone(),
+            peer.node_id.clone(),
+            request.request_id.clone(),
+        );
+        let (inner_headers, inner_verified) = signed_headers(
+            request,
+            &inner_context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+        );
+        let inner_signature = inner_headers
+            .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| MeshRequestError::Reverse("inner signature is missing".to_string()))?;
+        let mut envelope = ReverseRelayEnvelope {
+            version: String::new(),
+            assignment_generation: route.assignment.generation,
+            target_node_id: peer.node_id.clone(),
+            method: request.method.as_str().to_string(),
+            uri: request.path_and_query.clone(),
+            content_type: request.content_type.clone().unwrap_or_default(),
+            route: request.route.as_str().to_string(),
+            sender_node_id: request.sender_id.clone(),
+            request_id: request.request_id.clone(),
+            issued_at: inner_context.issued_at,
+            content_length: request.body.len(),
+            inner_signature: inner_signature.to_string(),
+            outer_signature: String::new(),
+        };
+        envelope.sign(cluster_ca_key_pem);
+
+        let outer_request = MeshRequest {
+            method: reqwest::Method::POST,
+            path_and_query: "/api/admin/_internal/mesh/reverse-relay".to_string(),
+            content_type: Some("application/octet-stream".to_string()),
+            body: request.body.clone(),
+            total_budget: budget,
+            allow_ambiguous_fallback: request.allow_ambiguous_fallback,
+            request_id: request.request_id.clone(),
+            route: InternalRoute::MeshV2,
+            cluster_id: request.cluster_id.clone(),
+            sender_id: request.sender_id.clone(),
+            updates_active_path: false,
+        };
+        let outer_context = RequestContext::now(
+            InternalRoute::MeshV2,
+            request.cluster_id.clone(),
+            request.sender_id.clone(),
+            route.rendezvous.node_id.clone(),
+            request.request_id.clone(),
+        );
+        let (mut outer_headers, outer_verified) = signed_headers(
+            &outer_request,
+            &outer_context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+        );
+        envelope
+            .insert_headers(&mut outer_headers)
+            .map_err(|error| MeshRequestError::Reverse(error.to_string()))?;
+        let outer_started = Instant::now();
+        let local_rendezvous = self
+            .local_reverse_relay
+            .as_ref()
+            .filter(|local| local.node_id == route.rendezvous.node_id);
+        let mut response = None;
+        if let Some(local) = local_rendezvous {
+            let local_url = join_url(&local.base_url, &outer_request.path_and_query)?;
+            response = Some(
+                reverse::send_outer_request(
+                    &self.public_direct,
+                    &outer_request,
+                    &local_url,
+                    &outer_headers,
+                    budget,
+                    request.allow_ambiguous_fallback,
+                )
+                .await?,
+            );
+        } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
+            let mesh_budget = mesh_attempt_budget(budget).min(budget);
+            let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query)?;
+            match reverse::send_outer_request(
+                &self.mesh,
+                &outer_request,
+                &mesh_url,
+                &outer_headers,
+                mesh_budget,
+                request.allow_ambiguous_fallback,
+            )
+            .await
+            {
+                Ok(mesh_response) => response = Some(mesh_response),
+                Err(MeshRequestError::OutcomeUnknown) => {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Err(MeshRequestError::Public(_)) if !request.allow_ambiguous_fallback => {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Err(_) => {}
+            }
+        }
+        let response = match response {
+            Some(response) => response,
+            None => {
+                let remaining = budget.saturating_sub(outer_started.elapsed());
+                if remaining.is_zero() {
+                    return Err(MeshRequestError::OutcomeUnknown);
+                }
+                let outer_url = join_url(
+                    &route.rendezvous.public_base_url,
+                    &outer_request.path_and_query,
+                )?;
+                reverse::send_outer_request(
+                    &self.public_direct,
+                    &outer_request,
+                    &outer_url,
+                    &outer_headers,
+                    remaining,
+                    request.allow_ambiguous_fallback,
+                )
+                .await?
+            }
+        };
+        let outer_ack = response
+            .headers()
+            .get(internal_auth::INTERNAL_ACK_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| {
+                MeshRequestError::Reverse("outer acknowledgement is missing".to_string())
+            })?;
+        internal_auth::verify_ack_v2(
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            &outer_verified,
+            &route.rendezvous.node_id,
+            response.status().as_u16(),
+            outer_ack,
+        )?;
+        let inner_ack = response
+            .headers()
+            .get(crate::reverse_mesh::RELAY_INNER_ACK_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| {
+                MeshRequestError::Reverse("inner acknowledgement is missing".to_string())
+            })?;
+        internal_auth::verify_ack_v2(
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            &inner_verified,
+            &peer.node_id,
+            response.status().as_u16(),
+            inner_ack,
+        )?;
+        Ok(response)
+    }
+    async fn record_reverse_sample(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        route: &ReverseRelayRoute,
+    ) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
+                    peer_id: peer.node_id.clone(),
+                    peer_name: peer.node_name.clone(),
+                    rendezvous: route.rendezvous.node_id.clone(),
+                    rendezvous_role: route.role.as_str().to_string(),
+                    primary_rendezvous: route.assignment.primary_node_id.clone(),
+                    standby_rendezvous: route.assignment.standby_node_id.clone(),
+                    generation: route.assignment.generation,
+                    sample: telemetry_sample(
+                        TelemetryPath::Mesh,
+                        true,
+                        started.elapsed(),
+                        true,
+                        request.updates_active_path,
+                        None,
+                    ),
+                })
+                .await;
+        }
+    }
     async fn record_mesh_transport_failure(
         &self,
         peer: &MeshPeerTarget,
@@ -697,7 +1014,6 @@ impl MeshAwareHttpClient {
                 .await;
         }
     }
-
     async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
         self.record_sample(
             peer,
@@ -820,6 +1136,24 @@ async fn signed_send(
     cluster_ca_key_pem: &str,
     cluster_ca_cert_pem: &str,
 ) -> Result<(reqwest::Response, internal_auth::VerifiedRequest), reqwest::Error> {
+    let (headers, verified) =
+        signed_headers(request, context, cluster_ca_key_pem, cluster_ca_cert_pem);
+    let mut builder = client
+        .request(request.method.clone(), url)
+        .body(request.body.clone());
+    for (name, value) in &headers {
+        builder = builder.header(name, value);
+    }
+    let response = builder.send().await?;
+    Ok((response, verified))
+}
+
+fn signed_headers(
+    request: &MeshRequest,
+    context: &RequestContext,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+) -> (axum::http::HeaderMap, internal_auth::VerifiedRequest) {
     let uri = request
         .path_and_query
         .parse::<axum::http::Uri>()
@@ -863,14 +1197,7 @@ async fn signed_send(
         &context.target_id,
     )
     .expect("locally signed internal request verifies");
-    let mut builder = client
-        .request(request.method.clone(), url)
-        .body(request.body.clone());
-    for (name, value) in &headers {
-        builder = builder.header(name, value);
-    }
-    let response = builder.send().await?;
-    Ok((response, verified))
+    (headers, verified)
 }
 #[cfg(test)]
 mod peer_target_tests;

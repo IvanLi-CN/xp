@@ -128,6 +128,12 @@ async function openSystemStatus(page: import("@playwright/test").Page) {
 	).toBeVisible();
 }
 
+function healthyTransportLine(page: import("@playwright/test").Page) {
+	return page
+		.locator("[data-peer-route-line]:visible")
+		.filter({ hasText: /^H2 · 65 req · gen 4$/ });
+}
+
 test("keeps peer row actions inside the real AppShell content column", async ({
 	page,
 }) => {
@@ -137,9 +143,7 @@ test("keeps peer row actions inside the real AppShell content column", async ({
 	await expect(page.locator("[data-peer-row]")).toHaveCount(
 		meshStatus.peers.length,
 	);
-	await expect(
-		page.locator('[data-mesh-transport="healthy"]:visible'),
-	).toContainText("H2 · 65 req / 1 starts · gen 4");
+	await expect(healthyTransportLine(page)).toHaveText("H2 · 65 req · gen 4");
 
 	const bounds = await page.evaluate(() => {
 		const panel = document.querySelector<HTMLElement>("main.xp-panel");
@@ -196,9 +200,7 @@ test("keeps the stacked mobile peer actions free of horizontal overflow", async 
 	await expect(
 		page.getByRole("link", { name: "Details" }).first(),
 	).toBeVisible();
-	await expect(
-		page.locator('[data-mesh-transport="healthy"]:visible'),
-	).toContainText("H2 · 65 req / 1 starts · gen 4");
+	await expect(healthyTransportLine(page)).toHaveText("H2 · 65 req · gen 4");
 	const viewport = await page.evaluate(() => ({
 		clientWidth: document.documentElement.clientWidth,
 		scrollWidth: document.documentElement.scrollWidth,

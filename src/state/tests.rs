@@ -14,6 +14,7 @@ use crate::{
     protocol::{
         RealityConfig, RealityKeys, RealityServerNamesSource, VlessRealityVisionTcpEndpointMeta,
     },
+    reverse_mesh::ReverseMeshAssignment,
 };
 
 mod legacy_smux;
@@ -2430,3 +2431,4 @@ fn desired_state_apply_set_geo_db_update_settings_is_noop() {
 }
 
 mod endpoint_meta;
+mod reverse_assignment;

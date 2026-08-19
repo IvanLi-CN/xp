@@ -47,6 +47,20 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.buckets[0]?.mesh_connection_starts).toBe(0);
 	});
 
+	it("accepts a persisted reverse route without new assignment fields", () => {
+		const parsed = AdminMeshPeerSchema.parse({
+			...peerFixture(),
+			active_route: {
+				kind: "reverse_relay",
+				rendezvous: "node-rendezvous-a",
+				generation: fixtureCatalog.number.value7(),
+				readiness: "active",
+			},
+		});
+
+		expect(parsed.active_route?.rendezvous_role).toBeUndefined();
+	});
+
 	it("parses bounded Mesh transport reuse evidence", () => {
 		const parsed = AdminMeshPeerSchema.parse({
 			...peerFixture(),
@@ -66,4 +80,24 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.mesh_transport?.protocol).toBe("h2");
 		expect(parsed.mesh_transport?.connection_starts_5m).toBe(1);
 	});
+
+	it.each(["primary", "standby", "bootstrap"] as const)(
+		"accepts the %s reverse rendezvous role",
+		(rendezvous_role) => {
+			const parsed = AdminMeshPeerSchema.parse({
+				...peerFixture(),
+				active_route: {
+					kind: "reverse_relay",
+					rendezvous: "node-rendezvous-a",
+					rendezvous_role,
+					primary_rendezvous: "node-rendezvous-a",
+					standby_rendezvous: "node-rendezvous-b",
+					generation: fixtureCatalog.number.value7(),
+					readiness: "active",
+				},
+			});
+
+			expect(parsed.active_route?.rendezvous_role).toBe(rendezvous_role);
+		},
+	);
 });

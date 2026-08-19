@@ -1,13 +1,25 @@
 use std::collections::BTreeMap;
 
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub(super) struct ApiCapabilitiesResponse {
     release_tag: String,
     capabilities: Vec<&'static str>,
     fingerprint: BTreeMap<&'static str, Vec<&'static str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) reverse_mesh: Option<ReverseMeshReadiness>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(super) struct ReverseMeshReadiness {
+    pub xray_ready: bool,
+    pub managed_vless_endpoint: bool,
+    #[serde(default)]
+    pub reverse_ready: bool,
+    #[serde(default)]
+    pub health_verified: bool,
 }
 
 pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
@@ -46,6 +58,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.upgrade",
             "admin.mesh",
             "admin.mesh-transport-reuse",
+            "admin.mesh-reverse-relay-v1",
             "admin.reality-domains",
             "admin.node-probes",
             "admin.traffic-usage",
@@ -53,8 +66,10 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.mihomo-resource-policy",
             "cluster.join.staged-v1",
             "cluster.membership-lifecycle-v1",
+            "cluster.mesh-reverse-assignment-v1",
         ],
         fingerprint,
+        reverse_mesh: None,
     })
 }
 
@@ -96,6 +111,16 @@ mod tests {
             response
                 .capabilities
                 .contains(&"admin.mesh-transport-reuse")
+        );
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.mesh-reverse-relay-v1")
+        );
+        assert!(
+            response
+                .capabilities
+                .contains(&"cluster.mesh-reverse-assignment-v1")
         );
         assert_eq!(response.fingerprint["/api/health"], vec!["status"]);
     }

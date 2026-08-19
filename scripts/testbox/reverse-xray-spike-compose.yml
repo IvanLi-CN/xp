@@ -1,0 +1,24 @@
+services:
+  rendezvous:
+    # Xray 26.3.27, source commit d2758a023cd7f4174a5a5fa4ff66e487d4342ba0.
+    image: ghcr.io/xtls/xray-core@sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
+    command: ["run", "-c", "/etc/xray/rendezvous.json"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${REVERSE_SPIKE_RVS_API_PORT:-10085}:10085"
+      - "127.0.0.1:${REVERSE_SPIKE_PORTAL_PORT:-10086}:10086"
+    volumes:
+      - ./reverse-xray-spike-rendezvous.json:/etc/xray/rendezvous.json:ro
+    networks:
+      default:
+        aliases: ["node-a.fixture.test"]
+  target:
+    image: ghcr.io/xtls/xray-core@sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
+    command: ["run", "-c", "/etc/xray/target.json"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${REVERSE_SPIKE_TARGET_API_PORT:-10087}:10085"
+    volumes:
+      - ./reverse-xray-spike-target.json:/etc/xray/target.json:ro

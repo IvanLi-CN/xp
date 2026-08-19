@@ -187,6 +187,8 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
     let automatic_restart_enabled = restarter.is_some();
 
     let task = tokio::spawn(async move {
+        // Reverse relay is opt-in only after the local Xray API has been observed healthy.
+        reconcile.set_reverse_enabled(false);
         let mut interval = tokio::time::interval(opts.interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -194,6 +196,8 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
         let mut last_down_warn_at: Option<Instant> = None;
         let mut next_restart_allowed_at: Option<Instant> = None;
         let mut restart_backoff_attempts = 0u32;
+        let mut reverse_recovery_waiting_for_readiness = false;
+        let mut reverse_runtime_reconcile_required = false;
 
         loop {
             interval.tick().await;
@@ -205,6 +209,27 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
             let mut request_full = false;
             let mut restart_due = false;
             let mut restart_trigger = None::<&'static str>;
+            let reverse_restart_requested = reconcile.take_xray_restart_request();
+            if reverse_restart_requested {
+                reconcile.set_reverse_enabled(false);
+                restart_due = true;
+                restart_trigger = Some("reverse_tombstone_limit");
+            }
+
+            if probe.is_ok() && !reverse_restart_requested {
+                if reverse_recovery_waiting_for_readiness {
+                    reconcile.request_reverse_restart_recovery();
+                    reverse_recovery_waiting_for_readiness = false;
+                    reverse_runtime_reconcile_required = false;
+                } else if reverse_runtime_reconcile_required {
+                    reconcile.request_full();
+                    reverse_runtime_reconcile_required = false;
+                }
+                reconcile.set_reverse_enabled(true);
+            } else if probe.is_err() {
+                reconcile.set_reverse_enabled(false);
+                reverse_runtime_reconcile_required = true;
+            }
 
             {
                 let mut snap = health_clone.inner.write().await;
@@ -308,7 +333,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                 reconcile.request_full();
             }
 
-            if automatic_restart_enabled {
+            if automatic_restart_enabled && !reverse_restart_requested {
                 let now_i = Instant::now();
                 let can_restart = next_restart_allowed_at.map(|t| now_i >= t).unwrap_or(true);
                 if can_restart {
@@ -332,6 +357,14 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                 );
                 restart_backoff_attempts = restart_backoff_attempts.saturating_add(1);
                 next_restart_allowed_at = Some(Instant::now() + next_delay);
+                let reverse_readiness = if result.is_ok() && reverse_restart_requested {
+                    Some(
+                        probe_xray_grpc(xray_api_addr, opts.connect_timeout, opts.request_timeout)
+                            .await,
+                    )
+                } else {
+                    None
+                };
 
                 let mut snap = health_clone.inner.write().await;
                 snap.restart_attempts = snap.restart_attempts.saturating_add(1);
@@ -343,6 +376,25 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                     .ok();
                 match result {
                     Ok(()) => {
+                        if reverse_restart_requested {
+                            match reverse_readiness.expect("reverse restart was probed") {
+                                Ok(()) => {
+                                    reconcile.request_reverse_restart_recovery();
+                                    reconcile.set_reverse_enabled(true);
+                                }
+                                Err(error) => {
+                                    reverse_recovery_waiting_for_readiness = true;
+                                    reverse_runtime_reconcile_required = false;
+                                    reconcile.set_reverse_enabled(false);
+                                    snap.last_restart_fail_at = Some(attempt_at);
+                                    warn!(
+                                        restarter = restarter.name(),
+                                        error = %error,
+                                        "Xray restart lacks readiness; Reverse remains disabled"
+                                    );
+                                }
+                            }
+                        }
                         info!(
                             restarter = restarter.name(),
                             trigger = restart_trigger.unwrap_or("unknown"),
@@ -350,6 +402,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                         );
                     }
                     Err(err) => {
+                        reconcile.set_reverse_enabled(false);
                         snap.last_restart_fail_at = Some(attempt_at);
                         warn!(
                             restarter = restarter.name(),
@@ -359,6 +412,12 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                         );
                     }
                 }
+            } else if restart_due {
+                reconcile.set_reverse_enabled(false);
+                warn!(
+                    trigger = restart_trigger.unwrap_or("unknown"),
+                    "Xray restart was requested but no managed restarter is available; Reverse remains disabled"
+                );
             }
         }
     });
@@ -561,6 +620,68 @@ mod tests {
         },
     };
 
+    #[derive(Debug, Default)]
+    struct TestStats;
+
+    #[tonic::async_trait]
+    impl StatsService for TestStats {
+        async fn get_stats(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<
+            tonic::Response<crate::xray::proto::xray::app::stats::command::GetStatsResponse>,
+            tonic::Status,
+        > {
+            Err(tonic::Status::not_found("missing stat"))
+        }
+
+        async fn get_stats_online(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<
+            tonic::Response<crate::xray::proto::xray::app::stats::command::GetStatsResponse>,
+            tonic::Status,
+        > {
+            Err(tonic::Status::unimplemented("get_stats_online"))
+        }
+
+        async fn query_stats(
+            &self,
+            _request: tonic::Request<
+                crate::xray::proto::xray::app::stats::command::QueryStatsRequest,
+            >,
+        ) -> Result<
+            tonic::Response<crate::xray::proto::xray::app::stats::command::QueryStatsResponse>,
+            tonic::Status,
+        > {
+            Err(tonic::Status::unimplemented("query_stats"))
+        }
+
+        async fn get_sys_stats(
+            &self,
+            _request: tonic::Request<
+                crate::xray::proto::xray::app::stats::command::SysStatsRequest,
+            >,
+        ) -> Result<
+            tonic::Response<crate::xray::proto::xray::app::stats::command::SysStatsResponse>,
+            tonic::Status,
+        > {
+            Err(tonic::Status::unimplemented("get_sys_stats"))
+        }
+
+        async fn get_stats_online_ip_list(
+            &self,
+            _request: tonic::Request<GetStatsRequest>,
+        ) -> Result<
+            tonic::Response<
+                crate::xray::proto::xray::app::stats::command::GetStatsOnlineIpListResponse,
+            >,
+            tonic::Status,
+        > {
+            Err(tonic::Status::unimplemented("get_stats_online_ip_list"))
+        }
+    }
+
     #[test]
     fn xray_status_as_str_is_stable() {
         assert_eq!(XrayStatus::Unknown.as_str(), "unknown");
@@ -602,69 +723,6 @@ mod tests {
         })
         .await
         .unwrap();
-
-        // Bring up a minimal gRPC StatsService endpoint.
-        #[derive(Debug, Default)]
-        struct TestStats;
-
-        #[tonic::async_trait]
-        impl StatsService for TestStats {
-            async fn get_stats(
-                &self,
-                _request: tonic::Request<GetStatsRequest>,
-            ) -> Result<
-                tonic::Response<crate::xray::proto::xray::app::stats::command::GetStatsResponse>,
-                tonic::Status,
-            > {
-                Err(tonic::Status::not_found("missing stat"))
-            }
-
-            async fn get_stats_online(
-                &self,
-                _request: tonic::Request<GetStatsRequest>,
-            ) -> Result<
-                tonic::Response<crate::xray::proto::xray::app::stats::command::GetStatsResponse>,
-                tonic::Status,
-            > {
-                Err(tonic::Status::unimplemented("get_stats_online"))
-            }
-
-            async fn query_stats(
-                &self,
-                _request: tonic::Request<
-                    crate::xray::proto::xray::app::stats::command::QueryStatsRequest,
-                >,
-            ) -> Result<
-                tonic::Response<crate::xray::proto::xray::app::stats::command::QueryStatsResponse>,
-                tonic::Status,
-            > {
-                Err(tonic::Status::unimplemented("query_stats"))
-            }
-
-            async fn get_sys_stats(
-                &self,
-                _request: tonic::Request<
-                    crate::xray::proto::xray::app::stats::command::SysStatsRequest,
-                >,
-            ) -> Result<
-                tonic::Response<crate::xray::proto::xray::app::stats::command::SysStatsResponse>,
-                tonic::Status,
-            > {
-                Err(tonic::Status::unimplemented("get_sys_stats"))
-            }
-
-            async fn get_stats_online_ip_list(
-                &self,
-                _request: tonic::Request<GetStatsRequest>,
-            ) -> Result<
-                tonic::Response<
-                    crate::xray::proto::xray::app::stats::command::GetStatsOnlineIpListResponse,
-                >,
-                tonic::Status,
-            > {
-                Err(tonic::Status::unimplemented("get_stats_online_ip_list"))
-            }
-        }
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
@@ -826,4 +884,80 @@ mod tests {
 
         task.abort();
     }
+
+    #[tokio::test]
+    async fn reverse_restart_requires_grpc_readiness_before_recovery() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ReconcileRequest>();
+        let reconcile = ReconcileHandle::from_sender(tx);
+        reconcile.set_reverse_runtime_ready(false);
+        reconcile.request_xray_restart();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let restarter: Arc<dyn XrayRestarter> = Arc::new(RecordingRestarter {
+            calls: calls.clone(),
+        });
+        let opts = XraySupervisorOptions {
+            interval: Duration::from_millis(20),
+            fails_before_down: 1,
+            connect_timeout: Duration::from_millis(20),
+            request_timeout: Duration::from_millis(20),
+            down_log_throttle: Duration::from_secs(3600),
+            restart_cooldown: Duration::from_secs(3600),
+            restart_max_cooldown: Duration::from_secs(3600),
+        };
+        let (_health, task) = spawn_xray_supervisor_with_options_and_restarter(
+            addr,
+            opts,
+            reconcile.clone(),
+            Some(restarter),
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while calls.load(Ordering::Relaxed) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(150), rx.recv())
+                .await
+                .is_err()
+        );
+        assert!(!reconcile.reverse_gate().load(Ordering::Acquire));
+
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server = tonic::transport::Server::builder()
+            .add_service(StatsServiceServer::new(TestStats))
+            .serve_with_incoming_shutdown(incoming, async {
+                let _ = shutdown_rx.await;
+            });
+        let server_handle = tokio::spawn(server);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let mut reset = false;
+            let mut full = false;
+            while !reset || !full {
+                match rx.recv().await {
+                    Some(ReconcileRequest::ResetReverseTombstones) => reset = true,
+                    Some(ReconcileRequest::Full) => full = true,
+                    Some(_) => {}
+                    None => panic!("reconcile channel closed"),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!reconcile.reverse_gate().load(Ordering::Acquire));
+
+        let _ = shutdown_tx.send(());
+        let _ = server_handle.await;
+        task.abort();
+    }
+
+    mod reverse_gate;
 }

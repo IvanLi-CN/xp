@@ -1,0 +1,61 @@
+{
+  "log": { "loglevel": "warning" },
+  "api": {
+    "tag": "api",
+    "listen": "0.0.0.0:10085",
+    "services": ["HandlerService", "RoutingService", "StatsService"]
+  },
+  "stats": {},
+  "inbounds": [
+    {
+      "tag": "vless-vision-entry",
+      "listen": "0.0.0.0",
+      "port": 8443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": ["www.example.com"],
+          "privateKey": "GA-RQi_g2tnjKtnVf5y1zclSqpvS988C5OibXaHB008",
+          "shortIds": ["0123456789abcdef"]
+        }
+      }
+    },
+    {
+      "tag": "vless-xhttp-entry",
+      "listen": "0.0.0.0",
+      "port": 8444,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": { "path": "/xp-xhttp", "mode": "stream-one" },
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": ["www.example.com"],
+          "privateKey": "GA-RQi_g2tnjKtnVf5y1zclSqpvS988C5OibXaHB008",
+          "shortIds": ["0123456789abcdef"]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom", "settings": {} },
+    { "tag": "block", "protocol": "blackhole", "settings": {} }
+  ],
+  "routing": { "domainStrategy": "AsIs", "rules": [] }
+}

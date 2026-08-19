@@ -185,10 +185,12 @@ export const demoMeshStatus: AdminMeshStatus = {
 	],
 };
 
-export function DemoSystemStatusPage() {
+export function DemoSystemStatusPage({
+	status = demoMeshStatus,
+}: { status?: AdminMeshStatus }) {
 	return (
 		<SystemStatusSurface
-			status={demoMeshStatus}
+			status={status}
 			showMeshTransportReuse
 			components={[
 				{ component: "xp", status: "up" },
@@ -199,6 +201,106 @@ export function DemoSystemStatusPage() {
 		/>
 	);
 }
+
+export const demoReverseMeshStatus: AdminMeshStatus = {
+	...demoMeshStatus,
+	peers: [
+		{
+			...demoMeshStatus.peers[1],
+			mesh_reason: "mesh_available",
+			current_path: "mesh",
+			quality: "good",
+			breaker: "closed",
+			mesh_transport: {
+				protocol: "h2",
+				health: "healthy",
+				connection_generation: 4,
+				current_connection_requests: 46,
+				requests_5m: 46,
+				connection_starts_5m: 1,
+				requests_1h: 552,
+				connection_starts_1h: 2,
+				last_connection_started_at: "2026-08-03T09:16:00Z",
+			},
+			buckets: buckets(Array<"mesh">(10).fill("mesh")),
+		},
+		{
+			...demoMeshStatus.peers[2],
+			mesh_url: "https://syd-1.edge.example.net:443",
+			mesh_capability: "enabled",
+			mesh_reason: "mesh_available",
+			current_path: "mesh",
+			quality: "good",
+			breaker: "closed",
+			last_sample_at: "2026-08-03T09:46:00Z",
+			last_transition_at: "2026-08-03T08:14:00Z",
+			availability_1h: 1,
+			availability_24h: 0.997,
+			mesh_availability_24h: 0.997,
+			latency_p50_ms: 37,
+			latency_p95_ms: 55,
+			mesh_transport: {
+				protocol: "h2",
+				health: "healthy",
+				connection_generation: 2,
+				current_connection_requests: 31,
+				requests_5m: 31,
+				connection_starts_5m: 1,
+				requests_1h: 372,
+				connection_starts_1h: 2,
+				last_connection_started_at: "2026-08-03T09:14:00Z",
+			},
+			buckets: buckets(Array<"mesh">(10).fill("mesh")),
+		},
+		{
+			...demoMeshStatus.peers[0],
+			active_route: {
+				kind: "reverse_relay",
+				rendezvous: "node-sgp-1",
+				rendezvous_role: "primary",
+				primary_rendezvous: "node-sgp-1",
+				standby_rendezvous: "node-syd-1",
+				generation: 7,
+				readiness: "active",
+			},
+		},
+		{
+			...demoMeshStatus.peers[0],
+			node_id: "node-seoul-1",
+			node_name: "seoul-1",
+			api_base_url: "https://seoul-1.edge.example.net",
+			mesh_url: null,
+			mesh_capability: "disabled",
+			mesh_reason: "missing_endpoint",
+			last_sample_at: "2026-08-03T09:45:00Z",
+			last_transition_at: "2026-08-03T08:12:00Z",
+			availability_1h: 0.995,
+			availability_24h: 0.996,
+			mesh_availability_24h: 0.993,
+			latency_p50_ms: 41,
+			latency_p95_ms: 62,
+			active_route: {
+				kind: "reverse_relay",
+				rendezvous: "node-sgp-1",
+				rendezvous_role: "primary",
+				primary_rendezvous: "node-sgp-1",
+				standby_rendezvous: "node-syd-1",
+				generation: 9,
+				readiness: "active",
+			},
+		},
+	],
+	events: [
+		{
+			at: "2026-08-03T09:48:00Z",
+			peer_id: "node-osaka-1",
+			kind: "transition",
+			message:
+				"Reverse targets use singapore-1 as primary and sydney-1 as standby.",
+		},
+		...demoMeshStatus.events,
+	],
+};
 
 export function UiDemoSystemStatusPage() {
 	return (
@@ -251,7 +353,7 @@ export function UiDemoSystemStatusPage() {
 							<DemoNavigation title="Settings" items={demoSettingsNavigation} />
 						</aside>
 						<main className="xp-panel min-w-0 p-[var(--xp-page-padding)]">
-							<DemoSystemStatusPage />
+							<DemoSystemStatusPage status={demoReverseMeshStatus} />
 						</main>
 					</div>
 				</div>

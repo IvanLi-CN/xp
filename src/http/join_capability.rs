@@ -14,6 +14,7 @@ use super::{
 use crate::domain::Node;
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
+pub(super) const REVERSE_ASSIGNMENT_CAPABILITY: &str = "cluster.mesh-reverse-assignment-v1";
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
 const MAX_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
@@ -79,6 +80,10 @@ pub(super) async fn require_membership_lifecycle_on_retained_voters(
         Some(excluded_voter_id),
     )
     .await
+}
+
+pub(super) async fn require_reverse_assignment_on_voters(state: &AppState) -> Result<(), ApiError> {
+    require_capability_on_voters(state, REVERSE_ASSIGNMENT_CAPABILITY, None).await
 }
 
 async fn require_capability_on_voters(

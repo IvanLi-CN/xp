@@ -42,6 +42,7 @@ pub struct RaftRpcAuth {
 pub struct BootstrapSenderMarker {
     pub sender_ids: BTreeSet<String>,
     pub activation_deadline: DateTime<Utc>,
+    pub reverse_mesh: Option<crate::reverse_mesh::ReverseMeshBootstrapMarker>,
     pub path: PathBuf,
 }
 
@@ -49,15 +50,26 @@ pub struct BootstrapSenderMarker {
 struct BootstrapSenderMarkerFile {
     sender_ids: BTreeSet<String>,
     activation_deadline: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reverse_mesh: Option<crate::reverse_mesh::ReverseMeshBootstrapMarker>,
 }
 
 pub fn encode_bootstrap_sender_marker(
     sender_ids: &[String],
     activation_deadline: &str,
 ) -> Result<Vec<u8>, serde_json::Error> {
+    encode_bootstrap_sender_marker_with_reverse(sender_ids, activation_deadline, None)
+}
+
+pub fn encode_bootstrap_sender_marker_with_reverse(
+    sender_ids: &[String],
+    activation_deadline: &str,
+    reverse_mesh: Option<&crate::reverse_mesh::ReverseMeshBootstrapMarker>,
+) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(&BootstrapSenderMarkerFile {
         sender_ids: sender_ids.iter().cloned().collect(),
         activation_deadline: activation_deadline.to_string(),
+        reverse_mesh: reverse_mesh.cloned(),
     })
 }
 
@@ -74,6 +86,7 @@ pub fn read_bootstrap_sender_marker(path: PathBuf) -> Option<BootstrapSenderMark
     Some(BootstrapSenderMarker {
         sender_ids: file.sender_ids,
         activation_deadline,
+        reverse_mesh: file.reverse_mesh,
         path,
     })
 }
@@ -247,7 +260,8 @@ mod tests {
 
     use super::{
         BootstrapSenderMarker, active_bootstrap_sender_ids, bootstrap_replication_complete,
-        bootstrap_sender_is_allowed,
+        bootstrap_sender_is_allowed, encode_bootstrap_sender_marker_with_reverse,
+        read_bootstrap_sender_marker,
     };
 
     #[test]
@@ -300,11 +314,43 @@ mod tests {
         let marker = BootstrapSenderMarker {
             sender_ids: BTreeSet::from(["leader".to_string()]),
             activation_deadline: chrono::Utc::now() + chrono::Duration::minutes(1),
+            reverse_mesh: None,
             path: marker_path.clone(),
         };
         assert!(active_bootstrap_sender_ids(Some(&marker)).is_some());
         std::fs::remove_file(marker_path).expect("remove marker");
         assert!(active_bootstrap_sender_ids(Some(&marker)).is_none());
+    }
+
+    #[test]
+    fn bootstrap_marker_round_trips_public_reverse_parameters() {
+        let temp = tempfile::tempdir().expect("marker directory");
+        let marker_path = temp.path().join("raft_bootstrap_sender");
+        let reverse = crate::reverse_mesh::ReverseMeshBootstrapMarker {
+            epoch: 4,
+            generation: 2,
+            target_node_id: "target".to_string(),
+            primary_node_id: "primary".to_string(),
+            standby_node_id: Some("standby".to_string()),
+            primary_endpoint: crate::reverse_mesh::ReverseMeshBootstrapEndpoint {
+                access_host: xp_test_fixtures::primary_host().to_owned(),
+                port: 443,
+                server_name: xp_test_fixtures::primary_server_name().to_owned(),
+                public_key: "public".to_string(),
+                short_id: "0123456789abcdef".to_string(),
+                transport: "vision_tcp".to_string(),
+            },
+            standby_endpoint: None,
+        };
+        let bytes = encode_bootstrap_sender_marker_with_reverse(
+            &["primary".to_string()],
+            "2099-01-01T00:00:00Z",
+            Some(&reverse),
+        )
+        .expect("encode marker");
+        std::fs::write(&marker_path, bytes).expect("write marker");
+        let parsed = read_bootstrap_sender_marker(marker_path).expect("read marker");
+        assert_eq!(parsed.reverse_mesh, Some(reverse));
     }
 
     #[test]

@@ -14,7 +14,9 @@ const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
 const MAX_BUCKETS: usize = 24 * 60;
 
+mod reverse;
 mod transport;
+pub use reverse::ReverseRelayTelemetrySample;
 use transport::MeshConnectionTrackers;
 pub(crate) use transport::{MeshConnectionFingerprint, MeshTransportObservation};
 pub use transport::{
@@ -27,6 +29,31 @@ pub use transport::{
 pub enum TelemetryPath {
     Mesh,
     Public,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActiveRouteKind {
+    RealityDirect,
+    ReverseRelay,
+    Public,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeshActiveRoute {
+    pub kind: ActiveRouteKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendezvous: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rendezvous_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_rendezvous: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standby_rendezvous: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +119,8 @@ pub struct MeshPeerTelemetry {
     pub peer_id: String,
     pub peer_name: String,
     pub last_path: Option<TelemetryPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_route: Option<MeshActiveRoute>,
     pub last_sample_at: Option<String>,
     pub last_mesh_target: Option<String>,
     pub last_transition_at: Option<String>,
@@ -216,6 +245,18 @@ impl MeshTelemetryHandle {
         let updates_active_path = sample.updates_active_path && sample.success;
         if updates_active_path {
             peer.last_path = Some(sample.path);
+            peer.active_route = Some(MeshActiveRoute {
+                kind: match sample.path {
+                    TelemetryPath::Mesh => ActiveRouteKind::RealityDirect,
+                    TelemetryPath::Public => ActiveRouteKind::Public,
+                },
+                rendezvous: None,
+                rendezvous_role: None,
+                primary_rendezvous: None,
+                standby_rendezvous: None,
+                generation: None,
+                readiness: None,
+            });
         }
         peer.last_sample_at = Some(timestamp(now));
         if updates_active_path && previous_path != Some(sample.path) {

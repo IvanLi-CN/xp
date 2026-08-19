@@ -454,7 +454,7 @@ fn source_tombstone_acknowledgements_use_the_tombstone_cursor_stream() {
         .expect("collector accepts tombstone");
     let acknowledgement = receipt.tombstone_acknowledgements()[0].clone();
     source
-        .acknowledge_tombstones(&[acknowledgement.clone()])
+        .acknowledge_tombstones(std::slice::from_ref(&acknowledgement))
         .expect("source accepts collector acknowledgement");
     assert!(!source.tombstones.fully_acknowledged(&acknowledgement.key));
 

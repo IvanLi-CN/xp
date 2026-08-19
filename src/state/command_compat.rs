@@ -150,6 +150,23 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::UpdateRepositoryMemberRuntime(patch) => {
                 Self::UpdateRepositoryMemberRuntime(patch)
             }
+            DesiredStateCommandCompat::SetReverseMeshEpoch { epoch } => {
+                Self::SetReverseMeshEpoch { epoch }
+            }
+            DesiredStateCommandCompat::UpsertReverseMeshAssignment {
+                assignment,
+                expected_generation,
+            } => Self::UpsertReverseMeshAssignment {
+                assignment,
+                expected_generation,
+            },
+            DesiredStateCommandCompat::DeleteReverseMeshAssignment {
+                target_node_id,
+                expected_generation,
+            } => Self::DeleteReverseMeshAssignment {
+                target_node_id,
+                expected_generation,
+            },
             DesiredStateCommandCompat::ReplaceUserGrants { user_id, grants } => {
                 let endpoint_ids = grants.into_iter().map(|g| g.endpoint_id).collect();
                 Self::ReplaceUserAccess {

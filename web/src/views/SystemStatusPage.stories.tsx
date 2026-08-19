@@ -3,7 +3,10 @@ import { expect, fn, userEvent, within } from "@storybook/test";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { fixtureStoryData } from "../fixture-policy/storybook";
 
-import { demoMeshStatus } from "@/demo/DemoSystemStatusPage";
+import {
+	demoMeshStatus,
+	demoReverseMeshStatus,
+} from "@/demo/DemoSystemStatusPage";
 
 import { SystemStatusSurface } from "./SystemStatusPage";
 
@@ -70,17 +73,16 @@ export const Healthy: Story = {
 		await expect(detailsRect.height).toBe(probeRect.height);
 		await expect(detailsRect.right).toBeLessThanOrEqual(rowRect?.right ?? 0);
 		await expect(
-			(await canvas.findAllByText("Mesh available")).length,
+			(await canvas.findAllByText("Reality direct")).length,
 		).toBeGreaterThan(0);
 		await expect(
-			(await canvas.findAllByText("Using public fallback")).length,
+			(await canvas.findAllByText("Public fallback")).length,
 		).toBeGreaterThan(0);
 		await expect(
-			(await canvas.findAllByText("H2 · 58 req / 1 starts · gen 3")).length,
+			(await canvas.findAllByText("H2 · 58 req · gen 3")).length,
 		).toBeGreaterThan(0);
 		await expect(
-			(await canvas.findAllByText("Churning · H2 · 17 req / 4 starts · gen 18"))
-				.length,
+			(await canvas.findAllByText("H2 churning · 17 req · gen 18")).length,
 		).toBeGreaterThan(0);
 		await userEvent.click(probe);
 		await expect(args.onProbePeer).toHaveBeenCalledWith(
@@ -123,7 +125,7 @@ export const LegacyBackend: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			canvas.queryByText("H2 · 58 req / 1 starts · gen 3"),
+			canvas.queryByText("H2 · 58 req · gen 3"),
 		).not.toBeInTheDocument();
 	},
 };
@@ -142,6 +144,110 @@ export const PartialAndFallback: Story = {
 					: peer,
 			),
 		},
+	},
+};
+
+export const ReverseRelay: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "reverseRelayDesktop",
+			viewports: {
+				reverseRelayDesktop: {
+					name: "Reverse relay desktop (1280x900)",
+					styles: { width: "1280px", height: "900px" },
+					type: "desktop",
+				},
+				reverseRelayMobile: {
+					name: "Reverse relay mobile (393x852)",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	args: {
+		status: demoReverseMeshStatus,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText("Cluster nodes")).toBeInTheDocument();
+		await expect(
+			await canvas.findByText("1 local · 4 remote"),
+		).toBeInTheDocument();
+		for (const nodeId of [
+			"node-sgp-1",
+			"node-syd-1",
+			"node-osaka-1",
+			"node-seoul-1",
+		]) {
+			await expect(
+				canvasElement.querySelector(`[data-peer-row="${nodeId}"]`),
+			).not.toBeNull();
+		}
+		await expect(
+			(await canvas.findAllByText("Rendezvous · primary")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("Rendezvous · standby")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("Reverse relay")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			(await canvas.findAllByText("via singapore-1 · g7")).length,
+		).toBeGreaterThan(0);
+		await expect(
+			canvas.queryByText("Primary · standby sydney-1"),
+		).not.toBeInTheDocument();
+		const peerRows = canvasElement.querySelectorAll("[data-peer-row]");
+		await expect(peerRows).toHaveLength(4);
+		const routeLines = canvasElement.querySelectorAll("[data-peer-route-line]");
+		await expect(routeLines).toHaveLength(16);
+		for (const line of routeLines) {
+			await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
+		}
+		for (const nodeId of ["node-osaka-1", "node-seoul-1"]) {
+			await expect(
+				canvasElement.querySelector(
+					`[data-peer-row="${nodeId}"] [data-peer-cell="route"]`,
+				)?.children.length,
+			).toBe(2);
+		}
+		for (const cell of canvasElement.querySelectorAll("[data-peer-cell]")) {
+			await expect(cell.children.length).toBeLessThanOrEqual(2);
+			for (const line of cell.querySelectorAll(":scope > p")) {
+				await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
+			}
+		}
+	},
+};
+
+export const DirectAssignedTarget: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			peers: demoReverseMeshStatus.peers.map((peer) =>
+				peer.node_id === "node-osaka-1" || peer.node_id === "node-seoul-1"
+					? {
+							...peer,
+							active_route: {
+								kind: "reality_direct" as const,
+								rendezvous: null,
+								rendezvous_role: null,
+								primary_rendezvous: "node-sgp-1",
+								standby_rendezvous: "node-syd-1",
+								generation: 7,
+								readiness: null,
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const row = canvasElement.querySelector('[data-peer-row="node-sgp-1"]');
+		await expect(row).toHaveTextContent("Reality direct");
+		await expect(row).toHaveTextContent("Rendezvous · primary");
 	},
 };
 

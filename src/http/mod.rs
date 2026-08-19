@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     convert::Infallible,
-    sync::Arc,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
     time::Instant as StdInstant,
 };
 
@@ -31,8 +32,9 @@ mod endpoint_requests;
 mod mesh;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
-    admin_run_mesh_probes, send_mesh_internal_capability_read, send_mesh_internal_read,
-    send_mesh_internal_request, spawn_mesh_probe_worker,
+    admin_internal_reverse_relay, admin_run_mesh_probes, send_mesh_internal_capability_read,
+    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
+    spawn_reverse_assignment_worker,
 };
 
 use crate::{
@@ -107,7 +109,7 @@ use crate::{
         UpgradeJobStatus, UpgradeStartError, UpgradeSupport, read_reconciled_status, start_upgrade,
         support_status,
     },
-    xray_supervisor::XrayHealthHandle,
+    xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
 
 mod capabilities;
@@ -146,6 +148,7 @@ pub struct AppState {
     pub ops_github_client: reqwest::Client,
     pub mesh_client: MeshAwareHttpClient,
     pub mesh_telemetry: MeshTelemetryHandle,
+    pub reverse_relay: crate::reverse_relay::ReverseRelayRuntime,
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
 }
@@ -609,6 +612,8 @@ struct ClusterJoinResponse {
     node_id: String,
     leader_node_id: String,
     bootstrap_sender_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reverse_mesh_bootstrap: Option<crate::reverse_mesh::ReverseMeshBootstrapMarker>,
     activation_deadline: String,
     signed_cert_pem: String,
     cluster_ca_pem: String,
@@ -963,6 +968,10 @@ pub fn build_router_with_mesh_telemetry(
         cluster_ca_pem: cluster_ca_pem.clone(),
         local_node_id: cluster.node_id.clone(),
         store: store.clone(),
+        bootstrap_sender_path: config
+            .data_dir
+            .join("cluster")
+            .join("raft_bootstrap_sender"),
         verifier: AdminTokenVerifier::default(),
     };
 
@@ -1009,10 +1018,12 @@ pub fn build_router_with_mesh_telemetry(
         ops_github_client,
         mesh_client,
         mesh_telemetry,
+        reverse_relay: crate::reverse_relay::ReverseRelayRuntime::default(),
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
     };
     spawn_mesh_probe_worker(app_state.clone());
+    spawn_reverse_assignment_worker(app_state.clone());
     history_repository::spawn_repository_replica_worker(app_state.clone());
 
     let admin = Router::new()
@@ -1034,6 +1045,14 @@ pub fn build_router_with_mesh_telemetry(
             post(node_metadata::admin_internal_update_node_metadata),
         )
         .route("/_internal/mesh/health", get(admin_internal_mesh_health))
+        .route(
+            "/_internal/mesh/reverse-readiness",
+            get(admin_internal_reverse_readiness),
+        )
+        .route(
+            "/_internal/mesh/reverse-relay",
+            post(admin_internal_reverse_relay),
+        )
         .route(
             "/_internal/raft/restore-node",
             post(membership_restore::admin_internal_restore_node),
@@ -1383,7 +1402,13 @@ async fn admin_auth(
         auth.cluster_ca_key_pem.as_deref(),
     ) && signature.starts_with("v2:")
     {
-        let limit = if req.uri().path().contains("/raft/") {
+        let relay_is_raft = req.uri().path().ends_with("/mesh/reverse-relay")
+            && req
+                .headers()
+                .get(crate::reverse_mesh::RELAY_URI_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|uri| uri.starts_with("/raft/") || uri.contains("snapshot"));
+        let limit = if req.uri().path().contains("/raft/") || relay_is_raft {
             8 * 1024 * 1024
         } else {
             1024 * 1024
@@ -1435,7 +1460,13 @@ async fn admin_auth(
             .await
             .get_node(&verified.context.sender_id)
             .is_some();
-        if !sender_is_member {
+        let bootstrap_health_sender = verified.context.route
+            == internal_auth::InternalRoute::HealthV2
+            && crate::raft::http_rpc::read_bootstrap_sender_marker(
+                auth.bootstrap_sender_path.clone(),
+            )
+            .is_some_and(|marker| marker.sender_ids.contains(&verified.context.sender_id));
+        if !sender_is_member && !bootstrap_health_sender {
             return ApiError::unauthorized("internal sender is not a cluster member")
                 .into_response();
         }
@@ -1507,6 +1538,7 @@ struct AdminAuthState {
     cluster_ca_pem: String,
     local_node_id: String,
     store: Arc<Mutex<JsonSnapshotStore>>,
+    bootstrap_sender_path: PathBuf,
     verifier: AdminTokenVerifier,
 }
 
@@ -1738,13 +1770,75 @@ async fn admin_internal_mesh_health(
     })))
 }
 
+async fn admin_internal_reverse_readiness(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let Some(Extension(internal)) = internal else {
+        return Err(ApiError::unauthorized("internal auth required"));
+    };
+    if !matches!(
+        internal
+            .verified
+            .as_ref()
+            .map(|request| request.context.route),
+        Some(internal_auth::InternalRoute::MeshV2)
+    ) {
+        return Err(ApiError::unauthorized(
+            "reverse readiness authentication required",
+        ));
+    }
+    let managed_vless_endpoint = {
+        let store = state.store.lock().await;
+        store.list_endpoints().into_iter().any(|endpoint| {
+            endpoint.node_id == state.cluster.node_id
+                && crate::managed_default_endpoints::managed_default_vless_endpoint(&endpoint)
+                    .is_some()
+        })
+    };
+    let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
+    let reverse_ready = state.reconcile.reverse_gate().load(Ordering::Acquire)
+        && xray_ready
+        && managed_vless_endpoint;
+    let health_verified = state.reverse_relay.has_any_health_verified().await;
+    Ok(Json(json!({
+        "node_id": state.cluster.node_id,
+        "xray_ready": xray_ready,
+        "managed_vless_endpoint": managed_vless_endpoint,
+        "reverse_ready": reverse_ready,
+        "health_verified": health_verified,
+        "reverse_assignment_capability": true,
+        "reverse_relay_capability": true,
+    })))
+}
+
 async fn admin_internal_capabilities(
+    Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
 ) -> Result<Json<capabilities::ApiCapabilitiesResponse>, ApiError> {
     if internal.is_none() {
         return Err(ApiError::unauthorized("internal auth required"));
     }
-    Ok(api_capabilities().await)
+    let mut response = api_capabilities().await.0;
+    let managed_vless_endpoint = {
+        let store = state.store.lock().await;
+        store.list_endpoints().into_iter().any(|endpoint| {
+            endpoint.node_id == state.cluster.node_id
+                && crate::managed_default_endpoints::managed_default_vless_endpoint(&endpoint)
+                    .is_some()
+        })
+    };
+    let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
+    let health_verified = state.reverse_relay.has_any_health_verified().await;
+    response.reverse_mesh = Some(capabilities::ReverseMeshReadiness {
+        xray_ready,
+        managed_vless_endpoint,
+        reverse_ready: state.reconcile.reverse_gate().load(Ordering::Acquire)
+            && xray_ready
+            && managed_vless_endpoint,
+        health_verified,
+    });
+    Ok(Json(response))
 }
 
 async fn admin_internal_repair_orphan_voter(
@@ -1902,6 +1996,11 @@ async fn cluster_join(
     let activation_deadline = reservation.activation_deadline;
     let signed_cert_pem = reservation.signed_cert_pem;
     let bootstrap_sender_ids = join_protocol::bootstrap_sender_ids(&state).await;
+    let reverse_mesh_bootstrap = if existing_session.is_some() {
+        join_protocol::reverse_bootstrap_marker(&state, &node_id).await
+    } else {
+        None
+    };
     join_capability::require_membership_lifecycle_on_voters(&state).await?;
     crate::join_coordinator::migrate_one_legacy_join_session(&state.raft, &state.store)
         .await
@@ -1925,6 +2024,7 @@ async fn cluster_join(
             node_id,
             leader_node_id: state.cluster.node_id.clone(),
             bootstrap_sender_ids,
+            reverse_mesh_bootstrap,
             activation_deadline,
             signed_cert_pem,
             cluster_ca_pem: (*state.cluster_ca_pem).clone(),
@@ -1955,6 +2055,7 @@ async fn cluster_join(
             node_id,
             leader_node_id: state.cluster.node_id.clone(),
             bootstrap_sender_ids,
+            reverse_mesh_bootstrap,
             activation_deadline,
             signed_cert_pem,
             cluster_ca_pem: (*state.cluster_ca_pem).clone(),
@@ -2048,10 +2149,13 @@ async fn cluster_join(
         .await
         .map_err(|e| ApiError::internal(format!("join add_learner failed: {e}")))?;
 
+    let reverse_mesh_bootstrap = join_protocol::prepare_reverse_bootstrap(&state, &node_id).await?;
+
     Ok(Json(ClusterJoinResponse {
         node_id,
         leader_node_id: state.cluster.node_id.clone(),
         bootstrap_sender_ids,
+        reverse_mesh_bootstrap,
         activation_deadline,
         signed_cert_pem,
         cluster_ca_pem: (*state.cluster_ca_pem).clone(),

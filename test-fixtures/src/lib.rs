@@ -606,6 +606,12 @@ pub fn subscription_api_subscribed() -> &'static str {
 }
 
 // fixture-policy-values:start
+pub fn endpoint_tag_reverse_spike_vision() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixtureReverseSpikeVision"]
+}
+pub fn endpoint_tag_reverse_spike_xhttp() -> &'static str {
+    &catalog().fixtures.strings["endpointTag"]["fixtureReverseSpikeXhttp"]
+}
 pub fn timestamp_at20260729_t080000_z() -> &'static str {
     &catalog().fixtures.strings["timestamp"]["t20260729T080000"]
 }
