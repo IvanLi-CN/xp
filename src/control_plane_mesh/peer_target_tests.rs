@@ -101,3 +101,32 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }
+
+#[tokio::test]
+async fn reverse_only_request_respects_the_local_readiness_gate() {
+    let gate = Arc::new(AtomicBool::new(false));
+    let client = MeshAwareHttpClient::new(reqwest::Client::new()).with_reverse_gate(gate);
+    let error = client
+        .send_peer_reverse_request(
+            &peer_target_from_node(&peer_node(), &[managed_vless_endpoint("one", 443)]),
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(xp_test_fixtures::number_value1()),
+                allow_ambiguous_fallback: true,
+                request_id: xp_test_fixtures::primary_node_id().to_owned(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::secondary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            "",
+            "",
+        )
+        .await
+        .expect_err("disabled Reverse must not resolve or send a route");
+
+    assert!(error.to_string().contains("reverse relay is disabled"));
+}

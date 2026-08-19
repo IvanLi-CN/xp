@@ -448,8 +448,12 @@ impl ReverseXrayReconciler {
         }
 
         let mut restart_required = false;
-        let existing_outbounds = client.list_outbounds().await?;
-        for outbound in existing_outbounds.outbounds {
+        let existing_outbounds = client.list_outbounds().await?.outbounds;
+        let existing_outbound_by_tag = existing_outbounds
+            .iter()
+            .map(|outbound| (outbound.tag.clone(), outbound.clone()))
+            .collect::<BTreeMap<_, _>>();
+        for outbound in existing_outbounds {
             let tag = outbound.tag;
             if tag.starts_with("xp-reverse-") && !desired.owned_outbound_tags.contains(&tag) {
                 if !self.should_remove_retired(&tag, now) {
@@ -557,6 +561,30 @@ impl ReverseXrayReconciler {
         // The order is deliberate: bridge outbounds and users first, portal exact routes next,
         // and the portal block rule last. The fixed loopback portal is created before its rules.
         for request in desired.outbound_requests.iter().cloned() {
+            let desired_outbound = request
+                .outbound
+                .as_ref()
+                .ok_or_else(|| tonic::Status::invalid_argument("reverse outbound is missing"))?;
+            // HandlerService has no outbound configuration replacement operation. Refresh an
+            // XP-owned tag with a changed desired config by removing it before re-adding it.
+            if let Some(existing) = existing_outbound_by_tag.get(&desired_outbound.tag)
+                && outbound_needs_refresh(existing, &request)?
+            {
+                match client
+                    .remove_outbound(xproto::app::proxyman::command::RemoveOutboundRequest {
+                        tag: desired_outbound.tag.clone(),
+                    })
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(status) if xray::is_not_found(&status) => {}
+                    Err(_) => {
+                        restart_required |= self.tombstones.record(desired_outbound.tag.clone())
+                            == TombstoneDecision::RestartRequired;
+                        continue;
+                    }
+                }
+            }
             match client.add_outbound(request).await {
                 Ok(_) => {}
                 Err(status) if xray::is_already_exists(&status) => {}
@@ -636,5 +664,36 @@ impl ReverseXrayReconciler {
             }
         }
         Ok(())
+    }
+}
+
+fn outbound_needs_refresh(
+    existing: &xproto::core::OutboundHandlerConfig,
+    desired: &xproto::app::proxyman::command::AddOutboundRequest,
+) -> Result<bool, tonic::Status> {
+    let desired = desired
+        .outbound
+        .as_ref()
+        .ok_or_else(|| tonic::Status::invalid_argument("reverse outbound is missing"))?;
+    Ok(existing != desired)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_outbound_is_refreshed_when_its_config_changes() {
+        let request = builder::build_reverse_freedom_outbound_request(
+            xp_test_fixtures::primary_endpoint_tag(),
+            xp_test_fixtures::loopback_address(),
+            xp_test_fixtures::number_value1(),
+        );
+        let existing = request.outbound.clone().expect("outbound is present");
+        assert!(!outbound_needs_refresh(&existing, &request).unwrap());
+
+        let mut changed = existing;
+        changed.expire = xp_test_fixtures::number_value1();
+        assert!(outbound_needs_refresh(&changed, &request).unwrap());
     }
 }
