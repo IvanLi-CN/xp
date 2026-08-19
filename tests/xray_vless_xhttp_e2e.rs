@@ -707,6 +707,10 @@ async fn mihomo_provider_chain_has_no_direct_fallback() {
     .expect("render Mihomo system provider");
     let external_yaml = r#"
 proxies:
+  - name: "Japan smoke"
+    type: http
+    server: 127.0.0.1
+    port: 1
   - name: "Germany smoke"
     type: http
     server: 127.0.0.1
@@ -724,6 +728,22 @@ proxies:
     )
     .expect("render Mihomo provider config");
     let mut root: serde_yaml::Mapping = serde_yaml::from_str(&rendered).expect("provider YAML");
+    let empty_filter_group_name = "🧪 mihomo-empty-filter";
+    root.get_mut("proxy-groups")
+        .and_then(Value::as_sequence_mut)
+        .expect("proxy-groups sequence")
+        .push(
+            serde_yaml::from_str(&format!(
+                "name: {empty_filter_group_name}\n\
+                 type: url-test\n\
+                 hidden: true\n\
+                 url: https://www.gstatic.com/generate_204\n\
+                 use: [providerA]\n\
+                 filter: '(?i)(Mars|Venus)'\n\
+                 empty-fallback: REJECT\n"
+            ))
+            .expect("empty-filter Mihomo group"),
+        );
     let relay_group_name = root
         .get("proxy-groups")
         .and_then(Value::as_sequence)
@@ -845,26 +865,10 @@ proxies:
         },
     )
     .await;
-    let initial_relay_candidates = initial_relay
-        .get("all")
-        .and_then(serde_json::Value::as_array)
-        .expect("initial Mihomo relay candidates")
-        .iter()
-        .filter_map(serde_json::Value::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        initial_relay_candidates,
-        vec!["REJECT"],
-        "an unavailable provider must expose only the explicit REJECT fallback"
-    );
     assert_eq!(
         initial_relay.get("now").and_then(serde_json::Value::as_str),
         Some("REJECT"),
         "an unavailable provider must use the explicit empty fallback"
-    );
-    assert_ne!(
-        initial_relay.get("now").and_then(serde_json::Value::as_str),
-        Some("COMPATIBLE")
     );
     let _provider_server = spawn_mihomo_provider_server(
         provider_addr,
@@ -879,14 +883,14 @@ proxies:
             value.get("proxies").and_then(Value::as_sequence).is_some()
         })
         .await;
-    assert!(
-        loaded_external
-            .get("proxies")
-            .and_then(Value::as_sequence)
-            .is_some_and(|proxies| proxies.iter().any(|proxy| {
-                proxy.get("name").and_then(Value::as_str) == Some("Germany smoke")
-            }))
-    );
+    let loaded_external_names = loaded_external
+        .get("proxies")
+        .and_then(Value::as_sequence)
+        .expect("loaded external provider proxies")
+        .iter()
+        .filter_map(|proxy| proxy.get("name").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(loaded_external_names, vec!["Japan smoke", "Germany smoke"]);
     let relay = wait_for_mihomo_proxy_api(
         &client,
         controller_addr,
@@ -904,18 +908,38 @@ proxies:
         .get("all")
         .and_then(serde_json::Value::as_array)
         .expect("Mihomo relay candidates");
-    assert!(
-        relay_candidates.iter().all(|candidate| {
-            matches!(candidate.as_str(), Some(name)
-                if name != "DIRECT" && name != "COMPATIBLE" && name != "Germany smoke")
-        }),
-        concat!(
-            "Mihomo relay candidates must exclude DIRECT, COMPATIBLE, and non-matching ",
-            "provider candidates"
-        )
-    );
     assert_eq!(
         relay_candidates
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>(),
+        vec!["Japan smoke"],
+        "a matching provider candidate must remain selectable without a static REJECT"
+    );
+    assert_ne!(
+        relay.get("now").and_then(serde_json::Value::as_str),
+        Some("COMPATIBLE")
+    );
+
+    let empty_filter_relay = wait_for_mihomo_proxy_api(
+        &client,
+        controller_addr,
+        empty_filter_group_name,
+        &mihomo,
+        |value| {
+            value
+                .get("all")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+        },
+    )
+    .await;
+    let empty_filter_candidates = empty_filter_relay
+        .get("all")
+        .and_then(serde_json::Value::as_array)
+        .expect("empty-filter Mihomo candidates");
+    assert_eq!(
+        empty_filter_candidates
             .iter()
             .filter_map(serde_json::Value::as_str)
             .collect::<Vec<_>>(),
@@ -923,7 +947,9 @@ proxies:
         "an empty external provider filter must expose only the explicit REJECT sentinel"
     );
     assert_eq!(
-        relay.get("now").and_then(serde_json::Value::as_str),
+        empty_filter_relay
+            .get("now")
+            .and_then(serde_json::Value::as_str),
         Some("REJECT")
     );
 
