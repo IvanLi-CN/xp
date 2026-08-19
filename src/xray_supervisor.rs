@@ -197,6 +197,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
         let mut next_restart_allowed_at: Option<Instant> = None;
         let mut restart_backoff_attempts = 0u32;
         let mut reverse_recovery_waiting_for_readiness = false;
+        let mut reverse_runtime_reconcile_required = false;
 
         loop {
             interval.tick().await;
@@ -219,10 +220,15 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                 if reverse_recovery_waiting_for_readiness {
                     reconcile.request_reverse_restart_recovery();
                     reverse_recovery_waiting_for_readiness = false;
+                    reverse_runtime_reconcile_required = false;
+                } else if reverse_runtime_reconcile_required {
+                    reconcile.request_full();
+                    reverse_runtime_reconcile_required = false;
                 }
                 reconcile.set_reverse_enabled(true);
             } else if probe.is_err() {
                 reconcile.set_reverse_enabled(false);
+                reverse_runtime_reconcile_required = true;
             }
 
             {
@@ -378,6 +384,7 @@ pub fn spawn_xray_supervisor_with_options_and_restarter(
                                 }
                                 Err(error) => {
                                     reverse_recovery_waiting_for_readiness = true;
+                                    reverse_runtime_reconcile_required = false;
                                     reconcile.set_reverse_enabled(false);
                                     snap.last_restart_fail_at = Some(attempt_at);
                                     warn!(
@@ -951,4 +958,6 @@ mod tests {
         let _ = server_handle.await;
         task.abort();
     }
+
+    mod reverse_gate;
 }

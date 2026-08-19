@@ -134,7 +134,6 @@ impl ReconcileHandle {
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
     }
-
     pub(crate) fn request_reverse_restart_recovery(&self) {
         self.reverse_recovery_required
             .store(false, Ordering::Release);
@@ -142,14 +141,13 @@ impl ReconcileHandle {
         self.request(ReconcileRequest::ResetReverseTombstones);
         self.request(ReconcileRequest::Full);
     }
-
     pub(crate) fn request_xray_restart(&self) {
         self.reverse_recovery_required
             .store(true, Ordering::Release);
+        self.reverse_runtime_ready.store(false, Ordering::Release);
         self.refresh_reverse_gate();
         self.restart_requested.store(true, Ordering::Release);
     }
-
     pub(crate) fn take_xray_restart_request(&self) -> bool {
         self.restart_requested.swap(false, Ordering::AcqRel)
     }
@@ -157,10 +155,11 @@ impl ReconcileHandle {
     pub fn reverse_gate(&self) -> Arc<AtomicBool> {
         self.reverse_enabled.clone()
     }
-
     pub(crate) fn set_reverse_enabled(&self, enabled: bool) {
         self.reverse_supervisor_enabled
             .store(enabled, Ordering::Release);
+        self.reverse_runtime_ready
+            .fetch_and(enabled, Ordering::AcqRel);
         self.refresh_reverse_gate();
     }
 
@@ -302,9 +301,9 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
     let handle = ReconcileHandle {
         tx: Some(tx),
         restart_requested: Arc::new(AtomicBool::new(false)),
-        reverse_enabled: Arc::new(AtomicBool::new(true)),
-        reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
-        reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
+        reverse_enabled: Arc::new(AtomicBool::new(false)),
+        reverse_supervisor_enabled: Arc::new(AtomicBool::new(false)),
+        reverse_runtime_ready: Arc::new(AtomicBool::new(false)),
         reverse_recovery_required: Arc::new(AtomicBool::new(false)),
     };
     let restart_handle = handle.clone();
@@ -386,6 +385,7 @@ async fn reconciler_task<R: RngCore>(
                 )
                 .await
                 {
+                    restart_handle.set_reverse_runtime_ready(false);
                     let delay = backoff.next_delay();
                     debug!(?err, ?delay, "reconcile connect failed; backing off");
                     backoff_until = Some(Instant::now() + delay);
