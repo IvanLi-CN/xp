@@ -277,6 +277,9 @@ target SHA, `release_type`, `channel`, `expected_version`, and a short non-sensi
 The workflow verifies the target is on `main`, waits for successful `ci`, `fixture-policy`, and
 `xray-e2e` push runs for that exact SHA, and refuses to tag when the computed version differs from
 `expected_version`. Stable backfills publish `latest`; prereleases do not.
+If the target commit changes a workflow file, the Actions `GITHUB_TOKEN` cannot create its tag; an
+owner must first push the exact annotated tag with a credential that has workflow scope. The workflow
+then reuses that tag idempotently.
 
 ## Troubleshooting checklist
 
