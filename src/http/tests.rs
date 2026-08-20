@@ -834,7 +834,7 @@ async fn body_text(res: axum::response::Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-async fn read_sse_until(mut body: Body, marker: &str) -> String {
+async fn read_sse_until(body: &mut Body, marker: &str) -> String {
     let mut out = String::new();
     for _ in 0..6 {
         let frame = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())

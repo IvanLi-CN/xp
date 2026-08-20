@@ -4511,11 +4511,35 @@ async fn build_admin_status_snapshot(state: &AppState) -> Result<AdminStatusSnap
 
 fn admin_status_snapshot_fingerprint(snapshot: &AdminStatusSnapshot) -> serde_json::Result<String> {
     let mut value = serde_json::to_value(snapshot)?;
-    value
-        .as_object_mut()
-        .expect("status snapshot serializes to an object")
-        .remove("emitted_at");
+    normalize_admin_status_snapshot_fingerprint_value(&mut value);
     serde_json::to_string(&value)
+}
+
+fn normalize_admin_status_snapshot_fingerprint_value(value: &mut serde_json::Value) {
+    let Some(snapshot) = value.as_object_mut() else {
+        return;
+    };
+    snapshot.remove("emitted_at");
+    let Some(items) = snapshot
+        .get_mut("nodes_runtime")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|runtime| runtime.get_mut("items"))
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for item in items {
+        let Some(summary) = item
+            .as_object_mut()
+            .and_then(|item| item.get_mut("summary"))
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        if summary.get("status").and_then(serde_json::Value::as_str) == Some("unknown") {
+            summary.remove("updated_at");
+        }
+    }
 }
 
 async fn admin_get_upgrade_status(
@@ -4543,6 +4567,10 @@ async fn admin_stream_status_events(
             worker_hub.run(state_for_worker).await;
         });
     });
+    let mut subscription = subscription;
+    if let Some(event) = subscription.replay.take() {
+        initial_events.push_back(event.into_sse_event());
+    }
 
     let out_stream = stream::unfold(
         (initial_events, subscription),

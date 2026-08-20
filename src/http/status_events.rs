@@ -30,6 +30,8 @@ impl StatusEventUpdate {
 struct StatusEventsLifecycle {
     subscribers: usize,
     worker_running: bool,
+    latest_update: Option<StatusEventUpdate>,
+    refresh_requested: bool,
 }
 
 #[derive(Clone)]
@@ -41,6 +43,7 @@ pub(super) struct StatusEventsHub {
 
 pub(super) struct StatusEventsSubscription {
     pub(super) receiver: broadcast::Receiver<StatusEventUpdate>,
+    pub(super) replay: Option<StatusEventUpdate>,
     hub: StatusEventsHub,
 }
 
@@ -64,25 +67,34 @@ impl StatusEventsHub {
     where
         F: FnOnce(),
     {
-        let receiver = self.sender.subscribe();
-        let should_start_worker = {
+        let (receiver, replay, should_start_worker, wake_worker) = {
             let mut lifecycle = self
                 .lifecycle
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let receiver = self.sender.subscribe();
             lifecycle.subscribers += 1;
-            if lifecycle.worker_running {
+            let should_start_worker = if lifecycle.worker_running {
                 false
             } else {
                 lifecycle.worker_running = true;
                 true
-            }
+            };
+            (
+                receiver,
+                lifecycle.latest_update.clone(),
+                should_start_worker,
+                !should_start_worker && lifecycle.refresh_requested,
+            )
         };
         if should_start_worker {
             start_worker();
+        } else if wake_worker {
+            self.shutdown.notify_one();
         }
         StatusEventsSubscription {
             receiver,
+            replay,
             hub: self.clone(),
         }
     }
@@ -94,7 +106,12 @@ impl StatusEventsHub {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             lifecycle.subscribers = lifecycle.subscribers.saturating_sub(1);
-            lifecycle.subscribers == 0
+            let is_inactive = lifecycle.subscribers == 0;
+            if is_inactive {
+                lifecycle.latest_update = None;
+                lifecycle.refresh_requested = true;
+            }
+            is_inactive
         };
         if should_stop {
             self.shutdown.notify_one();
@@ -138,6 +155,7 @@ impl StatusEventsHub {
                     if self.stop_if_inactive() {
                         return;
                     }
+                    self.publish_snapshot(&state, &mut last_snapshot_fingerprint).await;
                 }
             }
         }
@@ -163,9 +181,13 @@ impl StatusEventsHub {
             Ok(snapshot_json) => snapshot_json,
             Err(error) => return self.publish_error(format!("serialize status snapshot: {error}")),
         };
+        let refresh_requested = self.take_refresh_request();
         match admin_status_snapshot_fingerprint(&snapshot) {
-            Ok(fingerprint) if last_snapshot_fingerprint.as_ref() != Some(&fingerprint) => {
-                let _ = self.sender.send(StatusEventUpdate::Snapshot(snapshot_json));
+            Ok(fingerprint)
+                if refresh_requested
+                    || last_snapshot_fingerprint.as_ref() != Some(&fingerprint) =>
+            {
+                self.publish_update(StatusEventUpdate::Snapshot(snapshot_json));
                 *last_snapshot_fingerprint = Some(fingerprint);
             }
             Ok(_) => {}
@@ -174,11 +196,32 @@ impl StatusEventsHub {
     }
 
     fn publish_error(&self, message: String) {
-        let _ = self
-            .sender
-            .send(StatusEventUpdate::SnapshotError(AdminStatusSnapshotError {
-                message,
-            }));
+        self.publish_update(StatusEventUpdate::SnapshotError(AdminStatusSnapshotError {
+            message,
+        }));
+    }
+
+    fn take_refresh_request(&self) -> bool {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let refresh_requested = lifecycle.refresh_requested;
+        lifecycle.refresh_requested = false;
+        refresh_requested
+    }
+
+    fn publish_update(&self, update: StatusEventUpdate) {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lifecycle.subscribers == 0 {
+            return;
+        }
+        lifecycle.latest_update = Some(update.clone());
+        lifecycle.refresh_requested = false;
+        let _ = self.sender.send(update);
     }
 }
 
@@ -204,13 +247,9 @@ mod tests {
         assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(hub.lifecycle_for_test(), (2, true));
 
-        assert!(
-            hub.sender
-                .send(StatusEventUpdate::Snapshot(
-                    "{\"health\":\"ok\"}".to_string(),
-                ))
-                .is_ok()
-        );
+        hub.publish_update(StatusEventUpdate::Snapshot(
+            "{\"health\":\"ok\"}".to_string(),
+        ));
         let first_update = first.receiver.recv().await.unwrap();
         let second_update = second.receiver.recv().await.unwrap();
         assert!(matches!(
@@ -227,5 +266,40 @@ mod tests {
         drop(second);
         assert!(hub.stop_if_inactive());
         assert_eq!(hub.lifecycle_for_test(), (0, false));
+    }
+
+    #[test]
+    fn replays_the_latest_update_to_a_late_subscriber() {
+        let hub = StatusEventsHub::new();
+        let _first = hub.subscribe(|| {});
+        hub.publish_update(StatusEventUpdate::Snapshot(
+            "{\"health\":\"ok\"}".to_string(),
+        ));
+
+        let late = hub.subscribe(|| {});
+        assert!(matches!(
+            late.replay,
+            Some(StatusEventUpdate::Snapshot(ref snapshot)) if snapshot == "{\"health\":\"ok\"}"
+        ));
+    }
+
+    #[test]
+    fn replays_snapshot_errors_and_refreshes_after_a_full_disconnect() {
+        let hub = StatusEventsHub::new();
+        let first = hub.subscribe(|| {});
+        hub.publish_error("runtime unavailable".to_string());
+
+        let late = hub.subscribe(|| {});
+        assert!(matches!(
+            late.replay,
+            Some(StatusEventUpdate::SnapshotError(ref error))
+                if error.message == "runtime unavailable"
+        ));
+
+        drop(first);
+        drop(late);
+        let reconnect = hub.subscribe(|| {});
+        assert!(reconnect.replay.is_none());
+        assert!(hub.take_refresh_request());
     }
 }
