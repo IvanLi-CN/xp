@@ -268,6 +268,16 @@ Pre-releases publish:
 - `ghcr.io/ivanli-cn/xp:vX.Y.Z-...`
 - `ghcr.io/ivanli-cn/xp:X.Y.Z-...`
 
+## Corrective release backfill
+
+Normal releases derive their type and channel from the pull request events through its merge event.
+Do not edit a merged pull request's labels to trigger a release. When a merged target was skipped or
+otherwise needs a corrective release, an owner may dispatch the `release` workflow with the exact
+target SHA, `release_type`, `channel`, `expected_version`, and a short non-sensitive `reason`.
+The workflow verifies the target is on `main`, waits for successful `ci`, `fixture-policy`, and
+`xray-e2e` push runs for that exact SHA, and refuses to tag when the computed version differs from
+`expected_version`. Stable backfills publish `latest`; prereleases do not.
+
 ## Troubleshooting checklist
 
 - Missing bootstrap token/hash: confirm `XP_ADMIN_TOKEN` or `XP_ADMIN_TOKEN_HASH`
