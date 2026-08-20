@@ -19,27 +19,38 @@ jobs:
     name: release intent label gate
     runs-on: ubuntu-latest
     steps:
-      - name: validate intent label (exactly one)
+      - name: validate release intent labels
         uses: actions/github-script@v9
         with:
           github-token: ${{ github.token }}
           script: |
-            const allowed = new Set([
+            const allowedTypes = new Set([
               "type:docs",
               "type:skip",
               "type:patch",
               "type:minor",
               "type:major",
             ]);
+            const allowedChannels = new Set(["channel:stable", "channel:prerelease"]);
 
-            const labels = (context.payload.pull_request?.labels ?? [])
+            const labelResponse = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const labels = (labelResponse.data ?? [])
               .map((l) => l?.name)
               .filter((n) => typeof n === "string" && n.length > 0);
 
-            const present = labels.filter((n) => allowed.has(n));
-            const unknownType = labels.filter((n) => n.startsWith("type:") && !allowed.has(n));
+            const unique = (values) => Array.from(new Set(values)).sort();
+            const types = unique(labels.filter((n) => n.startsWith("type:")));
+            const channels = unique(labels.filter((n) => n.startsWith("channel:")));
+            const unknownType = types.filter((n) => !allowedTypes.has(n));
+            const unknownChannel = channels.filter((n) => !allowedChannels.has(n));
 
-            core.info(`Allowed intent labels: ${Array.from(allowed).sort().join(", ")}`);
+            core.info(`Allowed type labels: ${Array.from(allowedTypes).sort().join(", ")}`);
+            core.info(`Allowed channel labels: ${Array.from(allowedChannels).sort().join(", ")}`);
             core.info(`Found labels: ${Array.from(new Set(labels)).sort().join(", ")}`);
 
             if (unknownType.length > 0) {
@@ -49,16 +60,27 @@ jobs:
               return;
             }
 
-            if (present.length === 0) {
-              core.setFailed("Missing intent label: PR must have exactly one intent label");
-              return;
-            }
-
-            if (present.length > 1) {
+            if (unknownChannel.length > 0) {
               core.setFailed(
-                `Conflicting intent labels: ${Array.from(new Set(present)).sort().join(", ")} (must be exactly one)`
+                `Unknown release channel label(s): ${unknownChannel.join(", ")}`
               );
               return;
             }
 
-            core.notice(`Intent label OK: ${present[0]}`);
+            if (types.length !== 1) {
+              core.setFailed(
+                `PR must have exactly one release type label; ` +
+                `found ${types.length}: ${types.join(", ")}`
+              );
+              return;
+            }
+
+            if (channels.length !== 1) {
+              core.setFailed(
+                `PR must have exactly one release channel label; ` +
+                `found ${channels.length}: ${channels.join(", ")}`
+              );
+              return;
+            }
+
+            core.notice(`Release intent OK: ${types[0]} + ${channels[0]}`);

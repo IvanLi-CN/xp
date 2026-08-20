@@ -17,6 +17,10 @@ jobs:
         shell: bash
         run: ./.github/scripts/test-compute-version.sh
 
+      - name: release intent and readiness regression
+        shell: bash
+        run: python3 ./.github/scripts/test-release-governance.py
+
       - name: setup rust
         uses: dtolnay/rust-toolchain@v1
         with:

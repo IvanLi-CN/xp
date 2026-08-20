@@ -902,6 +902,20 @@ Post-upgrade validation for nodes expected to expose a managed-default VLESS ing
 2. `curl -Ik https://<access_host[:vless_port]>/generate_204`
 3. Re-render a Mihomo provider subscription and confirm the relay group for that `access_host` now uses `https://<access_host[:port]>/generate_204`
 
+### Release intent and corrective backfill
+
+Normal release intent is the merged pull request's type and channel labels as reconstructed from
+GitHub Issue events through the unique merge event. The current labels on an already merged PR are
+not authoritative, and historical PR labels must not be edited to trigger a release. A release is
+published only after the target SHA has successful `ci`, `fixture-policy`, and `xray-e2e` push runs
+on `main`.
+
+For a corrective release, an owner dispatches the `release` workflow with the exact merged `head_sha`,
+`release_type`, `channel`, `expected_version`, and a short non-sensitive `reason`. The workflow fails
+before tag creation if the target is not on `main`, the expected version does not match, or any
+required workflow is missing or unsuccessful. This is a Manual Backfill, not a replacement for the
+normal merge-time intent path. Stable releases publish `latest`; prereleases do not.
+
 ### Release-ready checklist: host-managed systemd node with Tunnel/DDNS
 
 Ideal post-release path:

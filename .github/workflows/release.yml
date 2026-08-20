@@ -11,8 +11,32 @@ on:
         description: Commit SHA on main to backfill release for
         required: true
         type: string
+      release_type:
+        description: Release increment for the approved backfill
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - stable
+          - prerelease
+      expected_version:
+        description: Exact computed version required before tagging
+        required: true
+        type: string
+      reason:
+        description: Short non-sensitive reason for the manual backfill
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: write
   issues: read
   packages: write
@@ -51,30 +75,65 @@ jobs:
       - name: checkout release automation
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
 
-      - name: determine release intent (labels)
+      - name: determine release intent
         id: intent
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
           WORKFLOW_RUN_SHA: ${{ env.RELEASE_HEAD_SHA }}
+          RELEASE_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_type || '' }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version || '' }}
+          RELEASE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || '' }}
         run: bash ./.github/scripts/release-intent.sh
+
+      - name: verify target workflow readiness
+        if: steps.intent.outputs.should_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_HEAD_SHA: ${{ env.RELEASE_HEAD_SHA }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 ./.github/scripts/release_readiness.py
 
       - name: summary (release intent)
         if: always()
+        env:
+          TRIGGER: ${{ github.event_name }}
+          TARGET_SHA: ${{ env.RELEASE_HEAD_SHA }}
+          PR_NUMBER: ${{ steps.intent.outputs.pr_number }}
+          PR_URL: ${{ steps.intent.outputs.pr_url }}
+          INTENT_SOURCE: ${{ steps.intent.outputs.intent_source }}
+          INTENT_TYPE: ${{ steps.intent.outputs.release_intent_type }}
+          RELEASE_CHANNEL: ${{ steps.intent.outputs.release_channel }}
+          INTENT_LABEL: ${{ steps.intent.outputs.release_intent_label }}
+          IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
+          SHOULD_RELEASE: ${{ steps.intent.outputs.should_release }}
+          BUMP_LEVEL: ${{ steps.intent.outputs.bump_level }}
+          INTENT_REASON: ${{ steps.intent.outputs.reason }}
+          BACKFILL_REASON: ${{ steps.intent.outputs.backfill_reason }}
+          EXPECTED_VERSION: ${{ steps.intent.outputs.expected_version }}
         shell: bash
         run: |
+          set -euo pipefail
           {
-            echo "### Release intent"
-            echo "- trigger: ${{ github.event_name }}"
-            echo "- head_sha: ${{ env.RELEASE_HEAD_SHA }}"
-            echo "- pr: #${{ steps.intent.outputs.pr_number }} (${{ steps.intent.outputs.pr_url }})"
-            echo "- intent_label: ${{ steps.intent.outputs.release_intent_label }}"
-            echo "- is_prerelease: ${{ steps.intent.outputs.is_prerelease }}"
-            echo "- should_release: ${{ steps.intent.outputs.should_release }}"
-            echo "- bump_level: ${{ steps.intent.outputs.bump_level }}"
-            echo "- reason: ${{ steps.intent.outputs.reason }}"
+            printf '%s\n' '### Release intent'
+            printf '%s\n' "- trigger: ${TRIGGER}"
+            printf '%s\n' "- head_sha: ${TARGET_SHA}"
+            printf '%s\n' "- pr: #${PR_NUMBER} (${PR_URL})"
+            printf '%s\n' "- source: ${INTENT_SOURCE}"
+            printf '%s\n' "- type: ${INTENT_TYPE}"
+            printf '%s\n' "- channel: ${RELEASE_CHANNEL}"
+            printf '%s\n' "- intent_label: ${INTENT_LABEL}"
+            printf '%s\n' "- is_prerelease: ${IS_PRERELEASE}"
+            printf '%s\n' "- should_release: ${SHOULD_RELEASE}"
+            printf '%s\n' "- bump_level: ${BUMP_LEVEL}"
+            printf '%s\n' "- reason: ${INTENT_REASON}"
+            printf '%s\n' "- backfill_reason: ${BACKFILL_REASON}"
+            printf '%s\n' "- expected_version: ${EXPECTED_VERSION}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: skip release (intent says no)
@@ -93,6 +152,22 @@ jobs:
           set -euo pipefail
           chmod +x .github/scripts/compute-version.sh
           .github/scripts/compute-version.sh
+
+      - name: verify expected backfill version
+        if: >-
+          steps.intent.outputs.should_release == 'true' &&
+          github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          COMPUTED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${COMPUTED_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+            echo "expected_version mismatch" >&2
+            echo "expected=${EXPECTED_VERSION} computed=${COMPUTED_VERSION}" >&2
+            exit 1
+          fi
+          echo "expected_version verified: ${COMPUTED_VERSION}"
 
       - name: prepare docker image tags
         id: image
@@ -297,7 +372,7 @@ jobs:
           cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-aarch64
 
           cd release
-          sha256sum *-linux-* > checksums.txt
+          sha256sum -- *-linux-* > checksums.txt
 
       - name: setup qemu
         if: steps.intent.outputs.should_release == 'true'

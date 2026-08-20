@@ -65,6 +65,12 @@ jobs:
               re.compile(r'\bRELEASE_REQUESTED_SHA=([0-9a-f]{40})\b'),
               re.compile(r'target_sha="([0-9a-f]{40})"'),
           ]
+          metadata_patterns = {
+              'intent_source': re.compile(r'\bintent_source=([^\r\n]+)'),
+              'intent_type': re.compile(r'\brelease_intent_type=([^\r\n]+)'),
+              'channel': re.compile(r'\brelease_channel=([^\r\n]+)'),
+              'backfill_reason': re.compile(r'\bbackfill_reason=([^\r\n]+)'),
+          }
 
           def api_request(path: str, *, accept: str = 'application/vnd.github+json') -> str:
               url = path if path.startswith('http') else f'{api_root}{path}'
@@ -152,12 +158,37 @@ jobs:
               if resolved_sha == fallback_head_sha and requested_sha:
                   resolved_sha = requested_sha
 
+              metadata = {}
+              for job in jobs:
+                  if not isinstance(job, dict):
+                      continue
+                  job_id = job.get('id')
+                  if not isinstance(job_id, int):
+                      continue
+                  log_text = load_job_log(job_id)
+                  for key, pattern in metadata_patterns.items():
+                      if key not in metadata:
+                          match = pattern.search(log_text)
+                          if match:
+                              metadata[key] = match.group(1).strip()[:240]
+
+              metadata_details = '; '.join(
+                  f'{key}={metadata[key]}'
+                  for key in ('intent_source', 'intent_type', 'channel', 'backfill_reason')
+                  if metadata.get(key)
+              )
               if resolved_sha and resolved_sha != fallback_head_sha:
                   extra_details = f'resolved release target sha from {resolved_from} logs'
               elif requested_sha and run_event == 'workflow_dispatch':
                   extra_details = f'resolved requested commit sha from {resolved_from} logs'
               elif run_event == 'workflow_dispatch':
                   extra_details = 'manual release dispatch'
+              if metadata_details:
+                  extra_details = (
+                      f'{extra_details}; {metadata_details}'
+                      if extra_details
+                      else metadata_details
+                  )
           except Exception as exc:  # noqa: BLE001
               if run_event == 'workflow_dispatch':
                   extra_details = f'manual release dispatch; target sha resolution fell back to workflow_run head sha ({type(exc).__name__})'
