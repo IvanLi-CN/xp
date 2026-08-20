@@ -40,8 +40,8 @@
 
 - PR 必须且只能有一个受管 `type:docs|skip|patch|minor|major` 与一个受管
   `channel:stable|prerelease`。
-- 自动 resolver 必须只重放合并事件及其之前的标签事件；
-  事件 API 必须按 `Link` 关系完整分页；缺失/重复/未知标签、无法唯一映射 PR
+- 自动 resolver 必须只重放合并事件及其之前的标签事件；事件 API 必须按 `Link`
+  关系完整分页并包含唯一 merge event；缺失/重复/未知标签、无法唯一映射 PR
   或 API 失败必须 fail closed。
 - 需要发布时，三个指定 workflow 必须是目标 SHA 的 `push`、`main`、`success` run。
 - Manual Backfill 必须提供 `head_sha`、`release_type`、`channel`、
@@ -68,7 +68,8 @@
 ### Edge cases / errors
 
 - 合并后新增或删除的标签不得改变自动意图。
-- 目标 SHA 没有唯一 merged PR、事件时间线无法证明唯一 merge event 或完整分页、
+- 目标 SHA 没有唯一 merged PR、事件时间线无法证明唯一 merge event、完整分页或事件
+  时间戳、
   readiness 缺失/失败/取消/跳过/超时，均停止发布。
 - stable 不接受 prerelease expected version，prerelease 必须使用 `-rc.N` expected version。
 
