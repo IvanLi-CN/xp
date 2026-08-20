@@ -54,13 +54,15 @@ fn status_snapshot_fingerprint_ignores_unreachable_timestamp() {
         "emitted_at": "2026-08-20T10:00:00Z",
         "nodes_runtime": {
             "items": [{"summary": {"status": "unknown", "updated_at": "2026-08-20T10:00:00Z"}}]
-        }
+        },
+        "upgrade": {"status": {"state": "idle", "updated_at": "2026-08-20T10:00:00Z"}}
     });
     let mut second = serde_json::json!({
         "emitted_at": "2026-08-20T10:00:05Z",
         "nodes_runtime": {
             "items": [{"summary": {"status": "unknown", "updated_at": "2026-08-20T10:00:05Z"}}]
-        }
+        },
+        "upgrade": {"status": {"state": "idle", "updated_at": "2026-08-20T10:00:05Z"}}
     });
 
     normalize_admin_status_snapshot_fingerprint_value(&mut first);

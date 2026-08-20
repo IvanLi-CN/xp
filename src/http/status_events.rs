@@ -1,6 +1,12 @@
-use std::sync::{Arc, Mutex as StdMutex};
+use std::{
+    collections::VecDeque,
+    convert::Infallible,
+    future::Future,
+    sync::{Arc, Mutex as StdMutex},
+};
 
 use axum::response::sse::Event;
+use futures_util::{Stream, stream};
 use tokio::{
     sync::{Notify, broadcast},
     time::Duration,
@@ -152,6 +158,22 @@ impl StatusEventsHub {
     }
 
     pub(super) async fn run(self, state: AppState) {
+        self.run_with_snapshot_builder(move || {
+            let state = state.clone();
+            async move {
+                build_admin_status_snapshot(&state)
+                    .await
+                    .map_err(|error| error.message)
+            }
+        })
+        .await;
+    }
+
+    async fn run_with_snapshot_builder<F, Fut>(self, mut build_snapshot: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<super::AdminStatusSnapshot, String>>,
+    {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut last_snapshot_fingerprint: Option<String> = None;
 
@@ -161,26 +183,32 @@ impl StatusEventsHub {
                     if self.stop_if_inactive() {
                         return;
                     }
-                    self.publish_snapshot(&state, &mut last_snapshot_fingerprint).await;
+                    self.publish_built_snapshot(
+                        build_snapshot().await,
+                        &mut last_snapshot_fingerprint,
+                    );
                 }
                 _ = self.shutdown.notified() => {
                     if self.stop_if_inactive() {
                         return;
                     }
-                    self.publish_snapshot(&state, &mut last_snapshot_fingerprint).await;
+                    self.publish_built_snapshot(
+                        build_snapshot().await,
+                        &mut last_snapshot_fingerprint,
+                    );
                 }
             }
         }
     }
 
-    async fn publish_snapshot(
+    fn publish_built_snapshot(
         &self,
-        state: &AppState,
+        result: Result<super::AdminStatusSnapshot, String>,
         last_snapshot_fingerprint: &mut Option<String>,
     ) {
-        match build_admin_status_snapshot(state).await {
+        match result {
             Ok(snapshot) => self.publish_serialized_snapshot(snapshot, last_snapshot_fingerprint),
-            Err(error) => self.publish_error(error.message, last_snapshot_fingerprint),
+            Err(message) => self.publish_error(message, last_snapshot_fingerprint),
         }
     }
 
@@ -261,11 +289,84 @@ impl StatusEventsHub {
     }
 }
 
+pub(super) fn stream_events(
+    initial_events: VecDeque<Event>,
+    subscription: StatusEventsSubscription,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send {
+    stream::unfold(
+        (initial_events, subscription),
+        |(mut initial, mut subscription)| async move {
+            if let Some(event) = initial.pop_front() {
+                return Some((Ok(event), (initial, subscription)));
+            }
+            loop {
+                match subscription.receiver.recv().await {
+                    Ok(event) => {
+                        return Some((Ok(event.into_sse_event()), (initial, subscription)));
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        if let Some(event) = subscription.recover_after_lag() {
+                            return Some((Ok(event.into_sse_event()), (initial, subscription)));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, atomic::AtomicUsize};
 
+    use futures_util::StreamExt;
+
     use super::*;
+
+    fn status_snapshot_for_test() -> super::super::AdminStatusSnapshot {
+        super::super::AdminStatusSnapshot {
+            emitted_at: "2026-08-20T10:00:00Z".to_string(),
+            health: super::super::AdminStatusHealthSnapshot { status: "ok" },
+            cluster_info: super::super::ClusterInfoResponse {
+                cluster_id: "cluster-a".to_string(),
+                node_id: "node-a".to_string(),
+                role: "leader",
+                leader_api_base_url: "https://node-a.example.test".to_string(),
+                term: 1,
+                xp_version: "test".to_string(),
+            },
+            nodes_runtime: super::super::AdminNodesRuntimeResponse {
+                partial: false,
+                unreachable_nodes: vec![],
+                items: vec![],
+            },
+            alerts: super::super::AlertsResponse {
+                partial: false,
+                unreachable_nodes: vec![],
+                items: vec![],
+            },
+            upgrade: super::super::AdminUpgradeStatusResponse {
+                support: crate::upgrade_job::UpgradeSupport {
+                    supported: false,
+                    reason: None,
+                    trigger: None,
+                    storage: None,
+                },
+                status: crate::upgrade_job::UpgradeJobStatus {
+                    state: crate::upgrade_job::UpgradeJobState::Idle,
+                    target_tag: None,
+                    repo: None,
+                    started_at: None,
+                    finished_at: None,
+                    exit_code: None,
+                    message: None,
+                    updated_at: "2026-08-20T10:00:00Z".to_string(),
+                },
+            },
+            mesh_revision: 1,
+        }
+    }
 
     #[tokio::test]
     async fn shares_one_producer_and_stops_after_last_subscriber() {
@@ -301,6 +402,63 @@ mod tests {
         assert_eq!(hub.lifecycle_for_test(), (1, true));
         drop(second);
         assert!(hub.stop_if_inactive());
+        assert_eq!(hub.lifecycle_for_test(), (0, false));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn running_producer_fans_out_once_per_tick_and_stops_after_disconnect() {
+        let hub = StatusEventsHub::new();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let builds = Arc::new(AtomicUsize::new(0));
+        let worker_hub = hub.clone();
+        let worker_starts = starts.clone();
+        let worker_builds = builds.clone();
+        let mut first = hub.subscribe(move || {
+            worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::spawn(async move {
+                worker_hub
+                    .run_with_snapshot_builder(move || {
+                        let builds = worker_builds.clone();
+                        async move {
+                            builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Ok(status_snapshot_for_test())
+                        }
+                    })
+                    .await;
+            });
+        });
+        let second_starts = starts.clone();
+        let mut second = hub.subscribe(move || {
+            second_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            first.receiver.recv().await.unwrap(),
+            StatusEventUpdate::Snapshot(_)
+        ));
+        assert!(matches!(
+            second.receiver.recv().await.unwrap(),
+            StatusEventUpdate::Snapshot(_)
+        ));
+        assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(builds.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        tokio::time::advance(Duration::from_secs(5)).await;
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            first.receiver.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            second.receiver.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(builds.load(std::sync::atomic::Ordering::Relaxed), 2);
+
+        drop(first);
+        drop(second);
+        tokio::task::yield_now().await;
         assert_eq!(hub.lifecycle_for_test(), (0, false));
     }
 
@@ -410,5 +568,36 @@ mod tests {
             subscriber.recover_after_lag(),
             Some(StatusEventUpdate::Snapshot(ref snapshot)) if snapshot == "{\"revision\":32}"
         ));
+    }
+
+    #[tokio::test]
+    async fn status_event_stream_delivers_recovery_and_lag_replay() {
+        let hub = StatusEventsHub::new();
+        let subscription = hub.subscribe(|| {});
+        let mut stream = Box::pin(super::stream_events(
+            std::collections::VecDeque::new(),
+            subscription,
+        ));
+        let mut fingerprint = Some("unchanged".to_string());
+
+        hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
+        assert!(stream.next().await.is_some());
+        assert!(hub.publish_snapshot_if_active(
+            StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
+            "unchanged",
+            &fingerprint,
+        ));
+        assert!(stream.next().await.is_some());
+
+        for index in 0..33 {
+            hub.publish_update_if_active(StatusEventUpdate::Snapshot(format!(
+                "{{\"revision\":{index}}}"
+            )));
+        }
+        assert!(stream.next().await.is_some());
+
+        drop(stream);
+        assert!(hub.stop_if_inactive());
+        assert_eq!(hub.lifecycle_for_test(), (0, false));
     }
 }

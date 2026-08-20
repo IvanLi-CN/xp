@@ -156,7 +156,7 @@ async fn immediate_event_does_not_delay_the_first_sample() {
     assert!(!telemetry.state.lock().await.dirty);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn deferred_flush_persists_the_latest_sample_without_another_request() {
     let temp = tempfile::tempdir().unwrap();
     let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
@@ -177,16 +177,19 @@ async fn deferred_flush_persists_the_latest_sample_without_another_request() {
         .record_sample("peer-a", "alpha", sample())
         .await
         .unwrap();
-    {
-        let mut state = telemetry.state.lock().await;
-        assert!(state.flush_scheduled);
-        state.last_sample_persist_at = Some(Instant::now() - SAMPLE_PERSIST_INTERVAL);
-    }
-
-    telemetry.flush_when_due(StdDuration::ZERO).await;
+    assert!(telemetry.state.lock().await.flush_scheduled);
+    tokio::task::yield_now().await;
+    tokio::time::advance(SAMPLE_PERSIST_INTERVAL).await;
+    tokio::task::yield_now().await;
     assert_eq!(telemetry.persist_count(), 2);
-    let persisted = fs::read_to_string(temp.path().join("mesh/telemetry.json")).unwrap();
-    assert!(persisted.contains("\"revision\": 2"));
+    assert_eq!(
+        MeshTelemetryHandle::load(temp.path())
+            .unwrap()
+            .snapshot()
+            .await
+            .revision,
+        2
+    );
     assert!(!telemetry.state.lock().await.dirty);
 }
 

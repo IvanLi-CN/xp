@@ -4520,6 +4520,27 @@ fn normalize_admin_status_snapshot_fingerprint_value(value: &mut serde_json::Val
         return;
     };
     snapshot.remove("emitted_at");
+    if let Some(status) = snapshot
+        .get_mut("upgrade")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|upgrade| upgrade.get_mut("status"))
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let is_idle = status.get("state").and_then(serde_json::Value::as_str) == Some("idle");
+        let has_no_job = [
+            "target_tag",
+            "repo",
+            "started_at",
+            "finished_at",
+            "exit_code",
+            "message",
+        ]
+        .into_iter()
+        .all(|key| status.get(key).is_none_or(serde_json::Value::is_null));
+        if is_idle && has_no_job {
+            status.remove("updated_at");
+        }
+    }
     let Some(items) = snapshot
         .get_mut("nodes_runtime")
         .and_then(serde_json::Value::as_object_mut)
@@ -4572,33 +4593,13 @@ async fn admin_stream_status_events(
         initial_events.push_back(event.into_sse_event());
     }
 
-    let out_stream = stream::unfold(
-        (initial_events, subscription),
-        |(mut initial, mut subscription)| async move {
-            if let Some(event) = initial.pop_front() {
-                return Some((Ok(event), (initial, subscription)));
-            }
-            loop {
-                match subscription.receiver.recv().await {
-                    Ok(event) => {
-                        return Some((Ok(event.into_sse_event()), (initial, subscription)));
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        if let Some(event) = subscription.recover_after_lag() {
-                            return Some((Ok(event.into_sse_event()), (initial, subscription)));
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-                }
-            }
-        },
-    );
-
-    Ok(Sse::new(out_stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(10))
-            .text("keepalive"),
-    ))
+    Ok(
+        Sse::new(status_events::stream_events(initial_events, subscription)).keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(10))
+                .text("keepalive"),
+        ),
+    )
 }
 
 async fn admin_start_upgrade(

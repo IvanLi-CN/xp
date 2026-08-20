@@ -4,12 +4,15 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration as StdDuration, Instant},
+    time::Duration as StdDuration,
 };
 
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::{
+    sync::{Mutex, Semaphore},
+    time::Instant,
+};
 use tracing::warn;
 
 use crate::state::history_storage::read_legacy_mesh_telemetry;
@@ -239,6 +242,17 @@ impl MeshTelemetryHandle {
         peer_name: impl Into<String>,
         sample: MeshTelemetrySample,
     ) -> anyhow::Result<()> {
+        self.record_sample_with_active_route(peer_id, peer_name, sample, None)
+            .await
+    }
+
+    async fn record_sample_with_active_route(
+        &self,
+        peer_id: impl Into<String>,
+        peer_name: impl Into<String>,
+        sample: MeshTelemetrySample,
+        active_route: Option<MeshActiveRoute>,
+    ) -> anyhow::Result<()> {
         let now = Utc::now();
         let peer_id = peer_id.into();
         let observed_transport = self.connections.observe(&peer_id, sample.transport).await;
@@ -254,9 +268,13 @@ impl MeshTelemetryHandle {
         peer.peer_name = peer_name.into();
         let previous_path = peer.last_path;
         let updates_active_path = sample.updates_active_path && sample.success;
+        let persist_route_change = active_route.is_some();
+        let mut active_route_changed = false;
         if updates_active_path {
             peer.last_path = Some(sample.path);
-            peer.active_route = Some(MeshActiveRoute {
+        }
+        if updates_active_path || active_route.is_some() {
+            let active_route = active_route.unwrap_or(MeshActiveRoute {
                 kind: match sample.path {
                     TelemetryPath::Mesh => ActiveRouteKind::RealityDirect,
                     TelemetryPath::Public => ActiveRouteKind::Public,
@@ -268,6 +286,8 @@ impl MeshTelemetryHandle {
                 generation: None,
                 readiness: None,
             });
+            active_route_changed = peer.active_route.as_ref() != Some(&active_route);
+            peer.active_route = Some(active_route);
         }
         peer.last_sample_at = Some(timestamp(now));
         if updates_active_path && previous_path != Some(sample.path) {
@@ -318,7 +338,14 @@ impl MeshTelemetryHandle {
             }
         }
         state.persisted.revision += 1;
-        let deferred_flush = self.persist_sample_if_due(&mut state, Instant::now())?;
+        let deferred_flush = if persist_route_change && active_route_changed {
+            state.dirty = true;
+            state.sample_dirty = true;
+            self.persist_locked(&mut state, Instant::now())?;
+            None
+        } else {
+            self.persist_sample_if_due(&mut state, Instant::now())?
+        };
         drop(state);
         if let Some(delay) = deferred_flush {
             self.spawn_deferred_flush(delay);
