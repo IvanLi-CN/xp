@@ -53,6 +53,16 @@ pub(super) struct StatusEventsSubscription {
     hub: StatusEventsHub,
 }
 
+struct StatusEventsWorkerGuard {
+    hub: StatusEventsHub,
+}
+
+impl Drop for StatusEventsWorkerGuard {
+    fn drop(&mut self) {
+        self.hub.worker_exited();
+    }
+}
+
 impl Drop for StatusEventsSubscription {
     fn drop(&mut self) {
         self.hub.unsubscribe();
@@ -148,6 +158,17 @@ impl StatusEventsHub {
         true
     }
 
+    fn worker_exited(&self) {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        lifecycle.worker_running = false;
+        if lifecycle.subscribers > 0 {
+            lifecycle.refresh_requested = true;
+        }
+    }
+
     #[cfg(test)]
     fn lifecycle_for_test(&self) -> (usize, bool) {
         let lifecycle = self
@@ -174,6 +195,7 @@ impl StatusEventsHub {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<super::AdminStatusSnapshot, String>>,
     {
+        let _worker_guard = StatusEventsWorkerGuard { hub: self.clone() };
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut last_snapshot_fingerprint: Option<String> = None;
 
@@ -470,6 +492,64 @@ mod tests {
         drop(first);
         drop(second);
         tokio::task::yield_now().await;
+        assert_eq!(hub.lifecycle_for_test(), (0, false));
+    }
+
+    #[tokio::test]
+    async fn restarts_after_an_unexpected_worker_exit() {
+        let hub = StatusEventsHub::new();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (started, started_receiver) = tokio::sync::oneshot::channel();
+        let worker_hub = hub.clone();
+        let worker_starts = starts.clone();
+        let first = hub.subscribe(move || {
+            worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::spawn(async move {
+                let mut started = Some(started);
+                worker_hub
+                    .run_with_snapshot_builder(move || {
+                        let started = started.take();
+                        async move {
+                            started
+                                .expect("panic builder only runs once")
+                                .send(())
+                                .unwrap();
+                            panic!("test producer panic");
+                        }
+                    })
+                    .await;
+            });
+        });
+
+        started_receiver.await.unwrap();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            if hub.lifecycle_for_test() == (1, false) {
+                break;
+            }
+        }
+        assert_eq!(hub.lifecycle_for_test(), (1, false));
+
+        let worker_hub = hub.clone();
+        let worker_starts = starts.clone();
+        let mut second = hub.subscribe(move || {
+            worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::spawn(async move {
+                worker_hub
+                    .run_with_snapshot_builder(|| async { Ok(status_snapshot_for_test()) })
+                    .await;
+            });
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 2);
+        assert!(matches!(
+            second.receiver.recv().await.unwrap(),
+            StatusEventUpdate::Snapshot(_)
+        ));
+
+        drop(first);
+        drop(second);
+        assert!(hub.stop_if_inactive());
         assert_eq!(hub.lifecycle_for_test(), (0, false));
     }
 
