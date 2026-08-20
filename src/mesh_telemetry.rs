@@ -268,12 +268,8 @@ impl MeshTelemetryHandle {
         peer.peer_name = peer_name.into();
         let previous_path = peer.last_path;
         let updates_active_path = sample.updates_active_path && sample.success;
-        let persist_route_change = active_route.is_some();
-        let mut active_route_changed = false;
         if updates_active_path {
             peer.last_path = Some(sample.path);
-        }
-        if updates_active_path || active_route.is_some() {
             let active_route = active_route.unwrap_or(MeshActiveRoute {
                 kind: match sample.path {
                     TelemetryPath::Mesh => ActiveRouteKind::RealityDirect,
@@ -286,7 +282,6 @@ impl MeshTelemetryHandle {
                 generation: None,
                 readiness: None,
             });
-            active_route_changed = peer.active_route.as_ref() != Some(&active_route);
             peer.active_route = Some(active_route);
         }
         peer.last_sample_at = Some(timestamp(now));
@@ -338,14 +333,7 @@ impl MeshTelemetryHandle {
             }
         }
         state.persisted.revision += 1;
-        let deferred_flush = if persist_route_change && active_route_changed {
-            state.dirty = true;
-            state.sample_dirty = true;
-            self.persist_locked(&mut state, Instant::now())?;
-            None
-        } else {
-            self.persist_sample_if_due(&mut state, Instant::now())?
-        };
+        let deferred_flush = self.persist_sample_if_due(&mut state, Instant::now())?;
         drop(state);
         if let Some(delay) = deferred_flush {
             self.spawn_deferred_flush(delay);

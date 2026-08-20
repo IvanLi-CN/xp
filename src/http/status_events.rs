@@ -320,9 +320,20 @@ pub(super) fn stream_events(
 mod tests {
     use std::sync::{Arc, atomic::AtomicUsize};
 
+    use axum::response::{IntoResponse, sse::Sse};
     use futures_util::StreamExt;
+    use http_body_util::BodyExt;
 
     use super::*;
+
+    async fn event_text(event: Event) -> String {
+        let response = Sse::new(futures_util::stream::once(async {
+            Ok::<_, Infallible>(event)
+        }))
+        .into_response();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
 
     fn status_snapshot_for_test() -> super::super::AdminStatusSnapshot {
         super::super::AdminStatusSnapshot {
@@ -477,8 +488,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn replays_snapshot_errors_and_refreshes_after_a_full_disconnect() {
+    #[tokio::test]
+    async fn replays_snapshot_errors_and_refreshes_after_a_full_disconnect() {
         let hub = StatusEventsHub::new();
         let first = hub.subscribe(|| {});
         let mut fingerprint = Some("initial".to_string());
@@ -495,11 +506,16 @@ mod tests {
         drop(late);
         let reconnect = hub.subscribe(|| {});
         assert!(reconnect.replay.is_none());
+        let mut stream = Box::pin(super::stream_events(VecDeque::new(), reconnect));
         assert!(hub.publish_snapshot_if_active(
             StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
             "initial",
             &fingerprint,
         ));
+        assert_eq!(
+            event_text(stream.next().await.unwrap().unwrap()).await,
+            "event: snapshot\ndata: {\"health\":\"ok\"}\n\n"
+        );
     }
 
     #[tokio::test]
@@ -581,20 +597,29 @@ mod tests {
         let mut fingerprint = Some("unchanged".to_string());
 
         hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
-        assert!(stream.next().await.is_some());
+        assert_eq!(
+            event_text(stream.next().await.unwrap().unwrap()).await,
+            "event: snapshot_error\ndata: {\"message\":\"runtime unavailable\"}\n\n"
+        );
         assert!(hub.publish_snapshot_if_active(
             StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
             "unchanged",
             &fingerprint,
         ));
-        assert!(stream.next().await.is_some());
+        assert_eq!(
+            event_text(stream.next().await.unwrap().unwrap()).await,
+            "event: snapshot\ndata: {\"health\":\"ok\"}\n\n"
+        );
 
         for index in 0..33 {
             hub.publish_update_if_active(StatusEventUpdate::Snapshot(format!(
                 "{{\"revision\":{index}}}"
             )));
         }
-        assert!(stream.next().await.is_some());
+        assert_eq!(
+            event_text(stream.next().await.unwrap().unwrap()).await,
+            "event: snapshot\ndata: {\"revision\":32}\n\n"
+        );
 
         drop(stream);
         assert!(hub.stop_if_inactive());
