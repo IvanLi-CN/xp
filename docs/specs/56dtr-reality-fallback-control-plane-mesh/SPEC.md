@@ -106,7 +106,9 @@
 - status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
   仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
   订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。
-  最后一个订阅者离开后停止并要求下一次订阅重新采样。鉴权、路径和 Mesh 状态 API 保持不变。
+  `snapshot_error` 后的下一条成功快照不得被去重抑制；发生 broadcast lag 的订阅者重建 receiver 并
+  重放当前更新，避免持续陈旧。最后一个订阅者离开后停止并要求下一次订阅重新采样。鉴权、路径和
+  Mesh 状态 API 保持不变。
 - 质量枚举固定为 good、slow、unstable、down 与 unknown。
 - Mesh 失败但公网成功代表端到端成功，并单独记录 fallback。
 - 成功 Mesh response 的 HTTP version 与 socket tuple 只用于进程内识别连接；原始地址、源 IP、

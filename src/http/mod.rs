@@ -4583,7 +4583,11 @@ async fn admin_stream_status_events(
                     Ok(event) => {
                         return Some((Ok(event.into_sse_event()), (initial, subscription)));
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        if let Some(event) = subscription.recover_after_lag() {
+                            return Some((Ok(event.into_sse_event()), (initial, subscription)));
+                        }
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
                 }
             }

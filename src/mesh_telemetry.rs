@@ -152,6 +152,7 @@ struct PersistedTelemetry {
 struct TelemetryState {
     persisted: PersistedTelemetry,
     dirty: bool,
+    sample_dirty: bool,
     retry_persist: bool,
     flush_scheduled: bool,
     last_sample_persist_at: Option<Instant>,
@@ -205,6 +206,7 @@ impl MeshTelemetryHandle {
             state: Arc::new(Mutex::new(TelemetryState {
                 persisted: state,
                 dirty: false,
+                sample_dirty: false,
                 retry_persist: false,
                 flush_scheduled: false,
                 last_sample_persist_at: None,
@@ -444,6 +446,7 @@ impl MeshTelemetryHandle {
         now: Instant,
     ) -> anyhow::Result<Option<StdDuration>> {
         state.dirty = true;
+        state.sample_dirty = true;
         let due = state.retry_persist
             || state.last_sample_persist_at.is_none_or(|last_persist| {
                 now.duration_since(last_persist) >= SAMPLE_PERSIST_INTERVAL
@@ -477,7 +480,10 @@ impl MeshTelemetryHandle {
         }
         state.dirty = false;
         state.retry_persist = false;
-        state.last_sample_persist_at = Some(now);
+        if state.sample_dirty {
+            state.sample_dirty = false;
+            state.last_sample_persist_at = Some(now);
+        }
         #[cfg(test)]
         self.persist_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

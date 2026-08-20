@@ -123,6 +123,40 @@ async fn throttles_regular_samples_and_persists_immediate_events() {
 }
 
 #[tokio::test]
+async fn immediate_event_does_not_delay_the_first_sample() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    telemetry
+        .record_event("peer-a", "probe_requested", "operator requested a probe")
+        .await
+        .unwrap();
+    assert_eq!(telemetry.persist_count(), 1);
+
+    telemetry
+        .record_sample(
+            "peer-a",
+            "alpha",
+            MeshTelemetrySample {
+                path: TelemetryPath::Mesh,
+                success: true,
+                latency_ms: Some(xp_test_fixtures::number_value42()),
+                fallback: false,
+                updates_active_path: true,
+                transport: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        telemetry.persist_count(),
+        2,
+        "first sample persists immediately"
+    );
+    assert!(!telemetry.state.lock().await.dirty);
+}
+
+#[tokio::test]
 async fn deferred_flush_persists_the_latest_sample_without_another_request() {
     let temp = tempfile::tempdir().unwrap();
     let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();

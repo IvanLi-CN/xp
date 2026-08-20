@@ -53,6 +53,18 @@ impl Drop for StatusEventsSubscription {
     }
 }
 
+impl StatusEventsSubscription {
+    pub(super) fn recover_after_lag(&mut self) -> Option<StatusEventUpdate> {
+        let lifecycle = self
+            .hub
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.receiver = self.hub.sender.subscribe();
+        lifecycle.latest_update.clone()
+    }
+}
+
 impl StatusEventsHub {
     pub(super) fn new() -> Self {
         let (sender, _) = broadcast::channel(32);
@@ -168,7 +180,7 @@ impl StatusEventsHub {
     ) {
         match build_admin_status_snapshot(state).await {
             Ok(snapshot) => self.publish_serialized_snapshot(snapshot, last_snapshot_fingerprint),
-            Err(error) => self.publish_error(error.message),
+            Err(error) => self.publish_error(error.message, last_snapshot_fingerprint),
         }
     }
 
@@ -179,49 +191,73 @@ impl StatusEventsHub {
     ) {
         let snapshot_json = match serde_json::to_string(&snapshot) {
             Ok(snapshot_json) => snapshot_json,
-            Err(error) => return self.publish_error(format!("serialize status snapshot: {error}")),
+            Err(error) => {
+                return self.publish_error(
+                    format!("serialize status snapshot: {error}"),
+                    last_snapshot_fingerprint,
+                );
+            }
         };
-        let refresh_requested = self.take_refresh_request();
         match admin_status_snapshot_fingerprint(&snapshot) {
             Ok(fingerprint)
-                if refresh_requested
-                    || last_snapshot_fingerprint.as_ref() != Some(&fingerprint) =>
+                if self.publish_snapshot_if_active(
+                    StatusEventUpdate::Snapshot(snapshot_json),
+                    &fingerprint,
+                    last_snapshot_fingerprint,
+                ) =>
             {
-                self.publish_update(StatusEventUpdate::Snapshot(snapshot_json));
                 *last_snapshot_fingerprint = Some(fingerprint);
             }
             Ok(_) => {}
-            Err(error) => self.publish_error(format!("serialize status snapshot: {error}")),
+            Err(error) => self.publish_error(
+                format!("serialize status snapshot: {error}"),
+                last_snapshot_fingerprint,
+            ),
         }
     }
 
-    fn publish_error(&self, message: String) {
-        self.publish_update(StatusEventUpdate::SnapshotError(AdminStatusSnapshotError {
+    fn publish_error(&self, message: String, last_snapshot_fingerprint: &mut Option<String>) {
+        *last_snapshot_fingerprint = None;
+        self.publish_update_if_active(StatusEventUpdate::SnapshotError(AdminStatusSnapshotError {
             message,
         }));
     }
 
-    fn take_refresh_request(&self) -> bool {
-        let mut lifecycle = self
-            .lifecycle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let refresh_requested = lifecycle.refresh_requested;
-        lifecycle.refresh_requested = false;
-        refresh_requested
-    }
-
-    fn publish_update(&self, update: StatusEventUpdate) {
+    fn publish_snapshot_if_active(
+        &self,
+        update: StatusEventUpdate,
+        fingerprint: &str,
+        last_snapshot_fingerprint: &Option<String>,
+    ) -> bool {
         let mut lifecycle = self
             .lifecycle
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if lifecycle.subscribers == 0 {
-            return;
+            return false;
+        }
+        if !lifecycle.refresh_requested && last_snapshot_fingerprint.as_deref() == Some(fingerprint)
+        {
+            return false;
+        }
+        lifecycle.refresh_requested = false;
+        lifecycle.latest_update = Some(update.clone());
+        let _ = self.sender.send(update);
+        true
+    }
+
+    fn publish_update_if_active(&self, update: StatusEventUpdate) -> bool {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lifecycle.subscribers == 0 {
+            return false;
         }
         lifecycle.latest_update = Some(update.clone());
         lifecycle.refresh_requested = false;
         let _ = self.sender.send(update);
+        true
     }
 }
 
@@ -247,7 +283,7 @@ mod tests {
         assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(hub.lifecycle_for_test(), (2, true));
 
-        hub.publish_update(StatusEventUpdate::Snapshot(
+        hub.publish_update_if_active(StatusEventUpdate::Snapshot(
             "{\"health\":\"ok\"}".to_string(),
         ));
         let first_update = first.receiver.recv().await.unwrap();
@@ -272,7 +308,7 @@ mod tests {
     fn replays_the_latest_update_to_a_late_subscriber() {
         let hub = StatusEventsHub::new();
         let _first = hub.subscribe(|| {});
-        hub.publish_update(StatusEventUpdate::Snapshot(
+        hub.publish_update_if_active(StatusEventUpdate::Snapshot(
             "{\"health\":\"ok\"}".to_string(),
         ));
 
@@ -287,7 +323,8 @@ mod tests {
     fn replays_snapshot_errors_and_refreshes_after_a_full_disconnect() {
         let hub = StatusEventsHub::new();
         let first = hub.subscribe(|| {});
-        hub.publish_error("runtime unavailable".to_string());
+        let mut fingerprint = Some("initial".to_string());
+        hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
 
         let late = hub.subscribe(|| {});
         assert!(matches!(
@@ -300,6 +337,78 @@ mod tests {
         drop(late);
         let reconnect = hub.subscribe(|| {});
         assert!(reconnect.replay.is_none());
-        assert!(hub.take_refresh_request());
+        assert!(hub.publish_snapshot_if_active(
+            StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
+            "initial",
+            &fingerprint,
+        ));
+    }
+
+    #[tokio::test]
+    async fn keeps_a_refresh_pending_when_a_snapshot_finishes_after_disconnect() {
+        let hub = StatusEventsHub::new();
+        let first = hub.subscribe(|| {});
+        drop(first);
+        let fingerprint = Some("unchanged".to_string());
+
+        assert!(!hub.publish_snapshot_if_active(
+            StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
+            "unchanged",
+            &fingerprint,
+        ));
+
+        let mut reconnect = hub.subscribe(|| {});
+        assert!(hub.publish_snapshot_if_active(
+            StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
+            "unchanged",
+            &fingerprint,
+        ));
+        assert!(matches!(
+            reconnect.receiver.recv().await.unwrap(),
+            StatusEventUpdate::Snapshot(ref snapshot) if snapshot == "{\"health\":\"ok\"}"
+        ));
+    }
+
+    #[tokio::test]
+    async fn publishes_a_recovered_snapshot_after_an_error() {
+        let hub = StatusEventsHub::new();
+        let mut subscriber = hub.subscribe(|| {});
+        let mut fingerprint = Some("unchanged".to_string());
+
+        hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
+        assert!(fingerprint.is_none());
+        assert!(matches!(
+            subscriber.receiver.recv().await.unwrap(),
+            StatusEventUpdate::SnapshotError(_)
+        ));
+        assert!(hub.publish_snapshot_if_active(
+            StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
+            "unchanged",
+            &fingerprint,
+        ));
+        assert!(matches!(
+            subscriber.receiver.recv().await.unwrap(),
+            StatusEventUpdate::Snapshot(ref snapshot) if snapshot == "{\"health\":\"ok\"}"
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovers_the_latest_update_after_a_receiver_lags() {
+        let hub = StatusEventsHub::new();
+        let mut subscriber = hub.subscribe(|| {});
+        for index in 0..33 {
+            hub.publish_update_if_active(StatusEventUpdate::Snapshot(format!(
+                "{{\"revision\":{index}}}"
+            )));
+        }
+
+        assert!(matches!(
+            subscriber.receiver.recv().await,
+            Err(broadcast::error::RecvError::Lagged(_))
+        ));
+        assert!(matches!(
+            subscriber.recover_after_lag(),
+            Some(StatusEventUpdate::Snapshot(ref snapshot)) if snapshot == "{\"revision\":32}"
+        ));
     }
 }
