@@ -30,12 +30,14 @@ use tokio::{
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod status_events;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
     admin_internal_reverse_relay, admin_run_mesh_probes, send_mesh_internal_capability_read,
     send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
     spawn_reverse_assignment_worker,
 };
+use status_events::StatusEventsHub;
 
 use crate::{
     admin_token::{AdminTokenHash, AdminTokenVerifier, AdminTokenVerifyError},
@@ -148,6 +150,7 @@ pub struct AppState {
     pub ops_github_client: reqwest::Client,
     pub mesh_client: MeshAwareHttpClient,
     pub mesh_telemetry: MeshTelemetryHandle,
+    status_events: StatusEventsHub,
     pub reverse_relay: crate::reverse_relay::ReverseRelayRuntime,
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
@@ -1018,6 +1021,7 @@ pub fn build_router_with_mesh_telemetry(
         ops_github_client,
         mesh_client,
         mesh_telemetry,
+        status_events: StatusEventsHub::new(),
         reverse_relay: crate::reverse_relay::ReverseRelayRuntime::default(),
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
@@ -4505,6 +4509,15 @@ async fn build_admin_status_snapshot(state: &AppState) -> Result<AdminStatusSnap
     })
 }
 
+fn admin_status_snapshot_fingerprint(snapshot: &AdminStatusSnapshot) -> serde_json::Result<String> {
+    let mut value = serde_json::to_value(snapshot)?;
+    value
+        .as_object_mut()
+        .expect("status snapshot serializes to an object")
+        .remove("emitted_at");
+    serde_json::to_string(&value)
+}
+
 async fn admin_get_upgrade_status(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
@@ -4522,78 +4535,32 @@ async fn admin_stream_status_events(
     let mut initial_events = VecDeque::new();
     initial_events.push_back(sse_json_event("hello", &hello));
 
-    let (tx, rx) = mpsc::channel::<Event>(32);
-    let state_for_stream = state.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        let mut last_snapshot_json: Option<String> = None;
-        interval.tick().await;
+    let hub = state.status_events.clone();
+    let worker_hub = hub.clone();
+    let state_for_worker = state.clone();
+    let subscription = hub.subscribe(move || {
+        tokio::spawn(async move {
+            worker_hub.run(state_for_worker).await;
+        });
+    });
 
-        loop {
-            if tx.is_closed() {
-                return;
+    let out_stream = stream::unfold(
+        (initial_events, subscription),
+        |(mut initial, mut subscription)| async move {
+            if let Some(event) = initial.pop_front() {
+                return Some((Ok(event), (initial, subscription)));
             }
-
-            match build_admin_status_snapshot(&state_for_stream).await {
-                Ok(snapshot) => match serde_json::to_string(&snapshot) {
-                    Ok(snapshot_json) => {
-                        if last_snapshot_json.as_ref() != Some(&snapshot_json) {
-                            if tx
-                                .send(
-                                    Event::default()
-                                        .event("snapshot")
-                                        .data(snapshot_json.clone()),
-                                )
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                            last_snapshot_json = Some(snapshot_json);
-                        }
+            loop {
+                match subscription.receiver.recv().await {
+                    Ok(event) => {
+                        return Some((Ok(event.into_sse_event()), (initial, subscription)));
                     }
-                    Err(err) => {
-                        if tx
-                            .send(sse_json_event(
-                                "snapshot_error",
-                                &AdminStatusSnapshotError {
-                                    message: format!("serialize status snapshot: {err}"),
-                                },
-                            ))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                },
-                Err(err) => {
-                    if tx
-                        .send(sse_json_event(
-                            "snapshot_error",
-                            &AdminStatusSnapshotError {
-                                message: err.message.clone(),
-                            },
-                        ))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
                 }
             }
-
-            interval.tick().await;
-        }
-    });
-
-    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
-        if let Some(event) = initial.pop_front() {
-            return Some((Ok(event), (initial, rx)));
-        }
-        let next = rx.recv().await?;
-        Some((Ok(next), (initial, rx)))
-    });
+        },
+    );
 
     Ok(Sse::new(out_stream).keep_alive(
         KeepAlive::new()

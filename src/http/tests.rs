@@ -26,6 +26,8 @@ mod admin_auth_tests;
 mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
+#[path = "tests/status_events.rs"]
+mod status_events;
 mod vless_xhttp;
 use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
@@ -3209,39 +3211,6 @@ async fn admin_status_events_requires_auth() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn admin_status_events_streams_sse() {
-    let tmp = TempDir::new().unwrap();
-    let app = app(&tmp);
-
-    let res = app
-        .oneshot(req_authed("GET", "/api/admin/status/events"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let content_type = res
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert!(
-        content_type.starts_with("text/event-stream"),
-        "unexpected content-type: {content_type}"
-    );
-
-    let body = read_sse_until(res.into_body(), "event: snapshot").await;
-    assert!(body.contains("event: hello"), "missing hello event: {body}");
-    assert!(
-        body.contains("event: snapshot"),
-        "missing snapshot event: {body}"
-    );
-    assert!(
-        body.contains("\"health\""),
-        "missing health snapshot: {body}"
-    );
 }
 
 #[tokio::test]

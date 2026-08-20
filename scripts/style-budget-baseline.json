@@ -620,9 +620,6 @@
   "src/node_history.rs": {
     "source_lines": 3676
   },
-  "src/mesh_telemetry.rs": {
-    "source_lines": 1052
-  },
   "src/openrc_process.rs": {
     "long_line_count": 1,
     "max_line_length": 101

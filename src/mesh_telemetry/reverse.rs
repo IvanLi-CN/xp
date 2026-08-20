@@ -1,4 +1,6 @@
-use super::{ActiveRouteKind, MeshActiveRoute, MeshTelemetryHandle, MeshTelemetrySample, persist};
+use std::time::Instant;
+
+use super::{ActiveRouteKind, MeshActiveRoute, MeshTelemetryHandle, MeshTelemetrySample};
 
 #[derive(Debug, Clone)]
 pub struct ReverseRelayTelemetrySample {
@@ -30,7 +32,7 @@ impl MeshTelemetryHandle {
         self.record_sample(peer_id.clone(), peer_name, sample)
             .await?;
         let mut state = self.state.lock().await;
-        if let Some(peer) = state.peers.get_mut(&peer_id) {
+        if let Some(peer) = state.persisted.peers.get_mut(&peer_id) {
             peer.active_route = Some(MeshActiveRoute {
                 kind: ActiveRouteKind::ReverseRelay,
                 rendezvous: Some(rendezvous),
@@ -40,8 +42,8 @@ impl MeshTelemetryHandle {
                 generation: Some(generation),
                 readiness: Some("active".to_string()),
             });
-            state.revision += 1;
-            persist(&self.history_storage, &state)?;
+            state.persisted.revision += 1;
+            self.persist_immediately(&mut state, Instant::now())?;
         }
         Ok(())
     }
