@@ -139,12 +139,15 @@ def labels_at_merge(events: list[dict[str, Any]], merge_commit_sha: str) -> set[
 
 
 def verify_event_history(events: list[dict[str, Any]], pull_request: PullRequest) -> None:
-    timestamps = [
-        str(event.get("created_at") or "")
+    if not events or not all(
+        isinstance(event, dict) and isinstance(event.get("created_at"), str)
+        and bool(event["created_at"])
         for event in events
-        if isinstance(event, dict) and event.get("created_at")
-    ]
-    if len(timestamps) != len(events) or min(timestamps) > pull_request.created_at:
+    ):
+        raise IntentError("incomplete_event_history")
+    merge_event = find_merge_event(events, pull_request.merge_commit_sha)
+    merge_timestamp = merge_event.get("created_at")
+    if not isinstance(merge_timestamp, str) or not merge_timestamp:
         raise IntentError("incomplete_event_history")
 
 

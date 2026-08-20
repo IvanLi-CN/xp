@@ -70,7 +70,21 @@ class ReleaseIntentTests(unittest.TestCase):
         ]
         self.assertEqual(intent.labels_at_merge(events, "a" * 40), {"type:patch", "channel:prerelease"})
 
-    def test_event_history_must_reach_pull_request_creation(self) -> None:
+    def test_event_history_does_not_require_pull_request_open_event(self) -> None:
+        pull_request = intent.PullRequest(
+            number=1,
+            url="",
+            merge_commit_sha="a" * 40,
+            created_at="2026-08-01T00:00:00Z",
+            merged_at="2026-08-02T00:00:00Z",
+            base_ref="main",
+        )
+        intent.verify_event_history(
+            [{"id": 1, "event": "merged", "created_at": "2026-08-02T00:00:00Z"}],
+            pull_request,
+        )
+
+    def test_event_history_requires_timestamps_and_merge_event(self) -> None:
         pull_request = intent.PullRequest(
             number=1,
             url="",
@@ -80,8 +94,10 @@ class ReleaseIntentTests(unittest.TestCase):
             base_ref="main",
         )
         with self.assertRaises(intent.IntentError):
+            intent.verify_event_history([{"id": 1, "event": "labeled"}], pull_request)
+        with self.assertRaises(intent.IntentError):
             intent.verify_event_history(
-                [{"id": 1, "event": "merged", "created_at": "2026-08-02T00:00:00Z"}],
+                [{"id": 1, "event": "closed", "created_at": "2026-08-02T00:00:00Z"}],
                 pull_request,
             )
 
