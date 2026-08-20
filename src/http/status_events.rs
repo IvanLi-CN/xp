@@ -36,9 +36,13 @@ impl StatusEventUpdate {
 struct StatusEventsLifecycle {
     subscribers: usize,
     worker_running: bool,
+    worker_generation: u64,
+    worker_starter: Option<StatusEventsWorkerStarter>,
     latest_update: Option<StatusEventUpdate>,
     refresh_requested: bool,
 }
+
+type StatusEventsWorkerStarter = Arc<dyn Fn(StatusEventsWorkerGuard) + Send + Sync>;
 
 #[derive(Clone)]
 pub(super) struct StatusEventsHub {
@@ -53,13 +57,23 @@ pub(super) struct StatusEventsSubscription {
     hub: StatusEventsHub,
 }
 
-struct StatusEventsWorkerGuard {
+pub(super) struct StatusEventsWorkerGuard {
     hub: StatusEventsHub,
+    generation: u64,
+    disarmed: bool,
+}
+
+impl StatusEventsWorkerGuard {
+    fn disarm(&mut self) {
+        self.disarmed = true;
+    }
 }
 
 impl Drop for StatusEventsWorkerGuard {
     fn drop(&mut self) {
-        self.hub.worker_exited();
+        if !self.disarmed {
+            self.hub.worker_exited(self.generation);
+        }
     }
 }
 
@@ -93,30 +107,38 @@ impl StatusEventsHub {
 
     pub(super) fn subscribe<F>(&self, start_worker: F) -> StatusEventsSubscription
     where
-        F: FnOnce(),
+        F: Fn(StatusEventsWorkerGuard) + Send + Sync + 'static,
     {
-        let (receiver, replay, should_start_worker, wake_worker) = {
+        let start_worker: StatusEventsWorkerStarter = Arc::new(start_worker);
+        let (receiver, replay, worker_guard, wake_worker) = {
             let mut lifecycle = self
                 .lifecycle
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let receiver = self.sender.subscribe();
             lifecycle.subscribers += 1;
-            let should_start_worker = if lifecycle.worker_running {
-                false
+            let worker_guard = if lifecycle.worker_running {
+                None
             } else {
                 lifecycle.worker_running = true;
-                true
+                lifecycle.worker_generation = lifecycle.worker_generation.saturating_add(1);
+                lifecycle.worker_starter = Some(start_worker.clone());
+                Some(StatusEventsWorkerGuard {
+                    hub: self.clone(),
+                    generation: lifecycle.worker_generation,
+                    disarmed: false,
+                })
             };
+            let wake_worker = worker_guard.is_none() && lifecycle.refresh_requested;
             (
                 receiver,
                 lifecycle.latest_update.clone(),
-                should_start_worker,
-                !should_start_worker && lifecycle.refresh_requested,
+                worker_guard,
+                wake_worker,
             )
         };
-        if should_start_worker {
-            start_worker();
+        if let Some(worker_guard) = worker_guard {
+            start_worker(worker_guard);
         } else if wake_worker {
             self.shutdown.notify_one();
         }
@@ -158,14 +180,35 @@ impl StatusEventsHub {
         true
     }
 
-    fn worker_exited(&self) {
-        let mut lifecycle = self
-            .lifecycle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        lifecycle.worker_running = false;
-        if lifecycle.subscribers > 0 {
+    fn worker_exited(&self, generation: u64) {
+        let replacement = {
+            let mut lifecycle = self
+                .lifecycle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !lifecycle.worker_running || lifecycle.worker_generation != generation {
+                return;
+            }
+            if lifecycle.subscribers == 0 {
+                lifecycle.worker_running = false;
+                return;
+            }
+
             lifecycle.refresh_requested = true;
+            lifecycle.worker_generation = lifecycle.worker_generation.saturating_add(1);
+            let Some(start_worker) = lifecycle.worker_starter.clone() else {
+                lifecycle.worker_running = false;
+                return;
+            };
+            let worker_guard = StatusEventsWorkerGuard {
+                hub: self.clone(),
+                generation: lifecycle.worker_generation,
+                disarmed: false,
+            };
+            Some((start_worker, worker_guard))
+        };
+        if let Some((start_worker, worker_guard)) = replacement {
+            start_worker(worker_guard);
         }
     }
 
@@ -178,8 +221,8 @@ impl StatusEventsHub {
         (lifecycle.subscribers, lifecycle.worker_running)
     }
 
-    pub(super) async fn run(self, state: AppState) {
-        self.run_with_snapshot_builder(move || {
+    pub(super) async fn run(self, state: AppState, worker_guard: StatusEventsWorkerGuard) {
+        self.run_with_snapshot_builder(worker_guard, move || {
             let state = state.clone();
             async move {
                 build_admin_status_snapshot(&state)
@@ -190,12 +233,14 @@ impl StatusEventsHub {
         .await;
     }
 
-    async fn run_with_snapshot_builder<F, Fut>(self, mut build_snapshot: F)
-    where
+    async fn run_with_snapshot_builder<F, Fut>(
+        self,
+        mut worker_guard: StatusEventsWorkerGuard,
+        mut build_snapshot: F,
+    ) where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<super::AdminStatusSnapshot, String>>,
     {
-        let _worker_guard = StatusEventsWorkerGuard { hub: self.clone() };
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut last_snapshot_fingerprint: Option<String> = None;
 
@@ -203,6 +248,7 @@ impl StatusEventsHub {
             tokio::select! {
                 _ = interval.tick() => {
                     if self.stop_if_inactive() {
+                        worker_guard.disarm();
                         return;
                     }
                     self.publish_built_snapshot(
@@ -212,6 +258,7 @@ impl StatusEventsHub {
                 }
                 _ = self.shutdown.notified() => {
                     if self.stop_if_inactive() {
+                        worker_guard.disarm();
                         return;
                     }
                     self.publish_built_snapshot(
@@ -357,6 +404,10 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
+    fn discard_worker(mut worker_guard: StatusEventsWorkerGuard) {
+        worker_guard.disarm();
+    }
+
     fn status_snapshot_for_test() -> super::super::AdminStatusSnapshot {
         super::super::AdminStatusSnapshot {
             emitted_at: "2026-08-20T10:00:00Z".to_string(),
@@ -406,12 +457,14 @@ mod tests {
         let hub = StatusEventsHub::new();
         let starts = Arc::new(AtomicUsize::new(0));
         let first_starts = starts.clone();
-        let mut first = hub.subscribe(move || {
+        let mut first = hub.subscribe(move |mut worker_guard| {
             first_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            worker_guard.disarm();
         });
         let second_starts = starts.clone();
-        let mut second = hub.subscribe(move || {
+        let mut second = hub.subscribe(move |mut worker_guard| {
             second_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            worker_guard.disarm();
         });
 
         assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 1);
@@ -446,11 +499,13 @@ mod tests {
         let worker_hub = hub.clone();
         let worker_starts = starts.clone();
         let worker_builds = builds.clone();
-        let mut first = hub.subscribe(move || {
+        let mut first = hub.subscribe(move |worker_guard| {
             worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let worker_hub = worker_hub.clone();
+            let worker_builds = worker_builds.clone();
             tokio::spawn(async move {
                 worker_hub
-                    .run_with_snapshot_builder(move || {
+                    .run_with_snapshot_builder(worker_guard, move || {
                         let builds = worker_builds.clone();
                         async move {
                             builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -461,8 +516,9 @@ mod tests {
             });
         });
         let second_starts = starts.clone();
-        let mut second = hub.subscribe(move || {
+        let mut second = hub.subscribe(move |mut worker_guard| {
             second_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            worker_guard.disarm();
         });
 
         tokio::task::yield_now().await;
@@ -496,72 +552,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restarts_after_an_unexpected_worker_exit() {
+    async fn automatically_restarts_an_unexpected_worker_exit_for_existing_subscribers() {
         let hub = StatusEventsHub::new();
         let starts = Arc::new(AtomicUsize::new(0));
-        let (started, started_receiver) = tokio::sync::oneshot::channel();
         let worker_hub = hub.clone();
         let worker_starts = starts.clone();
-        let first = hub.subscribe(move || {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let worker_attempts = attempts.clone();
+        let mut subscriber = hub.subscribe(move |worker_guard| {
             worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let attempt = worker_attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if attempt == 0 {
+                return;
+            }
+            let worker_hub = worker_hub.clone();
             tokio::spawn(async move {
-                let mut started = Some(started);
                 worker_hub
-                    .run_with_snapshot_builder(move || {
-                        let started = started.take();
-                        async move {
-                            started
-                                .expect("panic builder only runs once")
-                                .send(())
-                                .unwrap();
-                            panic!("test producer panic");
-                        }
+                    .run_with_snapshot_builder(worker_guard, || async {
+                        Ok(status_snapshot_for_test())
                     })
                     .await;
             });
         });
 
-        started_receiver.await.unwrap();
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-            if hub.lifecycle_for_test() == (1, false) {
-                break;
-            }
-        }
-        assert_eq!(hub.lifecycle_for_test(), (1, false));
-
-        let worker_hub = hub.clone();
-        let worker_starts = starts.clone();
-        let mut second = hub.subscribe(move || {
-            worker_starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tokio::spawn(async move {
-                worker_hub
-                    .run_with_snapshot_builder(|| async { Ok(status_snapshot_for_test()) })
-                    .await;
-            });
-        });
-        tokio::task::yield_now().await;
+        let update = tokio::time::timeout(Duration::from_secs(1), subscriber.receiver.recv())
+            .await
+            .expect("replacement worker should publish a snapshot")
+            .unwrap();
         assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert!(matches!(
-            second.receiver.recv().await.unwrap(),
-            StatusEventUpdate::Snapshot(_)
-        ));
+        assert!(matches!(update, StatusEventUpdate::Snapshot(_)));
+
+        drop(subscriber);
+        assert!(hub.stop_if_inactive());
+        assert_eq!(hub.lifecycle_for_test(), (0, false));
+    }
+
+    #[test]
+    fn an_exited_old_worker_generation_does_not_stop_its_replacement() {
+        let hub = StatusEventsHub::new();
+        let first_guard = Arc::new(StdMutex::new(None));
+        let first_guard_slot = first_guard.clone();
+        let first = hub.subscribe(move |worker_guard| {
+            *first_guard_slot.lock().unwrap() = Some(worker_guard);
+        });
 
         drop(first);
-        drop(second);
         assert!(hub.stop_if_inactive());
+
+        let replacement_guard = Arc::new(StdMutex::new(None));
+        let replacement_guard_slot = replacement_guard.clone();
+        let replacement = hub.subscribe(move |worker_guard| {
+            *replacement_guard_slot.lock().unwrap() = Some(worker_guard);
+        });
+
+        drop(first_guard.lock().unwrap().take());
+        assert_eq!(hub.lifecycle_for_test(), (1, true));
+
+        drop(replacement);
+        assert!(hub.stop_if_inactive());
+        drop(replacement_guard.lock().unwrap().take());
         assert_eq!(hub.lifecycle_for_test(), (0, false));
     }
 
     #[test]
     fn replays_the_latest_update_to_a_late_subscriber() {
         let hub = StatusEventsHub::new();
-        let _first = hub.subscribe(|| {});
+        let _first = hub.subscribe(discard_worker);
         hub.publish_update_if_active(StatusEventUpdate::Snapshot(
             "{\"health\":\"ok\"}".to_string(),
         ));
 
-        let late = hub.subscribe(|| {});
+        let late = hub.subscribe(discard_worker);
         assert!(matches!(
             late.replay,
             Some(StatusEventUpdate::Snapshot(ref snapshot)) if snapshot == "{\"health\":\"ok\"}"
@@ -571,11 +632,11 @@ mod tests {
     #[tokio::test]
     async fn replays_snapshot_errors_and_refreshes_after_a_full_disconnect() {
         let hub = StatusEventsHub::new();
-        let first = hub.subscribe(|| {});
+        let first = hub.subscribe(discard_worker);
         let mut fingerprint = Some("initial".to_string());
         hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
 
-        let late = hub.subscribe(|| {});
+        let late = hub.subscribe(discard_worker);
         assert!(matches!(
             late.replay,
             Some(StatusEventUpdate::SnapshotError(ref error))
@@ -584,7 +645,7 @@ mod tests {
 
         drop(first);
         drop(late);
-        let reconnect = hub.subscribe(|| {});
+        let reconnect = hub.subscribe(discard_worker);
         assert!(reconnect.replay.is_none());
         let mut stream = Box::pin(super::stream_events(VecDeque::new(), reconnect));
         assert!(hub.publish_snapshot_if_active(
@@ -601,7 +662,7 @@ mod tests {
     #[tokio::test]
     async fn keeps_a_refresh_pending_when_a_snapshot_finishes_after_disconnect() {
         let hub = StatusEventsHub::new();
-        let first = hub.subscribe(|| {});
+        let first = hub.subscribe(discard_worker);
         drop(first);
         let fingerprint = Some("unchanged".to_string());
 
@@ -611,7 +672,7 @@ mod tests {
             &fingerprint,
         ));
 
-        let mut reconnect = hub.subscribe(|| {});
+        let mut reconnect = hub.subscribe(discard_worker);
         assert!(hub.publish_snapshot_if_active(
             StatusEventUpdate::Snapshot("{\"health\":\"ok\"}".to_string()),
             "unchanged",
@@ -626,7 +687,7 @@ mod tests {
     #[tokio::test]
     async fn publishes_a_recovered_snapshot_after_an_error() {
         let hub = StatusEventsHub::new();
-        let mut subscriber = hub.subscribe(|| {});
+        let mut subscriber = hub.subscribe(discard_worker);
         let mut fingerprint = Some("unchanged".to_string());
 
         hub.publish_error("runtime unavailable".to_string(), &mut fingerprint);
@@ -649,7 +710,7 @@ mod tests {
     #[tokio::test]
     async fn recovers_the_latest_update_after_a_receiver_lags() {
         let hub = StatusEventsHub::new();
-        let mut subscriber = hub.subscribe(|| {});
+        let mut subscriber = hub.subscribe(discard_worker);
         for index in 0..33 {
             hub.publish_update_if_active(StatusEventUpdate::Snapshot(format!(
                 "{{\"revision\":{index}}}"
@@ -669,7 +730,7 @@ mod tests {
     #[tokio::test]
     async fn status_event_stream_delivers_recovery_and_lag_replay() {
         let hub = StatusEventsHub::new();
-        let subscription = hub.subscribe(|| {});
+        let subscription = hub.subscribe(discard_worker);
         let mut stream = Box::pin(super::stream_events(
             std::collections::VecDeque::new(),
             subscription,

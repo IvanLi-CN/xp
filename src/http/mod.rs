@@ -4583,10 +4583,10 @@ async fn admin_stream_status_events(
     let hub = state.status_events.clone();
     let worker_hub = hub.clone();
     let state_for_worker = state.clone();
-    let subscription = hub.subscribe(move || {
-        tokio::spawn(async move {
-            worker_hub.run(state_for_worker).await;
-        });
+    let subscription = hub.subscribe(move |worker_guard| {
+        let worker_hub = worker_hub.clone();
+        let state_for_worker = state_for_worker.clone();
+        tokio::spawn(worker_hub.run(state_for_worker, worker_guard));
     });
     let mut subscription = subscription;
     if let Some(event) = subscription.replay.take() {
