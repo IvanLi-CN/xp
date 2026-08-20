@@ -914,7 +914,10 @@ For a corrective release, an owner dispatches the `release` workflow with the ex
 `release_type`, `channel`, `expected_version`, and a short non-sensitive `reason`. The workflow fails
 before tag creation if the target is not on `main`, the expected version does not match, or any
 required workflow is missing or unsuccessful. This is a Manual Backfill, not a replacement for the
-normal merge-time intent path. Stable releases publish `latest`; prereleases do not.
+normal merge-time intent path. Stable releases publish `latest`; prereleases do not. If the target
+commit changes a workflow file, the Actions `GITHUB_TOKEN` cannot create its tag; an owner must first
+push the exact annotated tag with a credential that has workflow scope, after which the workflow's
+idempotent tag step reuses it.
 
 ### Release-ready checklist: host-managed systemd node with Tunnel/DDNS
 
