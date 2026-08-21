@@ -1,10 +1,21 @@
 use super::*;
+use crate::history_sync::ProtocolError;
 use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
 };
+use crate::state::history_repository::{
+    MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+};
+mod ready_peer;
 
-const CATCH_UP_PEER_VERIFICATION_ATTEMPTS: usize = 2;
+pub(crate) use ready_peer::catch_up_against_ready_repositories;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InitialBackfillProgress {
+    InProgress,
+    Complete,
+    Unavailable,
+}
 pub(super) struct PeerBackfillImport<'a> {
     identity: &'a crate::state::history_repository::identity::RepositoryNodeIdentity,
     signing_key: &'a ed25519_dalek::SigningKey,
@@ -12,7 +23,6 @@ pub(super) struct PeerBackfillImport<'a> {
     epoch: u64,
     ready_repository_ids: &'a [String],
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct RepositoryInitialBackfillRecord {
     observed_at_unix_seconds: u64,
@@ -39,14 +49,12 @@ pub(crate) struct RepositoryInitialBackfillPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_page_cursor: Option<String>,
 }
-
 pub(crate) struct HistoricalBackfillCollector {
     pub(crate) after: Option<HistoricalBackfillSortKey>,
     pub(crate) limit: usize,
     pub(crate) records: BTreeMap<HistoricalBackfillSortKey, (u64, SyncRecord)>,
     pub(crate) has_more: bool,
 }
-
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HistoricalBackfillSortKey {
     observed_at_unix_seconds: u64,
@@ -54,7 +62,6 @@ pub(crate) struct HistoricalBackfillSortKey {
     #[serde(with = "backfill_cursor_key")]
     record_key: Vec<u8>,
 }
-
 impl HistoricalBackfillCollector {
     pub(crate) fn new(after: Option<HistoricalBackfillSortKey>, limit: usize) -> Self {
         Self {
@@ -64,23 +71,61 @@ impl HistoricalBackfillCollector {
             has_more: false,
         }
     }
-
-    pub(crate) fn push(&mut self, record: (u64, SyncRecord)) {
+    pub(crate) fn push(&mut self, record: (u64, SyncRecord)) -> anyhow::Result<()> {
+        self.push_with_times(record.0, record.0, record.1)
+    }
+    pub(crate) fn push_with_times(
+        &mut self,
+        sort_at_unix_seconds: u64,
+        segment_at_unix_seconds: u64,
+        record: SyncRecord,
+    ) -> anyhow::Result<()> {
         let key = HistoricalBackfillSortKey {
-            observed_at_unix_seconds: record.0,
-            schema_id: record.1.schema().0.to_owned(),
-            record_key: record.1.record_key().to_vec(),
+            observed_at_unix_seconds: sort_at_unix_seconds,
+            schema_id: record.schema().0.to_owned(),
+            record_key: record.record_key().to_vec(),
         };
         if self.after.as_ref().is_some_and(|after| key <= *after) {
-            return;
+            return Ok(());
         }
-        self.records.insert(key, record);
+        self.records.insert(key, (segment_at_unix_seconds, record));
         if self.records.len() > self.limit {
             self.records.pop_last();
             self.has_more = true;
         }
+        if self.records.len() == self.limit {
+            let bytes = self
+                .records
+                .values()
+                .map(|(_, record)| serialized_backfill_record_bytes(record))
+                .sum::<anyhow::Result<usize>>()?;
+            if bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES {
+                while self.records.len() > 1
+                    && self
+                        .records
+                        .values()
+                        .map(|(_, record)| serialized_backfill_record_bytes(record))
+                        .sum::<anyhow::Result<usize>>()?
+                        > MAX_INITIAL_BACKFILL_PAGE_BYTES
+                {
+                    self.records.pop_last();
+                    self.has_more = true;
+                }
+            }
+        }
+        if serialized_backfill_record_bytes(
+            &self
+                .records
+                .values()
+                .last()
+                .expect("backfill collector requires a record")
+                .1,
+        )? > MAX_INITIAL_BACKFILL_PAGE_BYTES
+        {
+            anyhow::bail!("initial history backfill record exceeds page budget");
+        }
+        Ok(())
     }
-
     pub(crate) fn next_cursor(&self) -> anyhow::Result<Option<String>> {
         self.has_more
             .then(|| {
@@ -92,12 +137,27 @@ impl HistoricalBackfillCollector {
             })
             .transpose()
     }
-
     fn into_records(self) -> Vec<(u64, SyncRecord)> {
         self.records.into_values().collect()
     }
 }
-
+fn serialized_backfill_record_bytes(record: &SyncRecord) -> anyhow::Result<usize> {
+    Ok(serde_json::to_vec(&RepositoryInitialBackfillRecord {
+        observed_at_unix_seconds: 0,
+        source_node_id: None,
+        source_epoch: None,
+        stream: None,
+        sequence: None,
+        subject_node_id: record.subject_node_id().to_owned(),
+        observer_node_id: record.observer_node_id().to_owned(),
+        schema_id: record.schema().0.to_owned(),
+        schema_version: record.schema().1,
+        record_key_base64: URL_SAFE_NO_PAD.encode(record.record_key()),
+        payload_base64: URL_SAFE_NO_PAD.encode(record.payload_bytes()),
+        tombstone: record.is_tombstone(),
+    })?
+    .len())
+}
 mod backfill_cursor_key {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde::{Deserialize, Deserializer, Serializer};
@@ -193,7 +253,7 @@ impl RepositoryInitialBackfillRecord {
 pub(crate) async fn backfill_initial_repository_from_local_history(
     state: &AppState,
     _now: u64,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<InitialBackfillProgress> {
     let local_backfill_completed = state
         .repository_replica
         .lock()
@@ -204,102 +264,103 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
         .map_err(|_| anyhow::anyhow!("derive local history backfill identity"))?;
     let signing_key = derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history backfill signing key"))?;
-    let mut saw_history = false;
     let ready_repository_ids = vec![state.cluster.node_id.clone()];
     if !local_backfill_completed {
-        let mut local_cursor = state
+        let inflight = state
             .repository_replica
             .lock()
             .await
-            .local_history_backfill_cursor()
-            .map(ToOwned::to_owned);
-        loop {
-            let collected =
-                historical_source_backfill_records(state, local_cursor.as_deref(), 1).await?;
-            saw_history |= !collected.records.is_empty();
-            let next_cursor = collected.next_cursor()?;
-            let completed = next_cursor.is_none();
-            let batches = historical_record_batches(collected.into_records());
-            let last_batch = batches.len().saturating_sub(1);
-            let mut checkpointed = false;
-            for (batch_index, (observed_at, records)) in batches.into_iter().enumerate() {
-                let segments = state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .queue_local_history_backfill_segments(
-                        &state.cluster.cluster_id,
-                        identity.clone(),
-                        &signing_key,
-                        records,
-                        observed_at,
-                    )?;
-                let last_segment = segments.len().saturating_sub(1);
-                for (segment_index, segment) in segments.iter().enumerate() {
-                    receive_local_source_segment(
-                        state,
-                        segment,
-                        &[],
-                        &ready_repository_ids,
-                        observed_at,
-                    )
-                    .await?;
-                    let mut runtime = state.repository_replica.lock().await;
-                    if batch_index == last_batch && segment_index == last_segment {
-                        runtime.acknowledge_local_source_segment_and_checkpoint_backfill(
-                            &segment.wire,
-                            next_cursor.clone(),
-                            completed,
-                        )?;
-                        checkpointed = true;
-                    } else {
-                        runtime.acknowledge_local_source_segment(&segment.wire)?;
-                    }
-                }
-            }
-            if !checkpointed {
+            .local_history_backfill_inflight_checkpoint();
+        let (segments, page_cursor, completed) = if let Some((page_cursor, completed)) = inflight {
+            (
                 state
                     .repository_replica
                     .lock()
                     .await
-                    .checkpoint_local_history_backfill(next_cursor.clone(), completed)?;
+                    .local_history_backfill_inflight_segments()?,
+                page_cursor,
+                completed,
+            )
+        } else {
+            let local_cursor = state
+                .repository_replica
+                .lock()
+                .await
+                .local_history_backfill_cursor()
+                .map(ToOwned::to_owned);
+            let collected = historical_source_backfill_records(
+                state,
+                local_cursor.as_deref(),
+                MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+            )
+            .await?;
+            let page_cursor = collected.next_cursor()?;
+            let completed = page_cursor.is_none();
+            let batches = historical_record_batches(collected.into_records())?;
+            if batches.iter().any(|(_, records)| !records.is_empty()) {
+                let segments = state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .queue_local_history_backfill_batches(
+                        &state.cluster.cluster_id,
+                        identity.clone(),
+                        &signing_key,
+                        page_cursor.clone(),
+                        completed,
+                        batches
+                            .into_iter()
+                            .map(|(_, records)| (records, _now))
+                            .collect(),
+                    )?;
+                (segments, page_cursor, completed)
+            } else {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .checkpoint_local_history_backfill(page_cursor.clone(), completed)?;
+                (Vec::new(), page_cursor, completed)
             }
-            let Some(next_cursor) = next_cursor else {
-                break;
-            };
-            local_cursor = Some(next_cursor);
+        };
+        for segment in &segments {
+            receive_local_source_segment(state, segment, &[], &ready_repository_ids, _now).await?;
+        }
+        if !segments.is_empty() {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .acknowledge_local_source_segments_and_checkpoint_backfill(
+                    &segments,
+                    page_cursor,
+                    completed,
+                )?;
+        }
+        if !completed {
+            return Ok(InitialBackfillProgress::InProgress);
         }
         // Peer availability must not replay local pages on every retry. The source outbox has
         // already durably acknowledged every local segment at this point.
     }
-    let mut peer_backfill_statuses = Vec::new();
     for peer in all_cluster_peers(state).await {
-        let peer_history = pull_peer_initial_history(state, &peer, &ready_repository_ids).await?;
-        saw_history |= peer_history.unwrap_or_default();
-        peer_backfill_statuses.push(peer_history);
+        match pull_peer_initial_history(state, &peer, &ready_repository_ids).await? {
+            InitialBackfillProgress::InProgress => {
+                return Ok(InitialBackfillProgress::InProgress);
+            }
+            InitialBackfillProgress::Unavailable => {
+                return Ok(InitialBackfillProgress::Unavailable);
+            }
+            InitialBackfillProgress::Complete => {}
+        }
     }
-    if !initial_backfill_is_complete(saw_history, &peer_backfill_statuses) {
-        // A first repository with no migrated history is deliberately not "caught up". Its
-        // lifecycle remains syncing instead of publishing a false complete/local-only window.
-        return Ok(false);
-    }
-    Ok(true)
+    Ok(InitialBackfillProgress::Complete)
 }
-
-pub(crate) fn initial_backfill_is_complete(
-    _saw_history: bool,
-    peer_backfill_statuses: &[Option<bool>],
-) -> bool {
-    // An all-empty cluster is a valid zero-coverage baseline. It is only incomplete when a
-    // peer has not responded, because that leaves historic coverage unknown.
-    peer_backfill_statuses.iter().all(Option::is_some)
-}
-
 pub(super) async fn pull_peer_initial_history(
     state: &AppState,
     peer: &MeshPeerTarget,
     ready_repository_ids: &[String],
-) -> anyhow::Result<Option<bool>> {
+) -> anyhow::Result<InitialBackfillProgress> {
     // Imported pre-repository history belongs to the repository that durably observed it. The
     // original node remains the subject and is encoded in the stable key. This lets that
     // repository's signed deletion marker remove peer history without impersonating a peer.
@@ -323,105 +384,103 @@ pub(super) async fn pull_peer_initial_history(
         .await
         .initial_peer_backfill_checkpoint(&peer.node_id)
         .unwrap_or_default();
-    let mut cursor = checkpoint.page_cursor;
+    let cursor = checkpoint.page_cursor;
     let mut stream_state = checkpoint.stream_state;
     let mut saw_history = checkpoint.saw_history;
     if checkpoint.completed {
-        return Ok(Some(saw_history));
+        return Ok(InitialBackfillProgress::Complete);
     }
-    loop {
-        let page: RepositoryInitialBackfillPage = match repository_direct_request(
-            state,
-            peer,
-            Method::GET,
-            &cursor.as_deref().map_or_else(
-                || {
-                    "/api/admin/_internal/history-repository/initial-backfill?page_size=1"
-                        .to_owned()
-                },
-                |cursor| {
-                    format!(
-                        "{}?page_cursor={cursor}&page_size=1",
-                        "/api/admin/_internal/history-repository/initial-backfill"
-                    )
-                },
-            ),
-            Vec::new(),
-        )
-        .await
-        {
-            Ok(page) => page,
-            Err(error) => {
-                if should_restart_peer_backfill(cursor.as_deref(), &error) {
-                    state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .restart_initial_peer_backfill(&peer.node_id)?;
-                }
-                tracing::debug!(
-                    peer = %peer.node_id,
-                    error = %error,
-                    "peer history backfill is incomplete"
-                );
-                return Ok(None);
+    let page: RepositoryInitialBackfillPage = match repository_direct_request(
+        state,
+        peer,
+        Method::GET,
+        &cursor.as_deref().map_or_else(
+            || {
+                format!(
+                    "/api/admin/_internal/history-repository/initial-backfill?page_size={}",
+                    MAX_INITIAL_BACKFILL_PAGE_RECORDS
+                )
+            },
+            |cursor| {
+                format!(
+                    "{}?page_cursor={cursor}&page_size={MAX_INITIAL_BACKFILL_PAGE_RECORDS}",
+                    "/api/admin/_internal/history-repository/initial-backfill"
+                )
+            },
+        ),
+        Vec::new(),
+    )
+    .await
+    {
+        Ok(page) => page,
+        Err(error) => {
+            if should_restart_peer_backfill(cursor.as_deref(), &error) {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .restart_initial_peer_backfill(&peer.node_id)?;
             }
-        };
-        if !page.records.is_empty() {
-            saw_history = true;
-            receive_peer_backfill_page(
-                state,
-                PeerBackfillImport {
-                    identity: &identity,
-                    signing_key: &signing_key,
-                    peer_node_id: &peer.node_id,
-                    epoch,
-                    ready_repository_ids,
-                },
-                page.records,
-                &mut stream_state,
-            )
-            .await?;
+            tracing::debug!(
+                peer = %peer.node_id,
+                error = %error,
+                "peer history backfill is incomplete"
+            );
+            return Ok(InitialBackfillProgress::Unavailable);
         }
-        let Some(next_page_cursor) = page.next_page_cursor else {
-            state
-                .repository_replica
-                .lock()
-                .await
-                .update_initial_peer_backfill_checkpoint(
-                    &peer.node_id,
-                    None,
-                    stream_state,
-                    saw_history,
-                    true,
-                )?;
-            return Ok(Some(saw_history));
-        };
-        if cursor.as_deref() == Some(next_page_cursor.as_str()) {
-            anyhow::bail!("peer history backfill page cursor did not advance");
-        }
-        cursor = Some(next_page_cursor);
+    };
+    if !page.records.is_empty() {
+        saw_history = true;
+        receive_peer_backfill_page(
+            state,
+            PeerBackfillImport {
+                identity: &identity,
+                signing_key: &signing_key,
+                peer_node_id: &peer.node_id,
+                epoch,
+                ready_repository_ids,
+            },
+            page.records,
+            &mut stream_state,
+        )
+        .await?;
+    }
+    let Some(next_page_cursor) = page.next_page_cursor else {
         state
             .repository_replica
             .lock()
             .await
             .update_initial_peer_backfill_checkpoint(
                 &peer.node_id,
-                cursor.clone(),
-                stream_state.clone(),
+                None,
+                stream_state,
                 saw_history,
-                false,
+                true,
             )?;
+        return Ok(InitialBackfillProgress::Complete);
+    };
+    if cursor.as_deref() == Some(next_page_cursor.as_str()) {
+        anyhow::bail!("peer history backfill page cursor did not advance");
     }
+    state
+        .repository_replica
+        .lock()
+        .await
+        .update_initial_peer_backfill_checkpoint(
+            &peer.node_id,
+            Some(next_page_cursor),
+            stream_state,
+            saw_history,
+            false,
+        )?;
+    Ok(InitialBackfillProgress::InProgress)
 }
-
 pub(crate) fn should_restart_peer_backfill(
     cursor: Option<&str>,
     error: &RepositoryDirectError,
 ) -> bool {
     cursor.is_some() && matches!(error, RepositoryDirectError::Application(_))
 }
-
 pub(super) async fn receive_peer_backfill_page(
     state: &AppState,
     import: PeerBackfillImport<'_>,
@@ -491,7 +550,6 @@ pub(super) async fn receive_peer_backfill_page(
     }
     Ok(())
 }
-
 pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> {
     Some(match schema_id {
         "runtime.v1" => "runtime",
@@ -502,7 +560,6 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         _ => return None,
     })
 }
-
 pub(crate) fn peer_backfill_stream_for_schema(
     schema_id: &str,
     peer_node_id: &str,
@@ -511,7 +568,6 @@ pub(crate) fn peer_backfill_stream_for_schema(
         .ok_or_else(|| anyhow::anyhow!("peer history has an unsupported source schema"))?;
     Ok(format!("{stream}-backfill-{peer_node_id}"))
 }
-
 pub(crate) fn peer_backfill_stream_for_record(
     record: &SyncRecord,
     peer_node_id: &str,
@@ -522,7 +578,6 @@ pub(crate) fn peer_backfill_stream_for_record(
         peer_backfill_stream_for_schema(record.schema().0, peer_node_id)
     }
 }
-
 pub(crate) async fn initial_backfill_page(
     state: &AppState,
     page_cursor: Option<&str>,
@@ -623,7 +678,6 @@ pub(crate) async fn initial_backfill_page(
         next_page_cursor,
     })
 }
-
 async fn historical_source_backfill_records(
     state: &AppState,
     page_cursor: Option<&str>,
@@ -697,7 +751,6 @@ async fn historical_source_backfill_records(
             }
         }
     }
-
     let mesh = state.mesh_telemetry.snapshot().await;
     for peer in mesh.peers {
         let peer_id = peer.peer_id.clone();
@@ -716,7 +769,6 @@ async fn historical_source_backfill_records(
             )?;
         }
     }
-
     let (inbound_samples, connection_samples) = {
         let store = state.store.lock().await;
         (
@@ -782,11 +834,10 @@ async fn historical_source_backfill_records(
         // Backfill has no source cursor before the repository protocol begins. Reserve the
         // first collector phase for deletion intent so no historical page can arrive before its
         // matching tombstone stream has been accepted.
-        records.push((0, tombstone));
+        records.push_with_times(0, now_unix_seconds, tombstone)?;
     }
     Ok(records)
 }
-
 fn push_backfill_record(
     records: &mut HistoricalBackfillCollector,
     schema_id: &str,
@@ -812,106 +863,75 @@ fn push_backfill_record(
             payload,
             false,
         )?,
-    ));
+    ))?;
     Ok(())
 }
-
 pub(super) fn historical_record_batches(
     records: Vec<(u64, SyncRecord)>,
-) -> Vec<(u64, Vec<SyncRecord>)> {
+) -> anyhow::Result<Vec<(u64, Vec<SyncRecord>)>> {
     const MAX_RECORDS_PER_BACKFILL_SEGMENT: usize = 32;
     let mut batches = Vec::new();
     let mut current_timestamp = None;
+    let mut current_stream = None;
     let mut current_records = Vec::new();
     for (observed_at, record) in records {
-        if current_timestamp != Some(observed_at)
-            || current_records.len() == MAX_RECORDS_PER_BACKFILL_SEGMENT
+        let stream = if record.is_tombstone() {
+            "tombstone"
+        } else {
+            source_stream_for_schema(record.schema().0)
+                .ok_or_else(|| anyhow::anyhow!("unknown backfill schema"))?
+        };
+        let timestamp_changed = current_timestamp != Some(observed_at);
+        let stream_changed = current_stream != Some(stream);
+        let record_limit = current_records.len() == MAX_RECORDS_PER_BACKFILL_SEGMENT;
+        let exceeds_byte_limit = if current_records.is_empty()
+            || (!timestamp_changed && !stream_changed && !record_limit)
         {
-            if let Some(timestamp) = current_timestamp {
-                batches.push((timestamp, std::mem::take(&mut current_records)));
+            let mut candidate = current_records.clone();
+            candidate.push(record.clone());
+            backfill_segment_canonical_size(observed_at, stream, &candidate)?
+                > MAX_INITIAL_BACKFILL_PAGE_BYTES
+        } else {
+            false
+        };
+        if timestamp_changed || stream_changed || record_limit || exceeds_byte_limit {
+            if current_records.is_empty() {
+                if exceeds_byte_limit {
+                    anyhow::bail!("initial history backfill segment exceeds byte budget");
+                }
+            } else {
+                batches.push((
+                    current_timestamp.expect("backfill batch timestamp"),
+                    std::mem::take(&mut current_records),
+                ));
             }
             current_timestamp = Some(observed_at);
+            current_stream = Some(stream);
         }
         current_records.push(record);
     }
     if let Some(timestamp) = current_timestamp {
         batches.push((timestamp, current_records));
     }
-    batches
+    Ok(batches)
 }
-
-pub(crate) async fn catch_up_against_ready_repositories(
-    state: &AppState,
-    now: u64,
-) -> anyhow::Result<bool> {
-    let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
-    if peers.len() != ready_repository_ids.len() {
-        return Ok(false);
+fn backfill_segment_canonical_size(
+    timestamp: u64,
+    stream: &str,
+    records: &[SyncRecord],
+) -> anyhow::Result<usize> {
+    let result = CanonicalSegment::new(
+        "backfill",
+        Cursor::new("backfill", 0, stream, 0)?,
+        records.to_vec(),
+        None,
+        timestamp,
+        timestamp,
+    )
+    .and_then(|segment| segment.canonical_bytes());
+    match result {
+        Ok(bytes) => Ok(bytes.len()),
+        Err(ProtocolError::SegmentCanonicalLimit { actual }) => Ok(actual),
+        Err(error) => Err(error.into()),
     }
-    let mut receiving_repository_ids = ready_repository_ids.clone();
-    receiving_repository_ids.push(state.cluster.node_id.clone());
-    receiving_repository_ids.sort_unstable();
-    receiving_repository_ids.dedup();
-    {
-        let mut runtime = state.repository_replica.lock().await;
-        runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&receiving_repository_ids)?;
-    }
-
-    for peer in peers
-        .iter()
-        .filter(|peer| peer.node_id != state.cluster.node_id)
-    {
-        let mut caught_up = false;
-        for attempt in 0..CATCH_UP_PEER_VERIFICATION_ATTEMPTS {
-            match replicate_peer(
-                state,
-                peer,
-                &receiving_repository_ids,
-                now,
-                ReplicaWork::DeepVerification,
-                false,
-            )
-            .await
-            {
-                Ok(true) => {
-                    caught_up = true;
-                    break;
-                }
-                Ok(false) if catch_up_has_verification_retry(attempt) => continue,
-                Ok(false) => break,
-                Err(error) => {
-                    tracing::debug!(
-                        peer = %peer.node_id,
-                        error = %error,
-                        "history repository catch-up verification failed"
-                    );
-                    return Ok(false);
-                }
-            }
-        }
-        if !caught_up {
-            return Ok(false);
-        }
-    }
-    // Signed anti-entropy covers the seven-day detail cache above. One ready repository exports
-    // the canonical older tiers below that fixed boundary, so importing every peer cannot create
-    // overlapping backfill streams for the same cluster-wide history.
-    let Some(tiered_peer) = peers
-        .iter()
-        .find(|peer| peer.node_id != state.cluster.node_id)
-    else {
-        return Ok(false);
-    };
-    if pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids)
-        .await?
-        .is_none()
-    {
-        return Ok(false);
-    }
-    Ok(true)
-}
-
-pub(crate) fn catch_up_has_verification_retry(attempt: usize) -> bool {
-    attempt.saturating_add(1) < CATCH_UP_PEER_VERIFICATION_ATTEMPTS
 }

@@ -36,8 +36,6 @@ const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
-const MAX_INITIAL_BACKFILL_PAGE_BYTES: usize = 192 * 1024;
-const MAX_INITIAL_BACKFILL_PAGE_RECORDS: usize = 64;
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
 mod direct;
@@ -47,9 +45,8 @@ mod source_records;
 mod tests;
 #[cfg(test)]
 pub(super) use backfill::{
-    HistoricalBackfillCollector, HistoricalBackfillSortKey, initial_backfill_is_complete,
-    peer_backfill_stream_for_record, peer_backfill_stream_for_schema, should_restart_peer_backfill,
-    source_stream_for_schema,
+    HistoricalBackfillCollector, HistoricalBackfillSortKey, peer_backfill_stream_for_record,
+    peer_backfill_stream_for_schema, should_restart_peer_backfill, source_stream_for_schema,
 };
 pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page};
 use backfill::{
@@ -61,7 +58,8 @@ pub(super) use direct::{
     repository_direct_request, repository_mesh_request,
 };
 use source::{
-    should_attempt_source_relay, source_record, source_record_with_key,
+    local_repository_lifecycle, repair_legacy_tombstone_metadata, should_attempt_source_relay,
+    should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
     source_record_with_key_for_subject,
 };
 use source_records::{source_records, source_records_with_deletions};
@@ -509,7 +507,9 @@ async fn receive_local_source_segment(
             &state.cluster.node_id,
         )?
     };
-    if !receipt.tombstone_acknowledgements().is_empty() {
+    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
+        && !receipt.tombstone_acknowledgements().is_empty()
+    {
         propagate_tombstone_acknowledgements(
             state,
             ready_repository_ids,
@@ -559,6 +559,7 @@ async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::R
 }
 
 async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyhow::Result<()> {
+    repair_legacy_tombstone_metadata(state, now).await?;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let (lifecycle, catch_up_completed, ready_repository_ids) = {
         let store = state.store.lock().await;
@@ -584,14 +585,22 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
     // Catch-up validates a bounded point in time. Once it completes, continuously arriving
     // source segments must not reset the five-minute stability window: a busy cluster otherwise
     // has no instant at which it can be exactly equal to an actively writing repository.
-    let caught_up = if !should_run_initial_catch_up(catch_up_completed) {
-        true
+    let catch_up = if !should_run_initial_catch_up(catch_up_completed) {
+        backfill::InitialBackfillProgress::Complete
     } else if ready_repository_ids.is_empty() {
         backfill_initial_repository_from_local_history(state, now).await?
     } else {
         catch_up_against_ready_repositories(state, now).await?
     };
-    apply_local_catch_up_result(state, &node_id, now, caught_up).await
+    match catch_up {
+        backfill::InitialBackfillProgress::InProgress => Ok(()),
+        backfill::InitialBackfillProgress::Complete => {
+            apply_local_catch_up_result(state, &node_id, now, true).await
+        }
+        backfill::InitialBackfillProgress::Unavailable => {
+            apply_local_catch_up_result(state, &node_id, now, false).await
+        }
+    }
 }
 
 fn should_run_initial_catch_up(catch_up_completed: bool) -> bool {
@@ -848,12 +857,7 @@ async fn replicate_peer(
                     .lock()
                     .await
                     .restart_initial_peer_backfill(&peer.node_id)?;
-                if pull_peer_initial_history(state, peer, ready_repository_ids)
-                    .await?
-                    .is_none()
-                {
-                    return Ok(false);
-                }
+                pull_peer_initial_history(state, peer, ready_repository_ids).await?;
                 return Ok(false);
             }
             let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();

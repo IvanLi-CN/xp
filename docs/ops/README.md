@@ -637,6 +637,23 @@ Notes:
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
+- Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
+  and one page per peer, capped at 128 records and 192 KiB. `syncing` remains visible while pages
+  are in progress, and only a fully completed catch-up starts the five-minute readiness window.
+  A local page persists its pending wire set before delivery and commits every acknowledgement
+  with the page cursor; a restart replays the original wires and does not allocate new sequences.
+  For ready peers, that page is exactly one summary page, one repair response, or one tiered export
+  page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a restart
+  cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
+  Retained partition mismatches trigger the same single-authority tiered import followed by a fresh
+  deep summary pass; the member cannot enter `ready` while that verification remains unresolved.
+  Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
+  deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
+  retries delivery to all cluster nodes.
+- Upgrades repair the legacy zero-time tombstone ledger in place on startup when its mutable
+  metadata matches the fixed horizon. This changes only the control snapshot's ledger expiry; it
+  does not rewrite signed history, cursors or hashes. Do not remove `history.sqlite3`, replace
+  repository members or alter ordinary-node retention configuration for this repair.
 - `inbound_ip_usage.json` is a local-only high-frequency store for inbound IP presence (7-day retention, 1-minute bitmap window, Geo cache). It is **not** replicated via raft.
 - `node_history_cache.json` stores local node history and Traffic analytics. Traffic sampling runs on UTC five-minute boundaries and writes the same Xray counter delta to node and real-user rollups. It retains at most 588 five-minute buckets (49 hours) and 90 UTC daily buckets; hourly rollups are not stored. Endpoint probe traffic is included in node totals but is never exposed as a normal user.
 - Missing samples, first tracking, and counter resets remain partial and are surfaced as warnings; operators must not treat gaps as zero traffic. Deleting a user clears its stored history, deleting a node clears its node and user-node history, and removed memberships expire naturally with the retention windows. These node-data retention semantics are unchanged by the repository storage-medium migration.

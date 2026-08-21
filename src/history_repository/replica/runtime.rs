@@ -203,6 +203,8 @@ struct RepositoryReplicaSnapshot {
     local_history_backfill_completed: bool,
     #[serde(default)]
     local_history_backfill_cursor: Option<String>,
+    #[serde(default)]
+    local_history_backfill_inflight: Option<LocalHistoryBackfillInFlight>,
     /// Peer imports are checkpointed outside the raw history rows. A failed first-repository
     /// catch-up can therefore resume the signed import chain rather than replaying page zero
     /// with a forked cursor.
@@ -240,11 +242,19 @@ impl Default for RepositoryReplicaSnapshot {
             deep_verified_peer_ids: BTreeSet::new(),
             local_history_backfill_completed: false,
             local_history_backfill_cursor: None,
+            local_history_backfill_inflight: None,
             initial_peer_backfills: BTreeMap::new(),
             retention_compaction_cursor: None,
             retention_compaction_continuation: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LocalHistoryBackfillInFlight {
+    page_cursor: Option<String>,
+    completed: bool,
+    segment_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +337,16 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) completed: bool,
     #[serde(default)]
     pub(crate) epoch: u64,
+    #[serde(default)]
+    pub(crate) summary_cursor: Option<String>,
+    #[serde(default)]
+    pub(crate) summary_pending_segment_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) summary_pending_next_cursor: Option<String>,
+    #[serde(default)]
+    pub(crate) summary_complete: bool,
+    #[serde(default)]
+    pub(crate) summary_requires_tiered_backfill: bool,
 }
 
 impl From<&RetentionCompactionCursor> for RepositoryHistoryCompactionCursor {
@@ -604,6 +624,17 @@ impl RepositoryReplicaRuntime {
         self.snapshot.local_history_backfill_cursor.as_deref()
     }
 
+    pub(crate) fn repair_legacy_tombstone_metadata(
+        &mut self,
+        now_unix_seconds: u64,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.tombstones.repair_epoch_zero_metadata(now_unix_seconds) {
+            return Ok(false);
+        }
+        self.persist_control_state()?;
+        Ok(true)
+    }
+
     pub(crate) fn checkpoint_local_history_backfill(
         &mut self,
         page_cursor: Option<String>,
@@ -638,11 +669,11 @@ impl RepositoryReplicaRuntime {
         saw_history: bool,
         completed: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        let epoch = self
+        let checkpoint = self
             .snapshot
             .initial_peer_backfills
             .get(peer_node_id)
-            .map(|checkpoint| checkpoint.epoch)
+            .cloned()
             .unwrap_or_default();
         self.snapshot.initial_peer_backfills.insert(
             peer_node_id.to_owned(),
@@ -651,9 +682,36 @@ impl RepositoryReplicaRuntime {
                 stream_state,
                 saw_history,
                 completed,
-                epoch,
+                epoch: checkpoint.epoch,
+                summary_cursor: checkpoint.summary_cursor,
+                summary_pending_segment_ids: checkpoint.summary_pending_segment_ids,
+                summary_pending_next_cursor: checkpoint.summary_pending_next_cursor,
+                summary_complete: checkpoint.summary_complete,
+                summary_requires_tiered_backfill: checkpoint.summary_requires_tiered_backfill,
             },
         );
+        self.persist_control_state()
+    }
+
+    pub(crate) fn update_initial_peer_summary_checkpoint(
+        &mut self,
+        peer_node_id: &str,
+        summary_cursor: Option<String>,
+        pending_segment_ids: Vec<String>,
+        pending_next_cursor: Option<String>,
+        summary_complete: bool,
+        summary_requires_tiered_backfill: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .entry(peer_node_id.to_owned())
+            .or_default();
+        checkpoint.summary_cursor = summary_cursor;
+        checkpoint.summary_pending_segment_ids = pending_segment_ids;
+        checkpoint.summary_pending_next_cursor = pending_next_cursor;
+        checkpoint.summary_complete = summary_complete;
+        checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
         self.persist_control_state()
     }
 
@@ -818,6 +876,10 @@ mod retention_tests;
 #[cfg(test)]
 #[path = "runtime/repair_tests.rs"]
 mod repair_tests;
+
+#[cfg(test)]
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
 
 #[cfg(test)]
 #[path = "runtime/query_budget_tests.rs"]
