@@ -1,8 +1,8 @@
 use super::*;
+use crate::history_sync::ProtocolError;
 use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
 };
-
 const CATCH_UP_PEER_VERIFICATION_ATTEMPTS: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,6 @@ pub(crate) enum InitialBackfillProgress {
     Complete,
     Unavailable,
 }
-
 pub(super) struct PeerBackfillImport<'a> {
     identity: &'a crate::state::history_repository::identity::RepositoryNodeIdentity,
     signing_key: &'a ed25519_dalek::SigningKey,
@@ -19,7 +18,6 @@ pub(super) struct PeerBackfillImport<'a> {
     epoch: u64,
     ready_repository_ids: &'a [String],
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct RepositoryInitialBackfillRecord {
     observed_at_unix_seconds: u64,
@@ -46,14 +44,12 @@ pub(crate) struct RepositoryInitialBackfillPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_page_cursor: Option<String>,
 }
-
 pub(crate) struct HistoricalBackfillCollector {
     pub(crate) after: Option<HistoricalBackfillSortKey>,
     pub(crate) limit: usize,
     pub(crate) records: BTreeMap<HistoricalBackfillSortKey, (u64, SyncRecord)>,
     pub(crate) has_more: bool,
 }
-
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct HistoricalBackfillSortKey {
     observed_at_unix_seconds: u64,
@@ -61,7 +57,6 @@ pub(crate) struct HistoricalBackfillSortKey {
     #[serde(with = "backfill_cursor_key")]
     record_key: Vec<u8>,
 }
-
 impl HistoricalBackfillCollector {
     pub(crate) fn new(after: Option<HistoricalBackfillSortKey>, limit: usize) -> Self {
         Self {
@@ -71,11 +66,9 @@ impl HistoricalBackfillCollector {
             has_more: false,
         }
     }
-
     pub(crate) fn push(&mut self, record: (u64, SyncRecord)) -> anyhow::Result<()> {
         self.push_with_times(record.0, record.0, record.1)
     }
-
     pub(crate) fn push_with_times(
         &mut self,
         sort_at_unix_seconds: u64,
@@ -128,7 +121,6 @@ impl HistoricalBackfillCollector {
         }
         Ok(())
     }
-
     pub(crate) fn next_cursor(&self) -> anyhow::Result<Option<String>> {
         self.has_more
             .then(|| {
@@ -140,12 +132,10 @@ impl HistoricalBackfillCollector {
             })
             .transpose()
     }
-
     fn into_records(self) -> Vec<(u64, SyncRecord)> {
         self.records.into_values().collect()
     }
 }
-
 fn serialized_backfill_record_bytes(record: &SyncRecord) -> anyhow::Result<usize> {
     Ok(serde_json::to_vec(&RepositoryInitialBackfillRecord {
         observed_at_unix_seconds: 0,
@@ -163,7 +153,6 @@ fn serialized_backfill_record_bytes(record: &SyncRecord) -> anyhow::Result<usize
     })?
     .len())
 }
-
 mod backfill_cursor_key {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde::{Deserialize, Deserializer, Serializer};
@@ -286,7 +275,7 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
         .await?;
         let next_cursor = collected.next_cursor()?;
         let completed = next_cursor.is_none();
-        let batches = historical_record_batches(collected.into_records());
+        let batches = historical_record_batches(collected.into_records())?;
         let last_batch = batches.len().saturating_sub(1);
         let mut checkpointed = false;
         for (batch_index, (observed_at, records)) in batches.into_iter().enumerate() {
@@ -350,7 +339,6 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     }
     Ok(InitialBackfillProgress::Complete)
 }
-
 pub(super) async fn pull_peer_initial_history(
     state: &AppState,
     peer: &MeshPeerTarget,
@@ -470,14 +458,12 @@ pub(super) async fn pull_peer_initial_history(
         )?;
     Ok(InitialBackfillProgress::InProgress)
 }
-
 pub(crate) fn should_restart_peer_backfill(
     cursor: Option<&str>,
     error: &RepositoryDirectError,
 ) -> bool {
     cursor.is_some() && matches!(error, RepositoryDirectError::Application(_))
 }
-
 pub(super) async fn receive_peer_backfill_page(
     state: &AppState,
     import: PeerBackfillImport<'_>,
@@ -874,26 +860,73 @@ fn push_backfill_record(
 
 pub(super) fn historical_record_batches(
     records: Vec<(u64, SyncRecord)>,
-) -> Vec<(u64, Vec<SyncRecord>)> {
+) -> anyhow::Result<Vec<(u64, Vec<SyncRecord>)>> {
     const MAX_RECORDS_PER_BACKFILL_SEGMENT: usize = 32;
     let mut batches = Vec::new();
     let mut current_timestamp = None;
+    let mut current_stream = None;
     let mut current_records = Vec::new();
     for (observed_at, record) in records {
-        if current_timestamp != Some(observed_at)
-            || current_records.len() == MAX_RECORDS_PER_BACKFILL_SEGMENT
+        let stream = if record.is_tombstone() {
+            "tombstone"
+        } else {
+            source_stream_for_schema(record.schema().0)
+                .ok_or_else(|| anyhow::anyhow!("unknown backfill schema"))?
+        };
+        let timestamp_changed = current_timestamp != Some(observed_at);
+        let stream_changed = current_stream != Some(stream);
+        let record_limit = current_records.len() == MAX_RECORDS_PER_BACKFILL_SEGMENT;
+        let exceeds_byte_limit = if current_records.is_empty()
+            || (!timestamp_changed && !stream_changed && !record_limit)
         {
-            if let Some(timestamp) = current_timestamp {
-                batches.push((timestamp, std::mem::take(&mut current_records)));
+            let mut candidate = current_records.clone();
+            candidate.push(record.clone());
+            backfill_segment_canonical_size(observed_at, stream, &candidate)?
+                > MAX_INITIAL_BACKFILL_PAGE_BYTES
+        } else {
+            false
+        };
+        if timestamp_changed || stream_changed || record_limit || exceeds_byte_limit {
+            if current_records.is_empty() {
+                if exceeds_byte_limit {
+                    anyhow::bail!("initial history backfill segment exceeds byte budget");
+                }
+            } else {
+                batches.push((
+                    current_timestamp.expect("backfill batch timestamp"),
+                    std::mem::take(&mut current_records),
+                ));
             }
             current_timestamp = Some(observed_at);
+            current_stream = Some(stream);
         }
         current_records.push(record);
     }
     if let Some(timestamp) = current_timestamp {
         batches.push((timestamp, current_records));
     }
-    batches
+    Ok(batches)
+}
+
+fn backfill_segment_canonical_size(
+    timestamp: u64,
+    stream: &str,
+    records: &[SyncRecord],
+) -> anyhow::Result<usize> {
+    let result = CanonicalSegment::new(
+        "backfill",
+        Cursor::new("backfill", 0, stream, 0)?,
+        records.to_vec(),
+        None,
+        timestamp,
+        timestamp,
+    )
+    .and_then(|segment| segment.canonical_bytes());
+    match result {
+        Ok(bytes) => Ok(bytes.len()),
+        Err(ProtocolError::SegmentCanonicalLimit { actual }) => Ok(actual),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(

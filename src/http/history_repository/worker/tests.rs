@@ -240,6 +240,40 @@ fn initial_backfill_rejects_a_record_over_the_byte_budget() {
 }
 
 #[test]
+fn initial_backfill_splits_same_timestamp_records_before_canonical_limit() {
+    let records = (0..8_u64)
+        .map(|sequence| {
+            (
+                100,
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    sequence.to_be_bytes().to_vec(),
+                    vec![b'x'; 32 * 1024],
+                    false,
+                ),
+            )
+        })
+        .collect();
+    let batches = super::backfill::historical_record_batches(records).expect("split batches");
+    assert!(batches.len() > 1);
+    for (_, records) in batches {
+        let segment = CanonicalSegment::new(
+            "backfill",
+            Cursor::new("backfill", 0, "runtime", 0).expect("cursor"),
+            records,
+            None,
+            100,
+            100,
+        )
+        .expect("bounded segment");
+        assert!(segment.canonical_bytes().expect("canonical bytes").len() <= 192 * 1024);
+    }
+}
+
+#[test]
 fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
     let mut collector = super::HistoricalBackfillCollector::new(None, 2);
     collector
