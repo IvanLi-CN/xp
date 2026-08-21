@@ -553,6 +553,18 @@ impl TombstoneLedger {
         expired
     }
 
+    pub(crate) fn repair_epoch_zero_metadata(&mut self, now_unix_seconds: u64) -> bool {
+        let mut repaired = false;
+        for state in self.entries.values_mut() {
+            if state.created_at == 0 && state.expires_at == self.horizon_seconds {
+                state.created_at = now_unix_seconds;
+                state.expires_at = now_unix_seconds.saturating_add(self.horizon_seconds);
+                repaired = true;
+            }
+        }
+        repaired
+    }
+
     pub(crate) fn reconcile_ready_repositories(
         &mut self,
         ready_repositories: impl IntoIterator<Item = impl AsRef<str>>,

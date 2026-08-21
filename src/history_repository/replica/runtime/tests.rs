@@ -826,3 +826,39 @@ fn sqlite_retention_progresses_when_one_bucket_exceeds_the_lookahead() {
         "dense bucket is folded into one bounded aggregate"
     );
 }
+
+#[test]
+fn tombstone_backfill_time_repair() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let tombstone = segment_at(&key, 0, vec![record(b"dead", true)], None, 0, 0);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &tombstone.wire_bytes().expect("wire"),
+            0,
+        )
+        .expect("epoch-zero tombstone");
+
+    let mut restored = load(temporary.path());
+    assert!(
+        restored
+            .repair_legacy_tombstone_metadata(1_000)
+            .expect("repair metadata")
+    );
+    assert!(
+        !restored
+            .expire_tombstones(TOMBSTONE_HORIZON_SECONDS + 1)
+            .expect("retain repaired tombstone")
+    );
+
+    let mut restarted = load(temporary.path());
+    assert!(
+        !restarted
+            .repair_legacy_tombstone_metadata(2_000)
+            .expect("repair is idempotent")
+    );
+}

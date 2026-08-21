@@ -90,19 +90,6 @@ fn source_deletion_producer_queues_the_independent_tombstone_before_matching_his
 }
 
 #[test]
-fn peer_transport_failure_keeps_the_first_repository_syncing() {
-    assert!(!super::initial_backfill_is_complete(
-        true,
-        &[Some(true), None]
-    ));
-    assert!(super::initial_backfill_is_complete(false, &[Some(false)]));
-    assert!(super::initial_backfill_is_complete(
-        true,
-        &[Some(false), Some(true)]
-    ));
-}
-
-#[test]
 fn catch_up_rechecks_a_peer_after_repair_before_declaring_it_complete() {
     assert!(super::backfill::catch_up_has_verification_retry(0));
     assert!(!super::backfill::catch_up_has_verification_retry(1));
@@ -112,6 +99,16 @@ fn catch_up_rechecks_a_peer_after_repair_before_declaring_it_complete() {
 fn completed_catch_up_starts_a_stability_window_without_rechecking_live_segments() {
     assert!(!super::should_run_initial_catch_up(true));
     assert!(super::should_run_initial_catch_up(false));
+}
+
+#[test]
+fn syncing_tombstone_backfill_checkpoint() {
+    assert!(!super::should_fanout_tombstone_acknowledgements(
+        RepositoryLifecycle::Syncing
+    ));
+    assert!(super::should_fanout_tombstone_acknowledgements(
+        RepositoryLifecycle::Ready
+    ));
 }
 
 #[test]
@@ -159,23 +156,25 @@ fn peer_backfill_tombstones_use_the_independent_tombstone_stream() {
 }
 
 #[test]
-fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
-    let mut collector = super::HistoricalBackfillCollector::new(None, 64);
+fn initial_backfill_progress() {
+    let mut collector = super::HistoricalBackfillCollector::new(None, 128);
     for sequence in 0..130_u64 {
-        collector.push((
-            sequence,
-            source_record_with_key(
-                "runtime.v1",
-                "node-a",
+        collector
+            .push((
                 sequence,
-                format!("node-history:node:node-a:{sequence}").into_bytes(),
-                serde_json::json!({ "sequence": sequence }),
-                false,
-            )
-            .expect("bounded record"),
-        ));
+                source_record_with_key(
+                    "runtime.v1",
+                    "node-a",
+                    sequence,
+                    format!("node-history:node:node-a:{sequence}").into_bytes(),
+                    serde_json::json!({ "sequence": sequence }),
+                    false,
+                )
+                .expect("bounded record"),
+            ))
+            .expect("bounded page");
     }
-    assert_eq!(collector.records.len(), 64);
+    assert_eq!(collector.records.len(), 128);
     assert!(collector.has_more);
     assert_eq!(
         collector
@@ -188,7 +187,7 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
     );
     assert_eq!(
         collector.records.last_key_value().expect("last record").1.0,
-        63
+        127
     );
     let cursor = collector
         .next_cursor()
@@ -196,7 +195,7 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
         .expect("more history");
     let mut next = super::HistoricalBackfillCollector::new(
         Some(super::HistoricalBackfillSortKey::decode(&cursor).expect("cursor decoding")),
-        64,
+        128,
     );
     for sequence in 0..130_u64 {
         next.push((
@@ -210,44 +209,68 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
                 false,
             )
             .expect("bounded record"),
-        ));
+        ))
+        .expect("bounded page");
     }
-    assert_eq!(next.records.len(), 64);
-    assert!(next.has_more);
+    assert_eq!(next.records.len(), 2);
+    assert!(!next.has_more);
     assert_eq!(
         next.records.first_key_value().expect("first record").1.0,
-        64
+        128
     );
-    assert_eq!(next.records.last_key_value().expect("last record").1.0, 127);
+    assert_eq!(next.records.last_key_value().expect("last record").1.0, 129);
+}
+
+#[test]
+fn initial_backfill_rejects_a_record_over_the_byte_budget() {
+    let mut collector = super::HistoricalBackfillCollector::new(None, 128);
+    let result = collector.push((
+        0,
+        SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"oversized".to_vec(),
+            vec![b'x'; 192 * 1024],
+            false,
+        ),
+    ));
+    assert!(result.is_err());
 }
 
 #[test]
 fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
     let mut collector = super::HistoricalBackfillCollector::new(None, 2);
-    collector.push((
-        0,
-        super::source_record_with_key(
-            "traffic.v1",
-            "node-a",
+    collector
+        .push_with_times(
             0,
-            b"node-history:node:node-a:".to_vec(),
-            serde_json::json!({ "deleted": true }),
-            true,
+            1_700_000_000,
+            super::source_record_with_key(
+                "traffic.v1",
+                "node-a",
+                0,
+                b"node-history:node:node-a:".to_vec(),
+                serde_json::json!({ "deleted": true }),
+                true,
+            )
+            .expect("tombstone"),
         )
-        .expect("tombstone"),
-    ));
-    collector.push((
-        100,
-        super::source_record_with_key(
-            "traffic.v1",
-            "node-a",
+        .expect("tombstone");
+    collector
+        .push((
             100,
-            b"node-history:node:node-a:old".to_vec(),
-            serde_json::json!({ "old": true }),
-            false,
-        )
-        .expect("history"),
-    ));
+            super::source_record_with_key(
+                "traffic.v1",
+                "node-a",
+                100,
+                b"node-history:node:node-a:old".to_vec(),
+                serde_json::json!({ "old": true }),
+                false,
+            )
+            .expect("history"),
+        ))
+        .expect("history");
     assert!(
         collector
             .records
@@ -256,5 +279,14 @@ fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
             .1
             .1
             .is_tombstone()
+    );
+    assert_eq!(
+        collector
+            .records
+            .first_key_value()
+            .expect("first record")
+            .1
+            .0,
+        1_700_000_000
     );
 }
