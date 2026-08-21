@@ -670,6 +670,8 @@ Notes:
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
   and one page per peer, capped at 128 records and 192 KiB. `syncing` remains visible while pages
   are in progress, and only a fully completed catch-up starts the five-minute readiness window.
+  A local page persists its pending wire set before delivery and commits every acknowledgement
+  with the page cursor; a restart replays the original wires and does not allocate new sequences.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.

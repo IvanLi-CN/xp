@@ -24,7 +24,9 @@
   local page and one bounded page per peer (128 records / 192 KiB). `InProgress` keeps the member
   in `syncing` without writing `CatchUpIncomplete`; capacity refresh, live source collection and
   lifecycle checks continue on their normal cadence. A repository enters the existing five-minute
-  stability window only after every page is complete.
+  stability window only after every page is complete. A local page records its pending wire set
+  before delivery and commits all acknowledgements with the page cursor; an interrupted tick
+  replays those unchanged wires instead of assigning new source sequences.
 - Tombstones received while a repository is `syncing` are atomically stored with their local
   cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
   membership reports `ready`. The durable page is then retried through the existing all-node

@@ -261,64 +261,76 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
         .map_err(|_| anyhow::anyhow!("derive local history backfill signing key"))?;
     let ready_repository_ids = vec![state.cluster.node_id.clone()];
     if !local_backfill_completed {
-        let local_cursor = state
+        let inflight = state
             .repository_replica
             .lock()
             .await
-            .local_history_backfill_cursor()
-            .map(ToOwned::to_owned);
-        let collected = historical_source_backfill_records(
-            state,
-            local_cursor.as_deref(),
-            MAX_INITIAL_BACKFILL_PAGE_RECORDS,
-        )
-        .await?;
-        let next_cursor = collected.next_cursor()?;
-        let completed = next_cursor.is_none();
-        let batches = historical_record_batches(collected.into_records())?;
-        let last_batch = batches.len().saturating_sub(1);
-        let mut checkpointed = false;
-        for (batch_index, (observed_at, records)) in batches.into_iter().enumerate() {
-            let segments = state
+            .local_history_backfill_inflight_checkpoint();
+        let (segments, page_cursor, completed) = if let Some((page_cursor, completed)) = inflight {
+            (
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .local_history_backfill_inflight_segments()?,
+                page_cursor,
+                completed,
+            )
+        } else {
+            let local_cursor = state
                 .repository_replica
                 .lock()
                 .await
-                .queue_local_history_backfill_segments(
-                    &state.cluster.cluster_id,
-                    identity.clone(),
-                    &signing_key,
-                    records,
-                    observed_at,
-                )?;
-            let last_segment = segments.len().saturating_sub(1);
-            for (segment_index, segment) in segments.iter().enumerate() {
-                receive_local_source_segment(
-                    state,
-                    segment,
-                    &[],
-                    &ready_repository_ids,
-                    observed_at,
-                )
-                .await?;
-                let mut runtime = state.repository_replica.lock().await;
-                if batch_index == last_batch && segment_index == last_segment {
-                    runtime.acknowledge_local_source_segment_and_checkpoint_backfill(
-                        &segment.wire,
-                        next_cursor.clone(),
+                .local_history_backfill_cursor()
+                .map(ToOwned::to_owned);
+            let collected = historical_source_backfill_records(
+                state,
+                local_cursor.as_deref(),
+                MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+            )
+            .await?;
+            let page_cursor = collected.next_cursor()?;
+            let completed = page_cursor.is_none();
+            let batches = historical_record_batches(collected.into_records())?;
+            if batches.iter().any(|(_, records)| !records.is_empty()) {
+                let segments = state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .queue_local_history_backfill_batches(
+                        &state.cluster.cluster_id,
+                        identity.clone(),
+                        &signing_key,
+                        page_cursor.clone(),
                         completed,
+                        batches
+                            .into_iter()
+                            .map(|(_, records)| (records, _now))
+                            .collect(),
                     )?;
-                    checkpointed = true;
-                } else {
-                    runtime.acknowledge_local_source_segment(&segment.wire)?;
-                }
+                (segments, page_cursor, completed)
+            } else {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .checkpoint_local_history_backfill(page_cursor.clone(), completed)?;
+                (Vec::new(), page_cursor, completed)
             }
+        };
+        for segment in &segments {
+            receive_local_source_segment(state, segment, &[], &ready_repository_ids, _now).await?;
         }
-        if !checkpointed {
+        if !segments.is_empty() {
             state
                 .repository_replica
                 .lock()
                 .await
-                .checkpoint_local_history_backfill(next_cursor.clone(), completed)?;
+                .acknowledge_local_source_segments_and_checkpoint_backfill(
+                    &segments,
+                    page_cursor,
+                    completed,
+                )?;
         }
         if !completed {
             return Ok(InitialBackfillProgress::InProgress);
@@ -533,7 +545,6 @@ pub(super) async fn receive_peer_backfill_page(
     }
     Ok(())
 }
-
 pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> {
     Some(match schema_id {
         "runtime.v1" => "runtime",
@@ -544,7 +555,6 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         _ => return None,
     })
 }
-
 pub(crate) fn peer_backfill_stream_for_schema(
     schema_id: &str,
     peer_node_id: &str,
@@ -553,7 +563,6 @@ pub(crate) fn peer_backfill_stream_for_schema(
         .ok_or_else(|| anyhow::anyhow!("peer history has an unsupported source schema"))?;
     Ok(format!("{stream}-backfill-{peer_node_id}"))
 }
-
 pub(crate) fn peer_backfill_stream_for_record(
     record: &SyncRecord,
     peer_node_id: &str,
@@ -564,7 +573,6 @@ pub(crate) fn peer_backfill_stream_for_record(
         peer_backfill_stream_for_schema(record.schema().0, peer_node_id)
     }
 }
-
 pub(crate) async fn initial_backfill_page(
     state: &AppState,
     page_cursor: Option<&str>,
@@ -665,7 +673,6 @@ pub(crate) async fn initial_backfill_page(
         next_page_cursor,
     })
 }
-
 async fn historical_source_backfill_records(
     state: &AppState,
     page_cursor: Option<&str>,
@@ -739,7 +746,6 @@ async fn historical_source_backfill_records(
             }
         }
     }
-
     let mesh = state.mesh_telemetry.snapshot().await;
     for peer in mesh.peers {
         let peer_id = peer.peer_id.clone();
@@ -758,7 +764,6 @@ async fn historical_source_backfill_records(
             )?;
         }
     }
-
     let (inbound_samples, connection_samples) = {
         let store = state.store.lock().await;
         (
@@ -828,7 +833,6 @@ async fn historical_source_backfill_records(
     }
     Ok(records)
 }
-
 fn push_backfill_record(
     records: &mut HistoricalBackfillCollector,
     schema_id: &str,
@@ -857,7 +861,6 @@ fn push_backfill_record(
     ))?;
     Ok(())
 }
-
 pub(super) fn historical_record_batches(
     records: Vec<(u64, SyncRecord)>,
 ) -> anyhow::Result<Vec<(u64, Vec<SyncRecord>)>> {
@@ -907,7 +910,6 @@ pub(super) fn historical_record_batches(
     }
     Ok(batches)
 }
-
 fn backfill_segment_canonical_size(
     timestamp: u64,
     stream: &str,
@@ -928,7 +930,6 @@ fn backfill_segment_canonical_size(
         Err(error) => Err(error.into()),
     }
 }
-
 pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
     now: u64,
@@ -994,7 +995,6 @@ pub(crate) async fn catch_up_against_ready_repositories(
     };
     pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await
 }
-
 pub(crate) fn catch_up_has_verification_retry(attempt: usize) -> bool {
     attempt.saturating_add(1) < CATCH_UP_PEER_VERIFICATION_ATTEMPTS
 }
