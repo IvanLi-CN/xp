@@ -203,6 +203,8 @@ struct RepositoryReplicaSnapshot {
     local_history_backfill_completed: bool,
     #[serde(default)]
     local_history_backfill_cursor: Option<String>,
+    #[serde(default)]
+    local_history_backfill_inflight: Option<LocalHistoryBackfillInFlight>,
     /// Peer imports are checkpointed outside the raw history rows. A failed first-repository
     /// catch-up can therefore resume the signed import chain rather than replaying page zero
     /// with a forked cursor.
@@ -240,11 +242,19 @@ impl Default for RepositoryReplicaSnapshot {
             deep_verified_peer_ids: BTreeSet::new(),
             local_history_backfill_completed: false,
             local_history_backfill_cursor: None,
+            local_history_backfill_inflight: None,
             initial_peer_backfills: BTreeMap::new(),
             retention_compaction_cursor: None,
             retention_compaction_continuation: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LocalHistoryBackfillInFlight {
+    page_cursor: Option<String>,
+    completed: bool,
+    segment_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -829,6 +839,10 @@ mod retention_tests;
 #[cfg(test)]
 #[path = "runtime/repair_tests.rs"]
 mod repair_tests;
+
+#[cfg(test)]
+#[path = "runtime/page_replay_tests.rs"]
+mod page_replay_tests;
 
 #[cfg(test)]
 #[path = "runtime/query_budget_tests.rs"]
