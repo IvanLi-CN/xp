@@ -414,7 +414,7 @@ fn tiered_backfill_record_bytes(
         record.stream.clone(),
         record.sequence,
     )
-    .map_err(|error| RepositoryRuntimeError::Protocol(error))?;
+    .map_err(RepositoryRuntimeError::Protocol)?;
     let sync_record = SyncRecord::new(
         record.subject_node_id.clone(),
         record.observer_node_id.clone(),
