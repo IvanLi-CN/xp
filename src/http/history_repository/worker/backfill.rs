@@ -3,6 +3,9 @@ use crate::history_sync::ProtocolError;
 use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
 };
+use crate::state::history_repository::{
+    MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+};
 mod ready_peer;
 
 pub(crate) use ready_peer::catch_up_against_ready_repositories;

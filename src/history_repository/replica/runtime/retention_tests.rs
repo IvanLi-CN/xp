@@ -550,3 +550,40 @@ fn tiered_sqlite_history_exports_with_a_bounded_keyset_cursor() {
     assert_eq!(second.records.len(), 1);
     assert_ne!(first.records[0].record_key, second.records[0].record_key);
 }
+
+#[test]
+fn tiered_sqlite_history_exports_respect_the_byte_budget() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let rows = (0..2_u64)
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: 1_000 + sequence,
+                received_at_unix_seconds: 2_000,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "traffic".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "traffic.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("large-tiered-{sequence}").into_bytes(),
+                payload: vec![b'x'; 100 * 1024],
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed large tiered rows");
+
+    let first = runtime
+        .tiered_backfill_page(None, 128, u64::MAX, 100)
+        .expect("bounded tiered page");
+    assert_eq!(first.records.len(), 1);
+    assert!(first.next_cursor.is_some());
+}
