@@ -569,7 +569,7 @@ fn tiered_sqlite_history_exports_respect_the_byte_budget() {
                 schema_id: "traffic.v1".to_owned(),
                 schema_version: 1,
                 record_key: format!("large-tiered-{sequence}").into_bytes(),
-                payload: vec![b'x'; 100 * 1024],
+                payload: vec![b'x'; 150 * 1024],
                 tombstone: false,
             }
             .sqlite_row()

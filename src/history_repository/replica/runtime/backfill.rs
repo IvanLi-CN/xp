@@ -42,22 +42,6 @@ struct RepositoryTieredBackfillCursor {
     after: Option<RepositoryHistoryCompactionCursor>,
 }
 
-#[derive(Serialize)]
-struct RepositoryTieredBackfillWireRecord {
-    observed_at_unix_seconds: u64,
-    source_node_id: String,
-    source_epoch: u64,
-    stream: String,
-    sequence: u64,
-    subject_node_id: String,
-    observer_node_id: String,
-    schema_id: String,
-    schema_version: u32,
-    record_key_base64: String,
-    payload_base64: String,
-    tombstone: bool,
-}
-
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum RepositoryTieredBackfillPhase {
@@ -217,26 +201,39 @@ impl RepositoryReplicaRuntime {
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let fetched_has_more = rows.len() > limit;
         let mut selected_records = Vec::new();
-        let mut selected_bytes = 2_usize;
+        let mut selected_bytes = 0_usize;
         let mut has_more = fetched_has_more;
         for row in rows.into_iter().map(StoredRecord::from_sqlite_row) {
             let record = RepositoryTieredBackfillRecord::try_from(row?)?;
-            let record_bytes = tiered_backfill_record_bytes(&record)?;
-            if selected_records.is_empty() && record_bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES {
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
-            if selected_records.len() >= limit
-                || selected_bytes
-                    .saturating_add(record_bytes)
+            let record_bytes = tiered_backfill_record_bytes(
+                self.snapshot
+                    .cluster_id
+                    .as_deref()
+                    .unwrap_or("history-tiered"),
+                &record,
+            )?;
+            let exceeds_byte_budget = if selected_records.is_empty() {
+                record_bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES
+            } else {
+                selected_bytes
                     .saturating_add(1)
+                    .saturating_add(record_bytes)
                     > MAX_INITIAL_BACKFILL_PAGE_BYTES
-            {
+            };
+            if selected_records.len() >= limit || exceeds_byte_budget {
+                if selected_records.is_empty() && exceeds_byte_budget {
+                    return Err(RepositoryRuntimeError::StateLimitExceeded);
+                }
                 has_more = true;
                 break;
             }
-            selected_bytes = selected_bytes
-                .saturating_add(record_bytes)
-                .saturating_add(1);
+            selected_bytes = if selected_records.is_empty() {
+                record_bytes
+            } else {
+                selected_bytes
+                    .saturating_add(1)
+                    .saturating_add(record_bytes)
+            };
             selected_records.push(record);
         }
         let next_phase = if has_more {
@@ -408,22 +405,37 @@ impl TryFrom<StoredRecord> for RepositoryTieredBackfillRecord {
 }
 
 fn tiered_backfill_record_bytes(
+    cluster_id: &str,
     record: &RepositoryTieredBackfillRecord,
 ) -> Result<usize, RepositoryRuntimeError> {
-    serde_json::to_vec(&RepositoryTieredBackfillWireRecord {
-        observed_at_unix_seconds: record.observed_at_unix_seconds,
-        source_node_id: record.source_node_id.clone(),
-        source_epoch: record.source_epoch,
-        stream: record.stream.clone(),
-        sequence: record.sequence,
-        subject_node_id: record.subject_node_id.clone(),
-        observer_node_id: record.observer_node_id.clone(),
-        schema_id: record.schema_id.clone(),
-        schema_version: record.schema_version,
-        record_key_base64: URL_SAFE_NO_PAD.encode(&record.record_key),
-        payload_base64: URL_SAFE_NO_PAD.encode(&record.payload),
-        tombstone: record.tombstone,
-    })
+    let cursor = Cursor::new(
+        record.source_node_id.clone(),
+        record.source_epoch,
+        record.stream.clone(),
+        record.sequence,
+    )
+    .map_err(|error| RepositoryRuntimeError::Protocol(error))?;
+    let sync_record = SyncRecord::new(
+        record.subject_node_id.clone(),
+        record.observer_node_id.clone(),
+        record.schema_id.clone(),
+        record.schema_version,
+        record.record_key.clone(),
+        record.payload.clone(),
+        record.tombstone,
+    );
+    CanonicalSegment::new(
+        cluster_id,
+        cursor,
+        vec![sync_record],
+        None,
+        record.observed_at_unix_seconds,
+        record.observed_at_unix_seconds,
+    )
+    .and_then(|segment| segment.canonical_bytes())
     .map(|bytes| bytes.len())
-    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    .map_err(|error| match error {
+        ProtocolError::SegmentCanonicalLimit { .. } => RepositoryRuntimeError::StateLimitExceeded,
+        error => RepositoryRuntimeError::Protocol(error),
+    })
 }
