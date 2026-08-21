@@ -495,6 +495,16 @@ impl RepositoryReplicaRuntime {
         Ok(!(segments_converged && gaps_converged && partitions_converged))
     }
 
+    pub(crate) fn retained_partitions_converged(
+        &self,
+        remote: &RepositoryReplicaSummary,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !remote.partitions_included {
+            return Ok(true);
+        }
+        Ok(self.retained_partition_summaries()? == remote.partitions)
+    }
+
     pub(crate) fn repair_batch(
         &self,
         requested_segment_ids: &[String],

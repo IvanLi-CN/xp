@@ -502,6 +502,11 @@ fn deep_verification_compares_retained_record_partitions() {
     );
     assert!(
         !runtime
+            .retained_partitions_converged(&remote)
+            .expect("retained partition mismatch is observable")
+    );
+    assert!(
+        !runtime
             .requires_repair(&remote, false)
             .expect("shallow verification ignores retained partition summaries")
     );

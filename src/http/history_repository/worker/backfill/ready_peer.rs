@@ -112,13 +112,16 @@ async fn advance_ready_peer_catch_up_page(
                 return Ok(InitialBackfillProgress::Unavailable);
             }
         };
-    let (requires_repair, missing_segment_ids) = {
+    let (requires_repair, missing_segment_ids, partitions_converged) = {
         let runtime = state.repository_replica.lock().await;
         (
             runtime.requires_repair(&remote_summary, true)?,
             runtime.missing_segment_ids(&remote_summary, true)?,
+            runtime.retained_partitions_converged(&remote_summary)?,
         )
     };
+    let requires_tiered_backfill =
+        checkpoint.summary_requires_tiered_backfill || !partitions_converged;
     if requires_repair && !missing_segment_ids.is_empty() {
         state
             .repository_replica
@@ -130,13 +133,11 @@ async fn advance_ready_peer_catch_up_page(
                 missing_segment_ids,
                 remote_summary.next_segment_id,
                 false,
-                checkpoint.summary_requires_tiered_backfill,
+                requires_tiered_backfill,
             )?;
         return Ok(InitialBackfillProgress::InProgress);
     }
-    let mut requires_tiered_backfill = checkpoint.summary_requires_tiered_backfill;
     if requires_repair {
-        requires_tiered_backfill = true;
         state
             .repository_replica
             .lock()
