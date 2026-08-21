@@ -33,10 +33,45 @@ pub(crate) async fn catch_up_against_ready_repositories(
         }
     }
     if in_progress {
-        Ok(InitialBackfillProgress::InProgress)
-    } else {
-        Ok(InitialBackfillProgress::Complete)
+        return Ok(InitialBackfillProgress::InProgress);
     }
+    // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
+    // still advancing every peer's signed summary one bounded page per worker tick.
+    let Some(tiered_peer) = peers
+        .iter()
+        .find(|peer| peer.node_id != state.cluster.node_id)
+    else {
+        return Ok(InitialBackfillProgress::Unavailable);
+    };
+    let needs_reverification = {
+        let runtime = state.repository_replica.lock().await;
+        peers.iter().any(|peer| {
+            peer.node_id != state.cluster.node_id
+                && runtime
+                    .initial_peer_backfill_checkpoint(&peer.node_id)
+                    .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
+        })
+    };
+    let tiered_progress =
+        pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await?;
+    if needs_reverification && tiered_progress == InitialBackfillProgress::Complete {
+        let mut runtime = state.repository_replica.lock().await;
+        for peer in peers
+            .iter()
+            .filter(|peer| peer.node_id != state.cluster.node_id)
+        {
+            runtime.update_initial_peer_summary_checkpoint(
+                &peer.node_id,
+                None,
+                Vec::new(),
+                None,
+                false,
+                false,
+            )?;
+        }
+        return Ok(InitialBackfillProgress::InProgress);
+    }
+    Ok(tiered_progress)
 }
 
 async fn advance_ready_peer_catch_up_page(
@@ -56,11 +91,11 @@ async fn advance_ready_peer_catch_up_page(
             .await;
     }
     if checkpoint.summary_complete {
-        return pull_peer_initial_history(state, peer, ready_repository_ids).await;
+        return Ok(InitialBackfillProgress::Complete);
     }
 
     let path = checkpoint.summary_cursor.as_ref().map_or_else(
-        || "/api/admin/_internal/history-repository/summary?deep_verification=false".to_owned(),
+        || "/api/admin/_internal/history-repository/summary?deep_verification=true".to_owned(),
         |cursor| {
             format!("/api/admin/_internal/history-repository/summary?after_segment_id={cursor}")
         },
@@ -80,8 +115,8 @@ async fn advance_ready_peer_catch_up_page(
     let (requires_repair, missing_segment_ids) = {
         let runtime = state.repository_replica.lock().await;
         (
-            runtime.requires_repair(&remote_summary, false)?,
-            runtime.missing_segment_ids(&remote_summary, false)?,
+            runtime.requires_repair(&remote_summary, true)?,
+            runtime.missing_segment_ids(&remote_summary, true)?,
         )
     };
     if requires_repair && !missing_segment_ids.is_empty() {
@@ -95,10 +130,13 @@ async fn advance_ready_peer_catch_up_page(
                 missing_segment_ids,
                 remote_summary.next_segment_id,
                 false,
+                checkpoint.summary_requires_tiered_backfill,
             )?;
         return Ok(InitialBackfillProgress::InProgress);
     }
+    let mut requires_tiered_backfill = checkpoint.summary_requires_tiered_backfill;
     if requires_repair {
+        requires_tiered_backfill = true;
         state
             .repository_replica
             .lock()
@@ -116,6 +154,7 @@ async fn advance_ready_peer_catch_up_page(
             Vec::new(),
             None,
             summary_complete,
+            requires_tiered_backfill,
         )?;
     Ok(InitialBackfillProgress::InProgress)
 }
@@ -195,6 +234,7 @@ async fn repair_ready_peer_catch_up_page(
                 checkpoint.summary_pending_next_cursor
             },
             summary_complete,
+            checkpoint.summary_requires_tiered_backfill,
         )?;
     Ok(InitialBackfillProgress::InProgress)
 }

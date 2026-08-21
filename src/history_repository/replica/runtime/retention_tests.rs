@@ -336,6 +336,7 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             vec!["segment-2".to_owned()],
             Some("segment-3".to_owned()),
             false,
+            true,
         )
         .expect("persist summary checkpoint");
     runtime
@@ -362,6 +363,7 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             summary_pending_segment_ids: vec!["segment-2".to_owned()],
             summary_pending_next_cursor: Some("segment-3".to_owned()),
             summary_complete: false,
+            summary_requires_tiered_backfill: true,
             ..InitialPeerBackfillCheckpoint::default()
         })
     );
