@@ -91,20 +91,31 @@
 ## 遥测与 API
 
 - 遥测原子保存在 `XP_DATA_DIR/mesh/telemetry.json`，不经过 Raft。
+- 常规 `record_sample` 与终态失败只更新内存，首次样本立即原子写入，之后每个节点最多每 5 秒
+  写入一次最新 revision；崩溃最多丢失该窗口内的普通诊断样本。路由原因、breaker 和显式事件
+  继续同步持久化；持久化失败保留 dirty 状态，并由后续样本重试。
+- 启动时优先读取 `mesh/telemetry.json`；文件缺失时只读提取 3.32 SQLite
+  `history_snapshots.mesh_telemetry` BLOB，验证 schema 后原子创建 JSON。迁移不删除或修改旧 BLOB，
+  无效 legacy 数据必须使启动失败而不是重置遥测；通用 history storage 不得清理该 JSON 文件。
 - 每个 peer 保存 24 小时的 1 分钟 buckets；本机另外保存最近 200 个全局事件。
 - Mesh probe 每 60 秒；public standby 每 5 分钟。
 - public standby 记录可用性样本，但不得覆盖 peer 的当前 active path 或最近切换时间。
 - probe 有 jitter，最多并发四个 peer；三分钟无样本标记 stale。
 - `GET /api/admin/mesh/status` 对完整状态表示计算 ETag。
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
-- status SSE 只发布合并后的 telemetry revision。
+- status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
+  仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
+  订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。
+  `snapshot_error` 后的下一条成功快照不得被去重抑制；发生 broadcast lag 的订阅者重建 receiver 并
+  重放当前更新，避免持续陈旧。最后一个订阅者离开后停止并要求下一次订阅重新采样。鉴权、路径和
+  Mesh 状态 API 保持不变。
 - 质量枚举固定为 good、slow、unstable、down 与 unknown。
 - Mesh 失败但公网成功代表端到端成功，并单独记录 fallback。
 - 成功 Mesh response 的 HTTP version 与 socket tuple 只用于进程内识别连接；原始地址、源 IP、
   本地端口、远端端口和证书信息不得进入 telemetry、API、日志或 UI。
 - 每分钟 bucket 追加 `mesh_h2_requests` 与 `mesh_connection_starts`；peer 保存连接 generation、
   当前 generation 请求数和最后建连时间。旧 telemetry 缺字段时按零值读取，schema version 不变，
-  且不得因此增加每请求持久化次数。
+  且不得因此增加常规采样的五秒持久化上界。
 - status peer 可选返回 `mesh_transport`：`protocol`、`health`、`connection_generation`、
   `current_connection_requests`、5m/1h 请求数与建连数、`last_connection_started_at`。
 - `health` 固定为：无传输样本时 unknown；HTTP/2 且最近 5 分钟建连不超过两次时 healthy；

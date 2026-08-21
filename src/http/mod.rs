@@ -30,12 +30,14 @@ use tokio::{
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod status_events;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
     admin_internal_reverse_relay, admin_run_mesh_probes, send_mesh_internal_capability_read,
     send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
     spawn_reverse_assignment_worker,
 };
+use status_events::StatusEventsHub;
 
 use crate::{
     admin_token::{AdminTokenHash, AdminTokenVerifier, AdminTokenVerifyError},
@@ -148,6 +150,7 @@ pub struct AppState {
     pub ops_github_client: reqwest::Client,
     pub mesh_client: MeshAwareHttpClient,
     pub mesh_telemetry: MeshTelemetryHandle,
+    status_events: StatusEventsHub,
     pub reverse_relay: crate::reverse_relay::ReverseRelayRuntime,
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
@@ -1018,6 +1021,7 @@ pub fn build_router_with_mesh_telemetry(
         ops_github_client,
         mesh_client,
         mesh_telemetry,
+        status_events: StatusEventsHub::new(),
         reverse_relay: crate::reverse_relay::ReverseRelayRuntime::default(),
         internal_idempotency,
         admin_token_verifier: auth_state.verifier.clone(),
@@ -4505,6 +4509,60 @@ async fn build_admin_status_snapshot(state: &AppState) -> Result<AdminStatusSnap
     })
 }
 
+fn admin_status_snapshot_fingerprint(snapshot: &AdminStatusSnapshot) -> serde_json::Result<String> {
+    let mut value = serde_json::to_value(snapshot)?;
+    normalize_admin_status_snapshot_fingerprint_value(&mut value);
+    serde_json::to_string(&value)
+}
+
+fn normalize_admin_status_snapshot_fingerprint_value(value: &mut serde_json::Value) {
+    let Some(snapshot) = value.as_object_mut() else {
+        return;
+    };
+    snapshot.remove("emitted_at");
+    if let Some(status) = snapshot
+        .get_mut("upgrade")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|upgrade| upgrade.get_mut("status"))
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        let is_idle = status.get("state").and_then(serde_json::Value::as_str) == Some("idle");
+        let has_no_job = [
+            "target_tag",
+            "repo",
+            "started_at",
+            "finished_at",
+            "exit_code",
+            "message",
+        ]
+        .into_iter()
+        .all(|key| status.get(key).is_none_or(serde_json::Value::is_null));
+        if is_idle && has_no_job {
+            status.remove("updated_at");
+        }
+    }
+    let Some(items) = snapshot
+        .get_mut("nodes_runtime")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|runtime| runtime.get_mut("items"))
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for item in items {
+        let Some(summary) = item
+            .as_object_mut()
+            .and_then(|item| item.get_mut("summary"))
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        if summary.get("status").and_then(serde_json::Value::as_str) == Some("unknown") {
+            summary.remove("updated_at");
+        }
+    }
+}
+
 async fn admin_get_upgrade_status(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<AdminUpgradeStatusResponse>, ApiError> {
@@ -4522,84 +4580,26 @@ async fn admin_stream_status_events(
     let mut initial_events = VecDeque::new();
     initial_events.push_back(sse_json_event("hello", &hello));
 
-    let (tx, rx) = mpsc::channel::<Event>(32);
-    let state_for_stream = state.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        let mut last_snapshot_json: Option<String> = None;
-        interval.tick().await;
-
-        loop {
-            if tx.is_closed() {
-                return;
-            }
-
-            match build_admin_status_snapshot(&state_for_stream).await {
-                Ok(snapshot) => match serde_json::to_string(&snapshot) {
-                    Ok(snapshot_json) => {
-                        if last_snapshot_json.as_ref() != Some(&snapshot_json) {
-                            if tx
-                                .send(
-                                    Event::default()
-                                        .event("snapshot")
-                                        .data(snapshot_json.clone()),
-                                )
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                            last_snapshot_json = Some(snapshot_json);
-                        }
-                    }
-                    Err(err) => {
-                        if tx
-                            .send(sse_json_event(
-                                "snapshot_error",
-                                &AdminStatusSnapshotError {
-                                    message: format!("serialize status snapshot: {err}"),
-                                },
-                            ))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                },
-                Err(err) => {
-                    if tx
-                        .send(sse_json_event(
-                            "snapshot_error",
-                            &AdminStatusSnapshotError {
-                                message: err.message.clone(),
-                            },
-                        ))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-
-            interval.tick().await;
-        }
+    let hub = state.status_events.clone();
+    let worker_hub = hub.clone();
+    let state_for_worker = state.clone();
+    let subscription = hub.subscribe(move |worker_guard| {
+        let worker_hub = worker_hub.clone();
+        let state_for_worker = state_for_worker.clone();
+        tokio::spawn(worker_hub.run(state_for_worker, worker_guard));
     });
+    let mut subscription = subscription;
+    if let Some(event) = subscription.replay.take() {
+        initial_events.push_back(event.into_sse_event());
+    }
 
-    let out_stream = stream::unfold((initial_events, rx), |(mut initial, mut rx)| async move {
-        if let Some(event) = initial.pop_front() {
-            return Some((Ok(event), (initial, rx)));
-        }
-        let next = rx.recv().await?;
-        Some((Ok(next), (initial, rx)))
-    });
-
-    Ok(Sse::new(out_stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(10))
-            .text("keepalive"),
-    ))
+    Ok(
+        Sse::new(status_events::stream_events(initial_events, subscription)).keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(10))
+                .text("keepalive"),
+        ),
+    )
 }
 
 async fn admin_start_upgrade(

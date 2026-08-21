@@ -13,7 +13,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use tracing::warn;
 
 pub(crate) const STATE_KEY: &str = "persistent_state";
@@ -38,13 +38,12 @@ const BACKUP_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const CHECKPOINT_PAGES: u32 = 64;
 const VACUUM_PAGES: u32 = 64;
 
-const SOURCES: [HistorySource; 7] = [
+const SOURCES: [HistorySource; 6] = [
     HistorySource::new(STATE_KEY, "state.json"),
     HistorySource::new(USAGE_KEY, "usage.json"),
     HistorySource::new(INBOUND_IP_USAGE_KEY, "inbound_ip_usage.json"),
     HistorySource::new(TCP_CONNECTION_USAGE_KEY, "tcp_connection_usage.json"),
     HistorySource::new(NODE_HISTORY_KEY, "node_history_cache.json"),
-    HistorySource::new(MESH_TELEMETRY_KEY, "mesh/telemetry.json"),
     HistorySource::new(REPOSITORY_REPLICA_KEY, "history/repository_replica.json"),
 ];
 
@@ -264,6 +263,56 @@ impl HistoryStorage {
         self.fail_maintenance_after_commit
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+/// Reads the 3.32 telemetry snapshot without opening or modifying the general history store.
+///
+/// Mesh telemetry now owns its JSON file directly. This narrow compatibility reader is retained
+/// only to migrate the legacy SQLite BLOB when that file has not been created yet.
+pub(crate) fn read_legacy_mesh_telemetry(data_dir: &Path) -> Result<Option<Vec<u8>>> {
+    let database_path = data_dir.join(SQLITE_FILE);
+    match fs::metadata(&database_path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(HistoryStorageError(error.to_string())),
+    }
+
+    let connection = Connection::open_with_flags(&database_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(sqlite_error)?;
+    let has_snapshots_table = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'history_snapshots'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .is_some();
+    if !has_snapshots_table {
+        return Err(HistoryStorageError(
+            "legacy mesh telemetry database is missing history_snapshots".to_owned(),
+        ));
+    }
+
+    let mut statement = connection
+        .prepare("PRAGMA table_info(history_snapshots)")
+        .map_err(sqlite_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>();
+    let columns = match columns {
+        Ok(columns) => columns,
+        Err(error) => return Err(sqlite_error(error)),
+    };
+    if !columns.contains("key") || !columns.contains("payload") {
+        return Err(HistoryStorageError(
+            "legacy mesh telemetry database has an incompatible history_snapshots schema"
+                .to_owned(),
+        ));
+    }
+
+    read_sqlite(&connection, MESH_TELEMETRY_KEY)
 }
 
 fn shared_backend(data_dir: &Path) -> Arc<Mutex<Backend>> {

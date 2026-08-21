@@ -24,11 +24,6 @@ fn migrates_legacy_snapshots_into_sqlite_without_rewriting_json() {
             b"node-history".as_slice(),
         ),
         (
-            "mesh/telemetry.json",
-            MESH_TELEMETRY_KEY,
-            b"mesh-telemetry".as_slice(),
-        ),
-        (
             "history/repository_replica.json",
             REPOSITORY_REPLICA_KEY,
             b"repository-replica".as_slice(),
@@ -171,6 +166,21 @@ fn removes_migrated_json_backups_after_thirty_days() {
 }
 
 #[test]
+fn does_not_treat_mesh_telemetry_as_a_generic_history_backup() {
+    let temporary = tempfile::tempdir().unwrap();
+    let telemetry_path = temporary.path().join("mesh/telemetry.json");
+    fs::create_dir_all(telemetry_path.parent().unwrap()).unwrap();
+    fs::write(&telemetry_path, b"mesh-telemetry").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+    storage.cleanup_expired_backups_at(
+        std::time::SystemTime::now() + Duration::from_secs(31 * 24 * 60 * 60),
+    );
+
+    assert_eq!(fs::read(&telemetry_path).unwrap(), b"mesh-telemetry");
+}
+
+#[test]
 fn configures_wal_bounded_checkpoint_and_incremental_vacuum() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
@@ -179,7 +189,7 @@ fn configures_wal_bounded_checkpoint_and_incremental_vacuum() {
         .unwrap();
     let pages_before_shrink = sqlite_pragma(&storage, "page_count");
     storage.write(NODE_HISTORY_KEY, b"small").unwrap();
-    storage.write(MESH_TELEMETRY_KEY, b"mesh").unwrap();
+    storage.write(USAGE_KEY, b"usage").unwrap();
     storage.write(INBOUND_IP_USAGE_KEY, b"ip").unwrap();
 
     let journal_mode = sqlite_text_pragma(&storage, "journal_mode");
