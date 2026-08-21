@@ -29,7 +29,9 @@
   replays those unchanged wires instead of assigning new source sequences. For a ready peer, the
   single page budget is spent on one summary page, one repair response, or one tiered export page;
   the summary cursor and pending repair IDs are part of the durable peer checkpoint, so a restart
-  resumes the same page instead of restarting an unbounded scan.
+  resumes the same page instead of restarting an unbounded scan. Deep partition mismatches mark
+  the checkpoint for the single-authority tiered import and force a fresh summary verification
+  pass before the member can enter the readiness window.
 - Tombstones received while a repository is `syncing` are atomically stored with their local
   cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
   membership reports `ready`. The durable page is then retried through the existing all-node

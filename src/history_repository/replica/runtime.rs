@@ -345,6 +345,8 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) summary_pending_next_cursor: Option<String>,
     #[serde(default)]
     pub(crate) summary_complete: bool,
+    #[serde(default)]
+    pub(crate) summary_requires_tiered_backfill: bool,
 }
 
 impl From<&RetentionCompactionCursor> for RepositoryHistoryCompactionCursor {
@@ -685,6 +687,7 @@ impl RepositoryReplicaRuntime {
                 summary_pending_segment_ids: checkpoint.summary_pending_segment_ids,
                 summary_pending_next_cursor: checkpoint.summary_pending_next_cursor,
                 summary_complete: checkpoint.summary_complete,
+                summary_requires_tiered_backfill: checkpoint.summary_requires_tiered_backfill,
             },
         );
         self.persist_control_state()
@@ -697,6 +700,7 @@ impl RepositoryReplicaRuntime {
         pending_segment_ids: Vec<String>,
         pending_next_cursor: Option<String>,
         summary_complete: bool,
+        summary_requires_tiered_backfill: bool,
     ) -> Result<(), RepositoryRuntimeError> {
         let checkpoint = self
             .snapshot
@@ -707,6 +711,7 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_pending_segment_ids = pending_segment_ids;
         checkpoint.summary_pending_next_cursor = pending_next_cursor;
         checkpoint.summary_complete = summary_complete;
+        checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
         self.persist_control_state()
     }
 
