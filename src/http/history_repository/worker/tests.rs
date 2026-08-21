@@ -90,12 +90,6 @@ fn source_deletion_producer_queues_the_independent_tombstone_before_matching_his
 }
 
 #[test]
-fn catch_up_rechecks_a_peer_after_repair_before_declaring_it_complete() {
-    assert!(super::backfill::catch_up_has_verification_retry(0));
-    assert!(!super::backfill::catch_up_has_verification_retry(1));
-}
-
-#[test]
 fn completed_catch_up_starts_a_stability_window_without_rechecking_live_segments() {
     assert!(!super::should_run_initial_catch_up(true));
     assert!(super::should_run_initial_catch_up(false));

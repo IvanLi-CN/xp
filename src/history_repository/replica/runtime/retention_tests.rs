@@ -329,17 +329,40 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             false,
         )
         .expect("persist peer checkpoint");
+    runtime
+        .update_initial_peer_summary_checkpoint(
+            "node-b",
+            Some("segment-1".to_owned()),
+            vec!["segment-2".to_owned()],
+            Some("segment-3".to_owned()),
+            false,
+        )
+        .expect("persist summary checkpoint");
+    runtime
+        .update_initial_peer_backfill_checkpoint(
+            "node-b",
+            Some("tiered-page-2".to_owned()),
+            streams.clone(),
+            true,
+            false,
+        )
+        .expect("preserve summary checkpoint");
     drop(runtime);
 
     let restored = load(temporary.path());
     assert_eq!(
         restored.initial_peer_backfill_checkpoint("node-b"),
         Some(InitialPeerBackfillCheckpoint {
-            page_cursor: Some("opaque-page-cursor".to_owned()),
+            page_cursor: Some("tiered-page-2".to_owned()),
             stream_state: streams,
             saw_history: true,
             completed: false,
             epoch: 0,
+            summary_cursor: Some("segment-1".to_owned()),
+            summary_pending_segment_ids: vec!["segment-2".to_owned()],
+            summary_pending_next_cursor: Some("segment-3".to_owned()),
+            summary_complete: false,
+            ..InitialPeerBackfillCheckpoint::default()
         })
     );
 }

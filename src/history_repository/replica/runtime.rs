@@ -337,6 +337,14 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) completed: bool,
     #[serde(default)]
     pub(crate) epoch: u64,
+    #[serde(default)]
+    pub(crate) summary_cursor: Option<String>,
+    #[serde(default)]
+    pub(crate) summary_pending_segment_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) summary_pending_next_cursor: Option<String>,
+    #[serde(default)]
+    pub(crate) summary_complete: bool,
 }
 
 impl From<&RetentionCompactionCursor> for RepositoryHistoryCompactionCursor {
@@ -659,11 +667,11 @@ impl RepositoryReplicaRuntime {
         saw_history: bool,
         completed: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        let epoch = self
+        let checkpoint = self
             .snapshot
             .initial_peer_backfills
             .get(peer_node_id)
-            .map(|checkpoint| checkpoint.epoch)
+            .cloned()
             .unwrap_or_default();
         self.snapshot.initial_peer_backfills.insert(
             peer_node_id.to_owned(),
@@ -672,9 +680,33 @@ impl RepositoryReplicaRuntime {
                 stream_state,
                 saw_history,
                 completed,
-                epoch,
+                epoch: checkpoint.epoch,
+                summary_cursor: checkpoint.summary_cursor,
+                summary_pending_segment_ids: checkpoint.summary_pending_segment_ids,
+                summary_pending_next_cursor: checkpoint.summary_pending_next_cursor,
+                summary_complete: checkpoint.summary_complete,
             },
         );
+        self.persist_control_state()
+    }
+
+    pub(crate) fn update_initial_peer_summary_checkpoint(
+        &mut self,
+        peer_node_id: &str,
+        summary_cursor: Option<String>,
+        pending_segment_ids: Vec<String>,
+        pending_next_cursor: Option<String>,
+        summary_complete: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .entry(peer_node_id.to_owned())
+            .or_default();
+        checkpoint.summary_cursor = summary_cursor;
+        checkpoint.summary_pending_segment_ids = pending_segment_ids;
+        checkpoint.summary_pending_next_cursor = pending_next_cursor;
+        checkpoint.summary_complete = summary_complete;
         self.persist_control_state()
     }
 

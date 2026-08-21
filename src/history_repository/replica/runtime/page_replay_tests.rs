@@ -1,7 +1,4 @@
-use super::{
-    tests::{identity, load, record, signing_key},
-    *,
-};
+use super::tests::{identity, load, record, signing_key};
 
 #[test]
 fn local_history_backfill_page_replays_all_segments_before_checkpoint() {
