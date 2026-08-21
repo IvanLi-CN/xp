@@ -672,6 +672,9 @@ Notes:
   are in progress, and only a fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
+  For ready peers, that page is exactly one summary page, one repair response, or one tiered export
+  page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a restart
+  cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.

@@ -3,7 +3,9 @@ use crate::history_sync::ProtocolError;
 use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
 };
-const CATCH_UP_PEER_VERIFICATION_ATTEMPTS: usize = 2;
+mod ready_peer;
+
+pub(crate) use ready_peer::catch_up_against_ready_repositories;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitialBackfillProgress {
@@ -929,72 +931,4 @@ fn backfill_segment_canonical_size(
         Err(ProtocolError::SegmentCanonicalLimit { actual }) => Ok(actual),
         Err(error) => Err(error.into()),
     }
-}
-pub(crate) async fn catch_up_against_ready_repositories(
-    state: &AppState,
-    now: u64,
-) -> anyhow::Result<InitialBackfillProgress> {
-    let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
-    if peers.len() != ready_repository_ids.len() {
-        return Ok(InitialBackfillProgress::Unavailable);
-    }
-    let mut receiving_repository_ids = ready_repository_ids.clone();
-    receiving_repository_ids.push(state.cluster.node_id.clone());
-    receiving_repository_ids.sort_unstable();
-    receiving_repository_ids.dedup();
-    {
-        let mut runtime = state.repository_replica.lock().await;
-        runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&receiving_repository_ids)?;
-    }
-
-    for peer in peers
-        .iter()
-        .filter(|peer| peer.node_id != state.cluster.node_id)
-    {
-        let mut caught_up = false;
-        for attempt in 0..CATCH_UP_PEER_VERIFICATION_ATTEMPTS {
-            match replicate_peer(
-                state,
-                peer,
-                &receiving_repository_ids,
-                now,
-                ReplicaWork::DeepVerification,
-                false,
-            )
-            .await
-            {
-                Ok(true) => {
-                    caught_up = true;
-                    break;
-                }
-                Ok(false) if catch_up_has_verification_retry(attempt) => continue,
-                Ok(false) => break,
-                Err(error) => {
-                    tracing::debug!(
-                        peer = %peer.node_id,
-                        error = %error,
-                        "history repository catch-up verification failed"
-                    );
-                    return Ok(InitialBackfillProgress::Unavailable);
-                }
-            }
-        }
-        if !caught_up {
-            return Ok(InitialBackfillProgress::Unavailable);
-        }
-    }
-    // Signed anti-entropy covers the seven-day detail cache above. One ready repository exports
-    // the canonical older tiers below that fixed boundary, so importing every peer cannot create
-    // overlapping backfill streams for the same cluster-wide history.
-    let Some(tiered_peer) = peers
-        .iter()
-        .find(|peer| peer.node_id != state.cluster.node_id)
-    else {
-        return Ok(InitialBackfillProgress::Unavailable);
-    };
-    pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await
-}
-pub(crate) fn catch_up_has_verification_retry(attempt: usize) -> bool {
-    attempt.saturating_add(1) < CATCH_UP_PEER_VERIFICATION_ATTEMPTS
 }
