@@ -20,6 +20,20 @@
   existing node runtime, traffic, connection and IP views. Syncing members perform bounded repair
   catch-up and enter `ready` only after five stable minutes; successful deep verification writes
   local convergence back to Raft.
+- Initial repository bootstrap is deliberately yieldable: each worker tick exports at most one
+  local page and one bounded page per peer (128 records / 192 KiB). `InProgress` keeps the member
+  in `syncing` without writing `CatchUpIncomplete`; capacity refresh, live source collection and
+  lifecycle checks continue on their normal cadence. A repository enters the existing five-minute
+  stability window only after every page is complete.
+- Tombstones received while a repository is `syncing` are atomically stored with their local
+  cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
+  membership reports `ready`. The durable page is then retried through the existing all-node
+  acknowledgement path, and its delivery cursor advances only after successful fanout.
+- Startup lifecycle ticks repair the legacy mutable tombstone metadata where `created_at=0` and
+  `expires_at` is the fixed horizon. The repair extends the ledger from the current Unix time and
+  persists only the control snapshot; signed segments, cursors, hashes, ready membership and
+  acknowledgement state are left unchanged. Operators must not delete `history.sqlite3`, replace
+  repository members or change ordinary-node retention settings during rollout.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before either

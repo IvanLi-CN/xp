@@ -604,6 +604,17 @@ impl RepositoryReplicaRuntime {
         self.snapshot.local_history_backfill_cursor.as_deref()
     }
 
+    pub(crate) fn repair_legacy_tombstone_metadata(
+        &mut self,
+        now_unix_seconds: u64,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.tombstones.repair_epoch_zero_metadata(now_unix_seconds) {
+            return Ok(false);
+        }
+        self.persist_control_state()?;
+        Ok(true)
+    }
+
     pub(crate) fn checkpoint_local_history_backfill(
         &mut self,
         page_cursor: Option<String>,
