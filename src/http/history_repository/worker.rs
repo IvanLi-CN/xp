@@ -36,8 +36,6 @@ const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
-const MAX_INITIAL_BACKFILL_PAGE_BYTES: usize = 192 * 1024;
-const MAX_INITIAL_BACKFILL_PAGE_RECORDS: usize = 128;
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
 mod direct;
