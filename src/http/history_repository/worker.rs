@@ -910,12 +910,12 @@ async fn replicate_peer(
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
             }
-            let partitions_converged = state
+            let summary_converged = !state
                 .repository_replica
                 .lock()
                 .await
-                .retained_partitions_converged(&remote_summary)?;
-            if deep_repair_requires_tiered_backfill(work, partitions_converged) {
+                .requires_repair(&remote_summary, work.is_deep_verification())?;
+            if deep_repair_requires_tiered_backfill(work, summary_converged) {
                 state
                     .repository_replica
                     .lock()
@@ -940,8 +940,8 @@ async fn replicate_peer(
     Ok(true)
 }
 
-fn deep_repair_requires_tiered_backfill(work: ReplicaWork, partitions_converged: bool) -> bool {
-    work.is_deep_verification() && !partitions_converged
+fn deep_repair_requires_tiered_backfill(work: ReplicaWork, summary_converged: bool) -> bool {
+    work.is_deep_verification() && !summary_converged
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(

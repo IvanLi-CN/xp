@@ -40,7 +40,7 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
 }
 
 #[test]
-fn deep_repair_preserves_partition_recovery_until_the_summary_matches() {
+fn deep_repair_preserves_summary_recovery_until_the_summary_matches() {
     assert!(deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,
         false
