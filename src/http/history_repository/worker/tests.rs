@@ -135,10 +135,33 @@ fn deep_repair_keeps_backfill_checkpoint_after_a_full_segment_batch() {
             .expect("remaining segment repair")
             .is_empty()
     );
-    assert!(!deep_repair_requires_tiered_backfill(
-        ReplicaWork::DeepVerification,
-        true
-    ));
+    let stream_state = BTreeMap::from([("tiered-history".to_owned(), (64, Some([7; 32])))]);
+    target
+        .update_initial_peer_backfill_checkpoint(
+            "node-b",
+            Some("tiered-page-cursor".to_owned()),
+            stream_state,
+            true,
+            false,
+        )
+        .expect("seed tiered checkpoint");
+    let checkpoint = target
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("tiered checkpoint");
+
+    assert!(
+        !restart_tiered_backfill_after_incomplete_deep_repair(
+            &mut target,
+            "node-b",
+            ReplicaWork::DeepVerification,
+            true,
+        )
+        .expect("retain tiered checkpoint")
+    );
+    assert_eq!(
+        target.initial_peer_backfill_checkpoint("node-b"),
+        Some(checkpoint)
+    );
 }
 
 #[test]

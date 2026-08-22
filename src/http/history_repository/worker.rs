@@ -17,8 +17,9 @@ use crate::{
         },
         identity::RepositoryNodeId,
         replica::{
-            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary,
-            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
+            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaRuntime, RepositoryReplicaSegment,
+            RepositoryReplicaSummary, RepositoryRuntimeError, RepositorySyncReceipt,
+            RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
 };
@@ -920,12 +921,14 @@ async fn replicate_peer(
                 )
             };
             if !summary_converged {
-                if deep_repair_requires_tiered_backfill(work, remaining_segment_repairs) {
-                    state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .restart_initial_peer_backfill(&peer.node_id)?;
+                let restarted_tiered_backfill =
+                    restart_tiered_backfill_after_incomplete_deep_repair(
+                        &mut state.repository_replica.lock().await,
+                        &peer.node_id,
+                        work,
+                        remaining_segment_repairs,
+                    )?;
+                if restarted_tiered_backfill {
                     pull_peer_initial_history(state, peer, ready_repository_ids).await?;
                 }
                 return Ok(false);
@@ -951,6 +954,19 @@ fn deep_repair_requires_tiered_backfill(
     remaining_segment_repairs: bool,
 ) -> bool {
     work.is_deep_verification() && !remaining_segment_repairs
+}
+
+fn restart_tiered_backfill_after_incomplete_deep_repair(
+    runtime: &mut RepositoryReplicaRuntime,
+    peer_node_id: &str,
+    work: ReplicaWork,
+    remaining_segment_repairs: bool,
+) -> Result<bool, RepositoryRuntimeError> {
+    if !deep_repair_requires_tiered_backfill(work, remaining_segment_repairs) {
+        return Ok(false);
+    }
+    runtime.restart_initial_peer_backfill(peer_node_id)?;
+    Ok(true)
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(
