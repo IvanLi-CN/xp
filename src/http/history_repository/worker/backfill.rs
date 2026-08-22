@@ -308,10 +308,7 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
                         &signing_key,
                         page_cursor.clone(),
                         completed,
-                        batches
-                            .into_iter()
-                            .map(|(_, records)| (records, _now))
-                            .collect(),
+                        queued_history_backfill_batches(batches),
                     )?;
                 (segments, page_cursor, completed)
             } else {
@@ -915,6 +912,16 @@ pub(super) fn historical_record_batches(
     }
     Ok(batches)
 }
+
+pub(super) fn queued_history_backfill_batches(
+    batches: Vec<(u64, Vec<SyncRecord>)>,
+) -> Vec<(Vec<SyncRecord>, u64)> {
+    batches
+        .into_iter()
+        .map(|(observed_at_unix_seconds, records)| (records, observed_at_unix_seconds))
+        .collect()
+}
+
 fn backfill_segment_canonical_size(
     timestamp: u64,
     stream: &str,

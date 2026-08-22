@@ -268,6 +268,38 @@ fn initial_backfill_splits_same_timestamp_records_before_canonical_limit() {
 }
 
 #[test]
+fn initial_backfill_queues_each_batch_with_its_historical_observed_time() {
+    let records = [100_u64, 200]
+        .into_iter()
+        .map(|observed_at| {
+            (
+                observed_at,
+                source_record_with_key(
+                    "runtime.v1",
+                    "node-a",
+                    observed_at,
+                    observed_at.to_be_bytes().to_vec(),
+                    serde_json::json!({ "observed_at": observed_at }),
+                    false,
+                )
+                .expect("historical record"),
+            )
+        })
+        .collect();
+    let batches = super::backfill::historical_record_batches(records).expect("split batches");
+
+    let queued = super::backfill::queued_history_backfill_batches(batches);
+
+    assert_eq!(
+        queued
+            .iter()
+            .map(|(_, observed_at)| *observed_at)
+            .collect::<Vec<_>>(),
+        vec![100, 200]
+    );
+}
+
+#[test]
 fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
     let mut collector = super::HistoricalBackfillCollector::new(None, 2);
     collector
