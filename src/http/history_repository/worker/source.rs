@@ -1,6 +1,38 @@
 use crate::history_sync::SyncRecord;
+use crate::state::history_repository::{control::RepositoryLifecycle, identity::RepositoryNodeId};
 
+use super::super::AppState;
 use super::MAX_SOURCE_PAYLOAD_BYTES;
+
+pub(super) async fn local_repository_lifecycle(
+    state: &AppState,
+) -> anyhow::Result<RepositoryLifecycle> {
+    let store = state.store.lock().await;
+    let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
+    Ok(store
+        .state()
+        .repository_membership
+        .as_ref()
+        .and_then(|membership| membership.repository(&node_id))
+        .map(|member| *member.lifecycle())
+        .unwrap_or(RepositoryLifecycle::Syncing))
+}
+
+pub(super) async fn repair_legacy_tombstone_metadata(
+    state: &AppState,
+    now_unix_seconds: u64,
+) -> anyhow::Result<()> {
+    state
+        .repository_replica
+        .lock()
+        .await
+        .repair_legacy_tombstone_metadata(now_unix_seconds)?;
+    Ok(())
+}
+
+pub(super) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
+    lifecycle == RepositoryLifecycle::Ready
+}
 
 pub(super) fn source_record(
     schema_id: &str,

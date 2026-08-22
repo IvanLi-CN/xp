@@ -1,6 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
+use crate::state::history_repository::{
+    MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+};
+
 use super::*;
 
 #[derive(Debug, Clone)]
@@ -59,6 +63,10 @@ impl RepositoryReplicaRuntime {
         repair_cache_cutoff_unix_seconds: u64,
         now_unix_seconds: u64,
     ) -> Result<RepositoryTieredBackfillPage, RepositoryRuntimeError> {
+        let limit = limit.min(MAX_INITIAL_BACKFILL_PAGE_RECORDS);
+        if limit == 0 {
+            return Err(RepositoryRuntimeError::StateLimitExceeded);
+        }
         let cursor = page_cursor
             .map(|cursor| {
                 if cursor.len() > 1_024 {
@@ -180,7 +188,7 @@ impl RepositoryReplicaRuntime {
         self.storage
             .refresh_repository_history_export(&export_session_id, now_unix_seconds)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        let mut rows = self
+        let rows = self
             .storage
             .repository_history_records_page(
                 after.as_ref(),
@@ -191,8 +199,43 @@ impl RepositoryReplicaRuntime {
                 received_at_cutoff_unix_seconds,
             )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        let has_more = rows.len() > limit;
-        rows.truncate(limit);
+        let fetched_has_more = rows.len() > limit;
+        let mut selected_records = Vec::new();
+        let mut selected_bytes = 0_usize;
+        let mut has_more = fetched_has_more;
+        for row in rows.into_iter().map(StoredRecord::from_sqlite_row) {
+            let record = RepositoryTieredBackfillRecord::try_from(row?)?;
+            let record_bytes = tiered_backfill_record_bytes(
+                self.snapshot
+                    .cluster_id
+                    .as_deref()
+                    .unwrap_or("history-tiered"),
+                &record,
+            )?;
+            let exceeds_byte_budget = if selected_records.is_empty() {
+                record_bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES
+            } else {
+                selected_bytes
+                    .saturating_add(1)
+                    .saturating_add(record_bytes)
+                    > MAX_INITIAL_BACKFILL_PAGE_BYTES
+            };
+            if selected_records.len() >= limit || exceeds_byte_budget {
+                if selected_records.is_empty() && exceeds_byte_budget {
+                    return Err(RepositoryRuntimeError::StateLimitExceeded);
+                }
+                has_more = true;
+                break;
+            }
+            selected_bytes = if selected_records.is_empty() {
+                record_bytes
+            } else {
+                selected_bytes
+                    .saturating_add(1)
+                    .saturating_add(record_bytes)
+            };
+            selected_records.push(record);
+        }
         let next_phase = if has_more {
             Some(phase)
         } else if matches!(phase, RepositoryTieredBackfillPhase::Tombstones)
@@ -209,7 +252,15 @@ impl RepositoryReplicaRuntime {
         }
         let next_cursor = next_phase.map(|next_phase| {
             let next_after = if has_more {
-                rows.last().map(RepositoryHistoryCompactionCursor::from)
+                selected_records
+                    .last()
+                    .map(|record| RepositoryHistoryCompactionCursor {
+                        observed_start_unix_seconds: record.observed_at_unix_seconds,
+                        source_node_id: record.source_node_id.clone(),
+                        source_epoch: record.source_epoch,
+                        stream: record.stream.clone(),
+                        sequence: record.sequence,
+                    })
             } else {
                 None
             };
@@ -226,28 +277,8 @@ impl RepositoryReplicaRuntime {
                 .expect("repository backfill cursor is serializable"),
             )
         });
-        let records = rows
-            .into_iter()
-            .map(StoredRecord::from_sqlite_row)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|record| RepositoryTieredBackfillRecord {
-                observed_at_unix_seconds: record.observed_at_unix_seconds,
-                source_node_id: record.source_node_id,
-                source_epoch: record.source_epoch,
-                stream: record.stream,
-                sequence: record.sequence,
-                subject_node_id: record.subject_node_id,
-                observer_node_id: record.observer_node_id,
-                schema_id: record.schema_id,
-                schema_version: record.schema_version,
-                record_key: record.record_key,
-                payload: record.payload,
-                tombstone: record.tombstone,
-            })
-            .collect();
         Ok(RepositoryTieredBackfillPage {
-            records,
+            records: selected_records,
             next_cursor,
         })
     }
@@ -350,4 +381,61 @@ impl RepositoryReplicaRuntime {
         }
         self.persist_import_mutation(previous_snapshot, mutation)
     }
+}
+
+impl TryFrom<StoredRecord> for RepositoryTieredBackfillRecord {
+    type Error = RepositoryRuntimeError;
+
+    fn try_from(record: StoredRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            observed_at_unix_seconds: record.observed_at_unix_seconds,
+            source_node_id: record.source_node_id,
+            source_epoch: record.source_epoch,
+            stream: record.stream,
+            sequence: record.sequence,
+            subject_node_id: record.subject_node_id,
+            observer_node_id: record.observer_node_id,
+            schema_id: record.schema_id,
+            schema_version: record.schema_version,
+            record_key: record.record_key,
+            payload: record.payload,
+            tombstone: record.tombstone,
+        })
+    }
+}
+
+fn tiered_backfill_record_bytes(
+    cluster_id: &str,
+    record: &RepositoryTieredBackfillRecord,
+) -> Result<usize, RepositoryRuntimeError> {
+    let cursor = Cursor::new(
+        record.source_node_id.clone(),
+        record.source_epoch,
+        record.stream.clone(),
+        record.sequence,
+    )
+    .map_err(RepositoryRuntimeError::Protocol)?;
+    let sync_record = SyncRecord::new(
+        record.subject_node_id.clone(),
+        record.observer_node_id.clone(),
+        record.schema_id.clone(),
+        record.schema_version,
+        record.record_key.clone(),
+        record.payload.clone(),
+        record.tombstone,
+    );
+    CanonicalSegment::new(
+        cluster_id,
+        cursor,
+        vec![sync_record],
+        None,
+        record.observed_at_unix_seconds,
+        record.observed_at_unix_seconds,
+    )
+    .and_then(|segment| segment.canonical_bytes())
+    .map(|bytes| bytes.len())
+    .map_err(|error| match error {
+        ProtocolError::SegmentCanonicalLimit { .. } => RepositoryRuntimeError::StateLimitExceeded,
+        error => RepositoryRuntimeError::Protocol(error),
+    })
 }

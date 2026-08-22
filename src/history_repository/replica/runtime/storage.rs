@@ -1,6 +1,34 @@
 use super::*;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn migrate_legacy_segment_cursor_index(
+        &mut self,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() {
+            return Ok(());
+        }
+        loop {
+            let rows = self
+                .storage
+                .repository_history_segments_missing_cursor_index(128)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if rows.is_empty() {
+                return Ok(());
+            }
+            let segments = rows
+                .into_iter()
+                .map(StoredSegment::from_sqlite_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            let indexed_rows = segments
+                .iter()
+                .map(StoredSegment::sqlite_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            self.storage
+                .upsert_repository_history_segments(&indexed_rows)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        }
+    }
+
     pub(crate) fn migrate_history_to_sqlite(&mut self) -> Result<(), RepositoryRuntimeError> {
         if !self.storage.is_sqlite() || self.snapshot.external_history {
             return Ok(());
@@ -69,17 +97,31 @@ impl RepositoryReplicaRuntime {
                 .segments
                 .iter()
                 .cloned()
-                .map(|segment| (segment_tombstone_rank(&segment), segment))
+                .map(|segment| {
+                    (
+                        segment_tombstone_rank(&segment),
+                        segment_cursor_order(&segment),
+                        segment,
+                    )
+                })
                 .collect::<Vec<_>>();
-            segments.sort_by(|(left_rank, left), (right_rank, right)| {
-                (left_rank, &left.id).cmp(&(right_rank, &right.id))
+            segments.sort_by(|(left_rank, left_order, _), (right_rank, right_order, _)| {
+                (left_rank, left_order).cmp(&(right_rank, right_order))
             });
+            let after_order = segments
+                .iter()
+                .find(|(_, _, segment)| segment.id == after_id)
+                .map(|(_, order, _)| order.clone());
             let mut segments = segments
                 .into_iter()
-                .filter(|(rank, segment)| {
-                    (*rank, segment.id.as_str()) > (after_tombstone_rank, after_id)
+                .filter(|(rank, order, _)| {
+                    after_order
+                        .as_ref()
+                        .map_or(*rank >= after_tombstone_rank, |after_order| {
+                            (rank, order) > (&after_tombstone_rank, after_order)
+                        })
                 })
-                .map(|(_, segment)| segment)
+                .map(|(_, _, segment)| segment)
                 .collect::<Vec<_>>();
             segments.truncate(limit);
             return Ok(segments);
@@ -433,6 +475,22 @@ pub(super) fn segment_tombstone_rank(segment: &StoredSegment) -> bool {
             .any(SyncRecord::is_tombstone)
     })
 }
+
+fn segment_cursor_order(segment: &StoredSegment) -> (String, u64, String, u64, String) {
+    SignedSegment::from_wire(&segment.wire).map_or_else(
+        |_| (String::new(), 0, String::new(), 0, segment.id.clone()),
+        |signed| {
+            let cursor = signed.canonical().first_cursor();
+            (
+                cursor.source_node_id().to_owned(),
+                cursor.source_epoch(),
+                cursor.stream().to_owned(),
+                cursor.sequence(),
+                segment.id.clone(),
+            )
+        },
+    )
+}
 pub(crate) fn record_received_at(record: &StoredRecord) -> u64 {
     if record.received_at_unix_seconds == 0 {
         record.observed_at_unix_seconds
@@ -530,14 +588,20 @@ impl StoredRecord {
 
 impl StoredSegment {
     pub(crate) fn sqlite_row(&self) -> Result<RepositoryHistorySegmentRow, RepositoryRuntimeError> {
+        let signed = SignedSegment::from_wire(&self.wire)?;
+        let first_cursor = signed.canonical().first_cursor();
         Ok(RepositoryHistorySegmentRow {
             id: self.id.clone(),
             closed_at_unix_seconds: self.closed_at_unix_seconds,
-            contains_tombstone: SignedSegment::from_wire(&self.wire)?
+            contains_tombstone: signed
                 .canonical()
                 .records()
                 .iter()
                 .any(SyncRecord::is_tombstone),
+            source_node_id: first_cursor.source_node_id().to_owned(),
+            source_epoch: first_cursor.source_epoch(),
+            stream: first_cursor.stream().to_owned(),
+            first_sequence: first_cursor.sequence(),
             payload: serde_json::to_vec(self)
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?,
         })

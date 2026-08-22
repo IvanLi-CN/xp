@@ -484,6 +484,10 @@ fn ensure_schema(connection: &Connection) -> Result<()> {
                 id TEXT PRIMARY KEY NOT NULL,
                 closed_at INTEGER NOT NULL DEFAULT 0,
                 contains_tombstone INTEGER NOT NULL DEFAULT 1,
+                source_node_id TEXT NOT NULL DEFAULT '',
+                source_epoch INTEGER NOT NULL DEFAULT 0,
+                stream TEXT NOT NULL DEFAULT '',
+                first_sequence INTEGER NOT NULL DEFAULT 0,
                 payload BLOB NOT NULL
             );
             CREATE TABLE IF NOT EXISTS repository_history_export_leases (
@@ -543,12 +547,31 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
             )
             .map_err(sqlite_error)?;
     }
+    for (name, definition) in [
+        ("source_node_id", "TEXT NOT NULL DEFAULT ''"),
+        ("source_epoch", "INTEGER NOT NULL DEFAULT 0"),
+        ("stream", "TEXT NOT NULL DEFAULT ''"),
+        ("first_sequence", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !columns.contains(name) {
+            connection
+                .execute(
+                    &format!(
+                        "ALTER TABLE repository_history_segments ADD COLUMN {name} {definition}"
+                    ),
+                    [],
+                )
+                .map_err(sqlite_error)?;
+        }
+    }
     connection
         .execute_batch(
             "CREATE INDEX IF NOT EXISTS repository_history_segments_closed_at
                ON repository_history_segments (closed_at ASC, id ASC);
              CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
-               ON repository_history_segments (contains_tombstone DESC, id ASC);",
+               ON repository_history_segments
+                  (contains_tombstone DESC, source_node_id ASC, source_epoch ASC, stream ASC,
+                   first_sequence ASC, id ASC);",
         )
         .map_err(sqlite_error)
 }
@@ -712,16 +735,25 @@ fn upsert_repository_history_segment(
     transaction
         .execute(
             "INSERT INTO repository_history_segments
-                (id, closed_at, contains_tombstone, payload)
-             VALUES (?1, ?2, ?3, ?4)
+                (id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                 first_sequence, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
                closed_at = excluded.closed_at,
                contains_tombstone = excluded.contains_tombstone,
+               source_node_id = excluded.source_node_id,
+               source_epoch = excluded.source_epoch,
+               stream = excluded.stream,
+               first_sequence = excluded.first_sequence,
                payload = excluded.payload",
             params![
                 row.id,
                 i64::try_from(row.closed_at_unix_seconds).unwrap_or(i64::MAX),
                 row.contains_tombstone,
+                row.source_node_id,
+                i64::try_from(row.source_epoch).unwrap_or(i64::MAX),
+                row.stream,
+                i64::try_from(row.first_sequence).unwrap_or(i64::MAX),
                 row.payload,
             ],
         )

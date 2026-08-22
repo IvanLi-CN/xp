@@ -1,4 +1,10 @@
 use super::*;
+use crate::state::history_repository::{
+    HistoryStorage,
+    identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+    replica::RepositoryReplicaRuntime,
+};
+use ed25519_dalek::SigningKey;
 
 #[test]
 fn dynamic_relay_keys_are_deterministic_per_cluster_and_recipient() {
@@ -36,6 +42,125 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
     assert_eq!(
         completed_replication_work(ReplicaWork::DeepVerification, true),
         ReplicaWork::DeepVerification
+    );
+}
+
+#[test]
+fn deep_repair_preserves_summary_recovery_until_the_summary_matches() {
+    assert!(deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        false
+    ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        true
+    ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::AntiEntropy,
+        false
+    ));
+}
+
+#[test]
+fn deep_repair_keeps_backfill_checkpoint_after_a_full_segment_batch() {
+    let source_directory = tempfile::tempdir().expect("source directory");
+    let target_directory = tempfile::tempdir().expect("target directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).expect("signing key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut source = RepositoryReplicaRuntime::load(HistoryStorage::open(source_directory.path()))
+        .expect("source runtime");
+    let mut target = RepositoryReplicaRuntime::load(HistoryStorage::open(target_directory.path()))
+        .expect("target runtime");
+    let mut previous = None;
+    for sequence in 0..65_u64 {
+        let segment = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+            vec![SyncRecord::new(
+                "subject-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("record-{sequence}").into_bytes(),
+                b"sample".to_vec(),
+                false,
+            )],
+            previous,
+            10 + sequence,
+            11 + sequence,
+        )
+        .expect("segment")
+        .sign(&signing_key)
+        .expect("signature");
+        previous = Some(segment.segment_hash().expect("segment hash"));
+        source
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &segment.wire_bytes().expect("wire"),
+                100 + sequence,
+            )
+            .expect("store source segment");
+    }
+
+    let summary = source.replication_summary().expect("source summary");
+    assert_eq!(summary.segment_ids.len(), 65);
+    let first_batch = target
+        .missing_segment_ids(&summary, true)
+        .expect("first bounded batch");
+    assert_eq!(first_batch.len(), 64);
+    for segment in source
+        .repair_batch(&first_batch)
+        .expect("first repair batch")
+        .segments
+    {
+        target
+            .receive_wire("cluster-a", &identity, &segment.wire, 200)
+            .expect("receive bounded repair segment");
+    }
+
+    assert!(
+        target
+            .requires_repair(&summary, true)
+            .expect("remaining segment keeps summary incomplete")
+    );
+    assert!(
+        !target
+            .missing_segment_ids(&summary, true)
+            .expect("remaining segment repair")
+            .is_empty()
+    );
+    let stream_state = BTreeMap::from([("tiered-history".to_owned(), (64, Some([7; 32])))]);
+    target
+        .update_initial_peer_backfill_checkpoint(
+            "node-b",
+            Some("tiered-page-cursor".to_owned()),
+            stream_state,
+            true,
+            false,
+        )
+        .expect("seed tiered checkpoint");
+    let checkpoint = target
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("tiered checkpoint");
+
+    assert!(
+        !restart_tiered_backfill_after_incomplete_deep_repair(
+            &mut target,
+            "node-b",
+            ReplicaWork::DeepVerification,
+            true,
+        )
+        .expect("retain tiered checkpoint")
+    );
+    assert_eq!(
+        target.initial_peer_backfill_checkpoint("node-b"),
+        Some(checkpoint)
     );
 }
 
@@ -90,28 +215,19 @@ fn source_deletion_producer_queues_the_independent_tombstone_before_matching_his
 }
 
 #[test]
-fn peer_transport_failure_keeps_the_first_repository_syncing() {
-    assert!(!super::initial_backfill_is_complete(
-        true,
-        &[Some(true), None]
-    ));
-    assert!(super::initial_backfill_is_complete(false, &[Some(false)]));
-    assert!(super::initial_backfill_is_complete(
-        true,
-        &[Some(false), Some(true)]
-    ));
-}
-
-#[test]
-fn catch_up_rechecks_a_peer_after_repair_before_declaring_it_complete() {
-    assert!(super::backfill::catch_up_has_verification_retry(0));
-    assert!(!super::backfill::catch_up_has_verification_retry(1));
-}
-
-#[test]
 fn completed_catch_up_starts_a_stability_window_without_rechecking_live_segments() {
     assert!(!super::should_run_initial_catch_up(true));
     assert!(super::should_run_initial_catch_up(false));
+}
+
+#[test]
+fn syncing_tombstone_backfill_checkpoint() {
+    assert!(!super::should_fanout_tombstone_acknowledgements(
+        RepositoryLifecycle::Syncing
+    ));
+    assert!(super::should_fanout_tombstone_acknowledgements(
+        RepositoryLifecycle::Ready
+    ));
 }
 
 #[test]
@@ -159,23 +275,25 @@ fn peer_backfill_tombstones_use_the_independent_tombstone_stream() {
 }
 
 #[test]
-fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
-    let mut collector = super::HistoricalBackfillCollector::new(None, 64);
+fn initial_backfill_progress() {
+    let mut collector = super::HistoricalBackfillCollector::new(None, 128);
     for sequence in 0..130_u64 {
-        collector.push((
-            sequence,
-            source_record_with_key(
-                "runtime.v1",
-                "node-a",
+        collector
+            .push((
                 sequence,
-                format!("node-history:node:node-a:{sequence}").into_bytes(),
-                serde_json::json!({ "sequence": sequence }),
-                false,
-            )
-            .expect("bounded record"),
-        ));
+                source_record_with_key(
+                    "runtime.v1",
+                    "node-a",
+                    sequence,
+                    format!("node-history:node:node-a:{sequence}").into_bytes(),
+                    serde_json::json!({ "sequence": sequence }),
+                    false,
+                )
+                .expect("bounded record"),
+            ))
+            .expect("bounded page");
     }
-    assert_eq!(collector.records.len(), 64);
+    assert_eq!(collector.records.len(), 128);
     assert!(collector.has_more);
     assert_eq!(
         collector
@@ -188,7 +306,7 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
     );
     assert_eq!(
         collector.records.last_key_value().expect("last record").1.0,
-        63
+        127
     );
     let cursor = collector
         .next_cursor()
@@ -196,7 +314,7 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
         .expect("more history");
     let mut next = super::HistoricalBackfillCollector::new(
         Some(super::HistoricalBackfillSortKey::decode(&cursor).expect("cursor decoding")),
-        64,
+        128,
     );
     for sequence in 0..130_u64 {
         next.push((
@@ -210,44 +328,134 @@ fn initial_history_backfill_collector_keeps_only_one_bounded_page() {
                 false,
             )
             .expect("bounded record"),
-        ));
+        ))
+        .expect("bounded page");
     }
-    assert_eq!(next.records.len(), 64);
-    assert!(next.has_more);
+    assert_eq!(next.records.len(), 2);
+    assert!(!next.has_more);
     assert_eq!(
         next.records.first_key_value().expect("first record").1.0,
-        64
+        128
     );
-    assert_eq!(next.records.last_key_value().expect("last record").1.0, 127);
+    assert_eq!(next.records.last_key_value().expect("last record").1.0, 129);
+}
+
+#[test]
+fn initial_backfill_rejects_a_record_over_the_byte_budget() {
+    let mut collector = super::HistoricalBackfillCollector::new(None, 128);
+    let result = collector.push((
+        0,
+        SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"oversized".to_vec(),
+            vec![b'x'; 192 * 1024],
+            false,
+        ),
+    ));
+    assert!(result.is_err());
+}
+
+#[test]
+fn initial_backfill_splits_same_timestamp_records_before_canonical_limit() {
+    let records = (0..8_u64)
+        .map(|sequence| {
+            (
+                100,
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    sequence.to_be_bytes().to_vec(),
+                    vec![b'x'; 32 * 1024],
+                    false,
+                ),
+            )
+        })
+        .collect();
+    let batches = super::backfill::historical_record_batches(records).expect("split batches");
+    assert!(batches.len() > 1);
+    for (_, records) in batches {
+        let segment = CanonicalSegment::new(
+            "backfill",
+            Cursor::new("backfill", 0, "runtime", 0).expect("cursor"),
+            records,
+            None,
+            100,
+            100,
+        )
+        .expect("bounded segment");
+        assert!(segment.canonical_bytes().expect("canonical bytes").len() <= 192 * 1024);
+    }
+}
+
+#[test]
+fn initial_backfill_queues_each_batch_with_its_historical_observed_time() {
+    let records = [100_u64, 200]
+        .into_iter()
+        .map(|observed_at| {
+            (
+                observed_at,
+                source_record_with_key(
+                    "runtime.v1",
+                    "node-a",
+                    observed_at,
+                    observed_at.to_be_bytes().to_vec(),
+                    serde_json::json!({ "observed_at": observed_at }),
+                    false,
+                )
+                .expect("historical record"),
+            )
+        })
+        .collect();
+    let batches = super::backfill::historical_record_batches(records).expect("split batches");
+
+    let queued = super::backfill::queued_history_backfill_batches(batches);
+
+    assert_eq!(
+        queued
+            .iter()
+            .map(|(_, observed_at)| *observed_at)
+            .collect::<Vec<_>>(),
+        vec![100, 200]
+    );
 }
 
 #[test]
 fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
     let mut collector = super::HistoricalBackfillCollector::new(None, 2);
-    collector.push((
-        0,
-        super::source_record_with_key(
-            "traffic.v1",
-            "node-a",
+    collector
+        .push_with_times(
             0,
-            b"node-history:node:node-a:".to_vec(),
-            serde_json::json!({ "deleted": true }),
-            true,
+            1_700_000_000,
+            super::source_record_with_key(
+                "traffic.v1",
+                "node-a",
+                0,
+                b"node-history:node:node-a:".to_vec(),
+                serde_json::json!({ "deleted": true }),
+                true,
+            )
+            .expect("tombstone"),
         )
-        .expect("tombstone"),
-    ));
-    collector.push((
-        100,
-        super::source_record_with_key(
-            "traffic.v1",
-            "node-a",
+        .expect("tombstone");
+    collector
+        .push((
             100,
-            b"node-history:node:node-a:old".to_vec(),
-            serde_json::json!({ "old": true }),
-            false,
-        )
-        .expect("history"),
-    ));
+            super::source_record_with_key(
+                "traffic.v1",
+                "node-a",
+                100,
+                b"node-history:node:node-a:old".to_vec(),
+                serde_json::json!({ "old": true }),
+                false,
+            )
+            .expect("history"),
+        ))
+        .expect("history");
     assert!(
         collector
             .records
@@ -256,5 +464,14 @@ fn ordinary_backfill_places_tombstones_in_the_first_collector_phase() {
             .1
             .1
             .is_tombstone()
+    );
+    assert_eq!(
+        collector
+            .records
+            .first_key_value()
+            .expect("first record")
+            .1
+            .0,
+        1_700_000_000
     );
 }
