@@ -827,7 +827,6 @@ async fn replicate_peer(
     propagate_acknowledgements: bool,
 ) -> anyhow::Result<bool> {
     let mut after_segment_id = None::<String>;
-    let mut repaired = false;
     loop {
         let path = after_segment_id.as_ref().map_or_else(
             || {
@@ -850,7 +849,6 @@ async fn replicate_peer(
             )
         };
         if requires_repair {
-            repaired = true;
             if work.is_deep_verification() && missing_segment_ids.is_empty() {
                 state
                     .repository_replica
@@ -929,9 +927,6 @@ async fn replicate_peer(
             anyhow::bail!("repository summary cursor did not advance")
         }
         after_segment_id = Some(next);
-    }
-    if work.is_deep_verification() && repaired {
-        return Ok(false);
     }
     // The keyset traversal defines a bounded remote snapshot. Once every advertised segment
     // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
