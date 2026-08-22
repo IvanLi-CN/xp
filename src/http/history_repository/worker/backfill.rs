@@ -7,6 +7,8 @@ use crate::state::history_repository::{
     MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
 };
 mod ready_peer;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use ready_peer::catch_up_against_ready_repositories;
 
@@ -15,6 +17,16 @@ pub(crate) enum InitialBackfillProgress {
     InProgress,
     Complete,
     Unavailable,
+}
+
+impl InitialBackfillProgress {
+    fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unavailable, _) | (_, Self::Unavailable) => Self::Unavailable,
+            (Self::InProgress, _) | (_, Self::InProgress) => Self::InProgress,
+            (Self::Complete, Self::Complete) => Self::Complete,
+        }
+    }
 }
 pub(super) struct PeerBackfillImport<'a> {
     identity: &'a crate::state::history_repository::identity::RepositoryNodeIdentity,
@@ -265,6 +277,7 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
     let signing_key = derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history backfill signing key"))?;
     let ready_repository_ids = vec![state.cluster.node_id.clone()];
+    let mut progress = InitialBackfillProgress::Complete;
     if !local_backfill_completed {
         let inflight = state
             .repository_replica
@@ -334,24 +347,19 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
                     completed,
                 )?;
         }
-        if !completed {
-            return Ok(InitialBackfillProgress::InProgress);
-        }
+        progress = progress.combine(if completed {
+            InitialBackfillProgress::Complete
+        } else {
+            InitialBackfillProgress::InProgress
+        });
         // Peer availability must not replay local pages on every retry. The source outbox has
         // already durably acknowledged every local segment at this point.
     }
     for peer in all_cluster_peers(state).await {
-        match pull_peer_initial_history(state, &peer, &ready_repository_ids).await? {
-            InitialBackfillProgress::InProgress => {
-                return Ok(InitialBackfillProgress::InProgress);
-            }
-            InitialBackfillProgress::Unavailable => {
-                return Ok(InitialBackfillProgress::Unavailable);
-            }
-            InitialBackfillProgress::Complete => {}
-        }
+        progress =
+            progress.combine(pull_peer_initial_history(state, &peer, &ready_repository_ids).await?);
     }
-    Ok(InitialBackfillProgress::Complete)
+    Ok(progress)
 }
 pub(super) async fn pull_peer_initial_history(
     state: &AppState,
