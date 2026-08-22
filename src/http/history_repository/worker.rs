@@ -910,18 +910,24 @@ async fn replicate_peer(
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
             }
-            let summary_converged = !state
-                .repository_replica
-                .lock()
-                .await
-                .requires_repair(&remote_summary, work.is_deep_verification())?;
-            if deep_repair_requires_tiered_backfill(work, summary_converged) {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .restart_initial_peer_backfill(&peer.node_id)?;
-                pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+            let (summary_converged, remaining_segment_repairs) = {
+                let runtime = state.repository_replica.lock().await;
+                (
+                    !runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+                    !runtime
+                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
+                        .is_empty(),
+                )
+            };
+            if !summary_converged {
+                if deep_repair_requires_tiered_backfill(work, remaining_segment_repairs) {
+                    state
+                        .repository_replica
+                        .lock()
+                        .await
+                        .restart_initial_peer_backfill(&peer.node_id)?;
+                    pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+                }
                 return Ok(false);
             }
         }
@@ -940,8 +946,11 @@ async fn replicate_peer(
     Ok(true)
 }
 
-fn deep_repair_requires_tiered_backfill(work: ReplicaWork, summary_converged: bool) -> bool {
-    work.is_deep_verification() && !summary_converged
+fn deep_repair_requires_tiered_backfill(
+    work: ReplicaWork,
+    remaining_segment_repairs: bool,
+) -> bool {
+    work.is_deep_verification() && !remaining_segment_repairs
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(

@@ -53,6 +53,10 @@ fn deep_repair_preserves_summary_recovery_until_the_summary_matches() {
         ReplicaWork::AntiEntropy,
         false
     ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        true
+    ));
 }
 
 #[test]
