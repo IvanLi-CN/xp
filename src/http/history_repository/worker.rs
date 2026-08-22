@@ -849,15 +849,6 @@ async fn replicate_peer(
             )
         };
         if requires_repair {
-            if work.is_deep_verification() && missing_segment_ids.is_empty() {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .restart_initial_peer_backfill(&peer.node_id)?;
-                pull_peer_initial_history(state, peer, ready_repository_ids).await?;
-                return Ok(false);
-            }
             let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();
             let mut acknowledgements = Vec::new();
             let mut needs_gap_refresh = true;
@@ -919,6 +910,20 @@ async fn replicate_peer(
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
             }
+            let partitions_converged = state
+                .repository_replica
+                .lock()
+                .await
+                .retained_partitions_converged(&remote_summary)?;
+            if deep_repair_requires_tiered_backfill(work, partitions_converged) {
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .restart_initial_peer_backfill(&peer.node_id)?;
+                pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+                return Ok(false);
+            }
         }
         let Some(next) = remote_summary.next_segment_id else {
             break;
@@ -933,6 +938,10 @@ async fn replicate_peer(
     // source for exact equality is not a valid convergence condition: ordinary sources append
     // continuously, while the peer independently performs the symmetric pull.
     Ok(true)
+}
+
+fn deep_repair_requires_tiered_backfill(work: ReplicaWork, partitions_converged: bool) -> bool {
+    work.is_deep_verification() && !partitions_converged
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(

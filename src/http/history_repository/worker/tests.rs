@@ -40,6 +40,22 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
 }
 
 #[test]
+fn deep_repair_preserves_partition_recovery_until_the_summary_matches() {
+    assert!(deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        false
+    ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        true
+    ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::AntiEntropy,
+        false
+    ));
+}
+
+#[test]
 fn truncated_repair_response_leaves_only_undelivered_segments_pending() {
     let first = vec![1_u8, 2, 3];
     let second = vec![4_u8, 5, 6];
