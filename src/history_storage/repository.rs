@@ -71,6 +71,10 @@ pub(crate) struct RepositoryHistorySegmentRow {
     pub(crate) id: String,
     pub(crate) closed_at_unix_seconds: u64,
     pub(crate) contains_tombstone: bool,
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) first_sequence: u64,
     pub(crate) payload: Vec<u8>,
 }
 

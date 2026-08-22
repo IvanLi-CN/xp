@@ -429,6 +429,7 @@ impl RepositoryReplicaRuntime {
                 "repository history migration failed; continuing with JSON history"
             );
         }
+        runtime.migrate_legacy_segment_cursor_index()?;
         Ok(runtime)
     }
 
@@ -859,6 +860,9 @@ use helpers::{
 pub(crate) use source::source_epoch;
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
 
+#[cfg(test)]
+#[path = "runtime/repair_selection_tests.rs"]
+mod repair_selection_tests;
 #[cfg(test)]
 #[path = "runtime/sqlite_order_tests.rs"]
 mod sqlite_order_tests;

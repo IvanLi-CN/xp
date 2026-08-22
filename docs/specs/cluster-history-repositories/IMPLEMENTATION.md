@@ -41,6 +41,10 @@
   persists only the control snapshot; signed segments, cursors, hashes, ready membership and
   acknowledgement state are left unchanged. Operators must not delete `history.sqlite3`, replace
   repository members or change ordinary-node retention settings during rollout.
+- Repository segment pages are ordered by tombstone phase and the signed source cursor, rather
+  than by content hash. Startup repairs the corresponding SQLite cursor index in place for
+  existing segments before they are served for repair; it preserves each signed payload and does
+  not rebuild the database or run a full `VACUUM`.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before either

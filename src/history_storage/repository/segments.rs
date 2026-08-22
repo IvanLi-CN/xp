@@ -23,7 +23,8 @@ impl HistoryStorage {
         maintain_sqlite(connection)
     }
 
-    /// A phase-prefixed keyset keeps every tombstone segment ahead of ordinary repair data.
+    /// A phase-prefixed keyset keeps every tombstone segment ahead of ordinary repair data while
+    /// preserving source-cursor order within each phase.
     pub(crate) fn repository_history_segments_page(
         &self,
         after_id: Option<&str>,
@@ -60,13 +61,39 @@ impl HistoryStorage {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, closed_at, contains_tombstone, payload
+            "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                    first_sequence, payload
              FROM repository_history_segments
              WHERE id IN ({placeholders}) ORDER BY id ASC"
         );
         let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
         let rows = statement
             .query_map(rusqlite::params_from_iter(ids.iter()), segment_row)
+            .map_err(sqlite_error)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub(crate) fn repository_history_segments_missing_cursor_index(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistorySegmentRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
+        };
+        let mut statement = connection
+            .prepare(
+                "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                        first_sequence, payload
+                 FROM repository_history_segments
+                 WHERE source_node_id = ''
+                 ORDER BY id ASC
+                 LIMIT ?1",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], segment_row)
             .map_err(sqlite_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error)
@@ -81,10 +108,21 @@ fn segment_phase(
 ) -> Result<Vec<RepositoryHistorySegmentRow>> {
     let mut statement = connection
         .prepare(
-            "SELECT id, closed_at, contains_tombstone, payload
+            "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                    first_sequence, payload
              FROM repository_history_segments
-             WHERE contains_tombstone = ?1 AND (?2 IS NULL OR id > ?2)
-             ORDER BY id ASC LIMIT ?3",
+             WHERE contains_tombstone = ?1
+               AND (
+                    ?2 IS NULL
+                    OR (source_node_id, source_epoch, stream, first_sequence, id) > (
+                        SELECT source_node_id, source_epoch, stream, first_sequence, id
+                        FROM repository_history_segments
+                        WHERE id = ?2
+                    )
+               )
+             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                      id ASC
+             LIMIT ?3",
         )
         .map_err(sqlite_error)?;
     let rows = statement
@@ -106,6 +144,10 @@ fn segment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryHistorySeg
         id: row.get(0)?,
         closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(u64::MAX),
         contains_tombstone: row.get(2)?,
-        payload: row.get(3)?,
+        source_node_id: row.get(3)?,
+        source_epoch: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(u64::MAX),
+        stream: row.get(5)?,
+        first_sequence: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(u64::MAX),
+        payload: row.get(7)?,
     })
 }
