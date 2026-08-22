@@ -9,7 +9,7 @@ use std::{
 use tokio::time::MissedTickBehavior;
 
 use crate::{
-    control_plane_mesh::{MeshPeerTarget, peer_target_from_node},
+    control_plane_mesh::MeshPeerTarget,
     history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
     state::history_repository::{
         control::{
@@ -17,9 +17,8 @@ use crate::{
         },
         identity::RepositoryNodeId,
         replica::{
-            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaRuntime, RepositoryReplicaSegment,
-            RepositoryReplicaSummary, RepositoryRuntimeError, RepositorySyncReceipt,
-            RepositoryTombstoneAcknowledgement, rendezvous_collectors,
+            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary,
+            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
 };
@@ -39,7 +38,9 @@ const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
+mod deep_repair;
 mod direct;
+mod ready_peers;
 mod source;
 mod source_records;
 #[cfg(test)]
@@ -54,10 +55,14 @@ use backfill::{
     backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
     pull_peer_initial_history,
 };
+#[cfg(test)]
+use deep_repair::deep_repair_requires_tiered_backfill;
+use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
     repository_direct_request, repository_mesh_request,
 };
+pub(super) use ready_peers::ready_repository_peers;
 use source::{
     local_repository_lifecycle, repair_legacy_tombstone_metadata, should_attempt_source_relay,
     should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
@@ -951,26 +956,6 @@ async fn replicate_peer(
     Ok(true)
 }
 
-fn deep_repair_requires_tiered_backfill(
-    work: ReplicaWork,
-    remaining_segment_repairs: bool,
-) -> bool {
-    work.is_deep_verification() && !remaining_segment_repairs
-}
-
-fn restart_tiered_backfill_after_incomplete_deep_repair(
-    runtime: &mut RepositoryReplicaRuntime,
-    peer_node_id: &str,
-    work: ReplicaWork,
-    remaining_segment_repairs: bool,
-) -> Result<bool, RepositoryRuntimeError> {
-    if !deep_repair_requires_tiered_backfill(work, remaining_segment_repairs) {
-        return Ok(false);
-    }
-    runtime.restart_initial_peer_backfill(peer_node_id)?;
-    Ok(true)
-}
-
 pub(super) async fn propagate_tombstone_acknowledgements(
     state: &AppState,
     _ready_repository_ids: &[String],
@@ -999,29 +984,4 @@ pub(super) async fn propagate_tombstone_acknowledgements(
         }
     }
     first_delivery_error.map_or(Ok(()), Err)
-}
-
-pub(super) async fn ready_repository_peers(
-    state: &AppState,
-) -> anyhow::Result<(Vec<String>, Vec<MeshPeerTarget>)> {
-    let store = state.store.lock().await;
-    let membership = store
-        .state()
-        .repository_membership
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("history repository membership is not configured"))?;
-    let ready_repository_ids = membership
-        .ready_members()
-        .map(|member| member.node_id().as_str().to_owned())
-        .collect::<Vec<_>>();
-    if ready_repository_ids.is_empty() {
-        anyhow::bail!("no ready history repository is available");
-    }
-    let endpoints = store.list_endpoints();
-    let peers = ready_repository_ids
-        .iter()
-        .filter_map(|repository_id| store.get_node(repository_id))
-        .map(|node| peer_target_from_node(&node, &endpoints))
-        .collect();
-    Ok((ready_repository_ids, peers))
 }
