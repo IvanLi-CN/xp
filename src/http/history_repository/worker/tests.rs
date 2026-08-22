@@ -1,4 +1,10 @@
 use super::*;
+use crate::state::history_repository::{
+    HistoryStorage,
+    identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+    replica::RepositoryReplicaRuntime,
+};
+use ed25519_dalek::SigningKey;
 
 #[test]
 fn dynamic_relay_keys_are_deterministic_per_cluster_and_recipient() {
@@ -53,6 +59,82 @@ fn deep_repair_preserves_summary_recovery_until_the_summary_matches() {
         ReplicaWork::AntiEntropy,
         false
     ));
+}
+
+#[test]
+fn deep_repair_keeps_backfill_checkpoint_after_a_full_segment_batch() {
+    let source_directory = tempfile::tempdir().expect("source directory");
+    let target_directory = tempfile::tempdir().expect("target directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).expect("signing key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let mut source = RepositoryReplicaRuntime::load(HistoryStorage::open(source_directory.path()))
+        .expect("source runtime");
+    let mut target = RepositoryReplicaRuntime::load(HistoryStorage::open(target_directory.path()))
+        .expect("target runtime");
+    let mut previous = None;
+    for sequence in 0..65_u64 {
+        let segment = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+            vec![SyncRecord::new(
+                "subject-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("record-{sequence}").into_bytes(),
+                b"sample".to_vec(),
+                false,
+            )],
+            previous,
+            10 + sequence,
+            11 + sequence,
+        )
+        .expect("segment")
+        .sign(&signing_key)
+        .expect("signature");
+        previous = Some(segment.segment_hash().expect("segment hash"));
+        source
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &segment.wire_bytes().expect("wire"),
+                100 + sequence,
+            )
+            .expect("store source segment");
+    }
+
+    let summary = source.replication_summary().expect("source summary");
+    assert_eq!(summary.segment_ids.len(), 65);
+    let first_batch = target
+        .missing_segment_ids(&summary, true)
+        .expect("first bounded batch");
+    assert_eq!(first_batch.len(), 64);
+    for segment in source
+        .repair_batch(&first_batch)
+        .expect("first repair batch")
+        .segments
+    {
+        target
+            .receive_wire("cluster-a", &identity, &segment.wire, 200)
+            .expect("receive bounded repair segment");
+    }
+
+    assert!(
+        target
+            .requires_repair(&summary, true)
+            .expect("remaining segment keeps summary incomplete")
+    );
+    assert!(
+        !target
+            .missing_segment_ids(&summary, true)
+            .expect("remaining segment repair")
+            .is_empty()
+    );
     assert!(!deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,
         true
