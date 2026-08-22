@@ -861,6 +861,9 @@ pub(crate) use source::source_epoch;
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
 
 #[cfg(test)]
+#[path = "runtime/duplicate_gap_tests.rs"]
+mod duplicate_gap_tests;
+#[cfg(test)]
 #[path = "runtime/repair_selection_tests.rs"]
 mod repair_selection_tests;
 #[cfg(test)]
