@@ -921,13 +921,15 @@ async fn replicate_peer(
                 )
             };
             if !summary_converged {
-                let restarted_tiered_backfill =
+                let restarted_tiered_backfill = {
+                    let mut runtime = state.repository_replica.lock().await;
                     restart_tiered_backfill_after_incomplete_deep_repair(
-                        &mut state.repository_replica.lock().await,
+                        &mut runtime,
                         &peer.node_id,
                         work,
                         remaining_segment_repairs,
-                    )?;
+                    )?
+                };
                 if restarted_tiered_backfill {
                     pull_peer_initial_history(state, peer, ready_repository_ids).await?;
                 }
