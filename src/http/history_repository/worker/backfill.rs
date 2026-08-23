@@ -1,4 +1,5 @@
 use super::*;
+use crate::control_plane_mesh::peer_target_from_node;
 use crate::history_sync::ProtocolError;
 use crate::http::history_repository::{
     derived_repository_identity, derived_repository_signing_key,
@@ -363,25 +364,26 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
 }
 
 async fn initial_history_source_peers(state: &AppState) -> Vec<MeshPeerTarget> {
-    let repository_node_ids = {
-        let store = state.store.lock().await;
-        store
-            .state()
-            .repository_membership
-            .as_ref()
-            .map(|membership| {
-                membership
-                    .members()
-                    .iter()
-                    .map(|member| member.node_id().as_str().to_owned())
-                    .collect::<BTreeSet<_>>()
-            })
-            .unwrap_or_default()
-    };
-    all_cluster_peers(state)
-        .await
+    let store = state.store.lock().await;
+    let repository_node_ids = store
+        .state()
+        .repository_membership
+        .as_ref()
+        .map(|membership| {
+            membership
+                .members()
+                .iter()
+                .map(|member| member.node_id().as_str().to_owned())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let endpoints = store.list_endpoints();
+    store
+        .list_nodes()
         .into_iter()
-        .filter(|peer| is_initial_history_source_peer(&peer.node_id, &repository_node_ids))
+        .filter(|node| node.node_id != state.cluster.node_id)
+        .filter(|node| is_initial_history_source_peer(&node.node_id, &repository_node_ids))
+        .map(|node| peer_target_from_node(&node, &endpoints))
         .collect()
 }
 
