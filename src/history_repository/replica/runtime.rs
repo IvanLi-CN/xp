@@ -205,6 +205,10 @@ struct RepositoryReplicaSnapshot {
     local_history_backfill_cursor: Option<String>,
     #[serde(default)]
     local_history_backfill_inflight: Option<LocalHistoryBackfillInFlight>,
+    #[serde(default)]
+    legacy_segment_cursor_index_after_id: Option<String>,
+    #[serde(default)]
+    legacy_segment_cursor_index_complete: bool,
     /// Peer imports are checkpointed outside the raw history rows. A failed first-repository
     /// catch-up can therefore resume the signed import chain rather than replaying page zero
     /// with a forked cursor.
@@ -243,6 +247,8 @@ impl Default for RepositoryReplicaSnapshot {
             local_history_backfill_completed: false,
             local_history_backfill_cursor: None,
             local_history_backfill_inflight: None,
+            legacy_segment_cursor_index_after_id: None,
+            legacy_segment_cursor_index_complete: false,
             initial_peer_backfills: BTreeMap::new(),
             retention_compaction_cursor: None,
             retention_compaction_continuation: None,
@@ -429,7 +435,6 @@ impl RepositoryReplicaRuntime {
                 "repository history migration failed; continuing with JSON history"
             );
         }
-        runtime.migrate_legacy_segment_cursor_index()?;
         Ok(runtime)
     }
 

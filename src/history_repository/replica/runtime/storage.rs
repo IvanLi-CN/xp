@@ -1,32 +1,44 @@
 use super::*;
 
 impl RepositoryReplicaRuntime {
-    pub(crate) fn migrate_legacy_segment_cursor_index(
+    /// Migrate one bounded page of legacy segments after startup. The control snapshot advances
+    /// only after the corresponding SQLite rows commit, so an interrupted page is safe to replay.
+    pub(crate) fn migrate_legacy_segment_cursor_index_page(
         &mut self,
-    ) -> Result<(), RepositoryRuntimeError> {
-        if !self.uses_sqlite_history() {
-            return Ok(());
+        limit: usize,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() || self.snapshot.legacy_segment_cursor_index_complete {
+            return Ok(true);
         }
-        loop {
-            let rows = self
-                .storage
-                .repository_history_segments_missing_cursor_index(128)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-            if rows.is_empty() {
-                return Ok(());
-            }
-            let segments = rows
-                .into_iter()
-                .map(StoredSegment::from_sqlite_row)
-                .collect::<Result<Vec<_>, _>>()?;
-            let indexed_rows = segments
-                .iter()
-                .map(StoredSegment::sqlite_row)
-                .collect::<Result<Vec<_>, _>>()?;
-            self.storage
-                .upsert_repository_history_segments(&indexed_rows)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-        }
+        let rows = self
+            .storage
+            .repository_history_segments_missing_cursor_index(
+                self.snapshot
+                    .legacy_segment_cursor_index_after_id
+                    .as_deref(),
+                limit,
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let Some(last_id) = rows.last().map(|row| row.id.clone()) else {
+            self.snapshot.legacy_segment_cursor_index_after_id = None;
+            self.snapshot.legacy_segment_cursor_index_complete = true;
+            self.persist_control_state()?;
+            return Ok(true);
+        };
+        let segments = rows
+            .into_iter()
+            .map(StoredSegment::from_sqlite_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let indexed_rows = segments
+            .iter()
+            .map(StoredSegment::sqlite_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        self.storage
+            .upsert_repository_history_segments(&indexed_rows)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.snapshot.legacy_segment_cursor_index_after_id = Some(last_id);
+        self.persist_control_state()?;
+        Ok(false)
     }
 
     pub(crate) fn migrate_history_to_sqlite(&mut self) -> Result<(), RepositoryRuntimeError> {
