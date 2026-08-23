@@ -355,11 +355,41 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
         // Peer availability must not replay local pages on every retry. The source outbox has
         // already durably acknowledged every local segment at this point.
     }
-    for peer in all_cluster_peers(state).await {
+    for peer in initial_history_source_peers(state).await {
         progress =
             progress.combine(pull_peer_initial_history(state, &peer, &ready_repository_ids).await?);
     }
     Ok(progress)
+}
+
+async fn initial_history_source_peers(state: &AppState) -> Vec<MeshPeerTarget> {
+    let repository_node_ids = {
+        let store = state.store.lock().await;
+        store
+            .state()
+            .repository_membership
+            .as_ref()
+            .map(|membership| {
+                membership
+                    .members()
+                    .iter()
+                    .map(|member| member.node_id().as_str().to_owned())
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default()
+    };
+    all_cluster_peers(state)
+        .await
+        .into_iter()
+        .filter(|peer| is_initial_history_source_peer(&peer.node_id, &repository_node_ids))
+        .collect()
+}
+
+fn is_initial_history_source_peer(
+    peer_node_id: &str,
+    repository_node_ids: &BTreeSet<String>,
+) -> bool {
+    !repository_node_ids.contains(peer_node_id)
 }
 pub(super) async fn pull_peer_initial_history(
     state: &AppState,

@@ -21,17 +21,19 @@
   catch-up and enter `ready` only after five stable minutes; successful deep verification writes
   local convergence back to Raft.
 - Initial repository bootstrap is deliberately yieldable: each worker tick exports at most one
-  local page and one bounded page per peer (128 records / 192 KiB). `InProgress` keeps the member
-  in `syncing` without writing `CatchUpIncomplete`; capacity refresh, live source collection and
-  lifecycle checks continue on their normal cadence. A repository enters the existing five-minute
-  stability window only after every page is complete. A local page records its pending wire set
-  before delivery and commits all acknowledgements with the page cursor; an interrupted tick
-  replays those unchanged wires instead of assigning new source sequences. For a ready peer, the
-  single page budget is spent on one summary page, one repair response, or one tiered export page;
-  the summary cursor and pending repair IDs are part of the durable peer checkpoint, so a restart
-  resumes the same page instead of restarting an unbounded scan. Deep partition mismatches mark
-  the checkpoint for the single-authority tiered import and force a fresh summary verification
-  pass before the member can enter the readiness window.
+  local page and one bounded page per peer (128 records / 192 KiB). Before any member is `ready`,
+  a syncing repository imports peer history only from ordinary source nodes, never from another
+  configured repository; this prevents recursive imports between syncing replicas. `InProgress`
+  keeps the member in `syncing` without writing `CatchUpIncomplete`; capacity refresh, live source
+  collection and lifecycle checks continue on their normal cadence. A repository enters the
+  existing five-minute stability window only after every page is complete. A local page records
+  its pending wire set before delivery and commits all acknowledgements with the page cursor; an
+  interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
+  ready peer, the single page budget is spent on one summary page, one repair response, or one
+  tiered export page; the summary cursor and pending repair IDs are part of the durable peer
+  checkpoint, so a restart resumes the same page instead of restarting an unbounded scan. Deep
+  partition mismatches mark the checkpoint for the single-authority tiered import. A fresh
+  summary verification pass must complete before the member can enter the readiness window.
 - Tombstones received while a repository is `syncing` are atomically stored with their local
   cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
   membership reports `ready`. The durable page is then retried through the existing all-node
