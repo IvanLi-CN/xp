@@ -40,7 +40,10 @@ fn initial_backfill_includes_configured_repository_sources() {
         "repository-b",
         "repository-a"
     ));
-    assert!(!is_initial_history_source_peer("repository-a", "repository-a"));
+    assert!(!is_initial_history_source_peer(
+        "repository-a",
+        "repository-a"
+    ));
 }
 
 #[test]
