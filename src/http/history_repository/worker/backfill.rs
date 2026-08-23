@@ -152,26 +152,42 @@ impl HistoricalBackfillCollector {
     pub(crate) fn next_cursor(&self) -> anyhow::Result<Option<String>> {
         self.has_more
             .then(|| {
-                let after = self
-                    .records
-                    .last_key_value()
-                    .expect("backfill cursor requires a record")
-                    .0;
-                match self.snapshot_end_unix_seconds {
-                    Some(snapshot_end_unix_seconds) => HistoricalBackfillPageCursor {
-                        after: after.clone(),
-                        snapshot_end_unix_seconds: Some(snapshot_end_unix_seconds),
-                    }
-                    .encode(),
-                    None => after.encode(),
-                }
+                self.encode_cursor_after(
+                    self.records
+                        .last_key_value()
+                        .expect("backfill cursor requires a record")
+                        .0,
+                )
             })
             .transpose()
     }
+
+    fn encode_cursor_after(&self, after: &HistoricalBackfillSortKey) -> anyhow::Result<String> {
+        match self.snapshot_end_unix_seconds {
+            Some(snapshot_end_unix_seconds) => HistoricalBackfillPageCursor {
+                after: after.clone(),
+                snapshot_end_unix_seconds: Some(snapshot_end_unix_seconds),
+            }
+            .encode(),
+            None => after.encode(),
+        }
+    }
+
     fn into_records(self) -> Vec<(u64, SyncRecord)> {
         self.records.into_values().collect()
     }
 }
+
+fn next_historical_backfill_page_cursor(
+    collected: &HistoricalBackfillCollector,
+    page_len: usize,
+    after: Option<&HistoricalBackfillSortKey>,
+) -> anyhow::Result<Option<String>> {
+    (collected.has_more || page_len < collected.records.len())
+        .then(|| collected.encode_cursor_after(after.expect("nonempty historical backfill page")))
+        .transpose()
+}
+
 fn serialized_backfill_record_bytes(record: &SyncRecord) -> anyhow::Result<usize> {
     Ok(serde_json::to_vec(&RepositoryInitialBackfillRecord {
         observed_at_unix_seconds: 0,
@@ -686,14 +702,8 @@ pub(crate) async fn initial_backfill_page(
         page.push(candidate);
         next_cursor = Some(sort_key.clone());
     }
-    let next_page_cursor = (collected.has_more || page.len() < collected.records.len())
-        .then(|| {
-            next_cursor
-                .as_ref()
-                .expect("nonempty backfill page")
-                .encode()
-        })
-        .transpose()?;
+    let next_page_cursor =
+        next_historical_backfill_page_cursor(&collected, page.len(), next_cursor.as_ref())?;
     Ok(RepositoryInitialBackfillPage {
         records: page,
         next_page_cursor,

@@ -1,6 +1,6 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
-    InitialBackfillProgress, is_initial_history_source_peer,
+    InitialBackfillProgress, is_initial_history_source_peer, next_historical_backfill_page_cursor,
 };
 use crate::history_sync::SyncRecord;
 use std::collections::BTreeSet;
@@ -121,4 +121,33 @@ fn initial_backfill_page_cursor_accepts_the_legacy_sort_key() {
         b"node-history:node:node-a:100".to_vec()
     );
     assert_eq!(decoded.snapshot_end_unix_seconds, None);
+}
+
+#[test]
+fn initial_backfill_page_response_keeps_the_frozen_snapshot_tail() {
+    let mut collected = HistoricalBackfillCollector::new(None, 3).with_snapshot_end(100);
+    for observed_at in [50, 60, 70] {
+        collected
+            .push((
+                observed_at,
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    observed_at.to_be_bytes().to_vec(),
+                    Vec::new(),
+                    false,
+                ),
+            ))
+            .expect("historical record");
+    }
+    let after = collected.records.first_key_value().expect("first record").0;
+
+    let cursor = next_historical_backfill_page_cursor(&collected, 1, Some(after))
+        .expect("page cursor encoding")
+        .expect("more records in the frozen snapshot");
+    let cursor = HistoricalBackfillPageCursor::decode(&cursor).expect("page cursor decoding");
+
+    assert_eq!(cursor.snapshot_end_unix_seconds, Some(100));
 }
