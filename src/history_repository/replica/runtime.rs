@@ -780,6 +780,9 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.legacy_segment_cursor_index_is_complete() {
+            return Ok(false);
+        }
         let jitter_seconds = self
             .snapshot
             .cluster_id
@@ -851,6 +854,9 @@ mod helpers;
 #[cfg(test)]
 #[path = "runtime/legacy_cursor_tests.rs"]
 mod legacy_cursor_tests;
+#[cfg(test)]
+#[path = "runtime/legacy_relay_tests.rs"]
+mod legacy_relay_tests;
 mod paths;
 mod query;
 mod receive;
