@@ -669,18 +669,19 @@ Notes:
   the endpoints are not an arbitrary SQL or bulk-export interface.
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
   and one page per peer, capped at 128 records and 192 KiB. Before any member is `ready`, syncing
-  repositories import peer history only from ordinary source nodes, not from another configured
-  repository, preventing recursive imports between syncing replicas. The existing opaque page
-  cursor fixes the first page's snapshot horizon, so new samples cannot keep this historical scan
-  open. `syncing` remains visible while pages are in progress, and only a fully completed catch-up
-  starts the five-minute readiness window.
+  repositories import each peer's node-local history, including another configured syncing
+  repository. This establishes the full cluster baseline without recursive repository repair. The
+  existing opaque page cursor fixes the first page's snapshot horizon, so new samples cannot keep
+  this historical scan open. `syncing` remains visible while pages are in progress, and only a
+  fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
   For ready peers, that page is exactly one summary page, one repair response, or one tiered export
   page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a restart
   cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
-  Retained partition mismatches trigger the same single-authority tiered import followed by a fresh
-  deep summary pass; the member cannot enter `ready` while that verification remains unresolved.
+  Retained partition mismatches after segment repair drains trigger the same single-authority
+  tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
+  verification remains unresolved.
   Tombstones accepted during `syncing` are persisted locally but their acknowledgement fanout is
   deferred until the member is Raft-`ready`, after which the existing durable acknowledgement page
   retries delivery to all cluster nodes.

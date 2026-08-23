@@ -46,18 +46,26 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
 }
 
 #[test]
-fn deep_repair_preserves_summary_recovery_until_the_summary_matches() {
+fn deep_partition_mismatch_restarts_tiered_backfill_after_segment_drain() {
     assert!(deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,
-        false
+        false,
+        true,
     ));
     assert!(!deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,
-        true
+        true,
+        true,
+    ));
+    assert!(!deep_repair_requires_tiered_backfill(
+        ReplicaWork::DeepVerification,
+        false,
+        false,
     ));
     assert!(!deep_repair_requires_tiered_backfill(
         ReplicaWork::AntiEntropy,
-        false
+        false,
+        true,
     ));
 }
 
@@ -154,6 +162,7 @@ fn deep_repair_keeps_backfill_checkpoint_after_a_full_segment_batch() {
             &mut target,
             "node-b",
             ReplicaWork::DeepVerification,
+            true,
             true,
         )
         .expect("retain tiered checkpoint")

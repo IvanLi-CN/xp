@@ -929,13 +929,16 @@ async fn replicate_peer(
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
             }
-            let remaining_segment_repairs = {
+            let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
                 let runtime = state.repository_replica.lock().await;
-                !runtime
-                    .missing_segment_ids(&remote_summary, work.is_deep_verification())?
-                    .is_empty()
+                (
+                    !runtime
+                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
+                        .is_empty(),
+                    runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+                )
             };
-            if remaining_segment_repairs {
+            if remaining_segment_repairs || repair_remains_after_segment_repairs {
                 let restarted_tiered_backfill = {
                     let mut runtime = state.repository_replica.lock().await;
                     restart_tiered_backfill_after_incomplete_deep_repair(
@@ -943,6 +946,7 @@ async fn replicate_peer(
                         &peer.node_id,
                         work,
                         remaining_segment_repairs,
+                        repair_remains_after_segment_repairs,
                     )?
                 };
                 if restarted_tiered_backfill {

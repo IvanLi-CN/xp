@@ -116,25 +116,11 @@ impl HistoricalBackfillCollector {
             self.records.pop_last();
             self.has_more = true;
         }
-        if self.records.len() == self.limit {
-            let bytes = self
-                .records
-                .values()
-                .map(|(_, record)| serialized_backfill_record_bytes(record))
-                .sum::<anyhow::Result<usize>>()?;
-            if bytes > MAX_INITIAL_BACKFILL_PAGE_BYTES {
-                while self.records.len() > 1
-                    && self
-                        .records
-                        .values()
-                        .map(|(_, record)| serialized_backfill_record_bytes(record))
-                        .sum::<anyhow::Result<usize>>()?
-                        > MAX_INITIAL_BACKFILL_PAGE_BYTES
-                {
-                    self.records.pop_last();
-                    self.has_more = true;
-                }
-            }
+        while self.records.len() > 1
+            && self.serialized_records_bytes()? > MAX_INITIAL_BACKFILL_PAGE_BYTES
+        {
+            self.records.pop_last();
+            self.has_more = true;
         }
         if serialized_backfill_record_bytes(
             &self
@@ -148,6 +134,13 @@ impl HistoricalBackfillCollector {
             anyhow::bail!("initial history backfill record exceeds page budget");
         }
         Ok(())
+    }
+
+    fn serialized_records_bytes(&self) -> anyhow::Result<usize> {
+        self.records
+            .values()
+            .map(|(_, record)| serialized_backfill_record_bytes(record))
+            .sum()
     }
     pub(crate) fn next_cursor(&self) -> anyhow::Result<Option<String>> {
         self.has_more
@@ -365,33 +358,20 @@ pub(crate) async fn backfill_initial_repository_from_local_history(
 
 async fn initial_history_source_peers(state: &AppState) -> Vec<MeshPeerTarget> {
     let store = state.store.lock().await;
-    let repository_node_ids = store
-        .state()
-        .repository_membership
-        .as_ref()
-        .map(|membership| {
-            membership
-                .members()
-                .iter()
-                .map(|member| member.node_id().as_str().to_owned())
-                .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
     let endpoints = store.list_endpoints();
     store
         .list_nodes()
         .into_iter()
-        .filter(|node| node.node_id != state.cluster.node_id)
-        .filter(|node| is_initial_history_source_peer(&node.node_id, &repository_node_ids))
+        // A configured peer serves its node-local history from this endpoint. Including it here
+        // makes concurrently syncing repositories ingest the same complete cluster baseline;
+        // it does not recursively start repository-to-repository repair.
+        .filter(|node| is_initial_history_source_peer(&node.node_id, &state.cluster.node_id))
         .map(|node| peer_target_from_node(&node, &endpoints))
         .collect()
 }
 
-fn is_initial_history_source_peer(
-    peer_node_id: &str,
-    repository_node_ids: &BTreeSet<String>,
-) -> bool {
-    !repository_node_ids.contains(peer_node_id)
+fn is_initial_history_source_peer(peer_node_id: &str, local_node_id: &str) -> bool {
+    peer_node_id != local_node_id
 }
 pub(super) async fn pull_peer_initial_history(
     state: &AppState,

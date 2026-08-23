@@ -1,9 +1,10 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
     InitialBackfillProgress, is_initial_history_source_peer, next_historical_backfill_page_cursor,
+    serialized_backfill_record_bytes,
 };
 use crate::history_sync::SyncRecord;
-use std::collections::BTreeSet;
+use crate::state::history_repository::MAX_INITIAL_BACKFILL_PAGE_BYTES;
 
 #[test]
 fn tick_progress_keeps_peer_pages_eligible_while_local_backfill_runs() {
@@ -26,22 +27,52 @@ fn tick_progress_blocks_readiness_after_an_unavailable_peer_page() {
 }
 
 #[test]
-fn initial_backfill_excludes_every_configured_repository_source() {
-    let repository_node_ids =
-        BTreeSet::from(["repository-a".to_owned(), "repository-b".to_owned()]);
-
+fn initial_backfill_includes_configured_repository_sources() {
     assert!(is_initial_history_source_peer(
         "ordinary-source",
-        &repository_node_ids
+        "repository-a"
     ));
-    assert!(!is_initial_history_source_peer(
+    assert!(is_initial_history_source_peer(
         "repository-a",
-        &repository_node_ids
+        "repository-b"
     ));
-    assert!(!is_initial_history_source_peer(
+    assert!(is_initial_history_source_peer(
         "repository-b",
-        &repository_node_ids
+        "repository-a"
     ));
+    assert!(!is_initial_history_source_peer("repository-a", "repository-a"));
+}
+
+#[test]
+fn initial_backfill_collector_bounds_pages_below_the_record_limit() {
+    let mut collected = HistoricalBackfillCollector::new(None, 128);
+    for observed_at in [1_u64, 2, 3] {
+        collected
+            .push((
+                observed_at,
+                SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    observed_at.to_be_bytes().to_vec(),
+                    vec![u8::try_from(observed_at).expect("small test value"); 60 * 1024],
+                    false,
+                ),
+            ))
+            .expect("bounded historical record");
+    }
+
+    let page_bytes = collected
+        .records
+        .values()
+        .map(|(_, record)| serialized_backfill_record_bytes(record))
+        .sum::<anyhow::Result<usize>>()
+        .expect("page size");
+
+    assert!(collected.has_more);
+    assert_eq!(collected.records.len(), 2);
+    assert!(page_bytes <= MAX_INITIAL_BACKFILL_PAGE_BYTES);
 }
 
 #[test]
