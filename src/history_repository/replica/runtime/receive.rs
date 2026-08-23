@@ -105,6 +105,9 @@ impl RepositoryReplicaRuntime {
             }
         };
         if matches!(acceptance, Acceptance::Duplicate { .. }) {
+            // A peer can report an already repaired gap during anti-entropy. The segment is
+            // still authoritative evidence that its covered cursor range is present locally.
+            self.clear_repaired_gaps(segment.canonical());
             self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
             return Ok(sync_receipt(acceptance, availability, Vec::new()));
         }

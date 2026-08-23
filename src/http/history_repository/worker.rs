@@ -8,8 +8,13 @@ use std::{
 };
 use tokio::time::MissedTickBehavior;
 
+use super::super::AppState;
+use super::{
+    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
+    RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
+};
 use crate::{
-    control_plane_mesh::{MeshPeerTarget, peer_target_from_node},
+    control_plane_mesh::MeshPeerTarget,
     history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
     state::history_repository::{
         control::{
@@ -23,12 +28,6 @@ use crate::{
     },
 };
 
-use super::super::AppState;
-use super::{
-    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
-    RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
-};
-
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
@@ -36,32 +35,36 @@ const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
 const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
-const MAX_INITIAL_BACKFILL_PAGE_BYTES: usize = 192 * 1024;
-const MAX_INITIAL_BACKFILL_PAGE_RECORDS: usize = 64;
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
 mod backfill;
+mod deep_repair;
 mod direct;
+mod ready_peers;
 mod source;
 mod source_records;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 pub(super) use backfill::{
-    HistoricalBackfillCollector, HistoricalBackfillSortKey, initial_backfill_is_complete,
-    peer_backfill_stream_for_record, peer_backfill_stream_for_schema, should_restart_peer_backfill,
-    source_stream_for_schema,
+    HistoricalBackfillCollector, HistoricalBackfillSortKey, peer_backfill_stream_for_record,
+    peer_backfill_stream_for_schema, should_restart_peer_backfill, source_stream_for_schema,
 };
 pub(super) use backfill::{RepositoryInitialBackfillPage, initial_backfill_page};
 use backfill::{
     backfill_initial_repository_from_local_history, catch_up_against_ready_repositories,
     pull_peer_initial_history,
 };
+#[cfg(test)]
+use deep_repair::deep_repair_requires_tiered_backfill;
+use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
     repository_direct_request, repository_mesh_request,
 };
+pub(super) use ready_peers::ready_repository_peers;
 use source::{
-    should_attempt_source_relay, source_record, source_record_with_key,
+    local_repository_lifecycle, repair_legacy_tombstone_metadata, should_attempt_source_relay,
+    should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
     source_record_with_key_for_subject,
 };
 use source_records::{source_records, source_records_with_deletions};
@@ -509,7 +512,9 @@ async fn receive_local_source_segment(
             &state.cluster.node_id,
         )?
     };
-    if !receipt.tombstone_acknowledgements().is_empty() {
+    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
+        && !receipt.tombstone_acknowledgements().is_empty()
+    {
         propagate_tombstone_acknowledgements(
             state,
             ready_repository_ids,
@@ -559,6 +564,7 @@ async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::R
 }
 
 async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyhow::Result<()> {
+    repair_legacy_tombstone_metadata(state, now).await?;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let (lifecycle, catch_up_completed, ready_repository_ids) = {
         let store = state.store.lock().await;
@@ -584,14 +590,22 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
     // Catch-up validates a bounded point in time. Once it completes, continuously arriving
     // source segments must not reset the five-minute stability window: a busy cluster otherwise
     // has no instant at which it can be exactly equal to an actively writing repository.
-    let caught_up = if !should_run_initial_catch_up(catch_up_completed) {
-        true
+    let catch_up = if !should_run_initial_catch_up(catch_up_completed) {
+        backfill::InitialBackfillProgress::Complete
     } else if ready_repository_ids.is_empty() {
         backfill_initial_repository_from_local_history(state, now).await?
     } else {
         catch_up_against_ready_repositories(state, now).await?
     };
-    apply_local_catch_up_result(state, &node_id, now, caught_up).await
+    match catch_up {
+        backfill::InitialBackfillProgress::InProgress => Ok(()),
+        backfill::InitialBackfillProgress::Complete => {
+            apply_local_catch_up_result(state, &node_id, now, true).await
+        }
+        backfill::InitialBackfillProgress::Unavailable => {
+            apply_local_catch_up_result(state, &node_id, now, false).await
+        }
+    }
 }
 
 fn should_run_initial_catch_up(catch_up_completed: bool) -> bool {
@@ -818,7 +832,6 @@ async fn replicate_peer(
     propagate_acknowledgements: bool,
 ) -> anyhow::Result<bool> {
     let mut after_segment_id = None::<String>;
-    let mut repaired = false;
     loop {
         let path = after_segment_id.as_ref().map_or_else(
             || {
@@ -833,89 +846,112 @@ async fn replicate_peer(
         );
         let remote_summary: RepositoryReplicaSummary =
             repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await?;
-        let (requires_repair, missing_segment_ids) = {
+        let requires_repair = {
             let runtime = state.repository_replica.lock().await;
-            (
-                runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
-                runtime.missing_segment_ids(&remote_summary, work.is_deep_verification())?,
-            )
+            runtime.requires_repair(&remote_summary, work.is_deep_verification())?
         };
         if requires_repair {
-            repaired = true;
-            if work.is_deep_verification() && missing_segment_ids.is_empty() {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .restart_initial_peer_backfill(&peer.node_id)?;
-                if pull_peer_initial_history(state, peer, ready_repository_ids)
-                    .await?
-                    .is_none()
-                {
-                    return Ok(false);
-                }
-                return Ok(false);
-            }
-            let mut pending_segment_ids = missing_segment_ids.into_iter().collect::<BTreeSet<_>>();
             let mut acknowledgements = Vec::new();
             let mut needs_gap_refresh = true;
-            while needs_gap_refresh || !pending_segment_ids.is_empty() {
-                needs_gap_refresh = false;
-                let repair_body = serde_json::to_vec(&RepositoryRepairRequest {
-                    segment_ids: pending_segment_ids.iter().cloned().collect(),
-                })?;
-                let repair: crate::state::history_repository::replica::RepositoryRepairBatch =
-                    repository_direct_request(
-                        state,
-                        peer,
-                        Method::POST,
-                        "/api/admin/_internal/history-repository/repair",
-                        repair_body,
-                    )
-                    .await?;
-                if pending_segment_ids.is_empty() {
-                    if !repair.segments.is_empty() {
-                        anyhow::bail!("repository repair response returned unrequested segments")
-                    }
-                } else {
-                    remove_delivered_repair_segment_ids(
-                        &mut pending_segment_ids,
-                        repair
-                            .segments
-                            .iter()
-                            .map(|segment| segment.wire.as_slice()),
-                    )?;
+            loop {
+                let mut pending_segment_ids = {
+                    let runtime = state.repository_replica.lock().await;
+                    runtime
+                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                };
+                if pending_segment_ids.is_empty() && !needs_gap_refresh {
+                    break;
                 }
-                for segment in repair.segments {
-                    if !super::identity_is_pinned_for_node(state, &segment.identity)
-                        .await
-                        .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
-                    {
-                        anyhow::bail!("repository repair segment identity is not pinned")
+                while needs_gap_refresh || !pending_segment_ids.is_empty() {
+                    needs_gap_refresh = false;
+                    let repair_body = serde_json::to_vec(&RepositoryRepairRequest {
+                        segment_ids: pending_segment_ids.iter().cloned().collect(),
+                    })?;
+                    let repair: crate::state::history_repository::replica::RepositoryRepairBatch =
+                        repository_direct_request(
+                            state,
+                            peer,
+                            Method::POST,
+                            "/api/admin/_internal/history-repository/repair",
+                            repair_body,
+                        )
+                        .await?;
+                    if pending_segment_ids.is_empty() {
+                        if !repair.segments.is_empty() {
+                            anyhow::bail!(
+                                "repository repair response returned unrequested segments"
+                            )
+                        }
+                    } else {
+                        remove_delivered_repair_segment_ids(
+                            &mut pending_segment_ids,
+                            repair
+                                .segments
+                                .iter()
+                                .map(|segment| segment.wire.as_slice()),
+                        )?;
                     }
-                    let receipt = state
+                    for segment in repair.segments {
+                        if !super::identity_is_pinned_for_node(state, &segment.identity)
+                            .await
+                            .map_err(|_| {
+                                anyhow::anyhow!("check repository repair segment identity")
+                            })?
+                        {
+                            anyhow::bail!("repository repair segment identity is not pinned")
+                        }
+                        let receipt = state
+                            .repository_replica
+                            .lock()
+                            .await
+                            .receive_wire_from_repository(
+                                &state.cluster.cluster_id,
+                                &segment.identity,
+                                &segment.wire,
+                                now,
+                                ready_repository_ids,
+                                &state.cluster.node_id,
+                            )?;
+                        acknowledgements
+                            .extend(receipt.tombstone_acknowledgements().iter().cloned());
+                    }
+                    state
                         .repository_replica
                         .lock()
                         .await
-                        .receive_wire_from_repository(
-                            &state.cluster.cluster_id,
-                            &segment.identity,
-                            &segment.wire,
-                            now,
-                            ready_repository_ids,
-                            &state.cluster.node_id,
-                        )?;
-                    acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
+                        .merge_replica_gaps(&repair.gaps)?;
                 }
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .merge_replica_gaps(&repair.gaps)?;
             }
             if propagate_acknowledgements {
                 propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
                     .await?;
+            }
+            let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
+                let runtime = state.repository_replica.lock().await;
+                (
+                    !runtime
+                        .missing_segment_ids(&remote_summary, work.is_deep_verification())?
+                        .is_empty(),
+                    runtime.requires_repair(&remote_summary, work.is_deep_verification())?,
+                )
+            };
+            if remaining_segment_repairs || repair_remains_after_segment_repairs {
+                let restarted_tiered_backfill = {
+                    let mut runtime = state.repository_replica.lock().await;
+                    restart_tiered_backfill_after_incomplete_deep_repair(
+                        &mut runtime,
+                        &peer.node_id,
+                        work,
+                        remaining_segment_repairs,
+                        repair_remains_after_segment_repairs,
+                    )?
+                };
+                if restarted_tiered_backfill {
+                    pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+                }
+                return Ok(false);
             }
         }
         let Some(next) = remote_summary.next_segment_id else {
@@ -925,9 +961,6 @@ async fn replicate_peer(
             anyhow::bail!("repository summary cursor did not advance")
         }
         after_segment_id = Some(next);
-    }
-    if work.is_deep_verification() && repaired {
-        return Ok(false);
     }
     // The keyset traversal defines a bounded remote snapshot. Once every advertised segment
     // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
@@ -964,29 +997,4 @@ pub(super) async fn propagate_tombstone_acknowledgements(
         }
     }
     first_delivery_error.map_or(Ok(()), Err)
-}
-
-pub(super) async fn ready_repository_peers(
-    state: &AppState,
-) -> anyhow::Result<(Vec<String>, Vec<MeshPeerTarget>)> {
-    let store = state.store.lock().await;
-    let membership = store
-        .state()
-        .repository_membership
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("history repository membership is not configured"))?;
-    let ready_repository_ids = membership
-        .ready_members()
-        .map(|member| member.node_id().as_str().to_owned())
-        .collect::<Vec<_>>();
-    if ready_repository_ids.is_empty() {
-        anyhow::bail!("no ready history repository is available");
-    }
-    let endpoints = store.list_endpoints();
-    let peers = ready_repository_ids
-        .iter()
-        .filter_map(|repository_id| store.get_node(repository_id))
-        .map(|node| peer_target_from_node(&node, &endpoints))
-        .collect();
-    Ok((ready_repository_ids, peers))
 }

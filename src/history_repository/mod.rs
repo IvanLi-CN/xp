@@ -9,3 +9,6 @@ pub(crate) use crate::state::history_storage::{
     HistoryStorage, INBOUND_IP_USAGE_KEY, NODE_HISTORY_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY,
     USAGE_KEY,
 };
+
+pub(crate) const MAX_INITIAL_BACKFILL_PAGE_BYTES: usize = 192 * 1024;
+pub(crate) const MAX_INITIAL_BACKFILL_PAGE_RECORDS: usize = 128;

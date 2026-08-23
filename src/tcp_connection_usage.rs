@@ -88,6 +88,8 @@ pub struct PersistedTcpConnectionEndpointUsage {
     pub port: u16,
     #[serde(default)]
     pub counts: Vec<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_observed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -191,7 +193,8 @@ impl PersistedTcpConnectionUsage {
     }
 
     /// Repository bootstrap uses the persisted per-minute series instead of replacing history
-    /// with a single current connection summary.
+    /// with a single current connection summary. New endpoint records skip their unobserved
+    /// leading zeroes; legacy records without a first observation retain the full window.
     pub fn repository_samples_for_node(
         &self,
         node_id: &str,
@@ -206,7 +209,10 @@ impl PersistedTcpConnectionUsage {
                 endpoint_id: endpoint.endpoint_id.clone(),
                 endpoint_tag: endpoint.endpoint_tag.clone(),
                 port: endpoint.port,
-                series: (0..MINUTES_WINDOW)
+                series: (repository_start_index(
+                    latest,
+                    endpoint.first_observed_at.as_deref().and_then(parse_minute),
+                )..MINUTES_WINDOW)
                     .map(|index| TcpConnectionUsageSeriesPoint {
                         minute: rfc3339_minute(
                             latest - Duration::minutes((MINUTES_WINDOW - 1 - index) as i64),
@@ -320,6 +326,7 @@ impl PersistedTcpConnectionUsage {
                     endpoint_tag: sample.endpoint_tag.clone(),
                     port: sample.port,
                     counts: vec![0; MINUTES_WINDOW],
+                    first_observed_at: Some(minute_str.clone()),
                 });
             normalize_counts(&mut record.counts);
             if record.node_id != sample.node_id {
@@ -564,6 +571,17 @@ fn parse_minute(value: &str) -> Option<DateTime<Utc>> {
         .map(floor_minute)
 }
 
+fn repository_start_index(latest: DateTime<Utc>, first_observed: Option<DateTime<Utc>>) -> usize {
+    let Some(first_observed) = first_observed else {
+        return 0;
+    };
+    let window_start = latest - Duration::minutes((MINUTES_WINDOW - 1) as i64);
+    first_observed
+        .signed_duration_since(window_start)
+        .num_minutes()
+        .clamp(0, (MINUTES_WINDOW - 1) as i64) as usize
+}
+
 fn rfc3339_minute(value: DateTime<Utc>) -> String {
     floor_minute(value).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
@@ -712,6 +730,63 @@ mod tests {
         let counts = &usage.endpoints[xp_test_fixtures::endpoint_fixtureinline_a()].counts;
         assert_eq!(counts[MINUTES_WINDOW - 2], 2);
         assert_eq!(counts[MINUTES_WINDOW - 1], 0);
+    }
+
+    #[test]
+    fn repository_samples_skip_unobserved_leading_minutes_for_new_endpoints() {
+        let minute0 = floor_minute(Utc::now());
+        let minute1 = minute0 + Duration::minutes(1);
+        let mut usage = PersistedTcpConnectionUsage::default();
+        usage.record_minute_samples(
+            minute0,
+            true,
+            None,
+            &[TcpConnectionMinuteSample {
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
+                port: 443,
+                count: 2,
+            }],
+        );
+        usage.record_minute_samples(minute1, true, None, &[]);
+
+        let samples = usage.repository_samples_for_node(xp_test_fixtures::label_node1_variant2());
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].series.len(), 2);
+        assert_eq!(samples[0].series[0].minute, rfc3339_minute(minute0));
+        assert_eq!(
+            samples[0]
+                .series
+                .iter()
+                .map(|sample| sample.count)
+                .collect::<Vec<_>>(),
+            [2, 0]
+        );
+    }
+
+    #[test]
+    fn repository_samples_preserve_the_full_window_for_legacy_endpoints() {
+        let minute = floor_minute(Utc::now());
+        let mut usage = PersistedTcpConnectionUsage {
+            latest_minute: Some(rfc3339_minute(minute)),
+            ..PersistedTcpConnectionUsage::default()
+        };
+        usage.endpoints.insert(
+            xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+            PersistedTcpConnectionEndpointUsage {
+                node_id: xp_test_fixtures::label_node1_variant2().to_owned(),
+                endpoint_id: xp_test_fixtures::endpoint_fixtureinline_a().to_owned(),
+                endpoint_tag: xp_test_fixtures::endpoint_tag_fixtureinline_a().to_owned(),
+                port: 443,
+                counts: vec![0; MINUTES_WINDOW],
+                first_observed_at: None,
+            },
+        );
+
+        let samples = usage.repository_samples_for_node(xp_test_fixtures::label_node1_variant2());
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].series.len(), MINUTES_WINDOW);
     }
 
     #[test]

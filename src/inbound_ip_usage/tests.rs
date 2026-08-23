@@ -244,6 +244,44 @@ fn record_and_shift_bitmap_window() {
 }
 
 #[test]
+fn repository_samples_skip_unobserved_leading_minutes() {
+    let mut usage = PersistedInboundIpUsage::default();
+    let resolver = TestGeoLookup;
+    let minute0 = chrono::DateTime::parse_from_rfc3339("2026-03-08T10:11:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let minute1 = minute0 + Duration::minutes(1);
+    let minute2 = minute1 + Duration::minutes(1);
+
+    usage.record_minute_samples(minute0, false, &[], &resolver, true);
+    assert!(
+        usage
+            .repository_samples_for_node(xp_test_fixtures::label_n1())
+            .is_empty()
+    );
+
+    usage.record_minute_samples(
+        minute1,
+        false,
+        &[sample("u1::e1", "u1", "n1", "e1", "ep-1", &["203.0.113.7"])],
+        &resolver,
+        true,
+    );
+    usage.record_minute_samples(minute2, false, &[], &resolver, true);
+
+    let samples = usage.repository_samples_for_node(xp_test_fixtures::label_n1());
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0].minute, rfc3339_minute(minute1));
+    assert_eq!(
+        samples
+            .iter()
+            .map(|sample| sample.count)
+            .collect::<Vec<_>>(),
+        [1, 0]
+    );
+}
+
+#[test]
 fn normalize_recomputes_minutes_and_prunes_memberships() {
     let mut usage = PersistedInboundIpUsage {
         latest_minute: Some("2026-03-08T10:11:00Z".to_string()),

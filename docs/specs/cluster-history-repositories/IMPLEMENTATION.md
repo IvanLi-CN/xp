@@ -20,6 +20,36 @@
   existing node runtime, traffic, connection and IP views. Syncing members perform bounded repair
   catch-up and enter `ready` only after five stable minutes; successful deep verification writes
   local convergence back to Raft.
+- Initial repository bootstrap is deliberately yieldable: each worker tick exports at most one
+  local page and one bounded page per peer (128 records / 192 KiB). Before any member is `ready`,
+  a syncing repository imports each peer's node-local history, including another configured
+  syncing repository. This establishes the complete common baseline without recursively starting
+  repository repair. The existing opaque page cursor fixes the initial snapshot's upper time
+  bound, so samples created during the transfer do not extend that bootstrap scan. `InProgress`
+  keeps the member in `syncing` without writing `CatchUpIncomplete`; capacity refresh, live source
+  collection and lifecycle checks continue on their normal cadence. A repository enters the
+  existing five-minute stability window only after every page is complete. A local page records
+  its pending wire set before delivery and commits all acknowledgements with the page cursor; an
+  interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
+  ready peer, the single page budget is spent on one summary page, one repair response, or one
+  tiered export page; the summary cursor and pending repair IDs are part of the durable peer
+  checkpoint, so a restart resumes the same page instead of restarting an unbounded scan. Deep
+  partition mismatches after a segment repair drains mark the checkpoint for the single-authority
+  tiered import. A fresh summary verification pass must complete before the member can enter the
+  readiness window.
+- Tombstones received while a repository is `syncing` are atomically stored with their local
+  cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
+  membership reports `ready`. The durable page is then retried through the existing all-node
+  acknowledgement path, and its delivery cursor advances only after successful fanout.
+- Startup lifecycle ticks repair the legacy mutable tombstone metadata where `created_at=0` and
+  `expires_at` is the fixed horizon. The repair extends the ledger from the current Unix time and
+  persists only the control snapshot; signed segments, cursors, hashes, ready membership and
+  acknowledgement state are left unchanged. Operators must not delete `history.sqlite3`, replace
+  repository members or change ordinary-node retention settings during rollout.
+- Repository segment pages are ordered by tombstone phase and the signed source cursor, rather
+  than by content hash. Startup repairs the corresponding SQLite cursor index in place for
+  existing segments before they are served for repair; it preserves each signed payload and does
+  not rebuild the database or run a full `VACUUM`.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before either

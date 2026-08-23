@@ -200,20 +200,32 @@ impl PersistedInboundIpUsage {
         self.latest_minute.as_deref().and_then(parse_minute)
     }
 
-    /// Repository bootstrap consumes the complete persisted minute window rather than a latest
-    /// summary so coverage starts at the actual retained history boundary.
+    /// Repository bootstrap omits unobserved leading minutes but retains zeroes after the first
+    /// known IP, preventing newly monitored nodes from backfilling synthetic history.
     pub fn repository_samples_for_node(&self, node_id: &str) -> Vec<InboundIpUsageSeriesPoint> {
         let Some(latest) = self.latest_minute_dt() else {
             return Vec::new();
         };
-        (0..MINUTES_WINDOW)
+        let records = self
+            .memberships
+            .values()
+            .filter(|membership| membership.node_id == node_id)
+            .flat_map(|membership| membership.ips.values())
+            .collect::<Vec<_>>();
+        if records.is_empty() {
+            return Vec::new();
+        }
+        let first_observed = records
+            .iter()
+            .filter_map(|record| parse_minute(&record.first_seen_at))
+            .min();
+        let start_index = repository_start_index(latest, first_observed);
+
+        (start_index..MINUTES_WINDOW)
             .map(|index| {
-                let count = self
-                    .memberships
-                    .values()
-                    .filter(|membership| membership.node_id == node_id)
-                    .flat_map(|membership| membership.ips.iter())
-                    .filter(|(_, record)| {
+                let count = records
+                    .iter()
+                    .filter(|record| {
                         extract_window_flags(&record.bitmap, index, 1)
                             .first()
                             .copied()
@@ -695,6 +707,16 @@ fn parse_minute(raw: &str) -> Option<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .ok()
         .map(|dt| floor_minute(dt.with_timezone(&Utc)))
+}
+
+fn repository_start_index(latest: DateTime<Utc>, first_observed: Option<DateTime<Utc>>) -> usize {
+    first_observed.map_or(0, |first_observed| {
+        let window_start = latest - Duration::minutes((MINUTES_WINDOW - 1) as i64);
+        first_observed
+            .signed_duration_since(window_start)
+            .num_minutes()
+            .clamp(0, (MINUTES_WINDOW - 1) as i64) as usize
+    })
 }
 
 fn zero_bitmap() -> Vec<u8> {
