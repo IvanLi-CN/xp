@@ -162,6 +162,31 @@ fn deep_repair_keeps_backfill_checkpoint_after_a_full_segment_batch() {
         target.initial_peer_backfill_checkpoint("node-b"),
         Some(checkpoint)
     );
+
+    let second_batch = target
+        .missing_segment_ids(&summary, true)
+        .expect("second bounded batch");
+    assert_eq!(second_batch.len(), 1);
+    for segment in source
+        .repair_batch(&second_batch)
+        .expect("second repair batch")
+        .segments
+    {
+        target
+            .receive_wire("cluster-a", &identity, &segment.wire, 201)
+            .expect("receive final repair segment");
+    }
+    assert!(
+        target
+            .missing_segment_ids(&summary, true)
+            .expect("all summary segments repaired")
+            .is_empty()
+    );
+    assert!(
+        !target
+            .requires_repair(&summary, true)
+            .expect("full summary is converged")
+    );
 }
 
 #[test]
