@@ -670,9 +670,10 @@ Notes:
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
   and one page per peer, capped at 128 records and 192 KiB. Before any member is `ready`, syncing
   repositories import peer history only from ordinary source nodes, not from another configured
-  repository, preventing recursive imports between syncing replicas. `syncing` remains visible
-  while pages are in progress, and only a fully completed catch-up starts the five-minute
-  readiness window.
+  repository, preventing recursive imports between syncing replicas. The existing opaque page
+  cursor fixes the first page's snapshot horizon, so new samples cannot keep this historical scan
+  open. `syncing` remains visible while pages are in progress, and only a fully completed catch-up
+  starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
   For ready peers, that page is exactly one summary page, one repair response, or one tiered export

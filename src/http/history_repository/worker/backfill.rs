@@ -7,10 +7,13 @@ use crate::http::history_repository::{
 use crate::state::history_repository::{
     MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
 };
+mod cursor;
 mod ready_peer;
 #[cfg(test)]
 mod tests;
 
+use cursor::HistoricalBackfillPageCursor;
+pub(crate) use cursor::HistoricalBackfillSortKey;
 pub(crate) use ready_peer::catch_up_against_ready_repositories;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,25 +67,25 @@ pub(crate) struct RepositoryInitialBackfillPage {
 }
 pub(crate) struct HistoricalBackfillCollector {
     pub(crate) after: Option<HistoricalBackfillSortKey>,
+    snapshot_end_unix_seconds: Option<u64>,
     pub(crate) limit: usize,
     pub(crate) records: BTreeMap<HistoricalBackfillSortKey, (u64, SyncRecord)>,
     pub(crate) has_more: bool,
-}
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct HistoricalBackfillSortKey {
-    observed_at_unix_seconds: u64,
-    schema_id: String,
-    #[serde(with = "backfill_cursor_key")]
-    record_key: Vec<u8>,
 }
 impl HistoricalBackfillCollector {
     pub(crate) fn new(after: Option<HistoricalBackfillSortKey>, limit: usize) -> Self {
         Self {
             after,
+            snapshot_end_unix_seconds: None,
             limit,
             records: BTreeMap::new(),
             has_more: false,
         }
+    }
+
+    fn with_snapshot_end(mut self, snapshot_end_unix_seconds: u64) -> Self {
+        self.snapshot_end_unix_seconds = Some(snapshot_end_unix_seconds);
+        self
     }
     pub(crate) fn push(&mut self, record: (u64, SyncRecord)) -> anyhow::Result<()> {
         self.push_with_times(record.0, record.0, record.1)
@@ -93,6 +96,13 @@ impl HistoricalBackfillCollector {
         segment_at_unix_seconds: u64,
         record: SyncRecord,
     ) -> anyhow::Result<()> {
+        if !record.is_tombstone()
+            && self
+                .snapshot_end_unix_seconds
+                .is_some_and(|end| segment_at_unix_seconds > end)
+        {
+            return Ok(());
+        }
         let key = HistoricalBackfillSortKey {
             observed_at_unix_seconds: sort_at_unix_seconds,
             schema_id: record.schema().0.to_owned(),
@@ -142,11 +152,19 @@ impl HistoricalBackfillCollector {
     pub(crate) fn next_cursor(&self) -> anyhow::Result<Option<String>> {
         self.has_more
             .then(|| {
-                self.records
+                let after = self
+                    .records
                     .last_key_value()
                     .expect("backfill cursor requires a record")
-                    .0
-                    .encode()
+                    .0;
+                match self.snapshot_end_unix_seconds {
+                    Some(snapshot_end_unix_seconds) => HistoricalBackfillPageCursor {
+                        after: after.clone(),
+                        snapshot_end_unix_seconds: Some(snapshot_end_unix_seconds),
+                    }
+                    .encode(),
+                    None => after.encode(),
+                }
             })
             .transpose()
     }
@@ -170,40 +188,6 @@ fn serialized_backfill_record_bytes(record: &SyncRecord) -> anyhow::Result<usize
         tombstone: record.is_tombstone(),
     })?
     .len())
-}
-mod backfill_cursor_key {
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub(super) fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&URL_SAFE_NO_PAD.encode(value))
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let encoded = String::deserialize(deserializer)?;
-        URL_SAFE_NO_PAD
-            .decode(encoded)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-impl HistoricalBackfillSortKey {
-    pub(crate) fn encode(&self) -> anyhow::Result<String> {
-        Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(self)?))
-    }
-
-    pub(crate) fn decode(encoded: &str) -> anyhow::Result<Self> {
-        if encoded.len() > 1_024 {
-            anyhow::bail!("initial history backfill cursor exceeds limit");
-        }
-        Ok(serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded)?)?)
-    }
 }
 
 impl RepositoryInitialBackfillRecord {
@@ -720,10 +704,16 @@ async fn historical_source_backfill_records(
     page_cursor: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<HistoricalBackfillCollector> {
-    let after = page_cursor
-        .map(HistoricalBackfillSortKey::decode)
+    let cursor = page_cursor
+        .map(HistoricalBackfillPageCursor::decode)
         .transpose()?;
-    let mut records = HistoricalBackfillCollector::new(after, limit);
+    // A bounded historical snapshot must finish even while live sampling continues.
+    let snapshot_end_unix_seconds = cursor
+        .as_ref()
+        .and_then(|cursor| cursor.snapshot_end_unix_seconds)
+        .unwrap_or_else(|| u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default());
+    let mut records = HistoricalBackfillCollector::new(cursor.map(|cursor| cursor.after), limit)
+        .with_snapshot_end(snapshot_end_unix_seconds);
     if let Some(history) = state.node_history.snapshot(&state.cluster.node_id).await {
         let history_node_id = history.node_id.clone();
         for traffic in history.daily_traffic {
