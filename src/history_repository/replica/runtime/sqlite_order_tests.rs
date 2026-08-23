@@ -174,8 +174,11 @@ fn sqlite_load_defers_legacy_segment_cursor_index_migration() {
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let repository_identity = identity(&signing_key);
     let ready = vec!["repository-a".to_owned()];
-    let wire_for = |sequence| {
-        CanonicalSegment::new(
+    let mut runtime =
+        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
+    let mut previous_hash = None;
+    for sequence in 0_u64..2 {
+        let signed = CanonicalSegment::new(
             "cluster-a",
             Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
             vec![SyncRecord::new(
@@ -187,24 +190,19 @@ fn sqlite_load_defers_legacy_segment_cursor_index_migration() {
                 format!("sample:{sequence}").into_bytes(),
                 false,
             )],
-            None,
+            previous_hash,
             100,
             100,
         )
         .expect("canonical segment")
         .sign(&signing_key)
-        .expect("signed segment")
-        .wire_bytes()
-        .expect("wire")
-    };
-    let mut runtime =
-        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
-    for sequence in 0..2 {
+        .expect("signed segment");
+        previous_hash = Some(signed.segment_hash().expect("segment hash"));
         runtime
             .receive_wire_from_repository(
                 "cluster-a",
                 &repository_identity,
-                &wire_for(sequence),
+                &signed.wire_bytes().expect("wire"),
                 100,
                 &ready,
                 "repository-a",
