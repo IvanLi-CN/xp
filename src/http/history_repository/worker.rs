@@ -8,6 +8,11 @@ use std::{
 };
 use tokio::time::MissedTickBehavior;
 
+use super::super::AppState;
+use super::{
+    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
+    RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
+};
 use crate::{
     control_plane_mesh::MeshPeerTarget,
     history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
@@ -21,11 +26,6 @@ use crate::{
             RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
-};
-use super::super::AppState;
-use super::{
-    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
-    RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
 };
 
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
