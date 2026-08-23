@@ -1,13 +1,3 @@
-use axum::http::Method;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
-use tokio::time::MissedTickBehavior;
-
 use super::super::AppState;
 use super::{
     INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
@@ -27,7 +17,15 @@ use crate::{
         },
     },
 };
-
+use axum::http::Method;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
+use tokio::time::MissedTickBehavior;
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
@@ -39,6 +37,7 @@ const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0"
 mod backfill;
 mod deep_repair;
 mod direct;
+mod legacy_segment_index;
 mod ready_peers;
 mod source;
 mod source_records;
@@ -70,6 +69,7 @@ use source::{
 use source_records::{source_records, source_records_with_deletions};
 
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
+    legacy_segment_index::spawn(state.clone());
     let source_state = state.clone();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(SOURCE_COLLECTION_INTERVAL);

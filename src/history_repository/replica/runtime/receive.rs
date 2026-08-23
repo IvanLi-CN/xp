@@ -524,6 +524,7 @@ impl RepositoryReplicaRuntime {
         self.snapshot = RepositoryReplicaSnapshot {
             cluster_id: cluster_id.clone(),
             external_history: self.storage.is_sqlite(),
+            legacy_segment_cursor_index_complete: self.storage.is_sqlite(),
             local_source,
             ..RepositoryReplicaSnapshot::default()
         };

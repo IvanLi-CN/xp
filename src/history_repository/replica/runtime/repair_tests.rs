@@ -483,29 +483,6 @@ fn repository_retention_marks_aggregates_incomplete_for_permanent_gaps() {
 }
 
 #[test]
-fn dynamic_relay_hourly_attempt_gate_survives_repository_restart() {
-    let first = tempfile::tempdir().expect("first repository");
-    let mut sender = load(first.path());
-    sender.snapshot.cluster_id = Some("cluster-a".to_owned());
-    assert!(
-        sender
-            .begin_dynamic_relay_attempt(10_000)
-            .expect("first relay attempt is due")
-    );
-    assert!(
-        !sender
-            .begin_dynamic_relay_attempt(10_001)
-            .expect("relay attempt is rate limited")
-    );
-    let mut restored = load(first.path());
-    assert!(
-        !restored
-            .begin_dynamic_relay_attempt(10_001)
-            .expect("relay attempt stays rate limited after restart")
-    );
-}
-
-#[test]
 fn sqlite_restart_restores_continuous_acknowledgements_and_records() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

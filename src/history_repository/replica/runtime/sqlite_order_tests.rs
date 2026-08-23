@@ -1,6 +1,6 @@
 use ed25519_dalek::SigningKey;
 
-use super::{RepositoryReplicaRuntime, StoredSegment};
+use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
     state::history_repository::{
@@ -169,44 +169,46 @@ fn sqlite_summary_orders_repair_candidates_by_signed_cursor() {
 }
 
 #[test]
-fn sqlite_load_backfills_legacy_segment_cursor_index() {
+fn sqlite_load_defers_legacy_segment_cursor_index_migration() {
     let temporary = tempfile::tempdir().expect("SQLite temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let repository_identity = identity(&signing_key);
     let ready = vec!["repository-a".to_owned()];
-    let wire = CanonicalSegment::new(
-        "cluster-a",
-        Cursor::new("node-a", 7, "runtime", 0).expect("cursor"),
-        vec![SyncRecord::new(
-            "node-a",
-            "node-a",
-            "runtime.v1",
-            1,
-            b"runtime:0".to_vec(),
-            b"sample:0".to_vec(),
-            false,
-        )],
-        None,
-        100,
-        100,
-    )
-    .expect("canonical segment")
-    .sign(&signing_key)
-    .expect("signed segment")
-    .wire_bytes()
-    .expect("wire");
     let mut runtime =
         RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
-    runtime
-        .receive_wire_from_repository(
+    let mut previous_hash = None;
+    for sequence in 0_u64..2 {
+        let signed = CanonicalSegment::new(
             "cluster-a",
-            &repository_identity,
-            &wire,
+            Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("runtime:{sequence}").into_bytes(),
+                format!("sample:{sequence}").into_bytes(),
+                false,
+            )],
+            previous_hash,
             100,
-            &ready,
-            "repository-a",
+            100,
         )
-        .expect("store segment");
+        .expect("canonical segment")
+        .sign(&signing_key)
+        .expect("signed segment");
+        previous_hash = Some(signed.segment_hash().expect("segment hash"));
+        runtime
+            .receive_wire_from_repository(
+                "cluster-a",
+                &repository_identity,
+                &signed.wire_bytes().expect("wire"),
+                100,
+                &ready,
+                "repository-a",
+            )
+            .expect("store segment");
+    }
     {
         let mut backend = runtime.storage.lock_backend();
         let Backend::Sqlite(connection) = &mut *backend else {
@@ -220,25 +222,83 @@ fn sqlite_load_backfills_legacy_segment_cursor_index() {
             )
             .expect("erase legacy cursor index");
     }
+    runtime.snapshot.legacy_segment_cursor_index_after_id = None;
+    runtime.snapshot.legacy_segment_cursor_index_complete = false;
+    runtime
+        .persist_control_state()
+        .expect("checkpoint legacy state");
     drop(runtime);
 
-    let restored =
+    let mut restored =
         RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("restore");
+    assert!(matches!(
+        restored.replication_summary(),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
+    assert!(matches!(
+        restored.repair_batch(&[]),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
+    assert!(matches!(
+        restored.relay_batch("repository-b"),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
+    assert_eq!(
+        restored
+            .storage
+            .repository_history_segments_missing_cursor_index(None, 3)
+            .expect("inspect cursor index")
+            .len(),
+        2
+    );
+    assert!(
+        !restored
+            .migrate_legacy_segment_cursor_index_page(1)
+            .expect("migrate one bounded page")
+    );
+    drop(restored);
+
+    let mut restored =
+        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("resume");
+    assert_eq!(
+        restored
+            .storage
+            .repository_history_segments_missing_cursor_index(None, 3)
+            .expect("inspect resumed cursor index")
+            .len(),
+        1
+    );
+    assert!(
+        !restored
+            .migrate_legacy_segment_cursor_index_page(1)
+            .expect("migrate resumed bounded page")
+    );
     assert!(
         restored
             .storage
-            .repository_history_segments_missing_cursor_index(1)
+            .repository_history_segments_missing_cursor_index(None, 3)
             .expect("inspect cursor index")
             .is_empty()
+    );
+    assert!(
+        restored
+            .migrate_legacy_segment_cursor_index_page(1)
+            .expect("complete migration")
     );
     let summary = restored.replication_summary().expect("SQLite summary");
     let repair = restored
         .repair_batch(&summary.segment_ids)
         .expect("repair batch");
-    let sequence = SignedSegment::from_wire(&repair.segments[0].wire)
-        .expect("repair wire")
-        .canonical()
-        .first_cursor()
-        .sequence();
-    assert_eq!(sequence, 0);
+    let sequences = repair
+        .segments
+        .iter()
+        .map(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .expect("repair wire")
+                .canonical()
+                .first_cursor()
+                .sequence()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, vec![0, 1]);
 }

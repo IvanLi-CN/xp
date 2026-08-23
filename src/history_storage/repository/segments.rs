@@ -76,27 +76,48 @@ impl HistoryStorage {
 
     pub(crate) fn repository_history_segments_missing_cursor_index(
         &self,
+        after_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(Vec::new());
         };
-        let mut statement = connection
-            .prepare(
-                "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
-                        first_sequence, payload
-                 FROM repository_history_segments
-                 WHERE source_node_id = ''
-                 ORDER BY id ASC
-                 LIMIT ?1",
-            )
-            .map_err(sqlite_error)?;
-        let rows = statement
-            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], segment_row)
-            .map_err(sqlite_error)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(sqlite_error)
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = if let Some(after_id) = after_id {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                            first_sequence, payload
+                     FROM repository_history_segments
+                     WHERE source_node_id = '' AND id > ?1
+                     ORDER BY id ASC
+                     LIMIT ?2",
+                )
+                .map_err(sqlite_error)?;
+            statement
+                .query_map(params![after_id, limit], segment_row)
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?
+        } else {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
+                            first_sequence, payload
+                     FROM repository_history_segments
+                     WHERE source_node_id = ''
+                     ORDER BY id ASC
+                     LIMIT ?1",
+                )
+                .map_err(sqlite_error)?;
+            statement
+                .query_map([limit], segment_row)
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?
+        };
+        Ok(rows)
     }
 }
 
