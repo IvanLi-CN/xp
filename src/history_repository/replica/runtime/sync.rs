@@ -433,6 +433,7 @@ impl RepositoryReplicaRuntime {
         after_segment_id: Option<&str>,
         deep_verification: bool,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
+        self.require_legacy_segment_cursor_index()?;
         let mut segments = self.stored_segments_page(
             after_segment_id,
             super::REPLICATION_SEGMENT_PAGE_SIZE.saturating_add(1),
@@ -509,6 +510,7 @@ impl RepositoryReplicaRuntime {
         &self,
         requested_segment_ids: &[String],
     ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
+        self.require_legacy_segment_cursor_index()?;
         if requested_segment_ids.len() > MAX_REPAIR_SEGMENTS {
             return Err(RepositoryRuntimeError::Replica(
                 ReplicaError::RepairLimitExceeded,
@@ -550,6 +552,7 @@ impl RepositoryReplicaRuntime {
         &self,
         target_repository_id: &str,
     ) -> Result<RelayRepairPage, RepositoryRuntimeError> {
+        self.require_legacy_segment_cursor_index()?;
         let after_id = match self
             .snapshot
             .relay_segment_cursors

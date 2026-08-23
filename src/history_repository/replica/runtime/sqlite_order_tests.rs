@@ -1,6 +1,6 @@
 use ed25519_dalek::SigningKey;
 
-use super::{RepositoryReplicaRuntime, StoredSegment};
+use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
     state::history_repository::{
@@ -222,10 +222,27 @@ fn sqlite_load_defers_legacy_segment_cursor_index_migration() {
             )
             .expect("erase legacy cursor index");
     }
+    runtime.snapshot.legacy_segment_cursor_index_after_id = None;
+    runtime.snapshot.legacy_segment_cursor_index_complete = false;
+    runtime
+        .persist_control_state()
+        .expect("checkpoint legacy state");
     drop(runtime);
 
     let mut restored =
         RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("restore");
+    assert!(matches!(
+        restored.replication_summary(),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
+    assert!(matches!(
+        restored.repair_batch(&[]),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
+    assert!(matches!(
+        restored.relay_batch("repository-b"),
+        Err(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    ));
     assert_eq!(
         restored
             .storage

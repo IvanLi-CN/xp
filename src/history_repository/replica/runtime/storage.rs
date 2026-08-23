@@ -41,6 +41,16 @@ impl RepositoryReplicaRuntime {
         Ok(false)
     }
 
+    pub(crate) fn legacy_segment_cursor_index_is_complete(&self) -> bool {
+        !self.uses_sqlite_history() || self.snapshot.legacy_segment_cursor_index_complete
+    }
+
+    pub(crate) fn require_legacy_segment_cursor_index(&self) -> Result<(), RepositoryRuntimeError> {
+        self.legacy_segment_cursor_index_is_complete()
+            .then_some(())
+            .ok_or(RepositoryRuntimeError::LegacySegmentCursorIndexPending)
+    }
+
     pub(crate) fn migrate_history_to_sqlite(&mut self) -> Result<(), RepositoryRuntimeError> {
         if !self.storage.is_sqlite() || self.snapshot.external_history {
             return Ok(());
@@ -64,6 +74,8 @@ impl RepositoryReplicaRuntime {
         migrated_snapshot.records.clear();
         migrated_snapshot.segments.clear();
         migrated_snapshot.external_history = true;
+        migrated_snapshot.legacy_segment_cursor_index_after_id = None;
+        migrated_snapshot.legacy_segment_cursor_index_complete = true;
         let bytes = serde_json::to_vec(&migrated_snapshot)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {

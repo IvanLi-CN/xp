@@ -907,6 +907,9 @@ fn repository_error(error: RepositoryRuntimeError) -> ApiError {
         RepositoryRuntimeError::ClusterBindingMismatch => {
             ApiError::unauthorized("repository cluster binding does not match")
         }
+        RepositoryRuntimeError::LegacySegmentCursorIndexPending => {
+            ApiError::conflict("repository segment cursor migration is in progress")
+        }
         RepositoryRuntimeError::StateLimitExceeded => {
             ApiError::conflict("repository history capacity is exhausted")
         }

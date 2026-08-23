@@ -12,6 +12,7 @@ pub(crate) enum RepositoryRuntimeError {
     Query(QueryError),
     Storage(String),
     ClusterBindingMismatch,
+    LegacySegmentCursorIndexPending,
     WriteStopped(HistoryWriteAvailability),
     StateLimitExceeded,
 }
