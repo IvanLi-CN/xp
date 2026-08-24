@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import { createQueryClient } from "../queryClient";
 import { HistoryRepositoriesPanel } from "./HistoryRepositoriesPanel";
 
@@ -60,11 +61,16 @@ describe("HistoryRepositoriesPanel", () => {
 			<QueryClientProvider client={createQueryClient()}>
 				<HistoryRepositoriesPanel
 					adminToken="admin-token"
-					nodes={[{ node_id: "node-a", node_name: "edge-a" }]}
+					nodes={[
+						{
+							node_id: fixtureCatalog.nodeId.fixture32(),
+							node_name: fixtureCatalog.nodeName.fixture33(),
+						},
+					]}
 				/>
 			</QueryClientProvider>,
 		);
 
-		expect(screen.getByText(/node-a.*edge-a/)).toBeVisible();
+		expect(screen.getByText(/node-fixture-32.*fixture-node-33/)).toBeVisible();
 	});
 });

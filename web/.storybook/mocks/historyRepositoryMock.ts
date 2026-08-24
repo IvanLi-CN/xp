@@ -22,7 +22,9 @@ export function buildHistoryRepositories(
 			{
 				member: {
 					identity: {
-						node_id: nodes[0]?.node_id ?? fixtureCatalog.nodeId.fixture17(),
+						node_id: nodes[0]
+							? fixtureCatalog.nodeId.fixture32()
+							: fixtureCatalog.nodeId.fixture17(),
 						ed25519_public_key: "storybook-ed25519",
 						x25519_relay_public_key: "storybook-x25519",
 					},

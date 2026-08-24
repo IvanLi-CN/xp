@@ -97,7 +97,7 @@ describe("RepositoryStatusSummary", () => {
 		const nodeId = fixtureCatalog.nodeId.fixture32();
 		render(
 			<RepositoryStatusSummary
-				nodeNames={{ [nodeId]: "edge-a" }}
+				nodeNames={{ [fixtureCatalog.nodeId.fixture32()]: "edge-a" }}
 				status={{
 					configured: true,
 					partial: false,
@@ -106,7 +106,7 @@ describe("RepositoryStatusSummary", () => {
 						{
 							member: {
 								identity: {
-									node_id: nodeId,
+									node_id: fixtureCatalog.nodeId.fixture32(),
 									ed25519_public_key: "ed25519-key",
 									x25519_relay_public_key: "x25519-key",
 								},
@@ -141,7 +141,7 @@ describe("RepositoryStatusSummary", () => {
 						{
 							member: {
 								identity: {
-									node_id: nodeId,
+									node_id: fixtureCatalog.nodeId.fixture36(),
 									ed25519_public_key: "ed25519-key",
 									x25519_relay_public_key: "x25519-key",
 								},
