@@ -1521,6 +1521,7 @@ export function UserDetailsPage() {
 								onWindowChange={(next) => prefs.setTrafficWindow(next)}
 								isFetching={trafficQuery.isFetching}
 								isWindowPending={trafficDisplay.isWindowPending}
+								showTitle={false}
 								nodeSelector={trafficNodeSelector}
 							/>
 						) : null}

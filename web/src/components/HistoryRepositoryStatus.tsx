@@ -156,17 +156,19 @@ export function RepositoryStatusSummary(props: {
 	title?: string;
 	compact?: boolean;
 	nodeNames?: Readonly<Record<string, string>>;
+	showTitle?: boolean;
 }) {
 	const {
 		status,
 		title = "History repositories",
 		compact = false,
 		nodeNames,
+		showTitle = true,
 	} = props;
 	if (!status.configured) {
 		return (
 			<section className="border-t border-border/70 pt-4">
-				<h2 className="text-lg font-semibold">{title}</h2>
+				{showTitle ? <h2 className="text-lg font-semibold">{title}</h2> : null}
 				<p className="mt-2 text-sm text-muted-foreground">
 					No history repository has been configured for this cluster.
 				</p>
@@ -177,7 +179,7 @@ export function RepositoryStatusSummary(props: {
 	return (
 		<section className="border-t border-border/70 pt-4">
 			<div className="flex flex-wrap items-center justify-between gap-2">
-				<h2 className="text-lg font-semibold">{title}</h2>
+				{showTitle ? <h2 className="text-lg font-semibold">{title}</h2> : null}
 				{status.partial ? (
 					<Badge variant="warning">partial</Badge>
 				) : (

@@ -19,6 +19,7 @@ import { ReadStateBanner } from "./ReadStateBanner";
 export function HistoryRepositoriesPanel(props: {
 	adminToken: string;
 	nodes: Array<{ node_id: string; node_name: string }>;
+	showTitle?: boolean;
 }) {
 	const { adminToken } = props;
 	const nodeNames = Object.fromEntries(
@@ -85,7 +86,11 @@ export function HistoryRepositoriesPanel(props: {
 	} else if (state.data) {
 		content = (
 			<>
-				<RepositoryStatusSummary status={state.data} nodeNames={nodeNames} />
+				<RepositoryStatusSummary
+					status={state.data}
+					nodeNames={nodeNames}
+					showTitle={props.showTitle}
+				/>
 				<HistoryRepositoryMembershipEditor
 					adminToken={adminToken}
 					members={state.data.items.map((item) => item.member)}

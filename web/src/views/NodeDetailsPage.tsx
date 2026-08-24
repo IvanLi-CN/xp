@@ -885,7 +885,6 @@ export function NodeDetailsPage() {
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							<div className="flex items-center justify-between gap-3">
 								<div>
-									<h2 className="xp-card-title">Service runtime</h2>
 									<p className="text-sm text-muted-foreground">
 										Live status of xp/xray/cloudflared/ddns with 7-day history
 										and key events.
@@ -1159,7 +1158,6 @@ export function NodeDetailsPage() {
 					<ModuleTabsPanel value="metadata">
 						<section className="space-y-3">
 							<div>
-								<h2 className="xp-card-title">Node metadata</h2>
 								<p className="text-sm text-muted-foreground">
 									Read-only. Managed via xp-ops config file.
 								</p>
@@ -1339,7 +1337,6 @@ export function NodeDetailsPage() {
 					<ModuleTabsPanel value="quota">
 						<section className="space-y-4">
 							<div>
-								<h2 className="xp-card-title">Quota reset</h2>
 								<p className="text-sm text-muted-foreground">
 									Runtime admin setting. Safe to edit via the admin API.
 								</p>
@@ -1546,6 +1543,7 @@ export function NodeDetailsPage() {
 									onWindowChange={(next) => prefs.setTrafficWindow(next)}
 									isFetching={trafficQuery.isFetching}
 									isWindowPending={trafficDisplay.isWindowPending}
+									showTitle={false}
 								/>
 							) : null}
 						</div>
@@ -1595,6 +1593,7 @@ export function NodeDetailsPage() {
 								<IpUsageView
 									title="IP usage"
 									description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
+									showTitle={false}
 									window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
 									geoSource={ipUsageDisplay.data.geo_source}
 									onWindowChange={setIpUsageWindow}
@@ -1664,6 +1663,7 @@ export function NodeDetailsPage() {
 									report={tcpConnectionsDisplay.data}
 									isFetching={tcpConnectionsQuery.isFetching}
 									isWindowPending={tcpConnectionsDisplay.isWindowPending}
+									showTitle={false}
 								/>
 							) : null}
 						</div>

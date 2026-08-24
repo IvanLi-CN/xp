@@ -75,6 +75,7 @@ type IpUsageViewProps = {
 	title: string;
 	description: string;
 	window: AdminIpUsageWindow;
+	showTitle?: boolean;
 	geoSource?: AdminIpGeoSource;
 	onWindowChange: (window: AdminIpUsageWindow) => void;
 	report: SharedIpUsageReport;
@@ -1653,6 +1654,7 @@ export function IpUsageView({
 	title,
 	description,
 	window,
+	showTitle = true,
 	geoSource,
 	onWindowChange,
 	report,
@@ -1789,7 +1791,9 @@ export function IpUsageView({
 			<div className="space-y-4 p-6">
 				<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 					<div>
-						<h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+						{showTitle ? (
+							<h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+						) : null}
 						<p className="text-sm opacity-70">{description}</p>
 						<p className="mt-1 text-xs opacity-60">
 							Window: {formatDateTime(report.window_start)} {"->"}{" "}

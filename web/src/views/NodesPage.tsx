@@ -315,6 +315,7 @@ export function NodesPage() {
 					<HistoryRepositoriesPanel
 						adminToken={adminToken}
 						nodes={nodesState.data?.items ?? []}
+						showTitle={false}
 					/>
 				</ModuleTabsPanel>
 			</ModuleTabsLayout>

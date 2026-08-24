@@ -213,7 +213,7 @@ export const TrafficTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
 		await expect(
-			await canvas.findByRole("heading", { name: "Traffic" }),
+			await canvas.findByRole("tab", { name: "Traffic" }),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("combobox", { name: "Traffic nodes" }),

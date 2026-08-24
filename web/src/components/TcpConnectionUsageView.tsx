@@ -45,6 +45,7 @@ type TcpConnectionUsageViewProps = {
 	>;
 	isFetching?: boolean;
 	isWindowPending?: boolean;
+	showTitle?: boolean;
 	tooltipPreviewMinute?: string | null;
 };
 
@@ -348,6 +349,7 @@ export function TcpConnectionUsageView({
 	report,
 	isFetching = false,
 	isWindowPending = false,
+	showTitle = true,
 	tooltipPreviewMinute = null,
 }: TcpConnectionUsageViewProps) {
 	const palette = useEChartsThemePalette();
@@ -618,7 +620,9 @@ export function TcpConnectionUsageView({
 		<div className="space-y-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<h2 className="xp-card-title">TCP connection count</h2>
+					{showTitle ? (
+						<h2 className="xp-card-title">TCP connection count</h2>
+					) : null}
 					<p className="text-sm text-muted-foreground">
 						Per-minute ESTABLISHED inbound TCP connections on this node&apos;s
 						business endpoint ports.
