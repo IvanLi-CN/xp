@@ -21,6 +21,9 @@ export function HistoryRepositoriesPanel(props: {
 	nodes: Array<{ node_id: string; node_name: string }>;
 }) {
 	const { adminToken } = props;
+	const nodeNames = Object.fromEntries(
+		props.nodes.map((node) => [node.node_id, node.node_name]),
+	);
 	const runtime = useAppRuntime();
 	const capability = useApiCapability("admin.history-repositories");
 	const query = useQuery({
@@ -82,7 +85,7 @@ export function HistoryRepositoriesPanel(props: {
 	} else if (state.data) {
 		content = (
 			<>
-				<RepositoryStatusSummary status={state.data} />
+				<RepositoryStatusSummary status={state.data} nodeNames={nodeNames} />
 				<HistoryRepositoryMembershipEditor
 					adminToken={adminToken}
 					members={state.data.items.map((item) => item.member)}

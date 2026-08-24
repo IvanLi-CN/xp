@@ -1054,10 +1054,6 @@
     "max_line_length": 134,
     "source_lines": 1858
   },
-  "web/src/views/NodesPage.stories.tsx": {
-    "long_line_count": 1,
-    "max_line_length": 148
-  },
   "web/src/views/NodesPage.tsx": {
     "long_line_count": 8,
     "max_line_length": 198,

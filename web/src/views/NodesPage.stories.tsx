@@ -148,19 +148,13 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 
 export const WithJoinToken: Story = {
+	parameters: {
+		router: {
+			initialEntry: "/nodes/join",
+		},
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(
-			await canvas.findAllByRole("link", { name: "Details" }),
-		).toHaveLength(2);
-		const openLinks = await canvas.findAllByRole("link", {
-			name: "Open on node",
-		});
-		await expect(openLinks).toHaveLength(2);
-		await expect(openLinks[0]).toHaveAttribute(
-			"href",
-			"https://node-a.example.invalid/iframe.html?id=pages-nodespage--with-join-token&viewMode=%7B%7BviewMode%7D%7D&login_token=storybook-admin-token",
-		);
 		await userEvent.click(
 			canvas.getByRole("button", { name: /create token/i }),
 		);
@@ -170,6 +164,42 @@ export const WithJoinToken: Story = {
 		await expect(
 			await canvas.findByText(/sudo xp-ops deploy/i),
 		).toBeInTheDocument();
+	},
+};
+
+export const HistoryRepositories: Story = {
+	parameters: {
+		router: {
+			initialEntry: "/nodes/repositories",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByRole("tab", { name: "历史仓库" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await expect(await canvas.findByText("reachable")).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(fixtureCatalog.story.nodesPagePrimaryNodeName()),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByText(fixtureCatalog.story.nodesPagePrimaryNodeId()),
+		).toBeInTheDocument();
+	},
+};
+
+export const Mobile393x852: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "nodesMobile393",
+			viewports: {
+				nodesMobile393: {
+					name: "393x852",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
 	},
 };
 

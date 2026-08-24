@@ -31,7 +31,13 @@ vi.mock("../offline/useQueryWithOfflineFallback", () => ({
 	}),
 }));
 vi.mock("./HistoryRepositoryStatus", () => ({
-	RepositoryStatusSummary: () => <div>repository summary</div>,
+	RepositoryStatusSummary: ({
+		nodeNames,
+	}: {
+		nodeNames?: Readonly<Record<string, string>>;
+	}) => (
+		<div>repository summary {nodeNames ? JSON.stringify(nodeNames) : ""}</div>
+	),
 }));
 vi.mock("./HistoryRepositoryMembershipEditor", () => ({
 	HistoryRepositoryMembershipEditor: () => <div>membership editor</div>,
@@ -46,6 +52,19 @@ describe("HistoryRepositoriesPanel", () => {
 		);
 
 		expect(screen.getByText("Offline repository status")).toBeVisible();
-		expect(screen.getByText("repository summary")).toBeVisible();
+		expect(screen.getByText(/repository summary/)).toBeVisible();
+	});
+
+	it("passes the node directory to repository status", () => {
+		render(
+			<QueryClientProvider client={createQueryClient()}>
+				<HistoryRepositoriesPanel
+					adminToken="admin-token"
+					nodes={[{ node_id: "node-a", node_name: "edge-a" }]}
+				/>
+			</QueryClientProvider>,
+		);
+
+		expect(screen.getByText(/node-a.*edge-a/)).toBeVisible();
 	});
 });

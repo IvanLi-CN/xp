@@ -224,6 +224,18 @@ const preview: Preview = {
 				component: NodesPage,
 			});
 
+			const nodesJoinRoute = createRoute({
+				getParentRoute: () => nodesRoute,
+				path: "join",
+				component: () => null,
+			});
+
+			const nodesRepositoriesRoute = createRoute({
+				getParentRoute: () => nodesRoute,
+				path: "repositories",
+				component: () => null,
+			});
+
 			const nodeDetailsRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/nodes/$nodeId",
@@ -402,9 +414,14 @@ const preview: Preview = {
 				component: DemoToolsPage,
 			});
 
+			const nodesRouteTree = nodesRoute.addChildren([
+				nodesJoinRoute,
+				nodesRepositoriesRoute,
+			]);
+
 			const appRouteTree = appRoute.addChildren([
 				dashboardRoute,
-				nodesRoute,
+				nodesRouteTree,
 				nodeDetailsRoute,
 				endpointsRoute,
 				endpointNewRoute,

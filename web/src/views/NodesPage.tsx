@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { createAdminJoinToken } from "../api/adminJoinTokens";
@@ -6,17 +7,18 @@ import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
-import { CopyButton } from "../components/CopyButton";
 import { HistoryRepositoriesPanel } from "../components/HistoryRepositoriesPanel";
+import { JoinNodePanel } from "../components/JoinNodePanel";
+import {
+	ModuleTabsLayout,
+	ModuleTabsPanel,
+} from "../components/ModuleTabsLayout";
 import { NodeInventoryList } from "../components/NodeInventoryList";
 import { PageHeader } from "../components/PageHeader";
 import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { ReadStateBanner } from "../components/ReadStateBanner";
 import { useToast } from "../components/Toast";
-import { useUiPrefs } from "../components/UiPrefs";
 import { readAdminToken } from "../components/auth";
-import { inputClass as inputControlClass } from "../components/ui-helpers";
-import { Input } from "../components/ui/input";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
 	formatSyncTimestamp,
@@ -26,14 +28,35 @@ import {
 } from "../offline/queryReadState";
 import { useQueryWithOfflineFallback } from "../offline/useQueryWithOfflineFallback";
 import { formatBackendError } from "../utils/backendErrorMessage";
-import { highlightShell } from "../utils/highlightShell";
+
+type NodesTab = "nodes" | "join" | "repositories";
+type NodesTabPath = "/nodes" | "/nodes/join" | "/nodes/repositories";
+
+const NODES_TAB_OPTIONS = [
+	{ value: "nodes", label: "节点" },
+	{ value: "join", label: "加入节点" },
+	{ value: "repositories", label: "历史仓库" },
+] satisfies Array<{ value: NodesTab; label: string }>;
+
+const NODES_TAB_PATHS: Record<NodesTab, NodesTabPath> = {
+	nodes: "/nodes",
+	join: "/nodes/join",
+	repositories: "/nodes/repositories",
+};
+
+function nodesTabFromPath(pathname: string): NodesTab {
+	if (pathname === NODES_TAB_PATHS.join) return "join";
+	if (pathname === NODES_TAB_PATHS.repositories) return "repositories";
+	return "nodes";
+}
 
 export function NodesPage() {
+	const location = useLocation();
+	const navigate = useNavigate();
 	const [adminToken] = useState(() => readAdminToken());
 	const runtime = useAppRuntime();
 	const nodesCapability = useApiCapability("admin.nodes");
 	const { pushToast } = useToast();
-	const prefs = useUiPrefs();
 	const [ttlSeconds, setTtlSeconds] = useState(3600);
 	const [joinToken, setJoinToken] = useState<string | null>(null);
 	const [joinTokenError, setJoinTokenError] = useState<string | null>(null);
@@ -233,6 +256,11 @@ export function NodesPage() {
 		latestSyncedAt !== null &&
 		(hasQueryData(nodesState) || hasQueryData(clusterInfoState)) &&
 		(!runtime.isOnline || nodesState.isError || clusterInfoState.isError);
+	const canCreateJoinToken =
+		adminToken.length > 0 &&
+		nodesCapability.available &&
+		runtime.isOnline &&
+		!runtime.isReadOnly;
 
 	return (
 		<div className="space-y-6">
@@ -255,139 +283,44 @@ export function NodesPage() {
 				/>
 			) : null}
 
-			<div className="xp-card">
-				<div className="xp-card-body space-y-4">
-					<div>
-						<h2 className="xp-card-title">Join token</h2>
-						<p className="text-sm text-muted-foreground">
-							Generate a token and share it with the node you want to join.
-						</p>
-					</div>
-					<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-						<div className="xp-field-stack">
-							<span className="text-sm font-medium">TTL (seconds)</span>
-							<Input
-								aria-label="TTL (seconds)"
-								type="number"
-								min={60}
-								step={60}
-								className={inputControlClass(prefs.density, "font-mono")}
-								value={ttlSeconds}
-								onChange={(event) => {
-									const next = Number(event.target.value);
-									setTtlSeconds(Number.isFinite(next) ? next : 0);
-								}}
-							/>
-						</div>
-						<div className="flex md:justify-end">
-							<Button
-								variant="secondary"
-								loading={isCreatingJoinToken}
-								disabled={
-									ttlSeconds <= 0 ||
-									adminToken.length === 0 ||
-									!nodesCapability.available ||
-									!runtime.isOnline ||
-									runtime.isReadOnly
-								}
-								onClick={handleCreateJoinToken}
-							>
-								Create token
-							</Button>
-						</div>
-					</div>
-					{joinTokenError ? (
-						<p className="font-mono text-sm text-destructive">
-							{joinTokenError}
-						</p>
-					) : null}
-					{joinToken ? (
-						<div className="space-y-4 rounded-2xl border border-border/60 bg-muted/35 p-4">
-							<div className="grid gap-4 lg:grid-cols-12">
-								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-6">
-									<div className="flex items-center justify-between gap-2">
-										<p className="text-xs uppercase tracking-wide text-muted-foreground">
-											Join token
-										</p>
-										<CopyButton
-											text={joinToken}
-											ariaLabel="Copy join token"
-											iconOnly
-											variant="ghost"
-											size="sm"
-										/>
-									</div>
-									<p className="break-all font-mono text-sm">{joinToken}</p>
-								</div>
+			<ModuleTabsLayout
+				options={NODES_TAB_OPTIONS}
+				value={nodesTabFromPath(location.pathname)}
+				onValueChange={(value) => {
+					if (value in NODES_TAB_PATHS) {
+						navigate({ to: NODES_TAB_PATHS[value as NodesTab] });
+					}
+				}}
+				ariaLabel="Nodes sections"
+			>
+				<ModuleTabsPanel value="nodes" keepMounted>
+					<section className="space-y-4">
+						<h2 className="text-lg font-semibold">Node inventory</h2>
+						{nodesContent}
+					</section>
+				</ModuleTabsPanel>
 
-								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-6">
-									<div className="flex items-center justify-between gap-2">
-										<p className="text-xs uppercase tracking-wide text-muted-foreground">
-											xp join command (legacy)
-										</p>
-										<CopyButton
-											text={joinCommand}
-											ariaLabel="Copy join command"
-											iconOnly
-											variant="ghost"
-											size="sm"
-										/>
-									</div>
-									<p className="break-all font-mono text-sm">{joinCommand}</p>
-								</div>
+				<ModuleTabsPanel value="join" keepMounted>
+					<JoinNodePanel
+						ttlSeconds={ttlSeconds}
+						onTtlSecondsChange={setTtlSeconds}
+						isCreatingJoinToken={isCreatingJoinToken}
+						canCreateToken={canCreateJoinToken}
+						onCreateJoinToken={handleCreateJoinToken}
+						joinTokenError={joinTokenError}
+						joinToken={joinToken}
+						joinCommand={joinCommand}
+						deployCommand={deployCommand}
+					/>
+				</ModuleTabsPanel>
 
-								<div className="space-y-3 rounded-xl border border-border/60 bg-background/70 p-4 lg:col-span-12">
-									<div className="space-y-1 min-w-0">
-										<div className="flex items-center justify-between gap-2">
-											<p className="text-xs uppercase tracking-wide text-muted-foreground">
-												xp-ops deploy command (recommended)
-											</p>
-											<CopyButton
-												text={deployCommand || ""}
-												ariaLabel="Copy deploy command"
-												iconOnly
-												variant="ghost"
-												size="sm"
-											/>
-										</div>
-										{deployCommand ? (
-											<pre className="max-h-72 overflow-auto rounded-xl border border-border/60 bg-background/80 p-3 font-mono text-sm leading-5">
-												{highlightShell(deployCommand)}
-											</pre>
-										) : (
-											<p className="text-sm text-muted-foreground">
-												Loading cluster version...
-											</p>
-										)}
-									</div>
-								</div>
-							</div>
-							<div className="text-sm text-muted-foreground">
-								<p>
-									Notes: you can override{" "}
-									<span className="font-mono">XP_REPO</span>,{" "}
-									<span className="font-mono">NODE_NAME</span>,{" "}
-									<span className="font-mono">ACCESS_HOST</span>, and{" "}
-									<span className="font-mono">API_BASE_URL</span> before running
-									the deploy command.
-								</p>
-							</div>
-						</div>
-					) : null}
-				</div>
-			</div>
-
-			<div className="xp-card">
-				<div className="xp-card-body space-y-4">
-					<h2 className="xp-card-title">Node inventory</h2>
-					{nodesContent}
-				</div>
-			</div>
-
-			<HistoryRepositoriesPanel
-				adminToken={adminToken}
-				nodes={nodesState.data?.items ?? []}
-			/>
+				<ModuleTabsPanel value="repositories" keepMounted>
+					<HistoryRepositoriesPanel
+						adminToken={adminToken}
+						nodes={nodesState.data?.items ?? []}
+					/>
+				</ModuleTabsPanel>
+			</ModuleTabsLayout>
 		</div>
 	);
 }

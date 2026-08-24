@@ -75,8 +75,10 @@ export function RepositoryMemberStatus(props: {
 	member: HistoryRepositoryMember;
 	runtime?: HistoryRepositoryRuntime;
 	compact?: boolean;
+	nodeName?: string;
 }) {
-	const { member, runtime, compact = false } = props;
+	const { member, runtime, compact = false, nodeName } = props;
+	const nodeId = member.identity.node_id;
 	return (
 		<div
 			className={[
@@ -86,7 +88,10 @@ export function RepositoryMemberStatus(props: {
 			].join(" ")}
 		>
 			<div className="min-w-0">
-				<p className="truncate font-mono text-xs">{member.identity.node_id}</p>
+				{nodeName ? <p className="truncate font-medium">{nodeName}</p> : null}
+				<p className="break-all font-mono text-xs" title={nodeId}>
+					{nodeId}
+				</p>
 				<p className="mt-1 text-xs text-muted-foreground">
 					{runtime
 						? [
@@ -150,8 +155,14 @@ export function RepositoryStatusSummary(props: {
 	status: AdminHistoryRepositoriesResponse;
 	title?: string;
 	compact?: boolean;
+	nodeNames?: Readonly<Record<string, string>>;
 }) {
-	const { status, title = "History repositories", compact = false } = props;
+	const {
+		status,
+		title = "History repositories",
+		compact = false,
+		nodeNames,
+	} = props;
 	if (!status.configured) {
 		return (
 			<section className="border-t border-border/70 pt-4">
@@ -179,6 +190,11 @@ export function RepositoryStatusSummary(props: {
 					member={item.member}
 					runtime={item.runtime}
 					compact={compact}
+					nodeName={
+						nodeNames
+							? (nodeNames[item.member.identity.node_id] ?? "未知节点")
+							: undefined
+					}
 				/>
 			))}
 			{status.partial ? (
