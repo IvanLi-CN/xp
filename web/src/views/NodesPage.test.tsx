@@ -210,9 +210,9 @@ describe("<NodesPage />", () => {
 	});
 
 	it.each([
-		["/nodes", "节点"],
-		["/nodes/join", "加入节点"],
-		["/nodes/repositories", "历史仓库"],
+		["/nodes", "Nodes"],
+		["/nodes/join", "Join node"],
+		["/nodes/repositories", "History repositories"],
 	] as const)("restores the active module tab from %s", async (path, label) => {
 		window.history.pushState({}, fixtureCatalog.host.fixture99(), path);
 		renderPage();
@@ -241,7 +241,9 @@ describe("<NodesPage />", () => {
 
 		await userEvent.click(screen.getByRole("button", { name: "Create token" }));
 		await screen.findByText("join-token-1");
-		await userEvent.click(screen.getByRole("tab", { name: "历史仓库" }));
+		await userEvent.click(
+			screen.getByRole("tab", { name: "History repositories" }),
+		);
 
 		expect(window.location.pathname).toBe("/nodes/repositories");
 		expect(screen.getByText("join-token-1")).toBeInTheDocument();

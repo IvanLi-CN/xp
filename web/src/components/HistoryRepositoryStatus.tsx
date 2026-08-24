@@ -194,7 +194,7 @@ export function RepositoryStatusSummary(props: {
 					compact={compact}
 					nodeName={
 						nodeNames
-							? (nodeNames[item.member.identity.node_id] ?? "未知节点")
+							? (nodeNames[item.member.identity.node_id] ?? "Unknown node")
 							: undefined
 					}
 				/>

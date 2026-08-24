@@ -173,10 +173,9 @@ export const HistoryRepositories: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByRole("tab", { name: "历史仓库" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
+		await expect(
+			canvas.getByRole("tab", { name: "History repositories" }),
+		).toHaveAttribute("aria-selected", "true");
 		await expect(await canvas.findByText("reachable")).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(fixtureCatalog.story.nodesPagePrimaryNodeName()),

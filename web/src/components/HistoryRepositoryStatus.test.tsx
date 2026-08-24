@@ -159,7 +159,7 @@ describe("RepositoryStatusSummary", () => {
 			/>,
 		);
 
-		expect(screen.getByText("未知节点")).toBeVisible();
+		expect(screen.getByText("Unknown node")).toBeVisible();
 		expect(screen.getByText(nodeId)).toBeVisible();
 	});
 });

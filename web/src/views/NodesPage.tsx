@@ -33,9 +33,9 @@ type NodesTab = "nodes" | "join" | "repositories";
 type NodesTabPath = "/nodes" | "/nodes/join" | "/nodes/repositories";
 
 const NODES_TAB_OPTIONS = [
-	{ value: "nodes", label: "节点" },
-	{ value: "join", label: "加入节点" },
-	{ value: "repositories", label: "历史仓库" },
+	{ value: "nodes", label: "Nodes" },
+	{ value: "join", label: "Join node" },
+	{ value: "repositories", label: "History repositories" },
 ] satisfies Array<{ value: NodesTab; label: string }>;
 
 const NODES_TAB_PATHS: Record<NodesTab, NodesTabPath> = {
