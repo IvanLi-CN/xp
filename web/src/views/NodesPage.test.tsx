@@ -223,6 +223,14 @@ describe("<NodesPage />", () => {
 		);
 	});
 
+	it("does not repeat the node inventory title below the page heading", () => {
+		renderPage();
+
+		expect(
+			screen.queryByRole("heading", { name: "Node inventory" }),
+		).not.toBeInTheDocument();
+	});
+
 	it("keeps the join token state mounted while switching module paths", async () => {
 		window.history.pushState(
 			{},

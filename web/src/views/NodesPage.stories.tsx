@@ -58,8 +58,7 @@ function UnauthorizedNodesErrorPage() {
 					description="Inspect cluster nodes and issue join tokens for new members."
 				/>
 				<section className="xp-card">
-					<div className="xp-card-body space-y-4">
-						<h2 className="xp-card-title">Node inventory</h2>
+					<div className="xp-card-body">
 						<PageState
 							variant="error"
 							title="Failed to load nodes"
@@ -91,8 +90,7 @@ function CachedUnauthorizedNodesPage() {
 					description="Last successful sync: 2026/7/30 15:00:00."
 				/>
 				<section className="xp-card">
-					<div className="xp-card-body space-y-4">
-						<h2 className="xp-card-title">Node inventory</h2>
+					<div className="xp-card-body">
 						<NodeInventoryList
 							items={cachedNodesRuntime.items}
 							partial={cachedNodesRuntime.partial}

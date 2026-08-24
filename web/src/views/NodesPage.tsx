@@ -294,10 +294,7 @@ export function NodesPage() {
 				ariaLabel="Nodes sections"
 			>
 				<ModuleTabsPanel value="nodes" keepMounted>
-					<section className="space-y-4">
-						<h2 className="text-lg font-semibold">Node inventory</h2>
-						{nodesContent}
-					</section>
+					{nodesContent}
 				</ModuleTabsPanel>
 
 				<ModuleTabsPanel value="join" keepMounted>
