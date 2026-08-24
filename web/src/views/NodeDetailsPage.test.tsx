@@ -418,7 +418,9 @@ describe("<NodeDetailsPage />", () => {
 			);
 		});
 
-		expect(await screenByText("TCP connection count")).toBeTruthy();
+		expect(
+			await screenByText(/Per-minute ESTABLISHED inbound TCP connections/i),
+		).toBeTruthy();
 		expect(
 			await screenByText(`${fixtureCatalog.endpointTag.fixture139()} :443`),
 		).toBeTruthy();

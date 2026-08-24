@@ -183,9 +183,7 @@ export const User2: Story = {
 export const AccessTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Access" }),
-		);
+		await userEvent.click(await canvas.findByRole("tab", { name: "Access" }));
 		await expect(
 			await canvas.findByText("Selected endpoints: 2", {}, { timeout: 5_000 }),
 		).toBeInTheDocument();
@@ -202,7 +200,7 @@ export const QuotaStatusTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Quota status" }),
+			await canvas.findByRole("tab", { name: "Quota status" }),
 		);
 		await expect(
 			(await canvas.findAllByText(/Remaining:/)).length,
@@ -213,11 +211,9 @@ export const QuotaStatusTab: Story = {
 export const TrafficTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Traffic" }),
-		);
+		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
 		await expect(
-			await canvas.findByRole("heading", { name: "Traffic" }),
+			await canvas.findByRole("tab", { name: "Traffic" }),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("combobox", { name: "Traffic nodes" }),
@@ -232,7 +228,7 @@ export const UsageDetailsTab: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Usage details" }),
+			await canvas.findByRole("tab", { name: "Usage details" }),
 		);
 		await expect(
 			await canvas.findByRole("tab", {
@@ -288,7 +284,7 @@ export const UsageDetailsDuplicateNames: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Usage details" }),
+			await canvas.findByRole("tab", { name: "Usage details" }),
 		);
 		await expect(
 			await canvas.findByRole("tab", {
@@ -307,7 +303,7 @@ export const UsageDetailsTab7d: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Usage details" }),
+			await canvas.findByRole("tab", { name: "Usage details" }),
 		);
 		await userEvent.click(
 			await canvas.findByRole("tab", {

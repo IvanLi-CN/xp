@@ -111,7 +111,7 @@ export const Default: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
-			await canvas.findByRole("heading", { name: /service runtime/i }),
+			await canvas.findByRole("tab", { name: "Service runtime" }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText(/^key events$/i)).toBeInTheDocument();
 	},
@@ -152,7 +152,9 @@ export const TcpConnectionsTab: Story = {
 			await canvas.findByRole("tab", { name: "TCP connections" }),
 		);
 		await expect(
-			await canvas.findByText("TCP connection count"),
+			await canvas.findByText(
+				/Per-minute ESTABLISHED inbound TCP connections/i,
+			),
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(/Connections per minute/i),
@@ -173,7 +175,7 @@ export const TrafficTab: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(await canvas.findByRole("tab", { name: "Traffic" }));
 		await expect(
-			await canvas.findByRole("heading", { name: "Traffic" }),
+			await canvas.findByRole("tab", { name: "Traffic" }),
 		).toBeInTheDocument();
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Last 31 days" }),

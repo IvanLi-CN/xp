@@ -19,6 +19,12 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 		await importOriginal<typeof import("@tanstack/react-router")>();
 	return {
 		...actual,
+		useLocation: () => ({ pathname: window.location.pathname }),
+		useNavigate:
+			() =>
+			({ to }: { to: string }) => {
+				window.history.pushState({}, "", to);
+			},
 		Link: ({
 			children,
 			to,
@@ -201,6 +207,46 @@ describe("<NodesPage />", () => {
 			`${fixtureCatalog.service.fixture178()}/?login_token=admintoken`,
 			`${fixtureCatalog.service.fixture180()}/?login_token=admintoken`,
 		]);
+	});
+
+	it.each([
+		["/nodes", "Nodes"],
+		["/nodes/join", "Join node"],
+		["/nodes/repositories", "History repositories"],
+	] as const)("restores the active module tab from %s", async (path, label) => {
+		window.history.pushState({}, fixtureCatalog.host.fixture99(), path);
+		renderPage();
+
+		expect(screen.getByRole("tab", { name: label })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+	});
+
+	it("does not repeat the node inventory title below the page heading", () => {
+		renderPage();
+
+		expect(
+			screen.queryByRole("heading", { name: "Node inventory" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps the join token state mounted while switching module paths", async () => {
+		window.history.pushState(
+			{},
+			fixtureCatalog.host.fixture99(),
+			"/nodes/join",
+		);
+		renderPage();
+
+		await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+		await screen.findByText("join-token-1");
+		await userEvent.click(
+			screen.getByRole("tab", { name: "History repositories" }),
+		);
+
+		expect(window.location.pathname).toBe("/nodes/repositories");
+		expect(screen.getByText("join-token-1")).toBeInTheDocument();
 	});
 
 	it("offers sign-in recovery for an unauthorized nodes request", async () => {

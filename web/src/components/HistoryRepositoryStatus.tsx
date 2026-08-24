@@ -75,8 +75,10 @@ export function RepositoryMemberStatus(props: {
 	member: HistoryRepositoryMember;
 	runtime?: HistoryRepositoryRuntime;
 	compact?: boolean;
+	nodeName?: string;
 }) {
-	const { member, runtime, compact = false } = props;
+	const { member, runtime, compact = false, nodeName } = props;
+	const nodeId = member.identity.node_id;
 	return (
 		<div
 			className={[
@@ -86,7 +88,10 @@ export function RepositoryMemberStatus(props: {
 			].join(" ")}
 		>
 			<div className="min-w-0">
-				<p className="truncate font-mono text-xs">{member.identity.node_id}</p>
+				{nodeName ? <p className="truncate font-medium">{nodeName}</p> : null}
+				<p className="break-all font-mono text-xs" title={nodeId}>
+					{nodeId}
+				</p>
 				<p className="mt-1 text-xs text-muted-foreground">
 					{runtime
 						? [
@@ -150,12 +155,20 @@ export function RepositoryStatusSummary(props: {
 	status: AdminHistoryRepositoriesResponse;
 	title?: string;
 	compact?: boolean;
+	nodeNames?: Readonly<Record<string, string>>;
+	showTitle?: boolean;
 }) {
-	const { status, title = "History repositories", compact = false } = props;
+	const {
+		status,
+		title = "History repositories",
+		compact = false,
+		nodeNames,
+		showTitle = true,
+	} = props;
 	if (!status.configured) {
 		return (
 			<section className="border-t border-border/70 pt-4">
-				<h2 className="text-lg font-semibold">{title}</h2>
+				{showTitle ? <h2 className="text-lg font-semibold">{title}</h2> : null}
 				<p className="mt-2 text-sm text-muted-foreground">
 					No history repository has been configured for this cluster.
 				</p>
@@ -166,7 +179,7 @@ export function RepositoryStatusSummary(props: {
 	return (
 		<section className="border-t border-border/70 pt-4">
 			<div className="flex flex-wrap items-center justify-between gap-2">
-				<h2 className="text-lg font-semibold">{title}</h2>
+				{showTitle ? <h2 className="text-lg font-semibold">{title}</h2> : null}
 				{status.partial ? (
 					<Badge variant="warning">partial</Badge>
 				) : (
@@ -179,6 +192,11 @@ export function RepositoryStatusSummary(props: {
 					member={item.member}
 					runtime={item.runtime}
 					compact={compact}
+					nodeName={
+						nodeNames
+							? (nodeNames[item.member.identity.node_id] ?? "Unknown node")
+							: undefined
+					}
 				/>
 			))}
 			{status.partial ? (

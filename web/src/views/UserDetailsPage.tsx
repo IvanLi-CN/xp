@@ -41,6 +41,10 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyButton } from "../components/CopyButton";
 import { Icon } from "../components/Icon";
 import { IpUsageView } from "../components/IpUsageView";
+import {
+	ModuleTabsLayout,
+	ModuleTabsPanel,
+} from "../components/ModuleTabsLayout";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
 import { PageHeader } from "../components/PageHeader";
@@ -78,6 +82,7 @@ import {
 } from "../offline/queryReadState";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { normalizeMihomoProfileDraftForSave } from "../utils/userMihomoProfile";
+import { USER_TAB_OPTIONS, type UserDetailsTab } from "./UserDetailsTabs";
 import { removeAdminUser, replaceAdminUser } from "./adminUsersCache";
 import { useUserRouteTransientState } from "./useUserRouteTransientState";
 import { resolveUserTrafficNodeFilter } from "./userTrafficNodeFilter";
@@ -122,9 +127,7 @@ export function UserDetailsPage() {
 	const trafficCapability = useApiCapability("admin.traffic-usage");
 	const enabledFor = (capability: { available: boolean }) =>
 		adminToken.length > 0 && capability.available;
-	const [tab, setTab] = useState<
-		"user" | "access" | "quotaStatus" | "traffic" | "usageDetails"
-	>("user");
+	const [tab, setTab] = useState<UserDetailsTab>("user");
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [activeUsageNodeId, setActiveUsageNodeId] = useState<string | null>(
 		null,
@@ -1101,618 +1104,607 @@ export function UserDetailsPage() {
 				/>
 			) : null}
 
-			<div className="overflow-x-auto">
-				<div className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm">
-					{(
-						[
-							"user",
-							"access",
-							"quotaStatus",
-							"traffic",
-							"usageDetails",
-						] as const
-					).map((item) => (
-						<Button
-							key={item}
-							type="button"
-							size="sm"
-							variant={tab === item ? "primary" : "ghost"}
-							onClick={() => setTab(item)}
+			<ModuleTabsLayout
+				options={USER_TAB_OPTIONS}
+				value={tab}
+				onValueChange={(value) => setTab(value as UserDetailsTab)}
+				ariaLabel="User detail sections"
+			>
+				<ModuleTabsPanel value="user">
+					<div className="space-y-6">
+						<section
+							aria-labelledby="user-profile-heading"
+							className="xp-card p-4 space-y-4"
 						>
-							{item === "user"
-								? "User"
-								: item === "access"
-									? "Access"
-									: item === "quotaStatus"
-										? "Quota status"
-										: item === "traffic"
-											? "Traffic"
-											: "Usage details"}
-						</Button>
-					))}
-				</div>
-			</div>
-
-			{tab === "user" ? (
-				<div className="space-y-6">
-					<section
-						aria-labelledby="user-profile-heading"
-						className="xp-card p-4 space-y-4"
-					>
-						<h3 id="user-profile-heading" className="font-semibold">
-							User profile
-						</h3>
-						<div className="xp-field-stack gap-2">
-							<span className="text-sm font-medium">Display name</span>
-							<Input
-								aria-label="Display name"
-								className={inputClassName}
-								value={displayName}
-								onChange={(event) => setDisplayName(event.target.value)}
-							/>
-						</div>
-						<div className="grid gap-3 md:grid-cols-3">
+							<h3 id="user-profile-heading" className="font-semibold">
+								User profile
+							</h3>
 							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Quota reset policy</span>
-								<Select
-									value={resetPolicy}
-									onValueChange={(value) =>
-										setResetPolicy(value as "monthly" | "unlimited")
-									}
-								>
-									<SelectTrigger
-										className={selectClassName}
-										aria-label="Quota reset policy"
+								<span className="text-sm font-medium">Display name</span>
+								<Input
+									aria-label="Display name"
+									className={inputClassName}
+									value={displayName}
+									onChange={(event) => setDisplayName(event.target.value)}
+								/>
+							</div>
+							<div className="grid gap-3 md:grid-cols-3">
+								<div className="xp-field-stack gap-2">
+									<span className="text-sm font-medium">
+										Quota reset policy
+									</span>
+									<Select
+										value={resetPolicy}
+										onValueChange={(value) =>
+											setResetPolicy(value as "monthly" | "unlimited")
+										}
 									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="monthly">monthly</SelectItem>
-										<SelectItem value="unlimited">unlimited</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">Day of month</span>
-								<Input
-									type="number"
-									className={inputClassName}
-									min={1}
-									max={31}
-									disabled={resetPolicy !== "monthly"}
-									value={resetDay}
-									onChange={(event) =>
-										setResetDay(Number(event.target.value || "1"))
-									}
-								/>
-							</div>
-							<div className="xp-field-stack gap-2">
-								<span className="text-sm font-medium">TZ offset (minutes)</span>
-								<Input
-									type="number"
-									className={inputClassName}
-									value={resetTzOffsetMinutes}
-									onChange={(event) =>
-										setResetTzOffsetMinutes(Number(event.target.value || "0"))
-									}
-								/>
-							</div>
-						</div>
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">User ID:</span>
-							<span className="font-mono">{user.user_id}</span>
-						</div>
-						<div className="flex items-center gap-3 text-sm">
-							<span className="font-medium">Subscription token:</span>
-							<span className="font-mono break-all">
-								{user.subscription_token}
-							</span>
-						</div>
-						{userSaveError ? (
-							<div className="xp-alert xp-alert-error px-4 py-2">
-								{userSaveError}
-							</div>
-						) : null}
-						<div>
-							<Button
-								onClick={saveUserProfile}
-								loading={isSavingUser}
-								disabled={runtime.isReadOnly}
-							>
-								Save user
-							</Button>
-						</div>
-					</section>
-					<section
-						aria-labelledby="mihomo-config-heading"
-						className="xp-card p-4 space-y-4"
-					>
-						<h3 id="mihomo-config-heading" className="font-semibold">
-							Mihomo configuration
-						</h3>
-						<div className="space-y-3">
-							<div className="flex flex-wrap items-end gap-3">
-								<SubscriptionFormatSegmentedControl
-									className="w-full sm:w-auto"
-									onValueChange={setSubFormat}
-									testId="subscription-format"
-									value={subFormat}
-								/>
-								{subFormat === "mihomo" ? (
-									<SubscriptionResourceMirrorToggle
-										checked={useExternalResourceMirror}
-										onCheckedChange={(checked) => {
-											setUseExternalResourceMirror(checked);
-										}}
+										<SelectTrigger
+											className={selectClassName}
+											aria-label="Quota reset policy"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="monthly">monthly</SelectItem>
+											<SelectItem value="unlimited">unlimited</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="xp-field-stack gap-2">
+									<span className="text-sm font-medium">Day of month</span>
+									<Input
+										type="number"
+										className={inputClassName}
+										min={1}
+										max={31}
+										disabled={resetPolicy !== "monthly"}
+										value={resetDay}
+										onChange={(event) =>
+											setResetDay(Number(event.target.value || "1"))
+										}
 									/>
-								) : null}
-								<CopyButton
-									text={subscriptionUrl}
-									label="Copy URL"
-									ariaLabel="Copy subscription URL"
-									className="self-end"
-								/>
-								<Button
-									className="self-end"
-									data-testid="subscription-fetch"
-									iconLeft={<Icon name="tabler:cloud-download" />}
-									loading={subLoading}
-									disabled={runtime.isReadOnly}
-									onClick={async () => {
-										setSubOpen(true);
-										await loadSubscriptionPreview();
-									}}
-								>
-									Fetch
-								</Button>
-							</div>
-							<div className="text-xs text-muted-foreground">
-								Preview opens in a modal. Mihomo uses the canonical
-								provider-backed delivery path.
-							</div>
-						</div>
-						<div className="border-t border-border/70 pt-4 space-y-3">
-							<div className="font-medium text-sm">
-								Mihomo mixin config (per user)
-							</div>
-							{mihomoProfileQuery.isLoading ? (
-								<div className="text-xs text-muted-foreground">
-									Loading profile…
 								</div>
-							) : null}
-							{mihomoProfileQuery.isError ? (
-								<div className="xp-alert xp-alert-error px-4 py-2">
-									{formatError(mihomoProfileQuery.error)}
+								<div className="xp-field-stack gap-2">
+									<span className="text-sm font-medium">
+										TZ offset (minutes)
+									</span>
+									<Input
+										type="number"
+										className={inputClassName}
+										value={resetTzOffsetMinutes}
+										onChange={(event) =>
+											setResetTzOffsetMinutes(Number(event.target.value || "0"))
+										}
+									/>
 								</div>
-							) : null}
-							<YamlCodeEditor
-								label="mixin_yaml"
-								value={mihomoMixinYaml}
-								onChange={setMihomoMixinYaml}
-								placeholder="Paste Mihomo mixin YAML"
-								minRows={14}
-								readOnly={runtime.isReadOnly}
-								showShortcutHint
-							/>
-							<YamlCodeEditor
-								label="extra_proxies_yaml"
-								value={mihomoExtraProxiesYaml}
-								onChange={setMihomoExtraProxiesYaml}
-								placeholder="- name: custom-ss\n  type: ss\n  ..."
-								minRows={8}
-								readOnly={runtime.isReadOnly}
-							/>
-							<YamlCodeEditor
-								label="extra_proxy_providers_yaml"
-								value={mihomoExtraProxyProvidersYaml}
-								onChange={setMihomoExtraProxyProvidersYaml}
-								placeholder="ProviderA:\n  type: http\n  ..."
-								minRows={8}
-								readOnly={runtime.isReadOnly}
-							/>
-							{mihomoProfileSaveError ? (
+							</div>
+							<div className="flex items-center gap-3 text-sm">
+								<span className="font-medium">User ID:</span>
+								<span className="font-mono">{user.user_id}</span>
+							</div>
+							<div className="flex items-center gap-3 text-sm">
+								<span className="font-medium">Subscription token:</span>
+								<span className="font-mono break-all">
+									{user.subscription_token}
+								</span>
+							</div>
+							{userSaveError ? (
 								<div className="xp-alert xp-alert-error px-4 py-2">
-									{mihomoProfileSaveError}
+									{userSaveError}
 								</div>
 							) : null}
 							<div>
 								<Button
-									loading={isSavingMihomoProfile}
+									onClick={saveUserProfile}
+									loading={isSavingUser}
 									disabled={runtime.isReadOnly}
-									onClick={saveUserMihomoProfile}
 								>
-									Save mihomo mixin
+									Save user
 								</Button>
 							</div>
-						</div>
-					</section>
-					<div className="xp-card p-4 space-y-3">
-						<h3 className="font-semibold">Node quotas</h3>
-						<div className="rounded-xl border border-border/70 bg-muted/35 px-4 py-2 text-sm">
-							Node quota editing is currently unavailable in this view.
-						</div>
-						{nodesQuery.isLoading && !hasQueryData(nodesQuery) ? (
-							<PageState variant="loading" title="Loading nodes" />
-						) : null}
-						{nodesQuery.isError && !hasQueryData(nodesQuery) ? (
-							<PageState
-								variant="error"
-								title="Failed to load nodes"
-								description={formatError(nodesQuery.error)}
-							/>
-						) : null}
-						{nodeQuotasQuery.isLoading && !hasQueryData(nodeQuotasQuery) ? (
-							<PageState variant="loading" title="Loading node quotas" />
-						) : null}
-						{nodeQuotasQuery.isError && !hasQueryData(nodeQuotasQuery) ? (
-							<PageState
-								variant="error"
-								title="Failed to load node quotas"
-								description={formatError(nodeQuotasQuery.error)}
-							/>
-						) : null}
-						{!nodeQuotasQuery.isLoading && !nodeQuotasQuery.isError
-							? nodeCards.map((node) => {
-									const quota = nodeQuotasByNodeId.get(node.node_id);
-									return (
-										<div
-											key={node.node_id}
-											className="flex items-center justify-between rounded-2xl border border-border/70 p-3"
-										>
-											<div>
-												<div className="font-medium">{node.node_name}</div>
-												<div className="text-xs opacity-70 font-mono">
-													{node.node_id}
-												</div>
-											</div>
-											<NodeQuotaEditor
-												value={quota?.quota_limit_bytes ?? 0}
-												onApply={() => Promise.resolve()}
-												disabled
-											/>
-										</div>
-									);
-								})
-							: null}
-					</div>
-				</div>
-			) : null}
-			{tab === "access" ? (
-				<div className="space-y-4">
-					<div className="flex items-center justify-between">
-						<div className="text-sm opacity-70">
-							Selected endpoints: {selectedEndpointIds.length}
-						</div>
-						<Button
-							onClick={applyAccessMatrix}
-							loading={isApplyingAccess}
-							disabled={!isAccessReady || runtime.isReadOnly}
+						</section>
+						<section
+							aria-labelledby="mihomo-config-heading"
+							className="xp-card p-4 space-y-4"
 						>
-							Apply access
-						</Button>
-					</div>
-
-					{accessError ? (
-						<div className="xp-alert xp-alert-error px-4 py-2">
-							{accessError}
-						</div>
-					) : null}
-					{accessSelectionHints.length > 0 ? (
-						<output
-							aria-live="polite"
-							className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
-						>
-							<Icon
-								name="tabler:info-circle"
-								size={16}
-								className="mt-0.5 shrink-0 text-primary"
-							/>
-							<div className="space-y-0.5">
-								{accessSelectionHints.map((hint) => (
-									<p key={hint}>{hint}</p>
-								))}
+							<h3 id="mihomo-config-heading" className="font-semibold">
+								Mihomo configuration
+							</h3>
+							<div className="space-y-3">
+								<div className="flex flex-wrap items-end gap-3">
+									<SubscriptionFormatSegmentedControl
+										className="w-full sm:w-auto"
+										onValueChange={setSubFormat}
+										testId="subscription-format"
+										value={subFormat}
+									/>
+									{subFormat === "mihomo" ? (
+										<SubscriptionResourceMirrorToggle
+											checked={useExternalResourceMirror}
+											onCheckedChange={(checked) => {
+												setUseExternalResourceMirror(checked);
+											}}
+										/>
+									) : null}
+									<CopyButton
+										text={subscriptionUrl}
+										label="Copy URL"
+										ariaLabel="Copy subscription URL"
+										className="self-end"
+									/>
+									<Button
+										className="self-end"
+										data-testid="subscription-fetch"
+										iconLeft={<Icon name="tabler:cloud-download" />}
+										loading={subLoading}
+										disabled={runtime.isReadOnly}
+										onClick={async () => {
+											setSubOpen(true);
+											await loadSubscriptionPreview();
+										}}
+									>
+										Fetch
+									</Button>
+								</div>
+								<div className="text-xs text-muted-foreground">
+									Preview opens in a modal. Mihomo uses the canonical
+									provider-backed delivery path.
+								</div>
 							</div>
-						</output>
-					) : null}
-					{isAccessDataLoading &&
-					(!hasQueryData(nodesQuery) ||
-						!hasQueryData(endpointsQuery) ||
-						!hasQueryData(accessQuery)) ? (
-						<PageState variant="loading" title="Loading access matrix" />
-					) : null}
-					{accessDataError &&
-					(!hasQueryData(nodesQuery) ||
-						!hasQueryData(endpointsQuery) ||
-						!hasQueryData(accessQuery)) ? (
-						<div className="space-y-3">
-							<PageState
-								variant="error"
-								title="Failed to load access matrix"
-								description={accessDataError}
-							/>
-							<Button variant="ghost" onClick={() => void retryAccessData()}>
-								Retry access data
+							<div className="border-t border-border/70 pt-4 space-y-3">
+								<div className="font-medium text-sm">
+									Mihomo mixin config (per user)
+								</div>
+								{mihomoProfileQuery.isLoading ? (
+									<div className="text-xs text-muted-foreground">
+										Loading profile…
+									</div>
+								) : null}
+								{mihomoProfileQuery.isError ? (
+									<div className="xp-alert xp-alert-error px-4 py-2">
+										{formatError(mihomoProfileQuery.error)}
+									</div>
+								) : null}
+								<YamlCodeEditor
+									label="mixin_yaml"
+									value={mihomoMixinYaml}
+									onChange={setMihomoMixinYaml}
+									placeholder="Paste Mihomo mixin YAML"
+									minRows={14}
+									readOnly={runtime.isReadOnly}
+									showShortcutHint
+								/>
+								<YamlCodeEditor
+									label="extra_proxies_yaml"
+									value={mihomoExtraProxiesYaml}
+									onChange={setMihomoExtraProxiesYaml}
+									placeholder="- name: custom-ss\n  type: ss\n  ..."
+									minRows={8}
+									readOnly={runtime.isReadOnly}
+								/>
+								<YamlCodeEditor
+									label="extra_proxy_providers_yaml"
+									value={mihomoExtraProxyProvidersYaml}
+									onChange={setMihomoExtraProxyProvidersYaml}
+									placeholder="ProviderA:\n  type: http\n  ..."
+									minRows={8}
+									readOnly={runtime.isReadOnly}
+								/>
+								{mihomoProfileSaveError ? (
+									<div className="xp-alert xp-alert-error px-4 py-2">
+										{mihomoProfileSaveError}
+									</div>
+								) : null}
+								<div>
+									<Button
+										loading={isSavingMihomoProfile}
+										disabled={runtime.isReadOnly}
+										onClick={saveUserMihomoProfile}
+									>
+										Save mihomo mixin
+									</Button>
+								</div>
+							</div>
+						</section>
+						<div className="xp-card p-4 space-y-3">
+							<h3 className="font-semibold">Node quotas</h3>
+							<div className="rounded-xl border border-border/70 bg-muted/35 px-4 py-2 text-sm">
+								Node quota editing is currently unavailable in this view.
+							</div>
+							{nodesQuery.isLoading && !hasQueryData(nodesQuery) ? (
+								<PageState variant="loading" title="Loading nodes" />
+							) : null}
+							{nodesQuery.isError && !hasQueryData(nodesQuery) ? (
+								<PageState
+									variant="error"
+									title="Failed to load nodes"
+									description={formatError(nodesQuery.error)}
+								/>
+							) : null}
+							{nodeQuotasQuery.isLoading && !hasQueryData(nodeQuotasQuery) ? (
+								<PageState variant="loading" title="Loading node quotas" />
+							) : null}
+							{nodeQuotasQuery.isError && !hasQueryData(nodeQuotasQuery) ? (
+								<PageState
+									variant="error"
+									title="Failed to load node quotas"
+									description={formatError(nodeQuotasQuery.error)}
+								/>
+							) : null}
+							{!nodeQuotasQuery.isLoading && !nodeQuotasQuery.isError
+								? nodeCards.map((node) => {
+										const quota = nodeQuotasByNodeId.get(node.node_id);
+										return (
+											<div
+												key={node.node_id}
+												className="flex items-center justify-between rounded-2xl border border-border/70 p-3"
+											>
+												<div>
+													<div className="font-medium">{node.node_name}</div>
+													<div className="text-xs opacity-70 font-mono">
+														{node.node_id}
+													</div>
+												</div>
+												<NodeQuotaEditor
+													value={quota?.quota_limit_bytes ?? 0}
+													onApply={() => Promise.resolve()}
+													disabled
+												/>
+											</div>
+										);
+									})
+								: null}
+						</div>
+					</div>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="access">
+					<div className="space-y-4">
+						<div className="flex items-center justify-between">
+							<div className="text-sm opacity-70">
+								Selected endpoints: {selectedEndpointIds.length}
+							</div>
+							<Button
+								onClick={applyAccessMatrix}
+								loading={isApplyingAccess}
+								disabled={!isAccessReady || runtime.isReadOnly}
+							>
+								Apply access
 							</Button>
 						</div>
-					) : null}
-					{!isAccessDataLoading && !accessDataError ? (
-						<AccessMatrix
-							nodes={(nodesQuery.data?.items ?? []).map((node) => ({
-								nodeId: node.node_id,
-								label: node.node_name,
-								details: (
-									<div className="space-y-0.5">
-										<div className="text-xs text-muted-foreground">
-											{accessNodeRemainingText(node.node_id)}
+
+						{accessError ? (
+							<div className="xp-alert xp-alert-error px-4 py-2">
+								{accessError}
+							</div>
+						) : null}
+						{accessSelectionHints.length > 0 ? (
+							<output
+								aria-live="polite"
+								className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
+							>
+								<Icon
+									name="tabler:info-circle"
+									size={16}
+									className="mt-0.5 shrink-0 text-primary"
+								/>
+								<div className="space-y-0.5">
+									{accessSelectionHints.map((hint) => (
+										<p key={hint}>{hint}</p>
+									))}
+								</div>
+							</output>
+						) : null}
+						{isAccessDataLoading &&
+						(!hasQueryData(nodesQuery) ||
+							!hasQueryData(endpointsQuery) ||
+							!hasQueryData(accessQuery)) ? (
+							<PageState variant="loading" title="Loading access matrix" />
+						) : null}
+						{accessDataError &&
+						(!hasQueryData(nodesQuery) ||
+							!hasQueryData(endpointsQuery) ||
+							!hasQueryData(accessQuery)) ? (
+							<div className="space-y-3">
+								<PageState
+									variant="error"
+									title="Failed to load access matrix"
+									description={accessDataError}
+								/>
+								<Button variant="ghost" onClick={() => void retryAccessData()}>
+									Retry access data
+								</Button>
+							</div>
+						) : null}
+						{!isAccessDataLoading && !accessDataError ? (
+							<AccessMatrix
+								nodes={(nodesQuery.data?.items ?? []).map((node) => ({
+									nodeId: node.node_id,
+									label: node.node_name,
+									details: (
+										<div className="space-y-0.5">
+											<div className="text-xs text-muted-foreground">
+												{accessNodeRemainingText(node.node_id)}
+											</div>
 										</div>
-									</div>
-								),
-							}))}
-							protocols={PROTOCOLS.map((protocol) => ({
-								protocolId: protocol.protocolId,
-								label: protocol.label,
-							}))}
-							cells={cells}
-							disabled={
-								isAccessDataLoading || !isAccessReady || runtime.isReadOnly
-							}
-							onToggleCell={(nodeId, protocolId) =>
-								toggleCell(nodeId, protocolId as SupportedProtocolId)
-							}
-							onToggleRow={toggleRow}
-							onToggleColumn={(protocolId) =>
-								toggleColumn(protocolId as SupportedProtocolId)
-							}
-							onToggleAll={toggleAll}
-							onToggleCellEndpoint={(nodeId, protocolId, endpointId, checked) =>
-								toggleCellEndpoint(
+									),
+								}))}
+								protocols={PROTOCOLS.map((protocol) => ({
+									protocolId: protocol.protocolId,
+									label: protocol.label,
+								}))}
+								cells={cells}
+								disabled={
+									isAccessDataLoading || !isAccessReady || runtime.isReadOnly
+								}
+								onToggleCell={(nodeId, protocolId) =>
+									toggleCell(nodeId, protocolId as SupportedProtocolId)
+								}
+								onToggleRow={toggleRow}
+								onToggleColumn={(protocolId) =>
+									toggleColumn(protocolId as SupportedProtocolId)
+								}
+								onToggleAll={toggleAll}
+								onToggleCellEndpoint={(
 									nodeId,
-									protocolId as SupportedProtocolId,
+									protocolId,
 									endpointId,
 									checked,
-								)
-							}
-						/>
-					) : null}
-				</div>
-			) : null}
-			{tab === "traffic" ? (
-				<div className="space-y-4">
-					{trafficQuery.isLoading && !trafficDisplay.data ? (
-						<PageState
-							variant="loading"
-							title="Loading traffic"
-							description="Fetching actual user traffic across the selected nodes."
-						/>
-					) : null}
-					{!trafficDisplay.data &&
-					queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
-						<PageState
-							variant="offline"
-							title="Offline traffic cache unavailable"
-							description="Open this tab while online to keep the latest traffic report available offline."
-							action={trafficNodeSelector}
-						/>
-					) : null}
-					{trafficQuery.isError &&
-					!trafficDisplay.data &&
-					!queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
-						<QueryErrorState
-							title="Failed to load traffic"
-							description={formatError(trafficQuery.error)}
-							error={trafficQuery.error}
-							loading={trafficQuery.isFetching}
-							onRetry={() => trafficQuery.refetch()}
-							beforeRetry={trafficNodeSelector}
-						/>
-					) : null}
-					{trafficQuery.isError && trafficDisplay.data ? (
-						<QueryRefreshError
-							title="Traffic refresh failed"
-							description={formatError(trafficQuery.error)}
-							error={trafficQuery.error}
-							loading={trafficQuery.isFetching}
-							onRetry={() => trafficQuery.refetch()}
-						/>
-					) : null}
-					{trafficDisplay.data ? (
-						<TrafficView
-							report={{
-								...trafficDisplay.data.traffic,
-								partial:
-									trafficDisplay.data.traffic.partial ||
-									trafficDisplay.data.partial,
-								warnings: [
-									...trafficDisplay.data.traffic.warnings,
-									...(trafficDisplay.data.unreachable_nodes.length > 0
-										? [
-												`Unreachable nodes: ${trafficDisplay.data.unreachable_nodes.join(", ")}`,
-											]
-										: []),
-								],
-							}}
-							window={trafficDisplay.displayWindow ?? prefs.trafficWindow}
-							onWindowChange={(next) => prefs.setTrafficWindow(next)}
-							isFetching={trafficQuery.isFetching}
-							isWindowPending={trafficDisplay.isWindowPending}
-							nodeSelector={trafficNodeSelector}
-						/>
-					) : null}
-				</div>
-			) : null}
-			{tab === "usageDetails" ? (
-				<div className="space-y-4">
-					{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
-						<PageState
-							variant="loading"
-							title="Loading usage details"
-							description="Fetching minute-level inbound IP usage grouped by node."
-						/>
-					) : null}
-					{!ipUsageDisplay.data &&
-					queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
-						<PageState
-							variant="offline"
-							title="Offline usage cache unavailable"
-							description="Open this usage tab while online to keep the latest inbound IP timeline available offline."
-						/>
-					) : null}
-					{ipUsageQuery.isError &&
-					!ipUsageDisplay.data &&
-					!queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
-						<QueryErrorState
-							title="Failed to load usage details"
-							description={formatError(ipUsageQuery.error)}
-							error={ipUsageQuery.error}
-							loading={ipUsageQuery.isFetching}
-							onRetry={() => ipUsageQuery.refetch()}
-						/>
-					) : null}
-					{ipUsageQuery.isError && ipUsageDisplay.data ? (
-						<QueryRefreshError
-							title="Usage details refresh failed"
-							description={formatError(ipUsageQuery.error)}
-							error={ipUsageQuery.error}
-							loading={ipUsageQuery.isFetching}
-							onRetry={() => ipUsageQuery.refetch()}
-						/>
-					) : null}
-					{ipUsageDisplay.data?.partial ? (
-						<div className="xp-alert xp-alert-warning px-4 py-2">
-							<div className="space-y-1">
-								<div>Usage details are partial.</div>
-								<div className="font-mono text-xs">
-									Unreachable nodes:{" "}
-									{ipUsageDisplay.data.unreachable_nodes.join(", ")}
-								</div>
-							</div>
-						</div>
-					) : null}
-					{ipUsageDisplay.data ? (
-						usageGroups.length > 0 ? (
-							<div className="space-y-4">
-								<div className="overflow-x-auto">
-									<div
-										className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
-										role="tablist"
-										aria-label="Usage detail nodes"
-									>
-										{usageGroups.map((group) => {
-											const selected =
-												group.node.node_id === activeUsageGroup?.node.node_id;
-											const label =
-												usageTabLabels.get(group.node.node_id) ??
-												group.node.node_name;
-											return (
-												<Button
-													key={group.node.node_id}
-													type="button"
-													size="sm"
-													variant={selected ? "primary" : "ghost"}
-													role="tab"
-													aria-selected={selected}
-													title={`${group.node.node_name} · ${group.node.node_id}`}
-													onClick={() =>
-														setActiveUsageNodeId(group.node.node_id)
-													}
-												>
-													{label}
-												</Button>
-											);
-										})}
+								) =>
+									toggleCellEndpoint(
+										nodeId,
+										protocolId as SupportedProtocolId,
+										endpointId,
+										checked,
+									)
+								}
+							/>
+						) : null}
+					</div>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="traffic">
+					<div className="space-y-4">
+						{trafficQuery.isLoading && !trafficDisplay.data ? (
+							<PageState
+								variant="loading"
+								title="Loading traffic"
+								description="Fetching actual user traffic across the selected nodes."
+							/>
+						) : null}
+						{!trafficDisplay.data &&
+						queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
+							<PageState
+								variant="offline"
+								title="Offline traffic cache unavailable"
+								description="Open this tab while online to keep the latest traffic report available offline."
+								action={trafficNodeSelector}
+							/>
+						) : null}
+						{trafficQuery.isError &&
+						!trafficDisplay.data &&
+						!queryIsOfflineBlocked(trafficQuery, runtime.isOnline) ? (
+							<QueryErrorState
+								title="Failed to load traffic"
+								description={formatError(trafficQuery.error)}
+								error={trafficQuery.error}
+								loading={trafficQuery.isFetching}
+								onRetry={() => trafficQuery.refetch()}
+								beforeRetry={trafficNodeSelector}
+							/>
+						) : null}
+						{trafficQuery.isError && trafficDisplay.data ? (
+							<QueryRefreshError
+								title="Traffic refresh failed"
+								description={formatError(trafficQuery.error)}
+								error={trafficQuery.error}
+								loading={trafficQuery.isFetching}
+								onRetry={() => trafficQuery.refetch()}
+							/>
+						) : null}
+						{trafficDisplay.data ? (
+							<TrafficView
+								report={{
+									...trafficDisplay.data.traffic,
+									partial:
+										trafficDisplay.data.traffic.partial ||
+										trafficDisplay.data.partial,
+									warnings: [
+										...trafficDisplay.data.traffic.warnings,
+										...(trafficDisplay.data.unreachable_nodes.length > 0
+											? [
+													`Unreachable nodes: ${trafficDisplay.data.unreachable_nodes.join(", ")}`,
+												]
+											: []),
+									],
+								}}
+								window={trafficDisplay.displayWindow ?? prefs.trafficWindow}
+								onWindowChange={(next) => prefs.setTrafficWindow(next)}
+								isFetching={trafficQuery.isFetching}
+								isWindowPending={trafficDisplay.isWindowPending}
+								showTitle={false}
+								nodeSelector={trafficNodeSelector}
+							/>
+						) : null}
+					</div>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="usageDetails">
+					<div className="space-y-4">
+						{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
+							<PageState
+								variant="loading"
+								title="Loading usage details"
+								description="Fetching minute-level inbound IP usage grouped by node."
+							/>
+						) : null}
+						{!ipUsageDisplay.data &&
+						queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
+							<PageState
+								variant="offline"
+								title="Offline usage cache unavailable"
+								description="Open this usage tab while online to keep the latest inbound IP timeline available offline."
+							/>
+						) : null}
+						{ipUsageQuery.isError &&
+						!ipUsageDisplay.data &&
+						!queryIsOfflineBlocked(ipUsageQuery, runtime.isOnline) ? (
+							<QueryErrorState
+								title="Failed to load usage details"
+								description={formatError(ipUsageQuery.error)}
+								error={ipUsageQuery.error}
+								loading={ipUsageQuery.isFetching}
+								onRetry={() => ipUsageQuery.refetch()}
+							/>
+						) : null}
+						{ipUsageQuery.isError && ipUsageDisplay.data ? (
+							<QueryRefreshError
+								title="Usage details refresh failed"
+								description={formatError(ipUsageQuery.error)}
+								error={ipUsageQuery.error}
+								loading={ipUsageQuery.isFetching}
+								onRetry={() => ipUsageQuery.refetch()}
+							/>
+						) : null}
+						{ipUsageDisplay.data?.partial ? (
+							<div className="xp-alert xp-alert-warning px-4 py-2">
+								<div className="space-y-1">
+									<div>Usage details are partial.</div>
+									<div className="font-mono text-xs">
+										Unreachable nodes:{" "}
+										{ipUsageDisplay.data.unreachable_nodes.join(", ")}
 									</div>
 								</div>
-								{activeUsageGroup ? (
-									<IpUsageView
-										title={`Usage details · ${activeUsageGroup.node.node_name}`}
-										description={`${activeUsageGroup.node.node_id} · ${activeUsageGroup.node.access_host || activeUsageGroup.node.api_base_url || "local node"}`}
-										window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
-										geoSource={activeUsageGroup.geo_source}
-										onWindowChange={setIpUsageWindow}
-										report={activeUsageGroup}
-										isFetching={ipUsageQuery.isFetching}
-										isWindowPending={ipUsageDisplay.isWindowPending}
-										emptyTitle="No inbound IP activity for this node"
-									/>
-								) : null}
 							</div>
-						) : ipUsageDisplay.data.partial ? (
+						) : null}
+						{ipUsageDisplay.data ? (
+							usageGroups.length > 0 ? (
+								<div className="space-y-4">
+									<div className="overflow-x-auto">
+										<div
+											className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-border/70 bg-card p-1 shadow-sm"
+											role="tablist"
+											aria-label="Usage detail nodes"
+										>
+											{usageGroups.map((group) => {
+												const selected =
+													group.node.node_id === activeUsageGroup?.node.node_id;
+												const label =
+													usageTabLabels.get(group.node.node_id) ??
+													group.node.node_name;
+												return (
+													<Button
+														key={group.node.node_id}
+														type="button"
+														size="sm"
+														variant={selected ? "primary" : "ghost"}
+														role="tab"
+														aria-selected={selected}
+														title={`${group.node.node_name} · ${group.node.node_id}`}
+														onClick={() =>
+															setActiveUsageNodeId(group.node.node_id)
+														}
+													>
+														{label}
+													</Button>
+												);
+											})}
+										</div>
+									</div>
+									{activeUsageGroup ? (
+										<IpUsageView
+											title={`Usage details · ${activeUsageGroup.node.node_name}`}
+											description={`${activeUsageGroup.node.node_id} · ${
+												activeUsageGroup.node.access_host ||
+												activeUsageGroup.node.api_base_url ||
+												"local node"
+											}`}
+											window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
+											geoSource={activeUsageGroup.geo_source}
+											onWindowChange={setIpUsageWindow}
+											report={activeUsageGroup}
+											isFetching={ipUsageQuery.isFetching}
+											isWindowPending={ipUsageDisplay.isWindowPending}
+											emptyTitle="No inbound IP activity for this node"
+										/>
+									) : null}
+								</div>
+							) : ipUsageDisplay.data.partial ? (
+								<PageState
+									variant="empty"
+									title="Usage details unavailable"
+									description="All nodes for this user's inbound IP usage are currently unreachable."
+								/>
+							) : (
+								<PageState
+									variant="empty"
+									title="No usage groups"
+									description="This user has no active node memberships to aggregate inbound IP usage from."
+								/>
+							)
+						) : null}
+					</div>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="quotaStatus">
+					<div className="xp-card p-4 space-y-3">
+						{nodeQuotaStatusQuery.isLoading &&
+						!hasQueryData(nodeQuotaStatusQuery) ? (
+							<PageState variant="loading" title="Loading quota status" />
+						) : null}
+						{!hasQueryData(nodeQuotaStatusQuery) &&
+						queryIsOfflineBlocked(nodeQuotaStatusQuery, runtime.isOnline) ? (
 							<PageState
-								variant="empty"
-								title="Usage details unavailable"
-								description="All nodes for this user's inbound IP usage are currently unreachable."
+								variant="offline"
+								title="Offline quota cache unavailable"
+								description="Open the quota status tab while online to keep the latest remaining-quota snapshot available offline."
 							/>
-						) : (
-							<PageState
-								variant="empty"
-								title="No usage groups"
-								description="This user has no active node memberships to aggregate inbound IP usage from."
+						) : null}
+						{nodeQuotaStatusQuery.isError &&
+						!hasQueryData(nodeQuotaStatusQuery) ? (
+							<QueryErrorState
+								title="Failed to load quota status"
+								description={formatError(nodeQuotaStatusQuery.error)}
+								error={nodeQuotaStatusQuery.error}
+								loading={nodeQuotaStatusQuery.isFetching}
+								onRetry={() => nodeQuotaStatusQuery.refetch()}
 							/>
-						)
-					) : null}
-				</div>
-			) : null}
-			{tab === "quotaStatus" ? (
-				<div className="xp-card p-4 space-y-3">
-					{nodeQuotaStatusQuery.isLoading &&
-					!hasQueryData(nodeQuotaStatusQuery) ? (
-						<PageState variant="loading" title="Loading quota status" />
-					) : null}
-					{!hasQueryData(nodeQuotaStatusQuery) &&
-					queryIsOfflineBlocked(nodeQuotaStatusQuery, runtime.isOnline) ? (
-						<PageState
-							variant="offline"
-							title="Offline quota cache unavailable"
-							description="Open the quota status tab while online to keep the latest remaining-quota snapshot available offline."
-						/>
-					) : null}
-					{nodeQuotaStatusQuery.isError &&
-					!hasQueryData(nodeQuotaStatusQuery) ? (
-						<QueryErrorState
-							title="Failed to load quota status"
-							description={formatError(nodeQuotaStatusQuery.error)}
-							error={nodeQuotaStatusQuery.error}
-							loading={nodeQuotaStatusQuery.isFetching}
-							onRetry={() => nodeQuotaStatusQuery.refetch()}
-						/>
-					) : null}
-					{nodeQuotaStatusQuery.data?.partial ? (
-						<div className="xp-alert xp-alert-warning px-4 py-2">
-							<div className="space-y-1">
-								<div>Quota status is partial.</div>
-								<div className="font-mono text-xs">
-									Unreachable nodes:{" "}
-									{nodeQuotaStatusQuery.data.unreachable_nodes.join(", ")}
+						) : null}
+						{nodeQuotaStatusQuery.data?.partial ? (
+							<div className="xp-alert xp-alert-warning px-4 py-2">
+								<div className="space-y-1">
+									<div>Quota status is partial.</div>
+									<div className="font-mono text-xs">
+										Unreachable nodes:{" "}
+										{nodeQuotaStatusQuery.data.unreachable_nodes.join(", ")}
+									</div>
 								</div>
 							</div>
-						</div>
-					) : null}
-					{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => {
-						const isUnlimited = item.quota_limit_bytes === 0;
-						const quotaLimitText = isUnlimited
-							? "unlimited"
-							: formatQuotaBytesHuman(item.quota_limit_bytes);
-						const remainingText = isUnlimited
-							? "unlimited"
-							: formatQuotaBytesHuman(item.remaining_bytes);
-						return (
-							<div
-								key={`${item.node_id}::${item.user_id}`}
-								className="rounded-2xl border border-border/70 p-3 space-y-1"
-							>
-								<div className="font-medium">{item.node_id}</div>
-								<div className="text-sm">
-									Used {formatQuotaBytesHuman(item.used_bytes)} /{" "}
-									{quotaLimitText}
+						) : null}
+						{(nodeQuotaStatusQuery.data?.items ?? []).map((item) => {
+							const isUnlimited = item.quota_limit_bytes === 0;
+							const quotaLimitText = isUnlimited
+								? "unlimited"
+								: formatQuotaBytesHuman(item.quota_limit_bytes);
+							const remainingText = isUnlimited
+								? "unlimited"
+								: formatQuotaBytesHuman(item.remaining_bytes);
+							return (
+								<div
+									key={`${item.node_id}::${item.user_id}`}
+									className="rounded-2xl border border-border/70 p-3 space-y-1"
+								>
+									<div className="font-medium">{item.node_id}</div>
+									<div className="text-sm">
+										Used {formatQuotaBytesHuman(item.used_bytes)} /{" "}
+										{quotaLimitText}
+									</div>
+									<div className="text-sm opacity-70">
+										Remaining: {remainingText}
+									</div>
 								</div>
-								<div className="text-sm opacity-70">
-									Remaining: {remainingText}
-								</div>
-							</div>
-						);
-					})}
-				</div>
-			) : null}
+							);
+						})}
+					</div>
+				</ModuleTabsPanel>
+			</ModuleTabsLayout>
 
 			<SubscriptionPreviewDialog
 				open={isCurrentTransientState && subOpen}

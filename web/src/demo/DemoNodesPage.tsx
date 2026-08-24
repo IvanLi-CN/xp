@@ -1,19 +1,55 @@
-import { Link, useParams } from "@tanstack/react-router";
+import {
+	Link,
+	useLocation,
+	useNavigate,
+	useParams,
+} from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 
 import { Button } from "../components/Button";
+import {
+	ModuleTabsLayout,
+	ModuleTabsPanel,
+} from "../components/ModuleTabsLayout";
 import { PageHeader } from "../components/PageHeader";
 import { PageState } from "../components/PageState";
 import { Input } from "../components/ui/input";
 import { formatGb, nodeStatusVariant, shortDate } from "./format";
 import { useDemo } from "./store";
 
+type DemoNodesTab = "nodes" | "join" | "repositories";
+type DemoNodesTabPath =
+	| "/demo/nodes"
+	| "/demo/nodes/join"
+	| "/demo/nodes/repositories";
+
+const DEMO_NODES_TABS = [
+	{ value: "nodes", label: "Nodes" },
+	{ value: "join", label: "Join node" },
+	{ value: "repositories", label: "History repositories" },
+] satisfies Array<{ value: DemoNodesTab; label: string }>;
+
+const DEMO_NODES_TAB_PATHS: Record<DemoNodesTab, DemoNodesTabPath> = {
+	nodes: "/demo/nodes",
+	join: "/demo/nodes/join",
+	repositories: "/demo/nodes/repositories",
+};
+
+function demoNodesTabFromPath(pathname: string): DemoNodesTab {
+	if (pathname === DEMO_NODES_TAB_PATHS.join) return "join";
+	if (pathname === DEMO_NODES_TAB_PATHS.repositories) return "repositories";
+	return "nodes";
+}
+
 export function DemoNodesPage() {
+	const location = useLocation();
+	const navigate = useNavigate();
 	const { state } = useDemo();
 	const [query, setQuery] = useState("");
 	const [status, setStatus] = useState("all");
+	const activeTab = demoNodesTabFromPath(location.pathname);
 	const nodes = useMemo(() => {
 		const q = query.trim().toLowerCase();
 		return state.nodes.filter((node) => {
@@ -26,6 +62,10 @@ export function DemoNodesPage() {
 			return matchesQuery && matchesStatus;
 		});
 	}, [query, state.nodes, status]);
+	const handleTabChange = (value: string) => {
+		if (!(value in DEMO_NODES_TAB_PATHS)) return;
+		void navigate({ to: DEMO_NODES_TAB_PATHS[value as DemoNodesTab] });
+	};
 
 	return (
 		<div className="space-y-6">
@@ -34,18 +74,56 @@ export function DemoNodesPage() {
 				description="Inspect runtime state, role, quota pressure, and access hosts."
 			/>
 
+			<ModuleTabsLayout
+				options={DEMO_NODES_TABS}
+				value={activeTab}
+				onValueChange={handleTabChange}
+				ariaLabel="Nodes sections"
+				mobileAriaLabel="Nodes section"
+			>
+				<ModuleTabsPanel value="nodes" keepMounted>
+					<NodesInventoryPanel
+						nodes={nodes}
+						query={query}
+						status={status}
+						onQueryChange={setQuery}
+						onStatusChange={setStatus}
+					/>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="join" keepMounted>
+					<DemoJoinNodePanel
+						canCreateToken={state.session?.role !== "viewer"}
+					/>
+				</ModuleTabsPanel>
+				<ModuleTabsPanel value="repositories" keepMounted>
+					<DemoHistoryRepositoriesPanel nodes={state.nodes} />
+				</ModuleTabsPanel>
+			</ModuleTabsLayout>
+		</div>
+	);
+}
+
+function NodesInventoryPanel(props: {
+	nodes: ReturnType<typeof useDemo>["state"]["nodes"];
+	query: string;
+	status: string;
+	onQueryChange: (value: string) => void;
+	onStatusChange: (value: string) => void;
+}) {
+	return (
+		<div className="space-y-4">
 			<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem]">
 				<Input
-					value={query}
-					onChange={(event) => setQuery(event.target.value)}
+					value={props.query}
+					onChange={(event) => props.onQueryChange(event.target.value)}
 					placeholder="Search node, host, or region"
 					aria-label="Search nodes"
 				/>
 				<select
 					className="xp-select"
-					value={status}
+					value={props.status}
 					aria-label="Filter node status"
-					onChange={(event) => setStatus(event.target.value)}
+					onChange={(event) => props.onStatusChange(event.target.value)}
 				>
 					<option value="all">All statuses</option>
 					<option value="healthy">Healthy</option>
@@ -54,13 +132,13 @@ export function DemoNodesPage() {
 				</select>
 			</div>
 
-			{nodes.length === 0 ? (
+			{props.nodes.length === 0 ? (
 				<PageState
 					variant="empty"
 					title="No matching nodes"
 					description="Clear the search or switch the scenario seed."
 					action={
-						<Button variant="secondary" onClick={() => setQuery("")}>
+						<Button variant="secondary" onClick={() => props.onQueryChange("")}>
 							Clear search
 						</Button>
 					}
@@ -79,7 +157,7 @@ export function DemoNodesPage() {
 							</tr>
 						</thead>
 						<tbody>
-							{nodes.map((node) => (
+							{props.nodes.map((node) => (
 								<tr key={node.id}>
 									<td>
 										<Link
@@ -113,6 +191,95 @@ export function DemoNodesPage() {
 				</div>
 			)}
 		</div>
+	);
+}
+
+function DemoJoinNodePanel(props: { canCreateToken: boolean }) {
+	const [ttlSeconds, setTtlSeconds] = useState("3600");
+	const [joinToken, setJoinToken] = useState<string | null>(null);
+
+	return (
+		<section className="space-y-4">
+			<div>
+				<h2 className="text-lg font-semibold">Create a join token</h2>
+				<p className="text-sm text-muted-foreground">
+					Generate a token and share it with the node you want to join.
+				</p>
+			</div>
+			<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+				<div className="xp-field-stack">
+					<label className="text-sm font-medium" htmlFor="demo-join-ttl">
+						TTL (seconds)
+					</label>
+					<Input
+						id="demo-join-ttl"
+						type="number"
+						min={60}
+						step={60}
+						value={ttlSeconds}
+						onChange={(event) => setTtlSeconds(event.target.value)}
+					/>
+				</div>
+				<Button
+					variant="secondary"
+					disabled={!props.canCreateToken || Number(ttlSeconds) <= 0}
+					onClick={() => setJoinToken(`demo-join-${ttlSeconds}`)}
+				>
+					Create token
+				</Button>
+			</div>
+			{joinToken ? (
+				<div className="space-y-2 border-t border-border/70 pt-4">
+					<p className="text-xs uppercase tracking-wide text-muted-foreground">
+						Join token
+					</p>
+					<p className="break-all font-mono text-sm">{joinToken}</p>
+				</div>
+			) : null}
+		</section>
+	);
+}
+
+function DemoHistoryRepositoriesPanel(props: {
+	nodes: ReturnType<typeof useDemo>["state"]["nodes"];
+}) {
+	return (
+		<section className="space-y-4">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<p className="text-sm text-muted-foreground">Replica status</p>
+				<Badge variant="success">reachable</Badge>
+			</div>
+			<div className="divide-y divide-border/70 border-y border-border/70">
+				{props.nodes.map((node) => (
+					<div
+						key={node.id}
+						className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+					>
+						<div>
+							<p className="font-medium">{node.name}</p>
+							<p className="font-mono text-xs text-muted-foreground">
+								{node.id}
+							</p>
+							<p className="mt-2 text-sm text-muted-foreground">
+								{node.status} · {formatGb(node.quotaUsedGb)} used
+							</p>
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<Badge
+								variant={node.status === "healthy" ? "success" : "warning"}
+							>
+								{node.status === "healthy" ? "converged" : "degraded"}
+							</Badge>
+							<span className="font-mono text-xs text-muted-foreground">
+								{node.quotaLimitGb === null
+									? "unlimited quota"
+									: `${formatGb(node.quotaLimitGb)} quota`}
+							</span>
+						</div>
+					</div>
+				))}
+			</div>
+		</section>
 	);
 }
 

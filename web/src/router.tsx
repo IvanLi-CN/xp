@@ -178,6 +178,18 @@ const nodesRoute = createRoute({
 	component: NodesPage,
 });
 
+const nodesJoinRoute = createRoute({
+	getParentRoute: () => nodesRoute,
+	path: "join",
+	component: () => null,
+});
+
+const nodesRepositoriesRoute = createRoute({
+	getParentRoute: () => nodesRoute,
+	path: "repositories",
+	component: () => null,
+});
+
 const nodeDetailsRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/nodes/$nodeId",
@@ -290,6 +302,18 @@ const demoNodesRoute = createRoute({
 	component: DemoNodesPage,
 });
 
+const demoNodesJoinRoute = createRoute({
+	getParentRoute: () => demoNodesRoute,
+	path: "join",
+	component: () => null,
+});
+
+const demoNodesRepositoriesRoute = createRoute({
+	getParentRoute: () => demoNodesRoute,
+	path: "repositories",
+	component: () => null,
+});
+
 const demoNodeDetailsRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/nodes/$nodeId",
@@ -368,10 +392,15 @@ const demoToolsRoute = createRoute({
 	component: DemoToolsPage,
 });
 
+const nodesRouteTree = nodesRoute.addChildren([
+	nodesJoinRoute,
+	nodesRepositoriesRoute,
+]);
+
 const appRouteTree = appRoute.addChildren([
 	dashboardRoute,
 	systemStatusRoute,
-	nodesRoute,
+	nodesRouteTree,
 	nodeDetailsRoute,
 	endpointsRoute,
 	endpointNewRoute,
@@ -388,10 +417,15 @@ const appRouteTree = appRoute.addChildren([
 
 const demoLoginRouteTree = demoLoginRootRoute.addChildren([demoLoginPageRoute]);
 
+const demoNodesRouteTree = demoNodesRoute.addChildren([
+	demoNodesJoinRoute,
+	demoNodesRepositoriesRoute,
+]);
+
 const demoAppRouteTree = demoAppRoute.addChildren([
 	demoDashboardRoute,
 	demoSystemStatusRoute,
-	demoNodesRoute,
+	demoNodesRouteTree,
 	demoNodeDetailsRoute,
 	demoEndpointsRoute,
 	demoEndpointNewRoute,

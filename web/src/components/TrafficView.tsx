@@ -44,6 +44,7 @@ type TrafficViewProps = {
 	onWindowChange: (window: TrafficWindow) => void;
 	isFetching?: boolean;
 	isWindowPending?: boolean;
+	showTitle?: boolean;
 	nodeSelector?: ReactNode;
 	tooltipPreviewIndex?: number | null;
 };
@@ -186,6 +187,7 @@ export function TrafficView({
 	onWindowChange,
 	isFetching,
 	isWindowPending = false,
+	showTitle = true,
 	nodeSelector,
 	tooltipPreviewIndex = null,
 }: TrafficViewProps) {
@@ -294,7 +296,7 @@ export function TrafficView({
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<h2 className="xp-card-title">Traffic</h2>
+					{showTitle ? <h2 className="xp-card-title">Traffic</h2> : null}
 					<p className="text-sm text-muted-foreground">
 						Actual uplink and downlink bytes from Xray membership counters.
 					</p>

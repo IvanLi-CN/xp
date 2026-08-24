@@ -92,4 +92,74 @@ describe("RepositoryStatusSummary", () => {
 		expect(screen.getByText("Ready")).toBeVisible();
 		expect(screen.getByTitle("ed25519-public-key-material")).toBeVisible();
 	});
+
+	it("renders a known node name with its full identity", () => {
+		const nodeId = fixtureCatalog.nodeId.fixture32();
+		render(
+			<RepositoryStatusSummary
+				nodeNames={{ [fixtureCatalog.nodeId.fixture32()]: "edge-a" }}
+				status={{
+					configured: true,
+					partial: false,
+					unreachable_node_ids: [],
+					items: [
+						{
+							member: {
+								identity: {
+									node_id: fixtureCatalog.nodeId.fixture32(),
+									ed25519_public_key: "ed25519-key",
+									x25519_relay_public_key: "x25519-key",
+								},
+								lifecycle: "ready",
+								replica_converged: true,
+								capacity: {
+									quota_bytes: 10 * 1024 ** 3,
+									used_bytes: 1024,
+									filesystem_available_bytes: 1024 ** 3,
+								},
+							},
+						},
+					],
+				}}
+			/>,
+		);
+
+		expect(screen.getByText("edge-a")).toBeVisible();
+		expect(screen.getByText(nodeId)).toBeVisible();
+	});
+
+	it("labels an unmapped directory entry as unknown while retaining its ID", () => {
+		const nodeId = fixtureCatalog.nodeId.fixture36();
+		render(
+			<RepositoryStatusSummary
+				nodeNames={{}}
+				status={{
+					configured: true,
+					partial: false,
+					unreachable_node_ids: [],
+					items: [
+						{
+							member: {
+								identity: {
+									node_id: fixtureCatalog.nodeId.fixture36(),
+									ed25519_public_key: "ed25519-key",
+									x25519_relay_public_key: "x25519-key",
+								},
+								lifecycle: "ready",
+								replica_converged: true,
+								capacity: {
+									quota_bytes: 10 * 1024 ** 3,
+									used_bytes: 1024,
+									filesystem_available_bytes: 1024 ** 3,
+								},
+							},
+						},
+					],
+				}}
+			/>,
+		);
+
+		expect(screen.getByText("Unknown node")).toBeVisible();
+		expect(screen.getByText(nodeId)).toBeVisible();
+	});
 });

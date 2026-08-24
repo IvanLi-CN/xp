@@ -1140,7 +1140,16 @@ rules: []
 
 async function screenByRole(role: string, name: string): Promise<HTMLElement> {
 	const { findByRole } = await import("@testing-library/react");
-	return findByRole(document.body, role as never, { name });
+	const moduleTabNames = new Set([
+		"User",
+		"Access",
+		"Quota status",
+		"Traffic",
+		"Usage details",
+	]);
+	const resolvedRole =
+		role === "button" && moduleTabNames.has(name) ? "tab" : role;
+	return findByRole(document.body, resolvedRole as never, { name });
 }
 
 async function screenByLabel(label: string): Promise<HTMLElement> {

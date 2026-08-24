@@ -32,6 +32,10 @@ import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { IpUsageView } from "../components/IpUsageView";
+import {
+	ModuleTabsLayout,
+	ModuleTabsPanel,
+} from "../components/ModuleTabsLayout";
 import { NodeQuotaEditor } from "../components/NodeQuotaEditor";
 import { NodeRepositoryQuality } from "../components/NodeRepositoryHistoryQuality";
 import { useObjectNavigationDirtySections } from "../components/ObjectNavigationGuard";
@@ -64,7 +68,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useNodeTimeWindowReports } from "../hooks/useNodeTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -870,51 +873,18 @@ export function NodeDetailsPage() {
 
 		return (
 			<div className="space-y-4">
-				<Tabs
-					className="sm:space-y-3"
+				<ModuleTabsLayout
+					options={NODE_DETAILS_TAB_OPTIONS}
 					value={activeTab}
 					onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
+					ariaLabel="Node details sections"
+					mobileAriaLabel="Node details section"
 				>
-					<div className="pb-3 sm:hidden">
-						<Select
-							value={activeTab}
-							onValueChange={(value) => setActiveTab(value as NodeDetailsTab)}
-						>
-							<SelectTrigger aria-label="Node details section">
-								<SelectValue placeholder="Select section" />
-							</SelectTrigger>
-							<SelectContent>
-								{NODE_DETAILS_TAB_OPTIONS.map((option) => (
-									<SelectItem key={option.value} value={option.value}>
-										{option.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-					<div className="hidden sm:block">
-						<TabsList
-							className="h-auto max-w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/70 bg-card p-0.5 sm:p-1 shadow-sm"
-							aria-label="Node details sections"
-						>
-							{NODE_DETAILS_TAB_OPTIONS.map((option) => (
-								<TabsTrigger
-									key={option.value}
-									value={option.value}
-									className="min-h-11 flex-1 basis-[calc(50%-0.125rem)] whitespace-nowrap px-2.5 sm:min-h-8 sm:flex-none sm:basis-auto sm:px-3"
-									onClick={() => setActiveTab(option.value)}
-								>
-									{option.label}
-								</TabsTrigger>
-							))}
-						</TabsList>
-					</div>
-					{activeTab === "runtime" ? (
+					<ModuleTabsPanel value="runtime">
 						<section className="space-y-4">
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							<div className="flex items-center justify-between gap-3">
 								<div>
-									<h2 className="xp-card-title">Service runtime</h2>
 									<p className="text-sm text-muted-foreground">
 										Live status of xp/xray/cloudflared/ddns with 7-day history
 										and key events.
@@ -1183,12 +1153,11 @@ export function NodeDetailsPage() {
 								</>
 							) : null}
 						</section>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "metadata" ? (
+					<ModuleTabsPanel value="metadata">
 						<section className="space-y-3">
 							<div>
-								<h2 className="xp-card-title">Node metadata</h2>
 								<p className="text-sm text-muted-foreground">
 									Read-only. Managed via xp-ops config file.
 								</p>
@@ -1363,12 +1332,11 @@ export function NodeDetailsPage() {
 								.
 							</div>
 						</section>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "quota" ? (
+					<ModuleTabsPanel value="quota">
 						<section className="space-y-4">
 							<div>
-								<h2 className="xp-card-title">Quota reset</h2>
 								<p className="text-sm text-muted-foreground">
 									Runtime admin setting. Safe to edit via the admin API.
 								</p>
@@ -1528,9 +1496,9 @@ export function NodeDetailsPage() {
 								</form>
 							</Form>
 						</section>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "traffic" ? (
+					<ModuleTabsPanel value="traffic">
 						<div className="space-y-4">
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{trafficQuery.isLoading && !trafficDisplay.data ? (
@@ -1575,12 +1543,13 @@ export function NodeDetailsPage() {
 									onWindowChange={(next) => prefs.setTrafficWindow(next)}
 									isFetching={trafficQuery.isFetching}
 									isWindowPending={trafficDisplay.isWindowPending}
+									showTitle={false}
 								/>
 							) : null}
 						</div>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "ipUsage" ? (
+					<ModuleTabsPanel value="ipUsage">
 						<div className="space-y-4">
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{ipUsageQuery.isLoading && !ipUsageDisplay.data ? (
@@ -1624,6 +1593,7 @@ export function NodeDetailsPage() {
 								<IpUsageView
 									title="IP usage"
 									description="Per-minute unique inbound IP counts, occupancy lanes, and aggregated IP rows for this node."
+									showTitle={false}
 									window={ipUsageDisplay.displayWindow ?? ipUsageWindow}
 									geoSource={ipUsageDisplay.data.geo_source}
 									onWindowChange={setIpUsageWindow}
@@ -1634,9 +1604,9 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 						</div>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "tcpConnections" ? (
+					<ModuleTabsPanel value="tcpConnections">
 						<div className="space-y-4">
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />
 							{tcpConnectionsQuery.isLoading && !tcpConnectionsDisplay.data ? (
@@ -1693,12 +1663,13 @@ export function NodeDetailsPage() {
 									report={tcpConnectionsDisplay.data}
 									isFetching={tcpConnectionsQuery.isFetching}
 									isWindowPending={tcpConnectionsDisplay.isWindowPending}
+									showTitle={false}
 								/>
 							) : null}
 						</div>
-					) : null}
+					</ModuleTabsPanel>
 
-					{activeTab === "danger" ? (
+					<ModuleTabsPanel value="danger">
 						<section className="space-y-4">
 							<NodeDeleteOperationStatus
 								operation={pendingDeleteOperation}
@@ -1724,8 +1695,8 @@ export function NodeDetailsPage() {
 								</Button>
 							</div>
 						</section>
-					) : null}
-				</Tabs>
+					</ModuleTabsPanel>
+				</ModuleTabsLayout>
 
 				<ConfirmDialog
 					open={deleteOpen}
