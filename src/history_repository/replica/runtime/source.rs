@@ -517,8 +517,12 @@ impl RepositoryReplicaRuntime {
         &mut self,
         delivered_wire: &[u8],
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         if self.remove_local_source_pending_segment(delivered_wire)? {
-            self.persist_control_state()?;
+            if let Err(error) = self.persist_control_state() {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
             if self.storage.is_sqlite() {
                 self.storage
                     .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(

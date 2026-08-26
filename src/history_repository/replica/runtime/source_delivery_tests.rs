@@ -250,6 +250,53 @@ fn source_journal_rejects_out_of_order_acknowledgement() {
 }
 
 #[test]
+fn source_journal_ack_write_failure_preserves_pending_segment_for_retry() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    let queued = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity,
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:retry".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            1,
+        )
+        .expect("queue source segment")
+        .expect("queued source segment");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    storage
+        .set_query_only_for_test(true)
+        .expect("enable SQLite write failure");
+
+    assert!(
+        runtime
+            .acknowledge_local_source_segment(&queued.wire)
+            .is_err()
+    );
+    assert_eq!(runtime.local_source_pending_segments().len(), 1);
+    assert_eq!(storage.source_delivery_journal().unwrap().len(), 1);
+
+    storage
+        .set_query_only_for_test(false)
+        .expect("disable SQLite write failure");
+    runtime
+        .acknowledge_local_source_segment(&queued.wire)
+        .expect("retry source acknowledgement");
+    assert!(runtime.local_source_pending_segments().is_empty());
+    assert!(storage.source_delivery_journal().unwrap().is_empty());
+}
+
+#[test]
 fn source_journal_replays_rows_beyond_the_bounded_restart_window() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = SigningKey::from_bytes(&[11; 32]);
