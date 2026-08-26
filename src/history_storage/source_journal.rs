@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::history_sync::SignedSegment;
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
 use super::*;
@@ -95,6 +96,27 @@ impl HistoryStorage {
             .map_err(sqlite_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error)
+    }
+
+    pub(crate) fn source_delivery_journal_max_epoch(&self) -> Result<Option<u64>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(None);
+        };
+        let mut statement = connection
+            .prepare("SELECT wire FROM source_delivery_journal")
+            .map_err(sqlite_error)?;
+        let mut rows = statement.query([]).map_err(sqlite_error)?;
+        let mut max_epoch = None;
+        while let Some(row) = rows.next().map_err(sqlite_error)? {
+            let wire: Vec<u8> = row.get(0).map_err(sqlite_error)?;
+            let segment = SignedSegment::from_wire(&wire).map_err(|error| {
+                HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
+            })?;
+            let epoch = segment.canonical().first_cursor().source_epoch();
+            max_epoch = Some(max_epoch.map_or(epoch, |current: u64| current.max(epoch)));
+        }
+        Ok(max_epoch)
     }
 
     pub(crate) fn acknowledge_source_delivery_journal(&self, ids: &[String]) -> Result<()> {

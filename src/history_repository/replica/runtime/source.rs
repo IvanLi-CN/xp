@@ -517,7 +517,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         delivered_wire: &[u8],
     ) -> Result<(), RepositoryRuntimeError> {
-        if self.remove_local_source_pending_segment(delivered_wire) {
+        if self.remove_local_source_pending_segment(delivered_wire)? {
             self.persist_control_state()?;
             if self.storage.is_sqlite() {
                 self.storage
@@ -540,7 +540,7 @@ impl RepositoryReplicaRuntime {
         page_cursor: Option<String>,
         completed: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        if !self.remove_local_source_pending_segment(delivered_wire) {
+        if !self.remove_local_source_pending_segment(delivered_wire)? {
             return Err(RepositoryRuntimeError::Storage(
                 "local history backfill acknowledgement was not pending".to_owned(),
             ));
@@ -618,11 +618,18 @@ impl RepositoryReplicaRuntime {
             ));
         }
         for segment in delivered_segments {
-            if !self.remove_local_source_pending_segment(&segment.wire) {
-                self.snapshot = previous_snapshot;
-                return Err(RepositoryRuntimeError::Storage(
-                    "local history backfill acknowledgement was not pending".to_owned(),
-                ));
+            match self.remove_local_source_pending_segment(&segment.wire) {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.snapshot = previous_snapshot;
+                    return Err(RepositoryRuntimeError::Storage(
+                        "local history backfill acknowledgement was not pending".to_owned(),
+                    ));
+                }
+                Err(error) => {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
             }
         }
         self.snapshot.local_history_backfill_cursor = page_cursor;
@@ -644,19 +651,29 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
-    fn remove_local_source_pending_segment(&mut self, delivered_wire: &[u8]) -> bool {
-        let mut acknowledged = false;
+    fn remove_local_source_pending_segment(
+        &mut self,
+        delivered_wire: &[u8],
+    ) -> Result<bool, RepositoryRuntimeError> {
         for stream in self.snapshot.local_source.streams.values_mut() {
-            if stream
+            let Some(index) = stream
                 .pending
-                .front()
-                .is_some_and(|pending| pending.wire == delivered_wire)
+                .iter()
+                .position(|pending| pending.wire == delivered_wire)
+            else {
+                continue;
+            };
+            if index != 0 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source delivery acknowledgement arrived out of order".to_owned(),
+                ));
+            }
             {
                 stream.pending.pop_front();
-                acknowledged = true;
+                return Ok(true);
             }
         }
-        acknowledged
+        Ok(false)
     }
 
     pub(crate) fn begin_source_dynamic_relay_attempt(

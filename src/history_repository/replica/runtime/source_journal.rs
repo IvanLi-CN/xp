@@ -28,6 +28,10 @@ impl RepositoryReplicaRuntime {
         if !legacy_rows.is_empty() {
             self.snapshot.local_source.clear_pending();
         }
+        let max_epoch = self
+            .storage
+            .source_delivery_journal_max_epoch()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let rows = self
             .storage
             .source_delivery_journal_page(256)
@@ -36,11 +40,7 @@ impl RepositoryReplicaRuntime {
         // records in a fresh epoch so the replayed journal and new observations cannot reuse a
         // cursor range. The durable epoch metadata is advanced by the next normal checkpoint.
         if self.snapshot.local_source.epoch == 0
-            && let Some(max_epoch) = rows
-                .iter()
-                .filter_map(|row| SignedSegment::from_wire(&row.wire).ok())
-                .map(|segment| segment.canonical().first_cursor().source_epoch())
-                .max()
+            && let Some(max_epoch) = max_epoch
         {
             self.snapshot.local_source.epoch = max_epoch.saturating_add(1).max(1);
             if let Some(row) = rows.first() {

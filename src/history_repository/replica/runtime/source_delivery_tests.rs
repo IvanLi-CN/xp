@@ -1,4 +1,5 @@
 use super::*;
+use sha2::Sha256;
 
 #[test]
 fn syncing_tombstone_receipt_is_deferred_until_repository_is_ready() {
@@ -98,4 +99,107 @@ fn source_backlog_does_not_become_a_permanent_gap_when_delivery_is_delayed() {
     assert_eq!(storage.source_delivery_journal().unwrap().len(), 8);
     assert_eq!(restored.local_source_next_sequence("runtime"), Some(9));
     assert_eq!(restored.local_source_pending_segments().len(), 1);
+}
+
+#[test]
+fn source_journal_epoch_recovery_scans_beyond_the_replay_page() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+
+    for sequence in 0..256_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+    let high_epoch = i64::MAX as u64;
+    let high_epoch_segment = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", high_epoch, "runtime", 0).expect("cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"high-epoch".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        10_000,
+        10_001,
+    )
+    .expect("high epoch segment")
+    .sign(&key)
+    .expect("high epoch signature");
+    let high_epoch_wire = high_epoch_segment.wire_bytes().expect("high epoch wire");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    storage
+        .append_source_delivery_journal(&[
+            crate::state::history_storage::SourceDeliveryJournalRow {
+                id: hex::encode(Sha256::digest(&high_epoch_wire)),
+                stream: "runtime".to_owned(),
+                closed_at_unix_seconds: 10_001,
+                identity: source_identity,
+                wire: high_epoch_wire,
+            },
+        ])
+        .expect("append high epoch journal row");
+    storage
+        .write(crate::state::history_storage::REPOSITORY_REPLICA_KEY, b"{}")
+        .expect("simulate lost control snapshot");
+
+    let restored = load(temporary.path());
+    assert_eq!(restored.snapshot.local_source.epoch(), high_epoch + 1);
+}
+
+#[test]
+fn source_journal_rejects_out_of_order_acknowledgement() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    for sequence in 0..2_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let journal = storage.source_delivery_journal().expect("read journal");
+    assert!(
+        runtime
+            .acknowledge_local_source_segment(&journal[1].wire)
+            .is_err()
+    );
+    assert_eq!(storage.source_delivery_journal().unwrap().len(), 2);
+    assert_eq!(runtime.local_source_pending_segments().len(), 1);
 }
