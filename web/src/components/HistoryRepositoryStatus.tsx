@@ -291,7 +291,7 @@ export function RepositoryQueryQuality(props: {
 											`${gap.permanent ? "permanent" : "repairing"}${
 												gap.reason ? ` (${gap.reason})` : ""
 											}: ${timeRange(gap.range)}`,
-										)
+									)
 									.join("; ")}
 						{history.gaps.length > gaps.length
 							? ` +${history.gaps.length - gaps.length}`
