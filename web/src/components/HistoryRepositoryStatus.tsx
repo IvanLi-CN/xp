@@ -286,13 +286,13 @@ export function RepositoryQueryQuality(props: {
 						{gaps.length === 0
 							? "none"
 							: gaps
-										.map(
-											(gap) =>
-												`${gap.permanent ? "permanent" : "repairing"}${
-													gap.reason ? ` (${gap.reason})` : ""
-												}: ${timeRange(gap.range)}`,
+									.map(
+										(gap) =>
+											`${gap.permanent ? "permanent" : "repairing"}${
+												gap.reason ? ` (${gap.reason})` : ""
+											}: ${timeRange(gap.range)}`,
 										)
-										.join("; ")}
+									.join("; ")}
 						{history.gaps.length > gaps.length
 							? ` +${history.gaps.length - gaps.length}`
 							: ""}

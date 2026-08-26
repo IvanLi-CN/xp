@@ -111,9 +111,9 @@ export const SourceBacklogged: Story = {
 								pending_bytes: 128 * 1024,
 								oldest_pending_cursor: "node-a/4/runtime/3993",
 								oldest_pending_age_seconds: 900,
-								},
-							}
-						: undefined,
+							},
+						}
+					: undefined,
 			})),
 		},
 	},
