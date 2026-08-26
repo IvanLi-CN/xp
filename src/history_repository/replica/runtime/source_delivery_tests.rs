@@ -290,3 +290,66 @@ fn source_journal_replays_rows_beyond_the_bounded_restart_window() {
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     assert!(storage.source_delivery_journal().unwrap().is_empty());
 }
+
+#[test]
+fn source_journal_restarts_same_timestamp_segments_in_cursor_order() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let rows = (0..32_u64)
+        .map(|sequence| {
+            let segment = CanonicalSegment::new(
+                "cluster-a",
+                Cursor::new("node-a", 7, "runtime", sequence).expect("cursor"),
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                None,
+                100,
+                100,
+            )
+            .expect("segment")
+            .sign(&key)
+            .expect("signature");
+            let wire = segment.wire_bytes().expect("wire");
+            crate::state::history_storage::SourceDeliveryJournalRow {
+                id: hex::encode(Sha256::digest(&wire)),
+                stream: "runtime".to_owned(),
+                closed_at_unix_seconds: 100,
+                identity: source_identity.clone(),
+                wire,
+            }
+        })
+        .collect::<Vec<_>>();
+    storage
+        .append_source_delivery_journal(&rows)
+        .expect("append same timestamp rows");
+    storage
+        .write(crate::state::history_storage::REPOSITORY_REPLICA_KEY, b"{}")
+        .expect("simulate lost control snapshot");
+
+    let mut restored = load(temporary.path());
+    for sequence in 0..32_u64 {
+        let front = restored
+            .local_source_pending_segments()
+            .into_iter()
+            .next()
+            .expect("pending segment");
+        let actual = SignedSegment::from_wire(&front.wire)
+            .expect("signed segment")
+            .canonical()
+            .first_cursor()
+            .sequence();
+        assert_eq!(actual, sequence);
+        restored
+            .acknowledge_local_source_segment(&front.wire)
+            .expect("acknowledge segment");
+    }
+}

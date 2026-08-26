@@ -5,6 +5,38 @@ use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
 use super::*;
 
+pub(super) fn ensure_source_delivery_journal_columns(connection: &Connection) -> Result<()> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(source_delivery_journal)")
+        .map_err(sqlite_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()
+        .map_err(sqlite_error)?;
+    for (name, definition) in [
+        ("source_node_id", "TEXT NOT NULL DEFAULT ''"),
+        ("source_epoch", "INTEGER NOT NULL DEFAULT 0"),
+        ("first_sequence", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !columns.contains(name) {
+            connection
+                .execute(
+                    &format!("ALTER TABLE source_delivery_journal ADD COLUMN {name} {definition}"),
+                    [],
+                )
+                .map_err(sqlite_error)?;
+        }
+    }
+    connection
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS source_delivery_journal_cursor_order
+               ON source_delivery_journal
+                  (stream, source_node_id, source_epoch, first_sequence, created_at, id);",
+        )
+        .map_err(sqlite_error)
+}
+
 /// A signed source segment that has not yet been acknowledged by every required repository.
 /// The payload is kept in SQLite so a control snapshot cannot grow with a delivery outage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,11 +98,13 @@ impl HistoryStorage {
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(Vec::new());
         };
+        repair_source_delivery_journal_order(connection)?;
         let mut statement = connection
             .prepare(
                 "SELECT id, stream, closed_at, identity, wire
                  FROM source_delivery_journal
-                 ORDER BY (stream = 'tombstone') DESC, created_at, id
+                 ORDER BY (stream = 'tombstone') DESC, source_node_id, source_epoch,
+                          stream, first_sequence, created_at, id
                  LIMIT ?1",
             )
             .map_err(sqlite_error)?;
@@ -147,16 +181,24 @@ fn insert_journal_rows(
     for row in rows {
         let identity = serde_json::to_vec(&row.identity)
             .map_err(|error| HistoryStorageError(error.to_string()))?;
+        let segment = SignedSegment::from_wire(&row.wire).map_err(|error| {
+            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
+        })?;
+        let cursor = segment.canonical().first_cursor();
         transaction
             .execute(
                 "INSERT INTO source_delivery_journal
-                     (id, stream, closed_at, identity, wire, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                      stream = excluded.stream,
                      closed_at = excluded.closed_at,
                      identity = excluded.identity,
-                     wire = excluded.wire",
+                     wire = excluded.wire,
+                     source_node_id = excluded.source_node_id,
+                     source_epoch = excluded.source_epoch,
+                     first_sequence = excluded.first_sequence",
                 params![
                     row.id,
                     row.stream,
@@ -164,9 +206,54 @@ fn insert_journal_rows(
                     identity,
                     row.wire,
                     durable_i64(row.closed_at_unix_seconds, "journal created_at")?,
+                    cursor.source_node_id(),
+                    durable_i64(cursor.source_epoch(), "journal source epoch")?,
+                    durable_i64(cursor.sequence(), "journal first sequence")?,
                 ],
             )
             .map_err(sqlite_error)?;
     }
     Ok(())
+}
+
+fn repair_source_delivery_journal_order(connection: &mut rusqlite::Connection) -> Result<()> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, wire FROM source_delivery_journal
+                 WHERE source_node_id = ''",
+            )
+            .map_err(sqlite_error)?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .map_err(sqlite_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?
+    };
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(sqlite_error)?;
+    for (id, wire) in rows {
+        let segment = SignedSegment::from_wire(&wire).map_err(|error| {
+            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
+        })?;
+        let cursor = segment.canonical().first_cursor();
+        transaction
+            .execute(
+                "UPDATE source_delivery_journal
+                 SET source_node_id = ?1, source_epoch = ?2, first_sequence = ?3
+                 WHERE id = ?4",
+                params![
+                    cursor.source_node_id(),
+                    durable_i64(cursor.source_epoch(), "journal source epoch")?,
+                    durable_i64(cursor.sequence(), "journal first sequence")?,
+                    id,
+                ],
+            )
+            .map_err(sqlite_error)?;
+    }
+    transaction.commit().map_err(sqlite_error)
 }
