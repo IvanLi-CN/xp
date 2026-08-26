@@ -1,3 +1,4 @@
+use super::super::StoredRecord;
 use super::*;
 use sha2::Sha256;
 
@@ -352,4 +353,67 @@ fn source_journal_restarts_same_timestamp_segments_in_cursor_order() {
             .acknowledge_local_source_segment(&front.wire)
             .expect("acknowledge segment");
     }
+}
+
+#[test]
+fn migration_fallback_preserves_legacy_source_delivery_pending_rows() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = load(temporary.path());
+    let queued = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity,
+            &key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"pending-before-fallback".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            100,
+        )
+        .expect("queue source segment")
+        .expect("queued source segment");
+    runtime.snapshot.records.push(StoredRecord {
+        observed_at_unix_seconds: 100,
+        received_at_unix_seconds: 100,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: i64::MAX as u64 + 1,
+        stream: "runtime".to_owned(),
+        sequence: 0,
+        subject_node_id: "node-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"invalid-migration-epoch".to_vec(),
+        payload: b"sample".to_vec(),
+        tombstone: false,
+    });
+    let snapshot = serde_json::to_vec(&runtime.snapshot).expect("serialize legacy snapshot");
+    storage
+        .write(
+            crate::state::history_storage::REPOSITORY_REPLICA_KEY,
+            &snapshot,
+        )
+        .expect("write legacy snapshot");
+    drop(runtime);
+
+    let reloaded = RepositoryReplicaRuntime::load(storage.clone()).expect("fallback load");
+    drop(reloaded);
+    drop(storage);
+
+    let fallback_storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let restored = RepositoryReplicaRuntime::load(fallback_storage).expect("reload JSON fallback");
+    let front = restored
+        .local_source_pending_segments()
+        .into_iter()
+        .next()
+        .expect("pending row survives fallback");
+    assert_eq!(front.wire, queued.wire);
 }

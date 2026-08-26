@@ -430,7 +430,6 @@ impl RepositoryReplicaRuntime {
             #[cfg(test)]
             capacity_override: None,
         };
-        runtime.hydrate_source_delivery_journal()?;
         if let Err(error) = runtime.migrate_history_to_sqlite() {
             if runtime.snapshot.external_history || !runtime.storage.degrade_to_json() {
                 return Err(error);
@@ -440,6 +439,7 @@ impl RepositoryReplicaRuntime {
                 "repository history migration failed; continuing with JSON history"
             );
         }
+        runtime.hydrate_source_delivery_journal()?;
         Ok(runtime)
     }
 
