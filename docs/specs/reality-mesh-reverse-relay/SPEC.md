@@ -12,7 +12,8 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - 在 Raft DesiredState 中保存一次性的 `reverse_mesh_epoch` 与每个 target 的确定性双 Rendezvous assignment。
 - 只选择当前 voter、具备静态 capability、signed Xray readiness 和 managed VLESS endpoint 的 Rendezvous；target 自身不要求 managed endpoint。
 - 使用上游 Xray 动态 Handler/Routing API、固定本地 SOCKS5 portal 和 reqwest HTTP/2 prior knowledge，不手写 H2C、CONNECT 或 Xray fork。
-- 以 `Reality Direct -> Reverse Relay -> Public/API` 顺序覆盖 health、Raft、内部 Admin fan-out、SSE 和 history direct path；失败时保持现有 `outcome_unknown` 与幂等语义。
+- 为 health、Raft、内部 Admin fan-out、SSE 和 history 提供 Reverse Relay；各调用方保留既有
+  peer-direct 选择，只有 direct 路径未成功时才使用 Reverse，并保持现有 `outcome_unknown` 与幂等语义。
 - Reverse 只承载 authenticated XP control-plane HTTP，禁止通用 VPN、任意 TCP/UDP、用户流量和递归中继。
 - 为 generation drain、Xray worker tombstone、受控重启、fresh join、host-managed systemd/OpenRC 与 single-image container 提供确定性降级。
 - 以 additive status API 和紧凑 System Status 行显示 `reality_direct|reverse_relay|public`，不新增手动选路控件。
@@ -51,7 +52,10 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。
   R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
 - 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
-- Direct/Reverse/Public 顺序固定。Reality 与 Reverse 各占 `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/首字节后不换路；不安全重试返回 `outcome_unknown`。
+- 对采用 `Reality Direct -> Reverse Relay -> Public/API` 的控制面调用，Reality 与 Reverse 各占
+  `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/
+  首字节后不换路；不安全重试返回 `outcome_unknown`。history 使用自己的同级 Mesh/Tunnel direct
+  选择，随后 Reverse，再使用动态 relay。
 - assignment worker 对每个 target 的 primary 和 standby Rendezvous 分别发送 signed Reverse `health-v2`。
   只有各自收到 target ACK 的 Rendezvous 才可转发该 generation 的非 health 请求；因此 standby
   在故障切换前已完成预热验证。

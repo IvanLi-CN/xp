@@ -39,6 +39,15 @@ function completenessVariant(
 
 function runtimeAvailability(runtime?: HistoryRepositoryRuntime): string {
 	if (!runtime) return "offline";
+	if (runtime.source_delivery?.state === "source_storage_guard") {
+		return "source capture paused";
+	}
+	if (runtime.source_delivery?.state === "journal_unavailable") {
+		return "source journal unavailable";
+	}
+	if (runtime.source_delivery?.state === "backlogged") {
+		return "source backlog";
+	}
 	if (runtime.storage_mode === "sqlite_degraded")
 		return "SQLite maintenance degraded";
 	if (runtime.storage_mode === "degraded_json") return "JSON fallback";
@@ -129,6 +138,18 @@ export function RepositoryMemberStatus(props: {
 							<dt className="text-muted-foreground">Ready</dt>
 							<dd>{timestamp(member.ready_at)}</dd>
 						</div>
+						{runtime?.source_delivery?.state === "backlogged" ? (
+							<div className="min-w-0 sm:col-span-2">
+								<dt className="text-muted-foreground">Source backlog</dt>
+								<dd>
+									{runtime.source_delivery.pending_segments} segments ·{" "}
+									{bytes(runtime.source_delivery.pending_bytes)}
+									{runtime.source_delivery.oldest_pending_cursor
+										? ` · from ${runtime.source_delivery.oldest_pending_cursor}`
+										: ""}
+								</dd>
+							</div>
+						) : null}
 					</dl>
 				)}
 			</div>
@@ -265,10 +286,12 @@ export function RepositoryQueryQuality(props: {
 						{gaps.length === 0
 							? "none"
 							: gaps
-									.map(
-										(gap) =>
-											`${gap.permanent ? "permanent" : "repairing"}: ${timeRange(gap.range)}`,
-									)
+										.map(
+											(gap) =>
+												`${gap.permanent ? "permanent" : "repairing"}${
+													gap.reason ? ` (${gap.reason})` : ""
+												}: ${timeRange(gap.range)}`,
+										)
 									.join("; ")}
 						{history.gaps.length > gaps.length
 							? ` +${history.gaps.length - gaps.length}`

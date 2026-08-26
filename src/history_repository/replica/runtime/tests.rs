@@ -451,6 +451,7 @@ fn replica_repair_propagates_canonical_gap_metadata() {
         start_unix_seconds: 10,
         end_unix_seconds: 11,
         permanent: true,
+        reason: None,
     });
     assert!(
         runtime

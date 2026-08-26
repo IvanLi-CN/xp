@@ -44,6 +44,11 @@ const healthy: AdminHistoryRepositoriesResponse = {
 				last_anti_entropy_unix_seconds: 1_786_001_100,
 				last_deep_verification_unix_seconds: 1_785_950_000,
 				last_dynamic_relay_attempt_unix_seconds: null,
+				source_delivery: {
+					state: "idle",
+					pending_segments: 0,
+					pending_bytes: 0,
+				},
 			},
 		},
 	],
@@ -84,6 +89,30 @@ export const SyncingWithGaps: Story = {
 				},
 				runtime: item.runtime
 					? { ...item.runtime, gap_count: 3, history_truncated: true }
+					: undefined,
+			})),
+		},
+	},
+};
+
+export const SourceBacklogged: Story = {
+	args: {
+		status: {
+			...healthy,
+			items: healthy.items.map((item) => ({
+				...item,
+				runtime: item.runtime
+					? {
+						...item.runtime,
+						gap_count: 0,
+						source_delivery: {
+							state: "backlogged",
+							pending_segments: 37,
+							pending_bytes: 128 * 1024,
+							oldest_pending_cursor: "node-a/4/runtime/3993",
+							oldest_pending_age_seconds: 900,
+						},
+					}
 					: undefined,
 			})),
 		},

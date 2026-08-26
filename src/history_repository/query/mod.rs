@@ -234,6 +234,8 @@ impl StreamWatermark {
 pub(crate) struct QueryGap {
     range: QueryRange,
     permanent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 impl QueryGap {
@@ -245,11 +247,29 @@ impl QueryGap {
         Ok(Self {
             range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
             permanent,
+            reason: None,
+        })
+    }
+
+    pub(crate) fn new_with_reason(
+        start_unix_seconds: u64,
+        end_unix_seconds: u64,
+        permanent: bool,
+        reason: Option<String>,
+    ) -> Result<Self, QueryError> {
+        Ok(Self {
+            range: QueryRange::new(start_unix_seconds, end_unix_seconds)?,
+            permanent,
+            reason,
         })
     }
 
     pub(crate) fn permanent(&self) -> bool {
         self.permanent
+    }
+
+    pub(crate) fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
     }
 
     fn intersects(&self, requested: QueryRange) -> bool {

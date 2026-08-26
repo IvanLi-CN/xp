@@ -35,6 +35,8 @@ use source::LocalSourceState;
 mod error;
 mod status;
 
+use status::SourceDeliveryStatus;
+
 pub(crate) use backfill::RepositoryTieredBackfillRecord;
 pub(crate) use error::RepositoryRuntimeError;
 pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
@@ -154,7 +156,7 @@ impl LocalQueryMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RepositoryReplicaSnapshot {
+pub(crate) struct RepositoryReplicaSnapshot {
     #[serde(default)]
     cluster_id: Option<String>,
     #[serde(default)]
@@ -312,6 +314,8 @@ struct StoredGap {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
     permanent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -426,6 +430,7 @@ impl RepositoryReplicaRuntime {
             #[cfg(test)]
             capacity_override: None,
         };
+        runtime.hydrate_source_delivery_journal()?;
         if let Err(error) = runtime.migrate_history_to_sqlite() {
             if runtime.snapshot.external_history || !runtime.storage.degrade_to_json() {
                 return Err(error);
@@ -497,7 +502,12 @@ impl RepositoryReplicaRuntime {
                         .is_none_or(|subject_node_id| gap.source_node_id == subject_node_id)
                 })
                 .map(|gap| {
-                    QueryGap::new(gap.start_unix_seconds, gap.end_unix_seconds, gap.permanent)
+                    QueryGap::new_with_reason(
+                        gap.start_unix_seconds,
+                        gap.end_unix_seconds,
+                        gap.permanent,
+                        gap.reason.clone(),
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if let Some((start, end)) = self.incomplete_aggregate_gap(&query)? {
@@ -577,6 +587,11 @@ impl RepositoryReplicaRuntime {
             self.prepare_for_replication(now_unix_seconds)?;
             self.refresh_capacity()?;
         }
+        let source_delivery = self.source_delivery_status(
+            now_unix_seconds,
+            self.storage_degraded,
+            self.snapshot.capacity.filesystem_available_bytes(),
+        )?;
         Ok(RepositoryRuntimeStatus {
             storage_mode: if self.storage_degraded {
                 "sqlite_degraded".to_owned()
@@ -608,6 +623,7 @@ impl RepositoryReplicaRuntime {
             last_dynamic_relay_attempt_unix_seconds: self
                 .snapshot
                 .last_dynamic_relay_attempt_unix_seconds,
+            source_delivery,
         })
     }
 

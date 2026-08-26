@@ -28,6 +28,7 @@ export const AdminRepositoryHistorySchema = z.object({
 		z.object({
 			range: RepositoryHistoryRangeSchema,
 			permanent: z.boolean(),
+			reason: z.string().nullable().optional(),
 		}),
 	),
 	clock_skew_seconds: z.number(),
