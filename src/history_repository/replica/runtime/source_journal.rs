@@ -32,6 +32,9 @@ impl RepositoryReplicaRuntime {
             .storage
             .source_delivery_journal_max_epoch()
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
+        // before calling this method again, so the next page entry slides into the window on the
+        // following delivery tick without loading an unbounded backlog into the control snapshot.
         let rows = self
             .storage
             .source_delivery_journal_page(256)
