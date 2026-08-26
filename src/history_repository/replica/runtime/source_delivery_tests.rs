@@ -127,7 +127,7 @@ fn source_journal_epoch_recovery_scans_beyond_the_replay_page() {
             )
             .expect("queue source segment");
     }
-    let high_epoch = i64::MAX as u64;
+    let high_epoch = i64::MAX as u64 - 1;
     let high_epoch_segment = CanonicalSegment::new(
         "cluster-a",
         Cursor::new("node-a", high_epoch, "runtime", 0).expect("cursor"),
@@ -166,6 +166,50 @@ fn source_journal_epoch_recovery_scans_beyond_the_replay_page() {
 
     let restored = load(temporary.path());
     assert_eq!(restored.snapshot.local_source.epoch(), high_epoch + 1);
+}
+
+#[test]
+fn source_journal_epoch_recovery_rejects_exhausted_epoch() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let segment = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", i64::MAX as u64, "runtime", 0).expect("cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"exhausted-epoch".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        10,
+        11,
+    )
+    .expect("segment")
+    .sign(&key)
+    .expect("signature");
+    let wire = segment.wire_bytes().expect("wire");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    storage
+        .append_source_delivery_journal(&[
+            crate::state::history_storage::SourceDeliveryJournalRow {
+                id: hex::encode(Sha256::digest(&wire)),
+                stream: "runtime".to_owned(),
+                closed_at_unix_seconds: 11,
+                identity: source_identity,
+                wire,
+            },
+        ])
+        .expect("append journal row");
+    storage
+        .write(crate::state::history_storage::REPOSITORY_REPLICA_KEY, b"{}")
+        .expect("simulate lost control snapshot");
+
+    assert!(RepositoryReplicaRuntime::load(storage).is_err());
 }
 
 #[test]

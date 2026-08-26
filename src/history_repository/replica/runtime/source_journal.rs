@@ -42,7 +42,11 @@ impl RepositoryReplicaRuntime {
         if self.snapshot.local_source.epoch == 0
             && let Some(max_epoch) = max_epoch
         {
-            self.snapshot.local_source.epoch = max_epoch.saturating_add(1).max(1);
+            let next_epoch = max_epoch
+                .checked_add(1)
+                .filter(|epoch| *epoch <= i64::MAX as u64)
+                .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
+            self.snapshot.local_source.epoch = next_epoch.max(1);
             if let Some(row) = rows.first() {
                 self.snapshot.local_source.node_id = row.identity.node_id().as_str().to_owned();
             }
