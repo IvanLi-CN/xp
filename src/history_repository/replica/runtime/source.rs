@@ -544,6 +544,7 @@ impl RepositoryReplicaRuntime {
         page_cursor: Option<String>,
         completed: bool,
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         if !self.remove_local_source_pending_segment(delivered_wire)? {
             return Err(RepositoryRuntimeError::Storage(
                 "local history backfill acknowledgement was not pending".to_owned(),
@@ -551,7 +552,10 @@ impl RepositoryReplicaRuntime {
         }
         self.snapshot.local_history_backfill_cursor = page_cursor;
         self.snapshot.local_history_backfill_completed = completed;
-        self.persist_control_state()?;
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
         if self.storage.is_sqlite() {
             self.storage
                 .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(delivered_wire))])
