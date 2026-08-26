@@ -26,10 +26,12 @@ decompressed-size, record-count, nesting and expansion-ratio limits before stora
 
 Reality Mesh and Cloudflare Tunnel are equal-level direct paths. The path
 selector prefers a healthy/stable path, switches with hysteresis, and probes
-standby at low frequency. Only when both direct paths fail may the source
-attempt a jittered hourly relay through an eligible Mesh member. Relay is
-streaming only, carries end-to-end X25519 plus AEAD payloads, and persists no history. Relay
-batches are compressed and paged against the actual encrypted-frame budget before sealing.
+standby at low frequency. Only when both direct paths fail may the source try
+the Raft-assigned Reality Mesh Reverse relay; only after that fails may it
+attempt a jittered hourly relay through an eligible Mesh member. Both relays
+are streaming only and persist no history. The dynamic relay carries end-to-end
+X25519 plus AEAD payloads; its batches are compressed and paged against the
+actual encrypted-frame budget before sealing.
 
 ## Acknowledgement and repair
 
@@ -38,6 +40,26 @@ the earliest retained cursor and an explicit gap. Tombstones replicate before
 affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
+
+A temporary transport failure, exhausted retry schedule, or full bounded outbox
+creates Recoverable Backlog, never a permanent gap. A Source or any ready
+repository that retains the original cursor range may repair it. A permanent
+gap is valid only after the original range has expired under the unchanged
+source-retention policy and neither the Source nor any ready repository can
+supply it.
+
+A syncing repository enters ready only after its durable catch-up checkpoints
+cover the bounded known union, no Recoverable Backlog remains, and the existing
+five-minute stability window completes. An agreed permanent gap does not block
+ready status, but it keeps replica convergence false and every affected query
+partial.
+
+A Source writes every unacknowledged signed segment to its SQLite delivery
+journal before attempting transfer, and removes it only after its Collector
+acknowledges the continuous watermark. The journal uses Zstandard level 1 when
+beneficial and is released incrementally after acknowledgement. Below the
+existing 256 MiB filesystem safety guard, a Source enters explicit capture
+suspension rather than creating a cursor, acknowledgement, or permanent gap.
 
 ## Query result
 

@@ -476,7 +476,7 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn serialized_snapshot_len(&self) -> Result<u64, RepositoryRuntimeError> {
-        serde_json::to_vec(&self.snapshot)
+        serde_json::to_vec(&self.snapshot_for_persistence())
             .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }

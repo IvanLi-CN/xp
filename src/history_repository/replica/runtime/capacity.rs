@@ -56,6 +56,7 @@ impl RepositoryReplicaRuntime {
             start_unix_seconds: segment.opened_at_unix_seconds(),
             end_unix_seconds: segment.closed_at_unix_seconds(),
             permanent,
+            reason: None,
         });
     }
 
@@ -80,6 +81,7 @@ impl RepositoryReplicaRuntime {
             start_unix_seconds: 0,
             end_unix_seconds: segment.opened_at_unix_seconds(),
             permanent: false,
+            reason: None,
         });
     }
 
@@ -101,6 +103,7 @@ impl RepositoryReplicaRuntime {
             start_unix_seconds: 0,
             end_unix_seconds: earliest_observed_unix_seconds.saturating_sub(1),
             permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
         });
     }
 

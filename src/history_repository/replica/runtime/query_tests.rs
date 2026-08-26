@@ -149,6 +149,7 @@ fn a_source_backpressure_gap_makes_a_fully_covered_query_partial() {
             start_unix_seconds: 101,
             end_unix_seconds: 101,
             permanent: true,
+            reason: None,
         }])
         .expect("merge source backpressure gap");
     let response = runtime

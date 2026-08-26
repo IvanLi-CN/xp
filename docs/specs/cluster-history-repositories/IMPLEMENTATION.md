@@ -52,14 +52,17 @@
   not rebuild the database or run a full `VACUUM`.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
-  keeps a stable path with hysteresis, and probes the standby path at low frequency before either
-  source or repository work can use its independently paced dynamic relay.
+  keeps a stable path with hysteresis, and probes the standby path at low frequency before source
+  or repository work may use its Raft-assigned Reality Mesh Reverse route, then its independently
+  paced dynamic relay.
 - Every node produces bounded one-minute signed source segments for runtime, traffic, Mesh path
   health, inbound-IP and connection summaries. Each schema family has its own durable outbox,
   cursor, sequence and hash chain; pending segments retry unchanged until the rendezvous primary
-  acknowledges them. Each bounded queue records stream-local backpressure as a durable permanent
-  gap while returning its existing front for delivery, so one full stream cannot block another and
-  recovery drains without reporting lost observations as complete.
+  acknowledges them. Every unacknowledged segment is also persisted in the SQLite source delivery
+  journal; the journal is replayed oldest-first after restart and released incrementally only after
+  a continuous acknowledgement. Transport failures and legacy queue pressure remain recoverable
+  backlog, never a permanent gap. The source enters `source_storage_guard` rather than advancing a
+  cursor when the existing 256 MiB filesystem guard is reached.
   After three failed primary delivery cycles, a source selects its rendezvous
   standby; both collectors accept the signed segment so that the transition has no coordination
   race. When both direct paths fail, an hourly-jittered relay carries compressed encrypted,

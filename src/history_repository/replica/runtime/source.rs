@@ -1,9 +1,14 @@
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::state::history_repository::replica::RepositoryReplicaGap;
+use crate::state::{
+    history_repository::replica::RepositoryReplicaGap, history_storage::SourceDeliveryJournalRow,
+};
 
 use super::*;
+
+#[path = "source_journal.rs"]
+mod source_journal;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct LocalSourceState {
@@ -31,8 +36,9 @@ pub(super) struct LocalSourceState {
 
 struct LocalSourceQueueOptions<'a> {
     ready_repositories: &'a [String],
-    max_pending_segments_per_stream: usize,
+    _max_pending_segments_per_stream: usize,
     persist: bool,
+    defer_journal: bool,
 }
 
 impl LocalSourceState {
@@ -42,6 +48,12 @@ impl LocalSourceState {
 
     pub(super) fn node_id(&self) -> Option<&str> {
         (!self.node_id.is_empty()).then_some(self.node_id.as_str())
+    }
+
+    fn clear_pending(&mut self) {
+        for stream in self.streams.values_mut() {
+            stream.pending.clear();
+        }
     }
 
     pub(super) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
@@ -223,9 +235,10 @@ impl RepositoryReplicaRuntime {
                 observed_at,
                 LocalSourceQueueOptions {
                     ready_repositories: &["local".to_owned()],
-                    max_pending_segments_per_stream:
+                    _max_pending_segments_per_stream:
                         Self::MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM,
                     persist: false,
+                    defer_journal: true,
                 },
             ) {
                 self.snapshot = previous_snapshot;
@@ -259,7 +272,24 @@ impl RepositoryReplicaRuntime {
                 .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
                 .collect(),
         });
-        if let Err(error) = self.persist_control_state() {
+        let persist_result = if self.storage.is_sqlite() {
+            let journal_rows = created
+                .iter()
+                .map(|segment| SourceDeliveryJournalRow {
+                    id: hex::encode(Sha256::digest(&segment.wire)),
+                    stream: stream_for_wire(&segment.wire),
+                    closed_at_unix_seconds: SignedSegment::from_wire(&segment.wire)
+                        .map(|signed| signed.canonical().closed_at_unix_seconds())
+                        .unwrap_or_default(),
+                    identity: segment.identity.clone(),
+                    wire: segment.wire.clone(),
+                })
+                .collect::<Vec<_>>();
+            self.persist_control_state_with_journal(&journal_rows)
+        } else {
+            self.persist_control_state()
+        };
+        if let Err(error) = persist_result {
             self.snapshot = previous_snapshot;
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
@@ -284,8 +314,9 @@ impl RepositoryReplicaRuntime {
             now_unix_seconds,
             LocalSourceQueueOptions {
                 ready_repositories,
-                max_pending_segments_per_stream: 8,
+                _max_pending_segments_per_stream: usize::MAX,
                 persist: true,
+                defer_journal: false,
             },
         )
     }
@@ -299,6 +330,20 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
+        self.hydrate_source_delivery_journal()?;
+        let previous_snapshot = self.snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
+        if self.storage.is_sqlite() {
+            let available = self
+                .storage
+                .available_bytes()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if available < 256 * 1024 * 1024 {
+                return Err(RepositoryRuntimeError::WriteStopped(
+                    HistoryWriteAvailability::DegradedLowSpace,
+                ));
+            }
+        }
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
         for record in records {
             if record.is_tombstone()
@@ -334,55 +379,16 @@ impl RepositoryReplicaRuntime {
             self.snapshot.local_source.epoch = self.finish_storage_write(result)?;
             self.snapshot.local_source.node_id = identity.node_id().as_str().to_owned();
         }
+        let mut journal_rows = Vec::new();
         for (stream, records) in records_by_stream {
             let record_count = u64::try_from(records.len())
                 .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
-            let (pending_segments, backpressured_records, sequence) = {
-                let stream_state = self
-                    .snapshot
-                    .local_source
-                    .streams
-                    .entry(stream.to_owned())
-                    .or_default();
-                if stream_state.pending.len() >= options.max_pending_segments_per_stream {
-                    let first_sequence = stream_state.next_sequence;
-                    stream_state.next_sequence = stream_state
-                        .next_sequence
-                        .checked_add(record_count)
-                        .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
-                    stream_state.backpressured_records = stream_state
-                        .backpressured_records
-                        .saturating_add(record_count);
-                    (
-                        Some(stream_state.pending.len()),
-                        stream_state.backpressured_records,
-                        first_sequence,
-                    )
-                } else {
-                    (None, 0, 0)
-                }
-            };
-            if let Some(pending_segments) = pending_segments {
-                self.record_local_source_backpressure_gap(
-                    stream,
-                    sequence,
-                    sequence.saturating_add(record_count.saturating_sub(1)),
-                    now_unix_seconds,
-                );
-                tracing::warn!(
-                    stream,
-                    pending_segments,
-                    backpressured_records,
-                    "history source outbox is backpressured"
-                );
-                continue;
-            }
             let next_sequence = self
                 .snapshot
                 .local_source
                 .streams
-                .get(stream)
-                .expect("source stream was initialized")
+                .entry(stream.to_owned())
+                .or_default()
                 .next_sequence;
             for (offset, record) in records.iter().enumerate() {
                 if !record.is_tombstone() {
@@ -447,15 +453,42 @@ impl RepositoryReplicaRuntime {
                 .checked_add(record_count)
                 .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
             stream_state.previous_segment_hash = Some(signed.segment_hash()?);
-            stream_state.pending.push_back(StoredSegment {
+            let stored = StoredSegment {
                 id: hex::encode(Sha256::digest(&wire)),
                 closed_at_unix_seconds: now_unix_seconds,
                 identity: identity.clone(),
                 wire: wire.clone(),
+            };
+            journal_rows.push(SourceDeliveryJournalRow {
+                id: stored.id.clone(),
+                stream: stream.to_owned(),
+                closed_at_unix_seconds: stored.closed_at_unix_seconds,
+                identity: stored.identity.clone(),
+                wire: stored.wire.clone(),
             });
+            stream_state.pending.push_back(stored);
         }
-        if options.persist {
-            self.persist_control_state()?;
+        if self.storage.is_sqlite() && !options.defer_journal {
+            if options.persist {
+                if let Err(error) = self.persist_control_state_with_journal(&journal_rows) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
+                    return Err(error);
+                }
+            } else {
+                let result = self.storage.append_source_delivery_journal(&journal_rows);
+                if let Err(error) = self.finish_storage_write(result) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
+                    return Err(error);
+                }
+            }
+        } else if options.persist
+            && let Err(error) = self.persist_control_state()
+        {
+            self.snapshot = previous_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
+            return Err(error);
         }
         Ok(self.local_source_pending_segments())
     }
@@ -484,8 +517,25 @@ impl RepositoryReplicaRuntime {
         &mut self,
         delivered_wire: &[u8],
     ) -> Result<(), RepositoryRuntimeError> {
-        if self.remove_local_source_pending_segment(delivered_wire) {
-            self.persist_control_state()?;
+        let previous_snapshot = self.snapshot.clone();
+        if self.remove_local_source_pending_segment(delivered_wire)? {
+            if let Err(error) = self.persist_control_state() {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
+            if self.storage.is_sqlite() {
+                if let Err(error) = self
+                    .storage
+                    .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(
+                        delivered_wire,
+                    ))])
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+                {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
+                self.hydrate_source_delivery_journal()?;
+            }
         }
         Ok(())
     }
@@ -499,14 +549,30 @@ impl RepositoryReplicaRuntime {
         page_cursor: Option<String>,
         completed: bool,
     ) -> Result<(), RepositoryRuntimeError> {
-        if !self.remove_local_source_pending_segment(delivered_wire) {
+        let previous_snapshot = self.snapshot.clone();
+        if !self.remove_local_source_pending_segment(delivered_wire)? {
             return Err(RepositoryRuntimeError::Storage(
                 "local history backfill acknowledgement was not pending".to_owned(),
             ));
         }
         self.snapshot.local_history_backfill_cursor = page_cursor;
         self.snapshot.local_history_backfill_completed = completed;
-        self.persist_control_state()
+        if let Err(error) = self.persist_control_state() {
+            self.snapshot = previous_snapshot;
+            return Err(error);
+        }
+        if self.storage.is_sqlite() {
+            if let Err(error) = self
+                .storage
+                .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(delivered_wire))])
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+            {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
+            self.hydrate_source_delivery_journal()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn local_history_backfill_inflight_checkpoint(
@@ -570,11 +636,18 @@ impl RepositoryReplicaRuntime {
             ));
         }
         for segment in delivered_segments {
-            if !self.remove_local_source_pending_segment(&segment.wire) {
-                self.snapshot = previous_snapshot;
-                return Err(RepositoryRuntimeError::Storage(
-                    "local history backfill acknowledgement was not pending".to_owned(),
-                ));
+            match self.remove_local_source_pending_segment(&segment.wire) {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.snapshot = previous_snapshot;
+                    return Err(RepositoryRuntimeError::Storage(
+                        "local history backfill acknowledgement was not pending".to_owned(),
+                    ));
+                }
+                Err(error) => {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
             }
         }
         self.snapshot.local_history_backfill_cursor = page_cursor;
@@ -583,22 +656,47 @@ impl RepositoryReplicaRuntime {
             self.snapshot = previous_snapshot;
             return Err(error);
         }
+        if self.storage.is_sqlite() {
+            let ids = delivered_segments
+                .iter()
+                .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
+                .collect::<Vec<_>>();
+            if let Err(error) = self
+                .storage
+                .acknowledge_source_delivery_journal(&ids)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+            {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
+            self.hydrate_source_delivery_journal()?;
+        }
         Ok(())
     }
 
-    fn remove_local_source_pending_segment(&mut self, delivered_wire: &[u8]) -> bool {
-        let mut acknowledged = false;
+    fn remove_local_source_pending_segment(
+        &mut self,
+        delivered_wire: &[u8],
+    ) -> Result<bool, RepositoryRuntimeError> {
         for stream in self.snapshot.local_source.streams.values_mut() {
-            if stream
+            let Some(index) = stream
                 .pending
-                .front()
-                .is_some_and(|pending| pending.wire == delivered_wire)
+                .iter()
+                .position(|pending| pending.wire == delivered_wire)
+            else {
+                continue;
+            };
+            if index != 0 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source delivery acknowledgement arrived out of order".to_owned(),
+                ));
+            }
             {
                 stream.pending.pop_front();
-                acknowledged = true;
+                return Ok(true);
             }
         }
-        acknowledged
+        Ok(false)
     }
 
     pub(crate) fn begin_source_dynamic_relay_attempt(
@@ -667,7 +765,8 @@ impl RepositoryReplicaRuntime {
                 last_sequence: gap.last_sequence,
                 start_unix_seconds: gap.start_unix_seconds,
                 end_unix_seconds: gap.end_unix_seconds,
-                permanent: true,
+                permanent: false,
+                reason: None,
             })
             .collect()
     }
@@ -833,6 +932,13 @@ fn stream_for_schema(schema_id: &str) -> Option<&'static str> {
     })
 }
 
+fn stream_for_wire(wire: &[u8]) -> String {
+    SignedSegment::from_wire(wire)
+        .ok()
+        .map(|segment| segment.canonical().first_cursor().stream().to_owned())
+        .unwrap_or_default()
+}
+
 fn deletion_marker_id(record: &SyncRecord) -> String {
     let (schema_id, _) = record.schema();
     deletion_marker_id_parts(schema_id, record.record_key())
@@ -854,73 +960,5 @@ pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
-
-    #[test]
-    fn stale_repository_rebuild_rotates_the_durable_source_epoch_before_resetting_sequences() {
-        let mut state = LocalSourceState {
-            epoch: 7,
-            streams: BTreeMap::from([("runtime".to_owned(), LocalSourceStreamState::default())]),
-            ..LocalSourceState::default()
-        };
-        state
-            .rotate_after_repository_rebuild()
-            .expect("rotate source epoch");
-        assert_eq!(state.epoch, 8);
-        assert!(state.streams.is_empty());
-    }
-
-    #[test]
-    fn stale_repository_rebuild_rejects_exhausted_source_epoch() {
-        let mut state = LocalSourceState {
-            epoch: i64::MAX as u64,
-            ..LocalSourceState::default()
-        };
-
-        assert!(state.rotate_after_repository_rebuild().is_err());
-        assert_eq!(state.epoch, i64::MAX as u64);
-    }
-
-    #[test]
-    fn disjoint_backpressure_ranges_remain_independent() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
-        let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
-        let mut runtime = RepositoryReplicaRuntime::empty(storage);
-        runtime.snapshot.local_source.epoch = 7;
-
-        runtime.record_local_source_backpressure_gap("runtime", 8, 8, 100);
-        runtime.record_local_source_backpressure_gap("runtime", 10, 10, 120);
-
-        let gaps = runtime.local_source_backpressure_gaps("node-a");
-        assert_eq!(gaps.len(), 2);
-        assert_eq!(gaps[0].stream, "runtime");
-        assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (8, 8));
-        assert_eq!((gaps[1].first_sequence, gaps[1].last_sequence), (10, 10));
-    }
-
-    #[test]
-    fn failed_sqlite_control_write_reports_read_only_degradation() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
-        let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
-        let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
-        storage
-            .set_query_only_for_test(true)
-            .expect("enable SQLite write failure");
-
-        assert!(
-            runtime
-                .record_local_source_collector_delivery("repository-a", "repository-a", false)
-                .is_err()
-        );
-        assert_eq!(
-            runtime
-                .runtime_status(12)
-                .expect("degraded status remains readable")
-                .storage_mode,
-            "sqlite_degraded"
-        );
-    }
-}
+#[path = "source_tests.rs"]
+mod tests;

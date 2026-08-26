@@ -32,6 +32,22 @@ export const HistoryRepositoryRuntimeSchema = z.object({
 	last_anti_entropy_unix_seconds: z.number().nullable(),
 	last_deep_verification_unix_seconds: z.number().nullable(),
 	last_dynamic_relay_attempt_unix_seconds: z.number().nullable(),
+	source_delivery: z
+		.object({
+			state: z.enum([
+				"idle",
+				"backlogged",
+				"source_storage_guard",
+				"journal_unavailable",
+			]),
+			pending_segments: z.number(),
+			pending_bytes: z.number(),
+			oldest_pending_cursor: z.string().nullable().optional(),
+			oldest_pending_age_seconds: z.number().nullable().optional(),
+			last_acknowledged_at: z.number().nullable().optional(),
+			last_delivery_path: z.string().nullable().optional(),
+		})
+		.optional(),
 });
 
 export const AdminHistoryRepositoriesResponseSchema = z.object({

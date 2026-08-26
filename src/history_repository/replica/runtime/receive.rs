@@ -17,6 +17,46 @@ impl PendingRepositoryMutation {
     }
 }
 
+fn tombstone_acknowledgements_for_segment(
+    segment: &crate::history_sync::CanonicalSegment,
+    repository_id: &str,
+) -> Result<Vec<RepositoryTombstoneAcknowledgement>, RepositoryRuntimeError> {
+    let mut acknowledgements = Vec::new();
+    for (offset, record) in segment.records().iter().enumerate() {
+        if !record.is_tombstone() || !is_known_schema(record) {
+            continue;
+        }
+        let sequence = segment
+            .first_cursor()
+            .sequence()
+            .checked_add(
+                u64::try_from(offset).map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?,
+            )
+            .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
+        let (schema_id, schema_version) = record.schema();
+        let cursor = ReplicaCursor::new(
+            segment.first_cursor().source_node_id(),
+            segment.first_cursor().source_epoch(),
+            segment.first_cursor().stream(),
+            sequence,
+        )?;
+        acknowledgements.push(RepositoryTombstoneAcknowledgement {
+            key: ReplicaRecord::new(
+                &cursor,
+                record.subject_node_id(),
+                record.observer_node_id(),
+                schema_id,
+                schema_version,
+                record.record_key().to_vec(),
+                record.payload_bytes().to_vec(),
+            )?
+            .key(),
+            repository_id: repository_id.to_owned(),
+        });
+    }
+    Ok(acknowledgements)
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn receive_wire(
         &mut self,
@@ -109,7 +149,18 @@ impl RepositoryReplicaRuntime {
             // still authoritative evidence that its covered cursor range is present locally.
             self.clear_repaired_gaps(segment.canonical());
             self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
-            return Ok(sync_receipt(acceptance, availability, Vec::new()));
+            let acknowledgements = ready_repositories
+                .iter()
+                .any(|repository_id| repository_id == local_repository_id)
+                .then(|| {
+                    tombstone_acknowledgements_for_segment(segment.canonical(), local_repository_id)
+                })
+                .transpose()?;
+            return Ok(sync_receipt(
+                acceptance,
+                availability,
+                acknowledgements.unwrap_or_default(),
+            ));
         }
 
         if let Some(gap) = acceptance.gap() {
@@ -239,12 +290,17 @@ impl RepositoryReplicaRuntime {
                 self.delete_records_for_tombstone(&target_key, mutation)?;
                 self.tombstones
                     .tombstone(key, now_unix_seconds, ready_repositories)?;
-                self.tombstones
-                    .acknowledge(replica_record.key(), local_repository_id)?;
-                acknowledgements.push(RepositoryTombstoneAcknowledgement {
-                    key: replica_record.key(),
-                    repository_id: local_repository_id.to_owned(),
-                });
+                if ready_repositories
+                    .iter()
+                    .any(|repository_id| repository_id == local_repository_id)
+                {
+                    self.tombstones
+                        .acknowledge(replica_record.key(), local_repository_id)?;
+                    acknowledgements.push(RepositoryTombstoneAcknowledgement {
+                        key: replica_record.key(),
+                        repository_id: local_repository_id.to_owned(),
+                    });
+                }
                 // Query paths exclude this row, while the retained source cursor allows a joining
                 // repository to reconstruct deletion protection after the signed repair cache
                 // has expired.
@@ -285,8 +341,7 @@ impl RepositoryReplicaRuntime {
         let last = segment.last_cursor().sequence();
         let mut remaining = Vec::with_capacity(self.snapshot.gaps.len().saturating_add(1));
         for gap in self.snapshot.gaps.drain(..) {
-            if gap.permanent
-                || gap.source_node_id != segment.first_cursor().source_node_id()
+            if gap.source_node_id != segment.first_cursor().source_node_id()
                 || gap.source_epoch != segment.first_cursor().source_epoch()
                 || gap.stream != segment.first_cursor().stream()
                 || last < gap.first_sequence
@@ -389,7 +444,7 @@ impl RepositoryReplicaRuntime {
                 .checkpoint()?,
         );
         self.snapshot.tombstones = self.tombstones.checkpoint();
-        let bytes = serde_json::to_vec(&self.snapshot)
+        let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {
             self.restore(previous_receiver, previous_snapshot.clone())?;
@@ -423,7 +478,7 @@ impl RepositoryReplicaRuntime {
         mutation: PendingRepositoryMutation,
     ) -> Result<(), RepositoryRuntimeError> {
         self.snapshot.tombstones = self.tombstones.checkpoint();
-        let bytes = serde_json::to_vec(&self.snapshot)
+        let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if bytes.len() > MAX_RUNTIME_STATE_BYTES {
             self.snapshot = previous_snapshot;

@@ -25,11 +25,13 @@ pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 
 mod repository;
+mod source_journal;
 #[allow(unused_imports)]
 pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
     RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
+pub(crate) use source_journal::SourceDeliveryJournalRow;
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -494,11 +496,25 @@ fn ensure_schema(connection: &Connection) -> Result<()> {
                 session_id TEXT PRIMARY KEY NOT NULL,
                 expires_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS source_delivery_journal (
+                id TEXT PRIMARY KEY NOT NULL,
+                stream TEXT NOT NULL DEFAULT '',
+                closed_at INTEGER NOT NULL,
+                identity BLOB NOT NULL,
+                wire BLOB NOT NULL,
+                created_at INTEGER NOT NULL,
+                source_node_id TEXT NOT NULL DEFAULT '',
+                source_epoch INTEGER NOT NULL DEFAULT 0,
+                first_sequence INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS source_delivery_journal_order
+                ON source_delivery_journal (created_at ASC, id ASC);
             ",
         )
         .map_err(sqlite_error)?;
     ensure_repository_history_columns(connection)?;
     ensure_repository_history_segment_columns(connection)?;
+    source_journal::ensure_source_delivery_journal_columns(connection)?;
     connection
         .execute_batch(
             "CREATE INDEX IF NOT EXISTS repository_history_records_tombstone

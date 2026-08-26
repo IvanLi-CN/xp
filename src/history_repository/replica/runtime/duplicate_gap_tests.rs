@@ -57,6 +57,7 @@ fn duplicate_repair_segment_clears_a_gap_reintroduced_by_a_peer() {
             start_unix_seconds: 12,
             end_unix_seconds: 12,
             permanent: false,
+            reason: None,
         }])
         .expect("merge stale peer gap");
     assert_eq!(runtime.snapshot.gaps.len(), 1);
@@ -101,6 +102,7 @@ fn deep_verification_keeps_a_local_only_gap_incomplete() {
             start_unix_seconds: 12,
             end_unix_seconds: 12,
             permanent: false,
+            reason: None,
         }])
         .expect("merge local-only gap");
 

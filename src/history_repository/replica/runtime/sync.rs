@@ -63,6 +63,8 @@ pub(crate) struct RepositoryReplicaGap {
     pub(crate) start_unix_seconds: u64,
     pub(crate) end_unix_seconds: u64,
     pub(crate) permanent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -657,7 +659,7 @@ impl RepositoryReplicaRuntime {
 
     pub(super) fn persist_control_state(&mut self) -> Result<(), RepositoryRuntimeError> {
         self.snapshot.tombstones = self.tombstones.checkpoint();
-        let bytes = serde_json::to_vec(&self.snapshot)
+        let bytes = serde_json::to_vec(&self.snapshot_for_persistence())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         if bytes.len() > super::MAX_RUNTIME_STATE_BYTES {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
@@ -834,6 +836,7 @@ fn gap_summary(gap: &StoredGap) -> RepositoryReplicaGap {
         start_unix_seconds: gap.start_unix_seconds,
         end_unix_seconds: gap.end_unix_seconds,
         permanent: gap.permanent,
+        reason: gap.reason.clone(),
     }
 }
 
@@ -847,6 +850,7 @@ fn stored_gap(gap: RepositoryReplicaGap) -> StoredGap {
         start_unix_seconds: gap.start_unix_seconds,
         end_unix_seconds: gap.end_unix_seconds,
         permanent: gap.permanent,
+        reason: gap.reason,
     }
 }
 
@@ -886,6 +890,7 @@ fn canonical_gaps(
             gap.first_sequence,
             gap.last_sequence,
             gap.permanent,
+            gap.reason.clone(),
         )
     });
     gaps.dedup();

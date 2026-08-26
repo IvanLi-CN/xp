@@ -6,7 +6,10 @@
 
 - 选择 SQLite 作为普通节点和仓库的统一本地存储；迁移必须可回退且不改变普通节点数据策略。
 - 选择 Zstandard level 1 作为新同步唯一压缩算法；小 payload 或压缩无收益时使用 identity。既有 GZIP 仅用于嵌入式 Web 静态资源。
-- 将 Reality Mesh 与 Cloudflare Tunnel 定义为同级 direct path；旧的本机控制面代理已完全删除，动态 relay 是独立内存态机制。
+- 将 Reality Mesh 与 Cloudflare Tunnel 定义为同级 direct path；双 direct 失败后依次使用 Raft 分配的
+  Reality Mesh Reverse 与独立内存态动态 relay。
+- 将临时传输故障和有界 outbox 满载定义为可恢复积压；只有 source 与 ready 仓库均无法再提供已过期
+  cursor 范围时才定义为永久 gap。
 - 选择 eventual consistency、source/observer 双身份、tombstone 和 anti-entropy，而不是 quorum 或 last-write-wins。
 - 将 raw IP 限制为短期细节并长期匿名聚合，避免仓库无限膨胀和不必要的隐私暴露。
 

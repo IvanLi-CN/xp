@@ -591,6 +591,7 @@ fn authenticated_source_gap_allows_the_stream_to_resume_after_dropped_records() 
             start_unix_seconds: 12,
             end_unix_seconds: 12,
             permanent: true,
+            reason: None,
         }])
         .expect("authenticated source gap");
 

@@ -15,6 +15,9 @@ use crate::{
     },
 };
 
+#[path = "source_delivery_tests.rs"]
+mod source_delivery_tests;
+
 fn identity() -> RepositoryNodeIdentity {
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     RepositoryNodeIdentity::new(
@@ -242,6 +245,7 @@ fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
             start_unix_seconds: 101,
             end_unix_seconds: 100,
             permanent: true,
+            reason: None,
         }],
     };
     let serialized = serde_json::to_vec(&invalid_batch).expect("relay batch JSON");
@@ -516,12 +520,28 @@ fn source_epoch_rotates_when_the_replica_snapshot_is_lost_but_sqlite_remains() {
             101,
         )
         .expect("rotated source segment");
-    let next_epoch = SignedSegment::from_wire(&next[0].wire)
-        .expect("next wire")
+    let replayed_epoch = SignedSegment::from_wire(&next[0].wire)
+        .expect("replayed wire")
         .canonical()
         .first_cursor()
         .source_epoch();
-    assert_eq!(next_epoch, first_epoch.saturating_add(1));
+    assert_eq!(replayed_epoch, first_epoch);
+    restored
+        .acknowledge_local_source_segment(&next[0].wire)
+        .expect("acknowledge replayed source segment");
+    let new_epoch = restored
+        .local_source_pending_segments()
+        .iter()
+        .map(|segment| {
+            SignedSegment::from_wire(&segment.wire)
+                .expect("next wire")
+                .canonical()
+                .first_cursor()
+                .source_epoch()
+        })
+        .find(|epoch| *epoch != first_epoch)
+        .expect("new epoch source segment");
+    assert_eq!(new_epoch, first_epoch.saturating_add(1));
 }
 
 fn source_record_key(segment: &super::RepositoryReplicaSegment) -> Vec<u8> {
@@ -590,7 +610,7 @@ fn saturated_source_outbox_returns_front_and_drains_after_recovery() {
 }
 
 #[test]
-fn a_backpressured_stream_preserves_other_streams_and_a_permanent_gap() {
+fn a_delayed_stream_preserves_other_streams_without_declaring_a_permanent_gap() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let source_identity = identity();
@@ -656,13 +676,7 @@ fn a_backpressured_stream_preserves_other_streams_and_a_permanent_gap() {
     assert!(streams.contains(&"runtime".to_owned()));
     assert!(streams.contains(&"traffic".to_owned()));
     let gaps = runtime.local_source_backpressure_gaps("node-a");
-    assert_eq!(gaps.len(), 1);
-    assert_eq!(gaps[0].stream, "runtime");
-    assert_eq!(gaps[0].first_sequence, 8);
-    assert_eq!(gaps[0].last_sequence, 8);
-    assert!(gaps[0].permanent);
-    assert_eq!(gaps[0].start_unix_seconds, 8);
-    assert_eq!(gaps[0].end_unix_seconds, 8);
+    assert!(gaps.is_empty());
     assert_eq!(runtime.local_source_next_sequence("runtime"), Some(9));
 }
 
