@@ -103,14 +103,15 @@ export const SourceBacklogged: Story = {
 				...item,
 				runtime: item.runtime
 					? {
-						...item.runtime,
-						gap_count: 0,
-						source_delivery: {
-							state: "backlogged",
-							pending_segments: 37,
-							pending_bytes: 128 * 1024,
-							oldest_pending_cursor: "node-a/4/runtime/3993",
-							oldest_pending_age_seconds: 900,
+							...item.runtime,
+							gap_count: 0,
+							source_delivery: {
+								state: "backlogged",
+								pending_segments: 37,
+								pending_bytes: 128 * 1024,
+								oldest_pending_cursor: "node-a/4/runtime/3993",
+								oldest_pending_age_seconds: 900,
+							},
 						},
 					}
 					: undefined,

@@ -292,7 +292,7 @@ export function RepositoryQueryQuality(props: {
 													gap.reason ? ` (${gap.reason})` : ""
 												}: ${timeRange(gap.range)}`,
 										)
-									.join("; ")}
+										.join("; ")}
 						{history.gaps.length > gaps.length
 							? ` +${history.gaps.length - gaps.length}`
 							: ""}
