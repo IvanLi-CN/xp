@@ -524,11 +524,16 @@ impl RepositoryReplicaRuntime {
                 return Err(error);
             }
             if self.storage.is_sqlite() {
-                self.storage
+                if let Err(error) = self
+                    .storage
                     .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(
                         delivered_wire,
                     ))])
-                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+                {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
                 self.hydrate_source_delivery_journal()?;
             }
         }
@@ -557,9 +562,14 @@ impl RepositoryReplicaRuntime {
             return Err(error);
         }
         if self.storage.is_sqlite() {
-            self.storage
+            if let Err(error) = self
+                .storage
                 .acknowledge_source_delivery_journal(&[hex::encode(Sha256::digest(delivered_wire))])
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+            {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
             self.hydrate_source_delivery_journal()?;
         }
         Ok(())
@@ -651,9 +661,14 @@ impl RepositoryReplicaRuntime {
                 .iter()
                 .map(|segment| hex::encode(Sha256::digest(&segment.wire)))
                 .collect::<Vec<_>>();
-            self.storage
+            if let Err(error) = self
+                .storage
                 .acknowledge_source_delivery_journal(&ids)
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+            {
+                self.snapshot = previous_snapshot;
+                return Err(error);
+            }
             self.hydrate_source_delivery_journal()?;
         }
         Ok(())
