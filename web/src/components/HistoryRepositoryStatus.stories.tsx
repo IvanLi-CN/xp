@@ -112,7 +112,7 @@ export const SourceBacklogged: Story = {
 								oldest_pending_cursor: "node-a/4/runtime/3993",
 								oldest_pending_age_seconds: 900,
 								},
-							},
+							}
 						: undefined,
 			})),
 		},
