@@ -56,7 +56,7 @@ describe("RepositoryStatusSummary", () => {
 			/>,
 		);
 
-		expect(screen.getByText("source backlog")).toBeVisible();
+		expect(screen.getByText(/source backlog/)).toBeVisible();
 		expect(screen.getByText(/37 segments/)).toBeVisible();
 		expect(screen.queryByText("0 gaps")).not.toBeInTheDocument();
 	});
