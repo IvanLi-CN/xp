@@ -79,16 +79,16 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
                     local_raft_node_id,
                     RaftNodeMeta {
                         name: cluster.node_name.clone(),
-                        api_base_url: config.api_base_url.clone(),
-                        raft_endpoint: config.api_base_url.clone(),
+                        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
                     },
                 ),
                 (
                     target_raft_node_id,
                     RaftNodeMeta {
                         name: target.node_name.clone(),
-                        api_base_url: target.api_base_url.clone(),
-                        raft_endpoint: target.api_base_url.clone(),
+                        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
                     },
                 ),
             ]),
@@ -204,8 +204,8 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
         retained_raft_node_id,
         RaftNodeMeta {
             name: retained_node.node_name,
-            api_base_url: retained_node.api_base_url.clone(),
-            raft_endpoint: retained_node.api_base_url,
+            api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
+            raft_endpoint: xp_test_fixtures::url_loopback1().to_owned(),
         },
     );
     barrier_metrics.membership_config = Arc::new(openraft::StoredMembership::new(
