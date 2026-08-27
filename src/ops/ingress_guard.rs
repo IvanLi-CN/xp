@@ -11,19 +11,20 @@ use crate::ops::cli::{
 use crate::ops::paths::Paths;
 use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
 use crate::ops::runtime_activation::{reload_systemd_units, restart_xray_service};
-use crate::ops::util::{Mode, ensure_dir, is_test_root};
+use crate::ops::util::{Mode, is_test_root};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 mod assets;
 mod nft;
 mod state;
 pub(crate) use assets::{refresh_xray_service_assets, write_direct_xray_service_assets};
 use state::{
-    fs_error, load_config, reject_symlink, remove_permit, running_as_root, update_status_counters,
-    validate_config, validate_limits, verify_readback, write_config, write_permit, write_status,
+    ensure_guard_runtime_dir, fs_error, load_config, read_table_value, reject_symlink,
+    remove_permit, running_as_root, update_status_counters, validate_config, validate_limits,
+    verify_readback, write_config, write_permit, write_status,
 };
 pub const PREPARE_FAILURE_EXIT: i32 = 77;
 pub const TABLE_NAME: &str = "xp_ingress_guard";
@@ -145,8 +146,8 @@ pub(crate) fn render_openrc_xray_script(mode: Option<GuardMode>) -> String {
     } else {
         "command=\"/usr/local/bin/xray\"\ncommand_args=\"run -c /etc/xray/config.json\"\n"
     };
-    let pre = if mode.is_some() {
-        concat!(
+    let pre = match mode {
+        Some(GuardMode::Enforced) => concat!(
             "\nstart_pre() {\n",
             "  /usr/local/bin/xp-ops _ingress-guard-prepare\n",
             "  result=$?\n",
@@ -154,9 +155,18 @@ pub(crate) fn render_openrc_xray_script(mode: Option<GuardMode>) -> String {
             "    return \"$result\"\n",
             "  fi\n",
             "}\n",
-        )
-    } else {
-        ""
+        ),
+        Some(GuardMode::Observe) => concat!(
+            "\nstart_pre() {\n",
+            "  /usr/local/bin/xp-ops _ingress-guard-prepare\n",
+            "  result=$?\n",
+            "  if [ \"$result\" -ne 0 ]; then\n",
+            "    # Observe mode records failures but keeps direct Xray startup.\n",
+            "    return 0\n",
+            "  fi\n",
+            "}\n",
+        ),
+        None => "",
     };
     format!(
         concat!(
@@ -198,9 +208,7 @@ struct OperationLock(File);
 
 impl OperationLock {
     fn acquire(paths: &Paths) -> Result<Self, ExitError> {
-        let dir = paths.run_xp_ingress_guard_dir();
-        reject_symlink(&dir)?;
-        ensure_dir(&dir).map_err(fs_error)?;
+        ensure_guard_runtime_dir(paths)?;
         let path = paths.run_xp_ingress_guard_lock();
         reject_symlink(&path)?;
         let file = OpenOptions::new()
@@ -236,52 +244,53 @@ pub fn cmd_ingress_guard(paths: Paths, command: IngressGuardCommand) -> Result<(
 }
 
 pub fn cmd_ingress_guard_prepare(paths: Paths) -> Result<(), ExitError> {
-    require_root(&paths)?;
-    let config = load_config(&paths)?;
+    prepare(&paths, true)
+}
+
+fn prepare(paths: &Paths, acquire_lock: bool) -> Result<(), ExitError> {
+    require_root(paths)?;
+    let _lock = if acquire_lock {
+        Some(OperationLock::acquire(paths)?)
+    } else {
+        None
+    };
+    // A permit is single-start state. Clear it before any fallible read or nft operation so a
+    // systemd ExecStartPre failure can never be bypassed by a stable service cgroup path.
+    remove_permit(paths)?;
+    let config = load_config(paths)?;
     let Some(mut config) = config else {
         return Ok(());
     };
     if config.mode == GuardMode::Observe {
-        let result = refresh_table(&paths, &mut config);
+        let result = refresh_table(paths, &mut config);
         if result.is_ok() {
-            let _ = write_config(&paths, &config);
+            let _ = write_config(paths, &config);
         }
         let _ = write_status(
-            &paths,
+            paths,
             status_from_config(&config, result.as_ref().err().map(error_code)),
         );
         return Ok(());
     }
-    let result = refresh_table(&paths, &mut config);
+    let result = refresh_table(paths, &mut config);
     match result {
         Ok(()) => {
-            if let Err(error) = write_config(&paths, &config) {
-                let _ = remove_permit(&paths);
-                let _ = write_status(
-                    &paths,
-                    status_from_config(&config, Some(error_code(&error))),
-                );
+            if let Err(error) = write_config(paths, &config) {
+                let _ = write_status(paths, status_from_config(&config, Some(error_code(&error))));
                 return Err(ExitError::new(PREPARE_FAILURE_EXIT, error.message));
             }
-            if let Err(error) = write_permit(&paths, &config) {
-                let _ = remove_permit(&paths);
-                let _ = write_status(
-                    &paths,
-                    status_from_config(&config, Some(error_code(&error))),
-                );
+            if let Err(error) = write_permit(paths, &config) {
+                let _ = write_status(paths, status_from_config(&config, Some(error_code(&error))));
                 return Err(ExitError::new(PREPARE_FAILURE_EXIT, error.message));
             }
-            if let Err(error) = write_status(&paths, status_from_config(&config, None)) {
+            if let Err(error) = write_status(paths, status_from_config(&config, None)) {
+                let _ = remove_permit(paths);
                 return Err(ExitError::new(PREPARE_FAILURE_EXIT, error.message));
             }
             Ok(())
         }
         Err(error) => {
-            let _ = remove_permit(&paths);
-            let _ = write_status(
-                &paths,
-                status_from_config(&config, Some(error_code(&error))),
-            );
+            let _ = write_status(paths, status_from_config(&config, Some(error_code(&error))));
             Err(ExitError::new(PREPARE_FAILURE_EXIT, error.message))
         }
     }
@@ -315,10 +324,7 @@ pub fn cmd_ingress_guard_exec(paths: Paths) -> Result<(), ExitError> {
         ));
     }
     let mut command = Command::new(xray);
-    command
-        .args(["run", "-c", "/etc/xray/config.json"])
-        .env("GOMEMLIMIT", "16MiB")
-        .env("GOGC", "50");
+    command.args(["run", "-c", "/etc/xray/config.json"]);
     let error = {
         #[cfg(unix)]
         {
@@ -434,29 +440,21 @@ fn set_limits(paths: &Paths, args: IngressGuardSetLimitsArgs) -> Result<(), Exit
     nft::check(&program)?;
     apply_owned_table(paths, &program)?;
     if let Err(error) = verify_readback(paths, &config) {
-        if let Some(previous) = old_program {
-            let _ = apply_owned_table(paths, &previous);
-        }
-        let _ = write_config(paths, &previous);
-        return Err(error);
+        let rollback =
+            restore_previous_state(paths, Some(&previous), old_program.as_deref(), &assets);
+        return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) =
         write_config(paths, &config).and_then(|_| refresh_xray_service_assets(paths))
     {
-        let _ = restore_xray_assets(paths, &assets);
-        let _ = write_config(paths, &previous);
-        if let Some(old_program) = old_program {
-            let _ = apply_owned_table(paths, &old_program);
-        }
-        return Err(error);
+        let rollback =
+            restore_previous_state(paths, Some(&previous), old_program.as_deref(), &assets);
+        return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) = write_status(paths, status_from_config(&config, None)) {
-        let _ = restore_xray_assets(paths, &assets);
-        let _ = write_config(paths, &previous);
-        if let Some(old_program) = old_program {
-            let _ = apply_owned_table(paths, &old_program);
-        }
-        return Err(error);
+        let rollback =
+            restore_previous_state(paths, Some(&previous), old_program.as_deref(), &assets);
+        return Err(with_rollback_result(error, rollback));
     }
     Ok(())
 }
@@ -469,13 +467,33 @@ fn status(paths: &Paths, args: IngressGuardStatusArgs) -> Result<(), ExitError> 
     {
         status = saved;
     }
-    if status.mode == "disabled"
-        && running_as_root(paths)
-        && let Some(config) = load_config(paths)?
-    {
-        status = status_from_config(&config, None);
+    if running_as_root(paths) {
+        match load_config(paths) {
+            Ok(Some(config)) => match verify_readback(paths, &config) {
+                Ok(()) => {
+                    status = status_from_config(&config, None);
+                    if let Err(error) = update_status_counters(paths, &mut status) {
+                        status.verified = false;
+                        status.error_code = Some(error_code(&error));
+                    }
+                }
+                Err(error) => {
+                    status = status_from_config(&config, Some(error_code(&error)));
+                    let _ = update_status_counters(paths, &mut status);
+                }
+            },
+            Ok(None) => status = GuardStatus::default(),
+            Err(error) => {
+                status.verified = false;
+                status.error_code = Some(error_code(&error));
+            }
+        }
+    } else {
+        if let Err(error) = update_status_counters(paths, &mut status) {
+            status.verified = false;
+            status.error_code = Some(error_code(&error));
+        }
     }
-    update_status_counters(paths, &mut status);
     if args.json {
         println!(
             "{}",
@@ -510,43 +528,54 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
     };
     validate_owned_table(paths)?;
     let assets = snapshot_xray_assets(paths)?;
+    let old_program = nft::render(&config).ok();
+    reject_symlink(&paths.etc_xp_ops_ingress_guard_config())?;
     fs::remove_file(paths.etc_xp_ops_ingress_guard_config()).map_err(fs_error)?;
     if let Err(error) = write_direct_xray_service_assets(paths) {
-        let _ = write_config(paths, &config);
-        let _ = restore_xray_assets(paths, &assets);
-        return Err(error);
+        let rollback =
+            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+        return Err(with_rollback_result(error, rollback));
     }
-    if !remove_owned_table(paths)? {
-        let _ = restore_xray_assets(paths, &assets);
-        let _ = write_config(paths, &config);
-        if let Ok(old_program) = nft::render(&config) {
-            let _ = apply_owned_table(paths, &old_program);
-        }
-        return Err(ExitError::new(
+    if !reload_systemd_units(paths) {
+        let error = ExitError::new(
             7,
-            "service_error: unable to remove guard table",
-        ));
+            "service_error: unable to reload direct Xray service asset",
+        );
+        let rollback =
+            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+        let _ = reload_systemd_units(paths);
+        return Err(with_rollback_result(error, rollback));
+    }
+    let remove_result = remove_owned_table(paths);
+    if !matches!(remove_result, Ok(true)) {
+        let error = match remove_result {
+            Ok(false) => ExitError::new(7, "service_error: unable to remove guard table"),
+            Err(error) => error,
+            Ok(true) => unreachable!(),
+        };
+        let rollback =
+            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+        let _ = reload_systemd_units(paths);
+        return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) = remove_permit(paths) {
-        let _ = restore_xray_assets(paths, &assets);
-        let _ = write_config(paths, &config);
-        if let Ok(old_program) = nft::render(&config) {
-            let _ = apply_owned_table(paths, &old_program);
-        }
-        return Err(error);
+        let rollback =
+            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+        let _ = reload_systemd_units(paths);
+        return Err(with_rollback_result(error, rollback));
     }
     if !restart_xray_service(paths, "xray.service", "xray") {
-        if restore_xray_assets(paths, &assets).is_err() || write_config(paths, &config).is_err() {
+        let rollback =
+            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+        if rollback.is_err() {
             return Err(ExitError::new(
                 8,
                 "rollback_failed: unable to restore guarded Xray assets",
             ));
         }
-        if let Ok(old_program) = nft::render(&config) {
-            let _ = apply_owned_table(paths, &old_program);
-        }
-        let guarded_restart = cmd_ingress_guard_prepare(paths.clone()).is_ok()
-            && restart_xray_service(paths, "xray.service", "xray");
+        let _ = reload_systemd_units(paths);
+        let guarded_restart =
+            prepare(paths, false).is_ok() && restart_xray_service(paths, "xray.service", "xray");
         return Err(ExitError::new(
             if guarded_restart { 7 } else { 8 },
             if guarded_restart {
@@ -556,7 +585,7 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
             },
         ));
     }
-    let _ = fs::remove_file(paths.etc_xp_ops_ingress_guard_config());
+    let _ = remove_guard_config(paths);
     let _ = fs::remove_file(paths.run_xp_ingress_guard_status());
     Ok(())
 }
@@ -568,44 +597,37 @@ fn commit_config_and_restart(
 ) -> Result<(), ExitError> {
     let previous = load_config(paths)?;
     let assets = snapshot_xray_assets(paths)?;
+    let previous_program = previous.as_ref().and_then(|value| nft::render(value).ok());
     let program = nft::render(config)?;
     nft::check(&program)?;
     apply_owned_table(paths, &program)?;
     if let Err(error) = verify_readback(paths, config) {
-        if let Some(previous) = previous {
-            let _ = write_config(paths, &previous);
-            if let Ok(old_program) = nft::render(&previous) {
-                let _ = apply_owned_table(paths, &old_program);
-            }
-        } else {
-            let _ = remove_owned_table(paths);
-        }
-        return Err(error);
+        let rollback = restore_previous_state(
+            paths,
+            previous.as_ref(),
+            previous_program.as_deref(),
+            &assets,
+        );
+        return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) = write_config(paths, config).and_then(|_| refresh_xray_service_assets(paths))
     {
-        let _ = restore_xray_assets(paths, &assets);
-        if let Some(previous) = previous.as_ref() {
-            let _ = write_config(paths, previous);
-            if let Ok(old_program) = nft::render(previous) {
-                let _ = apply_owned_table(paths, &old_program);
-            }
-        } else {
-            let _ = remove_owned_table(paths);
-        }
-        return Err(error);
+        let rollback = restore_previous_state(
+            paths,
+            previous.as_ref(),
+            previous_program.as_deref(),
+            &assets,
+        );
+        return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) = write_status(paths, status_from_config(config, None)) {
-        let _ = restore_xray_assets(paths, &assets);
-        if let Some(previous) = previous.as_ref() {
-            let _ = write_config(paths, previous);
-            if let Ok(old_program) = nft::render(previous) {
-                let _ = apply_owned_table(paths, &old_program);
-            }
-        } else {
-            let _ = remove_owned_table(paths);
-        }
-        return Err(error);
+        let rollback = restore_previous_state(
+            paths,
+            previous.as_ref(),
+            previous_program.as_deref(),
+            &assets,
+        );
+        return Err(with_rollback_result(error, rollback));
     }
     if !reload_systemd_units(paths) || !restart_xray_service(paths, "xray.service", "xray") {
         let _ = remove_permit(paths);
@@ -674,6 +696,52 @@ fn restore_file(path: &Path, contents: Option<&[u8]>) -> Result<(), ExitError> {
     }
     Ok(())
 }
+
+fn remove_guard_config(paths: &Paths) -> Result<(), ExitError> {
+    let path = paths.etc_xp_ops_ingress_guard_config();
+    reject_symlink(&path)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(fs_error(error)),
+    }
+}
+
+fn restore_previous_state(
+    paths: &Paths,
+    previous: Option<&GuardConfig>,
+    previous_program: Option<&str>,
+    assets: &XrayAssetSnapshot,
+) -> Result<(), ExitError> {
+    restore_xray_assets(paths, assets)?;
+    match previous {
+        Some(config) => {
+            write_config(paths, config)?;
+            let program = previous_program.ok_or_else(|| {
+                ExitError::new(8, "rollback_failed: previous nft program missing")
+            })?;
+            apply_owned_table(paths, program)?;
+        }
+        None => {
+            remove_guard_config(paths)?;
+            if !remove_owned_table(paths)? {
+                return Err(ExitError::new(
+                    8,
+                    "rollback_failed: unable to remove candidate guard table",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn with_rollback_result(original: ExitError, rollback: Result<(), ExitError>) -> ExitError {
+    match rollback {
+        Ok(()) => original,
+        Err(_) => ExitError::new(8, format!("rollback_failed: {}", original.message)),
+    }
+}
+
 fn refresh_table(paths: &Paths, config: &mut GuardConfig) -> Result<(), ExitError> {
     config.cgroup = current_xray_cgroup(paths)?;
     validate_owned_table(paths)?;
@@ -684,10 +752,7 @@ fn refresh_table(paths: &Paths, config: &mut GuardConfig) -> Result<(), ExitErro
 }
 
 fn apply_owned_table(_paths: &Paths, program: &str) -> Result<(), ExitError> {
-    let exists = Command::new(nft::binary())
-        .args(["--json", "list", "table", "inet", TABLE_NAME])
-        .output()
-        .is_ok_and(|output| output.status.success());
+    let exists = read_table_value(_paths)?.is_some();
     let transaction = if exists {
         format!("delete table inet {TABLE_NAME}\n{program}")
     } else {
@@ -748,142 +813,27 @@ fn preflight_capabilities(
 }
 
 fn validate_xray_service_asset(paths: &Paths, init: InitSystem) -> Result<(), ExitError> {
-    let (path, contents) = match init {
-        InitSystem::Systemd => (
-            paths.systemd_unit_dir().join("xray.service"),
-            fs::read_to_string(paths.systemd_unit_dir().join("xray.service")),
-        ),
-        InitSystem::OpenRc => (
-            paths.openrc_initd_dir().join("xray"),
-            fs::read_to_string(paths.openrc_initd_dir().join("xray")),
-        ),
-        InitSystem::None => return Err(ExitError::new(2, "unsupported_service")),
-    };
-    let raw = contents.map_err(|_| {
-        ExitError::new(
-            2,
-            format!(
-                "unsupported_service: managed Xray asset missing ({})",
-                path.display()
-            ),
-        )
-    })?;
-    let standard = match init {
-        InitSystem::Systemd => {
-            raw.contains("User=xray")
-                && raw.contains("Group=xray")
-                && (raw.contains("ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json")
-                    || raw.contains("ExecStart=/usr/local/bin/xp-ops _ingress-guard-exec"))
-        }
-        InitSystem::OpenRc => {
-            raw.contains("command_user=\"xray:xray\"")
-                && raw.contains("supervisor=supervise-daemon")
-                && (raw.contains("command=\"/usr/local/bin/xray\"")
-                    || raw.contains("command=\"/usr/local/bin/xp-ops\""))
-                && raw.contains("/etc/xray/config.json")
-        }
-        InitSystem::None => false,
-    };
-    if !standard || !raw.contains("# Managed by xp-ops ingress-guard service boundary") {
-        return Err(ExitError::new(
-            2,
-            "unsupported_service: custom Xray service asset",
-        ));
-    }
-    Ok(())
+    state::validate_xray_service_asset(paths, init)
 }
 
 fn current_xray_cgroup(paths: &Paths) -> Result<String, ExitError> {
-    if let Ok(value) = std::env::var("XP_OPS_TEST_CGROUP") {
-        return normalize_cgroup(&value);
-    }
-    let path = if is_test_root(paths.root()) {
-        PathBuf::from("/proc/self/cgroup")
-    } else {
-        paths.map_abs(Path::new("/proc/self/cgroup"))
-    };
-    let raw = fs::read_to_string(path)
-        .map_err(|error| ExitError::new(2, format!("cgroup_read_failed: {error}")))?;
-    let value = raw
-        .lines()
-        .find_map(|line| line.strip_prefix("0::"))
-        .ok_or_else(|| ExitError::new(2, "unsupported_kernel: unified cgroup path missing"))?;
-    normalize_cgroup(value)
+    state::current_xray_cgroup(paths)
 }
 
 fn xray_service_cgroup(paths: &Paths) -> Result<String, ExitError> {
-    if std::env::var_os("XP_OPS_TEST_CGROUP").is_some() {
-        return current_xray_cgroup(paths);
-    }
-    let proc_dir = paths.map_abs(Path::new("/proc"));
-    if let Ok(entries) = fs::read_dir(proc_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name
-                .to_str()
-                .is_none_or(|value| !value.chars().all(char::is_numeric))
-            {
-                continue;
-            }
-            let comm = entry.path().join("comm");
-            if fs::read_to_string(comm).ok().as_deref().map(str::trim) != Some("xray") {
-                continue;
-            }
-            let cgroup = entry.path().join("cgroup");
-            if let Ok(raw) = fs::read_to_string(cgroup)
-                && let Some(value) = raw.lines().find_map(|line| line.strip_prefix("0::"))
-            {
-                return normalize_cgroup(value);
-            }
-        }
-    }
-    current_xray_cgroup(paths)
+    state::xray_service_cgroup(paths)
 }
 
 fn normalize_cgroup(value: &str) -> Result<String, ExitError> {
-    let value = value.trim();
-    if value.is_empty()
-        || value.contains('\0')
-        || value.contains('"')
-        || value.contains('\\')
-        || value.contains('\n')
-    {
-        return Err(ExitError::new(2, "cgroup_read_failed: invalid cgroup path"));
-    }
-    Ok(value.trim_start_matches('/').to_string())
+    state::normalize_cgroup(value)
 }
 
 fn validate_owned_table(paths: &Paths) -> Result<(), ExitError> {
-    if is_test_root(paths.root()) && std::env::var_os("XP_OPS_NFT_BIN").is_none() {
-        return Ok(());
-    }
-    let output = Command::new(nft::binary())
-        .args(["--json", "list", "table", "inet", TABLE_NAME])
-        .output();
-    let Ok(output) = output else { return Ok(()) };
-    if !output.status.success() {
-        return Ok(());
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    if !text.contains(OWNERSHIP_MARKER) {
-        return Err(ExitError::new(
-            3,
-            "ownership_conflict: foreign nft table uses xp_ingress_guard",
-        ));
-    }
-    Ok(())
+    state::validate_owned_table(paths)
 }
 
 fn remove_owned_table(paths: &Paths) -> Result<bool, ExitError> {
-    if is_test_root(paths.root()) && std::env::var_os("XP_OPS_NFT_BIN").is_none() {
-        return Ok(true);
-    }
-    validate_owned_table(paths)?;
-    let status = Command::new(nft::binary())
-        .args(["delete", "table", "inet", TABLE_NAME])
-        .status()
-        .map_err(|error| ExitError::new(3, format!("nft_failed: {error}")))?;
-    Ok(status.success())
+    state::remove_owned_table(paths)
 }
 
 fn profile_from_arg(profile: IngressGuardProfileArg) -> GuardProfile {

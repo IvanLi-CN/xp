@@ -1,5 +1,6 @@
 use super::*;
 use crate::ops::paths::Paths;
+use crate::ops::util::ensure_dir;
 use clap::Parser;
 use std::fs;
 use tempfile::tempdir;
@@ -89,4 +90,34 @@ fn transaction_contract() {
     #[cfg(unix)]
     assert!(reject_symlink(&link).is_err());
     assert!(fs::read_to_string(target).unwrap().contains("global_rate"));
+}
+
+#[test]
+fn service_lifecycle_contract() {
+    let enforced = render_openrc_xray_script(Some(GuardMode::Enforced));
+    assert!(enforced.contains("return \"$result\""));
+    let observe = render_openrc_xray_script(Some(GuardMode::Observe));
+    assert!(observe.contains("Observe mode records failures"));
+    assert!(observe.contains("return 0"));
+
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    let service = paths.systemd_unit_dir().join("xray.service");
+    ensure_dir(service.parent().unwrap()).unwrap();
+    fs::write(
+        &service,
+        render_systemd_xray_unit(std::path::Path::new("/var/lib/xray"), None)
+            .replace("# Managed by xp-ops ingress-guard service boundary\n", ""),
+    )
+    .unwrap();
+    assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_ok());
+    fs::write(
+        &service,
+        render_systemd_xray_unit(
+            std::path::Path::new("/var/lib/xray"),
+            Some(GuardMode::Enforced),
+        ),
+    )
+    .unwrap();
+    assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_ok());
 }
