@@ -201,13 +201,20 @@ impl Default for GuardStatus {
         }
     }
 }
-
 #[allow(dead_code)]
 #[derive(Debug)]
 struct OperationLock(File);
 
 impl OperationLock {
     fn acquire(paths: &Paths) -> Result<Self, ExitError> {
+        Self::acquire_with_mode(paths, libc::LOCK_EX | libc::LOCK_NB)
+    }
+
+    fn acquire_for_prepare(paths: &Paths) -> Result<Self, ExitError> {
+        Self::acquire_with_mode(paths, libc::LOCK_EX)
+    }
+
+    fn acquire_with_mode(paths: &Paths, lock_mode: libc::c_int) -> Result<Self, ExitError> {
         ensure_guard_runtime_dir(paths)?;
         let path = paths.run_xp_ingress_guard_lock();
         reject_symlink(&path)?;
@@ -221,8 +228,7 @@ impl OperationLock {
         chmod(&path, 0o600).map_err(fs_error)?;
         #[cfg(unix)]
         {
-            // A non-blocking advisory lock makes duplicate mutations fail closed.
-            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            let result = unsafe { libc::flock(file.as_raw_fd(), lock_mode) };
             if result != 0 {
                 return Err(ExitError::new(
                     5,
@@ -250,12 +256,10 @@ pub fn cmd_ingress_guard_prepare(paths: Paths) -> Result<(), ExitError> {
 
 fn prepare(paths: &Paths, acquire_lock: bool) -> Result<(), ExitError> {
     require_root(paths)?;
-    // Invalidate the one-start permit before lock contention or any other fallible work.  The
-    // systemd pre-hook intentionally tolerates a non-zero refresh result, so the exec gate must
-    // never be able to consume a permit from an earlier start.
+    // Invalidate the one-start permit before any fallible work.
     remove_permit(paths)?;
     let _lock = if acquire_lock {
-        Some(OperationLock::acquire(paths)?)
+        Some(OperationLock::acquire_for_prepare(paths)?)
     } else {
         None
     };
@@ -513,7 +517,7 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
         eprintln!("would disable ingress guard and restore direct Xray startup");
         return Ok(());
     }
-    let _lock = OperationLock::acquire(paths)?;
+    let lock = OperationLock::acquire(paths)?;
     let config = load_config(paths)?;
     validate_owned_table(paths)?;
     let assets = snapshot_xray_assets(paths)?;
@@ -562,8 +566,8 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
             ));
         }
         let _ = reload_systemd_units(paths);
-        let guarded_restart =
-            prepare(paths, false).is_ok() && restart_xray_service(paths, "xray.service", "xray");
+        drop(lock);
+        let guarded_restart = restart_xray_service(paths, "xray.service", "xray");
         return Err(ExitError::new(
             if guarded_restart { 7 } else { 8 },
             if guarded_restart {
@@ -869,7 +873,6 @@ pub(crate) fn detect_xray_init_system(paths: &Paths, distro: Distro) -> InitSyst
     }
     detect_init_system(distro, None)
 }
-
 fn validate_xray_service_asset(paths: &Paths, init: InitSystem) -> Result<(), ExitError> {
     state::validate_xray_service_asset(paths, init)
 }

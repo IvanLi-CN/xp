@@ -451,12 +451,28 @@ pub(super) fn validate_xray_service_asset(
         let drop_ins = paths.systemd_unit_dir().join("xray.service.d");
         reject_symlink(&drop_ins)?;
         match fs::read_dir(&drop_ins) {
-            Ok(mut entries) => {
-                if entries.next().is_some() {
-                    return Err(ExitError::new(
-                        2,
-                        "unsupported_service: custom Xray service drop-in",
-                    ));
+            Ok(entries) => {
+                let mut managed_memory_drop_in = false;
+                for entry in entries {
+                    let entry = entry.map_err(fs_error)?;
+                    if entry.file_name() != "20-xp-memory.conf" {
+                        return Err(ExitError::new(
+                            2,
+                            "unsupported_service: custom Xray service drop-in",
+                        ));
+                    }
+                    reject_symlink(&entry.path())?;
+                    let raw = fs::read_to_string(entry.path()).map_err(fs_error)?;
+                    if !is_generated_xray_memory_drop_in(&raw) || managed_memory_drop_in {
+                        return Err(ExitError::new(
+                            2,
+                            "unsupported_service: custom Xray service drop-in",
+                        ));
+                    }
+                    managed_memory_drop_in = true;
+                }
+                if !managed_memory_drop_in && drop_ins.exists() {
+                    // An empty directory is harmless and is often left by package upgrades.
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -470,6 +486,20 @@ pub(super) fn validate_xray_service_asset(
         ));
     }
     Ok(())
+}
+
+fn is_generated_xray_memory_drop_in(raw: &str) -> bool {
+    const MARKER: &str = "# Managed by xp-ops; use a separate drop-in for overrides";
+    let mut lines = raw.lines();
+    if lines.next() != Some("[Service]") || lines.next() != Some(MARKER) {
+        return false;
+    }
+    lines.all(|line| {
+        matches!(
+            line,
+            "" | "Environment=GOMEMLIMIT=16MiB" | "Environment=GOGC=50"
+        )
+    })
 }
 
 fn is_generated_xray_service_asset(init: InitSystem, raw: &str) -> bool {
