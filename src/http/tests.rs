@@ -28,6 +28,8 @@ mod managed_vless_create;
 mod mihomo_smux;
 #[path = "tests/status_events.rs"]
 mod status_events;
+#[path = "tests/unreachable_voter_eviction.rs"]
+mod unreachable_voter_eviction;
 mod vless_xhttp;
 use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},

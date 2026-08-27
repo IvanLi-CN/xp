@@ -30,13 +30,16 @@ use tokio::{
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
+mod node_delete;
 mod status_events;
+mod unreachable_voter_eviction;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
     admin_internal_reverse_relay, admin_run_mesh_probes, send_mesh_internal_capability_read,
     send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
     spawn_reverse_assignment_worker,
 };
+use node_delete::AdminNodeDeletePreviewEndpoint;
 use status_events::StatusEventsHub;
 
 use crate::{
@@ -679,14 +682,6 @@ struct AdminNodeResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct AdminNodeDeletePreviewEndpoint {
-    endpoint_id: String,
-    tag: String,
-    kind: EndpointKind,
-    port: u16,
-}
-
-#[derive(Debug, Clone, Serialize)]
 struct AdminNodeDeletePreviewResponse {
     node_id: String,
     endpoints: Vec<AdminNodeDeletePreviewEndpoint>,
@@ -1039,6 +1034,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/repair-orphan-voter",
             post(admin_internal_repair_orphan_voter),
+        )
+        .route(
+            "/_internal/raft/evict-unreachable-voter",
+            post(unreachable_voter_eviction::admin_internal_evict_unreachable_voter),
         )
         .route(
             "/_internal/raft/membership-operations/{operation_id}",

@@ -19,6 +19,12 @@ use crate::{
     },
 };
 
+mod unreachable_voter_eviction;
+pub use unreachable_voter_eviction::{
+    UnreachableVoterEvictionPreview, begin_unreachable_voter_eviction,
+    preview_unreachable_voter_eviction,
+};
+
 pub use crate::raft_membership_cleanup::{
     MembershipRemovalCleanup, finalize_remove_node_cleanup_once,
 };
@@ -351,8 +357,7 @@ async fn resume_orphan_voter_repair_operation(
     operation: MembershipOperation,
 ) -> anyhow::Result<()> {
     let metrics = raft.metrics().borrow().clone();
-    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
-    {
+    if !is_current_local_leader(&metrics) {
         return Ok(());
     }
     if metrics
@@ -517,8 +522,7 @@ async fn validate_orphan_voter_repair(
     raft_node_id: NodeId,
     expected_membership: Option<&str>,
 ) -> anyhow::Result<()> {
-    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
-    {
+    if !is_current_local_leader(metrics) {
         anyhow::bail!("orphan voter repair must run on the current local leader")
     }
     let membership = metrics.membership_config.membership();
@@ -621,6 +625,10 @@ pub async fn block_membership_operation(
     .await
 }
 
+fn is_current_local_leader(metrics: &openraft::RaftMetrics<NodeId, NodeMeta>) -> bool {
+    metrics.state == openraft::ServerState::Leader && metrics.current_leader == Some(metrics.id)
+}
+
 pub(crate) async fn require_expected_membership(
     raft: &Arc<dyn RaftFacade>,
     operation: &MembershipOperation,
@@ -652,8 +660,7 @@ async fn prune_terminal_operations(
         return Ok(());
     }
     let metrics = raft.metrics().borrow().clone();
-    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
-    {
+    if !is_current_local_leader(&metrics) {
         return Ok(());
     }
     raft.ensure_linearizable().await?;
@@ -681,8 +688,7 @@ async fn resume_restore_operation(
         .get_node(&node_id)
         .ok_or_else(|| anyhow::anyhow!("restore operation node is missing"))?;
     let metrics = raft.metrics().borrow().clone();
-    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
-    {
+    if !is_current_local_leader(&metrics) {
         return Ok(());
     }
     let membership = metrics.membership_config.membership();
@@ -845,13 +851,18 @@ pub async fn resume_membership_operations_once(
     let Some(operation) = operation else {
         return prune_terminal_operations(&raft, &store).await;
     };
-    if operation.kind == MembershipOperationKind::Restore {
-        return resume_restore_operation(&raft, &store, operation).await;
+    match operation.kind {
+        MembershipOperationKind::Restore => {
+            return resume_restore_operation(&raft, &store, operation).await;
+        }
+        MembershipOperationKind::RepairOrphanVoter => {
+            return resume_orphan_voter_repair_operation(&raft, &store, operation).await;
+        }
+        MembershipOperationKind::RemoveNode => {}
+        _ => return Ok(()),
     }
-    if operation.kind == MembershipOperationKind::RepairOrphanVoter {
-        return resume_orphan_voter_repair_operation(&raft, &store, operation).await;
-    }
-    if operation.kind != MembershipOperationKind::RemoveNode {
+    let metrics = raft.metrics().borrow().clone();
+    if !is_current_local_leader(&metrics) {
         return Ok(());
     }
     let node_id = operation
@@ -861,12 +872,15 @@ pub async fn resume_membership_operations_once(
 
     match operation.phase {
         MembershipOperationPhase::Prepared => {
-            let metrics = raft.metrics().borrow().clone();
             let membership = metrics.membership_config.membership();
             let is_voter = membership
                 .voter_ids()
                 .any(|member| member == operation.raft_node_id);
             let is_member = membership.get_node(&operation.raft_node_id).is_some();
+            if metrics.id == operation.raft_node_id {
+                block_membership_operation(&raft, operation, "target became leader").await?;
+                return Ok(());
+            }
             if !is_member {
                 let _ = transition_operation(
                     &raft,
