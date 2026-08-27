@@ -10,7 +10,9 @@ The command requires a dry-run membership fingerprint, a clean linearizable memb
 joint configuration or active operation, an exact DesiredState node mapping, and an exact endpoint
 snapshot. Apply records the existing `RemoveNode` operation rather than introducing another
 mutation path. The established resumer then removes the voter, verifies absence, atomically deletes
-the node and confirmed endpoints, and queues runtime/history cleanup.
+the node and confirmed endpoints, and queues runtime/history cleanup. If the target becomes the
+current local leader before removal, the resumer terminally blocks the operation instead of
+removing that leader.
 
 ## Considered options
 

@@ -94,7 +94,8 @@ sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --n
 - Apply records the ordinary durable `RemoveNode` operation. The existing recovery sequence uses
   `RemoveVoters(..., false)`, proves absence, atomically deletes the confirmed node/endpoints, and
   queues inbound, history, and full-reconcile cleanup. It does not re-add the target after an
-  unknown result.
+  unknown result. The resumer acts only on its current local leader; if the target becomes that
+  leader before removal, it records terminal Blocked evidence and makes no membership change.
 
 ## Orphan voter repair
 

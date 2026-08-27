@@ -28,6 +28,8 @@ mod managed_vless_create;
 mod mihomo_smux;
 #[path = "tests/status_events.rs"]
 mod status_events;
+#[path = "tests/unreachable_voter_eviction.rs"]
+mod unreachable_voter_eviction;
 mod vless_xhttp;
 use crate::{
     cloudflared_supervisor::{CloudflaredHealthHandle, CloudflaredStatus},
@@ -1179,31 +1181,6 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
                         "url": "http://127.0.0.1:1/generate_204",
                     })
                     .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn unreachable_voter_eviction_requires_internal_auth() {
-    let tmp = tempfile::tempdir().unwrap();
-    let app = app(&tmp);
-
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/admin/_internal/raft/evict-unreachable-voter")
-                .header(
-                    header::AUTHORIZATION,
-                    format!("Bearer {}", TEST_ADMIN_TOKEN),
-                )
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({ "node_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV" }).to_string(),
                 ))
                 .unwrap(),
         )

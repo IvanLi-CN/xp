@@ -21,7 +21,9 @@
 - Unreachable mapped-voter eviction is a separate signed, leader-local CLI/API with no Admin Web
   action. It proves the target before excluding it from retained-voter capability verification,
   then records the existing RemoveNode operation with an immutable endpoint snapshot so the normal
-  resumer and cleanup machinery retain ownership of uncertain-result recovery.
+  resumer and cleanup machinery retain ownership of uncertain-result recovery. The resumer writes
+  only from the current local leader and terminally blocks the operation if its target becomes that
+  leader before `RemoveVoters`.
 
 ## Compatibility
 

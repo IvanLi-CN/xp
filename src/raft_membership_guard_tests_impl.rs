@@ -229,6 +229,100 @@ async fn unreachable_voter_eviction_requires_a_previewed_mapped_voter_and_endpoi
 }
 
 #[tokio::test]
+async fn remove_node_operation_blocks_when_its_target_becomes_leader() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
+    let target_raft_node_id = raft_node_id_from_ulid(&target_node_id).unwrap();
+    let retained_raft_node_id = target_raft_node_id.wrapping_add(1);
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: temp.path().to_path_buf(),
+            bootstrap_node_id: Some(target_node_id.clone()),
+            bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        })
+        .unwrap(),
+    ));
+    let mut metrics = openraft::RaftMetrics::new_initial(target_raft_node_id);
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(target_raft_node_id);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+        None,
+        openraft::Membership::new(
+            vec![BTreeSet::from([target_raft_node_id, retained_raft_node_id])],
+            BTreeMap::from([
+                (
+                    target_raft_node_id,
+                    NodeMeta {
+                        name: xp_test_fixtures::primary_node_name().to_owned(),
+                        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
+                    },
+                ),
+                (
+                    retained_raft_node_id,
+                    NodeMeta {
+                        name: xp_test_fixtures::secondary_node_name().to_owned(),
+                        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+                    },
+                ),
+            ]),
+        ),
+    ));
+    let expected_membership = membership_revision(&metrics).unwrap();
+    let (_metrics_tx, metrics_rx) = watch::channel(metrics);
+    let raft: Arc<dyn RaftFacade> = Arc::new(LocalRaft::new(store.clone(), metrics_rx));
+    store.lock().await.state_mut().membership_operations.insert(
+        "remove-node".to_string(),
+        MembershipOperation {
+            operation_id: "remove-node".to_string(),
+            kind: MembershipOperationKind::RemoveNode,
+            raft_node_id: target_raft_node_id,
+            node_id: Some(target_node_id.clone()),
+            expected_membership,
+            phase: MembershipOperationPhase::Prepared,
+            legacy: false,
+            delete_endpoints: true,
+            expected_endpoint_ids: Vec::new(),
+            expected_endpoint_tags: Vec::new(),
+            created_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+            next_retry_at: None,
+            terminal_at: None,
+            evidence: Some("test operation".to_string()),
+        },
+    );
+
+    resume_membership_operations_once(raft.clone(), store.clone())
+        .await
+        .unwrap();
+
+    let store = store.lock().await;
+    let operation = store
+        .state()
+        .membership_operations
+        .get("remove-node")
+        .unwrap();
+    assert_eq!(operation.phase, MembershipOperationPhase::Blocked);
+    assert!(
+        operation
+            .evidence
+            .as_deref()
+            .is_some_and(|evidence| evidence.contains("target became leader"))
+    );
+    assert!(store.get_node(&target_node_id).is_some());
+    assert!(
+        raft.metrics()
+            .borrow()
+            .membership_config
+            .membership()
+            .get_node(&target_raft_node_id)
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn orphan_voter_repair_resumes_after_an_uncertain_remove_voters_request() {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(Mutex::new(

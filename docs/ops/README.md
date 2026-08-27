@@ -1068,7 +1068,9 @@ voter before excluding only that target from capability verification; every reta
 must still pass the signed lifecycle-capability probe. It records the normal durable RemoveNode
 operation, so `RemoveVoters(..., false)`, absent verification, node/endpoint deletion, and cleanup
 remain recoverable. Do not replace a failed precondition with raw Raft edits, an internal API call,
-or `recover-single-node`.
+or `recover-single-node`. If leadership moves to the target before removal, the durable operation
+becomes Blocked and changes no membership; investigate and start a new approved preview only after
+the target is again a non-leader.
 
 If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
 case you can force a single-node Raft membership on the chosen surviving node to restore write
