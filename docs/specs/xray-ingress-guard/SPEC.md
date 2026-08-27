@@ -87,8 +87,9 @@ profile atomically; it never requires a port migration or an `xp` restart.
 ### Ruleset ownership
 
 `xp-ops` owns exactly `table inet xp_ingress_guard`. The table has a managed
-identity marker, a cgroup-v2 set for the current Xray service cgroup, named
-global/per-source limit state, and counters for admitted and dropped SYNs.
+identity marker, an inline `socket cgroupv2` selector for the current Xray
+service cgroup, named global/per-source limit state, and counters for admitted
+and dropped SYNs.
 
 Its input base chain drops only eligible over-limit packets and otherwise
 returns. It does not set a default policy, accept packets, flush another table,

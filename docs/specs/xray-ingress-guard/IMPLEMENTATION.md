@@ -54,13 +54,18 @@ The renderer must construct a typed nft program rather than concatenate
 operator strings. It creates or refreshes only `inet xp_ingress_guard` and
 includes:
 
-- a cgroups-v2 set containing the current Xray service-cgroup path;
+- an inline cgroups-v2 socket selector for the current Xray service-cgroup path;
 - one global named token bucket shared by IPv4 and IPv6;
 - finite IPv4 and IPv6 source-meter state, each capped at 1,024 entries with a
   60-second idle expiry;
 - named aggregate counters for eligible SYNs, global drops, and source drops;
 - an input base chain whose only terminal verdict is `drop` for an over-limit
   eligible SYN.
+
+Named counters are declared as table-level objects and referenced with nft's
+`counter name <id>` statement. Source meters are match expressions; their
+over-limit verdict and counter occur after the meter block so the counter only
+records excess source traffic.
 
 The base chain has policy `accept` and returns for every non-drop path. It must
 never emit an `accept` verdict that could bypass another owner’s host firewall

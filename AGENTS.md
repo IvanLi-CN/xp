@@ -23,6 +23,13 @@
   `GOMEMLIMIT=12MiB`, `GOGC=50`, and `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`.
   Release assets use the pinned low-memory Go build, and upgrade backfill must
   preserve operator overrides.
+- Host-managed XP-generated systemd/OpenRC Xray services may opt into the root-only
+  `xp-ops ingress-guard` admission guard. It owns only `table inet xp_ingress_guard`,
+  matches initial non-loopback TCP SYNs by the current Xray cgroup v2, and does not
+  enumerate ports or add a resident root process. Docker/Compose, custom Xray assets,
+  and unsupported kernels remain out of scope. `enable`, `observe`, `set-limits`, and
+  `disable` require root plus `--yes`; no xp/Web/API/polkit/sudo/doas firewall
+  delegation may be added. Enforced service preparation failure must keep Xray stopped.
 - Managed VLESS HTTPS canary certificates use Cloudflare DNS-01. Propagation checks query
   Cloudflare and Google over DoH; supported nodes require outbound HTTPS to those resolvers, but
   do not require direct authority access on UDP/TCP port 53.

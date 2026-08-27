@@ -151,6 +151,8 @@ fn rollback_runtime_binaries_and_services(
 fn snapshot_runtime_defaults(paths: &Paths) -> Result<RuntimeDefaultsBackup, ExitError> {
     let provider_wrapper = paths.usr_local_libexec_dir().join("cloudflared-tunnel");
     let paths = [
+        paths.etc_xp_ops_ingress_guard_config(),
+        paths.systemd_unit_dir().join("xray.service"),
         paths
             .systemd_unit_dir()
             .join("xray.service.d/20-xp-memory.conf"),
@@ -695,5 +697,23 @@ mod tests {
             assert!(!snapshot.files.iter().any(|file| file.path == wrapper));
             assert!(fs::symlink_metadata(wrapper).is_ok());
         }
+    }
+
+    #[test]
+    fn ingress_guard_upgrade_snapshot_preserves_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        fs::create_dir_all(paths.etc_xp_ops_dir()).unwrap();
+        fs::write(
+            paths.etc_xp_ops_ingress_guard_config(),
+            "schema = 1\nownership = 'xp-ops ingress-guard ownership v1'\n",
+        )
+        .unwrap();
+
+        let snapshot = snapshot_runtime_defaults(&paths).unwrap();
+        fs::remove_file(paths.etc_xp_ops_ingress_guard_config()).unwrap();
+        restore_runtime_defaults(&snapshot).unwrap();
+
+        assert!(paths.etc_xp_ops_ingress_guard_config().exists());
     }
 }

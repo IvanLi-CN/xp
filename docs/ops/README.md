@@ -102,6 +102,40 @@ Host-managed deployments are expected to run on small VPS/LXC machines, includin
 
 This keeps the first xray restart within roughly `30-60s` from an actual failure while avoiding repeated restarts when the host is under memory or I/O pressure. If a component remains down after restart attempts, `xp` increases the next restart delay exponentially up to 300 seconds and resets that delay after the probe recovers.
 
+## Host-managed Xray ingress guard
+
+The optional ingress guard is a root-operated host feature for XP-generated
+systemd/OpenRC Xray services. It limits new non-loopback TCP SYNs by the
+current Xray service cgroup before TLS/REALITY work begins. It is not available
+for Docker/Compose nodes, custom Xray service assets, or kernels without cgroup
+v2 and nft socket-cgroup support.
+
+```text
+sudo xp-ops ingress-guard enable --profile small-vps --yes
+sudo xp-ops ingress-guard status --json
+sudo xp-ops ingress-guard set-limits --global-rate 8 --global-burst 20 \
+  --source-rate 3 --source-burst 8 --yes
+sudo xp-ops ingress-guard disable --yes
+```
+
+`small-vps` defaults to a shared `8/s` burst `20` budget and a per-source
+`3/s` burst `8` budget. Excess initial SYNs are silently dropped; established
+connections and loopback listeners are unaffected. `observe` is an explicit
+diagnostic mode that records would-drop counters while preserving direct Xray
+startup. Mutating commands require root and `--yes`, and all support
+`--dry-run`.
+
+The guard owns only `table inet xp_ingress_guard`,
+`/etc/xp-ops/ingress-guard.toml`, and `/run/xp-ingress-guard/`. `xp`, Web/API,
+polkit, sudo, and doas receive no firewall privilege. The service start hook
+is part of the same `xp-ops` binary: enforced mode refreshes and verifies the
+table before Xray starts, while a missing permit exits `77` and cannot enter an
+automatic restart loop. OpenRC fails `start_pre` before `supervise-daemon`.
+An enforced failure leaves Xray stopped; the only unguarded recovery path is
+an explicit root `disable` operation. `init` and host-managed upgrades snapshot
+and restore the enabled configuration and guarded assets, and never fall back
+to an unguarded start during rollback.
+
 ## Endpoint probe (ingress reachability)
 
 `xp` runs a cluster-wide probe to measure **reachability** and **latency** for every endpoint (last 24 hours, per-hour buckets).

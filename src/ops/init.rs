@@ -188,7 +188,9 @@ fn write_systemd_units(paths: &Paths, args: &InitArgs, mode: Mode) -> Result<(),
     ensure_dir(&dir).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let xp_unit = systemd_xp_unit(args);
-    let xray_unit = systemd_xray_unit(args);
+    let guard_mode = crate::ops::ingress_guard::configured_mode(paths)?;
+    let xray_unit =
+        crate::ops::ingress_guard::render_systemd_xray_unit(&args.xray_work_dir, guard_mode);
     let upgrade_unit = systemd_xp_upgrade_unit(args);
 
     let xp_path = dir.join("xp.service");
@@ -243,30 +245,6 @@ Environment=XP_DATA_DIR={}\n\
 EnvironmentFile=-/etc/xp/xp.env\n\
 ExecStart=/usr/local/bin/xp-ops _upgrade-runner\n",
         args.xp_data_dir.display()
-    )
-}
-
-fn systemd_xray_unit(args: &InitArgs) -> String {
-    format!(
-        "[Unit]\n\
-Description=xray (local proxy runtime)\n\
-Wants=network-online.target\n\
-After=network-online.target\n\
-\n\
-[Service]\n\
-Type=simple\n\
-User=xray\n\
-Group=xray\n\
-WorkingDirectory={}\n\
-Environment=GOMEMLIMIT=16MiB\n\
-Environment=GOGC=50\n\
-ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json\n\
-Restart=always\n\
-RestartSec=2s\n\
-\n\
-[Install]\n\
-WantedBy=multi-user.target\n",
-        args.xray_work_dir.display()
     )
 }
 
@@ -644,7 +622,9 @@ fn write_openrc_scripts(paths: &Paths, _args: &InitArgs, mode: Mode) -> Result<(
     ensure_dir(&confd).map_err(|e| ExitError::new(4, format!("filesystem_error: {e}")))?;
 
     let xp_script = openrc_xp_script();
-    let xray_script = openrc_xray_script();
+    let xray_script = crate::ops::ingress_guard::render_openrc_xray_script(
+        crate::ops::ingress_guard::configured_mode(paths)?,
+    );
     let upgrade_script = openrc_xp_upgrade_script();
 
     let xp_path = initd.join("xp");
@@ -683,28 +663,9 @@ depend() {
     .to_string()
 }
 
+#[cfg(test)]
 fn openrc_xray_script() -> String {
-    r#"#!/sbin/openrc-run
-
-name="xray"
-description="xray (local proxy runtime)"
-
-command="/usr/local/bin/xray"
-command_args="run -c /etc/xray/config.json"
-command_user="xray:xray"
-export GOMEMLIMIT="${GOMEMLIMIT:-16MiB}"
-export GOGC="${GOGC:-50}"
-
-# Ensure automatic recovery on crashes without busy-looping.
-supervisor=supervise-daemon
-respawn_delay=2
-respawn_max=0
-
-depend() {
-  need net
-}
-"#
-    .to_string()
+    crate::ops::ingress_guard::render_openrc_xray_script(None)
 }
 
 fn openrc_xp_upgrade_script() -> String {
@@ -1000,6 +961,30 @@ mod tests {
         assert!(script.contains("GOGC=\"${GOGC:-50}\""));
         assert!(!script.contains("command_background="));
         assert!(!script.contains("pidfile="));
+    }
+
+    #[test]
+    fn ingress_guard_assets() {
+        let systemd = crate::ops::ingress_guard::render_systemd_xray_unit(
+            Path::new("/var/lib/xray"),
+            Some(crate::ops::ingress_guard::GuardMode::Enforced),
+        );
+        assert!(systemd.contains("User=xray"));
+        assert!(systemd.contains("Group=xray"));
+        assert!(systemd.contains("PermissionsStartOnly=true"));
+        assert!(systemd.contains("_ingress-guard-prepare"));
+        assert!(systemd.contains("_ingress-guard-exec"));
+        assert!(systemd.contains("RestartPreventExitStatus=77"));
+        assert!(!systemd.contains("sudo") && !systemd.contains("polkit"));
+
+        let openrc = crate::ops::ingress_guard::render_openrc_xray_script(Some(
+            crate::ops::ingress_guard::GuardMode::Enforced,
+        ));
+        assert!(openrc.contains("start_pre()"));
+        assert!(openrc.contains("_ingress-guard-prepare"));
+        assert!(openrc.contains("_ingress-guard-exec"));
+        assert!(openrc.contains("command_user=\"xray:xray\""));
+        assert!(openrc.contains("supervisor=supervise-daemon"));
     }
 
     #[test]

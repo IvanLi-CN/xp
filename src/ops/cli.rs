@@ -2,6 +2,7 @@ use crate::ops::admin_token;
 use crate::ops::cloudflare;
 use crate::ops::container;
 use crate::ops::deploy;
+use crate::ops::ingress_guard;
 use crate::ops::init;
 use crate::ops::install;
 use crate::ops::membership_lifecycle;
@@ -44,6 +45,15 @@ pub enum Command {
     UpgradeRunner(UpgradeRunnerArgs),
 
     #[command(subcommand)]
+    IngressGuard(IngressGuardCommand),
+
+    #[command(name = "_ingress-guard-prepare", hide = true)]
+    IngressGuardPrepare,
+
+    #[command(name = "_ingress-guard-exec", hide = true)]
+    IngressGuardExec,
+
+    #[command(subcommand)]
     Xp(XpCommand),
 
     Deploy(DeployArgs),
@@ -69,6 +79,70 @@ pub struct InstallArgs {
     #[arg(long, value_name = "SEMVER|latest", default_value = "latest")]
     pub xray_version: String,
 
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IngressGuardCommand {
+    Enable(IngressGuardEnableArgs),
+    Observe(IngressGuardObserveArgs),
+    SetLimits(IngressGuardSetLimitsArgs),
+    Status(IngressGuardStatusArgs),
+    Disable(IngressGuardDisableArgs),
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngressGuardProfileArg {
+    SmallVps,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IngressGuardEnableArgs {
+    #[arg(long, value_enum, default_value = "small-vps")]
+    pub profile: IngressGuardProfileArg,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IngressGuardObserveArgs {
+    #[arg(long, value_enum, default_value = "small-vps")]
+    pub profile: IngressGuardProfileArg,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IngressGuardSetLimitsArgs {
+    #[arg(long, value_name = "N")]
+    pub global_rate: u32,
+    #[arg(long, value_name = "N")]
+    pub global_burst: u32,
+    #[arg(long, value_name = "N")]
+    pub source_rate: u32,
+    #[arg(long, value_name = "N")]
+    pub source_burst: u32,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IngressGuardStatusArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IngressGuardDisableArgs {
+    #[arg(long)]
+    pub yes: bool,
     #[arg(long)]
     pub dry_run: bool,
 }
@@ -642,6 +716,9 @@ pub async fn run() -> i32 {
         },
         Some(Command::Upgrade(args)) => upgrade::cmd_upgrade(paths, args).await,
         Some(Command::UpgradeRunner(args)) => upgrade::cmd_upgrade_runner(paths, args).await,
+        Some(Command::IngressGuard(command)) => ingress_guard::cmd_ingress_guard(paths, command),
+        Some(Command::IngressGuardPrepare) => ingress_guard::cmd_ingress_guard_prepare(paths),
+        Some(Command::IngressGuardExec) => ingress_guard::cmd_ingress_guard_exec(paths),
         Some(Command::Xp(cmd)) => match cmd {
             XpCommand::Install(args) => xp::cmd_xp_install(paths, args).await,
             XpCommand::Bootstrap(args) => xp::cmd_xp_bootstrap(paths, args).await,
