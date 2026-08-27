@@ -5,6 +5,7 @@ use crate::ops::paths::Paths;
 use crate::ops::platform::InitSystem;
 use crate::ops::util::{chmod, ensure_dir, is_test_root};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -446,6 +447,22 @@ pub(super) fn validate_xray_service_asset(
             ),
         )
     })?;
+    if init == InitSystem::Systemd {
+        let drop_ins = paths.systemd_unit_dir().join("xray.service.d");
+        reject_symlink(&drop_ins)?;
+        match fs::read_dir(&drop_ins) {
+            Ok(mut entries) => {
+                if entries.next().is_some() {
+                    return Err(ExitError::new(
+                        2,
+                        "unsupported_service: custom Xray service drop-in",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(fs_error(error)),
+        }
+    }
     if !is_generated_xray_service_asset(init, &raw) {
         return Err(ExitError::new(
             2,
@@ -509,11 +526,30 @@ pub(super) fn current_xray_cgroup(paths: &Paths) -> Result<String, super::ExitEr
     normalize_cgroup(value)
 }
 
-pub(super) fn xray_service_cgroup(paths: &Paths) -> Result<String, super::ExitError> {
+pub(super) fn xray_service_cgroup(
+    paths: &Paths,
+    init: InitSystem,
+) -> Result<String, super::ExitError> {
     if std::env::var_os("XP_OPS_TEST_CGROUP").is_some() {
         return current_xray_cgroup(paths);
     }
+    if is_test_root(paths.root()) {
+        return current_xray_cgroup(paths);
+    }
+    if init == InitSystem::Systemd {
+        return systemd_xray_service_cgroup();
+    }
+    if init != InitSystem::OpenRc {
+        return Err(ExitError::new(2, "unsupported_service"));
+    }
     let proc_dir = paths.map_abs(Path::new("/proc"));
+    let expected_binary = fs::canonicalize(paths.usr_local_bin_xray()).map_err(|error| {
+        ExitError::new(
+            2,
+            format!("cgroup_read_failed: managed Xray binary is unavailable: {error}"),
+        )
+    })?;
+    let mut candidates = BTreeSet::new();
     if let Ok(entries) = fs::read_dir(proc_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name();
@@ -523,22 +559,38 @@ pub(super) fn xray_service_cgroup(paths: &Paths) -> Result<String, super::ExitEr
             {
                 continue;
             }
-            if fs::read_to_string(entry.path().join("comm"))
-                .ok()
-                .as_deref()
-                .map(str::trim)
-                != Some("xray")
-            {
+            let exe = entry.path().join("exe");
+            if fs::canonicalize(exe).ok().as_deref() != Some(expected_binary.as_path()) {
                 continue;
             }
             if let Ok(raw) = fs::read_to_string(entry.path().join("cgroup"))
                 && let Some(value) = raw.lines().find_map(|line| line.strip_prefix("0::"))
             {
-                return normalize_cgroup(value);
+                candidates.insert(normalize_cgroup(value)?);
             }
         }
     }
-    current_xray_cgroup(paths)
+    if candidates.len() == 1 {
+        return Ok(candidates.pop_first().expect("single Xray cgroup"));
+    }
+    Err(ExitError::new(
+        2,
+        "cgroup_read_failed: managed OpenRC Xray cgroup is not unique",
+    ))
+}
+
+fn systemd_xray_service_cgroup() -> Result<String, super::ExitError> {
+    let output = Command::new("systemctl")
+        .args(["show", "--property=ControlGroup", "--value", "xray.service"])
+        .output()
+        .map_err(|error| ExitError::new(2, format!("cgroup_read_failed: {error}")))?;
+    if !output.status.success() {
+        return Err(ExitError::new(
+            2,
+            "cgroup_read_failed: xray.service ControlGroup is unavailable",
+        ));
+    }
+    normalize_cgroup(&String::from_utf8_lossy(&output.stdout))
 }
 
 pub(super) fn normalize_cgroup(value: &str) -> Result<String, super::ExitError> {
@@ -558,6 +610,10 @@ pub(super) fn validate_owned_table(paths: &Paths) -> Result<(), super::ExitError
     let Some(table) = read_table_value(paths)? else {
         return Ok(());
     };
+    validate_owned_table_value(&table)
+}
+
+pub(super) fn validate_owned_table_value(table: &Value) -> Result<(), super::ExitError> {
     let comment = table
         .get("comment")
         .and_then(Value::as_str)
@@ -572,10 +628,10 @@ pub(super) fn validate_owned_table(paths: &Paths) -> Result<(), super::ExitError
 }
 
 pub(super) fn remove_owned_table(paths: &Paths) -> Result<bool, super::ExitError> {
-    if read_table_value(paths)?.is_none() {
+    let Some(table) = read_table_value(paths)? else {
         return Ok(true);
-    }
-    validate_owned_table(paths)?;
+    };
+    validate_owned_table_value(&table)?;
     let status = Command::new(super::nft::binary())
         .args(["delete", "table", "inet", super::TABLE_NAME])
         .status()

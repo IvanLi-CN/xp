@@ -129,4 +129,13 @@ fn service_lifecycle_contract() {
     )
     .unwrap();
     assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_err());
+    fs::write(
+        &service,
+        render_systemd_xray_unit(std::path::Path::new("/var/lib/xray"), None),
+    )
+    .unwrap();
+    let drop_in = paths.systemd_unit_dir().join("xray.service.d");
+    ensure_dir(&drop_in).unwrap();
+    fs::write(drop_in.join("override.conf"), "[Service]\nExecStart=\n").unwrap();
+    assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_err());
 }

@@ -646,6 +646,13 @@ fn commit_config_and_restart(
             rollback,
         ));
     }
+    let _verify_lock = OperationLock::acquire(paths)?;
+    if load_config(paths)?.as_ref() != Some(config) {
+        return Err(ExitError::new(
+            7,
+            "service_error: Xray restart completed after a concurrent guard update",
+        ));
+    }
     Ok(())
 }
 
@@ -755,12 +762,13 @@ fn refresh_table(paths: &Paths, config: &mut GuardConfig) -> Result<(), ExitErro
     verify_readback(paths, config)
 }
 
-fn apply_owned_table(_paths: &Paths, program: &str) -> Result<(), ExitError> {
-    let exists = read_table_value(_paths)?.is_some();
-    let transaction = if exists {
-        format!("delete table inet {TABLE_NAME}\n{program}")
-    } else {
-        program.to_string()
+fn apply_owned_table(paths: &Paths, program: &str) -> Result<(), ExitError> {
+    let transaction = match read_table_value(paths)? {
+        Some(table) => {
+            state::validate_owned_table_value(&table)?;
+            format!("delete table inet {TABLE_NAME}\n{program}")
+        }
+        None => program.to_string(),
     };
     nft::apply(&transaction)
 }
@@ -821,7 +829,7 @@ fn preflight_capabilities(
             global_burst: 1,
             source_rate: 1,
             source_burst: 1,
-            cgroup: xray_service_cgroup(paths)?,
+            cgroup: state::xray_service_cgroup(paths, init)?,
         };
         let program = nft::render(&probe)?;
         nft::check(&program).map_err(|_| {
@@ -871,7 +879,19 @@ fn current_xray_cgroup(paths: &Paths) -> Result<String, ExitError> {
 }
 
 fn xray_service_cgroup(paths: &Paths) -> Result<String, ExitError> {
-    state::xray_service_cgroup(paths)
+    state::xray_service_cgroup(paths, xray_init_system(paths)?)
+}
+
+fn xray_init_system(paths: &Paths) -> Result<InitSystem, ExitError> {
+    let distro = detect_distro(paths).map_err(|error| ExitError::new(2, error))?;
+    let init = detect_xray_init_system(paths, distro);
+    if init == InitSystem::None {
+        return Err(ExitError::new(
+            2,
+            "unsupported_service: systemd or OpenRC is required",
+        ));
+    }
+    Ok(init)
 }
 
 fn normalize_cgroup(value: &str) -> Result<String, ExitError> {
