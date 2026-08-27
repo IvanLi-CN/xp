@@ -115,6 +115,7 @@ pub enum XpCommand {
     Restart(XpRestartArgs),
     SyncNodeMeta(XpSyncNodeMetaArgs),
     RepairOrphanVoter(XpRepairOrphanVoterArgs),
+    EvictUnreachableVoter(XpEvictUnreachableVoterArgs),
     #[command(subcommand)]
     MembershipOperation(MembershipOperationCommand),
     /// Disaster recovery: force this node to become the only Raft voter.
@@ -302,6 +303,33 @@ pub struct XpRepairOrphanVoterArgs {
     /// Opaque membership fingerprint returned by the dry-run preview. Required with --apply.
     #[arg(long, value_name = "FINGERPRINT")]
     pub expected_membership: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpEvictUnreachableVoterArgs {
+    /// Local xp API base URL. This command must be run on the current Raft leader.
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+
+    /// Exact DesiredState node id of the unreachable, non-leader voter to remove.
+    #[arg(long, value_name = "NODE_ID")]
+    pub node_id: String,
+
+    /// Perform the removal. Omit for the default no-write preview.
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Opaque membership fingerprint returned by the dry-run preview. Required with --apply.
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub expected_membership: Option<String>,
+
+    /// Confirm deletion of every endpoint returned by the preview.
+    #[arg(long)]
+    pub delete_endpoints: bool,
+
+    /// Exact comma-separated endpoint ids returned by the preview; empty when none exist.
+    #[arg(long, value_delimiter = ',', value_name = "ID[,ID]")]
+    pub expected_endpoint_ids: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -649,6 +677,9 @@ pub async fn run() -> i32 {
             XpCommand::SyncNodeMeta(args) => xp::cmd_xp_sync_node_meta(paths, args).await,
             XpCommand::RepairOrphanVoter(args) => {
                 membership_lifecycle::cmd_xp_repair_orphan_voter(paths, args).await
+            }
+            XpCommand::EvictUnreachableVoter(args) => {
+                membership_lifecycle::cmd_xp_evict_unreachable_voter(paths, args).await
             }
             XpCommand::MembershipOperation(MembershipOperationCommand::Status(args)) => {
                 membership_lifecycle::cmd_xp_membership_operation_status(paths, args).await

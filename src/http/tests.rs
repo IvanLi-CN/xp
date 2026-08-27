@@ -1188,6 +1188,31 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
 }
 
 #[tokio::test]
+async fn unreachable_voter_eviction_requires_internal_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/_internal/raft/evict-unreachable-voter")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", TEST_ADMIN_TOKEN),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "node_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

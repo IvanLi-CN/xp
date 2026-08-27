@@ -11,6 +11,9 @@
 - A finished delete returns `204`. An operation that remains incomplete after five seconds returns
   `202` with a read-only membership operation status URL; a focused worker resumes only that
   recorded operation, without re-adding membership.
+- Public Admin Web deletion never excludes an unreachable voter from the lifecycle capability
+  barrier. The operator-only mapped-voter eviction command is documented with the membership
+  invariant and records the same RemoveNode operation only after its separate proof contract.
 
 ## Coverage
 

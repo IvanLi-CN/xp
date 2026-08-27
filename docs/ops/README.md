@@ -1041,6 +1041,35 @@ leader, joint-consensus, mapping, session, or operation precondition changes, st
 do not retry with `recover-single-node` or a bulk repair. After the target is absent, verify the
 membership invariant and perform a normal fresh join when the node should return.
 
+### Unreachable mapped voter incident
+
+Use this only when the owner has decided to remove one exact non-leader voter that is still mapped
+in DesiredState but cannot complete its signed capability probe. It is not a substitute for fixing
+an intermittent node, and it is unavailable through the Admin Web. Run the signed local CLI on the
+current leader for a zero-write preview:
+
+```bash
+sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --node-id <node-id>
+```
+
+The preview returns the opaque `expected_membership` fingerprint and every endpoint ID that will be
+deleted. Verify both, then apply with explicit endpoint cleanup confirmation:
+
+```bash
+sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --node-id <node-id> \
+  --apply --expected-membership <fingerprint> --delete-endpoints \
+  --expected-endpoint-ids <id,id>
+```
+
+When the preview contains no endpoints, omit `--expected-endpoint-ids` but keep
+`--delete-endpoints`. The command accepts only a clean, linearizable leader membership view with no
+joint configuration, active operation, or target pending join session. It proves the exact mapped
+voter before excluding only that target from capability verification; every retained mapped voter
+must still pass the signed lifecycle-capability probe. It records the normal durable RemoveNode
+operation, so `RemoveVoters(..., false)`, absent verification, node/endpoint deletion, and cleanup
+remain recoverable. Do not replace a failed precondition with raw Raft edits, an internal API call,
+or `recover-single-node`.
+
 If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
 case you can force a single-node Raft membership on the chosen surviving node to restore write
 availability. Failed or offline nodes are not kept as learners during this recovery; repair them

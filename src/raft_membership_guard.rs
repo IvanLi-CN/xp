@@ -19,6 +19,12 @@ use crate::{
     },
 };
 
+mod unreachable_voter_eviction;
+pub use unreachable_voter_eviction::{
+    UnreachableVoterEvictionPreview, begin_unreachable_voter_eviction,
+    preview_unreachable_voter_eviction,
+};
+
 pub use crate::raft_membership_cleanup::{
     MembershipRemovalCleanup, finalize_remove_node_cleanup_once,
 };
