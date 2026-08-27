@@ -18,6 +18,12 @@
   `202` and leaves a status operation for retry.
 - Orphan voter repair is signed, internal, leader-local CLI/API. Generic internal client-write
   refuses membership-operation commands.
+- Unreachable mapped-voter eviction is a separate signed, leader-local CLI/API with no Admin Web
+  action. It proves the target before excluding it from retained-voter capability verification,
+  then records the existing RemoveNode operation with an immutable endpoint snapshot so the normal
+  resumer and cleanup machinery retain ownership of uncertain-result recovery. The resumer writes
+  only from the current local leader and terminally blocks the operation if its target becomes that
+  leader before `RemoveVoters`.
 
 ## Compatibility
 
@@ -37,6 +43,10 @@
 - Orphan repair first performs its existing leader-local, linearizable preview. Only the previewed
   unique orphan is excluded from the retained-voter capability probe, so a stale orphan public URL
   cannot bypass or block the capability barrier.
+- Unreachable mapped-voter eviction likewise excludes only the previewed target from the retained
+  capability probe. Unlike orphan repair it requires the target's exact DesiredState mapping and
+  confirmed endpoint snapshot, then deletes those records through RemoveNode after Raft proves the
+  target absent.
 
 ## Coverage
 
@@ -50,5 +60,11 @@
   acknowledgements, repair-target rejections, and bounded capability-body reads remain covered.
 - HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
   guards, and membership failure paths.
+- Membership tests cover mapped-voter preview, endpoint snapshot mismatch rejection, durable
+  RemoveNode creation, retain=false membership removal, state cleanup, and the leader-transition
+  guard that blocks recovery without removing a target that became the local leader.
+- Signed eviction-route tests cover dry run, explicit cleanup confirmation, and a mapped retained
+  voter with an unavailable signed control-plane origin. The latter leaves the target Node,
+  endpoints, and membership-operation state unchanged.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and
   duplicate-delete disablement.

@@ -18,6 +18,12 @@ metadata into an orphan voter without a DesiredState Node mapping.
 - Make an abnormal member shape visible and block further unrelated membership writes; never infer
   a promotion, deletion, rollback, or disk rewrite from a periodic scan.
 - Permit one exact, leader-local orphan voter repair after dry-run fingerprint confirmation.
+- Permit one exact, leader-local eviction of an unreachable DesiredState-mapped voter after
+  dry-run fingerprint and endpoint-cleanup confirmation.
+
+## Related ADRs
+
+- [0003-unreachable-mapped-voter-eviction](../../adr/0003-unreachable-mapped-voter-eviction.md)
 
 ## Roles and invariants
 
@@ -60,6 +66,37 @@ metadata into an orphan voter without a DesiredState Node mapping.
   legacy JoinSession converts to a Join operation; malformed legacy material records a terminal
   Blocked operation. New binaries do not fall back to the old auto-promotion behavior.
 
+## Unreachable mapped voter eviction
+
+- This is an operator-only exception for one exact voter that still has a DesiredState Node
+  mapping but cannot complete its required signed capability probe. It has no Admin Web action and
+  is not a periodic repair.
+- Run only against the local current leader:
+
+```bash
+sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --node-id <node-id>
+sudo xp-ops xp evict-unreachable-voter --api-base-url http://127.0.0.1:62416 --node-id <node-id> \
+  --apply --expected-membership <fingerprint> --delete-endpoints \
+  --expected-endpoint-ids <id,id>
+```
+
+- The dry-run writes nothing and returns the exact target, endpoint snapshot, and membership
+  fingerprint. Apply requires that fingerprint, an explicit endpoint-cleanup confirmation, and the
+  exact endpoint ID set; an empty endpoint set omits `--expected-endpoint-ids`.
+- Before either result is accepted, the service rechecks signed internal authentication, local
+  leader ownership, linearizability, a non-joint configuration, no active operation, a clean
+  membership invariant, a non-leader current-voter target, its exact DesiredState mapping, and no
+  pending join session. Apply rechecks the fingerprint and endpoint set before recording intent.
+- Only after that exact target is proven does the lifecycle capability barrier exclude it. Every
+  retained DesiredState-mapped voter must still verify `cluster.membership-lifecycle-v1` through
+  its required signed control-plane path. A retained-voter failure remains terminal; raw Raft
+  edits, bulk repair, and `recover-single-node` are not fallback paths.
+- Apply records the ordinary durable `RemoveNode` operation. The existing recovery sequence uses
+  `RemoveVoters(..., false)`, proves absence, atomically deletes the confirmed node/endpoints, and
+  queues inbound, history, and full-reconcile cleanup. It does not re-add the target after an
+  unknown result. The resumer acts only on its current local leader; if the target becomes that
+  leader before removal, it records terminal Blocked evidence and makes no membership change.
+
 ## Orphan voter repair
 
 - Run only on the current leader's local API endpoint:
@@ -90,6 +127,10 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - `POST /api/admin/_internal/raft/repair-orphan-voter` accepts signed internal-auth requests.
   Dry-run returns `{ dry_run, raft_node_id, expected_membership }`; apply also requires
   `expected_membership` and returns the operation record.
+- `POST /api/admin/_internal/raft/evict-unreachable-voter` accepts signed internal-auth requests.
+  Dry-run returns `{ dry_run, node_id, raft_node_id, expected_membership, endpoints }`; apply also
+  requires `delete_endpoints=true`, the exact `expected_endpoint_ids`, and returns the durable
+  RemoveNode operation.
 - `GET /api/admin/membership-operations/{operation_id}` is read-only admin status.
 - `xp-ops xp membership-operation status --api-base-url <local-url> --operation-id <uuid>` reads
   that status through local signed internal authentication.
@@ -104,6 +145,9 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - An unreachable public URL on the proven orphan does not block repair when retained mapped voters
   verify the capability through Mesh; unavailable retained voters remain a coordinated-upgrade
   blocker.
+- An unreachable mapped voter is evicted only after a zero-write preview; a leader, learner,
+  unmapped target, stale fingerprint, changed endpoint set, joint configuration, active operation,
+  or unavailable retained voter leaves membership and DesiredState unchanged.
 - Delete returns `204` when completed within five seconds; otherwise it returns `202` with an
   operation id and status URL. The Web resumes polling the same operation after refresh and only
   refreshes inventory after a terminal completion.

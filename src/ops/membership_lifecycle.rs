@@ -1,7 +1,10 @@
 use axum::http::Method;
 
 use super::{
-    cli::{ExitError, XpMembershipOperationStatusArgs, XpRepairOrphanVoterArgs},
+    cli::{
+        ExitError, XpEvictUnreachableVoterArgs, XpMembershipOperationStatusArgs,
+        XpRepairOrphanVoterArgs,
+    },
     internal_auth::InternalOpsAuth,
     paths::Paths,
     xp::{internal_json_request, local_internal_ops_client},
@@ -48,6 +51,63 @@ pub(crate) async fn cmd_xp_repair_orphan_voter(
         "{}",
         serde_json::to_string_pretty(&response)
             .map_err(|error| ExitError::new(5, format!("encode repair response: {error}")))?
+    );
+    Ok(())
+}
+
+pub(crate) async fn cmd_xp_evict_unreachable_voter(
+    paths: Paths,
+    args: XpEvictUnreachableVoterArgs,
+) -> Result<(), ExitError> {
+    if args.apply
+        && args
+            .expected_membership
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --apply requires --expected-membership from dry-run",
+        ));
+    }
+    if args.apply && !args.delete_endpoints {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --apply requires --delete-endpoints",
+        ));
+    }
+    if !args.apply
+        && (args.expected_membership.is_some()
+            || args.delete_endpoints
+            || !args.expected_endpoint_ids.is_empty())
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: confirmation arguments are valid only with --apply",
+        ));
+    }
+    let (client, auth) = local_internal_ops_client(&paths, &args.api_base_url)?;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "node_id": args.node_id,
+        "apply": args.apply,
+        "expected_membership": args.expected_membership,
+        "delete_endpoints": args.delete_endpoints,
+        "expected_endpoint_ids": args.expected_endpoint_ids,
+    }))
+    .map_err(|error| ExitError::new(5, format!("encode eviction request: {error}")))?;
+    let response: serde_json::Value = internal_json_request(
+        &client,
+        &args.api_base_url,
+        &auth,
+        Method::POST,
+        "/api/admin/_internal/raft/evict-unreachable-voter",
+        Some(body),
+    )
+    .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response)
+            .map_err(|error| ExitError::new(5, format!("encode eviction response: {error}")))?
     );
     Ok(())
 }

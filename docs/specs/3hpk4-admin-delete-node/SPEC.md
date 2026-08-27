@@ -6,6 +6,10 @@
 - Created: 2026-02-06
 - Last: 2026-05-18
 
+## Related ADRs
+
+- [0003-unreachable-mapped-voter-eviction](../../adr/0003-unreachable-mapped-voter-eviction.md)
+
 ## 背景 / 问题陈述
 
 - 集群节点在反复 join、灾难恢复或误操作后，可能残留历史节点。
@@ -31,6 +35,8 @@
 - 不放宽本机节点、当前 leader 的删除限制。
 - 不改变单独删除 endpoint 的现有 API 行为。
 - 不暴露完整 Raft membership 管理面。
+- 不在 Admin Web 删除路径中绕过全 voter lifecycle capability barrier；失联 mapped voter 的受限
+  维护逐出仅由本地签名 `xp-ops` 命令处理，并受 Raft membership invariant 契约约束。
 
 ## 需求（Requirements）
 
