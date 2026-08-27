@@ -518,8 +518,7 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
     validate_owned_table(paths)?;
     let assets = snapshot_xray_assets(paths)?;
     let old_program = config.as_ref().and_then(|value| nft::render(value).ok());
-    reject_symlink(&paths.etc_xp_ops_ingress_guard_config())?;
-    fs::remove_file(paths.etc_xp_ops_ingress_guard_config()).map_err(fs_error)?;
+    remove_guard_config(paths)?;
     if let Err(error) = write_direct_xray_service_assets(paths) {
         let rollback =
             restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
@@ -622,14 +621,19 @@ fn commit_config_and_restart(
     }
     drop(lock);
     if !reload_systemd_units(paths) || !restart_xray_service(paths, "xray.service", "xray") {
-        let rollback = OperationLock::acquire(paths).and_then(|_rollback_lock| {
-            restore_previous_state(
-                paths,
-                previous.as_ref(),
-                previous_program.as_deref(),
-                &assets,
-            )
-        });
+        let _rollback_lock = OperationLock::acquire(paths)?;
+        if load_config(paths)?.as_ref() != Some(config) {
+            return Err(ExitError::new(
+                7,
+                "service_error: Xray restart failed after a concurrent guard update",
+            ));
+        }
+        let rollback = restore_previous_state(
+            paths,
+            previous.as_ref(),
+            previous_program.as_deref(),
+            &assets,
+        );
         return Err(with_rollback_result(
             ExitError::new(
                 7,
@@ -808,6 +812,21 @@ fn preflight_capabilities(
                 ));
             }
         }
+        let probe = GuardConfig {
+            schema: SCHEMA,
+            ownership: OWNERSHIP_MARKER.to_string(),
+            mode: GuardMode::Observe,
+            profile: GuardProfile::SmallVps.as_str().to_string(),
+            global_rate: 1,
+            global_burst: 1,
+            source_rate: 1,
+            source_burst: 1,
+            cgroup: xray_service_cgroup(paths)?,
+        };
+        let program = nft::render(&probe)?;
+        nft::check(&program).map_err(|_| {
+            ExitError::new(2, "unsupported_kernel: nft socket cgroupv2 is unavailable")
+        })?;
     }
     Ok(())
 }

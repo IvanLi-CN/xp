@@ -120,4 +120,13 @@ fn service_lifecycle_contract() {
     )
     .unwrap();
     assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_ok());
+    fs::write(
+        &service,
+        format!(
+            "{}Environment=EXTRA=1\n",
+            render_systemd_xray_unit(std::path::Path::new("/var/lib/xray"), None)
+        ),
+    )
+    .unwrap();
+    assert!(validate_xray_service_asset(&paths, InitSystem::Systemd).is_err());
 }

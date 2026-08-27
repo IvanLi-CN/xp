@@ -1,4 +1,6 @@
-use super::{ExitError, GuardConfig, GuardProfile, GuardStatus, Mode, OWNERSHIP_MARKER, SCHEMA};
+use super::{
+    ExitError, GuardConfig, GuardMode, GuardProfile, GuardStatus, Mode, OWNERSHIP_MARKER, SCHEMA,
+};
 use crate::ops::paths::Paths;
 use crate::ops::platform::InitSystem;
 use crate::ops::util::{chmod, ensure_dir, is_test_root};
@@ -444,47 +446,49 @@ pub(super) fn validate_xray_service_asset(
             ),
         )
     })?;
-    let standard = match init {
-        InitSystem::Systemd => {
-            raw.contains("User=xray")
-                && raw.contains("Group=xray")
-                && (raw.contains("ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json")
-                    || raw.contains("ExecStart=/usr/local/bin/xp-ops _ingress-guard-exec"))
-        }
-        InitSystem::OpenRc => {
-            raw.contains("command_user=\"xray:xray\"")
-                && raw.contains("supervisor=supervise-daemon")
-                && (raw.contains("command=\"/usr/local/bin/xray\"")
-                    || raw.contains("command=\"/usr/local/bin/xp-ops\""))
-                && (raw.contains("/etc/xray/config.json") || raw.contains("_ingress-guard-exec"))
-        }
-        InitSystem::None => false,
-    };
-    let legacy_managed = match init {
-        InitSystem::Systemd => {
-            raw.contains("Description=xray (local proxy runtime)")
-                && raw.contains("Wants=network-online.target")
-                && raw.contains("After=network-online.target")
-                && raw.contains("Environment=GOMEMLIMIT=16MiB")
-                && raw.contains("Environment=GOGC=50")
-                && raw.contains("Restart=always")
-        }
-        InitSystem::OpenRc => {
-            raw.contains("description=\"xray (local proxy runtime)\"")
-                && raw.contains("depend()")
-                && raw.contains("need net")
-        }
-        InitSystem::None => false,
-    };
-    if !standard
-        || (!raw.contains("# Managed by xp-ops ingress-guard service boundary") && !legacy_managed)
-    {
+    if !is_generated_xray_service_asset(init, &raw) {
         return Err(ExitError::new(
             2,
             "unsupported_service: custom Xray service asset",
         ));
     }
     Ok(())
+}
+
+fn is_generated_xray_service_asset(init: InitSystem, raw: &str) -> bool {
+    const MARKER: &str = "# Managed by xp-ops ingress-guard service boundary\n";
+    match init {
+        InitSystem::Systemd => {
+            let Some(work_dir) = raw
+                .lines()
+                .find_map(|line| line.strip_prefix("WorkingDirectory="))
+                .map(PathBuf::from)
+            else {
+                return false;
+            };
+            let direct = super::render_systemd_xray_unit(&work_dir, None);
+            [
+                direct.clone(),
+                super::render_systemd_xray_unit(&work_dir, Some(GuardMode::Enforced)),
+                super::render_systemd_xray_unit(&work_dir, Some(GuardMode::Observe)),
+                direct.replacen(MARKER, "", 1),
+            ]
+            .iter()
+            .any(|expected| raw == expected)
+        }
+        InitSystem::OpenRc => {
+            let direct = super::render_openrc_xray_script(None);
+            [
+                direct.clone(),
+                super::render_openrc_xray_script(Some(GuardMode::Enforced)),
+                super::render_openrc_xray_script(Some(GuardMode::Observe)),
+                direct.replacen(MARKER, "", 1),
+            ]
+            .iter()
+            .any(|expected| raw == expected)
+        }
+        InitSystem::None => false,
+    }
 }
 
 pub(super) fn current_xray_cgroup(paths: &Paths) -> Result<String, super::ExitError> {
@@ -588,7 +592,13 @@ pub(super) fn read_table_value(paths: &Paths) -> Result<Option<Value>, super::Ex
         .output()
         .map_err(|error| super::ExitError::new(3, format!("nft_readback_failed: {error}")))?;
     if !output.status.success() {
-        return Ok(None);
+        if is_missing_table(&output.stderr) {
+            return Ok(None);
+        }
+        return Err(super::ExitError::new(
+            3,
+            "nft_readback_failed: table is not readable",
+        ));
     }
     let json: Value = serde_json::from_slice(&output.stdout).map_err(|error| {
         super::ExitError::new(3, format!("nft_readback_failed: invalid JSON: {error}"))
@@ -604,4 +614,9 @@ pub(super) fn read_table_value(paths: &Paths) -> Result<Option<Value>, super::Ex
                 .then(|| table.clone())
             })
         }))
+}
+
+fn is_missing_table(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr);
+    stderr.contains("No such file or directory") || stderr.contains("does not exist")
 }

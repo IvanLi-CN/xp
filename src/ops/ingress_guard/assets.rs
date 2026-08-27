@@ -24,6 +24,7 @@ fn refresh_xray_service_assets_with_mode(
     let init = super::detect_xray_init_system(paths, distro);
     let systemd = paths.systemd_unit_dir().join("xray.service");
     if init == crate::ops::platform::InitSystem::Systemd {
+        super::validate_xray_service_asset(paths, init)?;
         super::reject_symlink(&systemd)?;
         let work_dir = fs::read_to_string(&systemd)
             .ok()
@@ -39,6 +40,7 @@ fn refresh_xray_service_assets_with_mode(
     }
     let openrc = paths.openrc_initd_dir().join("xray");
     if init == crate::ops::platform::InitSystem::OpenRc {
+        super::validate_xray_service_asset(paths, init)?;
         super::reject_symlink(&openrc)?;
         write_string_if_changed(&openrc, &super::render_openrc_xray_script(mode))
             .map_err(|error| super::fs_error(format!("filesystem_error: {error}")))?;
