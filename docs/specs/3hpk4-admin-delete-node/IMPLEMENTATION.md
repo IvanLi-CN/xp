@@ -14,12 +14,16 @@
 - Public Admin Web deletion never excludes an unreachable voter from the lifecycle capability
   barrier. The operator-only mapped-voter eviction command is documented with the membership
   invariant and records the same RemoveNode operation only after its separate proof contract.
+- That operator-only path rejects before intent creation when any retained mapped voter cannot
+  prove the lifecycle capability; it cannot turn a peer outage into a broader deletion bypass.
 
 ## Coverage
 
 - Backend HTTP tests cover preview, default conflict, confirmed endpoint cleanup, existing delete
   guards, and the `202` pending operation contract.
 - State tests cover node cleanup and endpoint cleanup.
+- Signed internal-route tests cover dry run, confirmation rejection, and the retained-voter
+  capability failure path with no node, endpoint, or membership-operation write.
 - Web tests cover endpoint preview, cancel, confirmed cleanup, persisted `202` operation polling,
   and duplicate-delete disablement.
 - Storybook includes a NodeDetailsPage delete confirmation scenario with endpoints.

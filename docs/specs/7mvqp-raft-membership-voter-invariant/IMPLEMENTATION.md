@@ -61,6 +61,10 @@
 - HTTP delete tests cover synchronous `204`, pending `202`, endpoint confirmation, leader/local
   guards, and membership failure paths.
 - Membership tests cover mapped-voter preview, endpoint snapshot mismatch rejection, durable
-  RemoveNode creation, retain=false membership removal, and state cleanup.
+  RemoveNode creation, retain=false membership removal, state cleanup, and the leader-transition
+  guard that blocks recovery without removing a target that became the local leader.
+- Signed eviction-route tests cover dry run, explicit cleanup confirmation, and a mapped retained
+  voter with an unavailable signed control-plane origin. The latter leaves the target Node,
+  endpoints, and membership-operation state unchanged.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and
   duplicate-delete disablement.
