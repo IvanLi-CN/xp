@@ -120,6 +120,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             .and_then(|_| chmod(&path, 0o755))
             .map_err(filesystem_error)?;
     }
+    crate::ops::ingress_guard::refresh_xray_service_assets(paths)?;
     backfill_provider_cloudflared_wrapper(paths)?;
     Ok(())
 }
