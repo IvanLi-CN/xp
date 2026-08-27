@@ -215,7 +215,6 @@ pub(super) fn verify_readback(paths: &Paths, config: &GuardConfig) -> Result<(),
     if is_test_root(paths.root()) && std::env::var_os("XP_OPS_NFT_BIN").is_none() {
         return Ok(());
     }
-    let text = readback.json.to_string();
     let table = readback
         .json
         .get("nftables")
@@ -235,57 +234,149 @@ pub(super) fn verify_readback(paths: &Paths, config: &GuardConfig) -> Result<(),
             "nft_readback_failed: table ownership marker mismatch",
         ));
     }
-    for marker in [
-        "global_over_limit",
-        "source_v4_over_limit",
-        "source_v6_over_limit",
-        "admitted_syns",
-        &config.cgroup,
-        "socket",
-        "iifname",
-        "tcp",
-        "flags",
-        "payload",
-        "lo",
-        "input",
-        "-300",
-        "1024",
-        "60s",
-    ] {
-        if !text.contains(marker) {
-            return Err(super::ExitError::new(
-                3,
-                format!("nft_readback_failed: missing expected rule detail {marker}"),
-            ));
-        }
+    let objects = readback
+        .json
+        .get("nftables")
+        .and_then(Value::as_array)
+        .ok_or_else(|| super::ExitError::new(3, "nft_readback_failed: nftables array missing"))?;
+    let chain = objects.iter().find_map(|item| item.get("chain"));
+    if chain
+        .and_then(|value| value.get("family"))
+        .and_then(Value::as_str)
+        != Some("inet")
+        || chain
+            .and_then(|value| value.get("table"))
+            .and_then(Value::as_str)
+            != Some(super::TABLE_NAME)
+        || chain
+            .and_then(|value| value.get("name"))
+            .and_then(Value::as_str)
+            != Some("input")
+        || chain
+            .and_then(|value| value.get("hook"))
+            .and_then(Value::as_str)
+            != Some("input")
+        || chain
+            .and_then(|value| value.get("prio"))
+            .and_then(Value::as_i64)
+            != Some(-300)
+        || chain
+            .and_then(|value| value.get("policy"))
+            .and_then(Value::as_str)
+            != Some("accept")
+    {
+        return Err(super::ExitError::new(
+            3,
+            "nft_readback_failed: input chain contract mismatch",
+        ));
     }
-    for (field, value) in [
-        ("rate", config.global_rate),
-        ("burst", config.global_burst),
-        ("rate", config.source_rate),
-        ("burst", config.source_burst),
-    ] {
-        let json_value = format!("\"{field}\":{value}");
-        let json_value_spaced = format!("\"{field}\": {value}");
-        if !text.contains(&json_value) && !text.contains(&json_value_spaced) {
-            return Err(super::ExitError::new(
-                3,
-                format!("nft_readback_failed: {field} value {value} missing"),
-            ));
-        }
-    }
+    let rules: Vec<&Value> = objects.iter().filter_map(|item| item.get("rule")).collect();
     let verdict = if config.mode == super::GuardMode::Enforced {
         "drop"
     } else {
         "return"
     };
-    if !text.contains(verdict) {
+    for (name, rate, burst, address, meter) in [
+        (
+            "global_over_limit",
+            config.global_rate,
+            config.global_burst,
+            None,
+            None,
+        ),
+        (
+            "source_v4_over_limit",
+            config.source_rate,
+            config.source_burst,
+            Some("ip saddr"),
+            Some("source_v4"),
+        ),
+        (
+            "source_v6_over_limit",
+            config.source_rate,
+            config.source_burst,
+            Some("ip6 saddr"),
+            Some("source_v6"),
+        ),
+    ] {
+        let rule = rules
+            .iter()
+            .find(|rule| rule.to_string().contains(name))
+            .ok_or_else(|| missing_rule(name))?;
+        validate_rule_selector(rule, &config.cgroup)?;
+        if !rule_has_number(rule, "rate", rate)
+            || !rule_has_number(rule, "burst", burst)
+            || !rule_has_key(rule, verdict)
+            || address.is_some_and(|marker| !rule.to_string().contains(marker))
+            || meter.is_some_and(|marker| !rule.to_string().contains(marker))
+        {
+            return Err(super::ExitError::new(
+                3,
+                format!("nft_readback_failed: rule contract mismatch for {name}"),
+            ));
+        }
+        if meter.is_some()
+            && (!rule_has_number(rule, "size", super::SOURCE_METER_SIZE)
+                || !rule_has_number(rule, "timeout", 60))
+        {
+            return Err(super::ExitError::new(
+                3,
+                format!("nft_readback_failed: source meter contract mismatch for {name}"),
+            ));
+        }
+    }
+    let admitted = rules
+        .iter()
+        .find(|rule| rule.to_string().contains("admitted_syns"))
+        .ok_or_else(|| missing_rule("admitted_syns"))?;
+    validate_rule_selector(admitted, &config.cgroup)?;
+    if !rule_has_key(admitted, "return") {
         return Err(super::ExitError::new(
             3,
-            format!("nft_readback_failed: expected {verdict} verdict missing"),
+            "nft_readback_failed: admitted SYN rule must return",
         ));
     }
     Ok(())
+}
+
+fn missing_rule(name: &str) -> super::ExitError {
+    super::ExitError::new(3, format!("nft_readback_failed: rule {name} is missing"))
+}
+
+fn validate_rule_selector(rule: &Value, cgroup: &str) -> Result<(), super::ExitError> {
+    let text = rule.to_string();
+    for marker in ["socket", "iifname", "lo", "tcp", "flags", cgroup] {
+        if !text.contains(marker) {
+            return Err(super::ExitError::new(
+                3,
+                format!("nft_readback_failed: selector detail {marker} missing"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn rule_has_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key(key) || object.values().any(|child| rule_has_key(child, key))
+        }
+        Value::Array(items) => items.iter().any(|child| rule_has_key(child, key)),
+        _ => false,
+    }
+}
+
+fn rule_has_number(value: &Value, key: &str, expected: u32) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(name, child)| {
+            (name == key && child.as_u64() == Some(expected as u64))
+                || rule_has_number(child, key, expected)
+        }),
+        Value::Array(items) => items
+            .iter()
+            .any(|child| rule_has_number(child, key, expected)),
+        _ => false,
+    }
 }
 
 pub(super) fn update_status_counters(

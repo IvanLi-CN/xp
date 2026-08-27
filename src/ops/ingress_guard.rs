@@ -9,9 +9,9 @@ use crate::ops::cli::{
     IngressGuardStatusArgs,
 };
 use crate::ops::paths::Paths;
-use crate::ops::platform::{InitSystem, detect_distro, detect_init_system};
+use crate::ops::platform::{Distro, InitSystem, detect_distro, detect_init_system};
 use crate::ops::runtime_activation::{reload_systemd_units, restart_xray_service};
-use crate::ops::util::{Mode, is_test_root};
+use crate::ops::util::{Mode, chmod, is_test_root};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -218,6 +218,7 @@ impl OperationLock {
             .write(true)
             .open(&path)
             .map_err(fs_error)?;
+        chmod(&path, 0o600).map_err(fs_error)?;
         #[cfg(unix)]
         {
             // A non-blocking advisory lock makes duplicate mutations fail closed.
@@ -249,14 +250,15 @@ pub fn cmd_ingress_guard_prepare(paths: Paths) -> Result<(), ExitError> {
 
 fn prepare(paths: &Paths, acquire_lock: bool) -> Result<(), ExitError> {
     require_root(paths)?;
+    // Invalidate the one-start permit before lock contention or any other fallible work.  The
+    // systemd pre-hook intentionally tolerates a non-zero refresh result, so the exec gate must
+    // never be able to consume a permit from an earlier start.
+    remove_permit(paths)?;
     let _lock = if acquire_lock {
         Some(OperationLock::acquire(paths)?)
     } else {
         None
     };
-    // A permit is single-start state. Clear it before any fallible read or nft operation so a
-    // systemd ExecStartPre failure can never be bypassed by a stable service cgroup path.
-    remove_permit(paths)?;
     let config = load_config(paths)?;
     let Some(mut config) = config else {
         return Ok(());
@@ -348,11 +350,6 @@ fn enable(paths: &Paths, args: IngressGuardEnableArgs) -> Result<(), ExitError> 
     let profile = profile_from_arg(args.profile);
     let mode = Mode::from_dry_run(args.dry_run);
     preflight_capabilities(paths, profile, mode)?;
-    let _lock = if mode == Mode::Real {
-        Some(OperationLock::acquire(paths)?)
-    } else {
-        None
-    };
     let cgroup = xray_service_cgroup(paths)?;
     let limits = limits_for_profile(profile);
     let config = GuardConfig {
@@ -370,7 +367,6 @@ fn enable(paths: &Paths, args: IngressGuardEnableArgs) -> Result<(), ExitError> 
         eprintln!("would enable ingress guard profile {}", profile.as_str());
         return Ok(());
     }
-    validate_owned_table(paths)?;
     commit_config_and_restart(paths, &config, true)
 }
 
@@ -380,11 +376,6 @@ fn observe(paths: &Paths, args: IngressGuardObserveArgs) -> Result<(), ExitError
     let profile = profile_from_arg(args.profile);
     let mode = Mode::from_dry_run(args.dry_run);
     preflight_capabilities(paths, profile, mode)?;
-    let _lock = if mode == Mode::Real {
-        Some(OperationLock::acquire(paths)?)
-    } else {
-        None
-    };
     let cgroup = xray_service_cgroup(paths)?;
     let limits = limits_for_profile(profile);
     let config = GuardConfig {
@@ -405,7 +396,6 @@ fn observe(paths: &Paths, args: IngressGuardObserveArgs) -> Result<(), ExitError
         );
         return Ok(());
     }
-    validate_owned_table(paths)?;
     commit_config_and_restart(paths, &config, false)
 }
 
@@ -468,10 +458,12 @@ fn status(paths: &Paths, args: IngressGuardStatusArgs) -> Result<(), ExitError> 
         status = saved;
     }
     if running_as_root(paths) {
+        let last_error = status.error_code.clone();
         match load_config(paths) {
             Ok(Some(config)) => match verify_readback(paths, &config) {
                 Ok(()) => {
                     status = status_from_config(&config, None);
+                    status.error_code = last_error;
                     if let Err(error) = update_status_counters(paths, &mut status) {
                         status.verified = false;
                         status.error_code = Some(error_code(&error));
@@ -523,17 +515,14 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
     }
     let _lock = OperationLock::acquire(paths)?;
     let config = load_config(paths)?;
-    let Some(config) = config else {
-        return Ok(());
-    };
     validate_owned_table(paths)?;
     let assets = snapshot_xray_assets(paths)?;
-    let old_program = nft::render(&config).ok();
+    let old_program = config.as_ref().and_then(|value| nft::render(value).ok());
     reject_symlink(&paths.etc_xp_ops_ingress_guard_config())?;
     fs::remove_file(paths.etc_xp_ops_ingress_guard_config()).map_err(fs_error)?;
     if let Err(error) = write_direct_xray_service_assets(paths) {
         let rollback =
-            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+            restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
         return Err(with_rollback_result(error, rollback));
     }
     if !reload_systemd_units(paths) {
@@ -542,7 +531,7 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
             "service_error: unable to reload direct Xray service asset",
         );
         let rollback =
-            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+            restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
         let _ = reload_systemd_units(paths);
         return Err(with_rollback_result(error, rollback));
     }
@@ -554,19 +543,19 @@ fn disable(paths: &Paths, args: IngressGuardDisableArgs) -> Result<(), ExitError
             Ok(true) => unreachable!(),
         };
         let rollback =
-            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+            restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
         let _ = reload_systemd_units(paths);
         return Err(with_rollback_result(error, rollback));
     }
     if let Err(error) = remove_permit(paths) {
         let rollback =
-            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+            restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
         let _ = reload_systemd_units(paths);
         return Err(with_rollback_result(error, rollback));
     }
     if !restart_xray_service(paths, "xray.service", "xray") {
         let rollback =
-            restore_previous_state(paths, Some(&config), old_program.as_deref(), &assets);
+            restore_previous_state(paths, config.as_ref(), old_program.as_deref(), &assets);
         if rollback.is_err() {
             return Err(ExitError::new(
                 8,
@@ -595,11 +584,13 @@ fn commit_config_and_restart(
     config: &GuardConfig,
     enforced: bool,
 ) -> Result<(), ExitError> {
+    let lock = OperationLock::acquire(paths)?;
     let previous = load_config(paths)?;
     let assets = snapshot_xray_assets(paths)?;
     let previous_program = previous.as_ref().and_then(|value| nft::render(value).ok());
     let program = nft::render(config)?;
     nft::check(&program)?;
+    validate_owned_table(paths)?;
     apply_owned_table(paths, &program)?;
     if let Err(error) = verify_readback(paths, config) {
         let rollback = restore_previous_state(
@@ -629,18 +620,27 @@ fn commit_config_and_restart(
         );
         return Err(with_rollback_result(error, rollback));
     }
+    drop(lock);
     if !reload_systemd_units(paths) || !restart_xray_service(paths, "xray.service", "xray") {
-        let _ = remove_permit(paths);
-        if enforced {
-            return Err(ExitError::new(
+        let rollback = OperationLock::acquire(paths).and_then(|_rollback_lock| {
+            restore_previous_state(
+                paths,
+                previous.as_ref(),
+                previous_program.as_deref(),
+                &assets,
+            )
+        });
+        return Err(with_rollback_result(
+            ExitError::new(
                 7,
-                "service_error: Xray did not become ready with verified ingress guard",
-            ));
-        }
-        write_status(
-            paths,
-            status_from_config(config, Some("service_unverified".to_string())),
-        )?;
+                if enforced {
+                    "service_error: Xray did not become ready with verified ingress guard"
+                } else {
+                    "service_error: Xray did not become ready after observe update"
+                },
+            ),
+            rollback,
+        ));
     }
     Ok(())
 }
@@ -782,7 +782,7 @@ fn preflight_capabilities(
         }
     }
     let distro = detect_distro(paths).map_err(|error| ExitError::new(2, error))?;
-    let init = detect_init_system(distro, None);
+    let init = detect_xray_init_system(paths, distro);
     if init == InitSystem::None {
         return Err(ExitError::new(
             2,
@@ -810,6 +810,37 @@ fn preflight_capabilities(
         }
     }
     Ok(())
+}
+
+pub(crate) fn detect_xray_init_system(paths: &Paths, distro: Distro) -> InitSystem {
+    if let Ok(value) = std::env::var("XP_OPS_INIT_SYSTEM") {
+        return match value.as_str() {
+            "systemd" => InitSystem::Systemd,
+            "openrc" | "openrc-run" => InitSystem::OpenRc,
+            _ => InitSystem::None,
+        };
+    }
+    let systemd_asset = paths.systemd_unit_dir().join("xray.service").is_file();
+    let openrc_asset = paths.openrc_initd_dir().join("xray").is_file();
+    if systemd_asset != openrc_asset {
+        return if systemd_asset {
+            InitSystem::Systemd
+        } else {
+            InitSystem::OpenRc
+        };
+    }
+    if !is_test_root(paths.root())
+        && let Ok(comm) = fs::read_to_string("/proc/1/comm")
+    {
+        let comm = comm.trim();
+        if comm == "systemd" {
+            return InitSystem::Systemd;
+        }
+        if comm == "init" || comm == "openrc-init" {
+            return InitSystem::OpenRc;
+        }
+    }
+    detect_init_system(distro, None)
 }
 
 fn validate_xray_service_asset(paths: &Paths, init: InitSystem) -> Result<(), ExitError> {
