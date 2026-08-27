@@ -176,7 +176,20 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
     assert_eq!(store_guard.list_endpoints().len(), 1);
     drop(store_guard);
 
-    let retained_raft_node_id = local_raft_node_id.max(target_raft_node_id).wrapping_add(1);
+    let retained_node = Node {
+        node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+        node_name: xp_test_fixtures::label_extra_node().to_owned(),
+        access_host: xp_test_fixtures::secondary_host().to_owned(),
+        api_base_url: xp_test_fixtures::url_loopback1().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    let retained_raft_node_id = raft_node_id_from_ulid(&retained_node.node_id).unwrap();
+    store
+        .lock()
+        .await
+        .upsert_node(retained_node.clone())
+        .unwrap();
     let mut barrier_metrics = metrics_tx.borrow().clone();
     let membership = barrier_metrics.membership_config.membership();
     let mut voters = membership
@@ -190,9 +203,9 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
     nodes.insert(
         retained_raft_node_id,
         RaftNodeMeta {
-            name: "unmapped-retained-voter".to_string(),
-            api_base_url: xp_test_fixtures::service_fixture571().to_owned(),
-            raft_endpoint: xp_test_fixtures::service_fixture571().to_owned(),
+            name: retained_node.node_name,
+            api_base_url: retained_node.api_base_url.clone(),
+            raft_endpoint: retained_node.api_base_url,
         },
     );
     barrier_metrics.membership_config = Arc::new(openraft::StoredMembership::new(
@@ -214,7 +227,7 @@ async fn signed_preview_and_rejection_leave_unreachable_voter_state_unchanged() 
         ))
         .await
         .unwrap();
-    assert_eq!(barrier_rejected.status(), StatusCode::CONFLICT);
+    assert_eq!(barrier_rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
     let store = store.lock().await;
     assert!(store.state().membership_operations.is_empty());
     assert!(store.get_node(&target.node_id).is_some());
