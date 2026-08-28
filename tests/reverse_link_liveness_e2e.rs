@@ -21,6 +21,7 @@ const EXTRA_CPU_SECONDS: u64 = 10;
 const OUTBOUND_TAG: &str = "xp-reverse-outbound-liveness-unreachable";
 const REVERSE_TAG: &str = "xp-reverse-in-liveness-unreachable";
 const MANAGED_VLESS_INBOUND_TAG: &str = "vless-baseline-entry";
+const MANAGED_VLESS_OUTBOUND_TAG: &str = "vless-runtime-baseline";
 
 #[derive(Debug)]
 struct ResourceRun {
@@ -252,6 +253,10 @@ async fn assert_managed_vless_baseline(client: &mut xray::XrayClient) {
     assert!(
         tags.contains(MANAGED_VLESS_INBOUND_TAG),
         "managed VLESS baseline inbound must remain available"
+    );
+    assert!(
+        has_outbound(client, MANAGED_VLESS_OUTBOUND_TAG).await,
+        "managed VLESS baseline outbound must remain available"
     );
 }
 
