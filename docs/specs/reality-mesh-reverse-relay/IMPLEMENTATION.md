@@ -28,6 +28,24 @@
   retaining a bounded health observation; local Xray/portal readiness remains the admission gate
   and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
   retryable Reality timeout also proceeds to the Rendezvous Public/API path.
+- Target-side Reverse lifecycle is local and fail-closed. Each derived Link starts with one
+  10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
+  The target grants a 120-second lease only when the request's assigned Rendezvous identity and
+  signed relay envelope match the Link's derived authority; Link headers on direct health cannot
+  extend a lease. One missed probe receives one 30-second recheck; two consecutive missed probes
+  enter a 15-minute cooldown, after which one half-open probe is permitted per cooldown. Lease
+  expiry begins the same bounded acquisition sequence after a 30-second wait. A retired handler
+  gets one fixed 120-second drain deadline, even when its replacement never becomes healthy.
+  `XP_REVERSE_MESH_ENABLED=false` forces local XP-owned Reverse Xray artifact discovery and removal
+  after an XP restart while Direct/Public and Raft membership continue.
+- The unreachable-Rendezvous resource fixture first installs and removes one real Reverse outbound,
+  then keeps Reverse disabled during its baseline phase and includes a loopback-only managed
+  VLESS/REALITY inbound. This warms Xray's lazy native Reverse handler once, so the unchanged 2 MiB
+  PSS gate measures repeated unavailable-Link lifecycle rather than a process-wide cold-start
+  allocation; the test also proves that the prewarm outbound is gone before sampling.
+- Reverse route reconciliation now reads existing Xray rule tags before adding desired routes.
+  The only duplicate-response compatibility branch accepts `app/router: duplicate ruleTag` for
+  the exact desired tag.
 - Fresh-join bootstrap links use the domain-separated `ReverseRole::Bootstrap` tag/UUID/origin
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale

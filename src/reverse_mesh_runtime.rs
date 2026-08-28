@@ -15,7 +15,7 @@ use crate::{
         RealityConfig, RealityKeys, VlessRealityTransport, VlessRealityVisionTcpEndpointMeta,
     },
     reverse_mesh::{
-        REVERSE_PORTAL_ADDRESS, REVERSE_SOCKS_USERNAME, ReverseMeshAssignment,
+        REVERSE_PORTAL_ADDRESS, REVERSE_SOCKS_USERNAME, ReverseLinkKey, ReverseMeshAssignment,
         ReverseMeshBootstrapMarker, ReverseRole, ReverseTombstones, TombstoneDecision,
         derive_reverse_origin, derive_reverse_origin_id, derive_reverse_password,
         derive_reverse_tag, derive_reverse_uuid,
@@ -46,6 +46,8 @@ pub struct ReverseXrayDesired {
     pub owned_inbound_tags: BTreeSet<String>,
     pub owned_outbound_tags: BTreeSet<String>,
     pub owned_rule_tags: BTreeSet<String>,
+    pub active_target_links: BTreeSet<ReverseLinkKey>,
+    pub fail_closed_outbound_tags: BTreeSet<String>,
     pub managed_vless_inbound_tags: BTreeSet<String>,
     pub owned_inbound_user_emails: BTreeMap<String, BTreeSet<String>>,
 }
@@ -63,6 +65,7 @@ pub fn build_reverse_desired(
     local_xp_port: u16,
     bootstrap: Option<&ReverseMeshBootstrapMarker>,
     bootstrap_target_node_id: Option<&str>,
+    enabled_target_links: &BTreeSet<ReverseLinkKey>,
 ) -> Result<ReverseXrayDesired, String> {
     // A freshly joined node receives the marker before its first Raft snapshot. Its local
     // desired state therefore still has epoch zero, but the marker already carries the epoch
@@ -82,6 +85,7 @@ pub fn build_reverse_desired(
             local_xp_port,
             Some(marker),
             bootstrap_target_node_id,
+            enabled_target_links,
         );
     }
     let mut effective_assignments = assignments.clone();
@@ -282,6 +286,27 @@ pub fn build_reverse_desired(
                 } else {
                     formal_role
                 };
+                let link = ReverseLinkKey::new(
+                    epoch,
+                    local_node_id,
+                    rendezvous_id,
+                    role,
+                    assignment.generation,
+                );
+                let outbound_tag = format!(
+                    "xp-reverse-outbound-{epoch}-{rendezvous_id}-{role:?}-{}",
+                    assignment.generation
+                );
+                let freedom_tag = format!(
+                    "xp-reverse-freedom-{epoch}-{rendezvous_id}-{role:?}-{}",
+                    assignment.generation
+                );
+                if !enabled_target_links.contains(&link) {
+                    desired.fail_closed_outbound_tags.insert(outbound_tag);
+                    desired.fail_closed_outbound_tags.insert(freedom_tag);
+                    continue;
+                }
+                desired.active_target_links.insert(link.clone());
                 let rendezvous = effective_nodes
                     .iter()
                     .find(|node| node.node_id == rendezvous_id)
@@ -314,14 +339,6 @@ pub fn build_reverse_desired(
                     rendezvous_id,
                     role,
                     assignment.generation,
-                );
-                let outbound_tag = format!(
-                    "xp-reverse-outbound-{epoch}-{rendezvous_id}-{role:?}-{}",
-                    assignment.generation
-                );
-                let freedom_tag = format!(
-                    "xp-reverse-freedom-{epoch}-{rendezvous_id}-{role:?}-{}",
-                    assignment.generation
                 );
                 let reverse_endpoint = ReverseVlessEndpoint {
                     access_host: rendezvous.access_host.clone(),
@@ -432,6 +449,7 @@ impl ReverseXrayReconciler {
         &mut self,
         client: &mut xray::XrayClient,
         desired: &ReverseXrayDesired,
+        remove_immediately: bool,
     ) -> Result<ReverseReconcileStatus, tonic::Status> {
         self.configured = true;
         let now = Instant::now();
@@ -456,7 +474,10 @@ impl ReverseXrayReconciler {
         for outbound in existing_outbounds {
             let tag = outbound.tag;
             if tag.starts_with("xp-reverse-") && !desired.owned_outbound_tags.contains(&tag) {
-                if !self.should_remove_retired(&tag, now) {
+                if !remove_immediately
+                    && !desired.fail_closed_outbound_tags.contains(&tag)
+                    && !self.should_remove_retired(&tag, now)
+                {
                     continue;
                 }
                 match client
@@ -476,6 +497,17 @@ impl ReverseXrayReconciler {
         }
 
         let existing_rules = client.list_rules().await?;
+        let existing_rule_tags = existing_rules
+            .rules
+            .iter()
+            .map(|rule| {
+                if rule.rule_tag.is_empty() {
+                    rule.tag.clone()
+                } else {
+                    rule.rule_tag.clone()
+                }
+            })
+            .collect::<BTreeSet<_>>();
         for rule in existing_rules.rules {
             let tag = if rule.rule_tag.is_empty() {
                 rule.tag
@@ -506,7 +538,7 @@ impl ReverseXrayReconciler {
         for inbound in existing_inbounds.inbounds {
             let tag = inbound.tag;
             if tag.starts_with("xp-reverse-") && !desired.owned_inbound_tags.contains(&tag) {
-                if !self.should_remove_retired(&tag, now) {
+                if !remove_immediately && !self.should_remove_retired(&tag, now) {
                     continue;
                 }
                 match client
@@ -537,7 +569,7 @@ impl ReverseXrayReconciler {
                     continue;
                 }
                 let tag = format!("user:{inbound_tag}:{}", user.email);
-                if !self.should_remove_retired(&tag, now) {
+                if !remove_immediately && !self.should_remove_retired(&tag, now) {
                     continue;
                 }
                 let operation = builder::build_remove_user_operation(&user.email);
@@ -617,9 +649,14 @@ impl ReverseXrayReconciler {
             }
         }
         for request in desired.route_requests.iter().cloned() {
+            let (rule_tag, already_present) =
+                desired_route_presence(&existing_rule_tags, &request)?;
+            if already_present {
+                continue;
+            }
             match client.add_rule(request).await {
                 Ok(_) => {}
-                Err(status) if xray::is_already_exists(&status) => {}
+                Err(status) if xray::is_duplicate_rule_tag(&status, &rule_tag) => {}
                 Err(status) => return Err(status),
             }
         }
@@ -667,6 +704,37 @@ impl ReverseXrayReconciler {
     }
 }
 
+fn requested_rule_tag(
+    request: &xproto::app::router::command::AddRuleRequest,
+) -> Result<String, tonic::Status> {
+    let config = request
+        .config
+        .as_ref()
+        .ok_or_else(|| tonic::Status::invalid_argument("reverse route config is missing"))?;
+    let config = xproto::app::router::Config::decode(config.value.as_slice())
+        .map_err(|_| tonic::Status::invalid_argument("reverse route config is invalid"))?;
+    let [rule] = config.rule.as_slice() else {
+        return Err(tonic::Status::invalid_argument(
+            "reverse route config must contain exactly one rule",
+        ));
+    };
+    if rule.rule_tag.is_empty() {
+        return Err(tonic::Status::invalid_argument(
+            "reverse route tag is missing",
+        ));
+    }
+    Ok(rule.rule_tag.clone())
+}
+
+fn desired_route_presence(
+    existing_rule_tags: &BTreeSet<String>,
+    request: &xproto::app::router::command::AddRuleRequest,
+) -> Result<(String, bool), tonic::Status> {
+    let rule_tag = requested_rule_tag(request)?;
+    let already_present = existing_rule_tags.contains(&rule_tag);
+    Ok((rule_tag, already_present))
+}
+
 fn outbound_needs_refresh(
     existing: &xproto::core::OutboundHandlerConfig,
     desired: &xproto::app::proxyman::command::AddOutboundRequest,
@@ -695,5 +763,47 @@ mod tests {
         let mut changed = existing;
         changed.expire = xp_test_fixtures::number_value1();
         assert!(outbound_needs_refresh(&changed, &request).unwrap());
+    }
+
+    #[test]
+    fn reverse_route_tag_is_decoded_before_idempotent_add() {
+        let request = builder::build_reverse_route_rule(
+            "xp-reverse-route-7-target-primary-3",
+            "xp-reverse-portal-7-rendezvous",
+            "rvs-test.mesh.invalid:443",
+            "xp-reverse-freedom-7-rendezvous-Primary-3",
+        );
+        assert_eq!(
+            requested_rule_tag(&request).unwrap(),
+            "xp-reverse-route-7-target-primary-3"
+        );
+    }
+
+    #[test]
+    fn listed_reverse_route_prevents_another_add() {
+        let request = builder::build_reverse_route_rule(
+            "xp-reverse-route-7-target-primary-3",
+            "xp-reverse-portal-7-rendezvous",
+            "rvs-test.mesh.invalid:443",
+            "xp-reverse-freedom-7-rendezvous-Primary-3",
+        );
+        let existing = BTreeSet::from(["xp-reverse-route-7-target-primary-3".to_string()]);
+
+        let (tag, already_present) = desired_route_presence(&existing, &request).unwrap();
+
+        assert_eq!(tag, "xp-reverse-route-7-target-primary-3");
+        assert!(already_present);
+    }
+
+    #[test]
+    fn failed_replacement_removes_a_retired_outbound_after_one_drain_window() {
+        let now = Instant::now();
+        let mut reconciler = ReverseXrayReconciler::default();
+
+        assert!(!reconciler.should_remove_retired("xp-reverse-outbound-old", now));
+        assert!(
+            reconciler
+                .should_remove_retired("xp-reverse-outbound-old", now + Duration::from_secs(120),)
+        );
     }
 }

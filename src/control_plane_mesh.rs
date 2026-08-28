@@ -808,6 +808,7 @@ impl MeshAwareHttpClient {
             .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
             .and_then(|value| value.to_str().ok())
             .ok_or_else(|| MeshRequestError::Reverse("inner signature is missing".to_string()))?;
+        let reverse_authority = reverse::reverse_authority(route, peer);
         let mut envelope = ReverseRelayEnvelope {
             version: String::new(),
             assignment_generation: route.assignment.generation,
@@ -820,6 +821,7 @@ impl MeshAwareHttpClient {
             request_id: request.request_id.clone(),
             issued_at: inner_context.issued_at,
             content_length: request.body.len(),
+            reverse_authority,
             inner_signature: inner_signature.to_string(),
             outer_signature: String::new(),
         };

@@ -56,7 +56,15 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous, control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only, password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener. Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-relay order.
+- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal
+  peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous,
+  control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path
+  and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only,
+  password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
+  A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
+  120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
+  bounded backoff. Repository synchronization keeps both direct paths and follows the same
+  Reverse-before-dynamic-relay order.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
@@ -508,6 +516,11 @@ Required (or commonly set):
     recreate the service through Compose. Do not place the plaintext token in the Compose file.
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
+- `XP_REVERSE_MESH_ENABLED` (default: `true`)
+  - Set to `false` and restart `xp` to fail-close Reverse on that node. XP removes its
+    Reverse Xray artifacts and closes Reverse forwarding while preserving Raft assignments,
+    Direct/Public paths, and membership. Restore `true` and restart `xp` only after the
+    incident gate permits another bounded probe.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
   - Probe interval for `xray` gRPC availability.
 - `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` (default: `3`, allowed range `1..=10`)

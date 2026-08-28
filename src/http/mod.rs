@@ -34,10 +34,11 @@ mod node_delete;
 mod status_events;
 mod unreachable_voter_eviction;
 use mesh::{
-    MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_raft_client_write,
-    admin_internal_reverse_relay, admin_run_mesh_probes, send_mesh_internal_capability_read,
-    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
-    spawn_reverse_assignment_worker,
+    MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
+    admin_internal_raft_client_write, admin_internal_reverse_probe, admin_internal_reverse_relay,
+    admin_run_mesh_probes, send_mesh_internal_capability_read, send_mesh_internal_read,
+    send_mesh_internal_request, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
+    spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use status_events::StatusEventsHub;
@@ -1023,6 +1024,7 @@ pub fn build_router_with_mesh_telemetry(
     };
     spawn_mesh_probe_worker(app_state.clone());
     spawn_reverse_assignment_worker(app_state.clone());
+    spawn_reverse_link_probe_worker(app_state.clone());
     history_repository::spawn_repository_replica_worker(app_state.clone());
 
     let admin = Router::new()
@@ -1055,6 +1057,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/mesh/reverse-relay",
             post(admin_internal_reverse_relay),
+        )
+        .route(
+            "/_internal/mesh/reverse-probe",
+            post(admin_internal_reverse_probe),
         )
         .route(
             "/_internal/raft/restore-node",
@@ -1746,31 +1752,6 @@ fn validate_cluster_join_request(
     }
     validate_https_origin(&req.api_base_url)?;
     raft_node_id_from_ulid(node_id).map_err(|e| ApiError::invalid_request(e.to_string()))
-}
-
-async fn admin_internal_mesh_health(
-    Extension(state): Extension<AppState>,
-    internal: Option<Extension<InternalSignatureAuth>>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let Some(Extension(internal)) = internal else {
-        return Err(ApiError::unauthorized("internal auth required"));
-    };
-    if !matches!(
-        internal
-            .verified
-            .as_ref()
-            .map(|request| request.context.route),
-        Some(internal_auth::InternalRoute::HealthV2)
-    ) {
-        return Err(ApiError::unauthorized(
-            "mesh health authentication required",
-        ));
-    }
-    Ok(Json(json!({
-        "ok": true,
-        "node_id": state.cluster.node_id,
-        "auth_epoch": "v2"
-    })))
 }
 
 async fn admin_internal_reverse_readiness(
