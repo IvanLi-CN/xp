@@ -363,7 +363,7 @@ mod tests {
     fn health_context(sender_id: &str) -> internal_auth::RequestContext {
         internal_auth::RequestContext {
             route: internal_auth::InternalRoute::HealthV2,
-            cluster_id: "cluster".to_string(),
+            cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
             sender_id: sender_id.to_string(),
             target_id: "target".to_string(),
             request_id: "request".to_string(),
