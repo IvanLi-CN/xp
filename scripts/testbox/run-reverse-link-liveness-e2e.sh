@@ -2,6 +2,15 @@
 set -euo pipefail
 
 XRAY_LOG="${TMPDIR:-/tmp}/xp-reverse-link-liveness-xray.log"
+WEB_DIST_PLACEHOLDER='<!doctype html><title>xp reverse link liveness test</title>'
+CREATED_WEB_DIST_PLACEHOLDER=false
+
+if [[ ! -f web/dist/index.html ]]; then
+  mkdir -p web/dist
+  printf '%s\n' "$WEB_DIST_PLACEHOLDER" > web/dist/index.html
+  CREATED_WEB_DIST_PLACEHOLDER=true
+fi
+
 xray run -c scripts/testbox/reverse-xray-spike-target.json >"$XRAY_LOG" 2>&1 &
 XRAY_PID="$!"
 
@@ -13,6 +22,11 @@ cleanup() {
   kill "$XRAY_PID" 2>/dev/null || true
   wait "$XRAY_PID" 2>/dev/null || true
   rm -f "$XRAY_LOG"
+  if [[ "$CREATED_WEB_DIST_PLACEHOLDER" == true ]] \
+    && [[ "$(<web/dist/index.html)" == "$WEB_DIST_PLACEHOLDER" ]]; then
+    rm -f web/dist/index.html
+    rmdir web/dist 2>/dev/null || true
+  fi
   exit "$status"
 }
 trap cleanup EXIT INT TERM
