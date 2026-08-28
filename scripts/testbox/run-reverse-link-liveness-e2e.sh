@@ -33,4 +33,4 @@ trap cleanup EXIT INT TERM
 
 export XP_REVERSE_LIVENESS_XRAY_ADDR=127.0.0.1:10085
 export XP_REVERSE_LIVENESS_XRAY_PID="$XRAY_PID"
-cargo test --test reverse_link_liveness_e2e -- --ignored
+cargo test --test reverse_link_liveness_e2e -- --ignored --nocapture
