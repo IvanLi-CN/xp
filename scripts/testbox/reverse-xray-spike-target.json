@@ -7,7 +7,30 @@
   },
   "stats": {},
   "policy": { "levels": { "0": { "bufferSize": 0 } } },
-  "inbounds": [],
+  "inbounds": [
+    {
+      "tag": "vless-baseline-entry",
+      "listen": "127.0.0.1",
+      "port": 18443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": ["www.example.com"],
+          "privateKey": "GA-RQi_g2tnjKtnVf5y1zclSqpvS988C5OibXaHB008",
+          "shortIds": ["0123456789abcdef"]
+        }
+      }
+    }
+  ],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": {} },
     { "tag": "public", "protocol": "freedom", "settings": {} },
