@@ -42,6 +42,7 @@ async fn unreachable_reverse_link_stays_bounded_without_reclaiming_base_outbound
     let clock_ticks = clock_ticks_per_second();
     let mut client = connect_xray(address).await;
 
+    prewarm_reverse_handler(&mut client).await;
     assert_base_outbounds(&mut client).await;
     assert_managed_vless_baseline(&mut client).await;
     let baseline = observe_resource_run(xray_pid, duration).await;
@@ -70,6 +71,26 @@ async fn unreachable_reverse_link_stays_bounded_without_reclaiming_base_outbound
         "candidate SYN-SENT {} exceeds the disabled baseline {} plus one live probe",
         candidate.peak_syn_sent,
         baseline.peak_syn_sent
+    );
+}
+
+async fn prewarm_reverse_handler(client: &mut xray::XrayClient) {
+    let link = ReverseLinkKey::new(7, "target", "prewarm-rendezvous", ReverseRole::Primary, 3);
+    let mut reconciler = ReverseXrayReconciler::default();
+    let enabled = desired_xray(&link, true);
+    reconciler
+        .reconcile(client, &enabled, true)
+        .await
+        .expect("prewarm target Xray reverse artifacts");
+    let disabled = desired_xray(&link, false);
+    reconciler
+        .reconcile(client, &disabled, true)
+        .await
+        .expect("remove prewarm target Xray reverse artifacts");
+    sleep(Duration::from_secs(1)).await;
+    assert!(
+        !has_outbound(client, OUTBOUND_TAG).await,
+        "prewarm reverse outbound must be removed before the resource baseline"
     );
 }
 
