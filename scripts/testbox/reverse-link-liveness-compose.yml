@@ -6,4 +6,4 @@ services:
     working_dir: /workspace
     command: ["sleep", "infinity"]
     volumes:
-      - ./:/workspace
+      - ../../:/workspace
