@@ -20,6 +20,7 @@ const XRAY_PSS_DELTA_KIB: u64 = 2 * 1024;
 const EXTRA_CPU_SECONDS: u64 = 10;
 const OUTBOUND_TAG: &str = "xp-reverse-outbound-liveness-unreachable";
 const REVERSE_TAG: &str = "xp-reverse-in-liveness-unreachable";
+const MANAGED_VLESS_INBOUND_TAG: &str = "vless-baseline-entry";
 
 #[derive(Debug)]
 struct ResourceRun {
@@ -42,6 +43,7 @@ async fn unreachable_reverse_link_stays_bounded_without_reclaiming_base_outbound
     let mut client = connect_xray(address).await;
 
     assert_base_outbounds(&mut client).await;
+    assert_managed_vless_baseline(&mut client).await;
     let baseline = observe_resource_run(xray_pid, duration).await;
 
     let candidate = exercise_unreachable_link(&mut client, xray_pid, duration).await;
@@ -115,6 +117,7 @@ async fn exercise_unreachable_link(
                 "target Xray outbound must exactly follow the reverse Link circuit"
             );
             assert_base_outbounds(client).await;
+            assert_managed_vless_baseline(client).await;
             if has_underlay && !previous_enabled {
                 runtime.mark_underlays_installed(&enabled);
                 assert_eq!(runtime.take_probe(), Some(link.clone()));
@@ -156,6 +159,7 @@ async fn exercise_unreachable_link(
         "the link must finish open with no target-side initiating outbound"
     );
     assert_base_outbounds(client).await;
+    assert_managed_vless_baseline(client).await;
     observed
 }
 
@@ -233,6 +237,21 @@ async fn assert_base_outbounds(client: &mut xray::XrayClient) {
     assert!(
         tags.contains("block"),
         "block outbound must remain available"
+    );
+}
+
+async fn assert_managed_vless_baseline(client: &mut xray::XrayClient) {
+    let tags = client
+        .list_inbounds(false)
+        .await
+        .expect("list target Xray inbounds")
+        .inbounds
+        .into_iter()
+        .map(|inbound| inbound.tag)
+        .collect::<BTreeSet<_>>();
+    assert!(
+        tags.contains(MANAGED_VLESS_INBOUND_TAG),
+        "managed VLESS baseline inbound must remain available"
     );
 }
 
