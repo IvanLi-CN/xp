@@ -4,7 +4,7 @@
 
 ## Related ADRs
 
-- [0004-reverse-link-liveness-lifecycle](../../adr/0004-reverse-link-liveness-lifecycle.md)
+- [0005-reverse-link-unverified-cooldown](../../adr/0005-reverse-link-unverified-cooldown.md)
 
 ## 背景
 
@@ -48,9 +48,11 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   `probe_underlay|active` Link 安装 initiating Xray outbound。签名 `health-v2`
   必须携带经 reverse relay 信封认证的精确派生 authority，并由该 Link 的 Rendezvous 签发，才签发
   120 秒 `Link Lease`；单独的 Link headers 或普通直连 health 不得续租。每个 Link 同时至多一个
-  probe/active outbound。target 在 10 秒 probe window 内未收到 lease，或 active lease 过期时，
-  立即 fence 新请求并移除 initiating outbound，然后按 `30/60/120/240/300s` 退避。Direct/Public
-  和 membership 不受影响。
+  probe/active outbound。新 Link 先获得一个 10 秒 probe window；首个未获 lease 的结果会立即
+  fence 新请求、移除 initiating outbound，并在 30 秒后只重试一次。第二个未获 lease 的结果进入
+  15 分钟 cooldown；cooldown 后每次只允许一个 10 秒 half-open probe。active lease 过期时也立即
+  移除 initiating outbound，30 秒后从同一两次探测序列重新获取 lease。精确签名 health 成功会立即
+  授予 120 秒 lease 并清除未验证失败历史。Direct/Public 和 membership 不受影响。
 - 每个 retired handler 在首次发现时只获得一个固定的 120 秒 drain deadline；replacement 未获 lease
   不能延长或无限延迟旧 initiating outbound 的移除。tag、origin、UUID 按 cluster epoch、target、
   Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、local node、portal
@@ -97,10 +99,10 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。
   XP 还会对已分配 target 的 primary 与 standby 分别发起只走 Reverse 的 signed `health-v2` 请求；各 Rendezvous 在 target ACK 通过后保存短期健康证据。
   重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得
-  启用生产 epoch。不可达 Rendezvous 的 15 分钟 shared-testbox 场景必须证明：每个 Link 至多六次
+  启用生产 epoch。不可达 Rendezvous 的 15 分钟 shared-testbox 场景必须证明：每个 Link 至多两次
   probe 安装、open 期间不存在 target-side reverse outbound、SYN-SENT 不累积、Xray CPU 不超过
   Reverse-disabled 基线的 125% 或额外 10 CPU-seconds（取较宽者）、Xray PSS 增量不超过 2 MiB，且
-  Direct/Public 持续可用。
+  固定的 Direct/Public outbound 持续可用。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
 - target 拒绝携带 Reverse Link headers 但缺少有效 relay 信封的 health，且拒绝 sender、generation、

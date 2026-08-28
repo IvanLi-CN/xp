@@ -21,9 +21,15 @@ The one target-side Xray outbound temporarily installed during a 10-second attem
 Link Lease. It is removed if no lease returns.
 _Avoid_: installation, persistent connection.
 
+**Unverified Link Circuit**:
+The acquisition budget for a Reverse Link without a signed health response: one initial 10-second
+probe, one recheck after 30 seconds, then a 15-minute cooldown. Each later cooldown permits only
+one 10-second half-open probe. A returned signed health replaces this state with a Link Lease.
+_Avoid_: retry loop, Xray reconnect policy.
+
 **Open Reverse Circuit**:
 The local state after a Reverse Link probe or lease fails. The target has no initiating outbound
-for that link until the bounded retry deadline. Direct/Public and membership remain available.
+for that link until its recheck or cooldown deadline. Direct/Public and membership remain available.
 _Avoid_: node down, assignment deletion.
 
 **Healthy Replacement**:

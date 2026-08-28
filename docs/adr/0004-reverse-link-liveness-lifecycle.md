@@ -1,5 +1,7 @@
 # Bind target Reverse underlays to signed link liveness
 
+> Superseded by [0005-reverse-link-unverified-cooldown](0005-reverse-link-unverified-cooldown.md).
+
 Raft Reverse assignments describe durable topology. They do not prove that an assigned
 Rendezvous is reachable from its target, nor do they bound Xray's retry behavior after that
 Rendezvous is lost. Treating every assigned target outbound as permanently installed allowed a

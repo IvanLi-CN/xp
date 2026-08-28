@@ -9,6 +9,8 @@ use super::{ReverseMeshAssignment, ReverseMeshBootstrapMarker, ReverseRole, reve
 
 pub const REVERSE_LINK_PROBE_WINDOW: Duration = Duration::from_secs(10);
 pub const REVERSE_LINK_LEASE: Duration = Duration::from_secs(120);
+pub const REVERSE_LINK_UNVERIFIED_PROBE_LIMIT: usize = 2;
+pub const REVERSE_LINK_UNVERIFIED_COOLDOWN: Duration = Duration::from_secs(15 * 60);
 pub const REVERSE_LINK_EPOCH_HEADER: &str = "x-xp-reverse-link-epoch";
 pub const REVERSE_LINK_RENDEZVOUS_HEADER: &str = "x-xp-reverse-link-rendezvous";
 pub const REVERSE_LINK_ROLE_HEADER: &str = "x-xp-reverse-link-role";
@@ -264,15 +266,16 @@ impl ReverseLinkCircuits {
         for state in self.links.values_mut() {
             match *state {
                 ReverseLinkCircuitState::Probing { deadline, failures } if now >= deadline => {
+                    let failures = failures.saturating_add(1);
                     *state = ReverseLinkCircuitState::Open {
-                        retry_at: now + reverse_backoff(failures),
-                        failures: failures.saturating_add(1),
+                        retry_at: now + reverse_link_retry_delay(failures),
+                        failures,
                     };
                 }
                 ReverseLinkCircuitState::Active { lease_deadline } if now >= lease_deadline => {
                     *state = ReverseLinkCircuitState::Open {
                         retry_at: now + reverse_backoff(0),
-                        failures: 1,
+                        failures: 0,
                     };
                 }
                 ReverseLinkCircuitState::Open { retry_at, failures } if now >= retry_at => {
@@ -348,6 +351,14 @@ impl ReverseLinkCircuits {
     }
 }
 
+fn reverse_link_retry_delay(failures: usize) -> Duration {
+    if failures >= REVERSE_LINK_UNVERIFIED_PROBE_LIMIT {
+        REVERSE_LINK_UNVERIFIED_COOLDOWN
+    } else {
+        reverse_backoff(failures.saturating_sub(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -399,6 +410,55 @@ mod tests {
                 .reconcile(&desired, retry + REVERSE_LINK_LEASE)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn unverified_link_cools_down_after_two_probes() {
+        let key = ReverseLinkKey::new(7, "target", "rendezvous", ReverseRole::Primary, 3);
+        let desired = BTreeSet::from([key.clone()]);
+        let now = Instant::now();
+        let mut circuits = ReverseLinkCircuits::default();
+
+        circuits.reconcile(&desired, now);
+        let first_timeout = now + REVERSE_LINK_PROBE_WINDOW;
+        assert!(circuits.reconcile(&desired, first_timeout).is_empty());
+        let second_probe = first_timeout + reverse_backoff(0);
+        assert_eq!(circuits.reconcile(&desired, second_probe), desired);
+        let second_timeout = second_probe + REVERSE_LINK_PROBE_WINDOW;
+        assert!(circuits.reconcile(&desired, second_timeout).is_empty());
+        assert!(matches!(
+            circuits.state(&key),
+            Some(ReverseLinkCircuitState::Open { failures: 2, retry_at })
+                if *retry_at == second_timeout + REVERSE_LINK_UNVERIFIED_COOLDOWN
+        ));
+    }
+
+    #[test]
+    fn expired_lease_starts_a_fresh_bounded_probe_sequence() {
+        let key = ReverseLinkKey::new(7, "target", "rendezvous", ReverseRole::Primary, 3);
+        let desired = BTreeSet::from([key.clone()]);
+        let now = Instant::now();
+        let mut circuits = ReverseLinkCircuits::default();
+
+        assert_eq!(circuits.reconcile(&desired, now), desired);
+        assert!(circuits.confirm_health(&key, now));
+        let lease_expired = now + REVERSE_LINK_LEASE;
+        assert!(circuits.reconcile(&desired, lease_expired).is_empty());
+
+        let first_probe = lease_expired + reverse_backoff(0);
+        assert_eq!(circuits.reconcile(&desired, first_probe), desired);
+        let first_timeout = first_probe + REVERSE_LINK_PROBE_WINDOW;
+        assert!(circuits.reconcile(&desired, first_timeout).is_empty());
+
+        let second_probe = first_timeout + reverse_backoff(0);
+        assert_eq!(circuits.reconcile(&desired, second_probe), desired);
+        let second_timeout = second_probe + REVERSE_LINK_PROBE_WINDOW;
+        assert!(circuits.reconcile(&desired, second_timeout).is_empty());
+        assert!(matches!(
+            circuits.state(&key),
+            Some(ReverseLinkCircuitState::Open { failures: 2, retry_at })
+                if *retry_at == second_timeout + REVERSE_LINK_UNVERIFIED_COOLDOWN
+        ));
     }
 
     #[test]

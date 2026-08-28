@@ -32,11 +32,12 @@
   10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
   The target grants a 120-second lease only when the request's assigned Rendezvous identity and
   signed relay envelope match the Link's derived authority; Link headers on direct health cannot
-  extend a lease. Probe or lease failure removes the initiating outbound immediately and uses the
-  bounded 30/60/120/240/300 second retry sequence. A retired handler gets one fixed 120-second
-  drain deadline, even when its replacement never becomes healthy. `XP_REVERSE_MESH_ENABLED=false`
-  forces local XP-owned Reverse Xray artifact discovery and removal after an XP restart while
-  Direct/Public and Raft membership continue.
+  extend a lease. One missed probe receives one 30-second recheck; two consecutive missed probes
+  enter a 15-minute cooldown, after which one half-open probe is permitted per cooldown. Lease
+  expiry begins the same bounded acquisition sequence after a 30-second wait. A retired handler
+  gets one fixed 120-second drain deadline, even when its replacement never becomes healthy.
+  `XP_REVERSE_MESH_ENABLED=false` forces local XP-owned Reverse Xray artifact discovery and removal
+  after an XP restart while Direct/Public and Raft membership continue.
 - Reverse route reconciliation now reads existing Xray rule tags before adding desired routes.
   The only duplicate-response compatibility branch accepts `app/router: duplicate ruleTag` for
   the exact desired tag.

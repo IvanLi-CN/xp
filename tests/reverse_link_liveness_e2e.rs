@@ -148,8 +148,8 @@ async fn exercise_unreachable_link(
 
     observed.cpu_ticks = xray_cpu_ticks(xray_pid).saturating_sub(initial_cpu_ticks);
     assert!(
-        probe_installations <= 6,
-        "15-minute unreachable run installed {probe_installations} probes; expected at most six"
+        probe_installations <= 2,
+        "15-minute unreachable run installed {probe_installations} probes; expected at most two"
     );
     assert!(
         !has_outbound(client, OUTBOUND_TAG).await,
@@ -225,6 +225,10 @@ async fn assert_base_outbounds(client: &mut xray::XrayClient) {
     assert!(
         tags.contains("direct"),
         "direct outbound must remain available"
+    );
+    assert!(
+        tags.contains("public"),
+        "public outbound must remain available"
     );
     assert!(
         tags.contains("block"),

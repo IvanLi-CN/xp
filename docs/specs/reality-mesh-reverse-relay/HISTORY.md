@@ -24,9 +24,9 @@
 - bootstrap 期间使用独立 `ReverseRole::Bootstrap` 派生域；join operation 完成后双方切回正式
   Primary/Standby，旧 bootstrap worker 进入 120 秒 drain。
 - Reverse Assignment 与 target-side Reverse Link 分离：assignment 仍是 durable topology，Link
-  Lease、probe 和 circuit 仅为目标节点内存态。不可达 Rendezvous 在 10 秒 probe 后移除该 Link
-  的 initiating outbound，并按 `30/60/120/240/300s` 重试；健康 replacement 才开始旧 Link 的
-  120 秒 drain。`XP_REVERSE_MESH_ENABLED=false` 是不改 Raft 的本地 fail-closed 回退。
+  Lease、probe 和 circuit 仅为目标节点内存态。ADR 0005 将未验证 Link 固定为初始 probe、一次
+  30 秒 recheck、15 分钟 cooldown；健康 replacement 才开始旧 Link 的 120 秒 drain。
+  `XP_REVERSE_MESH_ENABLED=false` 是不改 Raft 的本地 fail-closed 回退。
 - Xray route reconcile 以 `ListRule` 的当前 tag 集合为幂等依据；仅对同一 desired tag 的
   `app/router: duplicate ruleTag` 保留兼容 fallback。
 
