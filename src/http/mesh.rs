@@ -381,6 +381,16 @@ pub(super) async fn admin_internal_reverse_relay(
         assignment.generation,
     );
     let origin = crate::reverse_mesh::derive_reverse_origin(&origin_id);
+    if envelope.reverse_authority != origin {
+        return Err(ApiError::unauthorized(
+            "reverse relay authority does not match its assignment",
+        ));
+    }
+    if relay_route == internal_auth::InternalRoute::HealthV2 {
+        envelope
+            .insert_headers(&mut inner_headers)
+            .map_err(|_| ApiError::invalid_request("reverse relay proof is invalid"))?;
+    }
     let response = state
         .reverse_relay
         .forward(

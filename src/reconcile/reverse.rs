@@ -38,6 +38,25 @@ impl ReconcileHandle {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn xray_reconciliation_required(
+    has_local_endpoints: bool,
+    has_local_rebuilds: bool,
+    has_local_remove_inbounds: bool,
+    has_local_remove_users: bool,
+    has_reverse_desired: bool,
+    has_reverse_managed_state: bool,
+    reverse_mesh_enabled: bool,
+) -> bool {
+    has_local_endpoints
+        || has_local_rebuilds
+        || has_local_remove_inbounds
+        || has_local_remove_users
+        || has_reverse_desired
+        || has_reverse_managed_state
+        || !reverse_mesh_enabled
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn desired(
     restart_handle: &ReconcileHandle,
     reverse_mesh_enabled: bool,
@@ -64,7 +83,6 @@ pub(super) fn desired(
         target_links.as_ref().unwrap_or(&BTreeSet::new()),
         std::time::Instant::now(),
     );
-    let healthy_target_links = restart_handle.reverse_links().active_links();
     if !reverse_mesh_enabled {
         return ReverseXrayDesired::default();
     }
@@ -79,8 +97,6 @@ pub(super) fn desired(
         reverse_mesh_bootstrap,
         reverse_mesh_bootstrap_target,
         &enabled_target_links,
-        &healthy_target_links,
-        target_links.as_ref().is_some_and(|links| !links.is_empty()),
     )
     .unwrap_or_else(|error| {
         warn!(%error, "failed to build reverse Xray desired state; keeping Direct/Public only");
@@ -124,5 +140,17 @@ pub(super) async fn reconcile(
 pub(super) async fn wait_for_link_deadline(deadline: Option<Instant>) {
     if let Some(at) = deadline {
         tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_reverse_mesh_reconciles_persistent_xray_artifacts_after_restart() {
+        assert!(xray_reconciliation_required(
+            false, false, false, false, false, false, false,
+        ));
     }
 }

@@ -37,6 +37,46 @@ pub(super) fn insert_reverse_link_headers(
     Ok(())
 }
 
+fn reverse_link_health_proof_is_valid(
+    headers: &HeaderMap,
+    link: &crate::reverse_mesh::ReverseLinkKey,
+    local_node_id: &str,
+    cluster_ca_key_pem: &str,
+    context: &internal_auth::RequestContext,
+) -> bool {
+    let Some(inner_signature) = headers
+        .get(internal_auth::INTERNAL_SIGNATURE_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let Ok(envelope) = crate::reverse_mesh::ReverseRelayEnvelope::from_headers(headers) else {
+        return false;
+    };
+    let expected_authority =
+        crate::reverse_mesh::derive_reverse_origin(&crate::reverse_mesh::derive_reverse_origin_id(
+            link.epoch,
+            local_node_id,
+            &link.rendezvous_node_id,
+            link.role,
+            link.generation,
+        ));
+    envelope.verify(cluster_ca_key_pem)
+        && envelope.assignment_generation == link.generation
+        && envelope.target_node_id == local_node_id
+        && envelope.method == Method::GET.as_str()
+        && envelope.uri == "/api/admin/_internal/mesh/health"
+        && envelope.content_type.is_empty()
+        && envelope.route == internal_auth::InternalRoute::HealthV2.as_str()
+        && envelope.sender_node_id == link.rendezvous_node_id
+        && envelope.sender_node_id == context.sender_id
+        && envelope.request_id == context.request_id
+        && envelope.issued_at == context.issued_at
+        && envelope.content_length == 0
+        && envelope.reverse_authority == expected_authority
+        && envelope.inner_signature == inner_signature
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(in crate::http) struct ReverseLinkProbeRequest {
     target_node_id: String,
@@ -221,19 +261,164 @@ pub(in crate::http) async fn admin_internal_mesh_health(
             "mesh health authentication required",
         ));
     }
-    if let Some(link) =
-        crate::reverse_mesh::reverse_link_key_from_headers(&headers, &state.cluster.node_id)
-            .map_err(ApiError::invalid_request)?
-        && state
+    let link = crate::reverse_mesh::reverse_link_key_from_headers(&headers, &state.cluster.node_id)
+        .map_err(ApiError::invalid_request)?;
+    if link.is_none() && headers.contains_key(crate::reverse_mesh::RELAY_VERSION_HEADER) {
+        return Err(ApiError::unauthorized(
+            "reverse relay proof requires complete reverse link headers",
+        ));
+    }
+    if let Some(link) = link {
+        let verified = internal
+            .verified
+            .as_ref()
+            .expect("verified internal health request");
+        let ca_key_pem = state
+            .cluster_ca_key_pem
+            .as_deref()
+            .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
+        if !reverse_link_health_proof_is_valid(
+            &headers,
+            &link,
+            &state.cluster.node_id,
+            ca_key_pem,
+            &verified.context,
+        ) {
+            return Err(ApiError::unauthorized(
+                "reverse link health proof is invalid",
+            ));
+        }
+        if state
             .reconcile
             .reverse_links()
             .confirm_health(&link, std::time::Instant::now())
-    {
-        state.reconcile.request_full();
+        {
+            state.reconcile.request_full();
+        }
     }
     Ok(Json(json!({
         "ok": true,
         "node_id": state.cluster.node_id,
         "auth_epoch": "v2"
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    fn proof_headers(sender: &str) -> (HeaderMap, crate::reverse_mesh::ReverseLinkKey) {
+        let link = crate::reverse_mesh::ReverseLinkKey::new(
+            7,
+            "target",
+            "rendezvous",
+            crate::reverse_mesh::ReverseRole::Primary,
+            3,
+        );
+        let mut headers = HeaderMap::new();
+        insert_reverse_link_headers(
+            &mut headers,
+            link.epoch,
+            &link.rendezvous_node_id,
+            link.role,
+            link.generation,
+        )
+        .unwrap();
+        headers.insert(
+            internal_auth::INTERNAL_SIGNATURE_HEADER,
+            HeaderValue::from_static("v2:inner"),
+        );
+        let authority = crate::reverse_mesh::derive_reverse_origin(
+            &crate::reverse_mesh::derive_reverse_origin_id(
+                link.epoch,
+                "target",
+                &link.rendezvous_node_id,
+                link.role,
+                link.generation,
+            ),
+        );
+        let mut envelope = crate::reverse_mesh::ReverseRelayEnvelope {
+            version: String::new(),
+            assignment_generation: link.generation,
+            target_node_id: "target".to_string(),
+            method: "GET".to_string(),
+            uri: "/api/admin/_internal/mesh/health".to_string(),
+            content_type: String::new(),
+            route: internal_auth::InternalRoute::HealthV2.as_str().to_string(),
+            sender_node_id: sender.to_string(),
+            request_id: "request".to_string(),
+            issued_at: 1,
+            content_length: 0,
+            reverse_authority: authority,
+            inner_signature: "v2:inner".to_string(),
+            outer_signature: String::new(),
+        };
+        envelope.sign("cluster-key");
+        envelope.insert_headers(&mut headers).unwrap();
+        (headers, link)
+    }
+
+    fn health_context(sender_id: &str) -> internal_auth::RequestContext {
+        internal_auth::RequestContext {
+            route: internal_auth::InternalRoute::HealthV2,
+            cluster_id: "cluster".to_string(),
+            sender_id: sender_id.to_string(),
+            target_id: "target".to_string(),
+            request_id: "request".to_string(),
+            issued_at: 1,
+        }
+    }
+
+    #[test]
+    fn reverse_link_lease_requires_the_assigned_rendezvous_relay_proof() {
+        let (headers, link) = proof_headers("rendezvous");
+        assert!(reverse_link_health_proof_is_valid(
+            &headers,
+            &link,
+            "target",
+            "cluster-key",
+            &health_context("rendezvous"),
+        ));
+
+        let (foreign_headers, link) = proof_headers("other-member");
+        assert!(!reverse_link_health_proof_is_valid(
+            &foreign_headers,
+            &link,
+            "target",
+            "cluster-key",
+            &health_context("other-member"),
+        ));
+    }
+
+    #[test]
+    fn reverse_link_headers_on_direct_health_cannot_extend_a_lease() {
+        let (mut headers, link) = proof_headers("rendezvous");
+        for name in [
+            crate::reverse_mesh::RELAY_VERSION_HEADER,
+            crate::reverse_mesh::RELAY_GENERATION_HEADER,
+            crate::reverse_mesh::RELAY_TARGET_HEADER,
+            crate::reverse_mesh::RELAY_METHOD_HEADER,
+            crate::reverse_mesh::RELAY_URI_HEADER,
+            crate::reverse_mesh::RELAY_CONTENT_TYPE_HEADER,
+            crate::reverse_mesh::RELAY_ROUTE_HEADER,
+            crate::reverse_mesh::RELAY_SENDER_HEADER,
+            crate::reverse_mesh::RELAY_REQUEST_ID_HEADER,
+            crate::reverse_mesh::RELAY_ISSUED_AT_HEADER,
+            crate::reverse_mesh::RELAY_CONTENT_LENGTH_HEADER,
+            crate::reverse_mesh::RELAY_REVERSE_AUTHORITY_HEADER,
+            crate::reverse_mesh::RELAY_INNER_SIGNATURE_HEADER,
+            crate::reverse_mesh::RELAY_OUTER_SIGNATURE_HEADER,
+        ] {
+            headers.remove(name);
+        }
+        assert!(!reverse_link_health_proof_is_valid(
+            &headers,
+            &link,
+            "target",
+            "cluster-key",
+            &health_context("rendezvous"),
+        ));
+    }
 }

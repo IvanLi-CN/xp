@@ -47,8 +47,6 @@ pub struct ReverseXrayDesired {
     pub owned_outbound_tags: BTreeSet<String>,
     pub owned_rule_tags: BTreeSet<String>,
     pub active_target_links: BTreeSet<ReverseLinkKey>,
-    pub healthy_target_links: BTreeSet<ReverseLinkKey>,
-    pub target_links_present: bool,
     pub fail_closed_outbound_tags: BTreeSet<String>,
     pub managed_vless_inbound_tags: BTreeSet<String>,
     pub owned_inbound_user_emails: BTreeMap<String, BTreeSet<String>>,
@@ -68,8 +66,6 @@ pub fn build_reverse_desired(
     bootstrap: Option<&ReverseMeshBootstrapMarker>,
     bootstrap_target_node_id: Option<&str>,
     enabled_target_links: &BTreeSet<ReverseLinkKey>,
-    healthy_target_links: &BTreeSet<ReverseLinkKey>,
-    target_links_present: bool,
 ) -> Result<ReverseXrayDesired, String> {
     // A freshly joined node receives the marker before its first Raft snapshot. Its local
     // desired state therefore still has epoch zero, but the marker already carries the epoch
@@ -90,8 +86,6 @@ pub fn build_reverse_desired(
             Some(marker),
             bootstrap_target_node_id,
             enabled_target_links,
-            healthy_target_links,
-            target_links_present,
         );
     }
     let mut effective_assignments = assignments.clone();
@@ -166,10 +160,7 @@ pub fn build_reverse_desired(
             });
         }
     }
-    let mut desired = ReverseXrayDesired {
-        target_links_present,
-        ..Default::default()
-    };
+    let mut desired = ReverseXrayDesired::default();
     let local_vless = effective_endpoints
         .iter()
         .filter(|endpoint| endpoint.node_id == local_node_id)
@@ -316,9 +307,6 @@ pub fn build_reverse_desired(
                     continue;
                 }
                 desired.active_target_links.insert(link.clone());
-                if healthy_target_links.contains(&link) {
-                    desired.healthy_target_links.insert(link.clone());
-                }
                 let rendezvous = effective_nodes
                     .iter()
                     .find(|node| node.node_id == rendezvous_id)
@@ -486,11 +474,9 @@ impl ReverseXrayReconciler {
         for outbound in existing_outbounds {
             let tag = outbound.tag;
             if tag.starts_with("xp-reverse-") && !desired.owned_outbound_tags.contains(&tag) {
-                let defer_replacement_drain =
-                    desired.target_links_present && desired.healthy_target_links.is_empty();
                 if !remove_immediately
                     && !desired.fail_closed_outbound_tags.contains(&tag)
-                    && (defer_replacement_drain || !self.should_remove_retired(&tag, now))
+                    && !self.should_remove_retired(&tag, now)
                 {
                     continue;
                 }
@@ -807,5 +793,17 @@ mod tests {
 
         assert_eq!(tag, "xp-reverse-route-7-target-primary-3");
         assert!(already_present);
+    }
+
+    #[test]
+    fn failed_replacement_removes_a_retired_outbound_after_one_drain_window() {
+        let now = Instant::now();
+        let mut reconciler = ReverseXrayReconciler::default();
+
+        assert!(!reconciler.should_remove_retired("xp-reverse-outbound-old", now));
+        assert!(
+            reconciler
+                .should_remove_retired("xp-reverse-outbound-old", now + Duration::from_secs(120),)
+        );
     }
 }

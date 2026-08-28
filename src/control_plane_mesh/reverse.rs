@@ -1,5 +1,15 @@
 use super::*;
 
+pub(super) fn reverse_authority(route: &ReverseRelayRoute, peer: &MeshPeerTarget) -> String {
+    crate::reverse_mesh::derive_reverse_authority(
+        route.assignment.credential_epoch,
+        &peer.node_id,
+        &route.rendezvous.node_id,
+        route.role,
+        route.assignment.generation,
+    )
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct LocalReverseRelay {
     pub(super) node_id: String,

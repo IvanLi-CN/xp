@@ -45,15 +45,16 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - 进程内 Xray reconciler 串行全量重载 XP-owned rule，顺序固定为 API、target bridge、portal exact-match、portal block。旧 handler 进入 120 秒 drain，禁止新请求但允许已开始的 response stream 完成。
 - `Reverse Assignment` 是 durable topology；`Reverse Link` 是按
   `(epoch,target,Rendezvous,role,generation)` 区分的进程内生命周期。target 只为一个
-  `probe_underlay|active|healthy_draining` Link 安装 initiating Xray outbound。签名 `health-v2`
-  必须经精确派生 origin 到达 target 才签发 120 秒 `Link Lease`；每个 Link 同时至多一个
+  `probe_underlay|active` Link 安装 initiating Xray outbound。签名 `health-v2`
+  必须携带经 reverse relay 信封认证的精确派生 authority，并由该 Link 的 Rendezvous 签发，才签发
+  120 秒 `Link Lease`；单独的 Link headers 或普通直连 health 不得续租。每个 Link 同时至多一个
   probe/active outbound。target 在 10 秒 probe window 内未收到 lease，或 active lease 过期时，
   立即 fence 新请求并移除 initiating outbound，然后按 `30/60/120/240/300s` 退避。Direct/Public
   和 membership 不受影响。
-- 健康 replacement 只有在新 generation Active 后才允许旧 Link drain 120 秒；lease 失效不是
-  healthy replacement，不得借用 120 秒 drain 保留重连 outbound。tag、origin、UUID 按 cluster
-  epoch、target、Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、
-  local node、portal epoch 派生，不新增持久 secret。
+- 每个 retired handler 在首次发现时只获得一个固定的 120 秒 drain deadline；replacement 未获 lease
+  不能延长或无限延迟旧 initiating outbound 的移除。tag、origin、UUID 按 cluster epoch、target、
+  Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、local node、portal
+  epoch 派生，不新增持久 secret。
 - 固定版 Xray 不能证明 worker 已关闭时写 tombstone；每进程最多两个。产生第三个前由 systemd/OpenRC/supervisor 受控重启 Xray，并只重建当前 generation。重启不可用或失败只禁用 Reverse，Direct/Public 和 membership 继续可用。
 
 ### Relay wire 与路径
@@ -63,7 +64,7 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   远端 R 固定按 Reality Mesh 后 Public/API 的顺序访问。
   caller 自身就是 R 时，固定走其受签名保护的 XP loopback portal，避免两 voter 拓扑回绕公网地址。
   outer request 禁止 Reverse 递归。
-- outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length。
+- outer body 是未编码的原始 inner body。`x-xp-relay-*` 包含 version、assignment generation、target、原始 method/URI/content type/route/sender/request ID/issued-at/signature/content length 与派生 reverse authority。
   R 校验 outer、assignment、成员、route、inner signature 后透传；target 再次校验 inner。标准 outer ACK 与 `x-xp-relay-inner-ack` 必须同时验证。
 - 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
 - 对采用 `Reality Direct -> Reverse Relay -> Public/API` 的控制面调用，Reality 与 Reverse 各占
@@ -102,6 +103,8 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   Direct/Public 持续可用。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
+- target 拒绝携带 Reverse Link headers 但缺少有效 relay 信封的 health，且拒绝 sender、generation、
+  request identity 或派生 authority 与 Link 不一致的健康响应。
 - 非对称防火墙下 Direct -> Reverse -> Public、R/Xray 故障、120 秒 drain、1 MiB/8 MiB、SSE、response-start failure、fresh join、三种部署和受控重启符合合同；tombstone 不超过 2。
 - managed stack 20 节点与既有 50-peer 压测总 PSS 不超过 65,536 KiB；Rust/Web/Storybook/E2E/style/spec drift/required CI 通过，交付停在 `merge-ready / Step 5C Ready`。
 

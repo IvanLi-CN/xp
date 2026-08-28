@@ -13,12 +13,14 @@ link is in a bounded probe or active lease state.
 
 - A new or retried link receives one 10-second probe window. The target asks its exact assigned
   Rendezvous to return a bodyless signed health request through that same link.
-- A returned health request proves the path at the target and grants a 120-second Link Lease.
+- A returned health request proves the assigned Rendezvous, signed relay envelope and derived
+  reverse authority at the target, then grants a 120-second Link Lease. Link headers on ordinary
+  direct health requests cannot extend that lease.
 - A probe timeout or expired lease immediately removes that link's target outbounds and follows
   the local 30/60/120/240/300-second retry schedule. This state is neither Raft data nor a
   membership signal.
-- During an assignment replacement, an old link begins its existing 120-second drain only after
-  a current link holds a lease. The failed link itself never uses the drain period.
+- During an assignment replacement, an old handler receives one fixed 120-second drain deadline
+  when it is first retired. A failed replacement never renews or indefinitely delays that deadline.
 - `XP_REVERSE_MESH_ENABLED=false` is an operator-local fail-closed switch. It removes all
   XP-owned Reverse Xray artifacts on that node and closes the Reverse forwarding gate without
   changing Raft assignments, Direct/Public behavior, or membership.

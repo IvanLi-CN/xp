@@ -876,13 +876,15 @@ async fn reconcile_snapshot(
         || !reverse_desired.outbound_requests.is_empty()
         || !reverse_desired.inbound_user_operations.is_empty();
 
-    if !(has_local_endpoints
-        || has_local_rebuilds
-        || has_local_remove_inbounds
-        || has_local_remove_users
-        || has_reverse_desired
-        || reverse_reconciler.has_managed_state())
-    {
+    if !reverse::xray_reconciliation_required(
+        has_local_endpoints,
+        has_local_rebuilds,
+        has_local_remove_inbounds,
+        has_local_remove_users,
+        has_reverse_desired,
+        reverse_reconciler.has_managed_state(),
+        reverse_mesh_enabled,
+    ) {
         return Ok(ReconcileOutcome::default());
     }
 
