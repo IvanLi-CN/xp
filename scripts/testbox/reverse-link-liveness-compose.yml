@@ -5,5 +5,8 @@ services:
       dockerfile: scripts/testbox/Dockerfile.reverse-link-liveness
     working_dir: /workspace
     command: ["sleep", "infinity"]
+    environment:
+      GOMEMLIMIT: 16MiB
+      GOGC: "50"
     volumes:
       - ../../:/workspace
