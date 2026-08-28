@@ -179,15 +179,15 @@ fn desired_xray(link: &ReverseLinkKey, enabled: bool) -> ReverseXrayDesired {
 
 fn reverse_outbound_request() -> xray::proto::xray::app::proxyman::command::AddOutboundRequest {
     let endpoint = domain::Endpoint {
-        endpoint_id: "unreachable-rendezvous-endpoint".to_string(),
-        node_id: "unreachable-rendezvous".to_string(),
-        tag: "vless-unreachable-rendezvous".to_string(),
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::label_node_unreachable().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
         kind: domain::EndpointKind::VlessRealityVisionTcp,
         port: 8443,
         meta: xp_test_fixtures::endpoint_vless_meta().clone(),
     };
     let reverse_endpoint = xray::builder::ReverseVlessEndpoint {
-        access_host: "203.0.113.1".to_string(),
+        access_host: xp_test_fixtures::address_documentation203_0_113_30().to_owned(),
         endpoint,
         target_port: 8443,
         target_public_key_b64url_nopad: "Pf8FreUQ5qeklEqp0sUrQPztRLmqQacHXfCfhxmmKm4".to_string(),
