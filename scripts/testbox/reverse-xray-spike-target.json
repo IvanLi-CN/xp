@@ -34,32 +34,6 @@
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": {} },
     { "tag": "public", "protocol": "freedom", "settings": {} },
-    {
-      "tag": "vless-runtime-baseline",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [{
-          "address": "203.0.113.30",
-          "port": 8443,
-          "users": [{
-            "id": "11111111-1111-4111-8111-111111111111",
-            "encryption": "none",
-            "flow": "xtls-rprx-vision"
-          }]
-        }]
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "fingerprint": "chrome",
-          "serverName": "www.example.com",
-          "publicKey": "Pf8FreUQ5qeklEqp0sUrQPztRLmqQacHXfCfhxmmKm4",
-          "shortId": "0123456789abcdef",
-          "spiderX": ""
-        }
-      }
-    },
     { "tag": "block", "protocol": "blackhole", "settings": {} }
   ],
   "routing": { "domainStrategy": "AsIs", "rules": [] }

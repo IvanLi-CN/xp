@@ -39,11 +39,9 @@
   `XP_REVERSE_MESH_ENABLED=false` forces local XP-owned Reverse Xray artifact discovery and removal
   after an XP restart while Direct/Public and Raft membership continue.
 - The unreachable-Rendezvous resource fixture keeps Reverse disabled during its baseline phase but
-  includes a loopback-only managed VLESS/REALITY inbound and a non-routing VLESS/REALITY outbound.
-  The outbound has no Reverse account and no matching route, so it opens no listener or socket;
-  it loads the shared client runtime before sampling. The 2 MiB PSS gate therefore measures the
-  retained per-Link cost of an unavailable Reverse handler rather than the one-time process-wide
-  VLESS/REALITY client initialization.
+  includes a loopback-only managed VLESS/REALITY inbound. This loads the ordinary target protocol
+  runtime without an initiating Reverse outbound, so the 2 MiB PSS gate measures the extra cost of
+  an unavailable Reverse Link rather than the one-time first use of a normal managed endpoint.
 - Reverse route reconciliation now reads existing Xray rule tags before adding desired routes.
   The only duplicate-response compatibility branch accepts `app/router: duplicate ruleTag` for
   the exact desired tag.
