@@ -1,7 +1,7 @@
 services:
   tester:
     build:
-      context: .
+      context: ../..
       dockerfile: scripts/testbox/Dockerfile.reverse-link-liveness
     working_dir: /workspace
     command: ["sleep", "infinity"]
