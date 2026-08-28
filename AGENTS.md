@@ -51,10 +51,15 @@
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
   `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
-  listener. Fresh joins may carry a short-lived public-only `reverse_mesh_bootstrap` marker, but
-  learner catch-up and log-index promotion remain authoritative. If container-side Xray restart
-  recovery cannot complete after tombstone overflow, Reverse stays disabled until an operator
-  restarts the container; Direct/Public and membership remain available.
+  listener. A durable assignment does not itself keep a target Xray initiating outbound installed:
+  each local `(epoch,target,rendezvous,role,generation)` Link must acquire signed health within a
+  10-second probe or maintain a 120-second lease, otherwise its outbound is removed and retry is
+  bounded locally. `XP_REVERSE_MESH_ENABLED=false` is the supported node-local fail-closed
+  rollback and leaves Raft assignments, Direct/Public, and membership intact. Fresh joins may
+  carry a short-lived public-only `reverse_mesh_bootstrap` marker, but learner catch-up and
+  log-index promotion remain authoritative. If container-side Xray restart recovery cannot
+  complete after tombstone overflow, Reverse stays disabled until an operator restarts the
+  container; Direct/Public and membership remain available.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.

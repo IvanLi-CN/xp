@@ -98,6 +98,7 @@ fn test_config(data_dir: PathBuf, xray_api_addr: SocketAddr) -> Config {
         default_vless_server_names: None,
         default_vless_fingerprint: None,
         default_ss_port: None,
+        reverse_mesh_enabled: true,
         cloudflare_ddns_enabled: false,
         cloudflare_ddns_token_file: xp::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE.to_string(),
         cloudflare_ddns_zone_id: String::new(),

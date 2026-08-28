@@ -349,6 +349,17 @@ pub struct Config {
     pub default_ss_port: Option<u16>,
 
     #[arg(
+        long = "reverse-mesh-enabled",
+        global = true,
+        env = "XP_REVERSE_MESH_ENABLED",
+        value_name = "BOOL",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub reverse_mesh_enabled: bool,
+
+    #[arg(
         long = "cloudflare-ddns-enabled",
         global = true,
         env = "XP_CLOUDFLARE_DDNS_ENABLED",

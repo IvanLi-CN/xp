@@ -311,6 +311,15 @@ pub fn is_already_exists(status: &tonic::Status) -> bool {
     classify_idempotency_status(status) == IdempotencyStatus::AlreadyExists
 }
 
+/// Xray's router service reports duplicate rule tags as `Unknown` rather than `AlreadyExists`.
+/// This fallback is deliberately narrower than the generic classifier: the reported tag must be
+/// the exact desired tag, and callers should first use a successful `ListRule` result.
+pub fn is_duplicate_rule_tag(status: &tonic::Status, expected_tag: &str) -> bool {
+    let message = status.message().to_ascii_lowercase();
+    message.contains("app/router: duplicate ruletag")
+        && message.contains(&expected_tag.to_ascii_lowercase())
+}
+
 pub fn is_not_found(status: &tonic::Status) -> bool {
     classify_idempotency_status(status) == IdempotencyStatus::NotFound
 }
@@ -343,6 +352,10 @@ mod tests {
             tonic::Code::Unknown,
             "app/proxyman/inbound: Existing Tag Found: vless-foo",
         );
+        let duplicate_rule = tonic::Status::new(
+            tonic::Code::Unknown,
+            "app/router: duplicate ruleTag xp-reverse-route-7-target-primary-1",
+        );
         let other = tonic::Status::new(tonic::Code::Internal, "boom");
 
         assert_eq!(
@@ -372,6 +385,14 @@ mod tests {
 
         assert!(is_already_exists(&already));
         assert!(is_already_exists(&existing_tag_found));
+        assert!(is_duplicate_rule_tag(
+            &duplicate_rule,
+            "xp-reverse-route-7-target-primary-1"
+        ));
+        assert!(!is_duplicate_rule_tag(
+            &duplicate_rule,
+            "xp-reverse-route-7-other-primary-1"
+        ));
         assert!(!is_already_exists(&missing));
         assert!(is_not_found(&missing));
         assert!(!is_not_found(&already));

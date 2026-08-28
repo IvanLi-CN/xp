@@ -22,11 +22,14 @@ use crate::{
     credentials,
     domain::{Endpoint, EndpointKind, User},
     protocol::{Ss2022EndpointMeta, VlessRealityVisionTcpEndpointMeta},
-    reverse_mesh_runtime::{ReverseXrayDesired, ReverseXrayReconciler, build_reverse_desired},
+    reverse_mesh::ReverseLinkRuntime,
+    reverse_mesh_runtime::ReverseXrayReconciler,
     state::{JsonSnapshotStore, NodeUserEndpointMembership, membership_key, membership_xray_email},
     xray,
     xray::builder,
 };
+
+mod reverse;
 
 const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
 const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
@@ -99,6 +102,8 @@ pub struct ReconcileHandle {
     reverse_supervisor_enabled: Arc<AtomicBool>,
     reverse_runtime_ready: Arc<AtomicBool>,
     reverse_recovery_required: Arc<AtomicBool>,
+    reverse_operator_enabled: Arc<AtomicBool>,
+    reverse_links: ReverseLinkRuntime,
 }
 
 impl ReconcileHandle {
@@ -110,6 +115,8 @@ impl ReconcileHandle {
             reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
             reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+            reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_links: ReverseLinkRuntime::default(),
         }
     }
 
@@ -122,6 +129,8 @@ impl ReconcileHandle {
             reverse_supervisor_enabled: Arc::new(AtomicBool::new(true)),
             reverse_runtime_ready: Arc::new(AtomicBool::new(true)),
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+            reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
+            reverse_links: ReverseLinkRuntime::default(),
         }
     }
 
@@ -155,24 +164,13 @@ impl ReconcileHandle {
     pub fn reverse_gate(&self) -> Arc<AtomicBool> {
         self.reverse_enabled.clone()
     }
+
     pub(crate) fn set_reverse_enabled(&self, enabled: bool) {
         self.reverse_supervisor_enabled
             .store(enabled, Ordering::Release);
         self.reverse_runtime_ready
             .fetch_and(enabled, Ordering::AcqRel);
         self.refresh_reverse_gate();
-    }
-
-    pub(crate) fn set_reverse_runtime_ready(&self, ready: bool) {
-        self.reverse_runtime_ready.store(ready, Ordering::Release);
-        self.refresh_reverse_gate();
-    }
-
-    fn refresh_reverse_gate(&self) {
-        let enabled = self.reverse_supervisor_enabled.load(Ordering::Acquire)
-            && self.reverse_runtime_ready.load(Ordering::Acquire)
-            && !self.reverse_recovery_required.load(Ordering::Acquire);
-        self.reverse_enabled.store(enabled, Ordering::Release);
     }
 
     pub fn request_remove_inbound(&self, tag: impl Into<String>) {
@@ -305,6 +303,8 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_supervisor_enabled: Arc::new(AtomicBool::new(false)),
         reverse_runtime_ready: Arc::new(AtomicBool::new(false)),
         reverse_recovery_required: Arc::new(AtomicBool::new(false)),
+        reverse_operator_enabled: Arc::new(AtomicBool::new(config.reverse_mesh_enabled)),
+        reverse_links: ReverseLinkRuntime::default(),
     };
     let restart_handle = handle.clone();
 
@@ -353,6 +353,7 @@ async fn reconciler_task<R: RngCore>(
         } else {
             None
         };
+        let reverse_link_deadline = restart_handle.reverse_links().next_deadline();
 
         tokio::select! {
             _ = periodic.tick() => {
@@ -395,6 +396,11 @@ async fn reconciler_task<R: RngCore>(
                 pending.clear();
                 backoff.reset();
                 backoff_until = None;
+            }
+            _ = reverse::wait_for_link_deadline(reverse_link_deadline),
+                if reverse_link_deadline.is_some() => {
+                pending.add(ReconcileRequest::Full);
+                debounce_until = Some(Instant::now());
             }
         }
     }
@@ -660,6 +666,7 @@ async fn reconcile_once_with_runtime(
         reverse_reconciler,
         restart_handle,
         config.bind.port(),
+        config.reverse_mesh_enabled,
     )
     .await;
 
@@ -785,6 +792,7 @@ async fn reconcile_snapshot(
     reverse_reconciler: &mut ReverseXrayReconciler,
     restart_handle: &ReconcileHandle,
     local_xp_port: u16,
+    reverse_mesh_enabled: bool,
 ) -> Result<ReconcileOutcome, xray::XrayError> {
     use crate::xray::proto::xray::app::proxyman::command::{
         AlterInboundRequest, RemoveInboundRequest,
@@ -851,7 +859,9 @@ async fn reconcile_snapshot(
             Some(e) => e.node_id == local_node_id,
         });
 
-    let reverse_desired = build_reverse_desired(
+    let reverse_desired = reverse::desired(
+        restart_handle,
+        reverse_mesh_enabled,
         local_node_id,
         cluster_ca_key_pem,
         reverse_mesh_epoch,
@@ -861,11 +871,7 @@ async fn reconcile_snapshot(
         local_xp_port,
         reverse_mesh_bootstrap.as_ref(),
         reverse_mesh_bootstrap_target.as_deref(),
-    )
-    .unwrap_or_else(|error| {
-        warn!(%error, "failed to build reverse Xray desired state; keeping Direct/Public only");
-        ReverseXrayDesired::default()
-    });
+    );
     let has_reverse_desired = reverse_desired.portal.is_some()
         || !reverse_desired.outbound_requests.is_empty()
         || !reverse_desired.inbound_user_operations.is_empty();
@@ -881,25 +887,14 @@ async fn reconcile_snapshot(
     }
 
     let mut client = xray::connect(xray_api_addr).await?;
-    let mut reverse_restart_required = false;
-
-    match reverse_reconciler
-        .reconcile(&mut client, &reverse_desired)
-        .await
-    {
-        Ok(crate::reverse_mesh_runtime::ReverseReconcileStatus::RestartRequired) => {
-            restart_handle.set_reverse_runtime_ready(false);
-            warn!(
-                "reverse Xray tombstone limit reached; controlled supervisor restart is required"
-            );
-            reverse_restart_required = true;
-        }
-        Ok(_) => restart_handle.set_reverse_runtime_ready(true),
-        Err(status) => {
-            restart_handle.set_reverse_runtime_ready(false);
-            warn!(%status, "reverse Xray reconciliation failed; keeping Direct/Public available")
-        }
-    }
+    let reverse_restart_required = reverse::reconcile(
+        &mut client,
+        reverse_reconciler,
+        restart_handle,
+        &reverse_desired,
+        reverse_mesh_enabled,
+    )
+    .await;
 
     let mut refresh_user_ok: BTreeMap<String, bool> = users_needing_credential_refresh
         .keys()

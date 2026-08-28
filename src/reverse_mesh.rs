@@ -14,6 +14,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+mod link_liveness;
+
+pub use link_liveness::{
+    REVERSE_LINK_EPOCH_HEADER, REVERSE_LINK_GENERATION_HEADER, REVERSE_LINK_LEASE,
+    REVERSE_LINK_PROBE_WINDOW, REVERSE_LINK_RENDEZVOUS_HEADER, REVERSE_LINK_ROLE_HEADER,
+    ReverseLinkKey, ReverseLinkRuntime, reverse_link_key_from_headers, target_reverse_link_keys,
+};
+
 pub const REVERSE_ASSIGNMENT_CAPABILITY: &str = "cluster.mesh-reverse-assignment-v1";
 pub const REVERSE_RELAY_CAPABILITY: &str = "admin.mesh-reverse-relay-v1";
 pub const REVERSE_PORTAL_ADDRESS: &str = "127.0.0.1:10086";
@@ -306,7 +314,7 @@ pub struct ReverseLink {
     pub drain_deadline: Option<Instant>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReverseRole {
     Primary,

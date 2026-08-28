@@ -2,6 +2,10 @@
 
 > 当前有效合同。实现状态见 `./IMPLEMENTATION.md`，决策缘由见 `./HISTORY.md`。
 
+## Related ADRs
+
+- [0004-reverse-link-liveness-lifecycle](../../adr/0004-reverse-link-liveness-lifecycle.md)
+
 ## 背景
 
 Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoint。位于单向防火墙、运营商 NAT 或仅允许出站连接的节点，无法作为 Mesh server，导致控制面只能退回 Public/API。反向中继让目标节点主动经一个可访问的 Rendezvous 建立受限的 VLESS Reverse 链路，
@@ -39,7 +43,17 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - target 动态创建独立 Reverse account 的 VLESS outbound，经 Rendezvous 的现有 Reality/XHTTP 或 Reality/Vision TCP endpoint 主动建链。Rendezvous 的 VLESS inbound 首次握手按 generation 创建 reverse handler。
 - XP 通过 `socks5h` 与 `http2_prior_knowledge()` 请求 `http://rvs-<128-bit-id>.mesh.invalid:443`。target 仅允许精确 origin 路由到固定 XP loopback；未匹配 SOCKS 流量 block。target 不需要 managed VLESS endpoint。
 - 进程内 Xray reconciler 串行全量重载 XP-owned rule，顺序固定为 API、target bridge、portal exact-match、portal block。旧 handler 进入 120 秒 drain，禁止新请求但允许已开始的 response stream 完成。
-- 本地状态机为 `desired -> connecting -> health_verified -> active -> draining -> closed|retired_pending_restart|failed`。tag、origin、UUID 按 cluster epoch、target、Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、local node、portal epoch 派生，不新增持久 secret。
+- `Reverse Assignment` 是 durable topology；`Reverse Link` 是按
+  `(epoch,target,Rendezvous,role,generation)` 区分的进程内生命周期。target 只为一个
+  `probe_underlay|active|healthy_draining` Link 安装 initiating Xray outbound。签名 `health-v2`
+  必须经精确派生 origin 到达 target 才签发 120 秒 `Link Lease`；每个 Link 同时至多一个
+  probe/active outbound。target 在 10 秒 probe window 内未收到 lease，或 active lease 过期时，
+  立即 fence 新请求并移除 initiating outbound，然后按 `30/60/120/240/300s` 退避。Direct/Public
+  和 membership 不受影响。
+- 健康 replacement 只有在新 generation Active 后才允许旧 Link drain 120 秒；lease 失效不是
+  healthy replacement，不得借用 120 秒 drain 保留重连 outbound。tag、origin、UUID 按 cluster
+  epoch、target、Rendezvous、role、generation 派生且永不复用；SOCKS password 按 cluster CA、
+  local node、portal epoch 派生，不新增持久 secret。
 - 固定版 Xray 不能证明 worker 已关闭时写 tombstone；每进程最多两个。产生第三个前由 systemd/OpenRC/supervisor 受控重启 Xray，并只重建当前 generation。重启不可用或失败只禁用 Reverse，Direct/Public 和 membership 继续可用。
 
 ### Relay wire 与路径
@@ -81,7 +95,11 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 - 固定 Xray `26.3.27@d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 共享测试机 spike 已证明两台 Xray 经 XHTTP+Reality 与 Vision TCP+Reality 建立动态 VLESS Reverse，并完成受限 SOCKS5、H2C、精确 block 和移除隔离；测试端口仅绑定 host loopback，生产仍固定为 `127.0.0.1:10086`。
   XP 还会对已分配 target 的 primary 与 standby 分别发起只走 Reverse 的 signed `health-v2` 请求；各 Rendezvous 在 target ACK 通过后保存短期健康证据。
-  重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得启用生产 epoch。
+  重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得
+  启用生产 epoch。不可达 Rendezvous 的 15 分钟 shared-testbox 场景必须证明：每个 Link 至多六次
+  probe 安装、open 期间不存在 target-side reverse outbound、SYN-SENT 不累积、Xray CPU 不超过
+  Reverse-disabled 基线的 125% 或额外 10 CPU-seconds（取较宽者）、Xray PSS 增量不超过 2 MiB，且
+  Direct/Public 持续可用。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
 - 非对称防火墙下 Direct -> Reverse -> Public、R/Xray 故障、120 秒 drain、1 MiB/8 MiB、SSE、response-start failure、fresh join、三种部署和受控重启符合合同；tombstone 不超过 2。

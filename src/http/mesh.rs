@@ -3,8 +3,14 @@ use crate::http::join_capability::require_reverse_assignment_on_voters;
 use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
 mod bootstrap;
+#[path = "mesh/liveness.rs"]
+mod liveness;
 #[path = "mesh/status.rs"]
 mod status;
+
+pub(super) use liveness::{
+    admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
@@ -281,6 +287,13 @@ pub(super) async fn admin_internal_reverse_relay(
                 .map_err(|_| ApiError::invalid_request("reverse relay header value is invalid"))?,
         );
     }
+    liveness::insert_reverse_link_headers(
+        &mut inner_headers,
+        reverse_epoch,
+        &state.cluster.node_id,
+        role,
+        assignment.generation,
+    )?;
     let verified_inner = internal_auth::verify_request_v2(
         ca_key_pem,
         &state.cluster_ca_pem,

@@ -28,6 +28,16 @@
   retaining a bounded health observation; local Xray/portal readiness remains the admission gate
   and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
   retryable Reality timeout also proceeds to the Rendezvous Public/API path.
+- Target-side Reverse lifecycle is local and fail-closed. Each derived Link starts with one
+  10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
+  The target grants a 120-second lease only after that response arrives through the link; probe or
+  lease failure removes the initiating outbound immediately and uses the bounded 30/60/120/240/300
+  second retry sequence. A healthy replacement starts an older link's 120-second drain only after
+  the current Link Lease exists. `XP_REVERSE_MESH_ENABLED=false` removes all XP-owned Reverse
+  Xray artifacts locally while Direct/Public and Raft membership continue.
+- Reverse route reconciliation now reads existing Xray rule tags before adding desired routes.
+  The only duplicate-response compatibility branch accepts `app/router: duplicate ruleTag` for
+  the exact desired tag.
 - Fresh-join bootstrap links use the domain-separated `ReverseRole::Bootstrap` tag/UUID/origin
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale

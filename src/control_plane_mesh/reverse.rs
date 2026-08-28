@@ -82,6 +82,42 @@ impl MeshAwareHttpClient {
         Ok(())
     }
 
+    /// Sends one health request through the specified assigned link. Target-side liveness uses
+    /// this rather than the normal primary/standby fan-out so the signed response identifies one
+    /// Xray underlay precisely.
+    pub(crate) async fn send_peer_reverse_health_request_via(
+        &self,
+        peer: &MeshPeerTarget,
+        route: &ReverseRelayRoute,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+    ) -> Result<(), MeshRequestError> {
+        if !self.reverse_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled until local Xray readiness recovers".to_string(),
+            ));
+        }
+        if request.path_and_query != "/api/admin/_internal/mesh/health"
+            || request.method != reqwest::Method::GET
+            || !request.body.is_empty()
+        {
+            return Err(MeshRequestError::Reverse(
+                "reverse health probe must be a bodyless GET".to_string(),
+            ));
+        }
+        self.send_reverse_relay(
+            peer,
+            route,
+            &request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            route_budget(request.total_budget),
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// Sends only through the Raft-assigned Reverse route. This is used after a repository's
     /// equal direct paths have both failed, before the legacy encrypted dynamic relay is tried.
     pub(crate) async fn send_peer_reverse_request(
