@@ -6,6 +6,7 @@
     "services": ["HandlerService", "RoutingService", "StatsService"]
   },
   "stats": {},
+  "policy": { "levels": { "0": { "bufferSize": 0 } } },
   "inbounds": [],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": {} },
