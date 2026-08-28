@@ -75,6 +75,8 @@ async fn unreachable_reverse_link_stays_bounded_without_reclaiming_base_outbound
 }
 
 async fn prewarm_reverse_handler(client: &mut xray::XrayClient) {
+    // Xray creates its native Reverse handler lazily. Warm one real handler before the disabled
+    // baseline so the 2 MiB gate measures repeated unavailable-link lifecycle, not cold startup.
     let link = ReverseLinkKey::new(7, "target", "prewarm-rendezvous", ReverseRole::Primary, 3);
     let mut reconciler = ReverseXrayReconciler::default();
     let enabled = desired_xray(&link, true);

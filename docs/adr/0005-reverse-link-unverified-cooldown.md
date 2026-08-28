@@ -37,7 +37,9 @@ of relying on Xray's duplicate-route error strings or reconnect behavior.
 Recovery remains fast for a transient loss: the first missed health receives a 30-second recheck;
 a returned signed health immediately returns the link to its active lease. The resource gate keeps
 the prior limits: no accumulating SYN-SENT sockets, CPU no greater than the disabled baseline's
-125% or ten additional CPU-seconds, and PSS no more than 2 MiB above the disabled baseline.
+125% or ten additional CPU-seconds, and PSS no more than 2 MiB above the disabled baseline after
+one real Reverse handler has been installed and removed to account for Xray's lazy process-wide
+initialization.
 
 ## Rejected Alternatives
 

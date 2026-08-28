@@ -101,7 +101,8 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   重启重建、非对称防火墙、fresh join 的正式双链收敛、部署回滚和内存门禁仍须集成证据，完成前不得
   启用生产 epoch。不可达 Rendezvous 的 15 分钟 shared-testbox 场景必须证明：每个 Link 至多两次
   probe 安装、open 期间不存在 target-side reverse outbound、SYN-SENT 不累积、Xray CPU 不超过
-  Reverse-disabled 基线的 125% 或额外 10 CPU-seconds（取较宽者）、Xray PSS 增量不超过 2 MiB，且
+  Reverse-disabled 基线的 125% 或额外 10 CPU-seconds（取较宽者）、在一次真实 Reverse handler
+  安装/删除预热后 Xray PSS 增量不超过 2 MiB，且
   固定的 Direct/Public outbound 持续可用。
 - assignment 在 1/2/3/4/20 voter、leader change 与负载变化下确定一致；旧 schema 回滚被阻止。
 - relay 拒绝错误成员、过期/重放、stale generation、自环/递归、路径/body/length/signature 篡改与 ACK 置换；日志无 body/secret。
