@@ -35,7 +35,6 @@ use crate::{
         TcpConnectionUsageWarning,
     },
 };
-
 mod endpoint_meta;
 use endpoint_meta::build_endpoint_meta;
 mod command_compat;
@@ -43,11 +42,11 @@ mod membership_operation;
 pub use membership_operation::{
     MembershipOperation, MembershipOperationKind, MembershipOperationPhase,
 };
-
 #[path = "history_repository/mod.rs"]
 pub(crate) mod history_repository;
 #[path = "history_storage/mod.rs"]
 pub(crate) mod history_storage;
+mod reverse_assignment;
 
 pub const SCHEMA_VERSION: u32 = 13;
 const SCHEMA_VERSION_V12: u32 = 12;
@@ -2695,18 +2694,19 @@ impl DesiredStateCommand {
                 let current = state
                     .reverse_mesh_assignments
                     .get(&assignment.target_node_id);
-                if expected_generation
-                    .is_some_and(|expected| current.map(|item| item.generation) != Some(expected))
-                {
-                    return Err(StoreError::Migration {
-                        message: "reverse mesh assignment generation CAS failed".to_string(),
-                    });
-                }
                 let generation_floor = state
                     .reverse_mesh_generation_counters
                     .get(&assignment.target_node_id)
                     .copied()
                     .unwrap_or_default();
+                if reverse_assignment::generation_cas_is_stale_replay(
+                    current.map(|item| item.generation),
+                    expected_generation,
+                    assignment.generation,
+                    generation_floor,
+                )? {
+                    return Ok(DesiredStateApplyResult::Applied);
+                }
                 let is_same_current_generation =
                     current.is_some_and(|current| current.generation == assignment.generation);
                 if assignment.generation < generation_floor
