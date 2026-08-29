@@ -87,6 +87,14 @@ impl Paths {
         self.map_abs(Path::new("/etc/xp-ops/deploy/settings.json"))
     }
 
+    pub fn etc_xp_ops_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/etc/xp-ops"))
+    }
+
+    pub fn etc_xp_ops_ingress_guard_config(&self) -> PathBuf {
+        self.etc_xp_ops_dir().join("ingress-guard.toml")
+    }
+
     pub fn etc_xp_ops_cloudflare_settings(&self) -> PathBuf {
         self.map_abs(Path::new("/etc/xp-ops/cloudflare_tunnel/settings.json"))
     }
@@ -143,5 +151,21 @@ impl Paths {
     pub fn usr_local_libexec_xp_openrc_upgrade_trigger(&self) -> PathBuf {
         self.usr_local_libexec_dir()
             .join("xp-openrc-upgrade-trigger")
+    }
+
+    pub fn run_xp_ingress_guard_dir(&self) -> PathBuf {
+        self.map_abs(Path::new("/run/xp-ingress-guard"))
+    }
+
+    pub fn run_xp_ingress_guard_permit(&self) -> PathBuf {
+        self.run_xp_ingress_guard_dir().join("permit")
+    }
+
+    pub fn run_xp_ingress_guard_status(&self) -> PathBuf {
+        self.run_xp_ingress_guard_dir().join("status.json")
+    }
+
+    pub fn run_xp_ingress_guard_lock(&self) -> PathBuf {
+        self.run_xp_ingress_guard_dir().join("lock")
     }
 }

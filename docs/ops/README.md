@@ -56,7 +56,15 @@ Host-managed mode assumptions:
 - `xp` runs as a local HTTP admin/API server and binds loopback by default (`127.0.0.1:62416`).
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
-- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous, control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only, password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener. Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-relay order.
+- `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal
+  peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous,
+  control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path
+  and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only,
+  password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
+  A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
+  120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
+  bounded backoff. Repository synchronization keeps both direct paths and follows the same
+  Reverse-before-dynamic-relay order.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
@@ -101,6 +109,40 @@ Host-managed deployments are expected to run on small VPS/LXC machines, includin
 - `XP_CLOUDFLARED_RESTART_MODE=none`
 
 This keeps the first xray restart within roughly `30-60s` from an actual failure while avoiding repeated restarts when the host is under memory or I/O pressure. If a component remains down after restart attempts, `xp` increases the next restart delay exponentially up to 300 seconds and resets that delay after the probe recovers.
+
+## Host-managed Xray ingress guard
+
+The optional ingress guard is a root-operated host feature for XP-generated
+systemd/OpenRC Xray services. It limits new non-loopback TCP SYNs by the
+current Xray service cgroup before TLS/REALITY work begins. It is not available
+for Docker/Compose nodes, custom Xray service assets, or kernels without cgroup
+v2 and nft socket-cgroup support.
+
+```text
+sudo xp-ops ingress-guard enable --profile small-vps --yes
+sudo xp-ops ingress-guard status --json
+sudo xp-ops ingress-guard set-limits --global-rate 8 --global-burst 20 \
+  --source-rate 3 --source-burst 8 --yes
+sudo xp-ops ingress-guard disable --yes
+```
+
+`small-vps` defaults to a shared `8/s` burst `20` budget and a per-source
+`3/s` burst `8` budget. Excess initial SYNs are silently dropped; established
+connections and loopback listeners are unaffected. `observe` is an explicit
+diagnostic mode that records would-drop counters while preserving direct Xray
+startup. Mutating commands require root and `--yes`, and all support
+`--dry-run`.
+
+The guard owns only `table inet xp_ingress_guard`,
+`/etc/xp-ops/ingress-guard.toml`, and `/run/xp-ingress-guard/`. `xp`, Web/API,
+polkit, sudo, and doas receive no firewall privilege. The service start hook
+is part of the same `xp-ops` binary: enforced mode refreshes and verifies the
+table before Xray starts, while a missing permit exits `77` and cannot enter an
+automatic restart loop. OpenRC fails `start_pre` before `supervise-daemon`.
+An enforced failure leaves Xray stopped; the only unguarded recovery path is
+an explicit root `disable` operation. `init` and host-managed upgrades snapshot
+and restore the enabled configuration and guarded assets, and never fall back
+to an unguarded start during rollback.
 
 ## Endpoint probe (ingress reachability)
 
@@ -474,6 +516,11 @@ Required (or commonly set):
     recreate the service through Compose. Do not place the plaintext token in the Compose file.
 - `XP_XRAY_API_ADDR` (default: `127.0.0.1:10085`)
   - Address of the local `xray` gRPC API.
+- `XP_REVERSE_MESH_ENABLED` (default: `true`)
+  - Set to `false` and restart `xp` to fail-close Reverse on that node. XP removes its
+    Reverse Xray artifacts and closes Reverse forwarding while preserving Raft assignments,
+    Direct/Public paths, and membership. Restore `true` and restart `xp` only after the
+    incident gate permits another bounded probe.
 - `XP_XRAY_HEALTH_INTERVAL_SECS` (default: `2`, allowed range `1..=30`)
   - Probe interval for `xray` gRPC availability.
 - `XP_XRAY_HEALTH_FAILS_BEFORE_DOWN` (default: `3`, allowed range `1..=10`)

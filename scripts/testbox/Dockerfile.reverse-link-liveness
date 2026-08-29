@@ -1,0 +1,5 @@
+FROM ghcr.io/xtls/xray-core@sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7 AS xray
+
+FROM rust:1.96-bookworm
+
+COPY --from=xray /usr/local/bin/xray /usr/local/bin/xray

@@ -23,6 +23,13 @@
   `GOMEMLIMIT=12MiB`, `GOGC=50`, and `TUNNEL_MANAGEMENT_DIAGNOSTICS=false`.
   Release assets use the pinned low-memory Go build, and upgrade backfill must
   preserve operator overrides.
+- Host-managed XP-generated systemd/OpenRC Xray services may opt into the root-only
+  `xp-ops ingress-guard` admission guard. It owns only `table inet xp_ingress_guard`,
+  matches initial non-loopback TCP SYNs by the current Xray cgroup v2, and does not
+  enumerate ports or add a resident root process. Docker/Compose, custom Xray assets,
+  and unsupported kernels remain out of scope. `enable`, `observe`, `set-limits`, and
+  `disable` require root plus `--yes`; no xp/Web/API/polkit/sudo/doas firewall
+  delegation may be added. Enforced service preparation failure must keep Xray stopped.
 - Managed VLESS HTTPS canary certificates use Cloudflare DNS-01. Propagation checks query
   Cloudflare and Google over DoH; supported nodes require outbound HTTPS to those resolvers, but
   do not require direct authority access on UDP/TCP port 53.
@@ -44,10 +51,15 @@
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
   `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
-  listener. Fresh joins may carry a short-lived public-only `reverse_mesh_bootstrap` marker, but
-  learner catch-up and log-index promotion remain authoritative. If container-side Xray restart
-  recovery cannot complete after tombstone overflow, Reverse stays disabled until an operator
-  restarts the container; Direct/Public and membership remain available.
+  listener. A durable assignment does not itself keep a target Xray initiating outbound installed:
+  each local `(epoch,target,rendezvous,role,generation)` Link must acquire signed health within a
+  10-second probe or maintain a 120-second lease, otherwise its outbound is removed and retry is
+  bounded locally. `XP_REVERSE_MESH_ENABLED=false` is the supported node-local fail-closed
+  rollback and leaves Raft assignments, Direct/Public, and membership intact. Fresh joins may
+  carry a short-lived public-only `reverse_mesh_bootstrap` marker, but learner catch-up and
+  log-index promotion remain authoritative. If container-side Xray restart recovery cannot
+  complete after tombstone overflow, Reverse stays disabled until an operator restarts the
+  container; Direct/Public and membership remain available.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.

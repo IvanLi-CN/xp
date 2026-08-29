@@ -49,6 +49,7 @@ xp-ops container run
 | `XP_DEFAULT_VLESS_SERVER_NAMES`                | optional                     | Deprecated bootstrap compatibility input; validated only when `XP_DEFAULT_VLESS_PORT` is set and never chooses managed VLESS SNI        |
 | `XP_DEFAULT_VLESS_FINGERPRINT`                 | optional                     | Defaults to `chrome`                                                                                                                    |
 | `XP_DEFAULT_SS_PORT`                           | optional                     | Bootstrap port used only when the managed default SS2022 endpoint is missing                                                            |
+| `XP_REVERSE_MESH_ENABLED=false`                | incident rollback            | Disables local Reverse artifacts after the container is replaced; Raft assignments and Direct/Public remain available                   |
 | `CLOUDFLARE_API_TOKEN`                         | tunnel enabled               | Required on every start when Tunnel is enabled                                                                                          |
 
 ### Derived values

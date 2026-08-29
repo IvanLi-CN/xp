@@ -11,6 +11,7 @@ mod cloudflare_service_tests;
 pub(crate) mod cluster_info;
 mod container;
 mod deploy;
+pub(crate) mod ingress_guard;
 mod init;
 mod install;
 pub(crate) mod internal_auth;

@@ -13,6 +13,31 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) fn ensure_nftables(distro: Distro, mode: Mode) -> Result<(), ExitError> {
+    let (program, args) = match distro {
+        Distro::Arch => ("pacman", vec!["-S", "--noconfirm", "nftables"]),
+        Distro::Debian => ("apt-get", vec!["install", "-y", "nftables"]),
+        Distro::Rhel => ("dnf", vec!["install", "-y", "nftables"]),
+        Distro::Alpine => ("apk", vec!["add", "nftables"]),
+    };
+    if mode == Mode::DryRun {
+        eprintln!("would run: {program} {}", args.join(" "));
+        return Ok(());
+    }
+    let status = Command::new(program)
+        .args(&args)
+        .status()
+        .map_err(|error| ExitError::new(3, format!("install_failed: {error}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ExitError::new(
+            3,
+            format!("install_failed: {program} exited with {status}"),
+        ))
+    }
+}
+
 pub async fn cmd_install(paths: Paths, args: InstallArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun

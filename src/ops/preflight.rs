@@ -1,7 +1,7 @@
 use crate::ops::cli::{
     AdminTokenCommand, CloudflareCommand, CloudflareTokenCommand, Command, ContainerCommand,
-    DeployArgs, ExitError, InitArgs, InstallArgs, MihomoCommand, UpgradeArgs, XpCommand,
-    XpInstallArgs,
+    DeployArgs, ExitError, IngressGuardCommand, InitArgs, InstallArgs, MihomoCommand, UpgradeArgs,
+    XpCommand, XpInstallArgs,
 };
 use crate::ops::paths::Paths;
 use crate::ops::util::is_test_root;
@@ -53,6 +53,8 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
         | Command::Container(ContainerCommand::CancelInternalAuthV2Cutover(_)) => Ok(()),
         Command::Upgrade(args) => preflight_upgrade(paths, args),
         Command::UpgradeRunner(_args) => Ok(()),
+        Command::IngressGuard(command) => preflight_ingress_guard(paths, command),
+        Command::IngressGuardPrepare | Command::IngressGuardExec => Ok(()),
 
         Command::Xp(XpCommand::Install(args)) => preflight_xp_install(paths, args),
         Command::Xp(XpCommand::Bootstrap(args)) => {
@@ -127,6 +129,53 @@ pub fn preflight(paths: &Paths, command: &Option<Command>) -> Result<(), ExitErr
         }
         Command::Mihomo(MihomoCommand::Redact(_args)) => Ok(()),
     }
+}
+
+fn preflight_ingress_guard(paths: &Paths, command: &IngressGuardCommand) -> Result<(), ExitError> {
+    let dry_run = match command {
+        IngressGuardCommand::Enable(args) => args.dry_run,
+        IngressGuardCommand::Observe(args) => args.dry_run,
+        IngressGuardCommand::SetLimits(args) => args.dry_run,
+        IngressGuardCommand::Status(_) => true,
+        IngressGuardCommand::Disable(args) => args.dry_run,
+    };
+    if dry_run || is_test_root(paths.root()) {
+        return Ok(());
+    }
+    let targets = match command {
+        IngressGuardCommand::Enable(_) | IngressGuardCommand::Observe(_) => vec![
+            Target::dir(
+                paths.map_abs(Path::new("/etc")),
+                "ingress guard config parent",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/run")),
+                "ingress guard runtime parent",
+            ),
+        ],
+        IngressGuardCommand::SetLimits(_) => vec![
+            Target::dir(
+                paths.map_abs(Path::new("/etc")),
+                "ingress guard config parent",
+            ),
+            Target::dir(
+                paths.map_abs(Path::new("/run")),
+                "ingress guard runtime parent",
+            ),
+        ],
+        IngressGuardCommand::Disable(_) => vec![
+            Target::file_if_exists(
+                paths.etc_xp_ops_ingress_guard_config(),
+                "ingress guard config",
+            ),
+            Target::dir_if_exists(
+                paths.run_xp_ingress_guard_dir(),
+                "ingress guard runtime dir",
+            ),
+        ],
+        IngressGuardCommand::Status(_) => Vec::new(),
+    };
+    check_targets(paths, &targets)
 }
 
 fn preflight_tui(paths: &Paths) -> Result<(), ExitError> {

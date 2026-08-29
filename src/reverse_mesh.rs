@@ -14,6 +14,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+mod link_liveness;
+
+pub use link_liveness::{
+    REVERSE_LINK_EPOCH_HEADER, REVERSE_LINK_GENERATION_HEADER, REVERSE_LINK_LEASE,
+    REVERSE_LINK_PROBE_WINDOW, REVERSE_LINK_RENDEZVOUS_HEADER, REVERSE_LINK_ROLE_HEADER,
+    ReverseLinkKey, ReverseLinkRuntime, reverse_link_key_from_headers, target_reverse_link_keys,
+};
+
 pub const REVERSE_ASSIGNMENT_CAPABILITY: &str = "cluster.mesh-reverse-assignment-v1";
 pub const REVERSE_RELAY_CAPABILITY: &str = "admin.mesh-reverse-relay-v1";
 pub const REVERSE_PORTAL_ADDRESS: &str = "127.0.0.1:10086";
@@ -62,6 +70,7 @@ pub const RELAY_ISSUED_AT_HEADER: &str = "x-xp-relay-issued-at";
 pub const RELAY_CONTENT_LENGTH_HEADER: &str = "x-xp-relay-content-length";
 pub const RELAY_INNER_SIGNATURE_HEADER: &str = "x-xp-relay-inner-signature";
 pub const RELAY_OUTER_SIGNATURE_HEADER: &str = "x-xp-relay-outer-signature";
+pub const RELAY_REVERSE_AUTHORITY_HEADER: &str = "x-xp-relay-reverse-authority";
 pub const RELAY_INNER_ACK_HEADER: &str = "x-xp-relay-inner-ack";
 
 type HmacSha256 = Hmac<Sha256>;
@@ -306,7 +315,7 @@ pub struct ReverseLink {
     pub drain_deadline: Option<Instant>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReverseRole {
     Primary,
@@ -465,6 +474,18 @@ pub fn derive_reverse_origin(id: &[u8; 16]) -> String {
     format!("rvs-{}.mesh.invalid:443", hex::encode(id))
 }
 
+pub fn derive_reverse_authority(
+    epoch: u64,
+    target: &str,
+    rendezvous: &str,
+    role: ReverseRole,
+    generation: u64,
+) -> String {
+    derive_reverse_origin(&derive_reverse_origin_id(
+        epoch, target, rendezvous, role, generation,
+    ))
+}
+
 pub fn derive_reverse_origin_id(
     cluster_epoch: u64,
     target: &str,
@@ -509,6 +530,7 @@ pub struct ReverseRelayEnvelope {
     pub request_id: String,
     pub issued_at: i64,
     pub content_length: usize,
+    pub reverse_authority: String,
     pub inner_signature: String,
     pub outer_signature: String,
 }
@@ -527,6 +549,7 @@ impl ReverseRelayEnvelope {
             &self.request_id,
             &self.issued_at.to_string(),
             &self.content_length.to_string(),
+            &self.reverse_authority,
             &self.inner_signature,
         ]
         .join("\n")
@@ -565,6 +588,10 @@ impl ReverseRelayEnvelope {
             (RELAY_REQUEST_ID_HEADER, self.request_id.as_str()),
             (RELAY_ISSUED_AT_HEADER, issued_at.as_str()),
             (RELAY_CONTENT_LENGTH_HEADER, content_length.as_str()),
+            (
+                RELAY_REVERSE_AUTHORITY_HEADER,
+                self.reverse_authority.as_str(),
+            ),
             (RELAY_INNER_SIGNATURE_HEADER, self.inner_signature.as_str()),
             (RELAY_OUTER_SIGNATURE_HEADER, self.outer_signature.as_str()),
         ];
@@ -602,6 +629,7 @@ impl ReverseRelayEnvelope {
             content_length: required(RELAY_CONTENT_LENGTH_HEADER)?
                 .parse()
                 .map_err(|_| "invalid relay content length")?,
+            reverse_authority: required(RELAY_REVERSE_AUTHORITY_HEADER)?.to_string(),
             inner_signature: required(RELAY_INNER_SIGNATURE_HEADER)?.to_string(),
             outer_signature: required(RELAY_OUTER_SIGNATURE_HEADER)?.to_string(),
         })
@@ -791,6 +819,7 @@ mod tests {
             request_id: "request".to_string(),
             issued_at: 1,
             content_length: 32,
+            reverse_authority: "rvs-test.mesh.invalid:443".to_string(),
             inner_signature: "v2:inner".to_string(),
             outer_signature: String::new(),
         };
