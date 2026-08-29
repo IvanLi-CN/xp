@@ -22,6 +22,29 @@ test("renders the static fallback when the entry module cannot load", async ({
 	await expect(page.getByText("entry resource failed to load")).toBeVisible();
 });
 
+test("keeps public navigation usable when the selected build cache is incomplete", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await page.reload();
+	await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+	const cacheWasCorrupted = await page.evaluate(async () => {
+		const buildId = window.__XP_WEB_BUILD_ID__;
+		if (!buildId) return false;
+		const cacheName = `xp-app-shell-${buildId}`;
+		if (!(await caches.has(cacheName))) return false;
+		const cache = await caches.open(`xp-app-shell-${buildId}`);
+		return cache.delete(new URL("/__xp_build_metadata__", location.origin));
+	});
+	expect(cacheWasCorrupted).toBe(true);
+
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await expect(
+		page.getByRole("heading", { name: "Admin login", exact: true }),
+	).toBeVisible();
+});
+
 test("warm-loads cached nodes page offline after first successful visit", async ({
 	context,
 	page,
@@ -153,6 +176,7 @@ test("warm-loads cached nodes page offline after first successful visit", async 
 	await expect(page.getByText("Offline node inventory")).toBeVisible();
 	await expect(page.getByText(/Last successful sync:/)).toBeVisible();
 	await expect(page.getByText("1 node total")).toBeVisible();
+	await page.getByRole("tab", { name: "Join node", exact: true }).click();
 	await expect(
 		page.getByRole("button", { name: "Create token" }),
 	).toBeDisabled();
@@ -281,7 +305,7 @@ test("keeps the active precache when a replacement install is interrupted", asyn
 	expect(after).toEqual(before.urls);
 });
 
-test("repairs an incomplete active precache through cache recovery", async ({
+test("preserves an incomplete active precache and serves a complete recovery cache", async ({
 	page,
 }) => {
 	await setAdminToken(page);
@@ -294,14 +318,17 @@ test("repairs an incomplete active precache through cache recovery", async ({
 
 	const build = await page.evaluate(async () => {
 		const buildId = window.__XP_WEB_BUILD_ID__;
-		const cacheName = (await caches.keys()).find((name) =>
-			name.startsWith("xp-app-shell-"),
-		);
-		if (!cacheName) throw new Error("app-shell cache missing");
+		if (!buildId) throw new Error("active build id missing");
+		const cacheName = `xp-app-shell-${buildId}`;
+		if (!(await caches.has(cacheName))) {
+			throw new Error("active app-shell cache missing");
+		}
 		const cache = await caches.open(cacheName);
 		const targetRequest = (await cache.keys())[0];
 		if (!targetRequest) throw new Error("app-shell cache is empty");
-		await cache.delete(targetRequest);
+		if (!(await cache.delete(targetRequest))) {
+			throw new Error("active app-shell cache entry was not deleted");
+		}
 		return { buildId, cacheName, targetUrl: targetRequest.url };
 	});
 	await expect(
@@ -348,7 +375,17 @@ test("repairs an incomplete active precache through cache recovery", async ({
 	await expect(
 		page.evaluate(async ({ cacheName, targetUrl }) => {
 			const cache = await caches.open(cacheName);
-			return (await cache.match(targetUrl)) !== undefined;
+			return (await cache.match(targetUrl)) === undefined;
+		}, build),
+	).resolves.toBe(true);
+	await expect(
+		page.evaluate(async ({ cacheName, targetUrl }) => {
+			for (const recoveryName of await caches.keys()) {
+				if (!recoveryName.startsWith(`${cacheName}-recovery-`)) continue;
+				const recovery = await caches.open(recoveryName);
+				if ((await recovery.match(targetUrl)) !== undefined) return true;
+			}
+			return false;
 		}, build),
 	).resolves.toBe(true);
 });
