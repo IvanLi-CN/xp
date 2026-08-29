@@ -8,6 +8,18 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub(super) struct InternalRestoreNodeRequest {
     node_id: String,
+    #[serde(default)]
+    allow_missing_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct InternalPruneAbsentNodeRequest {
+    node_id: String,
+    #[serde(default)]
+    delete_endpoints: bool,
+    #[serde(default)]
+    expected_endpoint_ids: Vec<String>,
 }
 
 /// Restore has no raw membership escape hatch: it only creates or resumes the durable operation
@@ -30,6 +42,24 @@ pub(super) async fn admin_internal_restore_node(
         .ok_or_else(|| ApiError::not_found(format!("node not found: {}", request.node_id)))?;
     let raft_node_id = raft_node_id_from_ulid(&node.node_id)
         .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+    let allowed_missing = request
+        .allow_missing_node_ids
+        .iter()
+        .map(|node_id| {
+            raft_node_id_from_ulid(node_id)
+                .map_err(|error| ApiError::invalid_request(error.to_string()))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if allowed_missing.len() != request.allow_missing_node_ids.len() {
+        return Err(ApiError::invalid_request(
+            "restore allowlist must not contain duplicate node IDs",
+        ));
+    }
+    if allowed_missing.contains(&raft_node_id) {
+        return Err(ApiError::invalid_request(
+            "restore allowlist must not contain the target node",
+        ));
+    }
 
     let guard = crate::raft_membership_guard::membership_operation_gate()
         .lock_owned()
@@ -76,6 +106,7 @@ pub(super) async fn admin_internal_restore_node(
                 state.raft.clone(),
                 state.store.clone(),
                 raft_node_id,
+                &allowed_missing,
             )
             .await
             .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -130,5 +161,156 @@ pub(super) async fn admin_internal_restore_node(
         "already_voter": false,
         "operation_id": resumed.operation_id,
         "phase": resumed.phase,
+    })))
+}
+
+/// Remove a DesiredState node that is already absent from Raft membership after an explicitly
+/// authorized single-node recovery. This is intentionally narrower than normal node deletion:
+/// it cannot remove a live voter or learner, and the endpoint snapshot must match exactly.
+pub(super) async fn admin_internal_prune_absent_node(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(request): ApiJson<InternalPruneAbsentNodeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    join_capability::require_membership_lifecycle_on_voters(&state).await?;
+
+    let raft_node_id = raft_node_id_from_ulid(&request.node_id)
+        .map_err(|error| ApiError::invalid_request(error.to_string()))?;
+    let (node_exists, actual_endpoint_ids, actual_endpoint_tags) = {
+        let store = state.store.lock().await;
+        let node_exists = store.get_node(&request.node_id).is_some();
+        let endpoints = store
+            .list_endpoints()
+            .into_iter()
+            .filter(|endpoint| endpoint.node_id == request.node_id)
+            .collect::<Vec<_>>();
+        (
+            node_exists,
+            endpoints
+                .iter()
+                .map(|endpoint| endpoint.endpoint_id.clone())
+                .collect::<BTreeSet<_>>(),
+            endpoints
+                .iter()
+                .map(|endpoint| endpoint.tag.clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+    if !node_exists {
+        return Err(ApiError::not_found(format!(
+            "node not found: {}",
+            request.node_id
+        )));
+    }
+    let expected_endpoint_ids = request
+        .expected_endpoint_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if actual_endpoint_ids != expected_endpoint_ids
+        || (!request.delete_endpoints && !actual_endpoint_ids.is_empty())
+    {
+        return Err(ApiError::conflict(
+            crate::domain::DomainError::NodeEndpointSetChanged {
+                node_id: request.node_id.clone(),
+            }
+            .to_string(),
+        ));
+    }
+
+    let guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
+    state
+        .raft
+        .ensure_linearizable()
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let metrics = raft_metrics(&state);
+    if !is_leader(&metrics) {
+        return Err(ApiError::invalid_request("not leader"));
+    }
+    if metrics
+        .membership_config
+        .membership()
+        .get_node(&raft_node_id)
+        .is_some()
+    {
+        return Err(ApiError::conflict(
+            "absent-node prune requires the target to be absent from Raft membership",
+        ));
+    }
+    if state
+        .store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .is_some()
+    {
+        return Err(ApiError::conflict(
+            "another membership lifecycle operation is active",
+        ));
+    }
+
+    let operation = crate::state::MembershipOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        kind: crate::state::MembershipOperationKind::RemoveNode,
+        raft_node_id,
+        node_id: Some(request.node_id.clone()),
+        expected_membership: crate::raft_membership_guard::membership_revision(&metrics)
+            .map_err(|error| ApiError::internal(error.to_string()))?,
+        phase: crate::state::MembershipOperationPhase::Prepared,
+        legacy: false,
+        delete_endpoints: request.delete_endpoints,
+        expected_endpoint_ids: request.expected_endpoint_ids.clone(),
+        expected_endpoint_tags: actual_endpoint_tags,
+        created_at: Utc::now().to_rfc3339(),
+        next_retry_at: None,
+        terminal_at: None,
+        evidence: Some("authorized prune of node absent after single-node recovery".to_string()),
+    };
+    let _ = raft_write(
+        &state,
+        crate::state::DesiredStateCommand::BeginMembershipOperation {
+            operation: Box::new(operation.clone()),
+            node: None,
+            join_session: None,
+        },
+    )
+    .await?;
+    drop(guard);
+
+    for _ in 0..3 {
+        crate::raft_membership_guard::resume_membership_operations_once(
+            state.raft.clone(),
+            state.store.clone(),
+        )
+        .await
+        .map_err(|error| ApiError::internal(format!("absent-node prune resume failed: {error}")))?;
+    }
+    let cleanup = membership_removal_cleanup(&state);
+    let _ = crate::raft_membership_guard::finalize_remove_node_cleanup_once(
+        state.raft.clone(),
+        state.store.clone(),
+        &cleanup,
+    )
+    .await;
+    let phase = state
+        .store
+        .lock()
+        .await
+        .state()
+        .membership_operations
+        .get(&operation.operation_id)
+        .map(|operation| operation.phase.clone())
+        .unwrap_or(crate::state::MembershipOperationPhase::Prepared);
+    Ok(Json(serde_json::json!({
+        "ok": phase == crate::state::MembershipOperationPhase::Completed,
+        "operation_id": operation.operation_id,
+        "phase": phase,
     })))
 }
