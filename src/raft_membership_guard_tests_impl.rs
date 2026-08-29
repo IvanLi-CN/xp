@@ -294,9 +294,29 @@ async fn remove_node_operation_blocks_when_its_target_becomes_leader() {
         },
     );
 
-    resume_membership_operations_once(raft.clone(), store.clone())
-        .await
-        .unwrap();
+    let resumed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            resume_membership_operations_once(raft.clone(), store.clone())
+                .await
+                .unwrap();
+            let blocked = store
+                .lock()
+                .await
+                .state()
+                .membership_operations
+                .get("remove-node")
+                .is_some_and(|operation| operation.phase == MembershipOperationPhase::Blocked);
+            if blocked {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        resumed.is_ok(),
+        "operation did not acquire the membership gate"
+    );
 
     let store = store.lock().await;
     let operation = store
