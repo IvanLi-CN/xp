@@ -64,30 +64,28 @@ fn reverse_assignment_generation_floor_rejects_reuse_after_delete() {
 fn reverse_assignment_replay_of_deleted_same_generation_is_a_noop() {
     let mut state = PersistedState::empty();
     state.reverse_mesh_epoch = 7;
-    for (node_id, node_name, api_base_url) in [
-        (
-            xp_test_fixtures::primary_node_id(),
-            xp_test_fixtures::primary_node_name(),
-            xp_test_fixtures::primary_api_url(),
-        ),
-        (
-            xp_test_fixtures::secondary_node_id(),
-            xp_test_fixtures::secondary_node_name(),
-            xp_test_fixtures::secondary_api_url(),
-        ),
-    ] {
-        state.nodes.insert(
-            node_id.to_owned(),
-            Node {
-                node_id: node_id.to_owned(),
-                node_name: node_name.to_owned(),
-                access_host: xp_test_fixtures::loopback_address().to_owned(),
-                api_base_url: api_base_url.to_owned(),
-                quota_limit_bytes: 0,
-                quota_reset: NodeQuotaReset::default(),
-            },
-        );
-    }
+    state.nodes.insert(
+        xp_test_fixtures::primary_node_id().to_owned(),
+        Node {
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            access_host: xp_test_fixtures::loopback_address().to_owned(),
+            api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    );
+    state.nodes.insert(
+        xp_test_fixtures::secondary_node_id().to_owned(),
+        Node {
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            access_host: xp_test_fixtures::loopback_address().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    );
     let assignment = ReverseMeshAssignment {
         target_node_id: xp_test_fixtures::primary_node_id().to_owned(),
         generation: 4,
