@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn reverse_assignment_generation_cas_allows_a_fresh_learner() {
+    let result =
+        crate::state::reverse_assignment::generation_cas_is_stale_replay(None, &Some(51), 51, 0)
+            .expect("fresh learner should accept ordered history");
+    assert!(!result);
+}
+
+#[test]
 fn reverse_assignment_generation_floor_rejects_reuse_after_delete() {
     let mut state = PersistedState::empty();
     state.reverse_mesh_epoch = 7;

@@ -10,6 +10,9 @@ pub(super) fn generation_cas_is_stale_replay(
     if !mismatch {
         return Ok(false);
     }
+    if current_generation.is_none() && generation_floor == 0 {
+        return Ok(false);
+    }
     let stale_replay = expected_generation == &Some(assignment_generation)
         && current_generation.is_none()
         && generation_floor == assignment_generation;
