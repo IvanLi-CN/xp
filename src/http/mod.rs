@@ -1067,6 +1067,10 @@ pub fn build_router_with_mesh_telemetry(
             post(membership_restore::admin_internal_restore_node),
         )
         .route(
+            "/_internal/raft/prune-absent-node",
+            post(membership_restore::admin_internal_prune_absent_node),
+        )
+        .route(
             "/_internal/users/quota-summaries",
             get(admin_internal_list_user_quota_summaries),
         )

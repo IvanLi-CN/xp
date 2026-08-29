@@ -223,23 +223,24 @@ pub async fn require_clean_membership_for_remove_node(
 ) -> anyhow::Result<()> {
     require_clean_membership_for_write(raft, store).await
 }
-
-/// A restore owns the one DesiredState node that is intentionally absent while it is being
-/// returned through learner and voter phases. It may not mask any other broken mapping.
 pub async fn require_clean_membership_for_restore_node(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     raft_node_id: NodeId,
+    allowed_missing: &BTreeSet<NodeId>,
 ) -> anyhow::Result<()> {
     raft.ensure_linearizable().await?;
     let mut audit = audit_membership(raft, store).await;
     audit.missing_desired_members.remove(&raft_node_id);
-    if audit.is_clean() {
-        return Ok(());
+    if audit.missing_desired_members != *allowed_missing {
+        anyhow::bail!("membership_invariant_violation: restore allowlist mismatch");
     }
-    Err(membership_invariant_error(&audit))
+    audit.missing_desired_members.clear();
+    audit
+        .is_clean()
+        .then_some(())
+        .ok_or_else(|| membership_invariant_error(&audit))
 }
-
 fn membership_invariant_error(audit: &MembershipAudit) -> anyhow::Error {
     anyhow::anyhow!(
         "membership_invariant_violation: orphan_voters={:?}, duplicate_desired_members={:?}, \
