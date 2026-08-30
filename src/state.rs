@@ -2699,10 +2699,10 @@ impl DesiredStateCommand {
                     .get(&assignment.target_node_id)
                     .copied()
                     .unwrap_or_default();
-                if reverse_assignment::generation_cas_is_stale_replay(
-                    current.map(|item| item.generation),
+                if reverse_assignment::generation_cas_is_stale_replay_with_assignment(
+                    current,
                     expected_generation,
-                    assignment.generation,
+                    assignment,
                     generation_floor,
                 )? {
                     return Ok(DesiredStateApplyResult::Applied);
