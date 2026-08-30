@@ -88,7 +88,7 @@ mod tests {
             serde_json::json!({
                 "account_id": "account",
                 "zone_id": "zone",
-                "hostname": "node.example.test",
+                "hostname": xp_test_fixtures::host_fixture553(),
                 "tunnel_id": "tunnel-id",
             })
             .to_string(),
@@ -108,14 +108,14 @@ mod tests {
             &paths,
             "account",
             "zone",
-            "node.example.test",
+            xp_test_fixtures::host_fixture553(),
             &tunnel,
         ));
         assert!(!persisted_tunnel_matches_deploy_request(
             &paths,
             "account",
             "other-zone",
-            "node.example.test",
+            xp_test_fixtures::host_fixture553(),
             &tunnel,
         ));
         assert!(!persisted_tunnel_matches_deploy_request(

@@ -19,7 +19,7 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
         serde_json::json!({
             "account_id": "account",
             "zone_id": "zone",
-            "hostname": "node.example.test",
+            "hostname": xp_test_fixtures::host_fixture553(),
             "tunnel_id": "existing",
         })
         .to_string(),
@@ -64,8 +64,8 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
 
     let args = DeployArgs {
         xp_bin: Some(xp_bin),
-        node_name: "node".to_string(),
-        access_host: "node-ep.example.test".to_string(),
+        node_name: xp_test_fixtures::label_node1_variant2().to_owned(),
+        access_host: xp_test_fixtures::host_fixture552().to_owned(),
         cloudflare_toggle: crate::ops::cli::CloudflareToggle {
             cloudflare: true,
             no_cloudflare: false,
@@ -77,7 +77,7 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
         ip_geo_enabled: false,
         account_id: Some("account".to_string()),
         zone_id: Some("zone".to_string()),
-        hostname: Some("node.example.test".to_string()),
+        hostname: Some(xp_test_fixtures::host_fixture553().to_owned()),
         tunnel_name: Some("xp-node".to_string()),
         origin_url: Some("http://127.0.0.1:62416".to_string()),
         migrate_existing_tunnel: false,
@@ -93,7 +93,7 @@ async fn build_plan_reuses_matching_persisted_tunnel_without_conflict() {
         cloudflare_token: Some("token".to_string()),
         cloudflare_token_stdin: false,
         cloudflare_token_stdin_value: None,
-        api_base_url: None,
+        api_base_url: xp_test_fixtures::none(),
         xray_version: "latest".to_string(),
         enable_services_toggle: crate::ops::cli::EnableServicesToggle {
             enable_services: false,
