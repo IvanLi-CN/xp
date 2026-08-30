@@ -36,6 +36,9 @@
 - 新建 remote-config Tunnel 的首次配置 GET 若返回精确 Cloudflare `1055`，表示尚未存在远端
   配置；必须将其视为空配置并继续写入 XP 所有的 ingress。既有 Tunnel 的相同响应或其他错误
   必须保持终态失败并走补偿回滚。
+- 当同名远端 Tunnel 与持久化的 XP account、zone、hostname、Tunnel ID 及本地凭据中的
+  `TunnelID` 全部匹配时，非交互 deploy 必须直接复用该 Tunnel；不得将其当作名称冲突而生成
+  随机 Tunnel 名称。
 - 本地配置存在 `ingress` 时，修改前必须运行 `cloudflared tunnel ingress validate`；没有本地
   `ingress` 的远程 Tunnel 配置不得运行这个不适用的校验。本地文件原子替换且服务启动/健康检查
   失败时恢复原始文件和服务状态。

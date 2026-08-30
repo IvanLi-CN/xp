@@ -54,6 +54,11 @@ remote-config Tunnel because it has no configuration yet. `xp-ops` treats that e
 response as an empty remote configuration, then writes the owned ingress. A read error for an
 existing Tunnel, or any other error, remains terminal and follows the normal rollback path.
 
+When a rerun finds a same-named Tunnel that matches the persisted XP account, zone, hostname,
+Tunnel ID, and local credentials whose `TunnelID` matches, `xp-ops deploy --non-interactive -y`
+reuses it directly. It does not generate a suffixed Tunnel name for that verified local deployment
+state.
+
 ### Moving an existing XP Tunnel
 
 Changing the persisted Tunnel ID automatically migrates the persisted XP hostname after confirming

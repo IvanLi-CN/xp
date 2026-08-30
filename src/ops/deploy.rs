@@ -20,6 +20,8 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod input_validation;
+
 const DEFAULT_ORIGIN_URL: &str = "http://127.0.0.1:62416";
 const DEFAULT_VLESS_CANARY_ACME_DIRECTORY_URL: &str =
     "https://acme-v02.api.letsencrypt.org/directory";
@@ -756,7 +758,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             format!("https://{hostname}")
         };
         if !api_base_url.is_empty()
-            && let Err(e) = validate_https_origin_no_port(&api_base_url)
+            && let Err(e) = input_validation::validate_https_origin_no_port(&api_base_url)
         {
             errors.push(e.message);
         }
@@ -789,6 +791,15 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
         } else {
             None
         };
+        let zone_id_value = zone_id.clone().unwrap_or_default();
+        let (tunnel_conflict, tunnel_override) =
+            cloudflare::tunnel_config::classify_tunnel_for_deploy(
+                paths,
+                &account_id,
+                &zone_id_value,
+                &hostname,
+                tunnel_conflict,
+            );
         if let Some(tunnel) = tunnel_conflict.as_ref() {
             warnings.push(format!(
                 "tunnel name already exists: {} ({})",
@@ -796,7 +807,6 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             ));
         }
 
-        let zone_id_value = zone_id.clone().unwrap_or_default();
         let dns_conflict = if let (Some(token), true) = (
             token.as_ref(),
             !hostname.is_empty() && !zone_id_value.is_empty(),
@@ -831,7 +841,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             origin_url,
             origin_url_source: origin_source,
             tunnel_conflict,
-            tunnel_override: None,
+            tunnel_override,
             dns_conflict,
             dns_override: None,
         });
@@ -845,7 +855,7 @@ async fn build_plan(paths: &Paths, args: &DeployArgs) -> Result<DeployPlan, Exit
             }
         };
         if !base.is_empty()
-            && let Err(e) = validate_https_origin_no_port(&base)
+            && let Err(e) = input_validation::validate_https_origin_no_port(&base)
         {
             errors.push(e.message);
         }
@@ -1744,7 +1754,7 @@ fn public_api_probe_status_is_healthy(status: reqwest::StatusCode) -> bool {
 async fn wait_for_post_join_public_api_health(
     api_base_url: &str,
 ) -> Result<reqwest::StatusCode, ExitError> {
-    validate_https_origin_no_port(api_base_url)?;
+    input_validation::validate_https_origin_no_port(api_base_url)?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(5))
@@ -2394,23 +2404,7 @@ fn generate_admin_token() -> String {
     hex::encode(buf)
 }
 
-fn validate_https_origin_no_port(origin: &str) -> Result<(), ExitError> {
-    let url =
-        reqwest::Url::parse(origin).map_err(|_| ExitError::new(2, "invalid_args: invalid url"))?;
-    if url.scheme() != "https" {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: api-base-url must be https",
-        ));
-    }
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
-        return Err(ExitError::new(
-            2,
-            "invalid_args: api-base-url must be an origin (no path/query)",
-        ));
-    }
-    Ok(())
-}
-
+#[cfg(test)]
+mod persisted_tunnel_reuse_tests;
 #[cfg(test)]
 mod tests;
