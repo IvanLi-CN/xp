@@ -2,6 +2,10 @@
 
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`，关键演进原因见 `./HISTORY.md`。
 
+## Related ADRs
+
+- None
+
 ## 背景 / 问题陈述
 
 - 已打开的 PWA 标签页可能在服务端升级后继续运行旧 Web bundle；框架级异常目前退化为未设计的通用错误输出。
@@ -47,6 +51,8 @@
 - 默认恢复操作必须为受控刷新；仅在资源/缓存不一致或重复失败时提供静态应用缓存清理。
 - 静态缓存清理不得删除 token、UI 偏好或 IndexedDB 查询缓存。
 - 每次 Web 构建的入口 HTML、JS chunks、CSS、字体、图标和 manifest 必须属于同一 precache 版本。
+- 受控公开导航发现当前 active build 的 precache 不完整时，Service Worker 必须先在线下载、验证同一 build 的完整
+  recovery cache，再从该 cache 响应导航；重建失败不得删除现有 cache 或从其他 build 借用静态资源。
 - 新 Service Worker 必须在完整安装后进入 waiting；incumbent 仍控制客户端时仅在用户确认后请求激活。
   零受控客户端时允许浏览器按原生生命周期自动激活，下一次访问直接使用完整新构建。
   唯一例外是 legacy Workbox 迁移：当同 scope 的精确 `workbox-precache-v2-<scope>` 仍存在，
@@ -76,6 +82,8 @@
   再导航到 replacement build。旧页面及其 ownership 保留到导航提交、旧 client 从
   `clients.matchAll()` 消失；此后才原子替换不再被其他客户端持有的 XP app-shell cache。
   无新版 worker 且无法完整重建当前 build 时不得删除可用缓存，只提供普通 reload 与稍后重试。
+- 当前 active build 的受控公开导航若在 app 启动前发现 precache 不完整，Worker 使用完整验证过的同 build staged
+  recovery cache 继续导航；成功路径不得向用户暴露 raw cache-miss 响应，失败不得删除原 cache。
 - Service Worker 注册完成后立即检查新构建，再按配置周期继续检查；正常状态展示可关闭的更新提示，
   用户确认后才切换。
 - legacy Workbox 控制的已打开页面不能响应 XP ownership 声明时，完整新 Worker 后台激活但保持
@@ -142,6 +150,9 @@
 - Given 另一标签页仍持有请求清理的 build，When 当前标签页执行 cache recovery，Then
   旧 precache 保留供该 owner 使用，当前标签页切到 active build，其他站点数据不变。
 - Given 新构建下载中断，When 页面重新访问，Then 当前完整旧构建仍能启动。
+- Given 当前 active build 的 `__xp_build_metadata__` 或任一 precache entry 缺失，When 受控浏览器在线重新
+  访问公开入口，Then Worker 完整重建同一 build 后到达 Admin login，不显示 “The selected application build
+  is incomplete.”，且不使用另一 build 的静态资源。
 - Given legacy Workbox Worker 控制旧页面、完整 XP Worker 已 waiting 且存在无 owner 的中间 XP app-shell，When
   后续完整 XP Worker 在最多 1 秒声明探测后仍找不到有效 XP owner，Then 它后台激活但不发生
   `controllerchange`、`clients.claim()` 或自动刷新；旧页面手动刷新或新开页面后获得单一当前 build。

@@ -51,6 +51,11 @@ type BuildMetadata = {
 	entries: Array<{ url: string; revision: string | null }>;
 };
 
+type CompleteBuildCache = {
+	cacheName: string;
+	manifest: Set<string>;
+};
+
 const BUILD_ID = __XP_WEB_BUILD_ID__;
 const CACHE_NAME = appShellCacheName(BUILD_ID);
 let shouldClaimClients = false;
@@ -411,7 +416,7 @@ async function inspectLiveClientOwnership(
 		let cacheAvailable = ownerAvailability.get(buildId);
 		if (cacheAvailable === undefined) {
 			const manifestResult = await resolveBeforeDeadline(
-				readBuildManifest(appShellCacheName(buildId), buildId),
+				readCompleteBuildCache(buildId),
 				deadlineAtMs,
 			);
 			if (!manifestResult.completed) {
@@ -569,6 +574,31 @@ async function readBuildManifest(
 	return urls;
 }
 
+async function readCompleteBuildCache(
+	buildId: string,
+): Promise<CompleteBuildCache | null> {
+	const canonicalCacheName = appShellCacheName(buildId);
+	const canonicalManifest = await readBuildManifest(
+		canonicalCacheName,
+		buildId,
+	);
+	if (canonicalManifest) {
+		return { cacheName: canonicalCacheName, manifest: canonicalManifest };
+	}
+	if (buildId !== BUILD_ID) return null;
+
+	const recoveryPrefix = `${CACHE_NAME}-recovery-`;
+	const recoveryCacheNames = (await caches.keys())
+		.filter((cacheName) => cacheName.startsWith(recoveryPrefix))
+		.sort()
+		.reverse();
+	for (const cacheName of recoveryCacheNames) {
+		const manifest = await readBuildManifest(cacheName, BUILD_ID);
+		if (manifest) return { cacheName, manifest };
+	}
+	return null;
+}
+
 async function cacheContainsManifest(cacheName: string): Promise<boolean> {
 	return (await readBuildManifest(cacheName, BUILD_ID)) !== null;
 }
@@ -647,23 +677,25 @@ async function replaceCacheFromStaging(
 }
 
 async function completeBuildCache(): Promise<boolean> {
-	if (await cacheContainsManifest(CACHE_NAME)) return true;
+	return runCacheMutation(async () => {
+		if (await readCompleteBuildCache(BUILD_ID)) return true;
 
-	const recoveryName = `${CACHE_NAME}-recovery-${Date.now()}`;
-	const recovery = await caches.open(recoveryName);
-	try {
-		for (const entry of normalizedManifestEntries) {
-			await recovery.put(entry.url, await fetchManifestEntry(entry));
-		}
-		await writeBuildMetadata(recovery, BUILD_ID);
-		if (!(await replaceCacheFromStaging(recoveryName, CACHE_NAME)))
+		const recoveryName = `${CACHE_NAME}-recovery-${Date.now()}`;
+		const recovery = await caches.open(recoveryName);
+		try {
+			for (const entry of normalizedManifestEntries) {
+				await recovery.put(entry.url, await fetchManifestEntry(entry));
+			}
+			await writeBuildMetadata(recovery, BUILD_ID);
+			if (!(await readBuildManifest(recoveryName, BUILD_ID))) {
+				throw new Error("recovery precache is incomplete");
+			}
+			return true;
+		} catch {
+			await caches.delete(recoveryName);
 			return false;
-		await caches.delete(recoveryName);
-		return true;
-	} catch {
-		await caches.delete(recoveryName);
-		return false;
-	}
+		}
+	});
 }
 
 async function installBuild(): Promise<void> {
@@ -712,8 +744,7 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	const owners = await readOwners();
 	const hintedBuild = requestUrl.searchParams.get("xp-build");
 	const availableHintedBuild =
-		hintedBuild &&
-		(await readBuildManifest(appShellCacheName(hintedBuild), hintedBuild))
+		hintedBuild && (await readCompleteBuildCache(hintedBuild))
 			? hintedBuild
 			: null;
 	const selectedClientBuild = requestClientId
@@ -739,11 +770,15 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 			headers: { "Content-Type": "text/plain" },
 		});
 	}
-	const selectedManifest = await readBuildManifest(
-		appShellCacheName(buildId),
-		buildId,
-	);
-	if (!selectedManifest) {
+	let selectedBuildCache = await readCompleteBuildCache(buildId);
+	if (
+		!selectedBuildCache &&
+		buildId === BUILD_ID &&
+		(await completeBuildCache())
+	) {
+		selectedBuildCache = await readCompleteBuildCache(BUILD_ID);
+	}
+	if (!selectedBuildCache) {
 		await respondToClient(event.clientId || null, {
 			type: "XP_CACHE_MISS",
 			buildId,
@@ -754,7 +789,10 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 			headers: { "Content-Type": "text/plain" },
 		});
 	}
-	if (requestKind === "asset" && !selectedManifest.has(assetUrl.href)) {
+	if (
+		requestKind === "asset" &&
+		!selectedBuildCache.manifest.has(assetUrl.href)
+	) {
 		await respondToClient(event.clientId || null, {
 			type: "XP_CACHE_MISS",
 			buildId,
@@ -765,7 +803,7 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 			headers: { "Content-Type": "text/plain" },
 		});
 	}
-	const cache = await caches.open(appShellCacheName(buildId));
+	const cache = await caches.open(selectedBuildCache.cacheName);
 	const response = await cache.match(responseUrl, { ignoreSearch: true });
 	if (response) return response;
 
@@ -843,10 +881,7 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 			if (message?.type === "XP_DECLARE_BUILD" && clientId) {
 				const ownersBeforeDeclaration = await readOwners();
 				const cacheAvailable =
-					(await readBuildManifest(
-						appShellCacheName(message.buildId),
-						message.buildId,
-					)) !== null;
+					(await readCompleteBuildCache(message.buildId)) !== null;
 				if (!cacheAvailable) {
 					await respondToClient(clientId, {
 						type: "XP_CACHE_MISS",
