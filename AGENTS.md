@@ -162,8 +162,9 @@
   A freshly created remote-config Tunnel may return Cloudflare `1055` before any configuration
   exists; XP treats that exact response as an empty remote configuration and writes the owned
   ingress. Other configuration failures remain terminal.
-  A matching persisted XP Tunnel is reused by non-interactive deploy; it is not treated as a name
-  collision that can generate a suffixed Tunnel name.
+  A matching persisted XP Tunnel with a credentials payload naming that Tunnel ID is reused by
+  non-interactive deploy; it is not treated as a name collision that can generate a suffixed
+  Tunnel name.
   A legacy Tunnel with additional hostnames is rejected before writes because one cloudflared
   process cannot keep both Tunnel connectors alive.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.

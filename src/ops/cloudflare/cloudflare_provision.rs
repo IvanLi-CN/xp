@@ -774,32 +774,19 @@ fn verify_tunnel_credentials(
     let path = paths
         .etc_cloudflared_dir()
         .join(format!("{tunnel_id}.json"));
-    let raw = fs::read(&path).map_err(|error| {
-        ExitError::new(
-            6,
-            format!("{error_prefix}: credentials {}: {error}", path.display()),
-        )
-    })?;
-    let credentials: serde_json::Value = serde_json::from_slice(&raw).map_err(|error| {
-        ExitError::new(
-            6,
-            format!("{error_prefix}: credentials {}: {error}", path.display()),
-        )
-    })?;
-    if credentials
-        .get("TunnelID")
-        .and_then(serde_json::Value::as_str)
-        == Some(tunnel_id)
-    {
-        Ok(())
-    } else {
-        Err(ExitError::new(
+    match tunnel_config::credentials_belong_to_tunnel(paths, tunnel_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ExitError::new(
             6,
             format!(
                 "{error_prefix}: credentials {} do not belong to Tunnel {tunnel_id}",
                 path.display()
             ),
-        ))
+        )),
+        Err(error) => Err(ExitError::new(
+            6,
+            format!("{error_prefix}: credentials {}: {error}", path.display()),
+        )),
     }
 }
 

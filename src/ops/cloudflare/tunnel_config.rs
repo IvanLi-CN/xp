@@ -28,6 +28,18 @@ pub(crate) fn classify_tunnel_for_deploy(
     }
 }
 
+pub(crate) fn credentials_belong_to_tunnel(paths: &Paths, tunnel_id: &str) -> anyhow::Result<bool> {
+    let path = paths
+        .etc_cloudflared_dir()
+        .join(format!("{tunnel_id}.json"));
+    let raw = fs::read(path)?;
+    let credentials: serde_json::Value = serde_json::from_slice(&raw)?;
+    Ok(credentials
+        .get("TunnelID")
+        .and_then(serde_json::Value::as_str)
+        == Some(tunnel_id))
+}
+
 fn persisted_tunnel_matches_deploy_request(
     paths: &Paths,
     account_id: &str,
@@ -45,10 +57,7 @@ fn persisted_tunnel_matches_deploy_request(
         && settings.zone_id == zone_id
         && settings.hostname == hostname
         && settings.tunnel_id.as_deref() == Some(tunnel.id.as_str())
-        && paths
-            .etc_cloudflared_dir()
-            .join(format!("{}.json", tunnel.id))
-            .is_file()
+        && credentials_belong_to_tunnel(paths, &tunnel.id).unwrap_or(false)
 }
 
 pub(super) async fn get_tunnel_config_after_create(
@@ -123,6 +132,32 @@ mod tests {
             "account",
             "zone",
             "other.example.test",
+            &tunnel,
+        ));
+
+        fs::write(
+            paths.etc_cloudflared_dir().join("tunnel-id.json"),
+            r#"{"TunnelID":"other-tunnel"}"#,
+        )
+        .unwrap();
+        assert!(!persisted_tunnel_matches_deploy_request(
+            &paths,
+            "account",
+            "zone",
+            xp_test_fixtures::host_fixture553(),
+            &tunnel,
+        ));
+
+        fs::write(
+            paths.etc_cloudflared_dir().join("tunnel-id.json"),
+            "not-json",
+        )
+        .unwrap();
+        assert!(!persisted_tunnel_matches_deploy_request(
+            &paths,
+            "account",
+            "zone",
+            xp_test_fixtures::host_fixture553(),
             &tunnel,
         ));
     }
