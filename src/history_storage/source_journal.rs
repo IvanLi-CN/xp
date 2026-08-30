@@ -5,6 +5,8 @@ use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
 use super::*;
 
+const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
+
 pub(super) fn ensure_source_delivery_journal_columns(connection: &Connection) -> Result<()> {
     let mut statement = connection
         .prepare("PRAGMA table_info(source_delivery_journal)")
@@ -264,43 +266,47 @@ fn insert_journal_rows(
 }
 
 fn repair_source_delivery_journal_order(connection: &mut rusqlite::Connection) -> Result<()> {
-    let rows = {
-        let mut statement = connection
-            .prepare(
-                "SELECT id, wire FROM source_delivery_journal
-                 WHERE source_node_id = ''",
-            )
-            .map_err(sqlite_error)?;
-        statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })
-            .map_err(sqlite_error)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(sqlite_error)?
-    };
-    if rows.is_empty() {
-        return Ok(());
+    loop {
+        let rows = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, wire FROM source_delivery_journal
+                     WHERE source_node_id = ''
+                     ORDER BY id
+                     LIMIT ?1",
+                )
+                .map_err(sqlite_error)?;
+            statement
+                .query_map([SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?
+        };
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        for (id, wire) in rows {
+            let segment = SignedSegment::from_wire(&wire).map_err(|error| {
+                HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
+            })?;
+            let cursor = segment.canonical().first_cursor();
+            transaction
+                .execute(
+                    "UPDATE source_delivery_journal
+                     SET source_node_id = ?1, source_epoch = ?2, first_sequence = ?3
+                     WHERE id = ?4",
+                    params![
+                        cursor.source_node_id(),
+                        durable_i64(cursor.source_epoch(), "journal source epoch")?,
+                        durable_i64(cursor.sequence(), "journal first sequence")?,
+                        id,
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
     }
-    let transaction = connection.transaction().map_err(sqlite_error)?;
-    for (id, wire) in rows {
-        let segment = SignedSegment::from_wire(&wire).map_err(|error| {
-            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
-        })?;
-        let cursor = segment.canonical().first_cursor();
-        transaction
-            .execute(
-                "UPDATE source_delivery_journal
-                 SET source_node_id = ?1, source_epoch = ?2, first_sequence = ?3
-                 WHERE id = ?4",
-                params![
-                    cursor.source_node_id(),
-                    durable_i64(cursor.source_epoch(), "journal source epoch")?,
-                    durable_i64(cursor.sequence(), "journal first sequence")?,
-                    id,
-                ],
-            )
-            .map_err(sqlite_error)?;
-    }
-    transaction.commit().map_err(sqlite_error)
 }
