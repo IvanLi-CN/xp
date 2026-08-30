@@ -566,18 +566,20 @@ async fn remove_node_cleanup_stays_recoverable_until_runtime_and_history_cleanup
         reconcile: ReconcileHandle::from_sender(reconcile_tx),
     };
 
-    let mut finalized = false;
-    for _ in 0..100 {
-        if finalize_remove_node_cleanup_once(raft.clone(), store.clone(), &cleanup)
-            .await
-            .unwrap()
-        {
-            finalized = true;
-            break;
+    let finalized = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if finalize_remove_node_cleanup_once(raft.clone(), store.clone(), &cleanup)
+                .await
+                .unwrap()
+            {
+                return true;
+            }
+            // Cleanup deliberately yields when another lifecycle step owns the shared gate.
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        // Cleanup deliberately yields when another lifecycle step owns the shared gate.
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .expect("cleanup did not acquire the membership gate");
     assert!(finalized);
 
     assert_eq!(
