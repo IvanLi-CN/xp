@@ -5,7 +5,6 @@ use crate::ops::cloudflare_config::{
 };
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProvisionRuntime {
     ManagedService,
@@ -156,11 +155,16 @@ pub(super) async fn run(
         .transpose()
         .map_err(|e| ExitError::new(4, format!("migration_preflight_failed: {e}")))?;
 
+    let fresh_tunnel = created.is_some();
     let preflight: Result<_, ExitError> = async {
-        let remote_before = client
-            .get_tunnel_config(&args.account_id, &tunnel_id)
-            .await
-            .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
+        let remote_before = tunnel_config::get_tunnel_config_after_create(
+            &client,
+            &args.account_id,
+            &tunnel_id,
+            fresh_tunnel,
+        )
+        .await
+        .map_err(|e| ExitError::new(4, format!("cloudflare_api_error: {e}")))?;
         let remote_after =
             merge_remote_tunnel_config(&remote_before, &args.hostname, &args.origin_url)
                 .map_err(|e| ExitError::new(4, format!("cloudflare_config_error: {e}")))?;

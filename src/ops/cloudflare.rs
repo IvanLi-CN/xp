@@ -15,7 +15,7 @@ use std::path::Path;
 use std::process::Command;
 
 mod cloudflare_provision;
-
+pub(super) mod tunnel_config;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloudflareTokenSource {
     Flag,

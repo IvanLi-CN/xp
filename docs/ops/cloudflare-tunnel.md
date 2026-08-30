@@ -49,6 +49,11 @@ program. If a later write or restart fails, the command attempts reverse-order r
 ingress, DNS, local files, settings, credentials, and the service configuration. An incomplete
 rollback reports the retained local snapshot paths for manual recovery.
 
+Cloudflare can briefly return `1055: Configuration for tunnel not found` after XP creates a new
+remote-config Tunnel. `xp-ops` retries only that fresh-Tunnel configuration read for up to 30
+seconds. A read error for an existing Tunnel, or any other error, remains terminal and follows the
+normal rollback path.
+
 ### Moving an existing XP Tunnel
 
 Changing the persisted Tunnel ID automatically migrates the persisted XP hostname after confirming
