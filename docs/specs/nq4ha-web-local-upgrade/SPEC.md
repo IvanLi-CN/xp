@@ -66,6 +66,8 @@
 - 一次性 root 委托只能触发固定 upgrade runner，不能传入任意命令。
 - runner 必须读取 `XP_DATA_DIR` 下受限 request，调用现有 `xp-ops upgrade --version <target>`
   流程，并写 durable status。
+- OpenRC host-managed upgrade 只有在同一服务连续两次报告 started 后才可成功；首次 ready 后回到
+  stopping 必须按 restart failure 回滚，不能写入 succeeded。
 - UI 点击 Upgrade 必须先弹出确认框；确认后才调用 start API。
 - UI 必须在 running/restarting 时禁用重复启动，并轮询恢复状态。
 - UI 确认升级前必须建立同标签页观察记录，并将目标版本和绝对截止时间写入
