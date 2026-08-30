@@ -119,3 +119,4 @@
 | 集群长期历史数据仓库  | active    | bootstrap       | cluster-history-repositories | -          |
 | Reality Mesh 反向中继 | active    | in progress     | reality-mesh-reverse-relay   | -          |
 | 发布意图治理          | active    | in progress     | release-intent-governance    | -          |
+| 服务监控              | active    | 待实现          | uptime-monitoring            | -          |
