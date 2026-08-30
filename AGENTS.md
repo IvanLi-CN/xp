@@ -159,9 +159,9 @@
 - Cloudflare Tunnel provisioning preserves shared-Tunnel configuration outside the XP hostname.
   It reuses the existing single `cloudflared` process and validates before an atomic replacement.
   Moving an XP hostname automatically runs ownership preflight and rollback.
-  A freshly created remote-config Tunnel may return Cloudflare `1055` before its configuration is
-  readable; XP retries that exact transient read for a bounded 30 seconds before compensating the
-  newly created Tunnel. Other configuration failures remain terminal.
+  A freshly created remote-config Tunnel may return Cloudflare `1055` before any configuration
+  exists; XP treats that exact response as an empty remote configuration and writes the owned
+  ingress. Other configuration failures remain terminal.
   A legacy Tunnel with additional hostnames is rejected before writes because one cloudflared
   process cannot keep both Tunnel connectors alive.
 - If an environment is only partially supported or blocked by current implementation limits, the limitation must be stated concretely in specs and ops docs together with the required operator intervention.

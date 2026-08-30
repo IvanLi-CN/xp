@@ -274,7 +274,7 @@ async fn fresh_tunnel_dry_run_does_not_call_cloudflare() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
-async fn fresh_tunnel_retries_when_remote_config_is_not_ready() {
+async fn fresh_tunnel_initializes_empty_remote_config_after_1055() {
     let server = MockServer::start().await;
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
@@ -302,7 +302,6 @@ async fn fresh_tunnel_retries_when_remote_config_is_not_ready() {
         .expect(1)
         .mount(&server)
         .await;
-    mount_existing_target_config(&server).await;
     Mock::given(method("GET"))
         .and(path("/client/v4/zones/zone/dns_records"))
         .respond_with(ResponseTemplate::new(200).set_body_json(response(serde_json::json!([]))))
@@ -360,7 +359,7 @@ async fn fresh_tunnel_retries_when_remote_config_is_not_ready() {
                 && request.url.path() == "/client/v4/accounts/account/cfd_tunnel/new/configurations"
         })
         .count();
-    assert_eq!(config_reads, 2);
+    assert_eq!(config_reads, 1);
 }
 
 #[tokio::test]
