@@ -15,13 +15,13 @@
 - host-managed 服务在配置变化后重启并检查既有 `cloudflared` 服务；失败时恢复原 enable/running
   状态及受影响文件的内容、权限和属主，不会创建第二个常驻进程。
 - 新 Tunnel 的后续远端配置或 DNS 预检失败会立即删除刚创建的 Tunnel，避免留下未受管资源。
-- 新建 remote-config Tunnel 的首次配置 GET 对精确 Cloudflare `1055` 使用最多 10 次、总计不超过
-  30 秒的重试；既有 Tunnel 和其他 API 错误不进入该重试路径。
+- 新建 remote-config Tunnel 的首次配置 GET 对精确 Cloudflare `1055` 合成空配置，再沿用正常
+  的远端 ingress 合并与写入路径；既有 Tunnel 和其他 API 错误不进入该恢复路径。
 
 ## Validation
 
 - Rust 单元与 API smoke 测试覆盖本地无损编辑、远端规则合并、catch-all 歧义拒绝和
-  Tunnel/DNS 预检，以及新建 Tunnel 配置的 `1055` 就绪重试；事务失败路径保留本地/远端快照并
+  Tunnel/DNS 预检，以及新建 Tunnel 配置的 `1055` 空配置初始化；事务失败路径保留本地/远端快照并
   逆序补偿。
 - `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test` 与
   `bun run check:style-budget`。
