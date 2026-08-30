@@ -96,21 +96,22 @@ impl RepositoryReplicaRuntime {
         storage_degraded: bool,
         filesystem_available_bytes: u64,
     ) -> Result<SourceDeliveryStatus, RepositoryRuntimeError> {
-        let rows = if self.storage.is_sqlite() {
+        let summary = if self.storage.is_sqlite() {
             self.storage
-                .source_delivery_journal()
+                .source_delivery_journal_summary()
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         } else {
-            Vec::new()
+            crate::state::history_storage::SourceDeliveryJournalSummary {
+                pending_segments: 0,
+                pending_bytes: 0,
+                oldest: None,
+            }
         };
-        let pending_bytes = rows
-            .iter()
-            .map(|row| u64::try_from(row.wire.len()).unwrap_or(u64::MAX))
-            .sum();
-        let oldest_pending_age_seconds = rows
-            .first()
+        let oldest_pending_age_seconds = summary
+            .oldest
+            .as_ref()
             .map(|row| now_unix_seconds.saturating_sub(row.closed_at_unix_seconds));
-        let oldest_pending_cursor = rows.first().and_then(|row| {
+        let oldest_pending_cursor = summary.oldest.as_ref().and_then(|row| {
             SignedSegment::from_wire(&row.wire).ok().map(|segment| {
                 let cursor = segment.canonical().first_cursor();
                 format!(
@@ -126,15 +127,15 @@ impl RepositoryReplicaRuntime {
             "journal_unavailable"
         } else if filesystem_available_bytes < 256 * 1024 * 1024 {
             "source_storage_guard"
-        } else if rows.is_empty() {
+        } else if summary.pending_segments == 0 {
             "idle"
         } else {
             "backlogged"
         };
         Ok(SourceDeliveryStatus {
             state: state.to_owned(),
-            pending_segments: rows.len(),
-            pending_bytes,
+            pending_segments: summary.pending_segments,
+            pending_bytes: summary.pending_bytes,
             oldest_pending_cursor,
             oldest_pending_age_seconds,
             last_acknowledged_at: None,

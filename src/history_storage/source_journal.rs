@@ -48,6 +48,13 @@ pub(crate) struct SourceDeliveryJournalRow {
     pub(crate) wire: Vec<u8>,
 }
 
+#[derive(Debug)]
+pub(crate) struct SourceDeliveryJournalSummary {
+    pub(crate) pending_segments: usize,
+    pub(crate) pending_bytes: u64,
+    pub(crate) oldest: Option<SourceDeliveryJournalRow>,
+}
+
 impl HistoryStorage {
     pub(crate) fn append_source_delivery_journal_and_control(
         &self,
@@ -86,8 +93,46 @@ impl HistoryStorage {
         maintain_sqlite(connection)
     }
 
+    #[cfg(test)]
     pub(crate) fn source_delivery_journal(&self) -> Result<Vec<SourceDeliveryJournalRow>> {
         self.source_delivery_journal_page(usize::MAX)
+    }
+
+    pub(crate) fn source_delivery_journal_summary(&self) -> Result<SourceDeliveryJournalSummary> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(SourceDeliveryJournalSummary {
+                pending_segments: 0,
+                pending_bytes: 0,
+                oldest: None,
+            });
+        };
+        repair_source_delivery_journal_order(connection)?;
+        let (pending_segments, pending_bytes) = connection
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(length(wire)), 0)
+                 FROM source_delivery_journal",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .map_err(sqlite_error)?;
+        let oldest = connection
+            .query_row(
+                "SELECT id, stream, closed_at, identity, wire
+                 FROM source_delivery_journal
+                 ORDER BY (stream = 'tombstone') DESC, source_node_id, source_epoch,
+                          stream, first_sequence, created_at, id
+                 LIMIT 1",
+                [],
+                source_delivery_journal_row,
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        Ok(SourceDeliveryJournalSummary {
+            pending_segments: usize::try_from(pending_segments).unwrap_or(usize::MAX),
+            pending_bytes: u64::try_from(pending_bytes).unwrap_or(u64::MAX),
+            oldest,
+        })
     }
 
     pub(crate) fn source_delivery_journal_page(
@@ -109,24 +154,10 @@ impl HistoryStorage {
             )
             .map_err(sqlite_error)?;
         let rows = statement
-            .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                let identity_bytes: Vec<u8> = row.get(3)?;
-                let identity = serde_json::from_slice(&identity_bytes).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        3,
-                        rusqlite::types::Type::Blob,
-                        Box::new(error),
-                    )
-                })?;
-                Ok(SourceDeliveryJournalRow {
-                    id: row.get(0)?,
-                    stream: row.get(1)?,
-                    closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(2)?)
-                        .unwrap_or(u64::MAX),
-                    identity,
-                    wire: row.get(4)?,
-                })
-            })
+            .query_map(
+                [i64::try_from(limit).unwrap_or(i64::MAX)],
+                source_delivery_journal_row,
+            )
             .map_err(sqlite_error)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(sqlite_error)
@@ -172,6 +203,22 @@ impl HistoryStorage {
         transaction.commit().map_err(sqlite_error)?;
         maintain_sqlite(connection)
     }
+}
+
+fn source_delivery_journal_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SourceDeliveryJournalRow> {
+    let identity_bytes: Vec<u8> = row.get(3)?;
+    let identity = serde_json::from_slice(&identity_bytes).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Blob, Box::new(error))
+    })?;
+    Ok(SourceDeliveryJournalRow {
+        id: row.get(0)?,
+        stream: row.get(1)?,
+        closed_at_unix_seconds: u64::try_from(row.get::<_, i64>(2)?).unwrap_or(u64::MAX),
+        identity,
+        wire: row.get(4)?,
+    })
 }
 
 fn insert_journal_rows(
