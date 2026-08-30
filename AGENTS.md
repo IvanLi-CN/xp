@@ -154,7 +154,8 @@
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
 - A successful service restart requires the selected systemd or OpenRC manager to report the
-  service ready after restart; a zero exit status from an asynchronous restart command is not enough.
+  service ready after restart; OpenRC must report ready twice successively. A zero exit status from
+  an asynchronous restart command is not enough.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
 - Cloudflare Tunnel provisioning preserves shared-Tunnel configuration outside the XP hostname.
   It reuses the existing single `cloudflared` process and validates before an atomic replacement.

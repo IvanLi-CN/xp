@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(45);
 const SERVICE_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const OPENRC_READY_CONFIRMATIONS: u8 = 2;
 
 pub fn reload_systemd_units(paths: &Paths) -> bool {
     let systemd = paths.systemd_unit_dir();
@@ -50,9 +51,20 @@ fn restart_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> b
 
 fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
     let deadline = Instant::now() + service_ready_timeout();
+    let required_confirmations = if program == "rc-service" {
+        OPENRC_READY_CONFIRMATIONS
+    } else {
+        1
+    };
+    let mut ready_confirmations = 0;
     loop {
         if command_succeeds(program, args) {
-            return true;
+            ready_confirmations += 1;
+            if ready_confirmations >= required_confirmations {
+                return true;
+            }
+        } else {
+            ready_confirmations = 0;
         }
         if Instant::now() >= deadline {
             return false;
