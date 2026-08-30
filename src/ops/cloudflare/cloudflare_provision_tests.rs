@@ -274,6 +274,97 @@ async fn fresh_tunnel_dry_run_does_not_call_cloudflare() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
+async fn fresh_tunnel_retries_when_remote_config_is_not_ready() {
+    let server = MockServer::start().await;
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    write_migration_files(&paths);
+    fs::remove_file(paths.etc_xp_ops_cloudflare_settings()).unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/client/v4/accounts/account/cfd_tunnel"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response(
+            serde_json::json!({ "id": "new", "credentials_file": { "TunnelID": "new" } }),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/client/v4/accounts/account/cfd_tunnel/new/configurations",
+        ))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "success": false,
+            "errors": [{ "code": 1055, "message": "Configuration for tunnel not found" }],
+            "result": null
+        })))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_existing_target_config(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/client/v4/zones/zone/dns_records"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response(serde_json::json!([]))))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(
+            "/client/v4/accounts/account/cfd_tunnel/new/configurations",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response(serde_json::json!({}))))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/client/v4/zones/zone/dns_records"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(response(serde_json::json!({ "id": "record" }))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut args = migration_args(false);
+    args.migrate_existing_tunnel = false;
+
+    {
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("CLOUDFLARE_API_BASE_URL", server.uri());
+            std::env::set_var("XP_OPS_DISTRO", "rhel");
+        }
+        let result = run(
+            paths.clone(),
+            args,
+            "token".to_string(),
+            ProvisionRuntime::Container,
+        )
+        .await;
+        unsafe {
+            std::env::remove_var("CLOUDFLARE_API_BASE_URL");
+            std::env::remove_var("XP_OPS_DISTRO");
+        }
+        result.expect("fresh Tunnel config should become readable before provision fails");
+    }
+
+    let settings = fs::read_to_string(paths.etc_xp_ops_cloudflare_settings()).unwrap();
+    assert!(settings.contains("\"tunnel_id\": \"new\""));
+    let requests = server.received_requests().await.unwrap();
+    let config_reads = requests
+        .iter()
+        .filter(|request| {
+            request.method.as_str() == "GET"
+                && request.url.path() == "/client/v4/accounts/account/cfd_tunnel/new/configurations"
+        })
+        .count();
+    assert_eq!(config_reads, 2);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn single_hostname_legacy_tunnel_migrates_automatically() {
     let server = MockServer::start().await;
     let tmp = tempdir().unwrap();

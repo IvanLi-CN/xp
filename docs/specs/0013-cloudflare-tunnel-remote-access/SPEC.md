@@ -33,6 +33,8 @@
   必须零写入拒绝，避免其余服务失去 connector。
 - `--dry-run` 可以执行只读 Cloudflare GET 并输出影响摘要；不得发出 POST/PUT/PATCH/DELETE、
   写文件或重启服务。
+- 新建 remote-config Tunnel 后，Cloudflare 对配置 GET 的 `1055` 暂态不可读最多有界重试 30 秒；
+  仅此新建 Tunnel/精确错误可重试，既有 Tunnel 或其他错误必须保持终态失败并走补偿回滚。
 - 本地配置存在 `ingress` 时，修改前必须运行 `cloudflared tunnel ingress validate`；没有本地
   `ingress` 的远程 Tunnel 配置不得运行这个不适用的校验。本地文件原子替换且服务启动/健康检查
   失败时恢复原始文件和服务状态。
@@ -42,6 +44,8 @@
 - Hinet 形状 fixture 在重复 provision 后，外部 hostname、注释、排版及其他键保持不变。
 - 远端 fixture 的未知字段、SSH/TCP/path 规则及合法 catch-all 保持不变；XP hostname 的全部规则被替换。
 - 自动迁移的任一所有权预检失败不得产生本地、Cloudflare、DNS、settings 或服务变更。
+- 新建 Tunnel 首次配置读取返回 `1055` 时必须在有界重试后继续；既有 Tunnel 的相同响应不得被
+  隐藏或重试。
 - 每个写入阶段失败时已完成变更按逆序补偿；补偿失败保留快照并输出人工恢复信息。
 
 ## 实现里程碑
