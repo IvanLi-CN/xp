@@ -744,11 +744,22 @@ fn write_cloudflared_config(
     if original.as_deref() == Some(yml.as_slice()) {
         return Ok(false);
     }
-    validate_cloudflared_config(paths, cloudflared_binary, &yml)?;
+    if local_config_has_ingress(&yml)? {
+        validate_cloudflared_config(paths, cloudflared_binary, &yml)?;
+    }
     write_bytes_if_changed(&config_path, &yml)
         .map_err(|e| ExitError::new(6, format!("filesystem_error: {e}")))?;
     chmod(&config_path, 0o640).ok();
     Ok(true)
+}
+
+fn local_config_has_ingress(config: &[u8]) -> Result<bool, ExitError> {
+    let parsed: serde_yaml::Value = serde_yaml::from_slice(config)
+        .map_err(|error| ExitError::new(6, format!("filesystem_error: {error}")))?;
+    let mapping = parsed
+        .as_mapping()
+        .ok_or_else(|| ExitError::new(6, "filesystem_error: local config must be a mapping"))?;
+    Ok(mapping.contains_key(serde_yaml::Value::String("ingress".to_string())))
 }
 
 fn verify_tunnel_credentials(
@@ -794,6 +805,11 @@ fn validate_cloudflared_config(
     config: &[u8],
 ) -> Result<(), ExitError> {
     if is_test_root(paths.root()) {
+        #[cfg(test)]
+        if std::env::var_os("XP_OPS_TEST_VALIDATE_CLOUDFLARED_CONFIG").is_none() {
+            return Ok(());
+        }
+        #[cfg(not(test))]
         return Ok(());
     }
     let config_path = paths.etc_cloudflared_config();

@@ -5,6 +5,9 @@ use tempfile::tempdir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 fn response(result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "success": true, "errors": [], "result": result })
 }
@@ -422,4 +425,83 @@ fn credentials_must_belong_to_the_requested_tunnel() {
 
     assert_eq!(error.code, 6);
     assert!(error.message.contains("do not belong"));
+}
+
+#[cfg(unix)]
+#[test]
+fn fresh_remote_tunnel_config_skips_local_ingress_validation() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.etc_cloudflared_dir()).unwrap();
+    let cloudflared = tmp.path().join("cloudflared");
+    fs::write(
+        &cloudflared,
+        "#!/bin/sh\nif grep -q '^ingress:' \"$2\"; then exit 0; fi\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&cloudflared, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let key = "XP_OPS_TEST_VALIDATE_CLOUDFLARED_CONFIG";
+    let original = std::env::var_os(key);
+    unsafe { std::env::set_var(key, "1") };
+    let result = write_cloudflared_config(
+        &paths,
+        "tunnel-id",
+        "/etc/cloudflared/tunnel-id.json",
+        xp_test_fixtures::label_xp_fixture_test(),
+        xp_test_fixtures::primary_api_url(),
+        &cloudflared,
+    );
+    match original {
+        Some(value) => unsafe { std::env::set_var(key, value) },
+        None => unsafe { std::env::remove_var(key) },
+    }
+
+    result.expect("fresh remote Tunnel config must not invoke local ingress validation");
+    let config = fs::read_to_string(paths.etc_cloudflared_config()).unwrap();
+    assert!(!config.contains("ingress:"));
+}
+
+#[cfg(unix)]
+#[test]
+fn local_ingress_config_still_runs_local_ingress_validation() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let tmp = tempdir().unwrap();
+    let paths = Paths::new(tmp.path().to_path_buf());
+    fs::create_dir_all(paths.etc_cloudflared_dir()).unwrap();
+    fs::write(
+        paths.etc_cloudflared_config(),
+        concat!(
+            "tunnel: previous\ncredentials-file: /etc/cloudflared/previous.json\ningress:\n",
+            "  - service: http_status:404\n",
+        ),
+    )
+    .unwrap();
+    let cloudflared = tmp.path().join("cloudflared");
+    fs::write(
+        &cloudflared,
+        "#!/bin/sh\n: > \"$0.invoked\"\nif grep -q '^ingress:' \"$2\"; then exit 0; fi\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&cloudflared, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let key = "XP_OPS_TEST_VALIDATE_CLOUDFLARED_CONFIG";
+    let original = std::env::var_os(key);
+    unsafe { std::env::set_var(key, "1") };
+    let result = write_cloudflared_config(
+        &paths,
+        "tunnel-id",
+        "/etc/cloudflared/tunnel-id.json",
+        xp_test_fixtures::label_xp_fixture_test(),
+        xp_test_fixtures::primary_api_url(),
+        &cloudflared,
+    );
+    match original {
+        Some(value) => unsafe { std::env::set_var(key, value) },
+        None => unsafe { std::env::remove_var(key) },
+    }
+
+    result.expect("local ingress config must pass validation before it is written");
+    assert!(cloudflared.with_extension("invoked").exists());
 }

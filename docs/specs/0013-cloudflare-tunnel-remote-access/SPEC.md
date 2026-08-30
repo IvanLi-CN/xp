@@ -33,8 +33,9 @@
   必须零写入拒绝，避免其余服务失去 connector。
 - `--dry-run` 可以执行只读 Cloudflare GET 并输出影响摘要；不得发出 POST/PUT/PATCH/DELETE、
   写文件或重启服务。
-- 修改本地配置前必须运行 `cloudflared tunnel ingress validate`；本地文件原子替换且服务启动/
-  健康检查失败时恢复原始文件和服务状态。
+- 本地配置存在 `ingress` 时，修改前必须运行 `cloudflared tunnel ingress validate`；没有本地
+  `ingress` 的远程 Tunnel 配置不得运行这个不适用的校验。本地文件原子替换且服务启动/健康检查
+  失败时恢复原始文件和服务状态。
 
 ## 验收
 
