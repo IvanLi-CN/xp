@@ -145,9 +145,14 @@ fn config_object(value: &Value) -> Result<&Map<String, Value>, String> {
 
 fn config_object_mut(value: &mut Value) -> Result<&mut Map<String, Value>, String> {
     if value.get("config").is_some() {
-        return value
+        let config = value
             .get_mut("config")
-            .and_then(Value::as_object_mut)
+            .expect("config presence was checked above");
+        if config.is_null() {
+            *config = Value::Object(Map::new());
+        }
+        return config
+            .as_object_mut()
             .ok_or_else(|| "remote_tunnel_config_must_be_an_object".to_string());
     }
     value
@@ -469,6 +474,33 @@ mod tests {
         assert_eq!(
             actual["config"]["ingress"][2],
             remote["config"]["ingress"][3]
+        );
+    }
+
+    #[test]
+    fn remote_merge_initializes_a_null_wrapped_config() {
+        let remote = json!({ "config": null });
+
+        let actual = merge_remote_tunnel_config(
+            &remote,
+            xp_test_fixtures::primary_host(),
+            xp_test_fixtures::primary_api_url(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            actual,
+            json!({
+                "config": {
+                    "ingress": [
+                        {
+                            "hostname": xp_test_fixtures::primary_host(),
+                            "service": xp_test_fixtures::primary_api_url()
+                        },
+                        { "service": "http_status:404" }
+                    ]
+                }
+            })
         );
     }
 
