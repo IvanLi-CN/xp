@@ -1,4 +1,31 @@
 use super::StoreError;
+use crate::reverse_mesh::ReverseMeshAssignment;
+
+pub(super) fn is_identical_stale_replay(
+    current: Option<&ReverseMeshAssignment>,
+    expected_generation: &Option<u64>,
+    assignment: &ReverseMeshAssignment,
+) -> bool {
+    current == Some(assignment)
+        && expected_generation.is_some_and(|expected| expected < assignment.generation)
+}
+
+pub(super) fn generation_cas_is_stale_replay_with_assignment(
+    current: Option<&ReverseMeshAssignment>,
+    expected_generation: &Option<u64>,
+    assignment: &ReverseMeshAssignment,
+    generation_floor: u64,
+) -> Result<bool, StoreError> {
+    if is_identical_stale_replay(current, expected_generation, assignment) {
+        return Ok(true);
+    }
+    generation_cas_is_stale_replay(
+        current.map(|item| item.generation),
+        expected_generation,
+        assignment.generation,
+        generation_floor,
+    )
+}
 
 pub(super) fn generation_cas_is_stale_replay(
     current_generation: Option<u64>,

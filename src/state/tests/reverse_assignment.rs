@@ -101,6 +101,12 @@ fn reverse_assignment_replay_of_deleted_same_generation_is_a_noop() {
     }
     .apply(&mut state)
     .expect("initial assignment");
+    DesiredStateCommand::UpsertReverseMeshAssignment {
+        assignment: assignment.clone(),
+        expected_generation: Some(3),
+    }
+    .apply(&mut state)
+    .expect("identical assignment replay should be tolerated");
     DesiredStateCommand::DeleteReverseMeshAssignment {
         target_node_id: assignment.target_node_id.clone(),
         expected_generation: Some(assignment.generation),
