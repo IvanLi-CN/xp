@@ -41,8 +41,9 @@ It owns only the requested XP hostname:
   DNS PATCH changes only the owned CNAME content, leaving TTL, proxied mode, comments, and other
   record attributes untouched.
 
-Before replacing a changed local configuration, `xp-ops` runs
-`cloudflared tunnel ingress validate` against a candidate file and atomically installs it.
+Before replacing a changed local configuration that contains local `ingress`, `xp-ops` runs
+`cloudflared tunnel ingress validate` against a candidate file and atomically installs it. A
+remote-Tunnel configuration without local `ingress` skips that inapplicable local validation.
 A host-managed node then restarts the existing service; it never starts a second `cloudflared`
 program. If a later write or restart fails, the command attempts reverse-order rollback of remote
 ingress, DNS, local files, settings, credentials, and the service configuration. An incomplete
