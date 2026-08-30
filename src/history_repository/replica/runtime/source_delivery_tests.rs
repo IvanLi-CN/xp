@@ -103,6 +103,105 @@ fn source_backlog_does_not_become_a_permanent_gap_when_delivery_is_delayed() {
 }
 
 #[test]
+fn source_journal_summary_keeps_only_the_oldest_wire() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+
+    for sequence in 0..3_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    vec![u8::try_from(sequence).unwrap(); 4 * 1024],
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let rows = storage.source_delivery_journal().expect("read journal");
+    let expected_bytes = rows.iter().map(|row| row.wire.len() as u64).sum::<u64>();
+    let expected_oldest_id = rows.first().expect("oldest row").id.clone();
+
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("summarize journal");
+
+    assert_eq!(summary.pending_segments, rows.len());
+    assert_eq!(summary.pending_bytes, expected_bytes);
+    assert_eq!(summary.oldest.expect("oldest row").id, expected_oldest_id);
+}
+
+#[test]
+fn legacy_source_journal_order_repair_crosses_page_boundary() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+
+    for sequence in 0..257_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+    drop(runtime);
+
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal
+             SET source_node_id = '', source_epoch = 0, first_sequence = 0",
+            [],
+        )
+        .expect("simulate legacy journal order columns");
+    drop(connection);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("repair and summarize legacy journal");
+    assert_eq!(summary.pending_segments, 257);
+    drop(storage);
+
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("reopen history database");
+    let remaining = connection
+        .query_row(
+            "SELECT COUNT(*) FROM source_delivery_journal WHERE source_node_id = ''",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("count unrepaired journal rows");
+    assert_eq!(remaining, 0);
+}
+
+#[test]
 fn source_journal_epoch_recovery_scans_beyond_the_replay_page() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = SigningKey::from_bytes(&[11; 32]);

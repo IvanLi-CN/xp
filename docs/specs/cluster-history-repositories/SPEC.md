@@ -105,6 +105,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - source 在 SQLite delivery journal 中持久化未确认的已签名 segment，并在 collector 确认后增量
   释放空间。若文件系统可用空间低于既有 256 MiB 安全护栏，source 停止新的仓库采集并报告
   `source_storage_guard`；不得前推 cursor、伪造确认或改变普通节点的数据保留策略。
+- delivery journal 状态读取必须通过 SQLite 聚合条数与总字节数，并且只读取排序后的单条最老
+  segment；状态/API 查询的进程内存不得随 durable backlog 大小增长。
 - 仓库磁盘达到护栏时停止历史写入但不影响 Raft、join、配置、代理或升级。
 - relay 只承担流式转发；relay 失败不得被误报为数据已持久化。
 - 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
