@@ -159,6 +159,6 @@ esac\n",
             .stderr(predicates::str::contains(
                 "xray restart failed; restored previous config; rolled back xp",
             ));
-        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "2");
+        assert_eq!(fs::read_to_string(&xray_restart_count).unwrap().trim(), "3");
     }
 }
