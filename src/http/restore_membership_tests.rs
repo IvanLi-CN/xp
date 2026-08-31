@@ -173,6 +173,19 @@ fn req_json(method: &str, uri: &str, value: serde_json::Value) -> Request<Body> 
 async fn app_with_recording_raft(
     tmp: &TempDir,
 ) -> (axum::Router, RecordedMembershipCalls, Node, String) {
+    app_with_recording_raft_mode(tmp, false).await
+}
+
+async fn app_with_recording_stale_learner(
+    tmp: &TempDir,
+) -> (axum::Router, RecordedMembershipCalls, Node, String) {
+    app_with_recording_raft_mode(tmp, true).await
+}
+
+async fn app_with_recording_raft_mode(
+    tmp: &TempDir,
+    include_stale_learner: bool,
+) -> (axum::Router, RecordedMembershipCalls, Node, String) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -213,18 +226,29 @@ async fn app_with_recording_raft(
     metrics.state = openraft::ServerState::Leader;
     metrics.current_leader = Some(raft_id);
     metrics.last_log_index = Some(42);
+    let mut membership_nodes = std::collections::BTreeMap::from([(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    )]);
+    if include_stale_learner {
+        membership_nodes.insert(
+            raft_node_id_from_ulid(&restored.node_id).unwrap(),
+            RaftNodeMeta {
+                name: restored.node_name.clone(),
+                api_base_url: xp_test_fixtures::service_fixture495().to_owned(),
+                raft_endpoint: xp_test_fixtures::service_fixture495().to_owned(),
+            },
+        );
+    }
     metrics.membership_config = Arc::new(openraft::StoredMembership::new(
         None,
         openraft::Membership::new(
             vec![std::collections::BTreeSet::from([raft_id])],
-            std::collections::BTreeMap::from([(
-                raft_id,
-                RaftNodeMeta {
-                    name: cluster.node_name.clone(),
-                    api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
-                    raft_endpoint: cluster.api_base_url.clone(),
-                },
-            )]),
+            membership_nodes,
         ),
     ));
     let (_tx, rx) = watch::channel(metrics);
@@ -289,6 +313,107 @@ async fn internal_restore_existing_node_requires_internal_auth() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn internal_restore_stale_learner_requires_internal_auth() {
+    let tmp = TempDir::new().unwrap();
+    let (app, _calls, restored, _ca_key_pem) = app_with_recording_stale_learner(&tmp).await;
+
+    let res = app
+        .oneshot(req_json(
+            "POST",
+            "/api/admin/_internal/raft/restore-stale-learner",
+            json!({ "node_id": restored.node_id }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn internal_restore_stale_learner_starts_the_durable_restore_operation() {
+    let tmp = TempDir::new().unwrap();
+    let (app, _calls, restored, ca_key_pem) = app_with_recording_stale_learner(&tmp).await;
+    let cluster = ClusterMetadata::load(tmp.path()).unwrap();
+    let ca_pem = cluster.read_cluster_ca_pem(tmp.path()).unwrap();
+    let body = json!({ "node_id": restored.node_id }).to_string();
+    let uri: Uri = "/api/admin/_internal/raft/restore-stale-learner"
+        .parse()
+        .unwrap();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let res = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(body["dry_run"], true);
+    let expected_membership = body["expected_membership"].clone();
+
+    let body = json!({
+        "node_id": restored.node_id,
+        "apply": true,
+        "expected_membership": expected_membership,
+    })
+    .to_string();
+    let context = crate::internal_auth::RequestContext::now(
+        crate::internal_auth::InternalRoute::MeshV2,
+        &cluster.cluster_id,
+        &cluster.node_id,
+        &cluster.node_id,
+        crate::id::new_ulid_string(),
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    crate::internal_auth::sign_request_v2(
+        &ca_key_pem,
+        &ca_pem,
+        &Method::POST,
+        &uri,
+        Some("application/json"),
+        body.as_bytes(),
+        &context,
+        &mut headers,
+    )
+    .unwrap();
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    request.headers_mut().extend(headers);
+    let res = app.oneshot(request).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(body["dry_run"], false);
+    assert_eq!(body["operation"]["kind"], "restore");
+    assert_eq!(body["operation"]["phase"], "learner_registered");
 }
 
 #[tokio::test]

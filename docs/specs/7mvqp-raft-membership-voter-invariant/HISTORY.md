@@ -16,3 +16,6 @@
   same probe budget and a 64 KiB limit. A locally previewed unique orphan is excluded only from
   its own repair preflight, so stale public metadata cannot weaken the retained-voter upgrade
   barrier.
+- A Stale Learner is recovered by explicitly adopting only the proven learner into the existing
+  Restore lifecycle. It is distinct from an absent-node restore and from a pending Join session;
+  automatic promotion remains forbidden.

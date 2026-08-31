@@ -14,6 +14,26 @@ pub(super) struct InternalRestoreNodeRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct InternalRestoreStaleLearnerRequest {
+    node_id: String,
+    #[serde(default)]
+    apply: bool,
+    #[serde(default)]
+    expected_membership: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct InternalRestoreStaleLearnerResponse {
+    dry_run: bool,
+    node_id: String,
+    raft_node_id: u64,
+    expected_membership: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<crate::state::MembershipOperation>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct InternalPruneAbsentNodeRequest {
     node_id: String,
     #[serde(default)]
@@ -162,6 +182,75 @@ pub(super) async fn admin_internal_restore_node(
         "operation_id": resumed.operation_id,
         "phase": resumed.phase,
     })))
+}
+
+/// Adopt one exact stale learner into the existing durable Restore lifecycle. This is separate
+/// from ordinary absent-node restore so no caller can use it as a generic learner-promotion API.
+pub(super) async fn admin_internal_restore_stale_learner(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(request): ApiJson<InternalRestoreStaleLearnerRequest>,
+) -> Result<Json<InternalRestoreStaleLearnerResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let preview =
+        crate::raft_membership_guard::stale_learner_recovery::preview_stale_learner_recovery(
+            state.raft.clone(),
+            state.store.clone(),
+            &request.node_id,
+        )
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    join_capability::require_membership_lifecycle_on_voters(&state).await?;
+
+    if !request.apply {
+        return Ok(Json(InternalRestoreStaleLearnerResponse {
+            dry_run: true,
+            node_id: preview.node_id,
+            raft_node_id: preview.raft_node_id,
+            expected_membership: preview.expected_membership,
+            operation: None,
+        }));
+    }
+
+    let expected_membership = request
+        .expected_membership
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| ApiError::invalid_request("--apply requires expected_membership"))?;
+    let operation =
+        crate::raft_membership_guard::stale_learner_recovery::begin_stale_learner_recovery(
+            state.raft.clone(),
+            state.store.clone(),
+            &request.node_id,
+            &expected_membership,
+        )
+        .await
+        .map_err(|error| ApiError::conflict(error.to_string()))?;
+    crate::raft_membership_guard::resume_membership_operations_once(
+        state.raft.clone(),
+        state.store.clone(),
+    )
+    .await
+    .map_err(|error| {
+        ApiError::internal(format!("stale learner recovery resume failed: {error}"))
+    })?;
+    let operation = state
+        .store
+        .lock()
+        .await
+        .state()
+        .membership_operations
+        .get(&operation.operation_id)
+        .cloned()
+        .ok_or_else(|| ApiError::internal("stale learner recovery operation disappeared"))?;
+    Ok(Json(InternalRestoreStaleLearnerResponse {
+        dry_run: false,
+        node_id: preview.node_id,
+        raft_node_id: preview.raft_node_id,
+        expected_membership: operation.expected_membership.clone(),
+        operation: Some(operation),
+    }))
 }
 
 /// Remove a DesiredState node that is already absent from Raft membership after an explicitly
