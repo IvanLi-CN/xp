@@ -28,16 +28,16 @@ impl RepositoryReplicaRuntime {
         if !legacy_rows.is_empty() {
             self.snapshot.local_source.clear_pending();
         }
-        let max_epoch = self
-            .storage
-            .source_delivery_journal_max_epoch()
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
         let rows = self
             .storage
             .source_delivery_journal_page(256)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let max_epoch = self
+            .storage
+            .source_delivery_journal_max_epoch()
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         // A control snapshot can be lost while the delivery journal survives. Start new source
         // records in a fresh epoch so the replayed journal and new observations cannot reuse a
@@ -105,6 +105,8 @@ impl RepositoryReplicaRuntime {
                 pending_segments: 0,
                 pending_bytes: 0,
                 oldest: None,
+                last_acknowledged_at: None,
+                last_delivery_path: None,
             }
         };
         let oldest_pending_age_seconds = summary
@@ -138,8 +140,8 @@ impl RepositoryReplicaRuntime {
             pending_bytes: summary.pending_bytes,
             oldest_pending_cursor,
             oldest_pending_age_seconds,
-            last_acknowledged_at: None,
-            last_delivery_path: None,
+            last_acknowledged_at: summary.last_acknowledged_at,
+            last_delivery_path: summary.last_delivery_path,
         })
     }
 

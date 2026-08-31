@@ -110,6 +110,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   `source_storage_guard`；不得前推 cursor、伪造确认或改变普通节点的数据保留策略。
 - delivery journal 状态读取必须通过 SQLite 聚合条数与总字节数，并且只读取排序后的单条最老
   segment；状态/API 查询的进程内存不得随 durable backlog 大小增长。
+- delivery journal 的周期性状态、epoch 恢复和固定页读取必须使用持久化统计状态与匹配投递顺序的
+  SQLite 索引；除一次性旧库迁移外，不得扫描或反序列化整个 backlog。每轮读取最多 256 条，
+  其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
+- ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；Collector 不可达时保留
+  journal，不得伪造成功或产生无界并发重试。Collector 恢复后必须按固定页继续投递并只删除有效 ACK
+  所列 segment。
 - 仓库磁盘达到护栏时停止历史写入但不影响 Raft、join、配置、代理或升级。
 - relay 只承担流式转发；relay 失败不得被误报为数据已持久化。
 - 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
@@ -142,6 +148,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
   Raft 和 join 仍可用。
+- Given durable source backlog 至少 128 MiB，When source collection 周期运行，Then journal page、
+  status 和 epoch recovery 不执行全表 wire 解码或临时排序，单轮只处理固定页并保持 Direct/Public
+  与集群控制面可用。
+- Given Collector 暂时不可达，When 连续运行多个 collection 周期，Then backlog 原样保留且资源成本
+  有界；Given Collector 恢复并返回有效 ACK，Then ACK 时间/路径可观测且 backlog 持续下降。
 
 ## 验收清单（Acceptance checklist）
 
@@ -157,6 +168,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、relay、anti-entropy、聚合和查询。
 - shared testbox 验证 50 source/2 repository、256 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
+- shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
+  不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 9%，每个 60 秒周期数据库读取不超过
+  4 MiB，RSS 增量不超过 2 MiB。
 - 故障注入覆盖丢包、分区、恢复、退役、过期 tombstone、fork、unknown schema 和磁盘护栏。
 
 ### UI / Storybook (if applicable)
@@ -184,7 +198,7 @@ PR: none
 
 ## Related ADRs
 
-- `docs/adr/0002-history-synchronization-recovery-order.md`
+- [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

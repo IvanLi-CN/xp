@@ -325,7 +325,7 @@ async fn publish_local_history_segment(
                     .repository_replica
                     .lock()
                     .await
-                    .acknowledge_local_source_segment(&segment.wire)?;
+                    .acknowledge_local_source_segment_via(&segment.wire, now, "local")?;
             }
         } else {
             let body = serde_json::to_vec(&RepositorySyncRequest::with_wire(
@@ -349,7 +349,7 @@ async fn publish_local_history_segment(
                         .repository_replica
                         .lock()
                         .await
-                        .acknowledge_local_source_segment(&segment.wire)?;
+                        .acknowledge_local_source_segment_via(&segment.wire, now, "direct")?;
                 }
                 Err(error) => {
                     transport_failed |= error.is_transport();
@@ -486,7 +486,7 @@ async fn relay_local_source_segments(
             .repository_replica
             .lock()
             .await
-            .acknowledge_local_source_segment(&segment.wire)?;
+            .acknowledge_local_source_segment_via(&segment.wire, now, "dynamic_relay")?;
     }
     Ok(())
 }
