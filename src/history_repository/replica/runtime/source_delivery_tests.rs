@@ -144,6 +144,168 @@ fn source_journal_summary_keeps_only_the_oldest_wire() {
 }
 
 #[test]
+fn source_delivery_journal_state_tracks_upserts_and_ack_path() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    for sequence in 0..3_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    vec![u8::try_from(sequence + 1).unwrap(); 1024],
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let rows = storage.source_delivery_journal().expect("read journal");
+    let expected_bytes = rows.iter().map(|row| row.wire.len() as u64).sum::<u64>();
+    storage
+        .append_source_delivery_journal(&rows)
+        .expect("upsert journal rows");
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("summarize upserted journal");
+    assert_eq!(summary.pending_segments, rows.len());
+    assert_eq!(summary.pending_bytes, expected_bytes);
+
+    runtime
+        .acknowledge_local_source_segment_via(&rows[0].wire, 200, "direct")
+        .expect("acknowledge journal row");
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("summarize acknowledged journal");
+    assert_eq!(summary.pending_segments, rows.len() - 1);
+    assert_eq!(
+        summary.pending_bytes,
+        expected_bytes - rows[0].wire.len() as u64
+    );
+    assert_eq!(summary.last_acknowledged_at, Some(200));
+    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
+
+    storage
+        .acknowledge_source_delivery_journal(
+            &[hex::encode(Sha256::digest(&rows[0].wire))],
+            Some(300),
+            Some("dynamic_relay"),
+        )
+        .expect("repeat acknowledgement is idempotent");
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("summarize repeated acknowledgement");
+    assert_eq!(summary.last_acknowledged_at, Some(200));
+    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
+}
+
+#[test]
+fn source_delivery_journal_max_epoch_reads_state_without_decoding_wire() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    drop(storage);
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "INSERT INTO source_delivery_journal
+                 (id, stream, closed_at, identity, wire, created_at,
+                  source_node_id, source_epoch, first_sequence)
+             VALUES ('invalid-wire', 'runtime', 100, X'00', X'00', 100, 'node-a', 7, 0)",
+            [],
+        )
+        .expect("insert opaque journal row");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET epoch_high_water = 7
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("set epoch high-water");
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    assert_eq!(
+        storage
+            .source_delivery_journal_max_epoch()
+            .expect("read epoch high-water"),
+        Some(7)
+    );
+}
+
+#[test]
+fn source_delivery_journal_backlog_work_is_bounded() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let source_identity = identity();
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    drop(storage);
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    let identity = serde_json::to_vec(&source_identity).expect("serialize source identity");
+    let wire = vec![0_u8; 7 * 1024];
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin backlog transaction");
+    for sequence in 0..20_000_i64 {
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, ?2, 100, ?3, ?4, 100, 'node-a', 1, ?5)",
+                rusqlite::params![
+                    format!("segment-{sequence}"),
+                    if sequence % 100 == 0 {
+                        "tombstone"
+                    } else {
+                        "runtime"
+                    },
+                    &identity,
+                    &wire,
+                    sequence,
+                ],
+            )
+            .expect("insert backlog row");
+    }
+    transaction.commit().expect("commit backlog transaction");
+
+    let plan = connection
+        .prepare(
+            "EXPLAIN QUERY PLAN
+             SELECT id, stream, closed_at, identity, wire
+             FROM source_delivery_journal
+             ORDER BY (stream = 'tombstone') DESC, source_node_id, source_epoch,
+                      stream, first_sequence, created_at, id
+             LIMIT 256",
+        )
+        .expect("prepare journal page plan")
+        .query_map([], |row| row.get::<_, String>(3))
+        .expect("read journal page plan")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("collect journal page plan")
+        .join(" ");
+
+    assert!(
+        plan.contains("source_delivery_journal_delivery_order"),
+        "journal page must use the delivery-order index: {plan}"
+    );
+    assert!(
+        !plan.to_ascii_uppercase().contains("TEMP B-TREE"),
+        "journal page must not sort the full backlog: {plan}"
+    );
+}
+
+#[test]
 fn legacy_source_journal_order_repair_crosses_page_boundary() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
