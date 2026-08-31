@@ -20,7 +20,9 @@ import {
 	fetchAdminMembershipOperation,
 	fetchAdminNode,
 	fetchAdminNodeDeletePreview,
+	fetchAdminNodeMihomoResourcePolicy,
 	patchAdminNode,
+	putAdminNodeMihomoResourcePolicy,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
 import { fetchAdminRepositoryHistory } from "../api/adminRepositoryHistory";
@@ -146,6 +148,24 @@ function setupMocks(args?: {
 
 	vi.mocked(fetchAdminNode).mockResolvedValue(node);
 	vi.mocked(patchAdminNode).mockResolvedValue(node);
+	vi.mocked(fetchAdminNodeMihomoResourcePolicy).mockResolvedValue({
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+		override_cidrs: null,
+		effective_cidrs: [fixtureCatalog.address.privateCidr()],
+		source: "deployment_default",
+		status: "healthy",
+		error: null,
+	});
+	vi.mocked(putAdminNodeMihomoResourcePolicy).mockResolvedValue({
+		node_id: fixtureCatalog.nodeId.fixture134(),
+		deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+		override_cidrs: [fixtureCatalog.address.privateCidr()],
+		effective_cidrs: [fixtureCatalog.address.privateCidr()],
+		source: "override",
+		status: "healthy",
+		error: null,
+	});
 	vi.mocked(refreshAdminNodeEgressProbe).mockResolvedValue({
 		node_id: fixtureCatalog.nodeId.fixture17(),
 		accepted: true,
@@ -501,6 +521,46 @@ describe("<NodeDetailsPage />", () => {
 		const tcpTab = await screenByRole("tab", "TCP connections");
 		expect(tcpTab.className).toContain("basis-[calc(50%-0.125rem)]");
 		expect(tcpTab.className).toContain("min-h-11");
+	});
+
+	it("edits Mihomo private CIDRs as tags and saves the override", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: fixtureCatalog.address.privateCidr() },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+		await waitFor(() => {
+			expect(
+				cidrInput.closest('[data-testid="tag-input-control"]'),
+			).toHaveTextContent(fixtureCatalog.address.privateCidr());
+		});
+
+		fireEvent.click(await screenByRole("button", "Save override"));
+		await waitFor(() => {
+			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+				[fixtureCatalog.address.privateCidr()],
+			);
+		});
+
+		for (const name of [
+			"Refresh",
+			"Disable private targets",
+			"Save override",
+			"Restore deployment default",
+		]) {
+			const button = await screenByRole("button", name);
+			expect(button.className).toContain("h-10");
+			expect(button.className).toContain("min-h-11");
+		}
+		expect(
+			(await screenByRole("button", "Disable private targets")).className,
+		).toContain("border");
 	});
 
 	it("allows saving unlimited quota reset after entering an invalid monthly day", async () => {

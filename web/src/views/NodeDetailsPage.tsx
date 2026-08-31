@@ -47,6 +47,7 @@ import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
+import { TagInput } from "../components/TagInput";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
@@ -71,7 +72,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
-import { Textarea } from "../components/ui/textarea";
 import { useNodeTimeWindowReports } from "../hooks/useNodeTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -562,7 +562,7 @@ export function NodeDetailsPage() {
 	}, [nodeId]);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
-	const [mihomoPolicyDraft, setMihomoPolicyDraft] = useState("");
+	const [mihomoPolicyDraft, setMihomoPolicyDraft] = useState<string[]>([]);
 	const [isSavingMihomoPolicy, setIsSavingMihomoPolicy] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -625,11 +625,7 @@ export function NodeDetailsPage() {
 	}, [runtimeQuery.data]);
 
 	useEffect(() => {
-		if (mihomoPolicyQuery.data?.override_cidrs) {
-			setMihomoPolicyDraft(mihomoPolicyQuery.data.override_cidrs.join("\n"));
-		} else if (mihomoPolicyQuery.data?.source === "deployment_default") {
-			setMihomoPolicyDraft("");
-		}
+		setMihomoPolicyDraft(mihomoPolicyQuery.data?.override_cidrs ?? []);
 	}, [mihomoPolicyQuery.data]);
 
 	useEffect(() => {
@@ -826,7 +822,7 @@ export function NodeDetailsPage() {
 				["adminNodeMihomoResourcePolicy", adminToken, nodeId],
 				result,
 			);
-			setMihomoPolicyDraft(result.override_cidrs?.join("\n") ?? "");
+			setMihomoPolicyDraft(result.override_cidrs ?? []);
 			pushToast({
 				variant: "success",
 				message: "Mihomo resource policy updated.",
@@ -852,7 +848,7 @@ export function NodeDetailsPage() {
 				["adminNodeMihomoResourcePolicy", adminToken, nodeId],
 				result,
 			);
-			setMihomoPolicyDraft("");
+			setMihomoPolicyDraft([]);
 			pushToast({
 				variant: "success",
 				message: "Mihomo policy restored to deployment default.",
@@ -1507,33 +1503,23 @@ export function NodeDetailsPage() {
 												</div>
 											</div>
 
-											<div className="space-y-3 rounded-2xl border border-border/70 bg-muted/35 p-4">
-												<div>
-													<label
-														className="text-sm font-medium"
-														htmlFor="mihomo-policy-cidrs"
-													>
-														Web override CIDRs
-													</label>
-													<p className="text-sm text-muted-foreground">
-														One CIDR per line. Saving replaces the deployment
-														default for this node.
-													</p>
-												</div>
-												<Textarea
-													id="mihomo-policy-cidrs"
+											<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
+												<TagInput
+													label="Web override CIDRs"
 													value={mihomoPolicyDraft}
-													onChange={(event) =>
-														setMihomoPolicyDraft(event.target.value)
-													}
-													rows={5}
+													onChange={setMihomoPolicyDraft}
+													placeholder="192.168.0.0/16 or fd00::/8"
+													helperText="Add a CIDR with Enter or comma, or paste a list. Saving replaces the deployment default for this node."
+													allowPrimary={false}
 													disabled={
 														isSavingMihomoPolicy || appRuntime.isReadOnly
 													}
 												/>
-												<div className="flex flex-wrap justify-end gap-2">
+												<div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
 													<Button
 														variant="secondary"
+														size="md"
+														className="w-full sm:w-auto"
 														loading={mihomoPolicyQuery.isFetching}
 														disabled={
 															!appRuntime.isOnline || isSavingMihomoPolicy
@@ -1542,38 +1528,41 @@ export function NodeDetailsPage() {
 													>
 														Refresh
 													</Button>
-													<Button
-														variant="ghost"
-														disabled={
-															isSavingMihomoPolicy || appRuntime.isReadOnly
-														}
-														onClick={() => void updateMihomoPolicy([])}
-													>
-														Disable private targets
-													</Button>
-													<Button
-														loading={isSavingMihomoPolicy}
-														disabled={appRuntime.isReadOnly}
-														onClick={() =>
-															void updateMihomoPolicy(
-																mihomoPolicyDraft
-																	.split("\n")
-																	.map((value) => value.trim())
-																	.filter(Boolean),
-															)
-														}
-													>
-														Save override
-													</Button>
-													<Button
-														variant="secondary"
-														disabled={
-															isSavingMihomoPolicy || appRuntime.isReadOnly
-														}
-														onClick={() => void restoreMihomoPolicy()}
-													>
-														Restore deployment default
-													</Button>
+													<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+														<Button
+															variant="secondary"
+															size="md"
+															className="w-full sm:w-auto"
+															disabled={
+																isSavingMihomoPolicy || appRuntime.isReadOnly
+															}
+															onClick={() => void updateMihomoPolicy([])}
+														>
+															Disable private targets
+														</Button>
+														<Button
+															size="md"
+															className="w-full sm:w-auto"
+															loading={isSavingMihomoPolicy}
+															disabled={appRuntime.isReadOnly}
+															onClick={() =>
+																void updateMihomoPolicy(mihomoPolicyDraft)
+															}
+														>
+															Save override
+														</Button>
+														<Button
+															variant="secondary"
+															size="md"
+															className="w-full sm:w-auto"
+															disabled={
+																isSavingMihomoPolicy || appRuntime.isReadOnly
+															}
+															onClick={() => void restoreMihomoPolicy()}
+														>
+															Restore deployment default
+														</Button>
+													</div>
 												</div>
 											</div>
 										</>

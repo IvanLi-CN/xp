@@ -106,9 +106,9 @@ const meta = {
 					[fixtureCatalog.identifier.nodePrimary()]: {
 						node_id: fixtureCatalog.identifier.nodePrimary(),
 						deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
-						override_cidrs: null,
+						override_cidrs: [fixtureCatalog.address.privateCidr()],
 						effective_cidrs: [fixtureCatalog.address.privateCidr()],
-						source: "deployment_default",
+						source: "override",
 						status: "healthy",
 						error: null,
 					} satisfies AdminNodeMihomoResourcePolicy,
@@ -217,6 +217,52 @@ export const MetadataEgressProbe: Story = {
 	},
 };
 
+async function verifyMihomoPrivateResourcePolicy(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	await canvas.findByText("Mihomo resources", { exact: true });
+	const mihomoTab = Array.from(
+		canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
+	).find((element) => element.textContent?.trim() === "Mihomo resources");
+	if (mihomoTab) {
+		mihomoTab.click();
+	} else {
+		const mobileSelect = canvasElement.querySelector<HTMLElement>(
+			'[role="combobox"][aria-label="Node details section"]',
+		);
+		if (!mobileSelect) throw new Error("Mihomo navigation control is missing");
+		mobileSelect.click();
+		await userEvent.click(
+			await within(canvasElement.ownerDocument.body).findByRole("option", {
+				name: "Mihomo resources",
+			}),
+		);
+	}
+	await expect(
+		await canvas.findByText("Mihomo private resource policy"),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("textbox", { name: "Web override CIDRs" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Remove" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Save override" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Disable private targets" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Restore deployment default" }),
+	).toBeInTheDocument();
+}
+
+export const MihomoPrivateResourcePolicyDesktop: Story = {
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+	},
+};
+
 export const MihomoPrivateResourcePolicy: Story = {
 	parameters: {
 		viewport: {
@@ -230,41 +276,7 @@ export const MihomoPrivateResourcePolicy: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await canvas.findByText("Mihomo resources", { exact: true });
-		const mihomoTab = Array.from(
-			canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
-		).find((element) => element.textContent?.trim() === "Mihomo resources");
-		if (mihomoTab) {
-			mihomoTab.click();
-		} else {
-			const mobileSelect = canvasElement.querySelector<HTMLElement>(
-				'[role="combobox"][aria-label="Node details section"]',
-			);
-			if (!mobileSelect)
-				throw new Error("Mihomo navigation control is missing");
-			mobileSelect.click();
-			await userEvent.click(
-				await within(canvasElement.ownerDocument.body).findByRole("option", {
-					name: "Mihomo resources",
-				}),
-			);
-		}
-		await expect(
-			await canvas.findByText("Mihomo private resource policy"),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findAllByText(fixtureCatalog.address.privateCidr()),
-		).toHaveLength(2);
-		await expect(
-			await canvas.findByRole("button", { name: "Save override" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "Disable private targets" }),
-		).toBeInTheDocument();
-		await expect(
-			await canvas.findByRole("button", { name: "Restore deployment default" }),
-		).toBeInTheDocument();
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
 	},
 };
 
