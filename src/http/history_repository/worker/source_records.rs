@@ -1,5 +1,8 @@
 use super::*;
 
+const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
+const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
+
 pub(super) struct SourceRecordBatch {
     pub(super) records: Vec<SyncRecord>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
@@ -11,7 +14,14 @@ pub(super) async fn source_records(
 ) -> anyhow::Result<SourceRecordBatch> {
     let runtime = state.node_runtime.snapshot(50).await;
     let history = state.node_history.snapshot(&state.cluster.node_id).await;
-    let mesh = state.mesh_telemetry.snapshot().await;
+    let mesh = state
+        .mesh_telemetry
+        .history_source_snapshot(
+            MAX_PATH_HEALTH_SOURCE_PEERS,
+            MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER,
+            MAX_SOURCE_PAYLOAD_BYTES,
+        )
+        .await;
     let deletion_markers = state
         .node_history
         .repository_deletion_markers(&state.cluster.node_id)
@@ -63,10 +73,7 @@ pub(super) async fn source_records(
                 .and_then(|traffic| traffic.daily.last()),
         })
     });
-    let path_health = serde_json::json!({
-        "generated_at": mesh.generated_at,
-        "peers": mesh.peers.into_iter().take(MAX_SOURCE_SUMMARY_ITEMS).collect::<Vec<_>>(),
-    });
+    let path_health = serde_json::to_value(mesh)?;
     let mut live_records = [
         source_record(
             "runtime.v1",

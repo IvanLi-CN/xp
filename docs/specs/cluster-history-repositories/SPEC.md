@@ -62,6 +62,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   传输不得拆分 segment。
 - 小于 4 KiB 的 payload 使用 identity；其余仅尝试 Zstandard level 1，压缩无收益时使用 identity；
   单次响应 canonical uncompressed 不超过 1 MiB，wire 不超过 256 KiB。
+- 每分钟 source 的 `path_health.v1` 以轮转顺序携带最多 16 个 peer 的当前状态和每 peer 最新一分钟
+  bucket；不复制本地完整 24 小时 telemetry 序列。字段和延迟样本先受限，再逐 peer 按序列化后的
+  payload 纳入，必须保持在 32 KiB source-record 上限内。
 - Reality Mesh 和 Cloudflare Tunnel 是同级直连路径；选择稳定健康路径，另一条低频探测。
   两条都失败后，先尝试 Raft 分配的 Reality Mesh Reverse；Reverse 失败后才每小时抖动一次
   动态 Mesh relay。两类 relay 均不落盘；动态 relay 使用端到端 X25519+AEAD。
