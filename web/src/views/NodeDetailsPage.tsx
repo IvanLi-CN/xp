@@ -1508,7 +1508,7 @@ export function NodeDetailsPage() {
 													label="Web override CIDRs"
 													value={mihomoPolicyDraft}
 													onChange={setMihomoPolicyDraft}
-													placeholder="192.168.0.0/16 or fd00::/8"
+													placeholder="192.168.0.0/16"
 													helperText="Add a CIDR with Enter or comma, or paste a list. Saving replaces the deployment default for this node."
 													allowPrimary={false}
 													disabled={

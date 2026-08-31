@@ -529,6 +529,7 @@ describe("<NodeDetailsPage />", () => {
 
 		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		expect(cidrInput).toHaveAttribute("placeholder", "192.168.0.0/16");
 		fireEvent.change(cidrInput, {
 			target: { value: fixtureCatalog.address.privateCidr() },
 		});
