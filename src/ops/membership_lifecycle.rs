@@ -3,7 +3,7 @@ use axum::http::Method;
 use super::{
     cli::{
         ExitError, XpEvictUnreachableVoterArgs, XpMembershipOperationStatusArgs,
-        XpRepairOrphanVoterArgs,
+        XpRepairOrphanVoterArgs, XpRestoreStaleLearnerArgs,
     },
     internal_auth::InternalOpsAuth,
     paths::Paths,
@@ -108,6 +108,57 @@ pub(crate) async fn cmd_xp_evict_unreachable_voter(
         "{}",
         serde_json::to_string_pretty(&response)
             .map_err(|error| ExitError::new(5, format!("encode eviction response: {error}")))?
+    );
+    Ok(())
+}
+
+pub(crate) async fn cmd_xp_restore_stale_learner(
+    paths: Paths,
+    args: XpRestoreStaleLearnerArgs,
+) -> Result<(), ExitError> {
+    if args.apply
+        && args
+            .expected_membership
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --apply requires --expected-membership from dry-run",
+        ));
+    }
+    if !args.apply && args.expected_membership.is_some() {
+        return Err(ExitError::new(
+            2,
+            "invalid_args: --expected-membership is valid only with --apply",
+        ));
+    }
+    let (client, auth) = local_internal_ops_client(&paths, &args.api_base_url)?;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "node_id": args.node_id,
+        "apply": args.apply,
+        "expected_membership": args.expected_membership,
+    }))
+    .map_err(|error| {
+        ExitError::new(5, format!("encode stale learner recovery request: {error}"))
+    })?;
+    let response: serde_json::Value = internal_json_request(
+        &client,
+        &args.api_base_url,
+        &auth,
+        Method::POST,
+        "/api/admin/_internal/raft/restore-stale-learner",
+        Some(body),
+    )
+    .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).map_err(|error| {
+            ExitError::new(
+                5,
+                format!("encode stale learner recovery response: {error}"),
+            )
+        })?
     );
     Ok(())
 }

@@ -24,6 +24,10 @@
   resumer and cleanup machinery retain ownership of uncertain-result recovery. The resumer writes
   only from the current local leader and terminally blocks the operation if its target becomes that
   leader before `RemoveVoters`.
+- Stale learner recovery is a separate signed, leader-local CLI/API with no Admin Web action. It
+  requires one exact unexpected learner and a dry-run membership revision, atomically consumes a
+  matching learner-registered JoinSession with a Restore operation, and delegates catch-up and
+  promotion to the existing Restore resumer.
 
 ## Compatibility
 
@@ -47,6 +51,9 @@
   capability probe. Unlike orphan repair it requires the target's exact DesiredState mapping and
   confirmed endpoint snapshot, then deletes those records through RemoveNode after Raft proves the
   target absent.
+- Stale learner recovery never excludes its target from the retained-voter capability barrier: a
+  learner is not a voter. It is compatible with an older leader after intent is recorded because
+  the existing Restore resumer already owns the persisted operation kind and phases.
 
 ## Coverage
 
@@ -66,5 +73,8 @@
 - Signed eviction-route tests cover dry run, explicit cleanup confirmation, and a mapped retained
   voter with an unavailable signed control-plane origin. The latter leaves the target Node,
   endpoints, and membership-operation state unchanged.
+- Stale learner tests cover zero-write preview, exact learner and metadata matching, stale
+  fingerprint rejection, atomic JoinSession consumption, durable Restore creation, catch-up,
+  promotion, terminal completion, and signed-route authentication.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and
   duplicate-delete disablement.

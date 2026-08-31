@@ -19,6 +19,7 @@ use crate::{
     },
 };
 
+pub(crate) mod stale_learner_recovery;
 mod unreachable_voter_eviction;
 pub use unreachable_voter_eviction::{
     UnreachableVoterEvictionPreview, begin_unreachable_voter_eviction,
@@ -28,7 +29,6 @@ pub use unreachable_voter_eviction::{
 pub use crate::raft_membership_cleanup::{
     MembershipRemovalCleanup, finalize_remove_node_cleanup_once,
 };
-
 static MEMBERSHIP_OPERATION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 pub fn membership_operation_gate() -> Arc<Mutex<()>> {
     MEMBERSHIP_OPERATION_GATE
@@ -577,7 +577,7 @@ async fn validate_orphan_voter_repair(
     Ok(())
 }
 
-async fn write_operation(
+pub(crate) async fn write_operation(
     raft: &Arc<dyn RaftFacade>,
     command: DesiredStateCommand,
 ) -> anyhow::Result<()> {
@@ -626,7 +626,7 @@ pub async fn block_membership_operation(
     .await
 }
 
-fn is_current_local_leader(metrics: &openraft::RaftMetrics<NodeId, NodeMeta>) -> bool {
+pub(crate) fn is_current_local_leader(metrics: &openraft::RaftMetrics<NodeId, NodeMeta>) -> bool {
     metrics.state == openraft::ServerState::Leader && metrics.current_leader == Some(metrics.id)
 }
 
