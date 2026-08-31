@@ -31,9 +31,11 @@
 ## Persistence and query
 
 - 每个 node 使用 `${XP_DATA_DIR}/uptime.sqlite3` 的 WAL-backed pending store。
-  计划检查只在 Repository 已 ready 且 capture store 可接受记录时开始。
-- pending backlog 在 80%（64 MiB 或 100,000 条的任一限制）进入
-  `capture_suspended`，低于 60% 才恢复。该状态会停止新检查，不会丢弃已执行结果。
+  计划检查只在 Repository 已 ready 且 capture store 可接受记录时开始；否则每个已知计划 Slot
+  写入可合并的连续 gap range，并通过相同签名 stream 投递，历史因此呈现 coverage gap。
+- pending observation backlog 在 80%（64 MiB 或 100,000 条的任一限制）进入
+  `capture_suspended`，低于 60% 才恢复；压缩 gap range backlog 也按 100,000 条、同一
+  80%/60% 水位进入和恢复。该状态会停止新检查，不会丢弃已执行结果或静默吞掉缺口。
 - worker 将 `service_monitor_observation.v1` 作为
   `service_monitor_observation-v1` signed Source Delivery stream 投递；ack 后才标记
   本地 observation 已入队。
@@ -48,7 +50,10 @@
 
 - 后端提供 monitor list/create/get/patch/delete、status、history、run 和 run status
   routes；定义、fixture 和 Web Zod schema 共同使用 internally-tagged `target.kind`
-  wire shape。
+  wire shape。每个持久化 Observation 都带有 UTC Slot 的 Observer Set 快照；Repository
+  status 读取按 observer 保留的最新 Observation 供矩阵展示，但总状态仅聚合最新、同 revision
+  且完整的 Observer Set Slot；缺失、不同 Slot 或不同快照均返回 `unknown`/`partial`。历史分母
+  不随当前 allowlist 改写。
 - Web 注册一级“Service monitoring”导航以及 overview、new、edit、detail routes。
   overview 在在线时每 30 秒刷新，并以状态、6h uptime、五分钟连续性格带和最近检查
   组成 uptime roster；detail status 每 15 秒、history 每 30 秒刷新。

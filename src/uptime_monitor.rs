@@ -2,6 +2,9 @@ use std::{collections::BTreeMap, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 
+mod ranges;
+pub use ranges::ExpectedSlotRange;
+
 pub const DEFAULT_INTERVAL_SECONDS: u32 = 60;
 pub const UPTIME_HISTORY_SCHEMA: &str = "service_monitor_observation.v1";
 pub const UPTIME_HISTORY_STREAM: &str = "service_monitor_observation-v1";
@@ -167,12 +170,13 @@ impl ServiceMonitor {
             return Err(MonitorValidationError::InvalidRevision);
         }
         self.target.validate()?;
-        if let Some(observer_node_ids) = &self.observer_node_ids
-            && observer_node_ids
-                .iter()
-                .any(|node_id| node_id.trim().is_empty())
-        {
-            return Err(MonitorValidationError::InvalidObserverSet);
+        if let Some(observer_node_ids) = &self.observer_node_ids {
+            let Some(normalized) = normalized_observer_set(observer_node_ids) else {
+                return Err(MonitorValidationError::InvalidObserverSet);
+            };
+            if normalized.len() != observer_node_ids.len() {
+                return Err(MonitorValidationError::InvalidObserverSet);
+            }
         }
         Ok(())
     }
@@ -258,6 +262,13 @@ pub struct Observation {
     pub monitor_id: String,
     pub revision: u64,
     pub observer_node_id: String,
+    /// The full Observer Set selected for this exact UTC slot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observer_set_node_ids: Vec<String>,
+    /// Snapshot of the scheduled Observer Set. This remains attached to history after a monitor
+    /// revision changes so coverage keeps the denominator that applied to the slot.
+    #[serde(default = "default_expected_observer_count")]
+    pub expected_observer_count: u32,
     pub slot_unix_seconds: u64,
     pub observed_at_unix_seconds: u64,
     pub outcome: ObservationOutcome,
@@ -286,6 +297,16 @@ pub struct UptimeHistoryPayload {
     pub bucket_start_unix_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket_end_unix_seconds: Option<u64>,
+    /// One count per UTC slot, merged by max while repository retention rolls records up.
+    /// Raw observer records for the same slot therefore retain a single stable denominator.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub expected_observer_counts_by_slot: BTreeMap<u64, u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub observer_sets_by_slot: BTreeMap<u64, Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_slot_ranges: Vec<ExpectedSlotRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_observation: Option<Observation>,
     #[serde(default)]
     pub record_count: u64,
     #[serde(default)]
@@ -304,6 +325,20 @@ impl UptimeHistoryPayload {
         let mut rollup = ObservationRollup::default();
         rollup.record_expected(1);
         rollup.record(observation);
+        let mut expected_observer_counts_by_slot = BTreeMap::new();
+        let mut observer_sets_by_slot = BTreeMap::new();
+        if !observation.ad_hoc {
+            let observer_set_node_ids = normalized_observer_set(&observation.observer_set_node_ids)
+                .unwrap_or_else(|| vec![observation.observer_node_id.clone()]);
+            expected_observer_counts_by_slot.insert(
+                observation.slot_unix_seconds,
+                u32::try_from(observer_set_node_ids.len())
+                    .unwrap_or(u32::MAX)
+                    .max(observation.expected_observer_count)
+                    .max(1),
+            );
+            observer_sets_by_slot.insert(observation.slot_unix_seconds, observer_set_node_ids);
+        }
         Self {
             monitor_id: observation.monitor_id.clone(),
             revision: observation.revision,
@@ -312,6 +347,46 @@ impl UptimeHistoryPayload {
             resolution: None,
             bucket_start_unix_seconds: None,
             bucket_end_unix_seconds: None,
+            expected_observer_counts_by_slot,
+            observer_sets_by_slot,
+            expected_slot_ranges: Vec::new(),
+            latest_observation: Some(observation.clone()),
+            record_count: 1,
+            first_sequence: 0,
+            last_sequence: 0,
+            payload_sha256: String::new(),
+            complete: true,
+            rollup,
+        }
+    }
+
+    pub fn from_capture_gap(
+        monitor_id: String,
+        revision: u64,
+        observer_node_id: String,
+        range: ExpectedSlotRange,
+    ) -> Self {
+        let skipped_slots =
+            range.slot_count_in(range.start_slot_unix_seconds, range.end_slot_unix_seconds);
+        let mut rollup = ObservationRollup {
+            suspended: skipped_slots,
+            ..ObservationRollup::default()
+        };
+        rollup
+            .errors
+            .insert(ObservationError::CaptureSuspended, skipped_slots);
+        Self {
+            monitor_id,
+            revision,
+            observer_node_id,
+            ad_hoc: false,
+            resolution: None,
+            bucket_start_unix_seconds: None,
+            bucket_end_unix_seconds: None,
+            expected_observer_counts_by_slot: BTreeMap::new(),
+            observer_sets_by_slot: BTreeMap::new(),
+            expected_slot_ranges: vec![range],
+            latest_observation: None,
             record_count: 1,
             first_sequence: 0,
             last_sequence: 0,
@@ -328,7 +403,49 @@ impl UptimeHistoryPayload {
     pub fn merge_rollup(&mut self, other: &Self) {
         self.rollup.merge(&other.rollup);
         self.record_count = self.record_count.saturating_add(other.record_count.max(1));
+        for (slot, expected_observer_count) in &other.expected_observer_counts_by_slot {
+            self.expected_observer_counts_by_slot
+                .entry(*slot)
+                .and_modify(|current| *current = (*current).max(*expected_observer_count))
+                .or_insert(*expected_observer_count);
+        }
+        for (slot, observer_set_node_ids) in &other.observer_sets_by_slot {
+            let incoming = normalized_observer_set(observer_set_node_ids).unwrap_or_default();
+            self.observer_sets_by_slot
+                .entry(*slot)
+                .and_modify(|current| {
+                    current.extend(incoming.iter().cloned());
+                    current.sort();
+                    current.dedup();
+                })
+                .or_insert(incoming);
+        }
+        self.expected_slot_ranges
+            .extend(other.expected_slot_ranges.iter().cloned());
+        self.expected_slot_ranges.sort();
+        self.expected_slot_ranges.dedup();
+        if other.latest_observation.as_ref().is_some_and(|incoming| {
+            self.latest_observation.as_ref().is_none_or(|current| {
+                (
+                    incoming.observed_at_unix_seconds,
+                    incoming.slot_unix_seconds,
+                ) >= (current.observed_at_unix_seconds, current.slot_unix_seconds)
+            })
+        }) {
+            self.latest_observation = other.latest_observation.clone();
+        }
     }
+}
+
+pub fn normalized_observer_set(node_ids: &[String]) -> Option<Vec<String>> {
+    let mut node_ids = node_ids
+        .iter()
+        .filter(|node_id| !node_id.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    node_ids.sort();
+    node_ids.dedup();
+    (!node_ids.is_empty()).then_some(node_ids)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -621,27 +738,36 @@ fn validate_public_host(host: &str) -> Result<(), MonitorValidationError> {
 
 pub fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => {
-            !ip.is_private()
-                && !ip.is_loopback()
-                && !ip.is_link_local()
-                && !ip.is_multicast()
-                && !ip.is_unspecified()
-                && !ip.is_broadcast()
-                && ip.octets()[0] != 0
-                && ip.octets()[0] != 100
-                && ip.octets()[0] != 127
-                && ip.octets()[0] < 224
-        }
-        IpAddr::V6(ip) => {
-            !ip.is_loopback()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-                && !ip.is_unique_local()
-                && !ip.is_unicast_link_local()
-                && !ip.segments().starts_with(&[0x2001, 0x0db8])
-        }
+        IpAddr::V4(ip) => is_public_ipv4(ip),
+        IpAddr::V6(ip) => ip.to_ipv4_mapped().map_or_else(
+            || {
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_multicast()
+                    && !ip.is_unique_local()
+                    && !ip.is_unicast_link_local()
+                    && !ip.segments().starts_with(&[0x2001, 0x0db8])
+            },
+            is_public_ipv4,
+        ),
     }
+}
+
+fn is_public_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    !ip.is_private()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_multicast()
+        && !ip.is_unspecified()
+        && !ip.is_broadcast()
+        && ip.octets()[0] != 0
+        && ip.octets()[0] != 100
+        && ip.octets()[0] != 127
+        && ip.octets()[0] < 224
+}
+
+fn default_expected_observer_count() -> u32 {
+    1
 }
 
 #[cfg(test)]
@@ -653,6 +779,8 @@ mod tests {
             monitor_id: "monitor".to_string(),
             revision: 1,
             observer_node_id: "node".to_string(),
+            observer_set_node_ids: vec!["node".to_string()],
+            expected_observer_count: 1,
             slot_unix_seconds: 60,
             observed_at_unix_seconds: 60,
             outcome,
@@ -683,6 +811,48 @@ mod tests {
             wrong_scheme.validate(),
             Err(MonitorValidationError::InvalidScheme)
         );
+    }
+
+    #[test]
+    fn rejects_empty_or_duplicate_observer_sets() {
+        let mut monitor = ServiceMonitor {
+            monitor_id: "monitor".to_owned(),
+            name: "Public health".to_owned(),
+            target: MonitorTarget::Ping {
+                host: "example.com".to_owned(),
+            },
+            interval_seconds: 60,
+            observer_node_ids: Some(Vec::new()),
+            lifecycle: MonitorLifecycle::Active,
+            revision: 1,
+            revision_effective_at_unix_seconds: 60,
+        };
+        assert_eq!(
+            monitor.validate(),
+            Err(MonitorValidationError::InvalidObserverSet)
+        );
+        monitor.observer_node_ids = Some(vec!["node-a".to_owned(), "node-a".to_owned()]);
+        assert_eq!(
+            monitor.validate(),
+            Err(MonitorValidationError::InvalidObserverSet)
+        );
+    }
+
+    #[test]
+    fn rejects_ipv4_mapped_private_addresses() {
+        for address in [
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+            "::ffff:169.254.169.254",
+        ] {
+            assert!(
+                !is_public_ip(address.parse().expect("valid IPv6 address")),
+                "{address} must be rejected"
+            );
+        }
+        assert!(is_public_ip(
+            "::ffff:8.8.8.8".parse().expect("valid IPv6 address")
+        ));
     }
 
     #[test]
@@ -724,6 +894,43 @@ mod tests {
         assert_eq!(merged.successes, 1);
         assert_eq!(merged.failures, 1);
         assert_eq!(merged.latency_histogram.percentile(95), Some(32));
+    }
+
+    #[test]
+    fn history_payload_retains_slot_denominators_and_latest_observation() {
+        let mut first = observation(ObservationOutcome::Success);
+        first.expected_observer_count = 3;
+        first.observer_set_node_ids = vec![
+            "node-a".to_owned(),
+            "node-b".to_owned(),
+            "node-c".to_owned(),
+        ];
+        let mut second = first.clone();
+        second.observer_node_id = "node-b".to_owned();
+        second.observed_at_unix_seconds = 61;
+        second.outcome = ObservationOutcome::Failure;
+
+        let mut payload = UptimeHistoryPayload::from_observation(&first);
+        payload.merge_rollup(&UptimeHistoryPayload::from_observation(&second));
+
+        assert_eq!(payload.expected_observer_counts_by_slot.get(&60), Some(&3));
+        assert_eq!(
+            payload.observer_sets_by_slot.get(&60),
+            Some(&vec![
+                "node-a".to_owned(),
+                "node-b".to_owned(),
+                "node-c".to_owned(),
+            ])
+        );
+        assert_eq!(payload.rollup.executed, 2);
+        assert_eq!(
+            payload
+                .latest_observation
+                .as_ref()
+                .expect("latest observation")
+                .observer_node_id,
+            "node-b"
+        );
     }
 
     #[test]

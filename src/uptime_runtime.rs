@@ -11,13 +11,15 @@ use tokio::{
 use crate::{
     id::new_ulid_string,
     uptime_monitor::{
-        DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_TOTAL_TIMEOUT_SECONDS, HttpMethod, MonitorTarget,
-        Observation, ObservationError, ObservationOutcome, ServiceMonitor, is_public_ip,
+        DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_TOTAL_TIMEOUT_SECONDS, HttpMethod,
+        MAX_MONITOR_TIMEOUT_SECONDS, MonitorTarget, Observation, ObservationError,
+        ObservationOutcome, ServiceMonitor, is_public_ip, normalized_observer_set,
     },
 };
 
 const MAX_PENDING_OBSERVATIONS: u64 = 100_000;
 const MAX_PENDING_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PENDING_CAPTURE_GAPS: u64 = 100_000;
 const HIGH_WATERMARK_PERCENT: u64 = 80;
 const LOW_WATERMARK_PERCENT: u64 = 60;
 const MAX_REDIRECTS: usize = 3;
@@ -25,7 +27,9 @@ const BODY_LIMIT_BYTES: usize = 64 * 1024;
 const AD_HOC_CONCURRENCY: usize = 4;
 const AD_HOC_RUNS_PER_MINUTE: u8 = 10;
 
+mod capture_gaps;
 mod scheduler;
+pub use capture_gaps::PendingCaptureGap;
 pub(crate) use scheduler::spawn_uptime_worker;
 #[cfg(test)]
 mod tests;
@@ -52,6 +56,7 @@ pub struct UptimeHandle {
 struct UptimeRuntime {
     connection: Connection,
     capture_suspended: bool,
+    capture_gaps_suspended: bool,
     ad_hoc_runs: BTreeMap<String, AdHocRateLimit>,
 }
 
@@ -111,6 +116,23 @@ impl UptimeHandle {
                 ON uptime_observations (enqueued, observed_at_unix_seconds, id);
             CREATE INDEX IF NOT EXISTS uptime_observations_monitor_history
                 ON uptime_observations (monitor_id, observed_at_unix_seconds, id);
+            CREATE TABLE IF NOT EXISTS uptime_capture_gaps (
+                id TEXT PRIMARY KEY,
+                monitor_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                observer_node_id TEXT NOT NULL,
+                interval_seconds INTEGER NOT NULL,
+                observer_set_node_ids_json BLOB NOT NULL,
+                start_slot_unix_seconds INTEGER NOT NULL,
+                end_slot_unix_seconds INTEGER NOT NULL,
+                enqueued INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS uptime_capture_gaps_pending
+                ON uptime_capture_gaps (enqueued, end_slot_unix_seconds, id);
+            CREATE INDEX IF NOT EXISTS uptime_capture_gaps_coalesce
+                ON uptime_capture_gaps
+                (monitor_id, revision, observer_node_id, interval_seconds, enqueued,
+                 end_slot_unix_seconds);
             CREATE TABLE IF NOT EXISTS uptime_runs (
                 run_id TEXT PRIMARY KEY,
                 monitor_id TEXT NOT NULL,
@@ -128,6 +150,7 @@ impl UptimeHandle {
         let mut runtime = UptimeRuntime {
             connection,
             capture_suspended: false,
+            capture_gaps_suspended: false,
             ad_hoc_runs: BTreeMap::new(),
         };
         runtime.refresh_capture_state()?;
@@ -149,7 +172,7 @@ impl UptimeHandle {
     ) -> Result<bool, rusqlite::Error> {
         let mut runtime = self.inner.lock().await;
         runtime.refresh_capture_state()?;
-        if runtime.capture_suspended {
+        if runtime.capture_suspended || runtime.capture_gaps_suspended {
             return Ok(false);
         }
         let payload = serde_json::to_vec(&observation)
@@ -433,6 +456,11 @@ impl UptimeHandle {
              WHERE enqueued = 1 AND observed_at_unix_seconds < ?1",
             [i64::try_from(before_unix_seconds).unwrap_or(i64::MAX)],
         )?;
+        runtime.connection.execute(
+            "DELETE FROM uptime_capture_gaps
+             WHERE enqueued = 1 AND end_slot_unix_seconds < ?1",
+            [i64::try_from(before_unix_seconds).unwrap_or(i64::MAX)],
+        )?;
         Ok(())
     }
 
@@ -440,6 +468,7 @@ impl UptimeHandle {
         &self,
         monitor: &ServiceMonitor,
         observer_node_id: String,
+        observer_set_node_ids: Vec<String>,
         slot_unix_seconds: u64,
         ad_hoc: bool,
     ) -> Observation {
@@ -459,10 +488,16 @@ impl UptimeHandle {
             }
             Err(error) => (ObservationOutcome::Failure, Some(error), None, None, 0),
         };
+        let observer_set_node_ids = normalized_observer_set(&observer_set_node_ids)
+            .unwrap_or_else(|| vec![observer_node_id.clone()]);
         Observation {
             monitor_id: monitor.monitor_id.clone(),
             revision: monitor.revision,
             observer_node_id,
+            expected_observer_count: u32::try_from(observer_set_node_ids.len())
+                .unwrap_or(u32::MAX)
+                .max(1),
+            observer_set_node_ids,
             slot_unix_seconds,
             observed_at_unix_seconds,
             outcome,
@@ -535,7 +570,7 @@ impl UptimeRuntime {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         Ok(CaptureState {
-            suspended: self.capture_suspended,
+            suspended: self.capture_suspended || self.capture_gaps_suspended,
             pending_observations: u64::try_from(count).unwrap_or(u64::MAX),
             pending_bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
         })
@@ -554,6 +589,14 @@ impl UptimeRuntime {
             self.capture_suspended =
                 state.pending_observations >= high_count || state.pending_bytes >= high_bytes;
         }
+        let pending_capture_gaps = self.pending_capture_gap_count()?;
+        let high_gaps = MAX_PENDING_CAPTURE_GAPS * HIGH_WATERMARK_PERCENT / 100;
+        let low_gaps = MAX_PENDING_CAPTURE_GAPS * LOW_WATERMARK_PERCENT / 100;
+        self.capture_gaps_suspended = if self.capture_gaps_suspended {
+            pending_capture_gaps > low_gaps
+        } else {
+            pending_capture_gaps >= high_gaps
+        };
         Ok(())
     }
 }
@@ -586,6 +629,26 @@ struct ExecutionResult {
 }
 
 async fn execute_target(target: &MonitorTarget) -> Result<ExecutionResult, ObservationError> {
+    tokio::time::timeout(
+        Duration::from_secs(u64::from(MAX_MONITOR_TIMEOUT_SECONDS)),
+        execute_target_with_total_timeout(target),
+    )
+    .await
+    .map_err(|_| ObservationError::TotalTimeout)?
+}
+
+async fn execute_target_with_total_timeout(
+    target: &MonitorTarget,
+) -> Result<ExecutionResult, ObservationError> {
+    tokio::time::timeout(
+        Duration::from_secs(u64::from(DEFAULT_TOTAL_TIMEOUT_SECONDS)),
+        execute_target_inner(target),
+    )
+    .await
+    .map_err(|_| ObservationError::TotalTimeout)?
+}
+
+async fn execute_target_inner(target: &MonitorTarget) -> Result<ExecutionResult, ObservationError> {
     match target {
         MonitorTarget::Http {
             url,
@@ -719,12 +782,10 @@ async fn execute_tcp(host: &str, port: u16) -> Result<ExecutionResult, Observati
     let started = Instant::now();
     let addresses = resolve_public_addresses(host, port).await?;
     for address in addresses {
-        match tokio::time::timeout(
-            Duration::from_secs(u64::from(DEFAULT_CONNECT_TIMEOUT_SECONDS)),
-            TcpStream::connect(address),
-        )
-        .await
-        {
+        let Some(timeout) = tcp_connect_timeout(started.elapsed()) else {
+            return Err(ObservationError::TotalTimeout);
+        };
+        match tokio::time::timeout(timeout, TcpStream::connect(address)).await {
             Ok(Ok(_stream)) => {
                 return Ok(ExecutionResult {
                     latency_ms: duration_ms(started.elapsed()),
@@ -737,6 +798,17 @@ async fn execute_tcp(host: &str, port: u16) -> Result<ExecutionResult, Observati
         }
     }
     Err(ObservationError::TcpConnect)
+}
+
+fn tcp_connect_timeout(elapsed: Duration) -> Option<Duration> {
+    Duration::from_secs(u64::from(DEFAULT_TOTAL_TIMEOUT_SECONDS))
+        .checked_sub(elapsed)
+        .filter(|remaining| !remaining.is_zero())
+        .map(|remaining| {
+            remaining.min(Duration::from_secs(u64::from(
+                DEFAULT_CONNECT_TIMEOUT_SECONDS,
+            )))
+        })
 }
 
 async fn execute_ping(host: &str) -> Result<ExecutionResult, ObservationError> {

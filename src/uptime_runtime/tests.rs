@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
 use super::*;
@@ -9,6 +9,8 @@ fn observation(slot: u64) -> Observation {
         monitor_id: "monitor".to_owned(),
         revision: 1,
         observer_node_id: "node".to_owned(),
+        observer_set_node_ids: vec!["node".to_owned()],
+        expected_observer_count: 1,
         slot_unix_seconds: slot,
         observed_at_unix_seconds: slot,
         outcome: ObservationOutcome::Success,
@@ -18,6 +20,26 @@ fn observation(slot: u64) -> Observation {
         packet_loss_percent: 0,
         ad_hoc: false,
     }
+}
+
+#[test]
+fn tcp_connect_timeout_never_exceeds_the_shared_total_deadline() {
+    assert_eq!(
+        tcp_connect_timeout(Duration::ZERO),
+        Some(Duration::from_secs(u64::from(
+            DEFAULT_CONNECT_TIMEOUT_SECONDS
+        )))
+    );
+    assert_eq!(
+        tcp_connect_timeout(Duration::from_secs(7)),
+        Some(Duration::from_secs(3))
+    );
+    assert_eq!(
+        tcp_connect_timeout(Duration::from_secs(u64::from(
+            DEFAULT_TOTAL_TIMEOUT_SECONDS
+        ))),
+        None
+    );
 }
 
 #[tokio::test]
@@ -33,6 +55,123 @@ async fn persists_pending_observations_before_history_delivery() {
         .await
         .unwrap();
     assert!(handle.pending(10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn coalesces_skipped_slots_into_a_persisted_capture_gap() {
+    let temporary = TempDir::new().unwrap();
+    let handle = UptimeHandle::load(temporary.path()).unwrap();
+    let monitor = ServiceMonitor {
+        monitor_id: "monitor".to_owned(),
+        name: "Example".to_owned(),
+        target: MonitorTarget::Tcping {
+            host: "example.com".to_owned(),
+            port: 443,
+        },
+        interval_seconds: 60,
+        observer_node_ids: Some(vec!["node".to_owned()]),
+        lifecycle: MonitorLifecycle::Active,
+        revision: 1,
+        revision_effective_at_unix_seconds: 60,
+    };
+
+    assert!(
+        handle
+            .record_capture_gap(&monitor, "node".to_owned(), vec!["node".to_owned()], 60)
+            .await
+            .unwrap()
+    );
+    assert!(
+        handle
+            .record_capture_gap(&monitor, "node".to_owned(), vec!["node".to_owned()], 120)
+            .await
+            .unwrap()
+    );
+    let pending = handle.pending_capture_gaps(10).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].range.start_slot_unix_seconds, 60);
+    assert_eq!(pending[0].range.end_slot_unix_seconds, 120);
+
+    handle
+        .mark_capture_gaps_enqueued(&[pending[0].id.clone()])
+        .await
+        .unwrap();
+    assert!(handle.pending_capture_gaps(10).await.unwrap().is_empty());
+    assert_eq!(
+        handle
+            .capture_gaps("monitor", 0, 180, 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn suspends_capture_when_the_gap_backlog_reaches_its_high_watermark() {
+    let temporary = TempDir::new().unwrap();
+    let handle = UptimeHandle::load(temporary.path()).unwrap();
+    {
+        let runtime = handle.inner.lock().await;
+        let transaction = runtime.connection.unchecked_transaction().unwrap();
+        for index in 0..(MAX_PENDING_CAPTURE_GAPS * HIGH_WATERMARK_PERCENT / 100) {
+            transaction
+                .execute(
+                    "INSERT INTO uptime_capture_gaps
+                     (id, monitor_id, revision, observer_node_id, interval_seconds,
+                      observer_set_node_ids_json, start_slot_unix_seconds, end_slot_unix_seconds)
+                     VALUES (?1, ?2, 1, 'node', 60, ?3, 60, 60)",
+                    params![
+                        format!("gap-{index}"),
+                        format!("monitor-{index}"),
+                        br#"["node"]"#,
+                    ],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+    }
+
+    assert!(handle.capture_state().await.unwrap().suspended);
+    let monitor = ServiceMonitor {
+        monitor_id: "monitor".to_owned(),
+        name: "Example".to_owned(),
+        target: MonitorTarget::Tcping {
+            host: "example.com".to_owned(),
+            port: 443,
+        },
+        interval_seconds: 60,
+        observer_node_ids: Some(vec!["node".to_owned()]),
+        lifecycle: MonitorLifecycle::Active,
+        revision: 1,
+        revision_effective_at_unix_seconds: 60,
+    };
+    assert!(
+        !handle
+            .record_capture_gap(&monitor, "node".to_owned(), vec!["node".to_owned()], 60)
+            .await
+            .unwrap()
+    );
+    let pending = handle
+        .pending_capture_gaps(
+            usize::try_from(
+                MAX_PENDING_CAPTURE_GAPS * (HIGH_WATERMARK_PERCENT - LOW_WATERMARK_PERCENT) / 100,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    handle
+        .mark_capture_gaps_enqueued(&pending.iter().map(|gap| gap.id.clone()).collect::<Vec<_>>())
+        .await
+        .unwrap();
+    assert!(!handle.capture_state().await.unwrap().suspended);
+    assert!(
+        handle
+            .record_capture_gap(&monitor, "node".to_owned(), vec!["node".to_owned()], 60)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]

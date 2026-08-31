@@ -608,6 +608,8 @@ fn uptime_retention_merges_rollups_without_losing_outcomes() {
                 monitor_id: "monitor-a".to_owned(),
                 revision: 1,
                 observer_node_id: "node-a".to_owned(),
+                observer_set_node_ids: vec!["node-a".to_owned()],
+                expected_observer_count: 1,
                 slot_unix_seconds: observed_at + u64::try_from(sequence).unwrap(),
                 observed_at_unix_seconds: observed_at + u64::try_from(sequence).unwrap(),
                 outcome,

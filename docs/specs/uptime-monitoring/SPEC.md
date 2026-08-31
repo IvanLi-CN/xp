@@ -45,7 +45,8 @@ Raft 也不应承载高频 Observation。
   历史自然过期。
 - 最小周期为 60 秒，允许 `1m`、`5m`、`15m`、`1h`；Slot UTC 对齐。
 - 默认 Observer Set 是所有具备方法能力的节点，管理员可设置 allowlist。
-- 每个 Slot 固定其 Observer Node 集合；进程重启不补跑，
+- 每个 Slot 固定其 Observer Node 集合，并将该快照连同 Observation 进入 History
+  Repository；未执行的已知 Slot 以压缩缺口范围持久化并进入同一 stream。进程重启不补跑，
   计划检查不自动重试。
 - 默认 Observation Budget 是 300 个 `monitor × observer` Slot/分钟。
 - 超预算写入返回 `observation_budget_exceeded`，不得静默改变配置。
@@ -68,9 +69,10 @@ Raft 也不应承载高频 Observation。
 ### Persistence, rollup, and quality
 
 - 每个 Observation 先写 Source Delivery Journal，再投递到 History Repository。
-- journal 无法接收记录时停止新检查并显示 `capture_suspended`；
-  不得探测后丢弃。
-- uptime backlog 上限为 64 MiB 或 100,000 条，以先到者为准；低于 60% 后恢复。
+- journal 无法接收记录时停止新检查并显示 `capture_suspended`；停止期间的已知 Slot 以有界、
+  连续范围记录为 gap，不得探测后丢弃或把缺口伪装成未排期。
+- uptime observation backlog 上限为 64 MiB 或 100,000 条，以先到者为准；压缩 gap
+  range backlog 也以 100,000 条为界；两者都在 80% 停止新采集，并低于 60% 后恢复。
 - Observation stream 为 `service_monitor_observation-v1`，
   复用签名、cursor、ack 与 fork 防护。
 - Repository 以 source epoch、stream、sequence 幂等接收，并保存完整已知并集。
@@ -82,8 +84,8 @@ Raft 也不应承载高频 Observation。
 - unsupported、suspended、未采集 Slot 不计入可用率分母，
   但必须影响覆盖率或 quality。
 - 当前状态：全成功 `up`、全失败 `down`、混合 `degraded`、无结果 `unknown`。
-- 最新完整 Slot 超过约两个周期时为 `unknown`；
-  `capture_suspended` 是独立采集状态。
+- 当前状态只使用最新、同 revision 且 Observer Set 完整的 Slot；缺少任一 Observer 或最新完整
+  Slot 超过约两个周期时为 `unknown`；`capture_suspended` 是独立采集状态。
 - 查询必须返回 complete、partial 或 local_only，
   以及 coverage、watermark、gap、skew、freshness。
 
@@ -96,7 +98,7 @@ Raft 也不应承载高频 Observation。
 - history 自动选择 `1m`、`5m`、`1h`，
   最多约 1,500 点，并支持有界最近检查分页。
 - Web 新增一级导航“服务监控”与 `/monitors`、new、detail、edit 路由。
-- 总览显示状态、目标、方法、延迟、24h 可用率/覆盖率、
+- 总览显示状态、目标、方法、延迟、最近 6 小时可用率/覆盖率、72 个五分钟连续性格、
   Observer 数和 quality。
 - 详情显示状态时间线、延迟与统计图、Observer 结果、
   最近检查和 quality 横幅。

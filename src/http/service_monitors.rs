@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use axum::{
     Json, Router,
@@ -11,11 +11,11 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     id::new_ulid_string,
-    state::{DesiredStateCommand, history_repository::query::Completeness},
+    state::DesiredStateCommand,
     uptime_monitor::{
         CurrentStatus, MAX_HISTORY_POINTS, MonitorKind, MonitorLifecycle, MonitorTarget,
         Observation, ObservationError, ObservationOutcome, ObservationRollup, ServiceMonitor,
-        UPTIME_HISTORY_SCHEMA, UptimeHistoryPayload, next_slot, status_is_stale,
+        next_slot, normalized_observer_set, status_is_stale,
     },
     uptime_runtime::{AdHocRun, AdHocRunState, CaptureState},
 };
@@ -23,8 +23,9 @@ use crate::{
 use super::{ApiError, ApiJson, AppState, Items, raft_write};
 
 mod history;
+mod status;
 
-use history::{expected_slots, recent_history_summary, select_resolution, status_for};
+use history::{recent_history_summary, status_for};
 
 const OBSERVATION_BUDGET_PER_MINUTE: u64 = 300;
 const RECENT_SUMMARY_BUCKET_SECONDS: u64 = 5 * 60;
@@ -50,11 +51,11 @@ pub(super) fn router() -> Router {
         .route("/monitor-runs/{run_id}", get(admin_get_service_monitor_run))
         .route(
             "/monitors/{monitor_id}/status",
-            get(admin_get_service_monitor_status),
+            get(status::admin_get_service_monitor_status),
         )
         .route(
             "/monitors/{monitor_id}/history",
-            get(admin_get_service_monitor_history),
+            get(history::admin_get_service_monitor_history),
         )
 }
 
@@ -246,15 +247,16 @@ pub(super) async fn admin_list_service_monitors(
             .map_err(storage_error)?;
         let recent_6h =
             recent_history_summary(&monitor, capture, now, latest.as_ref(), observations);
+        let stale = status_is_stale(
+            latest
+                .as_ref()
+                .map(|observation| observation.observed_at_unix_seconds),
+            now,
+            monitor.interval_seconds,
+        );
         items.push(ServiceMonitorSummary {
-            stale: status_is_stale(
-                latest
-                    .as_ref()
-                    .map(|observation| observation.observed_at_unix_seconds),
-                now,
-                monitor.interval_seconds,
-            ),
-            status: status_for(latest.into_iter().collect(), capture),
+            stale,
+            status: status_for(latest.into_iter().collect(), capture, stale),
             monitor,
             quality,
             recent_6h,
@@ -455,7 +457,15 @@ pub(super) async fn admin_run_service_monitor(
         if uptime.mark_ad_hoc_run_running(&task_run_id).await.is_err() {
             return;
         }
-        let observation = uptime.run(&monitor, observer_node_id, now, true).await;
+        let observation = uptime
+            .run(
+                &monitor,
+                observer_node_id.clone(),
+                vec![observer_node_id],
+                now,
+                true,
+            )
+            .await;
         match uptime
             .record_with_id(task_run_id.clone(), observation.clone())
             .await
@@ -537,6 +547,8 @@ fn failed_target_preflight(observer_node_id: &str, now: u64) -> Observation {
         monitor_id: format!("preflight-{}", new_ulid_string()),
         revision: 1,
         observer_node_id: observer_node_id.to_owned(),
+        observer_set_node_ids: vec![observer_node_id.to_owned()],
+        expected_observer_count: 1,
         slot_unix_seconds: now,
         observed_at_unix_seconds: now,
         outcome: ObservationOutcome::Failure,
@@ -577,7 +589,13 @@ async fn run_target_preflight(state: &AppState, target: MonitorTarget, now: u64)
     };
     state
         .uptime
-        .run(&monitor, state.cluster.node_id.clone(), now, true)
+        .run(
+            &monitor,
+            state.cluster.node_id.clone(),
+            vec![state.cluster.node_id.clone()],
+            now,
+            true,
+        )
         .await
 }
 
@@ -594,207 +612,6 @@ pub(super) async fn admin_get_service_monitor_run(
         .ok_or_else(|| ApiError::not_found("ad-hoc monitor run not found"))
 }
 
-pub(super) async fn admin_get_service_monitor_status(
-    Extension(state): Extension<AppState>,
-    Path(monitor_id): Path<String>,
-) -> Result<Json<ServiceMonitorStatusResponse>, ApiError> {
-    let monitor = monitor_for(&state, &monitor_id).await?;
-    let now = now_unix_seconds();
-    let capture = state.uptime.capture_state().await.map_err(storage_error)?;
-    let quality = HistoryQuality::LocalOnly;
-    let latest = state
-        .uptime
-        .latest(&monitor_id)
-        .await
-        .map_err(storage_error)?;
-    let observer_node_ids = observer_node_ids(&state, &monitor).await;
-    let observers = observer_node_ids
-        .into_iter()
-        .map(|node_id| {
-            let local_observation = (node_id == state.cluster.node_id)
-                .then(|| latest.clone())
-                .flatten();
-            ObserverStatus {
-                state: status_for(local_observation.clone().into_iter().collect(), capture),
-                latest: local_observation,
-                icmp_supported: (node_id == state.cluster.node_id)
-                    .then(crate::uptime_runtime::icmp_supported),
-                node_id,
-            }
-        })
-        .collect();
-    Ok(Json(ServiceMonitorStatusResponse {
-        freshness_seconds: latest
-            .as_ref()
-            .map(|observation| now.saturating_sub(observation.observed_at_unix_seconds)),
-        stale: status_is_stale(
-            latest
-                .as_ref()
-                .map(|observation| observation.observed_at_unix_seconds),
-            now,
-            monitor.interval_seconds,
-        ),
-        status: status_for(latest.into_iter().collect(), capture),
-        monitor_id,
-        capture,
-        quality,
-        observers,
-    }))
-}
-
-pub(super) async fn admin_get_service_monitor_history(
-    Extension(state): Extension<AppState>,
-    Path(monitor_id): Path<String>,
-    Query(query): Query<HistoryQuery>,
-) -> Result<Json<ServiceMonitorHistoryResponse>, ApiError> {
-    let monitor = monitor_for(&state, &monitor_id).await?;
-    let now = now_unix_seconds();
-    let end = query.to.unwrap_or(now).min(now);
-    let start = query
-        .from
-        .unwrap_or_else(|| end.saturating_sub(24 * 60 * 60));
-    if start > end {
-        return Err(ApiError::invalid_request(
-            "history from must not be after to",
-        ));
-    }
-    let requested_limit = query.limit.unwrap_or(MAX_HISTORY_POINTS);
-    let limit = requested_limit.clamp(1, MAX_HISTORY_POINTS);
-    let (resolution, seconds) = select_resolution(query.resolution.as_deref(), start, end, limit)?;
-    let repository =
-        super::history_repository::query_service_monitor_history(&state, &monitor_id, start, end)
-            .await?;
-    let mut quality = match repository.plan().completeness() {
-        Completeness::Complete => HistoryQuality::Complete,
-        Completeness::Partial => HistoryQuality::Partial,
-        Completeness::LocalOnly => HistoryQuality::LocalOnly,
-    };
-    let repository_selected = repository.plan().completeness() != Completeness::LocalOnly;
-    let repository_truncated = repository.records_truncated();
-    let mut buckets = BTreeMap::<u64, ObservationRollup>::new();
-    if repository_selected {
-        for record in repository.records() {
-            if record.schema_id() != UPTIME_HISTORY_SCHEMA {
-                continue;
-            }
-            let Ok(payload) = serde_json::from_slice::<UptimeHistoryPayload>(record.payload())
-            else {
-                continue;
-            };
-            if payload.ad_hoc
-                || query
-                    .observer_id
-                    .as_deref()
-                    .is_some_and(|observer_id| observer_id != payload.observer_node_id)
-            {
-                continue;
-            }
-            let observed_at = payload
-                .bucket_start_unix_seconds
-                .unwrap_or_else(|| record.observed_at_unix_seconds());
-            let bucket_start = observed_at / seconds * seconds;
-            buckets
-                .entry(bucket_start)
-                .or_default()
-                .merge(&payload.rollup);
-        }
-    } else {
-        let observations = state
-            .uptime
-            .observations(
-                &monitor_id,
-                start,
-                end,
-                MAX_HISTORY_POINTS.saturating_mul(32),
-            )
-            .await
-            .map_err(storage_error)?;
-        for observation in observations.into_iter().filter(|observation| {
-            !observation.ad_hoc
-                && query
-                    .observer_id
-                    .as_deref()
-                    .is_none_or(|observer_id| observer_id == observation.observer_node_id)
-        }) {
-            let bucket_start = observation.observed_at_unix_seconds / seconds * seconds;
-            let rollup = buckets.entry(bucket_start).or_default();
-            rollup.record(&observation);
-        }
-    }
-    let observer_count = if query.observer_id.is_some() {
-        1
-    } else {
-        u64::try_from(observer_node_ids(&state, &monitor).await.len()).unwrap_or(u64::MAX)
-    };
-    let mut points = buckets
-        .into_iter()
-        .map(|(bucket_start, mut rollup)| {
-            let bucket_end = bucket_start
-                .saturating_add(seconds.saturating_sub(1))
-                .min(end);
-            rollup.expected = expected_slots(
-                bucket_start.max(start),
-                bucket_end,
-                monitor.interval_seconds,
-            )
-            .saturating_mul(observer_count);
-            HistoryPoint {
-                start_unix_seconds: bucket_start,
-                end_unix_seconds: bucket_end,
-                availability_percent: rollup.availability_percent(),
-                coverage_percent: rollup.coverage_percent(),
-                rollup,
-            }
-        })
-        .collect::<Vec<_>>();
-    let truncated = repository_truncated || points.len() > limit;
-    if truncated {
-        points.drain(..points.len().saturating_sub(limit));
-    }
-    let expected = points
-        .iter()
-        .map(|point| point.rollup.expected)
-        .sum::<u64>();
-    let executed = points
-        .iter()
-        .map(|point| point.rollup.executed)
-        .sum::<u64>();
-    let gaps = points
-        .iter()
-        .filter(|point| point.rollup.executed < point.rollup.expected)
-        .map(|point| HistoryGap {
-            start_unix_seconds: point.start_unix_seconds,
-            end_unix_seconds: point.end_unix_seconds,
-            expected: point.rollup.expected,
-            executed: point.rollup.executed,
-        })
-        .collect();
-    if truncated {
-        quality = HistoryQuality::Partial;
-    }
-    let latest = state
-        .uptime
-        .latest(&monitor_id)
-        .await
-        .map_err(storage_error)?;
-    Ok(Json(ServiceMonitorHistoryResponse {
-        monitor_id,
-        resolution,
-        coverage_percent: (expected > 0).then(|| executed as f64 * 100.0 / expected as f64),
-        watermark_unix_seconds: latest
-            .as_ref()
-            .map(|observation| observation.observed_at_unix_seconds),
-        freshness_seconds: latest
-            .as_ref()
-            .map(|observation| now.saturating_sub(observation.observed_at_unix_seconds)),
-        quality,
-        points,
-        truncated,
-        gaps,
-        skew_seconds: 0,
-    }))
-}
-
 async fn monitor_for(state: &AppState, monitor_id: &str) -> Result<ServiceMonitor, ApiError> {
     let store = state.store.lock().await;
     store
@@ -804,7 +621,7 @@ async fn monitor_for(state: &AppState, monitor_id: &str) -> Result<ServiceMonito
 
 async fn observer_node_ids(state: &AppState, monitor: &ServiceMonitor) -> Vec<String> {
     if let Some(node_ids) = &monitor.observer_node_ids {
-        return node_ids.clone();
+        return normalized_observer_set(node_ids).unwrap_or_default();
     }
     let store = state.store.lock().await;
     store
@@ -836,7 +653,9 @@ async fn ensure_observation_budget(
             let observers = monitor
                 .observer_node_ids
                 .as_ref()
-                .map_or(node_count, Vec::len);
+                .map_or(node_count, |node_ids| {
+                    normalized_observer_set(node_ids).map_or(0, |node_ids| node_ids.len())
+                });
             u64::try_from(observers)
                 .unwrap_or(u64::MAX)
                 .saturating_mul(60)
@@ -888,25 +707,95 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
     fn auto_history_resolution_obeys_the_point_budget() {
         assert_eq!(
-            select_resolution(None, 0, 1_499 * 60, MAX_HISTORY_POINTS).unwrap(),
+            history::select_resolution(None, 0, 1_499 * 60, MAX_HISTORY_POINTS).unwrap(),
             ("1m".to_owned(), 60)
         );
         assert_eq!(
-            select_resolution(None, 0, 1_500 * 60, MAX_HISTORY_POINTS).unwrap(),
+            history::select_resolution(None, 0, 1_500 * 60, MAX_HISTORY_POINTS).unwrap(),
             ("5m".to_owned(), 300)
         );
-        assert!(select_resolution(Some("daily"), 0, 1, 1).is_err());
+        assert!(history::select_resolution(Some("daily"), 0, 1, 1).is_err());
     }
 
     #[test]
     fn expected_slots_include_the_first_aligned_slot() {
-        assert_eq!(expected_slots(61, 180, 60), 2);
-        assert_eq!(expected_slots(61, 119, 60), 0);
+        assert_eq!(history::expected_slots(61, 180, 60), 2);
+        assert_eq!(history::expected_slots(61, 119, 60), 0);
+    }
+
+    #[test]
+    fn history_uses_the_observer_count_snapshotted_for_each_slot() {
+        let expected_by_slot = BTreeMap::from([(60, 3), (120, 3), (180, 1)]);
+        assert_eq!(
+            history::expected_observations_in_bucket(
+                &expected_by_slot,
+                &Default::default(),
+                60,
+                180,
+                false,
+            ),
+            7
+        );
+        assert_eq!(
+            history::expected_observations_in_bucket(
+                &expected_by_slot,
+                &Default::default(),
+                60,
+                180,
+                true,
+            ),
+            3
+        );
+    }
+
+    #[test]
+    fn keeps_the_latest_result_from_each_observer_for_cluster_status() {
+        let mut latest_by_observer = BTreeMap::new();
+        let mut tokyo = Observation {
+            monitor_id: "monitor".to_owned(),
+            revision: 1,
+            observer_node_id: "tokyo".to_owned(),
+            observer_set_node_ids: vec![
+                "frankfurt".to_owned(),
+                "singapore".to_owned(),
+                "tokyo".to_owned(),
+            ],
+            expected_observer_count: 3,
+            slot_unix_seconds: 60,
+            observed_at_unix_seconds: 60,
+            outcome: ObservationOutcome::Success,
+            error: None,
+            latency_ms: Some(20),
+            status_code: Some(200),
+            packet_loss_percent: 0,
+            ad_hoc: false,
+        };
+        let mut singapore = tokyo.clone();
+        singapore.observer_node_id = "singapore".to_owned();
+        singapore.observed_at_unix_seconds = 90;
+        singapore.outcome = ObservationOutcome::Failure;
+        status::insert_latest_observation(&mut latest_by_observer, tokyo.clone());
+        status::insert_latest_observation(&mut latest_by_observer, singapore.clone());
+        tokyo.observed_at_unix_seconds = 30;
+        tokyo.outcome = ObservationOutcome::Failure;
+        status::insert_latest_observation(&mut latest_by_observer, tokyo);
+
+        assert_eq!(latest_by_observer.len(), 2);
+        assert_eq!(
+            latest_by_observer.get("tokyo").unwrap().outcome,
+            ObservationOutcome::Success
+        );
+        assert_eq!(
+            latest_by_observer.get("singapore").unwrap().outcome,
+            ObservationOutcome::Failure
+        );
     }
 
     #[test]
@@ -927,6 +816,8 @@ mod tests {
             monitor_id: monitor.monitor_id.clone(),
             revision: 1,
             observer_node_id: "01JNODE0000000000000000001".to_owned(),
+            observer_set_node_ids: vec!["01JNODE0000000000000000001".to_owned()],
+            expected_observer_count: 1,
             slot_unix_seconds: 68_400,
             observed_at_unix_seconds: 68_400,
             outcome: crate::uptime_monitor::ObservationOutcome::Success,

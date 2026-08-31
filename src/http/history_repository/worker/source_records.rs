@@ -4,6 +4,7 @@ pub(super) struct SourceRecordBatch {
     records: Option<Vec<SyncRecord>>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
     pub(super) uptime_observation_ids: Vec<String>,
+    pub(super) uptime_capture_gap_ids: Vec<String>,
 }
 
 impl SourceRecordBatch {
@@ -18,6 +19,10 @@ impl SourceRecordBatch {
         state
             .uptime
             .mark_enqueued(&self.uptime_observation_ids)
+            .await?;
+        state
+            .uptime
+            .mark_capture_gaps_enqueued(&self.uptime_capture_gap_ids)
             .await?;
         Ok(())
     }
@@ -35,6 +40,7 @@ pub(super) async fn source_records(
         .repository_deletion_markers(&state.cluster.node_id)
         .await;
     let pending_uptime_observations = state.uptime.pending(512).await?;
+    let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
     let (inbound_ip, connections) = {
         let store = state.store.lock().await;
         let inbound_ip = serde_json::json!({
@@ -170,10 +176,31 @@ pub(super) async fn source_records(
             false,
         )?);
     }
+    for pending in &pending_uptime_capture_gaps {
+        let payload = crate::uptime_monitor::UptimeHistoryPayload::from_capture_gap(
+            pending.monitor_id.clone(),
+            pending.revision,
+            pending.observer_node_id.clone(),
+            pending.range.clone(),
+        );
+        records.push(source_record_with_key_for_subject(
+            crate::uptime_monitor::UPTIME_HISTORY_SCHEMA,
+            &pending.monitor_id,
+            &pending.observer_node_id,
+            pending.range.end_slot_unix_seconds,
+            pending.id.as_bytes().to_vec(),
+            serde_json::to_value(payload)?,
+            false,
+        )?);
+    }
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
         uptime_observation_ids: pending_uptime_observations
+            .into_iter()
+            .map(|pending| pending.id)
+            .collect(),
+        uptime_capture_gap_ids: pending_uptime_capture_gaps
             .into_iter()
             .map(|pending| pending.id)
             .collect(),
