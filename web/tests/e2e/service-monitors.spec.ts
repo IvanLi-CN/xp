@@ -1,5 +1,6 @@
 import { type Page, type Route, expect, test } from "@playwright/test";
 
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
 import { setAdminToken, setupApiMocks } from "./helpers";
 
@@ -46,17 +47,17 @@ function monitorStatus(monitor: Monitor) {
 		quality: "complete",
 		observers: [
 			{
-				node_id: "01JNODE0000000000000000001",
+				node_id: fixtureCatalog.identifier.nodePrimary(),
 				state: "up",
 				latest: {
 					monitor_id: monitor.monitor_id,
 					revision: monitor.revision,
-					observer_node_id: "01JNODE0000000000000000001",
+					observer_node_id: fixtureCatalog.identifier.nodePrimary(),
 					slot_unix_seconds: now - 60,
 					observed_at_unix_seconds: now - 18,
 					outcome: "success",
 					error: null,
-					latency_ms: 42,
+					latency_ms: fixtureCatalog.number.value42(),
 					status_code: 200,
 					packet_loss_percent: 0,
 					ad_hoc: false,
@@ -83,9 +84,9 @@ function monitorHistory(monitor: Monitor) {
 					unsupported: 0,
 					suspended: 0,
 					latency_count: 1,
-					latency_sum_ms: 42,
-					latency_min_ms: 42,
-					latency_max_ms: 42,
+					latency_sum_ms: fixtureCatalog.number.value42(),
+					latency_min_ms: fixtureCatalog.number.value42(),
+					latency_max_ms: fixtureCatalog.number.value42(),
 					latency_histogram: {
 						underflow: 0,
 						buckets: Array.from({ length: 32 }, (_, index) =>
@@ -115,7 +116,7 @@ function recentSummary() {
 		coverage_percent: 100,
 		expected: 360,
 		executed: 360,
-		latest_latency_ms: 42,
+		latest_latency_ms: fixtureCatalog.number.value42(),
 		latest_observed_at_unix_seconds: now - 18,
 		slots: Array.from({ length: 72 }, () => "up"),
 	};
@@ -167,12 +168,12 @@ async function setupServiceMonitorMocks(page: Page) {
 					{
 						monitor_id: "01JTEST0000000000000000001",
 						revision: 1,
-						observer_node_id: "01JNODE0000000000000000001",
+						observer_node_id: fixtureCatalog.identifier.nodePrimary(),
 						slot_unix_seconds: now,
 						observed_at_unix_seconds: now,
 						outcome: "success",
 						error: null,
-						latency_ms: 42,
+						latency_ms: fixtureCatalog.number.value42(),
 						status_code: 200,
 						packet_loss_percent: 0,
 						ad_hoc: true,
@@ -202,7 +203,10 @@ async function setupServiceMonitorMocks(page: Page) {
 		if (pathname === `/api/admin/monitors/${monitorId}/run`) {
 			return json(
 				route,
-				{ run_id: "01JRUN00000000000000000001", state: "queued" },
+				{
+					run_id: fixtureCatalog.identifier.probeRunPrimary(),
+					state: "queued",
+				},
 				202,
 			);
 		}
@@ -309,7 +313,7 @@ test("runs the backend cluster test from the B editor workspace", async ({
 		page.getByText("1 / 1 observers reached the target"),
 	).toBeVisible();
 	await expect(
-		page.getByText("01JNODE0000000000000000001", { exact: true }),
+		page.getByText(fixtureCatalog.identifier.nodePrimary(), { exact: true }),
 	).toBeVisible();
 	await expect(page.getByText("HTTP 200", { exact: true })).toBeVisible();
 });

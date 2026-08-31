@@ -785,7 +785,7 @@ mod tests {
             observed_at_unix_seconds: 60,
             outcome,
             error: None,
-            latency_ms: None,
+            latency_ms: xp_test_fixtures::none(),
             status_code: None,
             packet_loss_percent: 0,
             ad_hoc: false,
@@ -795,14 +795,14 @@ mod tests {
     #[test]
     fn rejects_private_and_mismatched_targets() {
         let private = MonitorTarget::Ping {
-            host: "127.0.0.1".to_string(),
+            host: xp_test_fixtures::loopback_address().to_string(),
         };
         assert_eq!(
             private.validate(),
             Err(MonitorValidationError::PrivateTarget)
         );
         let wrong_scheme = MonitorTarget::Https {
-            url: "http://example.com/health".to_string(),
+            url: xp_test_fixtures::canary_http_loopback_url().to_string(),
             method: HttpMethod::Get,
             accepted_statuses: default_http_status_ranges(),
             body_contains: None,
@@ -819,7 +819,7 @@ mod tests {
             monitor_id: "monitor".to_owned(),
             name: "Public health".to_owned(),
             target: MonitorTarget::Ping {
-                host: "example.com".to_owned(),
+                host: xp_test_fixtures::primary_host().to_owned(),
             },
             interval_seconds: 60,
             observer_node_ids: Some(Vec::new()),
@@ -879,13 +879,13 @@ mod tests {
         let mut left = ObservationRollup::default();
         left.record_expected(2);
         let mut first = observation(ObservationOutcome::Success);
-        first.latency_ms = Some(12);
+        first.latency_ms = xp_test_fixtures::optional_low_latency();
         left.record(&first);
         let mut right = ObservationRollup::default();
         right.record_expected(2);
         let mut second = observation(ObservationOutcome::Failure);
         second.error = Some(ObservationError::ConnectTimeout);
-        second.latency_ms = Some(40);
+        second.latency_ms = Some(xp_test_fixtures::number_value40());
         right.record(&second);
 
         let mut merged = left.clone();

@@ -614,7 +614,7 @@ fn uptime_retention_merges_rollups_without_losing_outcomes() {
                 observed_at_unix_seconds: observed_at + u64::try_from(sequence).unwrap(),
                 outcome,
                 error: None,
-                latency_ms: Some(10),
+                latency_ms: Some(xp_test_fixtures::number_value10()),
                 status_code: Some(200),
                 packet_loss_percent: 0,
                 ad_hoc: false,

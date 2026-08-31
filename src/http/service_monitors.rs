@@ -772,7 +772,7 @@ mod tests {
             observed_at_unix_seconds: 60,
             outcome: ObservationOutcome::Success,
             error: None,
-            latency_ms: Some(20),
+            latency_ms: Some(xp_test_fixtures::number_value20()),
             status_code: Some(200),
             packet_loss_percent: 0,
             ad_hoc: false,
@@ -804,7 +804,7 @@ mod tests {
             monitor_id: "01JMONITOR00000000000000000".to_owned(),
             name: "Public API".to_owned(),
             target: MonitorTarget::Ping {
-                host: "example.net".to_owned(),
+                host: xp_test_fixtures::primary_host().to_owned(),
             },
             interval_seconds: 3_600,
             observer_node_ids: None,
@@ -822,7 +822,7 @@ mod tests {
             observed_at_unix_seconds: 68_400,
             outcome: crate::uptime_monitor::ObservationOutcome::Success,
             error: None,
-            latency_ms: Some(42),
+            latency_ms: Some(xp_test_fixtures::number_value42()),
             status_code: None,
             packet_loss_percent: 0,
             ad_hoc: false,
@@ -831,7 +831,7 @@ mod tests {
             slot_unix_seconds: 86_400,
             observed_at_unix_seconds: 86_400,
             outcome: crate::uptime_monitor::ObservationOutcome::Failure,
-            latency_ms: None,
+            latency_ms: xp_test_fixtures::none(),
             ..success.clone()
         };
 

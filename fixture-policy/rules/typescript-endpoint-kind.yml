@@ -32,6 +32,16 @@ rule:
                   - pattern: '["endpoint_id"]'
                   - pattern: '["endpointId"]'
                   - pattern: '["port"]'
+    - not:
+        inside:
+          stopBy: end
+          all:
+            - kind: object
+            - has:
+                kind: pair
+                has:
+                  field: key
+                  regex: '^host$'
     - has:
         field: value
         not:

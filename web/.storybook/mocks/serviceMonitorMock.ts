@@ -4,6 +4,7 @@ import type {
 	ServiceMonitorStatusResponse,
 	ServiceMonitorSummary,
 } from "../../src/api/adminServiceMonitors";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 
 const NOW = Math.floor(Date.now() / 1000);
 
@@ -82,7 +83,11 @@ const MONITORS: ServiceMonitorSummary[] = [
 	{
 		monitor_id: "01JMONITOR00000000000000002",
 		name: "TCP edge port",
-		target: { kind: "tcping", host: "edge.example.net", port: 443 },
+		target: {
+			kind: "tcping",
+			host: fixtureCatalog.host.serverPrimary(),
+			port: fixtureCatalog.endpoint.port443(),
+		},
 		interval_seconds: 300,
 		observer_node_ids: ["01JNODE0000000000000000001"],
 		lifecycle: "active",
@@ -103,7 +108,7 @@ const MONITORS: ServiceMonitorSummary[] = [
 	{
 		monitor_id: "01JMONITOR00000000000000003",
 		name: "DNS reachability",
-		target: { kind: "ping", host: "resolver.example.net" },
+		target: { kind: "ping", host: fixtureCatalog.host.primary() },
 		interval_seconds: 900,
 		observer_node_ids: [
 			"01JNODE0000000000000000001",
@@ -159,12 +164,12 @@ export function monitorStatus(
 		quality: monitor.quality,
 		observers: [
 			{
-				node_id: "01JNODE0000000000000000001",
+				node_id: fixtureCatalog.identifier.nodePrimary(),
 				state: monitor.status,
 				latest: {
 					monitor_id: monitor.monitor_id,
 					revision: monitor.revision,
-					observer_node_id: "01JNODE0000000000000000001",
+					observer_node_id: fixtureCatalog.identifier.nodePrimary(),
 					slot_unix_seconds: NOW - 60,
 					observed_at_unix_seconds: NOW - 18,
 					outcome:
@@ -174,7 +179,10 @@ export function monitorStatus(
 								? "suspended"
 								: "failure",
 					error: monitor.status === "up" ? null : "connect_timeout",
-					latency_ms: monitor.status === "up" ? 42 : null,
+					latency_ms:
+						monitor.status === "up"
+							? fixtureCatalog.number.value42()
+							: fixtureCatalog.metric.none(),
 					status_code: monitor.status === "up" ? 200 : null,
 					packet_loss_percent: 0,
 					ad_hoc: false,
@@ -182,7 +190,7 @@ export function monitorStatus(
 				icmp_supported: true,
 			},
 			{
-				node_id: "01JNODE0000000000000000002",
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
 				state: monitor.status === "up" ? "up" : "down",
 				latest: null,
 				icmp_supported: false,

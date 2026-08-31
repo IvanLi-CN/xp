@@ -15,7 +15,7 @@ fn observation(slot: u64) -> Observation {
         observed_at_unix_seconds: slot,
         outcome: ObservationOutcome::Success,
         error: None,
-        latency_ms: Some(4),
+        latency_ms: Some(xp_test_fixtures::number_value4()),
         status_code: Some(200),
         packet_loss_percent: 0,
         ad_hoc: false,
@@ -65,7 +65,7 @@ async fn coalesces_skipped_slots_into_a_persisted_capture_gap() {
         monitor_id: "monitor".to_owned(),
         name: "Example".to_owned(),
         target: MonitorTarget::Tcping {
-            host: "example.com".to_owned(),
+            host: xp_test_fixtures::primary_host().to_owned(),
             port: 443,
         },
         interval_seconds: 60,
@@ -137,7 +137,7 @@ async fn suspends_capture_when_the_gap_backlog_reaches_its_high_watermark() {
         monitor_id: "monitor".to_owned(),
         name: "Example".to_owned(),
         target: MonitorTarget::Tcping {
-            host: "example.com".to_owned(),
+            host: xp_test_fixtures::primary_host().to_owned(),
             port: 443,
         },
         interval_seconds: 60,
@@ -179,7 +179,7 @@ async fn ad_hoc_run_persists_its_terminal_observation() {
     let temporary = TempDir::new().unwrap();
     let handle = UptimeHandle::load(temporary.path()).unwrap();
     let run = AdHocRun {
-        run_id: "run".to_owned(),
+        run_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
         monitor_id: "monitor".to_owned(),
         state: AdHocRunState::Queued,
         created_at_unix_seconds: 60,
@@ -188,18 +188,21 @@ async fn ad_hoc_run_persists_its_terminal_observation() {
         reason: None,
     };
     handle.create_ad_hoc_run(&run).await.unwrap();
-    handle.mark_ad_hoc_run_running("run").await.unwrap();
+    handle.mark_ad_hoc_run_running(&run.run_id).await.unwrap();
     let mut result = observation(61);
     result.ad_hoc = true;
     assert!(
         handle
-            .record_with_id("run".to_owned(), result.clone())
+            .record_with_id(run.run_id.clone(), result.clone())
             .await
             .unwrap()
     );
-    handle.complete_ad_hoc_run("run", &result).await.unwrap();
+    handle
+        .complete_ad_hoc_run(&run.run_id, &result)
+        .await
+        .unwrap();
 
-    let saved = handle.ad_hoc_run("run").await.unwrap().unwrap();
+    let saved = handle.ad_hoc_run(&run.run_id).await.unwrap().unwrap();
     assert!(matches!(saved.state, AdHocRunState::Succeeded));
     assert_eq!(saved.observation, Some(result));
 }
@@ -302,7 +305,7 @@ fn scheduled_monitor_requires_exact_slot_and_active_lifecycle() {
         monitor_id: "monitor".to_owned(),
         name: "Example".to_owned(),
         target: MonitorTarget::Tcping {
-            host: "example.com".to_owned(),
+            host: xp_test_fixtures::primary_host().to_owned(),
             port: 443,
         },
         interval_seconds: 60,

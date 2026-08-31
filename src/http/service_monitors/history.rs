@@ -522,7 +522,7 @@ mod tests {
             observed_at_unix_seconds: 60,
             outcome: ObservationOutcome::Success,
             error: None,
-            latency_ms: Some(1),
+            latency_ms: Some(xp_test_fixtures::number_value1()),
             status_code: None,
             packet_loss_percent: 0,
             ad_hoc: false,
