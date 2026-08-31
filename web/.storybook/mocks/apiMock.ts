@@ -911,20 +911,26 @@ function createDefaultSeed(): MockStateSeed {
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;
-	const nodeMihomoResourcePolicyByNodeId = Object.fromEntries(
-		nodes.map((node) => [
-			node.node_id,
-			{
-				node_id: node.node_id,
-				deployment_default_cidrs: ["192.168.0.0/16"],
-				override_cidrs: null,
-				effective_cidrs: ["192.168.0.0/16"],
-				source: "deployment_default" as const,
-				status: "healthy" as const,
-				error: null,
-			},
-		]),
-	) satisfies Record<string, AdminNodeMihomoResourcePolicy>;
+	const nodeMihomoResourcePolicyByNodeId = {
+		[fixtureCatalog.nodeId.fixture32()]: {
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+			override_cidrs: null,
+			effective_cidrs: [fixtureCatalog.address.privateCidr()],
+			source: "deployment_default" as const,
+			status: "healthy" as const,
+			error: null,
+		},
+		[fixtureCatalog.nodeId.fixture36()]: {
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+			override_cidrs: null,
+			effective_cidrs: [fixtureCatalog.address.privateCidr()],
+			source: "deployment_default" as const,
+			status: "healthy" as const,
+			error: null,
+		},
+	} satisfies Record<string, AdminNodeMihomoResourcePolicy>;
 	const nodeTcpConnectionsByNodeId = Object.fromEntries(
 		nodes.map((node) => [
 			node.node_id,

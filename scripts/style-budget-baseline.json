@@ -776,7 +776,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2527
+    "source_lines": 2533
   },
   "web/package.json": {
     "long_line_count": 1,
@@ -1100,7 +1100,7 @@
   },
   "fixture-policy/rules/catalog-value-types.yml": {
     "long_line_count": 4,
-    "max_line_length": 862
+    "max_line_length": 876
   },
   "fixture-policy/rules/rust-adapter-output-provenance.yml": {
     "long_line_count": 3,

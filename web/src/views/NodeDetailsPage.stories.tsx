@@ -103,11 +103,11 @@ const meta = {
 					[node.node_id, tcpConnectionReports],
 				]),
 				nodeMihomoResourcePolicyByNodeId: {
-					[node.node_id]: {
-						node_id: node.node_id,
-						deployment_default_cidrs: ["192.168.0.0/16"],
+					[fixtureCatalog.identifier.nodePrimary()]: {
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
 						override_cidrs: null,
-						effective_cidrs: ["192.168.0.0/16"],
+						effective_cidrs: [fixtureCatalog.address.privateCidr()],
 						source: "deployment_default",
 						status: "healthy",
 						error: null,
@@ -253,7 +253,9 @@ export const MihomoPrivateResourcePolicy: Story = {
 		await expect(
 			await canvas.findByText("Mihomo private resource policy"),
 		).toBeInTheDocument();
-		await expect(await canvas.findAllByText("192.168.0.0/16")).toHaveLength(2);
+		await expect(
+			await canvas.findAllByText(fixtureCatalog.address.privateCidr()),
+		).toHaveLength(2);
 		await expect(
 			await canvas.findByRole("button", { name: "Save override" }),
 		).toBeInTheDocument();
