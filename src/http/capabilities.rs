@@ -64,6 +64,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
             "admin.traffic-usage",
             "admin.mihomo-tools",
             "admin.mihomo-resource-policy",
+            "node.mihomo-resource-private-cidrs-v1",
             "cluster.join.staged-v1",
             "cluster.membership-lifecycle-v1",
             "cluster.mesh-reverse-assignment-v1",

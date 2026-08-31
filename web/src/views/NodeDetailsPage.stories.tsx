@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
-import type { AdminMembershipOperation, AdminNode } from "../api/adminNodes";
+import type {
+	AdminMembershipOperation,
+	AdminNode,
+	AdminNodeMihomoResourcePolicy,
+} from "../api/adminNodes";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
@@ -98,6 +102,17 @@ const meta = {
 				nodeTcpConnectionsByNodeId: Object.fromEntries([
 					[node.node_id, tcpConnectionReports],
 				]),
+				nodeMihomoResourcePolicyByNodeId: {
+					[node.node_id]: {
+						node_id: node.node_id,
+						deployment_default_cidrs: ["192.168.0.0/16"],
+						override_cidrs: null,
+						effective_cidrs: ["192.168.0.0/16"],
+						source: "deployment_default",
+						status: "healthy",
+						error: null,
+					} satisfies AdminNodeMihomoResourcePolicy,
+				},
 			},
 		},
 	},
@@ -199,6 +214,55 @@ export const MetadataEgressProbe: Story = {
 			await canvas.findAllByText(fixtureCatalog.address.tertiaryIpv4()),
 		).toHaveLength(2);
 		await expect(await canvas.findByText("ExampleNet")).toBeInTheDocument();
+	},
+};
+
+export const MihomoPrivateResourcePolicy: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoPolicyMobile",
+			viewports: {
+				mihomoPolicyMobile: {
+					name: "Mihomo policy mobile",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByText("Mihomo resources", { exact: true });
+		const mihomoTab = Array.from(
+			canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
+		).find((element) => element.textContent?.trim() === "Mihomo resources");
+		if (mihomoTab) {
+			mihomoTab.click();
+		} else {
+			const mobileSelect = canvasElement.querySelector<HTMLElement>(
+				'[role="combobox"][aria-label="Node details section"]',
+			);
+			if (!mobileSelect)
+				throw new Error("Mihomo navigation control is missing");
+			mobileSelect.click();
+			await userEvent.click(
+				await within(canvasElement.ownerDocument.body).findByRole("option", {
+					name: "Mihomo resources",
+				}),
+			);
+		}
+		await expect(
+			await canvas.findByText("Mihomo private resource policy"),
+		).toBeInTheDocument();
+		await expect(await canvas.findAllByText("192.168.0.0/16")).toHaveLength(2);
+		await expect(
+			await canvas.findByRole("button", { name: "Save override" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Disable private targets" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Restore deployment default" }),
+		).toBeInTheDocument();
 	},
 };
 

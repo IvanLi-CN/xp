@@ -78,6 +78,7 @@ use crate::{
         TelemetryPath, availability_for, latency_percentiles_for, mesh_transport_counts_for,
         mesh_transport_health_for, quality_for_peer,
     },
+    mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot},
     mihomo_redact, mihomo_resources,
     node_egress_probe::{NodeEgressProbeHandle, is_node_egress_probe_stale},
     node_history::{
@@ -145,6 +146,7 @@ pub struct AppState {
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
     pub mihomo_resource_directory: Arc<mihomo_resources::ResourceDirectoryCache>,
+    pub mihomo_resource_policy: Arc<MihomoResourcePolicy>,
     pub raft: Arc<dyn RaftFacade>,
     pub raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     pub geo_db_update: GeoDbUpdateHandle,
@@ -766,6 +768,23 @@ struct AdminMihomoResourcePolicyResponse {
     allow_private_targets: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdminNodeMihomoResourcePolicyResponse {
+    node_id: String,
+    deployment_default_cidrs: Vec<String>,
+    override_cidrs: Option<Vec<String>>,
+    effective_cidrs: Vec<String>,
+    source: mihomo_policy::PolicySource,
+    status: mihomo_policy::PolicyStatus,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutNodeMihomoResourcePolicyRequest {
+    override_cidrs: Vec<String>,
+}
+
 #[derive(Deserialize)]
 struct PatchUserRequest {
     #[serde(default, deserialize_with = "deserialize_optional_string")]
@@ -993,6 +1012,10 @@ pub fn build_router_with_mesh_telemetry(
             // advertise incomplete data as a fresh replica.
             panic!("repository replica checkpoint is unusable: {error}");
         });
+    let mihomo_resource_policy = Arc::new(
+        MihomoResourcePolicy::load(&config.data_dir)
+            .expect("parse Mihomo private CIDR deployment policy"),
+    );
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -1008,6 +1031,7 @@ pub fn build_router_with_mesh_telemetry(
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
         mihomo_resource_directory: Arc::new(mihomo_resources::ResourceDirectoryCache::new()),
+        mihomo_resource_policy,
         raft,
         raft_rpc: raft_rpc.clone(),
         geo_db_update,
@@ -1150,6 +1174,14 @@ pub fn build_router_with_mesh_telemetry(
         )
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/{node_id}/runtime", get(admin_get_node_runtime))
+        .route(
+            "/nodes/{node_id}/mihomo-resource-policy",
+            get(admin_get_node_mihomo_resource_policy).put(admin_put_node_mihomo_resource_policy),
+        )
+        .route(
+            "/nodes/{node_id}/mihomo-resource-policy/override",
+            delete(admin_delete_node_mihomo_resource_policy),
+        )
         .route("/nodes/{node_id}/history", get(admin_get_node_history))
         .route("/nodes/{node_id}/traffic", get(admin_get_node_traffic))
         .route("/nodes/{node_id}/ip-usage", get(admin_get_node_ip_usage))
@@ -1291,6 +1323,12 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
+        )
+        .route(
+            "/_internal/nodes/mihomo-resource-policy/local",
+            get(admin_internal_get_local_node_mihomo_resource_policy)
+                .put(admin_internal_put_local_node_mihomo_resource_policy)
+                .delete(admin_internal_delete_local_node_mihomo_resource_policy),
         )
         .route(
             "/_internal/nodes/egress-probe/local",
@@ -4375,10 +4413,6 @@ async fn build_admin_service_config_response(
         ip_geo_origin
     };
     let ip_geo_origin = ip_geo_origin.trim_end_matches('/').to_string();
-    let mihomo_resource_allow_private_targets = {
-        let store = state.store.lock().await;
-        store.mihomo_resource_allow_private_targets()
-    };
     let vless_https_canary_status = crate::vless_https_canary::load_status(
         &state.config.data_dir,
         state.config.vless_canary_bind,
@@ -4397,7 +4431,7 @@ async fn build_admin_service_config_response(
         quota_auto_unban: state.config.quota_auto_unban,
         ip_geo_enabled: state.config.ip_geo_enabled,
         ip_geo_origin,
-        mihomo_resource_allow_private_targets,
+        mihomo_resource_allow_private_targets: false,
         admin_token_present,
         admin_token_masked,
     })
@@ -4410,29 +4444,306 @@ async fn admin_get_config(
 }
 
 async fn admin_get_mihomo_resource_policy(
-    Extension(state): Extension<AppState>,
+    Extension(_state): Extension<AppState>,
 ) -> Result<Json<AdminMihomoResourcePolicyResponse>, ApiError> {
-    let store = state.store.lock().await;
+    // Kept for one compatibility window; authorization is node-local now.
     Ok(Json(AdminMihomoResourcePolicyResponse {
-        allow_private_targets: store.mihomo_resource_allow_private_targets(),
+        allow_private_targets: false,
     }))
 }
 
 async fn admin_put_mihomo_resource_policy(
-    Extension(state): Extension<AppState>,
+    Extension(_state): Extension<AppState>,
     ApiJson(req): ApiJson<PutMihomoResourcePolicyRequest>,
 ) -> Result<Json<AdminMihomoResourcePolicyResponse>, ApiError> {
-    raft_write(
-        &state,
-        DesiredStateCommand::SetMihomoResourceAllowPrivateTargets {
-            allow: req.allow_private_targets,
-        },
-    )
-    .await?;
+    let _ = req.allow_private_targets;
+    Err(ApiError::new(
+        "gone",
+        StatusCode::GONE,
+        "cluster-wide Mihomo private-target policy was replaced by node CIDR policy",
+    ))
+}
 
-    Ok(Json(AdminMihomoResourcePolicyResponse {
-        allow_private_targets: req.allow_private_targets,
-    }))
+fn node_mihomo_resource_policy_response(
+    node_id: String,
+    snapshot: PolicySnapshot,
+) -> AdminNodeMihomoResourcePolicyResponse {
+    let to_strings = |cidrs: &[ipnet::IpNet]| cidrs.iter().map(ToString::to_string).collect();
+    AdminNodeMihomoResourcePolicyResponse {
+        node_id,
+        deployment_default_cidrs: to_strings(&snapshot.deployment_default),
+        override_cidrs: snapshot.override_cidrs.as_deref().map(to_strings),
+        effective_cidrs: to_strings(&snapshot.effective),
+        source: snapshot.source,
+        status: snapshot.status,
+        error: snapshot.error,
+    }
+}
+
+async fn require_node_mihomo_resource_policy_capability(
+    state: &AppState,
+    node: &Node,
+) -> Result<(), ApiError> {
+    let response =
+        send_mesh_internal_capability_read(state, &state.mesh_client, node, Duration::from_secs(5))
+            .await
+            .map_err(|error| {
+                ApiError::new(
+                    "node_unreachable",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("node is unreachable: {}", error.message),
+                )
+            })?;
+    let MeshCapabilityProbeResponse::Verified(response) = response else {
+        return Err(ApiError::new(
+            "node_capability_unavailable",
+            StatusCode::CONFLICT,
+            "target node does not expose Mihomo private CIDR policy capability; upgrade it first",
+        ));
+    };
+    if !response.status().is_success() {
+        return Err(ApiError::new(
+            "node_capability_unavailable",
+            StatusCode::CONFLICT,
+            "target node capability probe was not accepted; upgrade it first",
+        ));
+    }
+    let body = response.json::<Value>().await.map_err(|_| {
+        ApiError::new(
+            "node_capability_unavailable",
+            StatusCode::CONFLICT,
+            "target node capability response is invalid; upgrade it first",
+        )
+    })?;
+    let supported = body
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some("node.mihomo-resource-private-cidrs-v1"))
+        });
+    if !supported {
+        return Err(ApiError::new(
+            "node_capability_unavailable",
+            StatusCode::CONFLICT,
+            "target node does not expose Mihomo private CIDR policy capability; upgrade it first",
+        ));
+    }
+    Ok(())
+}
+
+async fn admin_internal_get_local_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    Ok(Json(node_mihomo_resource_policy_response(
+        state.cluster.node_id.clone(),
+        state.mihomo_resource_policy.snapshot().await,
+    )))
+}
+
+async fn admin_internal_put_local_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+    ApiJson(req): ApiJson<PutNodeMihomoResourcePolicyRequest>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let snapshot = state
+        .mihomo_resource_policy
+        .set_override(req.override_cidrs)
+        .await
+        .map_err(|error| ApiError::unprocessable_entity(error.to_string()))?;
+    tracing::info!(
+        node_id = %state.cluster.node_id,
+        source = ?snapshot.source,
+        cidr_count = snapshot.effective.len(),
+        "Mihomo resource private CIDR override updated"
+    );
+    Ok(Json(node_mihomo_resource_policy_response(
+        state.cluster.node_id.clone(),
+        snapshot,
+    )))
+}
+
+async fn admin_internal_delete_local_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    internal: Option<Extension<InternalSignatureAuth>>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    if internal.is_none() {
+        return Err(ApiError::unauthorized("internal auth required"));
+    }
+    let snapshot = state
+        .mihomo_resource_policy
+        .clear_override()
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    tracing::info!(
+        node_id = %state.cluster.node_id,
+        "Mihomo resource private CIDR override removed"
+    );
+    Ok(Json(node_mihomo_resource_policy_response(
+        state.cluster.node_id.clone(),
+        snapshot,
+    )))
+}
+
+async fn admin_get_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    if node.node_id == state.cluster.node_id {
+        return Ok(Json(node_mihomo_resource_policy_response(
+            node_id,
+            state.mihomo_resource_policy.snapshot().await,
+        )));
+    }
+    require_node_mihomo_resource_policy_capability(&state, &node).await?;
+    let response = send_mesh_internal_read(
+        &state,
+        &state.mesh_client.clone(),
+        &node,
+        "/api/admin/_internal/nodes/mihomo-resource-policy/local".to_string(),
+        Duration::from_secs(3),
+    )
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node is unreachable",
+        )
+    })?;
+    if !response.status().is_success() {
+        return Err(ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node policy request failed",
+        ));
+    }
+    response
+        .json::<AdminNodeMihomoResourcePolicyResponse>()
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
+}
+
+async fn admin_put_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+    ApiJson(req): ApiJson<PutNodeMihomoResourcePolicyRequest>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    let body = serde_json::to_vec(&req).map_err(|error| ApiError::internal(error.to_string()))?;
+    if node.node_id == state.cluster.node_id {
+        return admin_internal_put_local_node_mihomo_resource_policy(
+            Extension(state),
+            Some(Extension(InternalSignatureAuth { verified: None })),
+            ApiJson(req),
+        )
+        .await;
+    }
+    require_node_mihomo_resource_policy_capability(&state, &node).await?;
+    let response = send_mesh_internal_request(
+        &state,
+        &state.mesh_client.clone(),
+        &node,
+        Method::PUT,
+        "/api/admin/_internal/nodes/mihomo-resource-policy/local".to_string(),
+        body,
+        Some("application/json".to_string()),
+        Duration::from_secs(5),
+        false,
+        crate::id::new_ulid_string(),
+    )
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node is unreachable",
+        )
+    })?;
+    if !response.status().is_success() {
+        return Err(ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node policy request failed",
+        ));
+    }
+    response
+        .json::<AdminNodeMihomoResourcePolicyResponse>()
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
+}
+
+async fn admin_delete_node_mihomo_resource_policy(
+    Extension(state): Extension<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<AdminNodeMihomoResourcePolicyResponse>, ApiError> {
+    let node = {
+        let store = state.store.lock().await;
+        store
+            .get_node(&node_id)
+            .ok_or_else(|| ApiError::not_found(format!("node not found: {node_id}")))?
+    };
+    if node.node_id == state.cluster.node_id {
+        return admin_internal_delete_local_node_mihomo_resource_policy(
+            Extension(state),
+            Some(Extension(InternalSignatureAuth { verified: None })),
+        )
+        .await;
+    }
+    require_node_mihomo_resource_policy_capability(&state, &node).await?;
+    let response = send_mesh_internal_request(
+        &state,
+        &state.mesh_client.clone(),
+        &node,
+        Method::DELETE,
+        "/api/admin/_internal/nodes/mihomo-resource-policy/local".to_string(),
+        Vec::new(),
+        None,
+        Duration::from_secs(5),
+        false,
+        crate::id::new_ulid_string(),
+    )
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node is unreachable",
+        )
+    })?;
+    if !response.status().is_success() {
+        return Err(ApiError::new(
+            "node_unreachable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "node policy request failed",
+        ));
+    }
+    response
+        .json::<AdminNodeMihomoResourcePolicyResponse>()
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 fn map_mihomo_redact_error(err: mihomo_redact::RedactError) -> ApiError {
@@ -8485,11 +8796,8 @@ async fn get_mihomo_resource(
     let Some(url) = url else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
-    let allow_private_targets = {
-        let store = state.store.lock().await;
-        store.mihomo_resource_allow_private_targets()
-    };
-    mihomo_resources::proxy_resource(url, &resource_id, allow_private_targets).await
+    mihomo_resources::proxy_resource_with_policy(url, &resource_id, &state.mihomo_resource_policy)
+        .await
 }
 
 #[cfg(test)]

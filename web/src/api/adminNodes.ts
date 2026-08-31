@@ -43,6 +43,20 @@ export const AdminNodeSchema = z
 
 export type AdminNode = z.infer<typeof AdminNodeSchema>;
 
+export const AdminNodeMihomoResourcePolicySchema = z.object({
+	node_id: z.string(),
+	deployment_default_cidrs: z.array(z.string()),
+	override_cidrs: z.array(z.string()).nullable(),
+	effective_cidrs: z.array(z.string()),
+	source: z.enum(["deployment_default", "override", "fail_closed"]),
+	status: z.enum(["healthy", "invalid_override"]),
+	error: z.string().nullable(),
+});
+
+export type AdminNodeMihomoResourcePolicy = z.infer<
+	typeof AdminNodeMihomoResourcePolicySchema
+>;
+
 export const AdminNodesResponseSchema = z
 	.object({
 		items: z.array(AdminNodeSchema),
@@ -170,6 +184,69 @@ export async function fetchAdminNode(
 
 	const json: unknown = await res.json();
 	return AdminNodeSchema.parse(json);
+}
+
+export async function fetchAdminNodeMihomoResourcePolicy(
+	adminToken: string,
+	nodeId: string,
+	signal?: AbortSignal,
+): Promise<AdminNodeMihomoResourcePolicy> {
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}/mihomo-resource-policy`,
+		{
+			method: "GET",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+	await throwIfNotOk(res);
+	return AdminNodeMihomoResourcePolicySchema.parse(await res.json());
+}
+
+export async function putAdminNodeMihomoResourcePolicy(
+	adminToken: string,
+	nodeId: string,
+	overrideCidrs: string[],
+	signal?: AbortSignal,
+): Promise<AdminNodeMihomoResourcePolicy> {
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}/mihomo-resource-policy`,
+		{
+			method: "PUT",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ override_cidrs: overrideCidrs }),
+			signal,
+		},
+	);
+	await throwIfNotOk(res);
+	return AdminNodeMihomoResourcePolicySchema.parse(await res.json());
+}
+
+export async function deleteAdminNodeMihomoResourcePolicy(
+	adminToken: string,
+	nodeId: string,
+	signal?: AbortSignal,
+): Promise<AdminNodeMihomoResourcePolicy> {
+	const res = await fetch(
+		`/api/admin/nodes/${encodeURIComponent(nodeId)}/mihomo-resource-policy/override`,
+		{
+			method: "DELETE",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${adminToken}`,
+			},
+			signal,
+		},
+	);
+	await throwIfNotOk(res);
+	return AdminNodeMihomoResourcePolicySchema.parse(await res.json());
 }
 
 export async function patchAdminNode(

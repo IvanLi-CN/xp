@@ -22,9 +22,12 @@ import {
 	type AdminNodeDeletePreviewEndpoint,
 	type AdminNodeEgressProbe,
 	type AdminNodePatchRequest,
+	deleteAdminNodeMihomoResourcePolicy,
 	fetchAdminNode,
 	fetchAdminNodeDeletePreview,
+	fetchAdminNodeMihomoResourcePolicy,
 	patchAdminNode,
+	putAdminNodeMihomoResourcePolicy,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
 import type { AdminTcpConnectionUsageWindow } from "../api/adminTcpConnections";
@@ -68,6 +71,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
 import { useNodeTimeWindowReports } from "../hooks/useNodeTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -186,6 +190,7 @@ type RuntimeActivityRow = {
 type NodeDetailsTab =
 	| "runtime"
 	| "metadata"
+	| "mihomo"
 	| "quota"
 	| "traffic"
 	| "ipUsage"
@@ -198,6 +203,7 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 }> = [
 	{ value: "runtime", label: "Service runtime" },
 	{ value: "metadata", label: "Node metadata" },
+	{ value: "mihomo", label: "Mihomo resources" },
 	{ value: "quota", label: "Quota reset" },
 	{ value: "traffic", label: "Traffic" },
 	{ value: "ipUsage", label: "IP usage" },
@@ -481,6 +487,9 @@ export function NodeDetailsPage() {
 	const appRuntime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const nodesCapability = useApiCapability("admin.nodes");
+	const mihomoPrivateCidrsCapability = useApiCapability(
+		"node.mihomo-resource-private-cidrs-v1",
+	);
 	const canReadRuntime =
 		adminToken.length > 0 && nodesCapability.available && appRuntime.isOnline;
 	const { pushToast } = useToast();
@@ -490,6 +499,15 @@ export function NodeDetailsPage() {
 		queryKey: ["adminNode", adminToken, nodeId],
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNode(adminToken, nodeId, signal),
+	});
+	const mihomoPolicyQuery = useQuery({
+		queryKey: ["adminNodeMihomoResourcePolicy", adminToken, nodeId],
+		enabled:
+			adminToken.length > 0 &&
+			nodesCapability.available &&
+			mihomoPrivateCidrsCapability.available,
+		queryFn: ({ signal }) =>
+			fetchAdminNodeMihomoResourcePolicy(adminToken, nodeId, signal),
 	});
 	const runtimeQuery = useQuery({
 		queryKey: ["adminNodeRuntime", adminToken, nodeId],
@@ -544,6 +562,8 @@ export function NodeDetailsPage() {
 	}, [nodeId]);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [mihomoPolicyDraft, setMihomoPolicyDraft] = useState("");
+	const [isSavingMihomoPolicy, setIsSavingMihomoPolicy] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [isPreparingDelete, setIsPreparingDelete] = useState(false);
@@ -603,6 +623,14 @@ export function NodeDetailsPage() {
 			setRuntimeLive(runtimeQuery.data);
 		}
 	}, [runtimeQuery.data]);
+
+	useEffect(() => {
+		if (mihomoPolicyQuery.data?.override_cidrs) {
+			setMihomoPolicyDraft(mihomoPolicyQuery.data.override_cidrs.join("\n"));
+		} else if (mihomoPolicyQuery.data?.source === "deployment_default") {
+			setMihomoPolicyDraft("");
+		}
+	}, [mihomoPolicyQuery.data]);
 
 	useEffect(() => {
 		if (!canReadRuntime) return;
@@ -783,6 +811,59 @@ export function NodeDetailsPage() {
 			});
 		} finally {
 			setIsRefreshingEgressProbe(false);
+		}
+	};
+
+	const updateMihomoPolicy = async (overrideCidrs: string[]) => {
+		setIsSavingMihomoPolicy(true);
+		try {
+			const result = await putAdminNodeMihomoResourcePolicy(
+				adminToken,
+				nodeId,
+				overrideCidrs,
+			);
+			queryClient.setQueryData(
+				["adminNodeMihomoResourcePolicy", adminToken, nodeId],
+				result,
+			);
+			setMihomoPolicyDraft(result.override_cidrs?.join("\n") ?? "");
+			pushToast({
+				variant: "success",
+				message: "Mihomo resource policy updated.",
+			});
+		} catch (error) {
+			pushToast({
+				variant: "error",
+				message: `Failed to update Mihomo resource policy: ${formatErrorMessage(error)}`,
+			});
+		} finally {
+			setIsSavingMihomoPolicy(false);
+		}
+	};
+
+	const restoreMihomoPolicy = async () => {
+		setIsSavingMihomoPolicy(true);
+		try {
+			const result = await deleteAdminNodeMihomoResourcePolicy(
+				adminToken,
+				nodeId,
+			);
+			queryClient.setQueryData(
+				["adminNodeMihomoResourcePolicy", adminToken, nodeId],
+				result,
+			);
+			setMihomoPolicyDraft("");
+			pushToast({
+				variant: "success",
+				message: "Mihomo policy restored to deployment default.",
+			});
+		} catch (error) {
+			pushToast({
+				variant: "error",
+				message: `Failed to restore Mihomo policy: ${formatErrorMessage(error)}`,
+			});
+		} finally {
+			setIsSavingMihomoPolicy(false);
 		}
 	};
 
@@ -1331,6 +1412,174 @@ export function NodeDetailsPage() {
 								<span className="font-mono">sudo xp-ops xp sync-node-meta</span>
 								.
 							</div>
+						</section>
+					</ModuleTabsPanel>
+
+					<ModuleTabsPanel value="mihomo">
+						<section className="space-y-4">
+							{mihomoPrivateCidrsCapability.unavailable ? (
+								<CapabilityUnavailableState
+									title="Mihomo private resource policy unavailable"
+									reason={mihomoPrivateCidrsCapability.reason}
+								/>
+							) : null}
+							{!mihomoPrivateCidrsCapability.unavailable ? (
+								<>
+									<div className="flex flex-wrap items-start justify-between gap-3">
+										<div>
+											<p className="text-sm font-semibold">
+												Mihomo private resource policy
+											</p>
+											<p className="text-sm text-muted-foreground">
+												Allow only approved private CIDRs for split-DNS mirror
+												resources on this node.
+											</p>
+										</div>
+										{mihomoPolicyQuery.data ? (
+											<Badge
+												variant={
+													mihomoPolicyQuery.data.status === "healthy"
+														? "success"
+														: "warning"
+												}
+											>
+												{mihomoPolicyQuery.data.source}
+											</Badge>
+										) : null}
+									</div>
+
+									{mihomoPolicyQuery.isLoading ? (
+										<PageState
+											variant="loading"
+											title="Loading Mihomo policy"
+											description="Fetching node-local private CIDR policy."
+										/>
+									) : null}
+									{mihomoPolicyQuery.isError ? (
+										<QueryErrorState
+											title="Mihomo policy unavailable"
+											description={formatErrorMessage(mihomoPolicyQuery.error)}
+											error={mihomoPolicyQuery.error}
+											loading={mihomoPolicyQuery.isFetching}
+											onRetry={() => mihomoPolicyQuery.refetch()}
+										/>
+									) : null}
+									{mihomoPolicyQuery.data ? (
+										<>
+											<div className="grid gap-3 md:grid-cols-3">
+												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+													<div className="text-xs uppercase tracking-wide text-muted-foreground">
+														Deployment default
+													</div>
+													<div className="mt-2 space-y-1 font-mono text-sm break-all">
+														{mihomoPolicyQuery.data.deployment_default_cidrs
+															.length > 0
+															? mihomoPolicyQuery.data.deployment_default_cidrs.map(
+																	(cidr) => <div key={cidr}>{cidr}</div>,
+																)
+															: "(empty)"}
+													</div>
+												</div>
+												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+													<div className="text-xs uppercase tracking-wide text-muted-foreground">
+														Effective policy
+													</div>
+													<div className="mt-2 space-y-1 font-mono text-sm break-all">
+														{mihomoPolicyQuery.data.effective_cidrs.length > 0
+															? mihomoPolicyQuery.data.effective_cidrs.map(
+																	(cidr) => <div key={cidr}>{cidr}</div>,
+																)
+															: "(private targets disabled)"}
+													</div>
+												</div>
+												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+													<div className="text-xs uppercase tracking-wide text-muted-foreground">
+														Status
+													</div>
+													<div className="mt-2 text-sm">
+														{mihomoPolicyQuery.data.status}
+														{mihomoPolicyQuery.data.error ? (
+															<p className="mt-1 break-words text-warning">
+																{mihomoPolicyQuery.data.error}
+															</p>
+														) : null}
+													</div>
+												</div>
+											</div>
+
+											<div className="space-y-3 rounded-2xl border border-border/70 bg-muted/35 p-4">
+												<div>
+													<label
+														className="text-sm font-medium"
+														htmlFor="mihomo-policy-cidrs"
+													>
+														Web override CIDRs
+													</label>
+													<p className="text-sm text-muted-foreground">
+														One CIDR per line. Saving replaces the deployment
+														default for this node.
+													</p>
+												</div>
+												<Textarea
+													id="mihomo-policy-cidrs"
+													value={mihomoPolicyDraft}
+													onChange={(event) =>
+														setMihomoPolicyDraft(event.target.value)
+													}
+													rows={5}
+													disabled={
+														isSavingMihomoPolicy || appRuntime.isReadOnly
+													}
+												/>
+												<div className="flex flex-wrap justify-end gap-2">
+													<Button
+														variant="secondary"
+														loading={mihomoPolicyQuery.isFetching}
+														disabled={
+															!appRuntime.isOnline || isSavingMihomoPolicy
+														}
+														onClick={() => void mihomoPolicyQuery.refetch()}
+													>
+														Refresh
+													</Button>
+													<Button
+														variant="ghost"
+														disabled={
+															isSavingMihomoPolicy || appRuntime.isReadOnly
+														}
+														onClick={() => void updateMihomoPolicy([])}
+													>
+														Disable private targets
+													</Button>
+													<Button
+														loading={isSavingMihomoPolicy}
+														disabled={appRuntime.isReadOnly}
+														onClick={() =>
+															void updateMihomoPolicy(
+																mihomoPolicyDraft
+																	.split("\n")
+																	.map((value) => value.trim())
+																	.filter(Boolean),
+															)
+														}
+													>
+														Save override
+													</Button>
+													<Button
+														variant="secondary"
+														disabled={
+															isSavingMihomoPolicy || appRuntime.isReadOnly
+														}
+														onClick={() => void restoreMihomoPolicy()}
+													>
+														Restore deployment default
+													</Button>
+												</div>
+											</div>
+										</>
+									) : null}
+								</>
+							) : null}
 						</section>
 					</ModuleTabsPanel>
 

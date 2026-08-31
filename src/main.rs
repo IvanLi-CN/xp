@@ -347,6 +347,8 @@ async fn join_cluster(config: xp::config::Config, join_token: String) -> Result<
 }
 
 async fn run_server(config: xp::config::Config) -> Result<()> {
+    xp::mihomo_policy::MihomoResourcePolicy::validate_environment()
+        .context("validate Mihomo private CIDR deployment policy")?;
     let cluster = xp::cluster_metadata::ClusterMetadata::load(&config.data_dir)?;
     let cluster_ca_pem = cluster.read_cluster_ca_pem(&config.data_dir)?;
     let cluster_ca_key_pem_required = cluster
