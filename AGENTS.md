@@ -49,6 +49,12 @@
   Raft-assigned Reality Mesh Reverse relay, and only then the in-memory encrypted dynamic relay.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
+- Service Monitoring persists each node's bounded capture journal in
+  `${XP_DATA_DIR}/uptime.sqlite3` and delivers observations through the existing signed History
+  Repository path. systemd, OpenRC, and Docker/Compose upgrades must preserve that file together
+  with `history.sqlite3`; no monitor sidecar or external `ping` command is supported. Linux ICMP
+  datagram/raw capability is optional and fail-closed as `unsupported`, while HTTP/HTTPS/TCPING
+  remain available.
 - Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
   `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
   listener. A durable assignment does not itself keep a target Xray initiating outbound installed:

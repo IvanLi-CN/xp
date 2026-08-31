@@ -1,64 +1,72 @@
-# 服务监控（Service Monitoring）实现状态
+# 服务监控（Service Monitoring）实现合同
 
-> 当前规范见 `./SPEC.md`。这里记录代码覆盖、rollout 与剩余实现事实。
+> 规范正文见 `./SPEC.md`；HTTP wire shape 见 `./contracts/api.md`。
 
-## Current Status
+## Control plane
 
-- Implementation: spec ready; implementation not started
-- Lifecycle: active
-- Catalog note: 先交付数据/执行面，再接 API 与 Web。
+- `src/uptime_monitor.rs` 定义 Monitor、不可变 revision、状态、Observation、
+  固定 32 桶延迟直方图和质量计算。
+- `src/state.rs` 把 Monitor 写入 DesiredState/Raft；schema migration 保持旧
+  state 可启动。创建和编辑在下一个 UTC Slot 生效，pause/resume/delete 都通过
+  revision-safe lifecycle command 收敛。
+- `src/http/service_monitors.rs` 在 Leader 写路径执行 300
+  `monitor x observer` slots/min admission；超额返回
+  `observation_budget_exceeded`，不减少 Observer Set。
 
-## Architecture
+## Execution and safety
 
-### Control plane
+- scheduler 使用 UTC 对齐 Slot、每节点 32 个计划并发和 skip missed tick；不补跑
+  重启前的 Slot，也不自动重试。
+- HTTP/HTTPS 使用无代理 client，最多 3 跳 redirect；每一跳都重新解析并拒绝
+  非公网地址。HTTPS 不允许协议降级。
+- HTTP 连接超时为 5 秒，总超时为 10 秒；literal body matcher 最多读取 64 KiB，
+  配置值最多 256 bytes。
+- TCPING 只运行一次 Tokio TCP connect 并立即关闭。
+- PING 在 Linux 先使用 ICMP datagram socket，必要时只退回同语义 raw socket；
+  不调用外部 `ping` binary，也不以 TCPING 代替 ICMP。无能力时 result 为
+  `unsupported`。
+- ad-hoc run 受每 token 每分钟 10 次、每 Observer 4 个并发限制；它独立于
+  scheduled idempotency，且不进入 availability/coverage 分母。
 
-- 在 DesiredState/Raft 中增加 Monitor、revision、lifecycle、budget reservation
-  与 capability summary。
-- Leader 分配 ULID、revision 和 `effective_at`；Raft 不保存高频 Observation。
-- PATCH 使用 `expected_revision`；删除是 lifecycle tombstone，不能 purge。
+## Persistence and query
 
-### Execution
+- 每个 node 使用 `${XP_DATA_DIR}/uptime.sqlite3` 的 WAL-backed pending store。
+  计划检查只在 Repository 已 ready 且 capture store 可接受记录时开始。
+- pending backlog 在 80%（64 MiB 或 100,000 条的任一限制）进入
+  `capture_suspended`，低于 60% 才恢复。该状态会停止新检查，不会丢弃已执行结果。
+- worker 将 `service_monitor_observation.v1` 作为
+  `service_monitor_observation-v1` signed Source Delivery stream 投递；ack 后才标记
+  本地 observation 已入队。
+- History Repository 沿用现有 SQLite row store、签名 cursor/ack 和 fork isolation。
+  retention 将 uptime payload 合并为 minute、five-minute、hour bucket，并保留
+  expected/executed/outcome、错误统计和可合并 latency histogram。
+- history API 根据查询窗口在 `1m`、`5m`、`1h` 之间选择粒度，最多返回 1,500
+  点，且明确返回 `complete`、`partial` 或 `local_only`、coverage、watermark、gap、
+  skew 和 freshness。
 
-- `src/uptime_monitor` 负责 schedule、executor、capability、outcome 和 status aggregation。
-- slot idempotency key 是 monitor、revision、observer、scheduled_at、mode 的组合。
-- HTTP client 关闭自动重定向，逐跳验证目的 URL；body 限制 64 KiB。
-- PING 通过 Linux ICMP datagram socket 执行；raw socket 只作同语义 capability fallback。
-- TCPING 通过 Tokio TCP connect 执行并立即关闭。
+## API and Web
 
-### Storage and sync
+- 后端提供 monitor list/create/get/patch/delete、status、history、run 和 run status
+  routes；定义、fixture 和 Web Zod schema 共同使用 internally-tagged `target.kind`
+  wire shape。
+- Web 注册一级“Service monitoring”导航以及 overview、new、edit、detail routes。
+  overview 在在线时每 30 秒刷新，并以状态、6h uptime、五分钟连续性格带和最近检查
+  组成 uptime roster；detail status 每 15 秒、history 每 30 秒刷新。
+- 详情页展示 capture/quality 横幅、状态、availability/coverage/latency 图、
+  Observer 矩阵和 ad-hoc 操作。远端 ICMP capability 未知时显示 `Unknown`，不会把
+  本机自检结果投射到远端节点。
 
-- `history.sqlite3` 增加 uptime raw、capture range、rollup 与索引表。
-- Source 使用 `service_monitor_observation-v1` journal 分区，
-  沿用 canonical payload 与签名链。
-- raw 唯一键覆盖 monitor、observer、slot、mode；receiver 先幂等再进行 rollup。
-- rollup 主键覆盖 monitor、revision、observer、resolution、bucket_start。
-- bucket 保存 counters、count/sum/min/max、固定 histogram、errors、
-  watermark、aggregate hash。
-- child hash 完整时才允许 minute -> 5m -> 1h；
-  清理与 completion marker 同一 transaction。
+## Deployment and migration
 
-### API and UI
-
-- `src/http` 增加 `/api/admin/monitors` 路由、错误 shape、history parser
-  与 status/run handlers。
-- `web/src/api` 增加 `adminMonitors.ts`；views 增加 overview、new、detail、edit。
-- 注册 `/monitors`、`/monitors/new`、`/monitors/:monitorId` 与 edit 路由和导航。
-- 复用 PageHeader、ResourceTable、ECharts、offline cache 与
-  History Repository quality 组件。
-
-## Rollout / migration
-
-1. 添加 SQLite 迁移与 schema family；既有 history stream 不变。
-2. 交付 executor 与 ICMP self-test，验证 systemd、OpenRC、Docker/Compose。
-3. 启用 Raft config、read API 和 scheduler；检查 revision 与 budget rejection。
-4. 用 canary monitor 检查 journal、quality、rollup、资源与 retention 边界。
-5. 启用 Web 路由；API、Repository、UI E2E 通过后移除 feature guard。
-
-## Remaining Gaps
-
-- 固定 ICMP adapter 在支持内核和 capability 组合上的生产测试。
-- 固定 API fixtures、histogram bucket 与迁移版本。
-- 绑定最终 integration SHA、视觉证据和 PR 状态。
+- systemd、OpenRC 与 single-image Docker/Compose 都运行相同 binary，不需要额外
+  monitor sidecar、listener 或外部 ping command。
+- Linux PING 需要内核允许 ICMP datagram socket，或运行身份拥有同一 ICMP 语义的
+  raw socket capability；无法满足时只隐藏 ICMP capability 并记录 unsupported，
+  HTTP/HTTPS/TCPING 不受影响。
+- host-managed upgrade 与 Docker volume 都必须保留 `${XP_DATA_DIR}/uptime.sqlite3`
+  和 Repository 节点的 `${XP_DATA_DIR}/history.sqlite3`。旧 uptime SQLite 的 broad
+  `(monitor, revision, observer, slot, ad_hoc)` unique key 会自动迁移为仅对 scheduled
+  slot 幂等，以保留同一秒的多个 ad-hoc run。
 
 ## References
 

@@ -148,3 +148,8 @@ Raft 也不应承载高频 Observation。
 - `../cluster-history-repositories/IMPLEMENTATION.md`
 - `./contracts/api.md`
 - `./CONTEXT.md`
+
+## Visual Evidence
+
+- [Service monitoring overview](./assets/service-monitor-overview.png)
+- [Cluster test workspace](./assets/service-monitor-create-cluster-test.png)

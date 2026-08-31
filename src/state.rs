@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
@@ -13,9 +13,7 @@ use crate::{
         validate_port, validate_tz_offset_minutes,
     },
     id::new_ulid_string,
-    inbound_ip_usage::{
-        GeoLookup, InboundIpMinuteSample, PersistedInboundIpGeo, PersistedInboundIpUsage,
-    },
+    inbound_ip_usage::{GeoLookup, InboundIpMinuteSample, PersistedInboundIpUsage},
     join_session::JoinSession,
     protocol::{
         RealityServerNamesSource, RotateShortIdResult, VlessRealityVisionTcpEndpointMeta,
@@ -34,6 +32,7 @@ use crate::{
         PersistedTcpConnectionUsage, TcpConnectionEndpointView, TcpConnectionMinuteSample,
         TcpConnectionUsageWarning,
     },
+    uptime_monitor::{MonitorLifecycle, ServiceMonitor},
 };
 mod endpoint_meta;
 use endpoint_meta::build_endpoint_meta;
@@ -42,13 +41,26 @@ mod membership_operation;
 pub use membership_operation::{
     MembershipOperation, MembershipOperationKind, MembershipOperationPhase,
 };
+mod config_types;
 #[path = "history_repository/mod.rs"]
 pub(crate) mod history_repository;
 #[path = "history_storage/mod.rs"]
 pub(crate) mod history_storage;
+mod probe_state;
 mod reverse_assignment;
+pub use config_types::{
+    NodeUserEndpointMembership, NodeWeightPolicyConfig, UserGlobalWeightConfig, UserMihomoProfile,
+    UserNodeQuotaConfig, UserNodeWeightConfig,
+};
+pub(crate) use probe_state::encode_node_egress_probe_compat_note;
+pub use probe_state::{
+    EndpointProbeAppendSample, EndpointProbeHistory, EndpointProbeHour, EndpointProbeNodeSample,
+    NodeEgressProbeState, NodeSubscriptionRegion,
+};
+use probe_state::{decode_node_egress_probe_compat_note, prune_endpoint_probe_hour_map};
 
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
+const SCHEMA_VERSION_V13: u32 = 13;
 const SCHEMA_VERSION_V12: u32 = 12;
 const SCHEMA_VERSION_V11: u32 = 11;
 const SCHEMA_VERSION_V10: u32 = 10;
@@ -63,7 +75,7 @@ const USAGE_SCHEMA_VERSION_V1: u32 = 1;
 const NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX: &str = "node_egress_probe_state:";
 const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
 
-/// Migrate any historical state payload into the latest schema (v13).
+/// Migrate any historical state payload into the latest schema (v14).
 ///
 /// This is used by Raft snapshot installation to support upgrades without requiring operators
 /// to start an older binary for snapshot/purge first.
@@ -77,13 +89,16 @@ pub(crate) fn migrate_state_value_to_latest(
 
     let mut state = match schema_version {
         SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
-        SCHEMA_VERSION_V12 => migrate_v12_to_v13(serde_json::from_value::<PersistedState>(raw)?)?,
-        SCHEMA_VERSION_V11 => migrate_v12_to_v13(migrate_v11_to_v12(serde_json::from_value::<
+        SCHEMA_VERSION_V13 => migrate_v13_to_v14(serde_json::from_value::<PersistedState>(raw)?)?,
+        SCHEMA_VERSION_V12 => migrate_v13_to_v14(migrate_v12_to_v13(serde_json::from_value::<
             PersistedState,
         >(raw)?)?)?,
+        SCHEMA_VERSION_V11 => migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(
+            serde_json::from_value::<PersistedState>(raw)?,
+        )?)?)?,
         SCHEMA_VERSION_V10 => {
             let v11 = migrate_v10_to_v11(serde_json::from_value::<PersistedState>(raw)?)?;
-            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
+            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?
         }
         SCHEMA_VERSION_V9 | SCHEMA_VERSION_V8 | SCHEMA_VERSION_V7 | SCHEMA_VERSION_V6
         | SCHEMA_VERSION_V5 | SCHEMA_VERSION_V4 | 3 => {
@@ -118,7 +133,7 @@ pub(crate) fn migrate_state_value_to_latest(
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(legacy)?;
             let v11 = migrate_v10_to_v11(v10)?;
-            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
+            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?
         }
         2 | 1 => {
             let v2: PersistedStateV2Like = serde_json::from_value(raw)?;
@@ -130,7 +145,7 @@ pub(crate) fn migrate_state_value_to_latest(
 
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(v8)?;
             let v11 = migrate_v10_to_v11(v10)?;
-            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?
+            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?
         }
         got => {
             return Err(StoreError::SchemaVersionMismatch {
@@ -322,6 +337,8 @@ pub struct PersistedState {
     pub membership_operations: BTreeMap<String, MembershipOperation>,
     #[serde(default)]
     pub endpoints: BTreeMap<String, Endpoint>,
+    #[serde(default)]
+    pub service_monitors: BTreeMap<String, ServiceMonitor>,
     /// Endpoint probe history (hour buckets, per node).
     ///
     /// Keyed by `endpoint_id`.
@@ -381,6 +398,7 @@ impl PersistedState {
             join_sessions: BTreeMap::new(),
             membership_operations: BTreeMap::new(),
             endpoints: BTreeMap::new(),
+            service_monitors: BTreeMap::new(),
             endpoint_probe_history: BTreeMap::new(),
             endpoint_probe_participants_by_hour: BTreeMap::new(),
             node_egress_probes: BTreeMap::new(),
@@ -459,240 +477,6 @@ impl PersistedStateV9Compat {
             node_weight_policies: BTreeMap::new(),
             node_user_endpoint_memberships: BTreeSet::new(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EndpointProbeHistory {
-    /// Keyed by an hour key like `2026-02-07T12:00:00Z`.
-    #[serde(default)]
-    pub hours: BTreeMap<String, EndpointProbeHour>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EndpointProbeHour {
-    /// Keyed by `node_id`.
-    #[serde(default)]
-    pub by_node: BTreeMap<String, EndpointProbeNodeSample>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EndpointProbeNodeSample {
-    pub ok: bool,
-    /// When true, this sample is intentionally skipped (reported but not tested).
-    #[serde(default)]
-    pub skipped: bool,
-    pub checked_at: String,
-    #[serde(default)]
-    pub latency_ms: Option<u32>,
-    #[serde(default)]
-    pub target_id: Option<String>,
-    #[serde(default)]
-    pub target_url: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-    /// Hash of the probe configuration to ensure cluster-wide consistency.
-    pub config_hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EndpointProbeAppendSample {
-    pub endpoint_id: String,
-    pub ok: bool,
-    /// When true, this sample is intentionally skipped (reported but not tested).
-    #[serde(default)]
-    pub skipped: bool,
-    pub checked_at: String,
-    #[serde(default)]
-    pub latency_ms: Option<u32>,
-    #[serde(default)]
-    pub target_id: Option<String>,
-    #[serde(default)]
-    pub target_url: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-    pub config_hash: String,
-}
-
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeSubscriptionRegion {
-    Japan,
-    HongKong,
-    Taiwan,
-    Korea,
-    Singapore,
-    Us,
-    #[default]
-    Other,
-}
-
-impl NodeSubscriptionRegion {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Japan => "Japan",
-            Self::HongKong => "HongKong",
-            Self::Taiwan => "Taiwan",
-            Self::Korea => "Korea",
-            Self::Singapore => "Singapore",
-            Self::Us => "US",
-            Self::Other => "Other",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct NodeEgressProbeState {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub public_ipv4: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub public_ipv6: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_public_ip: Option<String>,
-    #[serde(default)]
-    pub geo: PersistedInboundIpGeo,
-    #[serde(default)]
-    pub subscription_region: NodeSubscriptionRegion,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub checked_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_success_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub classification_invalidated_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_summary: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct NodeEgressProbeCompatPayload {
-    node_id: String,
-    probe: NodeEgressProbeState,
-}
-
-pub(crate) fn encode_node_egress_probe_compat_note(
-    node_id: &str,
-    probe: &NodeEgressProbeState,
-) -> Result<String, serde_json::Error> {
-    let payload = NodeEgressProbeCompatPayload {
-        node_id: node_id.to_string(),
-        probe: probe.clone(),
-    };
-    Ok(format!(
-        "{NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX}{}",
-        serde_json::to_string(&payload)?
-    ))
-}
-
-fn decode_node_egress_probe_compat_note(note: &str) -> Option<(String, NodeEgressProbeState)> {
-    let raw = note.strip_prefix(NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX)?;
-    let payload = serde_json::from_str::<NodeEgressProbeCompatPayload>(raw).ok()?;
-    Some((payload.node_id, payload.probe))
-}
-
-fn prune_endpoint_probe_hour_map<T>(hours: &mut BTreeMap<String, T>) {
-    while hours.len() > ENDPOINT_PROBE_HOUR_BUCKET_LIMIT {
-        let Some(oldest) = hours.keys().next().cloned() else {
-            break;
-        };
-        hours.remove(&oldest);
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UserNodeQuotaConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quota_limit_bytes: Option<u64>,
-    #[serde(default)]
-    pub quota_reset_source: QuotaResetSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UserNodeWeightConfig {
-    pub weight: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UserGlobalWeightConfig {
-    pub weight: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NodeWeightPolicyConfig {
-    #[serde(default = "default_true")]
-    pub inherit_global: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-impl Default for NodeWeightPolicyConfig {
-    fn default() -> Self {
-        Self {
-            inherit_global: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct NodeUserEndpointMembership {
-    pub user_id: String,
-    pub node_id: String,
-    pub endpoint_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct UserMihomoProfile {
-    pub mixin_yaml: String,
-    pub extra_proxies_yaml: String,
-    pub extra_proxy_providers_yaml: String,
-}
-
-impl Serialize for UserMihomoProfile {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Keep internal WAL/snapshot payloads readable by older binaries during rolling upgrades.
-        // Public APIs do not expose this struct directly; they use dedicated response DTOs.
-        let mut state = serializer.serialize_struct("UserMihomoProfile", 4)?;
-        state.serialize_field("mixin_yaml", &self.mixin_yaml)?;
-        state.serialize_field("template_yaml", &self.mixin_yaml)?;
-        state.serialize_field("extra_proxies_yaml", &self.extra_proxies_yaml)?;
-        state.serialize_field(
-            "extra_proxy_providers_yaml",
-            &self.extra_proxy_providers_yaml,
-        )?;
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for UserMihomoProfile {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct RawUserMihomoProfile {
-            #[serde(default)]
-            mixin_yaml: Option<String>,
-            #[serde(default)]
-            template_yaml: Option<String>,
-            #[serde(default)]
-            extra_proxies_yaml: String,
-            #[serde(default)]
-            extra_proxy_providers_yaml: String,
-        }
-
-        let raw = RawUserMihomoProfile::deserialize(deserializer)?;
-        Ok(Self {
-            mixin_yaml: raw.mixin_yaml.or(raw.template_yaml).unwrap_or_default(),
-            extra_proxies_yaml: raw.extra_proxies_yaml,
-            extra_proxy_providers_yaml: raw.extra_proxy_providers_yaml,
-        })
     }
 }
 
@@ -1278,6 +1062,19 @@ fn migrate_v12_to_v13(mut input: PersistedState) -> Result<PersistedState, Store
     }
     // The Reverse Mesh epoch is intentionally behind the schema barrier. Older binaries must
     // reject this state rather than silently rolling back after the first assignment is written.
+    input.schema_version = SCHEMA_VERSION_V13;
+    Ok(input)
+}
+
+fn migrate_v13_to_v14(mut input: PersistedState) -> Result<PersistedState, StoreError> {
+    if input.schema_version != SCHEMA_VERSION_V13 {
+        return Err(StoreError::Migration {
+            message: format!(
+                "expected v13 state during migration, got schema_version {}",
+                input.schema_version
+            ),
+        });
+    }
     input.schema_version = SCHEMA_VERSION;
     Ok(input)
 }
@@ -1936,6 +1733,24 @@ pub enum DesiredStateCommand {
     DeleteEndpoint {
         endpoint_id: String,
     },
+    CreateServiceMonitor {
+        monitor: ServiceMonitor,
+    },
+    UpdateServiceMonitor {
+        monitor: ServiceMonitor,
+        expected_revision: u64,
+    },
+    SetServiceMonitorLifecycle {
+        monitor_id: String,
+        lifecycle: MonitorLifecycle,
+        expected_revision: u64,
+        #[serde(default)]
+        revision_effective_at_unix_seconds: u64,
+    },
+    DeleteServiceMonitor {
+        monitor_id: String,
+        expected_revision: u64,
+    },
     CreateRealityDomain {
         domain: RealityDomain,
     },
@@ -2100,6 +1915,24 @@ enum DesiredStateCommandCompat {
     DeleteEndpoint {
         endpoint_id: String,
     },
+    CreateServiceMonitor {
+        monitor: ServiceMonitor,
+    },
+    UpdateServiceMonitor {
+        monitor: ServiceMonitor,
+        expected_revision: u64,
+    },
+    SetServiceMonitorLifecycle {
+        monitor_id: String,
+        lifecycle: MonitorLifecycle,
+        expected_revision: u64,
+        #[serde(default)]
+        revision_effective_at_unix_seconds: u64,
+    },
+    DeleteServiceMonitor {
+        monitor_id: String,
+        expected_revision: u64,
+    },
     CreateRealityDomain {
         domain: RealityDomain,
     },
@@ -2238,6 +2071,9 @@ pub enum DesiredStateApplyResult {
         deleted_endpoint_tags: Vec<String>,
     },
     EndpointDeleted {
+        deleted: bool,
+    },
+    ServiceMonitorDeleted {
         deleted: bool,
     },
     UserDeleted {
@@ -2755,6 +2591,97 @@ impl DesiredStateCommand {
                 state.endpoint_probe_history.remove(endpoint_id);
                 sync_node_user_endpoint_memberships(state);
                 Ok(DesiredStateApplyResult::EndpointDeleted { deleted })
+            }
+            Self::CreateServiceMonitor { monitor } => {
+                monitor
+                    .validate()
+                    .map_err(|error| DomainError::InvalidServiceMonitor {
+                        reason: error.to_string(),
+                    })?;
+                if state.service_monitors.contains_key(&monitor.monitor_id) {
+                    return Err(DomainError::ServiceMonitorExists {
+                        monitor_id: monitor.monitor_id.clone(),
+                    }
+                    .into());
+                }
+                state
+                    .service_monitors
+                    .insert(monitor.monitor_id.clone(), monitor.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::UpdateServiceMonitor {
+                monitor,
+                expected_revision,
+            } => {
+                monitor
+                    .validate()
+                    .map_err(|error| DomainError::InvalidServiceMonitor {
+                        reason: error.to_string(),
+                    })?;
+                let current = state
+                    .service_monitors
+                    .get(&monitor.monitor_id)
+                    .ok_or_else(|| DomainError::MissingServiceMonitor {
+                        monitor_id: monitor.monitor_id.clone(),
+                    })?;
+                if current.revision != *expected_revision
+                    || monitor.revision != current.revision.saturating_add(1)
+                {
+                    return Err(DomainError::ServiceMonitorChanged {
+                        monitor_id: monitor.monitor_id.clone(),
+                    }
+                    .into());
+                }
+                state
+                    .service_monitors
+                    .insert(monitor.monitor_id.clone(), monitor.clone());
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetServiceMonitorLifecycle {
+                monitor_id,
+                lifecycle,
+                expected_revision,
+                revision_effective_at_unix_seconds,
+            } => {
+                let monitor = state.service_monitors.get_mut(monitor_id).ok_or_else(|| {
+                    DomainError::MissingServiceMonitor {
+                        monitor_id: monitor_id.clone(),
+                    }
+                })?;
+                if monitor.revision != *expected_revision {
+                    return Err(DomainError::ServiceMonitorChanged {
+                        monitor_id: monitor_id.clone(),
+                    }
+                    .into());
+                }
+                monitor.lifecycle = lifecycle.clone();
+                monitor.revision = monitor.revision.saturating_add(1);
+                if *revision_effective_at_unix_seconds > 0 {
+                    monitor.revision_effective_at_unix_seconds =
+                        *revision_effective_at_unix_seconds;
+                }
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::DeleteServiceMonitor {
+                monitor_id,
+                expected_revision,
+            } => {
+                let Some(monitor) = state.service_monitors.get(monitor_id) else {
+                    return Ok(DesiredStateApplyResult::ServiceMonitorDeleted { deleted: false });
+                };
+                if monitor.revision != *expected_revision {
+                    return Err(DomainError::ServiceMonitorChanged {
+                        monitor_id: monitor_id.clone(),
+                    }
+                    .into());
+                }
+                let mut deleted_monitor = monitor.clone();
+                deleted_monitor.lifecycle = MonitorLifecycle::Deleted;
+                deleted_monitor.revision = deleted_monitor.revision.saturating_add(1);
+                state
+                    .service_monitors
+                    .insert(monitor_id.clone(), deleted_monitor);
+                Ok(DesiredStateApplyResult::ServiceMonitorDeleted { deleted: true })
             }
             Self::CreateRealityDomain { domain } => {
                 let mut domain = domain.clone();
@@ -3409,17 +3336,26 @@ impl JsonSnapshotStore {
 
                 match schema_version {
                     SCHEMA_VERSION => {
+                        let current: PersistedState = serde_json::from_value(raw)?;
+                        (current, None, false, false)
+                    }
+                    SCHEMA_VERSION_V13 => {
                         let v13: PersistedState = serde_json::from_value(raw)?;
-                        (v13, None, false, false)
+                        (migrate_v13_to_v14(v13)?, None, false, true)
                     }
                     SCHEMA_VERSION_V12 => {
                         let v12: PersistedState = serde_json::from_value(raw)?;
-                        (migrate_v12_to_v13(v12)?, None, false, true)
+                        (
+                            migrate_v13_to_v14(migrate_v12_to_v13(v12)?)?,
+                            None,
+                            false,
+                            true,
+                        )
                     }
                     SCHEMA_VERSION_V11 => {
                         let v11: PersistedState = serde_json::from_value(raw)?;
                         (
-                            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?,
+                            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?,
                             None,
                             false,
                             true,
@@ -3429,7 +3365,7 @@ impl JsonSnapshotStore {
                         let v10: PersistedState = serde_json::from_value(raw)?;
                         let v11 = migrate_v10_to_v11(v10)?;
                         (
-                            migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?,
+                            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?,
                             None,
                             false,
                             true,
@@ -3475,7 +3411,8 @@ impl JsonSnapshotStore {
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(legacy)?;
                         let v11 = migrate_v10_to_v11(v10)?;
-                        let v12 = migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?;
+                        let v12 =
+                            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?;
                         // Best-effort migration stats (logs are useful in production upgrades).
                         tracing::info!(
                             grants_total = stats.grants_total,
@@ -3499,7 +3436,8 @@ impl JsonSnapshotStore {
 
                         let (v10, mapping, stats) = migrate_v9_compat_to_v10(v8)?;
                         let v11 = migrate_v10_to_v11(v10)?;
-                        let v12 = migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?;
+                        let v12 =
+                            migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?;
                         tracing::info!(
                             grants_total = stats.grants_total,
                             grants_orphan_dropped = stats.grants_orphan_dropped,
@@ -4338,6 +4276,14 @@ impl JsonSnapshotStore {
 
     pub fn get_endpoint(&self, endpoint_id: &str) -> Option<Endpoint> {
         self.state.endpoints.get(endpoint_id).cloned()
+    }
+
+    pub fn list_service_monitors(&self) -> Vec<ServiceMonitor> {
+        self.state.service_monitors.values().cloned().collect()
+    }
+
+    pub fn get_service_monitor(&self, monitor_id: &str) -> Option<ServiceMonitor> {
+        self.state.service_monitors.get(monitor_id).cloned()
     }
 
     pub fn delete_endpoint(&mut self, endpoint_id: &str) -> Result<bool, StoreError> {

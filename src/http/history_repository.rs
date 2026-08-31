@@ -598,6 +598,13 @@ pub(super) async fn admin_query_history_repository(
     Extension(state): Extension<AppState>,
     Query(request): Query<RepositoryHistoryQuery>,
 ) -> Result<Json<RepositoryHistoryQueryResponse>, ApiError> {
+    query_history_repository(&state, request).await.map(Json)
+}
+
+pub(super) async fn query_history_repository(
+    state: &AppState,
+    request: RepositoryHistoryQuery,
+) -> Result<RepositoryHistoryQueryResponse, ApiError> {
     let query = HistoryQuery::new(
         request.start_unix_seconds,
         request.end_unix_seconds,
@@ -607,7 +614,7 @@ pub(super) async fn admin_query_history_repository(
     .and_then(|query| query.with_subject_node_id(request.subject_node_id.as_deref()))
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
-    let (ready_repository_ids, peers) = worker::ready_repository_peers(&state)
+    let (ready_repository_ids, peers) = worker::ready_repository_peers(state)
         .await
         .unwrap_or_default();
     let local_is_ready = ready_repository_ids
@@ -647,7 +654,7 @@ pub(super) async fn admin_query_history_repository(
         .take(MAX_REPAIR_REQUEST_IDS)
     {
         if let Ok(response) = worker::repository_direct_request::<RepositoryHistoryQueryResponse>(
-            &state,
+            state,
             peer,
             axum::http::Method::POST,
             "/api/admin/_internal/history-repository/query",
@@ -694,7 +701,26 @@ pub(super) async fn admin_query_history_repository(
             .find(|response| response.plan().repository_id().is_none())
             .ok_or_else(|| ApiError::internal("local history response is unavailable"))?,
     };
-    Ok(Json(response))
+    Ok(response)
+}
+
+pub(super) async fn query_service_monitor_history(
+    state: &AppState,
+    monitor_id: &str,
+    start_unix_seconds: u64,
+    end_unix_seconds: u64,
+) -> Result<RepositoryHistoryQueryResponse, ApiError> {
+    query_history_repository(
+        state,
+        RepositoryHistoryQuery {
+            start_unix_seconds,
+            end_unix_seconds,
+            page_size: 1_000,
+            page_cursor: None,
+            subject_node_id: Some(monitor_id.to_owned()),
+        },
+    )
+    .await
 }
 
 pub(super) async fn admin_list_history_repositories(

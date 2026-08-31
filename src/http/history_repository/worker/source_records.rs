@@ -1,8 +1,26 @@
 use super::*;
 
 pub(super) struct SourceRecordBatch {
-    pub(super) records: Vec<SyncRecord>,
+    records: Option<Vec<SyncRecord>>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
+    pub(super) uptime_observation_ids: Vec<String>,
+}
+
+impl SourceRecordBatch {
+    pub(super) fn take_records(&mut self) -> Vec<SyncRecord> {
+        self.records.take().unwrap_or_default()
+    }
+
+    pub(super) async fn mark_uptime_observations_enqueued(
+        &self,
+        state: &AppState,
+    ) -> anyhow::Result<()> {
+        state
+            .uptime
+            .mark_enqueued(&self.uptime_observation_ids)
+            .await?;
+        Ok(())
+    }
 }
 
 pub(super) async fn source_records(
@@ -16,6 +34,7 @@ pub(super) async fn source_records(
         .node_history
         .repository_deletion_markers(&state.cluster.node_id)
         .await;
+    let pending_uptime_observations = state.uptime.pending(512).await?;
     let (inbound_ip, connections) = {
         let store = state.store.lock().await;
         let inbound_ip = serde_json::json!({
@@ -137,9 +156,27 @@ pub(super) async fn source_records(
             .collect(),
         live_records,
     )?;
+    let mut records = records;
+    for pending in &pending_uptime_observations {
+        let payload =
+            crate::uptime_monitor::UptimeHistoryPayload::from_observation(&pending.observation);
+        records.push(source_record_with_key_for_subject(
+            crate::uptime_monitor::UPTIME_HISTORY_SCHEMA,
+            &pending.observation.monitor_id,
+            &pending.observation.observer_node_id,
+            pending.observation.observed_at_unix_seconds,
+            pending.id.as_bytes().to_vec(),
+            serde_json::to_value(payload)?,
+            false,
+        )?);
+    }
     Ok(SourceRecordBatch {
-        records,
+        records: Some(records),
         deletion_markers,
+        uptime_observation_ids: pending_uptime_observations
+            .into_iter()
+            .map(|pending| pending.id)
+            .collect(),
     })
 }
 

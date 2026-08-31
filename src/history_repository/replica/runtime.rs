@@ -52,12 +52,13 @@ const RETENTION_COMPACTION_BUCKET_LOOKAHEAD: usize = 32;
 const REPLICATION_SEGMENT_PAGE_SIZE: usize = 256;
 const MAX_QUERY_RESPONSE_BYTES: usize = 256 * 1024;
 const TOMBSTONE_HORIZON_SECONDS: u64 = 2 * 365 * 24 * 60 * 60;
-const KNOWN_SCHEMAS: [(&str, u32); 6] = [
+const KNOWN_SCHEMAS: [(&str, u32); 7] = [
     ("runtime.v1", 1),
     ("path_health.v1", 1),
     ("traffic.v1", 1),
     ("connections.v1", 1),
     ("ip_usage.v1", 1),
+    (crate::uptime_monitor::UPTIME_HISTORY_SCHEMA, 1),
     ("tombstone.v1", 1),
 ];
 
@@ -122,6 +123,20 @@ pub(crate) struct RepositoryHistoryRecord {
     tombstone: bool,
 }
 
+impl RepositoryHistoryRecord {
+    pub(crate) fn observed_at_unix_seconds(&self) -> u64 {
+        self.observed_at_unix_seconds
+    }
+
+    pub(crate) fn schema_id(&self) -> &str {
+        &self.schema_id
+    }
+
+    pub(crate) fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryHistoryQueryResponse {
     #[serde(flatten)]
@@ -135,6 +150,14 @@ pub(crate) struct RepositoryHistoryQueryResponse {
 impl RepositoryHistoryQueryResponse {
     pub(crate) fn plan(&self) -> &QueryPlan {
         &self.plan
+    }
+
+    pub(crate) fn records(&self) -> &[RepositoryHistoryRecord] {
+        &self.records
+    }
+
+    pub(crate) fn records_truncated(&self) -> bool {
+        self.records_truncated
     }
 }
 

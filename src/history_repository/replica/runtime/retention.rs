@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
+use crate::uptime_monitor::{UPTIME_HISTORY_SCHEMA, UptimeHistoryPayload};
+
 use super::{StoredGap, StoredRecord};
 
 pub(super) fn prune_records(
@@ -33,8 +35,8 @@ pub(super) fn prune_records(
                 if preserves_minute_detail {
                     entry.insert(RetainedRecord::Raw(record));
                 } else {
-                    entry.insert(RetainedRecord::Aggregate(RetentionAggregate::from_record(
-                        record, resolution, cluster_id,
+                    entry.insert(RetainedRecord::Aggregate(Box::new(
+                        RetentionAggregate::from_record(record, resolution, cluster_id),
                     )));
                 }
             }
@@ -182,6 +184,17 @@ fn retention_identifier(
     if preserves_minute_detail {
         return Some(record.record_key.clone());
     }
+    if record.schema_id == UPTIME_HISTORY_SCHEMA {
+        return serde_json::from_slice::<UptimeHistoryPayload>(&record.payload)
+            .ok()
+            .map(|payload| {
+                format!(
+                    "{}:{}:{}:{}",
+                    payload.monitor_id, payload.revision, payload.observer_node_id, payload.ad_hoc
+                )
+                .into_bytes()
+            });
+    }
     (record.schema_id == "ip_usage.v1").then(|| {
         aggregate_contribution(record)
             .anonymized_identifier
@@ -194,7 +207,7 @@ fn retention_identifier(
 
 enum RetainedRecord {
     Raw(StoredRecord),
-    Aggregate(RetentionAggregate),
+    Aggregate(Box<RetentionAggregate>),
 }
 
 impl RetainedRecord {
@@ -235,6 +248,7 @@ struct RetentionAggregate {
     payload_hash: [u8; 32],
     complete: bool,
     anonymized_identifier: Option<String>,
+    uptime_payload: Option<UptimeHistoryPayload>,
 }
 
 impl RetentionAggregate {
@@ -244,6 +258,7 @@ impl RetentionAggregate {
         cluster_id: Option<&str>,
     ) -> Self {
         let contribution = aggregate_contribution(&record);
+        let uptime_payload = uptime_payload(&record);
         let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
             bucket_time_range(record.observed_at_unix_seconds, resolution);
         Self {
@@ -258,11 +273,13 @@ impl RetentionAggregate {
             payload_hash: contribution.payload_hash,
             complete: contribution.complete,
             anonymized_identifier: contribution.anonymized_identifier,
+            uptime_payload,
         }
     }
 
     fn add(&mut self, record: StoredRecord) {
         let contribution = aggregate_contribution(&record);
+        let incoming_uptime_payload = uptime_payload(&record);
         let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
             bucket_time_range(record.observed_at_unix_seconds, self.resolution);
         self.bucket_start_unix_seconds = self
@@ -280,6 +297,13 @@ impl RetentionAggregate {
         if self.anonymized_identifier.is_none() {
             self.anonymized_identifier = contribution.anonymized_identifier;
         }
+        self.uptime_payload = match (self.uptime_payload.take(), incoming_uptime_payload) {
+            (Some(mut current), Some(incoming)) => {
+                current.merge_rollup(&incoming);
+                Some(current)
+            }
+            _ => None,
+        };
     }
 
     fn into_stored_record(self, gaps: &[StoredGap]) -> StoredRecord {
@@ -314,6 +338,20 @@ impl RetentionAggregate {
             self.bucket_start_unix_seconds,
             anonymized_identifier.as_deref(),
         );
+        if let Some(mut uptime_payload) = self.uptime_payload {
+            uptime_payload.resolution = Some(resolution.to_owned());
+            uptime_payload.bucket_start_unix_seconds = Some(self.bucket_start_unix_seconds);
+            uptime_payload.bucket_end_unix_seconds = Some(self.bucket_end_unix_seconds);
+            uptime_payload.record_count = self.record_count;
+            uptime_payload.first_sequence = self.first_sequence;
+            uptime_payload.last_sequence = self.last_sequence;
+            uptime_payload.payload_sha256 = hex::encode(self.payload_hash);
+            uptime_payload.complete = self.complete && !incomplete;
+            record.sequence = self.last_sequence;
+            record.payload = serde_json::to_vec(&uptime_payload)
+                .expect("uptime retention aggregate is serializable");
+            return record;
+        }
         let payload = RetentionAggregatePayload {
             algorithm: "sha256".to_owned(),
             resolution: resolution.to_owned(),
@@ -365,11 +403,37 @@ fn aggregate_contribution(record: &StoredRecord) -> AggregateContribution {
 }
 
 fn aggregate_payload(record: &StoredRecord) -> Option<RetentionAggregatePayload> {
+    if record.schema_id == UPTIME_HISTORY_SCHEMA {
+        let payload = uptime_payload(record)?;
+        if payload.is_aggregate()
+            && payload.record_count > 0
+            && payload.first_sequence <= payload.last_sequence
+        {
+            return Some(RetentionAggregatePayload {
+                algorithm: "sha256".to_owned(),
+                resolution: payload.resolution.unwrap_or_default(),
+                bucket_start_unix_seconds: payload.bucket_start_unix_seconds,
+                bucket_end_unix_seconds: payload.bucket_end_unix_seconds,
+                record_count: payload.record_count,
+                first_sequence: payload.first_sequence,
+                last_sequence: payload.last_sequence,
+                payload_sha256: payload.payload_sha256,
+                complete: payload.complete,
+                anonymized_identifier: None,
+            });
+        }
+    }
     let payload = serde_json::from_slice::<RetentionAggregatePayload>(&record.payload).ok()?;
     (payload.algorithm == "sha256"
         && payload.record_count > 0
         && payload.first_sequence <= payload.last_sequence)
         .then_some(payload)
+}
+
+fn uptime_payload(record: &StoredRecord) -> Option<UptimeHistoryPayload> {
+    (record.schema_id == UPTIME_HISTORY_SCHEMA)
+        .then(|| serde_json::from_slice(&record.payload).ok())
+        .flatten()
 }
 
 fn bucket_time_range(

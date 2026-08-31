@@ -53,6 +53,11 @@ const navGroups = [
 				to: "/demo/system-status",
 				icon: "tabler:activity-heartbeat",
 			},
+			{
+				label: "Service monitoring",
+				to: "/demo/service-monitors",
+				icon: "tabler:activity-heartbeat",
+			},
 			{ label: "Nodes", to: "/demo/nodes", icon: "tabler:server" },
 			{ label: "Endpoints", to: "/demo/endpoints", icon: "tabler:plug" },
 			{ label: "Users", to: "/demo/users", icon: "tabler:users" },

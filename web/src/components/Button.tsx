@@ -63,7 +63,7 @@ export function Button({
 
 	const variantMap = {
 		primary: "default",
-		secondary: "outline",
+		secondary: "secondary",
 		ghost: "ghost",
 		danger: "destructive",
 	} as const;
