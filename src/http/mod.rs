@@ -1,11 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    convert::Infallible,
-    path::PathBuf,
-    sync::{Arc, atomic::Ordering},
-    time::Instant as StdInstant,
-};
-
 use axum::{
     Json, Router,
     body::Body,
@@ -22,11 +14,17 @@ use chrono::{DateTime, SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    convert::Infallible,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Instant as StdInstant,
+};
 use tokio::{
     sync::{Mutex, mpsc},
     time::Duration,
 };
-
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
@@ -1074,6 +1072,10 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/raft/restore-node",
             post(membership_restore::admin_internal_restore_node),
+        )
+        .route(
+            "/_internal/raft/restore-stale-learner",
+            post(membership_restore::admin_internal_restore_stale_learner),
         )
         .route(
             "/_internal/raft/prune-absent-node",

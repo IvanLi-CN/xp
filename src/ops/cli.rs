@@ -190,6 +190,7 @@ pub enum XpCommand {
     SyncNodeMeta(XpSyncNodeMetaArgs),
     RepairOrphanVoter(XpRepairOrphanVoterArgs),
     EvictUnreachableVoter(XpEvictUnreachableVoterArgs),
+    RestoreStaleLearner(XpRestoreStaleLearnerArgs),
     #[command(subcommand)]
     MembershipOperation(MembershipOperationCommand),
     /// Disaster recovery: force this node to become the only Raft voter.
@@ -404,6 +405,25 @@ pub struct XpEvictUnreachableVoterArgs {
     /// Exact comma-separated endpoint ids returned by the preview; empty when none exist.
     #[arg(long, value_delimiter = ',', value_name = "ID[,ID]")]
     pub expected_endpoint_ids: Vec<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct XpRestoreStaleLearnerArgs {
+    /// Local xp API base URL. This command must be run on the current Raft leader.
+    #[arg(long, value_name = "ORIGIN", default_value = "http://127.0.0.1:62416")]
+    pub api_base_url: String,
+
+    /// Exact DesiredState node id of the learner to recover.
+    #[arg(long, value_name = "NODE_ID")]
+    pub node_id: String,
+
+    /// Perform the recovery. Omit for the default no-write preview.
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Opaque membership fingerprint returned by the dry-run preview. Required with --apply.
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub expected_membership: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -757,6 +777,9 @@ pub async fn run() -> i32 {
             }
             XpCommand::EvictUnreachableVoter(args) => {
                 membership_lifecycle::cmd_xp_evict_unreachable_voter(paths, args).await
+            }
+            XpCommand::RestoreStaleLearner(args) => {
+                membership_lifecycle::cmd_xp_restore_stale_learner(paths, args).await
             }
             XpCommand::MembershipOperation(MembershipOperationCommand::Status(args)) => {
                 membership_lifecycle::cmd_xp_membership_operation_status(paths, args).await

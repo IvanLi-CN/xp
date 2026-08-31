@@ -9,6 +9,8 @@
   and ingress-protection language.
 - [Service Monitoring](./docs/specs/uptime-monitoring/CONTEXT.md) — defines
   administrator-managed remote availability checks observed from cluster nodes.
+- [Raft Membership Lifecycle](./docs/specs/7mvqp-raft-membership-voter-invariant/CONTEXT.md) —
+  defines the valid cluster-member roles and operator recovery terms.
 
 ## Relationships
 
@@ -20,3 +22,5 @@
   long-term observations that History Repositories preserve and reconcile.
 - **Managed Host Operations -> Service Monitoring**: host capabilities determine
   whether an Observer Node can execute ICMP checks.
+- **Raft Membership Lifecycle -> Managed Host Operations**: a host operator invokes only
+  the narrow lifecycle commands that the cluster leader has preflighted.

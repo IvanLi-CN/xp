@@ -31,7 +31,7 @@ pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
     RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
-pub(crate) use source_journal::SourceDeliveryJournalRow;
+pub(crate) use source_journal::{SourceDeliveryJournalRow, SourceDeliveryJournalSummary};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";

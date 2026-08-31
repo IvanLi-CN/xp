@@ -1,3 +1,14 @@
+---
+title: Managed stack memory budgets require bounded control-plane reads
+module: ops
+problem_type: production-oom
+component: managed stack and history repository
+tags: [memory, oom, sqlite, history-repository, openrc]
+status: active
+related_specs:
+  - docs/specs/cluster-history-repositories/SPEC.md
+---
+
 # Managed Stack Memory Budget
 
 ## Symptom
@@ -12,6 +23,9 @@ memory growth while the host remains otherwise healthy.
   for each concurrent admin request.
 - A JWT already contains a signed, short-lived credential and must not trigger
   an Argon2 verification.
+- A control-plane status read can defeat durable queue isolation by loading every SQLite journal
+  payload into one process-owned collection. A backlog that is safe on disk can then exceed the XP
+  cgroup limit during an otherwise small runtime-status request.
 
 ## Remediation
 
@@ -47,6 +61,12 @@ A host-managed upgrade must finish the locked `xp`, Xray, and cloudflared phase
 before it replaces `xp-ops`. Treat the tool's own version as independent from the
 service release state: a self-update must not cause a resumed invocation to report
 the release current while XP and its managed runtimes remain on the previous version.
+
+Keep durable delivery backlogs out of control-plane snapshots. Compute counts and byte totals with
+SQLite aggregates, and fetch only the one ordered payload needed for the oldest-pending status.
+Any compatibility backfill that must decode stored payloads should use fixed-size pages so its
+memory use is independent of total backlog size. Do not delete or truncate the backlog to make a
+constrained node boot; preserving durable delivery semantics is part of the recovery contract.
 
 OpenRC `restart` can return after scheduling a `supervise-daemon` transition but before the
 service is ready. Treat a restart command as an initiation step, then poll the same service
@@ -97,3 +117,8 @@ Use `scripts/ops/sample-managed-stack-pss.sh` to sample process-tree PSS from
 `/proc/*/smaps_rollup` once per second, falling back to summing `Pss` entries in
 `/proc/*/smaps` on older kernels. The hard gate is a combined peak of
 `65,536 KiB`; an OOM, restart, or budget breach fails the run.
+
+For a journal-related XP OOM, correlate the cgroup `memory.events` OOM counters with per-process
+RSS and SQLite table aggregates. Exercise the runtime-status path repeatedly while keeping the
+existing journal intact; acceptance requires stable OOM counters and memory that does not grow with
+the number or total bytes of pending rows.

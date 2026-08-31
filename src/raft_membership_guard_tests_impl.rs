@@ -52,11 +52,28 @@ impl RaftFacade for RepairingRaft {
         _required_log_index: u64,
         _timeout: Duration,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { anyhow::bail!("unexpected learner catch-up") })
+        Box::pin(async { Ok(()) })
     }
 
-    fn add_voters(&self, _node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { anyhow::bail!("unexpected add_voters") })
+    fn add_voters(&self, node_ids: BTreeSet<NodeId>) -> BoxFuture<'_, anyhow::Result<()>> {
+        let metrics = self.metrics.clone();
+        let metrics_tx = self.metrics_tx.clone();
+        Box::pin(async move {
+            let mut next = metrics.borrow().clone();
+            let previous = next.membership_config.clone();
+            let mut voters = previous.membership().voter_ids().collect::<BTreeSet<_>>();
+            voters.extend(node_ids);
+            let nodes = previous
+                .nodes()
+                .map(|(node_id, node)| (*node_id, node.clone()))
+                .collect::<BTreeMap<_, _>>();
+            next.membership_config = Arc::new(openraft::StoredMembership::new(
+                *previous.log_id(),
+                openraft::Membership::new(vec![voters], nodes),
+            ));
+            metrics_tx.send_replace(next);
+            Ok(())
+        })
     }
 
     fn change_membership(
@@ -96,6 +113,192 @@ impl RaftFacade for RepairingRaft {
             Ok(())
         })
     }
+}
+
+#[tokio::test]
+async fn stale_learner_recovery_requires_an_exact_preview_and_completes_restore() {
+    let temp = tempfile::tempdir().unwrap();
+    let local_node_id = xp_test_fixtures::identifier_ulid_d().to_owned();
+    let target_node_id = xp_test_fixtures::identifier_ulid_e().to_owned();
+    let local_raft_node_id = raft_node_id_from_ulid(&local_node_id).unwrap();
+    let target_raft_node_id = raft_node_id_from_ulid(&target_node_id).unwrap();
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: temp.path().to_path_buf(),
+            bootstrap_node_id: Some(local_node_id),
+            bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        })
+        .unwrap(),
+    ));
+    let target = Node {
+        node_id: target_node_id.clone(),
+        node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+        access_host: xp_test_fixtures::secondary_host().to_owned(),
+        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: NodeQuotaReset::default(),
+    };
+    {
+        let mut store = store.lock().await;
+        store.upsert_node(target.clone()).unwrap();
+        store.state_mut().join_sessions.insert(
+            target_node_id.clone(),
+            crate::join_session::JoinSession {
+                node_id: target_node_id.clone(),
+                request_fingerprint: "test-fingerprint".to_string(),
+                signed_cert_pem: "test-certificate".to_string(),
+                token_expires_at: xp_test_fixtures::baseline_timestamp().to_owned(),
+                activation_deadline: xp_test_fixtures::baseline_timestamp().to_owned(),
+                required_log_index: 42,
+                status: crate::join_session::JoinSessionStatus::LearnerRegistered,
+                terminal_at: None,
+            },
+        );
+    }
+
+    let mut metrics = openraft::RaftMetrics::new_initial(local_raft_node_id);
+    metrics.state = openraft::ServerState::Leader;
+    metrics.current_leader = Some(local_raft_node_id);
+    metrics.last_log_index = Some(42);
+    metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+        None,
+        openraft::Membership::new(
+            vec![BTreeSet::from([local_raft_node_id])],
+            BTreeMap::from([
+                (
+                    local_raft_node_id,
+                    NodeMeta {
+                        name: xp_test_fixtures::primary_node_name().to_owned(),
+                        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::primary_api_url().to_owned(),
+                    },
+                ),
+                (
+                    target_raft_node_id,
+                    NodeMeta {
+                        name: target.node_name.clone(),
+                        api_base_url: target.api_base_url.clone(),
+                        raft_endpoint: target.api_base_url.clone(),
+                    },
+                ),
+            ]),
+        ),
+    ));
+    let (metrics_tx, metrics_rx) = watch::channel(metrics);
+    let recovery_metrics_tx = metrics_tx.clone();
+    let raft: Arc<dyn RaftFacade> = Arc::new(RepairingRaft {
+        inner: LocalRaft::new(store.clone(), metrics_rx.clone()),
+        metrics: metrics_rx,
+        metrics_tx,
+        retain_values: Arc::new(Mutex::new(Vec::new())),
+        fail_next_membership_change: Arc::new(AtomicBool::new(false)),
+    });
+
+    let valid_metrics = raft.metrics().borrow().clone();
+    let mut mismatched_metrics = valid_metrics.clone();
+    let previous = mismatched_metrics.membership_config.clone();
+    let voters = previous.membership().voter_ids().collect::<BTreeSet<_>>();
+    let mut nodes = previous
+        .nodes()
+        .map(|(node_id, node)| (*node_id, node.clone()))
+        .collect::<BTreeMap<_, _>>();
+    nodes.get_mut(&target_raft_node_id).unwrap().name = "wrong-target".to_string();
+    mismatched_metrics.membership_config = Arc::new(openraft::StoredMembership::new(
+        *previous.log_id(),
+        openraft::Membership::new(vec![voters], nodes),
+    ));
+    recovery_metrics_tx.send_replace(mismatched_metrics);
+    let error = preview_stale_learner_recovery(raft.clone(), store.clone(), &target_node_id)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("metadata does not match"));
+    assert!(store.lock().await.state().membership_operations.is_empty());
+    recovery_metrics_tx.send_replace(valid_metrics);
+
+    store
+        .lock()
+        .await
+        .state_mut()
+        .join_sessions
+        .get_mut(&target_node_id)
+        .unwrap()
+        .status = crate::join_session::JoinSessionStatus::Reserved;
+    let error = preview_stale_learner_recovery(raft.clone(), store.clone(), &target_node_id)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("reserved join session"));
+    assert!(store.lock().await.state().membership_operations.is_empty());
+    store
+        .lock()
+        .await
+        .state_mut()
+        .join_sessions
+        .get_mut(&target_node_id)
+        .unwrap()
+        .status = crate::join_session::JoinSessionStatus::LearnerRegistered;
+
+    let preview = preview_stale_learner_recovery(raft.clone(), store.clone(), &target_node_id)
+        .await
+        .unwrap();
+    assert_eq!(preview.raft_node_id, target_raft_node_id);
+    assert!(store.lock().await.state().membership_operations.is_empty());
+
+    let error = begin_stale_learner_recovery(
+        raft.clone(),
+        store.clone(),
+        &target_node_id,
+        "stale-membership-revision",
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("membership revision changed"));
+    assert!(store.lock().await.state().membership_operations.is_empty());
+
+    let operation = begin_stale_learner_recovery(
+        raft.clone(),
+        store.clone(),
+        &target_node_id,
+        &preview.expected_membership,
+    )
+    .await
+    .unwrap();
+    assert_eq!(operation.kind, MembershipOperationKind::Restore);
+    assert_eq!(
+        store.lock().await.state().join_sessions[&target_node_id].status,
+        crate::join_session::JoinSessionStatus::Consumed
+    );
+
+    for _ in 0..3 {
+        resume_membership_operations_once(raft.clone(), store.clone())
+            .await
+            .unwrap();
+    }
+    assert!(
+        raft.metrics()
+            .borrow()
+            .membership_config
+            .membership()
+            .voter_ids()
+            .any(|node_id| node_id == target_raft_node_id)
+    );
+    assert_eq!(
+        store
+            .lock()
+            .await
+            .state()
+            .membership_operations
+            .get(&operation.operation_id)
+            .unwrap()
+            .phase,
+        MembershipOperationPhase::Completed
+    );
+    assert!(
+        crate::raft_membership_guard::audit_membership(raft, store)
+            .await
+            .is_clean()
+    );
 }
 
 #[tokio::test]

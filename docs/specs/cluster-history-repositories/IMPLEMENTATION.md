@@ -63,11 +63,22 @@
   a continuous acknowledgement. Transport failures and legacy queue pressure remain recoverable
   backlog, never a permanent gap. The source enters `source_storage_guard` rather than advancing a
   cursor when the existing 256 MiB filesystem guard is reached.
+  `path_health.v1` reads a bounded telemetry source view directly from runtime state: rotating
+  through at most 16 peers, with each peer's latest one-minute bucket, rather than cloning complete
+  local 24-hour telemetry series. It bounds copied strings and latency samples before adding each
+  peer only when the serialized source view still fits the 32 KiB source-record budget.
   After three failed primary delivery cycles, a source selects its rendezvous
   standby; both collectors accept the signed segment so that the transition has no coordination
   race. When both direct paths fail, an hourly-jittered relay carries compressed encrypted,
   frame-budgeted pending-source pages through an eligible cluster member without storing history
   at the relay.
+  The SQLite source delivery journal maintains transactionally updated pending-count, pending-byte
+  and epoch high-water statistics plus the last successful acknowledgement path/time.
+  A delivery-order expression index serves tombstone-priority pages without a temporary sort.
+  Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
+  the entire journal.
+  Existing databases initialize these fields idempotently without deleting or rewriting signed
+  pending segments.
   Receivers require the complete pinned identity: repository senders must match their current
   Raft member identity, while ordinary cluster-node sources use the same server-derived pinned
   identity. Repair and relay batches apply the identical identity check before signature
