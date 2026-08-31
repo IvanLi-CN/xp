@@ -1,5 +1,5 @@
 use super::*;
-use std::{fs, net::SocketAddr};
+use std::{collections::VecDeque, fs, net::SocketAddr};
 
 fn h2_sample(fingerprint: MeshConnectionFingerprint) -> MeshTelemetrySample {
     MeshTelemetrySample {
@@ -20,6 +20,143 @@ fn fingerprint(local_port: u16, remote_port: u16) -> MeshConnectionFingerprint {
         local_addr: SocketAddr::from(([127, 0, 0, 1], local_port)),
         remote_addr: SocketAddr::from(([127, 0, 0, 2], remote_port)),
     }
+}
+
+#[tokio::test]
+async fn history_source_snapshot_bounds_full_peer_bucket_series() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    {
+        let mut state = telemetry.state.lock().await;
+        for peer_index in 0..16 {
+            state.persisted.peers.insert(
+                format!("peer-{peer_index}"),
+                MeshPeerTelemetry {
+                    peer_id: format!("peer-{peer_index}"),
+                    peer_name: format!("peer-{peer_index}"),
+                    last_path: Some(TelemetryPath::Mesh),
+                    buckets: (0..MAX_BUCKETS)
+                        .map(|minute| MeshTelemetryBucket {
+                            minute: format!("2026-08-31T{:04}:00Z", minute),
+                            mesh_success: 1,
+                            latency_samples_ms: vec![999; 64],
+                            ..Default::default()
+                        })
+                        .collect::<VecDeque<_>>(),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    let snapshot = telemetry.history_source_snapshot(16, 1, 32 * 1024).await;
+    assert_eq!(snapshot.peers.len(), 16);
+    assert!(snapshot.peers.iter().all(|peer| peer.buckets.len() == 1));
+    assert!(
+        snapshot
+            .peers
+            .iter()
+            .all(|peer| peer.buckets[0].minute == "2026-08-31T1439:00Z")
+    );
+    assert!(
+        serde_json::to_vec(&snapshot).unwrap().len() <= 32 * 1024,
+        "history source snapshot must fit its source-record payload budget"
+    );
+}
+
+#[tokio::test]
+async fn history_source_snapshot_rotates_peers_larger_than_one_source_window() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    {
+        let mut state = telemetry.state.lock().await;
+        for peer_index in 0..17 {
+            state.persisted.peers.insert(
+                format!("peer-{peer_index:02}"),
+                MeshPeerTelemetry {
+                    peer_id: format!("peer-{peer_index:02}"),
+                    peer_name: format!("peer-{peer_index:02}"),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    let first = telemetry.history_source_snapshot(16, 1, 32 * 1024).await;
+    let second = telemetry.history_source_snapshot(16, 1, 32 * 1024).await;
+    let peer_ids = first
+        .peers
+        .iter()
+        .chain(&second.peers)
+        .map(|peer| peer.peer_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(first.peers.len(), 16);
+    assert_eq!(second.peers.len(), 16);
+    assert_eq!(peer_ids.len(), 17);
+}
+
+#[tokio::test]
+async fn history_source_snapshot_bounds_large_variable_fields_before_serialization() {
+    let temp = tempfile::tempdir().unwrap();
+    let telemetry = MeshTelemetryHandle::load(temp.path()).unwrap();
+    let long_control_string = "\0".repeat(4 * 1024);
+    {
+        let mut state = telemetry.state.lock().await;
+        for peer_index in 0..32 {
+            state.persisted.peers.insert(
+                format!("peer-{peer_index:02}"),
+                MeshPeerTelemetry {
+                    peer_id: format!("{peer_index:02}{long_control_string}"),
+                    peer_name: long_control_string.clone(),
+                    active_route: Some(MeshActiveRoute {
+                        kind: ActiveRouteKind::ReverseRelay,
+                        rendezvous: Some(long_control_string.clone()),
+                        rendezvous_role: Some(long_control_string.clone()),
+                        primary_rendezvous: Some(long_control_string.clone()),
+                        standby_rendezvous: Some(long_control_string.clone()),
+                        generation: Some(1),
+                        readiness: Some(long_control_string.clone()),
+                    }),
+                    last_sample_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+                    last_mesh_target: Some(long_control_string.clone()),
+                    last_transition_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+                    last_connection_started_at: Some(long_control_string.clone()),
+                    buckets: VecDeque::from([MeshTelemetryBucket {
+                        minute: long_control_string.clone(),
+                        latency_samples_ms: vec![999; 4 * 1024],
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    let mut peer_ids = std::collections::BTreeSet::new();
+    for _ in 0..32 {
+        let snapshot = telemetry.history_source_snapshot(16, 1, 32 * 1024).await;
+
+        assert!(!snapshot.peers.is_empty());
+        assert!(
+            snapshot.peers.len() < 16,
+            "test data must exercise the byte budget"
+        );
+        assert!(serde_json::to_vec(&snapshot).unwrap().len() <= 32 * 1024);
+        for peer in &snapshot.peers {
+            assert!(peer.peer_id.len() <= MAX_HISTORY_SOURCE_STRING_BYTES);
+            assert!(peer.peer_name.len() <= MAX_HISTORY_SOURCE_STRING_BYTES);
+            assert!(
+                peer.last_mesh_target
+                    .as_deref()
+                    .is_none_or(|value| value.len() <= MAX_HISTORY_SOURCE_STRING_BYTES)
+            );
+            assert!(peer.buckets[0].minute.len() <= MAX_HISTORY_SOURCE_STRING_BYTES);
+            assert!(peer.buckets[0].latency_samples_ms.len() <= MAX_HISTORY_SOURCE_LATENCY_SAMPLES);
+            peer_ids.insert(peer.peer_id.clone());
+        }
+    }
+    assert_eq!(peer_ids.len(), 32);
 }
 
 #[tokio::test]

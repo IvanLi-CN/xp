@@ -3,7 +3,10 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration as StdDuration,
 };
 
@@ -20,6 +23,8 @@ use crate::state::history_storage::read_legacy_mesh_telemetry;
 const TELEMETRY_SCHEMA_VERSION: u32 = 1;
 const MAX_EVENTS: usize = 200;
 const MAX_BUCKETS: usize = 24 * 60;
+const MAX_HISTORY_SOURCE_STRING_BYTES: usize = 48;
+const MAX_HISTORY_SOURCE_LATENCY_SAMPLES: usize = 64;
 const SAMPLE_PERSIST_INTERVAL: StdDuration = StdDuration::from_secs(5);
 
 mod reverse;
@@ -180,6 +185,16 @@ pub struct MeshTelemetrySnapshot {
     pub events: Vec<MeshTelemetryEvent>,
 }
 
+/// Bounded Mesh telemetry view used by the history source worker.
+///
+/// History source observations describe the latest peer state. They do not need to duplicate the
+/// full local 24-hour bucket series on every one-minute source segment.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct MeshTelemetryHistorySourceSnapshot {
+    pub generated_at: String,
+    pub peers: Vec<MeshPeerTelemetry>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MeshTelemetrySample {
     pub path: TelemetryPath,
@@ -196,6 +211,7 @@ pub struct MeshTelemetryHandle {
     state: Arc<Mutex<TelemetryState>>,
     connections: MeshConnectionTrackers,
     probe_gate: Arc<Semaphore>,
+    history_source_cursor: Arc<AtomicUsize>,
     #[cfg(test)]
     persist_count: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -216,6 +232,7 @@ impl MeshTelemetryHandle {
             })),
             connections: MeshConnectionTrackers::default(),
             probe_gate: Arc::new(Semaphore::new(4)),
+            history_source_cursor: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             persist_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
@@ -234,6 +251,45 @@ impl MeshTelemetryHandle {
             peers: state.persisted.peers.values().cloned().collect(),
             events: state.persisted.events.iter().cloned().collect(),
         }
+    }
+
+    pub(crate) async fn history_source_snapshot(
+        &self,
+        max_peers: usize,
+        max_buckets_per_peer: usize,
+        max_payload_bytes: usize,
+    ) -> MeshTelemetryHistorySourceSnapshot {
+        let state = self.state.lock().await;
+        let mut snapshot = MeshTelemetryHistorySourceSnapshot {
+            generated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            peers: Vec::new(),
+        };
+        let peers = state.persisted.peers.values().collect::<Vec<_>>();
+        if max_peers == 0 || peers.is_empty() {
+            return snapshot;
+        }
+
+        let start = self
+            .history_source_cursor
+            // Advance one starting position per collection. The byte budget can admit fewer than
+            // `max_peers`, so advancing a full window could permanently skip its tail.
+            .fetch_add(1, Ordering::Relaxed)
+            % peers.len();
+        for offset in 0..peers.len() {
+            if snapshot.peers.len() == max_peers {
+                break;
+            }
+            let peer =
+                history_source_peer(peers[(start + offset) % peers.len()], max_buckets_per_peer);
+            snapshot.peers.push(peer);
+            let fits_budget = serde_json::to_vec(&snapshot)
+                .map(|payload| payload.len() <= max_payload_bytes)
+                .unwrap_or(false);
+            if !fits_budget {
+                snapshot.peers.pop();
+            }
+        }
+        snapshot
     }
 
     pub async fn record_sample(
@@ -547,6 +603,78 @@ impl MeshTelemetryHandle {
         self.persist_count
             .load(std::sync::atomic::Ordering::Relaxed)
     }
+}
+
+fn history_source_peer(peer: &MeshPeerTelemetry, max_buckets: usize) -> MeshPeerTelemetry {
+    let mut buckets = peer
+        .buckets
+        .iter()
+        .rev()
+        .take(max_buckets)
+        .map(history_source_bucket)
+        .collect::<Vec<_>>();
+    buckets.reverse();
+    MeshPeerTelemetry {
+        peer_id: history_source_string(&peer.peer_id),
+        peer_name: history_source_string(&peer.peer_name),
+        last_path: peer.last_path,
+        active_route: peer.active_route.as_ref().map(history_source_active_route),
+        last_sample_at: history_source_option(&peer.last_sample_at),
+        last_mesh_target: history_source_option(&peer.last_mesh_target),
+        last_transition_at: history_source_option(&peer.last_transition_at),
+        breaker: peer.breaker,
+        last_mesh_reason: peer.last_mesh_reason,
+        last_mesh_protocol: peer.last_mesh_protocol,
+        connection_generation: peer.connection_generation,
+        current_connection_requests: peer.current_connection_requests,
+        last_connection_started_at: history_source_option(&peer.last_connection_started_at),
+        buckets: VecDeque::from(buckets),
+    }
+}
+
+fn history_source_bucket(bucket: &MeshTelemetryBucket) -> MeshTelemetryBucket {
+    MeshTelemetryBucket {
+        minute: history_source_string(&bucket.minute),
+        mesh_success: bucket.mesh_success,
+        mesh_failure: bucket.mesh_failure,
+        public_success: bucket.public_success,
+        public_failure: bucket.public_failure,
+        fallback_success: bucket.fallback_success,
+        end_to_end_success: bucket.end_to_end_success,
+        end_to_end_failure: bucket.end_to_end_failure,
+        latency_samples_ms: bucket
+            .latency_samples_ms
+            .iter()
+            .take(MAX_HISTORY_SOURCE_LATENCY_SAMPLES)
+            .copied()
+            .collect(),
+        mesh_h2_requests: bucket.mesh_h2_requests,
+        mesh_connection_starts: bucket.mesh_connection_starts,
+    }
+}
+
+fn history_source_active_route(route: &MeshActiveRoute) -> MeshActiveRoute {
+    MeshActiveRoute {
+        kind: route.kind,
+        rendezvous: history_source_option(&route.rendezvous),
+        rendezvous_role: history_source_option(&route.rendezvous_role),
+        primary_rendezvous: history_source_option(&route.primary_rendezvous),
+        standby_rendezvous: history_source_option(&route.standby_rendezvous),
+        generation: route.generation,
+        readiness: history_source_option(&route.readiness),
+    }
+}
+
+fn history_source_option(value: &Option<String>) -> Option<String> {
+    value.as_deref().map(history_source_string)
+}
+
+fn history_source_string(value: &str) -> String {
+    let mut end = value.len().min(MAX_HISTORY_SOURCE_STRING_BYTES);
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_owned()
 }
 
 pub fn quality_for_peer(peer: &MeshPeerTelemetry, now: DateTime<Utc>) -> MeshQuality {
