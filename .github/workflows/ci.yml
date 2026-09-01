@@ -21,6 +21,10 @@ jobs:
         shell: bash
         run: python3 ./.github/scripts/test-release-governance.py
 
+      - name: release failure notifier workflow contract
+        shell: bash
+        run: python3 ./.github/scripts/test-notify-release-failure.py
+
       - name: setup rust
         uses: dtolnay/rust-toolchain@v1
         with:
