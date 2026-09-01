@@ -1,7 +1,4 @@
 #[cfg(target_os = "linux")]
-use super::*;
-
-#[cfg(target_os = "linux")]
 use std::{
     fs, thread,
     time::{Duration, Instant},
