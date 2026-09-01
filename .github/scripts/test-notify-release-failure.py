@@ -55,6 +55,12 @@ require("  smoke_test:\n    if: ${{ github.event_name == 'workflow_dispatch' }}\
 
 failure_job = job_block(source, "notify_failure", "smoke_test")
 smoke_job = job_block(source, "smoke_test")
+require(failure_condition in failure_job, "notify_failure failure condition is not attached to its job")
+require(failure_condition not in smoke_job, "smoke_test must not inherit the release failure condition")
+require(
+    "if: ${{ github.event_name == 'workflow_dispatch' }}" in smoke_job,
+    "smoke_test dispatch condition is not attached to its job",
+)
 for name, block in (("notify_failure", failure_job), ("smoke_test", smoke_job)):
     require("uses: " + OIDRUNE_REF in block, f"{name} does not call pinned Oidrune")
     require("outcome: failure\n" in block, f"{name} does not declare outcome")

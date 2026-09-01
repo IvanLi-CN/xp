@@ -21,8 +21,9 @@
 ## Contract validation
 
 - `.github/scripts/test-notify-release-failure.py` 断言固定 SHA、无旧 secret wiring、OIDC 权限、
-  触发过滤、失败判定、手动 smoke 路径与 caller-owned summary 字段。
-- `.github/workflows/ci.yml` 在 Rust job 中执行该 contract test。
+  触发过滤、逐 job 失败判定、手动 smoke 路径与 caller-owned summary 字段。
+- `.github/workflows/ci.yml` 在 Rust job 中执行该 contract test，并通过 Ruby Psych 解析两个
+  workflow 文件。
 
 ## Operational boundary
 
