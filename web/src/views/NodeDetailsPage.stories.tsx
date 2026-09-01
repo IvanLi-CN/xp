@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
 import type { AdminEndpoint } from "../api/adminEndpoints";
-import type { AdminMembershipOperation, AdminNode } from "../api/adminNodes";
+import type {
+	AdminMembershipOperation,
+	AdminNode,
+	AdminNodeMihomoResourcePolicy,
+} from "../api/adminNodes";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
@@ -98,6 +102,17 @@ const meta = {
 				nodeTcpConnectionsByNodeId: Object.fromEntries([
 					[node.node_id, tcpConnectionReports],
 				]),
+				nodeMihomoResourcePolicyByNodeId: {
+					[fixtureCatalog.identifier.nodePrimary()]: {
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+						override_cidrs: [fixtureCatalog.address.privateCidr()],
+						effective_cidrs: [fixtureCatalog.address.privateCidr()],
+						source: "override",
+						status: "healthy",
+						error: null,
+					} satisfies AdminNodeMihomoResourcePolicy,
+				},
 			},
 		},
 	},
@@ -199,6 +214,107 @@ export const MetadataEgressProbe: Story = {
 			await canvas.findAllByText(fixtureCatalog.address.tertiaryIpv4()),
 		).toHaveLength(2);
 		await expect(await canvas.findByText("ExampleNet")).toBeInTheDocument();
+	},
+};
+
+async function verifyMihomoPrivateResourcePolicy(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	await canvas.findByText("Mihomo resources", { exact: true });
+	const mihomoTab = Array.from(
+		canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
+	).find((element) => element.textContent?.trim() === "Mihomo resources");
+	if (mihomoTab) {
+		mihomoTab.click();
+	} else {
+		const mobileSelect = canvasElement.querySelector<HTMLElement>(
+			'[role="combobox"][aria-label="Node details section"]',
+		);
+		if (!mobileSelect) throw new Error("Mihomo navigation control is missing");
+		mobileSelect.click();
+		await userEvent.click(
+			await within(canvasElement.ownerDocument.body).findByRole("option", {
+				name: "Mihomo resources",
+			}),
+		);
+	}
+	await expect(
+		await canvas.findByText("Mihomo private resource policy"),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("textbox", { name: "Web override CIDRs" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Remove" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Save override" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Disable private targets" }),
+	).toBeInTheDocument();
+	await expect(
+		await canvas.findByRole("button", { name: "Restore deployment default" }),
+	).toBeInTheDocument();
+}
+
+export const MihomoPrivateResourcePolicyDesktop: Story = {
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+	},
+};
+
+export const MihomoPrivateResourcePolicy: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoPolicyMobile",
+			viewports: {
+				mihomoPolicyMobile: {
+					name: "Mihomo policy mobile",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+	},
+};
+
+export const MihomoPrivateResourcePolicyIpv6Mobile: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoPolicyMobile",
+			viewports: {
+				mihomoPolicyMobile: {
+					name: "Mihomo policy mobile",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+		mockApi: {
+			data: {
+				nodeMihomoResourcePolicyByNodeId: {
+					[fixtureCatalog.identifier.nodePrimary()]: {
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						deployment_default_cidrs: [
+							fixtureCatalog.address.privateIpv6Cidr(),
+						],
+						override_cidrs: [fixtureCatalog.address.privateIpv6Cidr()],
+						effective_cidrs: [fixtureCatalog.address.privateIpv6Cidr()],
+						source: "override",
+						status: "healthy",
+						error: null,
+					} satisfies AdminNodeMihomoResourcePolicy,
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findAllByText(fixtureCatalog.address.privateIpv6Cidr()),
+		).toHaveLength(3);
 	},
 };
 

@@ -11,6 +11,8 @@
   administrator-managed remote availability checks observed from cluster nodes.
 - [Raft Membership Lifecycle](./docs/specs/7mvqp-raft-membership-voter-invariant/CONTEXT.md) —
   defines the valid cluster-member roles and operator recovery terms.
+- [Mihomo Private Resource CIDRs](./docs/specs/mihomo-private-resource-cidrs/CONTEXT.md) —
+  defines node-local private target authorization for split-DNS mirror resources.
 
 ## Relationships
 

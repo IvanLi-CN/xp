@@ -21,6 +21,7 @@ use reqwest::{Client, Url};
 use sha2::Sha256;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
+use crate::mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot};
 use crate::{state::UserMihomoProfile, subscription};
 
 const MAX_RESOURCE_BYTES: u64 = 256 * 1024 * 1024;
@@ -309,6 +310,7 @@ fn build_resource_client() -> Client {
 async fn build_public_resource_client(
     url: &Url,
     timeout: Duration,
+    policy: &PolicySnapshot,
 ) -> Result<Client, (StatusCode, &'static str)> {
     let host = url
         .host_str()
@@ -322,11 +324,11 @@ async fn build_public_resource_client(
         Ok(Err(_)) => return Err((StatusCode::BAD_GATEWAY, "upstream_unreachable")),
         Err(_) => return Err((StatusCode::GATEWAY_TIMEOUT, "upstream_timeout")),
     };
-    if addrs.is_empty()
-        || addrs
-            .iter()
-            .any(|address| !crate::mihomo_redact::is_public_ip(address.ip()))
-    {
+    let addrs = addrs
+        .into_iter()
+        .filter(|address| mihomo_policy::is_allowed_address(address.ip(), &policy.effective))
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
         return Err((StatusCode::FORBIDDEN, "private_target_blocked"));
     }
 
@@ -343,6 +345,34 @@ pub async fn proxy_resource(
     url: Url,
     resource_id_value: &str,
     allow_private_targets: bool,
+) -> Response {
+    if allow_private_targets {
+        proxy_resource_with_snapshot(url, resource_id_value, None).await
+    } else {
+        let snapshot = PolicySnapshot {
+            deployment_default: Vec::new(),
+            override_cidrs: None,
+            effective: Vec::new(),
+            source: mihomo_policy::PolicySource::DeploymentDefault,
+            status: mihomo_policy::PolicyStatus::Healthy,
+            error: None,
+        };
+        proxy_resource_with_snapshot(url, resource_id_value, Some(snapshot)).await
+    }
+}
+
+pub async fn proxy_resource_with_policy(
+    url: Url,
+    resource_id_value: &str,
+    policy: &MihomoResourcePolicy,
+) -> Response {
+    proxy_resource_with_snapshot(url, resource_id_value, Some(policy.snapshot().await)).await
+}
+
+async fn proxy_resource_with_snapshot(
+    url: Url,
+    resource_id_value: &str,
+    policy: Option<PolicySnapshot>,
 ) -> Response {
     let global = GLOBAL_LIMIT
         .get_or_init(|| Arc::new(Semaphore::new(GLOBAL_CONCURRENCY)))
@@ -376,15 +406,14 @@ pub async fn proxy_resource(
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout");
         };
-        let client = if allow_private_targets {
-            CLIENT.get_or_init(build_resource_client).clone()
-        } else {
-            match build_public_resource_client(&current, remaining).await {
+        let client = match policy.as_ref() {
+            None => CLIENT.get_or_init(build_resource_client).clone(),
+            Some(policy) => match build_public_resource_client(&current, remaining, policy).await {
                 Ok(client) => client,
                 Err((status, code)) => {
                     return error_response(status, code);
                 }
-            }
+            },
         };
         let request = client
             .get(current.clone())

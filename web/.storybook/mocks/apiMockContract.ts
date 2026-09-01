@@ -1,7 +1,10 @@
 import type { AlertsResponse } from "../../src/api/adminAlerts";
 import type { AdminEndpointKind } from "../../src/api/adminEndpoints";
 import type { NodeHistorySnapshot } from "../../src/api/adminNodeHistory";
-import type { AdminNode } from "../../src/api/adminNodes";
+import type {
+	AdminNode,
+	AdminNodeMihomoResourcePolicy,
+} from "../../src/api/adminNodes";
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
 import type { ServiceMonitorSummary } from "../../src/api/adminServiceMonitors";
@@ -44,6 +47,10 @@ export type MockStateSeed = {
 	userAutoAssignEndpointKindsByUserId: Record<string, AdminEndpointKind[]>;
 	nodeQuotas: AdminUserNodeQuota[];
 	nodeIpUsageByNodeId: Record<string, MockWindowedNodeIpUsage>;
+	nodeMihomoResourcePolicyByNodeId: Record<
+		string,
+		AdminNodeMihomoResourcePolicy
+	>;
 	nodeTcpConnectionsByNodeId: Record<string, MockWindowedNodeTcpConnections>;
 	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;

@@ -18,7 +18,10 @@ import type {
 	NodeRuntimeEvent,
 	NodeRuntimeHistorySlot,
 } from "../../src/api/adminNodeRuntime";
-import type { AdminNode } from "../../src/api/adminNodes";
+import type {
+	AdminNode,
+	AdminNodeMihomoResourcePolicy,
+} from "../../src/api/adminNodes";
 import type { AdminQuotaPolicyGlobalWeightRow } from "../../src/api/adminQuotaPolicyGlobalWeightRows";
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminQuotaPolicyNodeWeightRow } from "../../src/api/adminQuotaPolicyNodeWeightRows";
@@ -910,6 +913,26 @@ function createDefaultSeed(): MockStateSeed {
 	const nodeIpUsageByNodeId = Object.fromEntries(
 		nodes.map((node) => [node.node_id, buildDefaultNodeIpUsage(node)]),
 	) satisfies Record<string, AdminNodeIpUsageResponse>;
+	const nodeMihomoResourcePolicyByNodeId = {
+		[fixtureCatalog.nodeId.fixture32()]: {
+			node_id: fixtureCatalog.nodeId.fixture32(),
+			deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+			override_cidrs: null,
+			effective_cidrs: [fixtureCatalog.address.privateCidr()],
+			source: "deployment_default" as const,
+			status: "healthy" as const,
+			error: null,
+		},
+		[fixtureCatalog.nodeId.fixture36()]: {
+			node_id: fixtureCatalog.nodeId.fixture36(),
+			deployment_default_cidrs: [fixtureCatalog.address.privateCidr()],
+			override_cidrs: null,
+			effective_cidrs: [fixtureCatalog.address.privateCidr()],
+			source: "deployment_default" as const,
+			status: "healthy" as const,
+			error: null,
+		},
+	} satisfies Record<string, AdminNodeMihomoResourcePolicy>;
 	const nodeTcpConnectionsByNodeId = Object.fromEntries(
 		nodes.map((node) => [
 			node.node_id,
@@ -1014,6 +1037,7 @@ function createDefaultSeed(): MockStateSeed {
 		userAutoAssignEndpointKindsByUserId,
 		nodeQuotas: [],
 		nodeIpUsageByNodeId,
+		nodeMihomoResourcePolicyByNodeId,
 		nodeTcpConnectionsByNodeId,
 		nodeHistoryByNodeId,
 		userIpUsageByUserId,
@@ -1046,6 +1070,10 @@ function buildState(config?: StorybookApiMockConfig): MockState {
 		nodeIpUsageByNodeId: {
 			...base.nodeIpUsageByNodeId,
 			...(overrides?.nodeIpUsageByNodeId ?? {}),
+		},
+		nodeMihomoResourcePolicyByNodeId: {
+			...base.nodeMihomoResourcePolicyByNodeId,
+			...(overrides?.nodeMihomoResourcePolicyByNodeId ?? {}),
 		},
 		nodeTcpConnectionsByNodeId: {
 			...base.nodeTcpConnectionsByNodeId,
@@ -1408,6 +1436,42 @@ async function handleRequest(
 			return errorResponse(404, "not_found", "node not found");
 		}
 		return jsonResponse(buildNodeEgressProbeRefreshResponse(node));
+	}
+
+	const nodeMihomoPolicyMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/mihomo-resource-policy$/,
+	);
+	if (nodeMihomoPolicyMatch && (method === "GET" || method === "PUT")) {
+		const nodeId = decodeURIComponent(nodeMihomoPolicyMatch[1]);
+		const policy = state.nodeMihomoResourcePolicyByNodeId[nodeId];
+		if (!policy) return errorResponse(404, "not_found", "node not found");
+		if (method === "PUT") {
+			const payload = await readJson<{ override_cidrs?: string[] }>(req);
+			const override = payload?.override_cidrs ?? [];
+			state.nodeMihomoResourcePolicyByNodeId[nodeId] = {
+				...policy,
+				override_cidrs: override,
+				effective_cidrs: override,
+				source: "override",
+			};
+		}
+		return jsonResponse(clone(state.nodeMihomoResourcePolicyByNodeId[nodeId]));
+	}
+
+	const nodeMihomoPolicyDeleteMatch = path.match(
+		/^\/api\/admin\/nodes\/([^/]+)\/mihomo-resource-policy\/override$/,
+	);
+	if (nodeMihomoPolicyDeleteMatch && method === "DELETE") {
+		const nodeId = decodeURIComponent(nodeMihomoPolicyDeleteMatch[1]);
+		const policy = state.nodeMihomoResourcePolicyByNodeId[nodeId];
+		if (!policy) return errorResponse(404, "not_found", "node not found");
+		state.nodeMihomoResourcePolicyByNodeId[nodeId] = {
+			...policy,
+			override_cidrs: null,
+			effective_cidrs: policy.deployment_default_cidrs,
+			source: "deployment_default",
+		};
+		return jsonResponse(clone(state.nodeMihomoResourcePolicyByNodeId[nodeId]));
 	}
 
 	if (path === "/api/admin/nodes/runtime" && method === "GET") {

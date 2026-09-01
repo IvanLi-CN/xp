@@ -219,7 +219,7 @@ export function TagInput({
 										className={badgeClass(
 											allowPrimary && idx === 0 ? "primary" : "ghost",
 											"default",
-											"gap-2 font-mono xp-chip-action",
+											"min-w-0 max-w-full gap-2 font-mono xp-chip-action",
 										)}
 										title={
 											allowPrimary && idx === 0
@@ -234,7 +234,7 @@ export function TagInput({
 												ariaLabel="Primary"
 											/>
 										) : null}
-										<span>{tag}</span>
+										<span className="min-w-0 truncate">{tag}</span>
 									</span>
 
 									{allowPrimary && idx !== 0 ? (
@@ -242,7 +242,7 @@ export function TagInput({
 											type="button"
 											variant="ghost"
 											size="sm"
-											className="h-7 px-2 xp-chip-action"
+											className="h-7 shrink-0 px-2 xp-chip-action"
 											onClick={() => makePrimaryAt(idx)}
 											disabled={disabled}
 											title="Make primary"
@@ -259,7 +259,7 @@ export function TagInput({
 										type="button"
 										variant="ghost"
 										size="sm"
-										className="h-7 px-2 xp-chip-action"
+										className="h-7 shrink-0 px-2 xp-chip-action"
 										onClick={() => removeAt(idx)}
 										disabled={disabled}
 										title="Remove"

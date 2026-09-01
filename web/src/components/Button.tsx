@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import { useUiPrefsOptional } from "./UiPrefs";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger";
 type ButtonSize = "md" | "sm";
 
 export interface ButtonProps extends Omit<UiButtonProps, "variant" | "size"> {
@@ -64,6 +64,7 @@ export function Button({
 	const variantMap = {
 		primary: "default",
 		secondary: "secondary",
+		outline: "outline",
 		ghost: "ghost",
 		danger: "destructive",
 	} as const;

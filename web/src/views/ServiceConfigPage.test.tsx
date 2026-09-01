@@ -1,10 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 
-import { fetchAdminConfig, putMihomoResourcePolicy } from "../api/adminConfig";
+import { fetchAdminConfig } from "../api/adminConfig";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
 import { ToastProvider } from "../components/Toast";
@@ -64,9 +63,6 @@ function setupMocks() {
 		admin_token_present: true,
 		admin_token_masked: "********",
 	});
-	vi.mocked(putMihomoResourcePolicy).mockResolvedValue({
-		mihomo_resource_allow_private_targets: true,
-	});
 }
 
 describe("ServiceConfigPage", () => {
@@ -88,8 +84,7 @@ describe("ServiceConfigPage", () => {
 		expect(screen.queryByText("Mihomo delivery")).toBeNull();
 	});
 
-	it("updates the cluster private-target mirror policy", async () => {
-		const user = userEvent.setup();
+	it("directs private-target configuration to node details", async () => {
 		renderPage();
 		expect(
 			await screen.findByRole("heading", { name: "Cluster settings" }),
@@ -98,12 +93,11 @@ describe("ServiceConfigPage", () => {
 			await screen.findByRole("heading", { name: "Node settings" }),
 		).toBeTruthy();
 
-		const checkbox = await screen.findByRole("checkbox", {
-			name: "Allow private Mihomo mirror targets",
-		});
-		await user.click(checkbox);
-
-		expect(putMihomoResourcePolicy).toHaveBeenCalledWith("admintoken", true);
-		expect(await screen.findByText("Allowed")).toBeTruthy();
+		expect(
+			await screen.findByText(/configured per node from the node details page/),
+		).toBeTruthy();
+		expect(
+			screen.queryByText("Allow private Mihomo mirror targets"),
+		).toBeNull();
 	});
 });

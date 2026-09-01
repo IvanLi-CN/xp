@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { expect, userEvent, within } from "@storybook/test";
+import { expect, within } from "@storybook/test";
 
 const meta = {
 	title: "Pages/ServiceConfigPage",
@@ -27,7 +27,7 @@ export const ProviderOnly: Story = {
 	},
 };
 
-export const PrivateMirrorTargetsBlocked: Story = {
+export const NodeLocalPrivateMirrorPolicy: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -36,11 +36,8 @@ export const PrivateMirrorTargetsBlocked: Story = {
 		await expect(
 			await canvas.findByRole("heading", { name: "Node settings" }),
 		).toBeInTheDocument();
-		const checkbox = await canvas.findByRole("checkbox", {
-			name: "Allow private Mihomo mirror targets",
-		});
-		await expect(checkbox).toHaveAttribute("aria-checked", "false");
-		await userEvent.click(checkbox);
-		await expect(await canvas.findByText("Allowed")).toBeInTheDocument();
+		await expect(
+			canvas.findByText(/configured per node from the node details page/),
+		).resolves.toBeInTheDocument();
 	},
 };
