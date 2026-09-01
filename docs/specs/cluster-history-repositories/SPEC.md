@@ -169,7 +169,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   Raft 和 join 仍可用。
 - VER-JOURNAL-BOUNDED covers: REQ-JOURNAL-BOUNDED and REQ-JOURNAL-RESOURCE.
   A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads one fixed page,
-  while Direct/Public and the cluster control plane remain available.
+  while the isolated journal run does not exercise the Direct/Public or cluster control-plane
+  listeners; those availability properties remain release-canary gates.
 - VER-JOURNAL-REPAIR covers: REQ-JOURNAL-REPAIR and REQ-JOURNAL-PAUSE.
   One source cycle commits at most one repair page and pauses delivery while repair is incomplete.
   A failed cycle preserves the previous cursor and a restart resumes from that cursor.
@@ -186,8 +187,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   and REQ-JOURNAL-COLLECTOR. Rust tests cover migration, cursor recovery, payload integrity,
   unreachable Collector, and resumed fixed-page drain.
 - VER-JOURNAL-TESTBOX covers: REQ-JOURNAL-RESOURCE.
-  The shared testbox exercises at least 20,000 rows or 128 MiB, an unreachable peer, and recovery,
-  while measuring CPU, database reads, RSS, Direct/Public, and control-plane health.
+  The shared testbox measures CPU, database reads and RSS for at least 20,000 rows or 128 MiB;
+  deterministic Rust tests cover an unreachable Collector and recovery. Direct/Public and
+  cluster-control-plane availability are verified separately by the production canary gate.
 
 ## Resource and Quality Constraints
 

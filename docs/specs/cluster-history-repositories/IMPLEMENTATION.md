@@ -85,8 +85,10 @@
   without decoding payloads; a journal with no legacy rows is marked complete in constant time
   after the initialization aggregate.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
-  below the 10% node quota, bounded journal reads and no loss of Direct/Public or control-plane
-  health; any failed window stops rollout and preserves the journal for rollback.
+  below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
+  health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
+  is the evidence for listener and control-plane availability. Any failed window stops rollout
+  and preserves the journal for rollback.
   A delivery-order expression index serves tombstone-priority pages without a temporary sort.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
