@@ -907,8 +907,18 @@ use helpers::{
     is_known_schema, known_schemas, serialized_response_overhead, sync_receipt,
     watermark_from_cursor,
 };
-pub(crate) use source::source_epoch;
 pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
+
+pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(b"xp-history-source-epoch-v1\0");
+    hasher.update(cluster_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(node_id.as_bytes());
+    hasher.update(b"stable-source-epoch");
+    let bytes: [u8; 32] = hasher.finalize().into();
+    (u64::from_be_bytes(bytes[..8].try_into().expect("SHA-256 prefix")) & i64::MAX as u64).max(1)
+}
 
 #[cfg(test)]
 #[path = "runtime/duplicate_gap_tests.rs"]

@@ -330,7 +330,7 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
-        self.hydrate_source_delivery_journal()?;
+        let journal_ready = self.hydrate_source_delivery_journal()?;
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
         if self.storage.is_sqlite() {
@@ -368,7 +368,16 @@ impl RepositoryReplicaRuntime {
             records_by_stream.entry(stream).or_default().push(record);
         }
         if records_by_stream.is_empty() {
-            return Ok(self.local_source_pending_segments());
+            return Ok(if journal_ready {
+                self.local_source_pending_segments()
+            } else {
+                Vec::new()
+            });
+        }
+        if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
+            return Err(RepositoryRuntimeError::Storage(
+                "source journal order repair must finish before source epoch recovery".to_owned(),
+            ));
         }
         if self.snapshot.local_source.epoch == 0 {
             let result = self.storage.allocate_repository_source_epoch(
@@ -490,7 +499,11 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        Ok(self.local_source_pending_segments())
+        Ok(if journal_ready {
+            self.local_source_pending_segments()
+        } else {
+            Vec::new()
+        })
     }
 
     pub(crate) fn queue_local_source_segment(
@@ -977,17 +990,6 @@ fn deletion_marker_id(record: &SyncRecord) -> String {
 
 fn deletion_marker_id_parts(schema_id: &str, record_key: &[u8]) -> String {
     format!("{schema_id}:{}", hex::encode(record_key))
-}
-
-pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
-    let mut hasher = Sha256::new();
-    hasher.update(b"xp-history-source-epoch-v1\0");
-    hasher.update(cluster_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(node_id.as_bytes());
-    hasher.update(b"stable-source-epoch");
-    let bytes: [u8; 32] = hasher.finalize().into();
-    (u64::from_be_bytes(bytes[..8].try_into().expect("SHA-256 prefix")) & i64::MAX as u64).max(1)
 }
 
 #[cfg(test)]

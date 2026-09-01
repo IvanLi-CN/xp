@@ -113,6 +113,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - delivery journal 的周期性状态、epoch 恢复和固定页读取必须使用持久化统计状态与匹配投递顺序的
   SQLite 索引；除一次性旧库迁移外，不得扫描或反序列化整个 backlog。每轮读取最多 256 条，
   其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
+- 旧库中缺少投递顺序元数据的 segment 必须通过 `source_delivery_journal_state` 的持久主键游标
+  分页校正；每个 60 秒 source collection cycle 最多提交一页 256 条，校正失败时游标不前进，
+  重启从最后一次提交的位置继续。状态查询不得隐式执行校正；校正期间继续持久化新 segment，
+  但暂停发送 journal page，并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复
+  backlog。不得为此新增 partial index，因为建立它本身会扫描整个 journal。
 - ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；Collector 不可达时保留
   journal，不得伪造成功或产生无界并发重试。Collector 恢复后必须按固定页继续投递并只删除有效 ACK
   所列 segment。
@@ -151,6 +156,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - Given durable source backlog 至少 128 MiB，When source collection 周期运行，Then journal page、
   status 和 epoch recovery 不执行全表 wire 解码或临时排序，单轮只处理固定页并保持 Direct/Public
   与集群控制面可用。
+- Given 旧排序 journal 正在分批校正，When 一个 source collection cycle 运行，Then 只提交一页
+  顺序元数据修复并暂停发送；Given cycle 或进程失败，Then 已确认 payload、ACK、epoch 高水位和
+  游标保持上次提交值，恢复后继续下一页。
 - Given Collector 暂时不可达，When 连续运行多个 collection 周期，Then backlog 原样保留且资源成本
   有界；Given Collector 恢复并返回有效 ACK，Then ACK 时间/路径可观测且 backlog 持续下降。
 

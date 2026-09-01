@@ -69,24 +69,7 @@ use source::{
 use source_records::{source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
-    let source_state = state.clone();
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(SOURCE_COLLECTION_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-            if let Err(error) = sync_local_repository_capacity(&source_state, now).await {
-                tracing::debug!(error = %error, "history repository capacity cycle skipped");
-            }
-            if let Err(error) = advance_local_repository_lifecycle(&source_state, now).await {
-                tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
-            }
-            if let Err(error) = publish_local_history_segments(&source_state).await {
-                tracing::debug!(error = %error, "history source collection cycle skipped");
-            }
-        }
-    });
+    source::spawn_local_source_worker(state.clone());
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(REPOSITORY_REPLICATION_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);

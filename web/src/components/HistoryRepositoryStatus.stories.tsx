@@ -119,6 +119,29 @@ export const SourceBacklogged: Story = {
 	},
 };
 
+export const SourceJournalOrderRepairing: Story = {
+	args: {
+		status: {
+			...healthy,
+			items: healthy.items.map((item) => ({
+				...item,
+				runtime: item.runtime
+					? {
+							...item.runtime,
+							gap_count: 0,
+							source_delivery: {
+								state: "journal_order_repairing",
+								pending_segments: 20_000,
+								pending_bytes: 128 * 1024 * 1024,
+								oldest_pending_age_seconds: 600,
+							},
+						}
+					: undefined,
+			})),
+		},
+	},
+};
+
 export const RemoteUnavailable: Story = {
 	args: {
 		status: {

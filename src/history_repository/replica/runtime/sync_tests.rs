@@ -18,6 +18,9 @@ use crate::{
 #[path = "source_delivery_tests.rs"]
 mod source_delivery_tests;
 
+#[path = "source_delivery_order_repair_tests.rs"]
+mod source_delivery_order_repair_tests;
+
 fn identity() -> RepositoryNodeIdentity {
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     RepositoryNodeIdentity::new(

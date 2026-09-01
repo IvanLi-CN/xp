@@ -45,6 +45,9 @@ function runtimeAvailability(runtime?: HistoryRepositoryRuntime): string {
 	if (runtime.source_delivery?.state === "journal_unavailable") {
 		return "source journal unavailable";
 	}
+	if (runtime.source_delivery?.state === "journal_order_repairing") {
+		return "source journal order repair";
+	}
 	if (runtime.source_delivery?.state === "backlogged") {
 		return "source backlog";
 	}
@@ -138,7 +141,8 @@ export function RepositoryMemberStatus(props: {
 							<dt className="text-muted-foreground">Ready</dt>
 							<dd>{timestamp(member.ready_at)}</dd>
 						</div>
-						{runtime?.source_delivery?.state === "backlogged" ? (
+						{runtime?.source_delivery?.state === "backlogged" ||
+						runtime?.source_delivery?.state === "journal_order_repairing" ? (
 							<div className="min-w-0 sm:col-span-2">
 								<dt className="text-muted-foreground">Source backlog</dt>
 								<dd>

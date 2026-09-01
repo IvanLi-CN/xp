@@ -244,6 +244,93 @@ fn source_delivery_journal_max_epoch_reads_state_without_decoding_wire() {
 }
 
 #[test]
+fn source_delivery_journal_state_migration_is_idempotent_for_legacy_schema() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute_batch(
+            "CREATE TABLE source_delivery_journal (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 stream TEXT NOT NULL DEFAULT '',
+                 closed_at INTEGER NOT NULL,
+                 identity BLOB NOT NULL,
+                 wire BLOB NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE TABLE source_delivery_journal_state (
+                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 pending_segments INTEGER NOT NULL,
+                 pending_bytes INTEGER NOT NULL,
+                 epoch_high_water INTEGER NOT NULL,
+                 last_acknowledged_at INTEGER,
+                 last_delivery_path TEXT
+             );
+             INSERT INTO source_delivery_journal
+                 (id, stream, closed_at, identity, wire, created_at)
+             VALUES ('legacy-row', 'runtime', 100, X'00', X'00', 100);
+             INSERT INTO source_delivery_journal_state
+                 (singleton, pending_segments, pending_bytes, epoch_high_water)
+             VALUES (1, 1, 1, 0);",
+        )
+        .expect("create legacy journal schema");
+    drop(connection);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("read migrated journal state");
+    assert!(summary.order_repairing);
+    assert_eq!(summary.pending_segments, 1);
+    assert!(storage.repair_source_delivery_journal_order_page().is_err());
+    let repair_state = {
+        let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+            .expect("reopen history database");
+        connection
+            .query_row(
+                "SELECT order_repair_cursor_id, order_repair_completed
+                 FROM source_delivery_journal_state
+                 WHERE singleton = 1",
+                [],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .expect("read failed repair state")
+    };
+    assert_eq!(repair_state, (None, 0));
+    drop(storage);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let columns = {
+        let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+            .expect("reopen history database");
+        let mut statement = connection
+            .prepare("PRAGMA table_info(source_delivery_journal_state)")
+            .expect("inspect migrated state columns");
+        statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("read migrated state columns")
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("collect migrated state columns")
+    };
+    assert!(
+        columns
+            .iter()
+            .any(|column| column == "order_repair_cursor_id")
+    );
+    assert!(
+        columns
+            .iter()
+            .any(|column| column == "order_repair_completed")
+    );
+    assert!(
+        storage
+            .source_delivery_journal_summary()
+            .expect("read state after repeated migration")
+            .order_repairing
+    );
+}
+
+#[test]
 fn source_delivery_journal_backlog_work_is_bounded() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let source_identity = identity();
@@ -277,7 +364,42 @@ fn source_delivery_journal_backlog_work_is_bounded() {
             )
             .expect("insert backlog row");
     }
+    transaction
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = ?1,
+                 pending_bytes = ?2,
+                 epoch_high_water = 1,
+                 order_repair_completed = 1
+             WHERE singleton = 1",
+            rusqlite::params![20_000_i64, wire.len() as i64 * 20_000_i64],
+        )
+        .expect("record backlog state statistics");
     transaction.commit().expect("commit backlog transaction");
+
+    let mut repair_probe = connection
+        .prepare(
+            "SELECT id, source_node_id
+             FROM source_delivery_journal
+             WHERE id > ?1
+             ORDER BY id
+             LIMIT ?2",
+        )
+        .expect("prepare bounded repair probe");
+    let mut probe_rows = repair_probe
+        .query(rusqlite::params!["", 256_i64])
+        .expect("execute bounded repair probe");
+    while probe_rows
+        .next()
+        .expect("read bounded repair probe")
+        .is_some()
+    {}
+    drop(probe_rows);
+    assert_eq!(
+        repair_probe.get_status(rusqlite::StatementStatus::FullscanStep),
+        0,
+        "repair page must seek from the primary-key cursor"
+    );
 
     let plan = connection
         .prepare(
@@ -303,6 +425,26 @@ fn source_delivery_journal_backlog_work_is_bounded() {
         !plan.to_ascii_uppercase().contains("TEMP B-TREE"),
         "journal page must not sort the full backlog: {plan}"
     );
+
+    drop(repair_probe);
+    drop(connection);
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let summary = storage
+        .source_delivery_journal_summary()
+        .expect("summarize large journal backlog");
+    assert_eq!(summary.pending_segments, 20_000);
+    assert!(!summary.order_repairing);
+    let page = storage
+        .source_delivery_journal_page(usize::MAX)
+        .expect("read bounded journal page");
+    match page {
+        crate::state::history_storage::SourceDeliveryJournalPage::Ready(rows) => {
+            assert_eq!(rows.len(), 256);
+        }
+        crate::state::history_storage::SourceDeliveryJournalPage::Repairing => {
+            panic!("current journal rows must not enter order repair")
+        }
+    }
 }
 
 #[test]
@@ -342,12 +484,20 @@ fn legacy_source_journal_order_repair_crosses_page_boundary() {
             [],
         )
         .expect("simulate legacy journal order columns");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET order_repair_cursor_id = NULL, order_repair_completed = 0
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("mark journal order repair pending");
     drop(connection);
 
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     let summary = storage
         .source_delivery_journal_summary()
-        .expect("repair and summarize legacy journal");
+        .expect("summarize legacy journal");
     assert_eq!(summary.pending_segments, 257);
     drop(storage);
 
@@ -360,7 +510,7 @@ fn legacy_source_journal_order_repair_crosses_page_boundary() {
             |row| row.get::<_, i64>(0),
         )
         .expect("count unrepaired journal rows");
-    assert_eq!(remaining, 0);
+    assert_eq!(remaining, 257);
 }
 
 #[test]
