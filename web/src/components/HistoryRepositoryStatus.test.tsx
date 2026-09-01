@@ -61,6 +61,60 @@ describe("RepositoryStatusSummary", () => {
 		expect(screen.queryByText("0 gaps")).not.toBeInTheDocument();
 	});
 
+	it("shows journal order repair while preserving the backlog count", () => {
+		render(
+			<RepositoryStatusSummary
+				status={{
+					configured: true,
+					partial: false,
+					unreachable_node_ids: [],
+					items: [
+						{
+							member: {
+								identity: {
+									node_id: fixtureCatalog.nodeId.fixture32(),
+									ed25519_public_key: "ed25519-key",
+									x25519_relay_public_key: "x25519-key",
+								},
+								lifecycle: "ready",
+								replica_converged: true,
+								capacity: {
+									quota_bytes: 10 * 1024 ** 3,
+									used_bytes: 1024,
+									filesystem_available_bytes: 1024 ** 3,
+								},
+							},
+							runtime: {
+								storage_mode: "sqlite",
+								capacity: {
+									quota_bytes: 10 * 1024 ** 3,
+									used_bytes: 1024,
+									filesystem_available_bytes: 1024 ** 3,
+								},
+								record_count: 1,
+								segment_count: 1,
+								gap_count: 0,
+								history_truncated: false,
+								last_verified_unix_seconds: null,
+								last_anti_entropy_unix_seconds: null,
+								last_deep_verification_unix_seconds: null,
+								last_dynamic_relay_attempt_unix_seconds: null,
+								source_delivery: {
+									state: "journal_order_repairing",
+									pending_segments: 20_000,
+									pending_bytes: 128 * 1024 * 1024,
+								},
+							},
+						},
+					],
+				}}
+			/>,
+		);
+
+		expect(screen.getByText(/source journal order repair/)).toBeVisible();
+		expect(screen.getByText(/20000 segments/)).toBeVisible();
+	});
+
 	it("distinguishes committed SQLite maintenance degradation from JSON fallback", () => {
 		render(
 			<RepositoryStatusSummary

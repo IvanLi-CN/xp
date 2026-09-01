@@ -4,6 +4,37 @@ use crate::state::history_repository::{control::RepositoryLifecycle, identity::R
 use super::super::AppState;
 use super::MAX_SOURCE_PAYLOAD_BYTES;
 
+pub(super) fn spawn_local_source_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(super::SOURCE_COLLECTION_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+            if let Err(error) = state
+                .repository_replica
+                .lock()
+                .await
+                .repair_source_delivery_journal_order_page()
+            {
+                tracing::debug!(
+                    error = %error,
+                    "history source journal order repair cycle skipped"
+                );
+            }
+            if let Err(error) = super::sync_local_repository_capacity(&state, now).await {
+                tracing::debug!(error = %error, "history repository capacity cycle skipped");
+            }
+            if let Err(error) = super::advance_local_repository_lifecycle(&state, now).await {
+                tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
+            }
+            if let Err(error) = super::publish_local_history_segments(&state).await {
+                tracing::debug!(error = %error, "history source collection cycle skipped");
+            }
+        }
+    });
+}
+
 pub(super) async fn local_repository_lifecycle(
     state: &AppState,
 ) -> anyhow::Result<RepositoryLifecycle> {

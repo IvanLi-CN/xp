@@ -31,7 +31,10 @@ pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
     RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
-pub(crate) use source_journal::{SourceDeliveryJournalRow, SourceDeliveryJournalSummary};
+pub(crate) use source_journal::{
+    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
+    SourceDeliveryJournalSummary,
+};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -373,16 +376,16 @@ fn open_sqlite(data_dir: &Path) -> Result<Connection> {
     fs::create_dir_all(data_dir).map_err(io_error)?;
     let db_path = data_dir.join(SQLITE_FILE);
     if db_path.exists() {
-        let connection = Connection::open(&db_path).map_err(sqlite_error)?;
+        let mut connection = Connection::open(&db_path).map_err(sqlite_error)?;
         configure_runtime(&connection)?;
-        ensure_schema(&connection)?;
+        ensure_schema(&mut connection)?;
         return Ok(connection);
     }
 
     migrate_json_snapshots(data_dir, &db_path)?;
-    let connection = Connection::open(db_path).map_err(sqlite_error)?;
+    let mut connection = Connection::open(db_path).map_err(sqlite_error)?;
     configure_runtime(&connection)?;
-    ensure_schema(&connection)?;
+    ensure_schema(&mut connection)?;
     Ok(connection)
 }
 
@@ -398,7 +401,7 @@ fn migrate_json_snapshots(data_dir: &Path, db_path: &Path) -> Result<()> {
         connection
             .pragma_update(None, "auto_vacuum", "INCREMENTAL")
             .map_err(sqlite_error)?;
-        ensure_schema(&connection)?;
+        ensure_schema(&mut connection)?;
 
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for source in SOURCES {
@@ -445,7 +448,7 @@ fn configure_runtime(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn ensure_schema(connection: &Connection) -> Result<()> {
+fn ensure_schema(connection: &mut Connection) -> Result<()> {
     connection
         .execute_batch(
             "

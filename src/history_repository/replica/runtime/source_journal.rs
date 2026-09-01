@@ -1,12 +1,16 @@
 use crate::history_sync::SignedSegment;
-use crate::state::history_storage::SourceDeliveryJournalRow;
+use crate::state::history_storage::{
+    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
+};
 
 use super::*;
 
 impl RepositoryReplicaRuntime {
-    pub(crate) fn hydrate_source_delivery_journal(&mut self) -> Result<(), RepositoryRuntimeError> {
+    pub(crate) fn hydrate_source_delivery_journal(
+        &mut self,
+    ) -> Result<bool, RepositoryRuntimeError> {
         if !self.storage.is_sqlite() {
-            return Ok(());
+            return Ok(true);
         }
         let legacy_rows = self
             .snapshot
@@ -31,10 +35,17 @@ impl RepositoryReplicaRuntime {
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
-        let rows = self
+        let (rows, order_repairing) = match self
             .storage
             .source_delivery_journal_page(256)
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        {
+            SourceDeliveryJournalPage::Ready(rows) => (rows, false),
+            SourceDeliveryJournalPage::Repairing => (Vec::new(), true),
+        };
+        if order_repairing {
+            return Ok(false);
+        }
         let max_epoch = self
             .storage
             .source_delivery_journal_max_epoch()
@@ -79,7 +90,7 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn snapshot_for_persistence(&self) -> RepositoryReplicaSnapshot {
@@ -107,6 +118,7 @@ impl RepositoryReplicaRuntime {
                 oldest: None,
                 last_acknowledged_at: None,
                 last_delivery_path: None,
+                order_repairing: false,
             }
         };
         let oldest_pending_age_seconds = summary
@@ -129,6 +141,8 @@ impl RepositoryReplicaRuntime {
             "journal_unavailable"
         } else if filesystem_available_bytes < 256 * 1024 * 1024 {
             "source_storage_guard"
+        } else if summary.order_repairing {
+            "journal_order_repairing"
         } else if summary.pending_segments == 0 {
             "idle"
         } else {
@@ -143,6 +157,20 @@ impl RepositoryReplicaRuntime {
             last_acknowledged_at: summary.last_acknowledged_at,
             last_delivery_path: summary.last_delivery_path,
         })
+    }
+
+    pub(crate) fn repair_source_delivery_journal_order_page(
+        &mut self,
+    ) -> Result<SourceDeliveryJournalRepairProgress, RepositoryRuntimeError> {
+        if !self.storage.is_sqlite() {
+            return Ok(SourceDeliveryJournalRepairProgress {
+                processed: 0,
+                completed: true,
+            });
+        }
+        self.storage
+            .repair_source_delivery_journal_order_page()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
 
     pub(crate) fn persist_control_state_with_journal(

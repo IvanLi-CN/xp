@@ -37,6 +37,7 @@ export const HistoryRepositoryRuntimeSchema = z.object({
 			state: z.enum([
 				"idle",
 				"backlogged",
+				"journal_order_repairing",
 				"source_storage_guard",
 				"journal_unavailable",
 			]),

@@ -47,9 +47,16 @@
   acknowledgement state are left unchanged. Operators must not delete `history.sqlite3`, replace
   repository members or change ordinary-node retention settings during rollout.
 - Repository segment pages are ordered by tombstone phase and the signed source cursor, rather
-  than by content hash. Startup repairs the corresponding SQLite cursor index in place for
-  existing segments before they are served for repair; it preserves each signed payload and does
-  not rebuild the database or run a full `VACUUM`.
+  than by content hash. Existing databases persist `order_repair_cursor_id` and
+  `order_repair_completed` in the source journal state row. A source collection cycle repairs at
+  most 256 rows by primary-key order, decoding `wire` only for rows whose source metadata is still
+  empty; the cursor, metadata and epoch high-water are committed together. A failed page leaves
+  the previous cursor intact and the next process resumes from it. Ordinary status, epoch and page
+  reads never start repair, and no partial index is created because its initial build would scan
+  the complete journal. While repair is incomplete, new signed rows are persisted but are not
+  offered to a collector; status reports `journal_order_repairing` with the durable backlog count.
+  The repair preserves each signed payload and does not rebuild the database or run a full
+  `VACUUM`.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source
@@ -73,7 +80,15 @@
   frame-budgeted pending-source pages through an eligible cluster member without storing history
   at the relay.
   The SQLite source delivery journal maintains transactionally updated pending-count, pending-byte
-  and epoch high-water statistics plus the last successful acknowledgement path/time.
+  and epoch high-water statistics plus the last successful acknowledgement path/time. The
+  order-repair cursor and completion marker are initialized idempotently in the schema transaction
+  without decoding payloads; a journal with no legacy rows is marked complete in constant time
+  after the initialization aggregate.
+  The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
+  below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
+  health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
+  is the evidence for listener and control-plane availability. Any failed window stops rollout
+  and preserves the journal for rollback.
   A delivery-order expression index serves tombstone-priority pages without a temporary sort.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
