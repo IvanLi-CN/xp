@@ -21,6 +21,19 @@ jobs:
         shell: bash
         run: python3 ./.github/scripts/test-release-governance.py
 
+      - name: release failure notifier workflow contract
+        shell: bash
+        run: python3 ./.github/scripts/test-notify-release-failure.py
+
+      - name: release notifier YAML contract
+        shell: bash
+        run: |
+          ruby - <<'RUBY'
+          require "yaml"
+          YAML.load_file(".github/workflows/notify-release-failure.yml")
+          YAML.load_file(".github/workflows/ci.yml")
+          RUBY
+
       - name: setup rust
         uses: dtolnay/rust-toolchain@v1
         with:
