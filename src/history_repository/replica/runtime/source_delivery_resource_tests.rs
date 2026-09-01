@@ -5,17 +5,16 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-fn process_cpu_ticks() -> u64 {
-    let stat = fs::read_to_string("/proc/self/stat").expect("read process stat");
-    let fields = stat
-        .split_once(") ")
-        .expect("process stat comm delimiter")
-        .1
-        .split_whitespace()
-        .collect::<Vec<_>>();
-    let user = fields[11].parse::<u64>().expect("user CPU ticks");
-    let system = fields[12].parse::<u64>().expect("system CPU ticks");
-    user + system
+fn current_thread_cpu_nanos() -> u64 {
+    let mut timestamp = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut timestamp) };
+    assert_eq!(result, 0, "read current thread CPU clock");
+    let seconds = u64::try_from(timestamp.tv_sec).expect("CPU clock seconds");
+    let nanos = u64::try_from(timestamp.tv_nsec).expect("CPU clock nanoseconds");
+    seconds.saturating_mul(1_000_000_000).saturating_add(nanos)
 }
 
 #[cfg(target_os = "linux")]
@@ -90,15 +89,13 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
         .source_delivery_journal_page(256)
         .expect("warm page");
     let baseline_rss = process_rss_bytes();
-    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    assert!(ticks_per_second > 0, "CPU tick rate must be positive");
     let mut cpu_percentages = Vec::with_capacity(5);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
 
     for _ in 0..5 {
         let started = Instant::now();
-        let cpu_before = process_cpu_ticks();
+        let cpu_before = current_thread_cpu_nanos();
         let read_before = process_read_bytes();
         {
             let summary = storage
@@ -122,8 +119,9 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
             thread::sleep(Duration::from_secs(1) - operation_elapsed);
         }
         let wall_seconds = started.elapsed().as_secs_f64();
-        let cpu_ticks = process_cpu_ticks().saturating_sub(cpu_before);
-        let cpu_percent = (cpu_ticks as f64 / ticks_per_second as f64) * 100.0 / wall_seconds;
+        let cpu_seconds =
+            current_thread_cpu_nanos().saturating_sub(cpu_before) as f64 / 1_000_000_000.0;
+        let cpu_percent = cpu_seconds * 100.0 / wall_seconds;
         cpu_percentages.push(cpu_percent);
         max_read_bytes = max_read_bytes.max(process_read_bytes().saturating_sub(read_before));
         max_rss_delta = max_rss_delta.max(process_rss_bytes().saturating_sub(baseline_rss));
