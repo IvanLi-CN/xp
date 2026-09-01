@@ -81,6 +81,7 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
+import { validateMihomoPrivateCidr } from "../utils/mihomoPrivateCidr";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
@@ -1510,6 +1511,7 @@ export function NodeDetailsPage() {
 													onChange={setMihomoPolicyDraft}
 													placeholder="192.168.0.0/16"
 													helperText="Add a CIDR with Enter or comma, or paste a list. Saving replaces the deployment default for this node."
+													validateTag={validateMihomoPrivateCidr}
 													allowPrimary={false}
 													disabled={
 														isSavingMihomoPolicy || appRuntime.isReadOnly

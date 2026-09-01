@@ -564,6 +564,31 @@ describe("<NodeDetailsPage />", () => {
 		).toContain("border");
 	});
 
+	it("rejects invalid Mihomo CIDRs and accepts IPv6 ULA tags", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: fixtureCatalog.address.privateCidr().replace("/", "") },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"CIDR must use address/prefix notation.",
+		);
+
+		fireEvent.change(cidrInput, {
+			target: { value: fixtureCatalog.address.privateIpv6Cidr() },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+		await waitFor(() => {
+			expect(
+				cidrInput.closest('[data-testid="tag-input-control"]'),
+			).toHaveTextContent(fixtureCatalog.address.privateIpv6Cidr());
+		});
+	});
+
 	it("allows saving unlimited quota reset after entering an invalid monthly day", async () => {
 		setupMocks();
 		renderPage();

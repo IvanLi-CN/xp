@@ -41,7 +41,7 @@ rule:
                 )"$
             - regex: '^"(nodeIds|endpointIds|userIds|tags|tokens|accessHosts|apiBases)"$'
             - regex: '^"(primary|secondary|tertiary|serverPrimary|serverSecondary)"$'
-            - regex: '^"(primaryIpv4|secondaryIpv4|tertiaryIpv4|privateCidr|loopback)"$'
+            - regex: '^"((primary|secondary|tertiary)Ipv4|private(Ipv6)?Cidr|loopback)"$'
             - regex: '^"(loopback39043|loopback49043|primaryApi|secondaryApi)"$'
             - regex: '^"(tertiaryApi|canaryHttpsListener|canaryHttpsAlternate)"$'
             - regex: '^"(canaryHttpLoopback|catchAllService|publicFallback|publicOrigin)"$'

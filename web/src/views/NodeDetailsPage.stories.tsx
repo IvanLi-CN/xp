@@ -280,6 +280,44 @@ export const MihomoPrivateResourcePolicy: Story = {
 	},
 };
 
+export const MihomoPrivateResourcePolicyIpv6Mobile: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "mihomoPolicyMobile",
+			viewports: {
+				mihomoPolicyMobile: {
+					name: "Mihomo policy mobile",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+		mockApi: {
+			data: {
+				nodeMihomoResourcePolicyByNodeId: {
+					[fixtureCatalog.identifier.nodePrimary()]: {
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						deployment_default_cidrs: [
+							fixtureCatalog.address.privateIpv6Cidr(),
+						],
+						override_cidrs: [fixtureCatalog.address.privateIpv6Cidr()],
+						effective_cidrs: [fixtureCatalog.address.privateIpv6Cidr()],
+						source: "override",
+						status: "healthy",
+						error: null,
+					} satisfies AdminNodeMihomoResourcePolicy,
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findAllByText(fixtureCatalog.address.privateIpv6Cidr()),
+		).toHaveLength(3);
+	},
+};
+
 export const DeleteWithEndpointCleanup: Story = {
 	parameters: {
 		mockApi: {

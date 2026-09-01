@@ -321,10 +321,10 @@ html[data-density="compact"] {
 	}
 
 	.xp-chip-group {
-		@apply inline-flex flex-wrap items-center gap-1;
+		@apply inline-flex min-w-0 max-w-full items-center gap-1;
 	}
 
 	.xp-chip-action {
-		@apply inline-flex items-center;
+		@apply inline-flex min-w-0 items-center;
 	}
 }

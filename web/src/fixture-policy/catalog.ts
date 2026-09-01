@@ -205,6 +205,7 @@ export const fixtureCatalog = {
 		secondaryIpv4: () => catalog.addresses.secondaryIpv4,
 		tertiaryIpv4: () => catalog.addresses.tertiaryIpv4,
 		privateCidr: () => catalog.addresses.privateCidr,
+		privateIpv6Cidr: () => catalog.addresses.privateIpv6Cidr,
 		loopback: () => catalog.addresses.loopback,
 		loopback39043: () => catalog.addresses.loopback39043,
 		loopback49043: () => catalog.addresses.loopback49043,

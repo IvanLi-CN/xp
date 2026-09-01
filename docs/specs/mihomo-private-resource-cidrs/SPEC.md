@@ -23,4 +23,8 @@ through the signed Mesh-backed node API.
 
 ## Related ADRs
 
-- `docs/adr/0007-node-local-mihomo-private-cidr-policy.md`
+- [ADR 0007](../../adr/0007-node-local-mihomo-private-cidr-policy.md)
+
+## Visual Evidence
+
+![IPv6 private CIDR policy on a 393px mobile viewport](./assets/node-policy-ipv6-mobile.png)
