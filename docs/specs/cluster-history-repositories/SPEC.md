@@ -214,8 +214,6 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ## Visual Evidence
 
-PR: none
-
 ![Repository syncing status](./assets/repository-status-syncing.png)
 
 ![Repository status on mobile](./assets/repository-status-mobile.png)
