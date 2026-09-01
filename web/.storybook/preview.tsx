@@ -54,6 +54,12 @@ import { NodeDetailsPage } from "../src/views/NodeDetailsPage";
 import { NodesPage } from "../src/views/NodesPage";
 import { QuotaPolicyPage } from "../src/views/QuotaPolicyPage";
 import { ServiceConfigPage } from "../src/views/ServiceConfigPage";
+import { ServiceMonitorDetailsPage } from "../src/views/ServiceMonitorDetailsPage";
+import {
+	ServiceMonitorEditPage,
+	ServiceMonitorNewPage,
+} from "../src/views/ServiceMonitorEditorPage";
+import { ServiceMonitorsPage } from "../src/views/ServiceMonitorsPage";
 import { ToolsPage } from "../src/views/ToolsPage";
 import { UserDetailsPage } from "../src/views/UserDetailsPage";
 import { UserNewPage } from "../src/views/UserNewPage";
@@ -272,6 +278,30 @@ const preview: Preview = {
 				component: EndpointProbeRunPage,
 			});
 
+			const serviceMonitorsRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/monitors",
+				component: ServiceMonitorsPage,
+			});
+
+			const serviceMonitorNewRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/monitors/new",
+				component: ServiceMonitorNewPage,
+			});
+
+			const serviceMonitorDetailsRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/monitors/$monitorId",
+				component: ServiceMonitorDetailsPage,
+			});
+
+			const serviceMonitorEditRoute = createRoute({
+				getParentRoute: () => appRoute,
+				path: "/monitors/$monitorId/edit",
+				component: ServiceMonitorEditPage,
+			});
+
 			const usersRoute = createRoute({
 				getParentRoute: () => appRoute,
 				path: "/users",
@@ -428,6 +458,10 @@ const preview: Preview = {
 				endpointDetailsRoute,
 				endpointProbeRoute,
 				endpointProbeRunRoute,
+				serviceMonitorsRoute,
+				serviceMonitorNewRoute,
+				serviceMonitorDetailsRoute,
+				serviceMonitorEditRoute,
 				usersRoute,
 				userNewRoute,
 				userDetailsRoute,

@@ -647,6 +647,9 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         "traffic.v1" => "traffic",
         "connections.v1" => "connections",
         "ip_usage.v1" => "ip_usage",
+        crate::uptime_monitor::UPTIME_HISTORY_SCHEMA => {
+            crate::uptime_monitor::UPTIME_HISTORY_STREAM
+        }
         _ => return None,
     })
 }

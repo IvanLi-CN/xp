@@ -7,6 +7,7 @@ import type {
 } from "../../src/api/adminNodes";
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
+import type { ServiceMonitorSummary } from "../../src/api/adminServiceMonitors";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
 import type { AdminUserNodeWeightItem } from "../../src/api/adminUserNodeWeights";
@@ -61,6 +62,7 @@ export type MockStateSeed = {
 	quotaSummaries?: AdminUserQuotaSummariesResponse;
 	alerts: AlertsResponse;
 	subscriptions: Record<string, string>;
+	serviceMonitors?: ServiceMonitorSummary[];
 };
 
 export const DEFAULT_API_CAPABILITIES = {
@@ -70,6 +72,7 @@ export const DEFAULT_API_CAPABILITIES = {
 		"admin.endpoint-mihomo-smux",
 		"admin.history-repositories",
 		"admin.repository-history",
+		"admin.service-monitors",
 	] satisfies ApiCapability[],
 	fingerprint: Object.fromEntries(
 		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [

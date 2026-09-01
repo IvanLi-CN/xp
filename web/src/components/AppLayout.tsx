@@ -28,6 +28,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 							},
 							{ label: "Nodes", to: "/nodes", icon: "tabler:server" },
 							{ label: "Endpoints", to: "/endpoints", icon: "tabler:plug" },
+							{
+								label: "Service monitoring",
+								to: "/monitors",
+								icon: "tabler:activity-heartbeat",
+							},
 							{ label: "Users", to: "/users", icon: "tabler:users" },
 						],
 					},

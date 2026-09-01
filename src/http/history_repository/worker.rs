@@ -67,7 +67,6 @@ use source::{
     source_record_with_key_for_subject,
 };
 use source_records::{source_records, source_records_with_deletions};
-
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
     let source_state = state.clone();
@@ -238,7 +237,6 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     }
     Ok(())
 }
-
 async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
     let Ok((ready_repository_ids, peers)) = ready_repository_peers(state).await else {
@@ -246,7 +244,6 @@ async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> 
     };
     publish_local_history_segment(state, &ready_repository_ids, &peers, now).await
 }
-
 async fn publish_local_history_segment(
     state: &AppState,
     ready_repository_ids: &[String],
@@ -258,20 +255,23 @@ async fn publish_local_history_segment(
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
-    let source_batch = source_records(state, now).await?;
+    let mut source_batch = source_records(state, now).await?;
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         let segments = runtime.queue_local_source_segments_for_repositories(
             &state.cluster.cluster_id,
             identity.clone(),
             &signing_key,
-            source_batch.records,
+            source_batch.take_records(),
             now,
             ready_repository_ids,
         )?;
         let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id);
         (segments, gaps)
     };
+    source_batch
+        .mark_uptime_observations_enqueued(state)
+        .await?;
     if segments.is_empty() && gaps.is_empty() {
         return Ok(());
     }

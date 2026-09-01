@@ -25,6 +25,18 @@ pub enum DomainError {
     MissingEndpoint {
         endpoint_id: String,
     },
+    MissingServiceMonitor {
+        monitor_id: String,
+    },
+    ServiceMonitorExists {
+        monitor_id: String,
+    },
+    ServiceMonitorChanged {
+        monitor_id: String,
+    },
+    InvalidServiceMonitor {
+        reason: String,
+    },
     EndpointChanged {
         endpoint_id: String,
     },
@@ -73,12 +85,15 @@ impl DomainError {
             | Self::InvalidNodeQuotaConfig { .. }
             | Self::MissingUser { .. }
             | Self::MissingNode { .. }
-            | Self::MissingEndpoint { .. } => "invalid_request",
-            Self::RealityDomainNotFound { .. } => "not_found",
+            | Self::MissingEndpoint { .. }
+            | Self::InvalidServiceMonitor { .. } => "invalid_request",
+            Self::RealityDomainNotFound { .. } | Self::MissingServiceMonitor { .. } => "not_found",
             Self::NodeInUse { .. }
             | Self::NodeEndpointSetChanged { .. }
             | Self::NodeLifecycleOperationActive { .. }
-            | Self::EndpointChanged { .. } => "conflict",
+            | Self::EndpointChanged { .. }
+            | Self::ServiceMonitorExists { .. }
+            | Self::ServiceMonitorChanged { .. } => "conflict",
             Self::RealityDomainNameConflict { .. } => "conflict",
             Self::InvalidRealityServerName { .. }
             | Self::InvalidAcceptedAuthority { .. }
@@ -105,6 +120,19 @@ impl std::fmt::Display for DomainError {
             Self::MissingUser { user_id } => write!(f, "user not found: {user_id}"),
             Self::MissingNode { node_id } => write!(f, "node not found: {node_id}"),
             Self::MissingEndpoint { endpoint_id } => write!(f, "endpoint not found: {endpoint_id}"),
+            Self::MissingServiceMonitor { monitor_id } => {
+                write!(f, "service monitor not found: {monitor_id}")
+            }
+            Self::ServiceMonitorExists { monitor_id } => {
+                write!(f, "service monitor already exists: {monitor_id}")
+            }
+            Self::ServiceMonitorChanged { monitor_id } => write!(
+                f,
+                "service monitor changed since the edit started: monitor_id={monitor_id}"
+            ),
+            Self::InvalidServiceMonitor { reason } => {
+                write!(f, "invalid service monitor: {reason}")
+            }
             Self::EndpointChanged { endpoint_id } => write!(
                 f,
                 "endpoint changed since the edit started: endpoint_id={endpoint_id}"

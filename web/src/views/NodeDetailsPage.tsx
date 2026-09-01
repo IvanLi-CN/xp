@@ -1532,7 +1532,7 @@ export function NodeDetailsPage() {
 													</Button>
 													<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
 														<Button
-															variant="secondary"
+															variant="outline"
 															size="md"
 															className="w-full sm:w-auto"
 															disabled={

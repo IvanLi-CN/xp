@@ -9,6 +9,12 @@ valid:
   - |
     const source = { kind: "github-releases" };
   - |
+    const target = {
+      kind: "tcping",
+      host: fixtureCatalog.host.serverPrimary(),
+      port: fixtureCatalog.endpoint.port443(),
+    };
+  - |
     function buildNodeDeletePreviewEndpoint(endpoint) {
       return {
         endpoint_id: endpoint.endpoint_id,

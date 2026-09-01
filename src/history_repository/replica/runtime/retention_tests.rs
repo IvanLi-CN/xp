@@ -21,7 +21,7 @@ fn sqlite_retention_progresses_for_mixed_buckets_sharing_a_dense_timestamp() {
     let observed_at = 10_000_u64;
     let now = observed_at
         .saturating_add(policy.minute_retention_seconds())
-        .saturating_add(1);
+        .saturating_add(2);
     let count = RETENTION_COMPACTION_PAGE_SIZE + RETENTION_COMPACTION_BUCKET_LOOKAHEAD + 32;
     let mut runtime = load(temporary.path());
     let rows = (0..u64::try_from(count).expect("count"))
@@ -586,4 +586,68 @@ fn tiered_sqlite_history_exports_respect_the_byte_budget() {
         .expect("bounded tiered page");
     assert_eq!(first.records.len(), 1);
     assert!(first.next_cursor.is_some());
+}
+
+#[test]
+fn uptime_retention_merges_rollups_without_losing_outcomes() {
+    use crate::uptime_monitor::{
+        Observation, ObservationOutcome, UPTIME_HISTORY_SCHEMA, UPTIME_HISTORY_STREAM,
+        UptimeHistoryPayload,
+    };
+
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let observed_at = 10_000_u64;
+    let now = observed_at
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(2);
+    let records = [ObservationOutcome::Success, ObservationOutcome::Failure]
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, outcome)| {
+            let observation = Observation {
+                monitor_id: "monitor-a".to_owned(),
+                revision: 1,
+                observer_node_id: "node-a".to_owned(),
+                observer_set_node_ids: vec!["node-a".to_owned()],
+                expected_observer_count: 1,
+                slot_unix_seconds: observed_at + u64::try_from(sequence).unwrap(),
+                observed_at_unix_seconds: observed_at + u64::try_from(sequence).unwrap(),
+                outcome,
+                error: None,
+                latency_ms: Some(xp_test_fixtures::number_value10()),
+                status_code: Some(200),
+                packet_loss_percent: 0,
+                ad_hoc: false,
+            };
+            StoredRecord {
+                observed_at_unix_seconds: observation.observed_at_unix_seconds,
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: UPTIME_HISTORY_STREAM.to_owned(),
+                sequence: u64::try_from(sequence).unwrap(),
+                subject_node_id: observation.monitor_id.clone(),
+                observer_node_id: observation.observer_node_id.clone(),
+                schema_id: UPTIME_HISTORY_SCHEMA.to_owned(),
+                schema_version: 1,
+                record_key: format!("uptime-{sequence}").into_bytes(),
+                payload: serde_json::to_vec(&UptimeHistoryPayload::from_observation(&observation))
+                    .expect("uptime payload"),
+                tombstone: false,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut records = records;
+
+    retention::prune_records(&mut records, &[], now, None);
+
+    assert_eq!(records.len(), 1);
+    let payload: UptimeHistoryPayload =
+        serde_json::from_slice(&records[0].payload).expect("uptime aggregate");
+    assert_eq!(payload.resolution.as_deref(), Some("five_minutes"));
+    assert_eq!(payload.rollup.expected, 2);
+    assert_eq!(payload.rollup.executed, 2);
+    assert_eq!(payload.rollup.successes, 1);
+    assert_eq!(payload.rollup.failures, 1);
+    assert!(payload.complete);
 }

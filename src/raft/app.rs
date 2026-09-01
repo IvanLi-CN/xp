@@ -817,6 +817,7 @@ fn map_store_error(err: StoreError) -> ClientResponse {
             DomainError::MissingUser { .. }
             | DomainError::MissingNode { .. }
             | DomainError::MissingEndpoint { .. }
+            | DomainError::MissingServiceMonitor { .. }
             | DomainError::RealityDomainNotFound { .. } => ClientResponse::Err {
                 status: 404,
                 code: "not_found".to_string(),
@@ -825,7 +826,9 @@ fn map_store_error(err: StoreError) -> ClientResponse {
             DomainError::NodeInUse { .. }
             | DomainError::NodeEndpointSetChanged { .. }
             | DomainError::NodeLifecycleOperationActive { .. }
-            | DomainError::EndpointChanged { .. } => ClientResponse::Err {
+            | DomainError::EndpointChanged { .. }
+            | DomainError::ServiceMonitorExists { .. }
+            | DomainError::ServiceMonitorChanged { .. } => ClientResponse::Err {
                 status: 409,
                 code: "conflict".to_string(),
                 message: domain.to_string(),

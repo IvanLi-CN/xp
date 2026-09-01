@@ -26,6 +26,12 @@ import { NodeDetailsPage } from "./views/NodeDetailsPage";
 import { NodesPage } from "./views/NodesPage";
 import { QuotaPolicyPage } from "./views/QuotaPolicyPage";
 import { ServiceConfigPage } from "./views/ServiceConfigPage";
+import { ServiceMonitorDetailsPage } from "./views/ServiceMonitorDetailsPage";
+import {
+	ServiceMonitorEditPage,
+	ServiceMonitorNewPage,
+} from "./views/ServiceMonitorEditorPage";
+import { ServiceMonitorsPage } from "./views/ServiceMonitorsPage";
 import { SystemStatusPage } from "./views/SystemStatusPage";
 import { ToolsPage } from "./views/ToolsPage";
 import { UserDetailsPage } from "./views/UserDetailsPage";
@@ -87,6 +93,10 @@ const DemoQuotaPolicyPage = lazyRouteComponent(
 const DemoServiceConfigPage = lazyRouteComponent(
 	() => import("./demo/DemoSettingsPages"),
 	"DemoServiceConfigPage",
+);
+const DemoServiceMonitorsPage = lazyRouteComponent(
+	() => import("./demo/DemoServiceMonitorsPage"),
+	"DemoServiceMonitorsPage",
 );
 const DemoToolsPage = lazyRouteComponent(
 	() => import("./demo/DemoSettingsPages"),
@@ -226,6 +236,30 @@ const endpointProbeRunRoute = createRoute({
 	component: EndpointProbeRunPage,
 });
 
+const serviceMonitorsRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/monitors",
+	component: ServiceMonitorsPage,
+});
+
+const serviceMonitorNewRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/monitors/new",
+	component: ServiceMonitorNewPage,
+});
+
+const serviceMonitorDetailsRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/monitors/$monitorId",
+	component: ServiceMonitorDetailsPage,
+});
+
+const serviceMonitorEditRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: "/monitors/$monitorId/edit",
+	component: ServiceMonitorEditPage,
+});
+
 const usersRoute = createRoute({
 	getParentRoute: () => appRoute,
 	path: "/users",
@@ -294,6 +328,12 @@ const demoSystemStatusRoute = createRoute({
 	getParentRoute: () => demoAppRoute,
 	path: "/system-status",
 	component: DemoSystemStatusPage,
+});
+
+const demoServiceMonitorsRoute = createRoute({
+	getParentRoute: () => demoAppRoute,
+	path: "/service-monitors",
+	component: DemoServiceMonitorsPage,
 });
 
 const demoNodesRoute = createRoute({
@@ -407,6 +447,10 @@ const appRouteTree = appRoute.addChildren([
 	endpointDetailsRoute,
 	endpointProbeRoute,
 	endpointProbeRunRoute,
+	serviceMonitorsRoute,
+	serviceMonitorNewRoute,
+	serviceMonitorDetailsRoute,
+	serviceMonitorEditRoute,
 	usersRoute,
 	userNewRoute,
 	userDetailsRoute,
@@ -425,6 +469,7 @@ const demoNodesRouteTree = demoNodesRoute.addChildren([
 const demoAppRouteTree = demoAppRoute.addChildren([
 	demoDashboardRoute,
 	demoSystemStatusRoute,
+	demoServiceMonitorsRoute,
 	demoNodesRouteTree,
 	demoNodeDetailsRoute,
 	demoEndpointsRoute,

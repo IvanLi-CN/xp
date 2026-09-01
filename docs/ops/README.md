@@ -70,6 +70,19 @@ Host-managed mode assumptions:
   reports configured, partial and unreachable states with per-member capacity and sync quality.
   `PUT /api/admin/history-repositories` replaces the validated membership through Raft. There is
   no static Mesh proxy environment, listener or compatibility path.
+- Service Monitoring uses the same History Repository delivery path. Each XP node keeps a
+  WAL-backed `${XP_DATA_DIR}/uptime.sqlite3` capture journal; configured repository nodes retain
+  the signed observations and rollups in `${XP_DATA_DIR}/history.sqlite3`. Preserve both files on
+  host-managed upgrades and mount the complete `XP_DATA_DIR` volume for Docker/Compose.
+  Scheduled checks begin only when a repository is ready and the local capture journal is below
+  its safety limit. At 80% of the 64 MiB or 100,000-observation limit, XP reports
+  `capture_suspended` and does not start new checks; capture resumes only below 60%.
+- HTTP/HTTPS/TCPING monitoring requires no init-system permissions or sidecar. PING uses a Linux
+  ICMP datagram socket and may use a raw ICMP socket only as the same-semantic fallback. A
+  systemd/OpenRC service or container that lacks both capabilities advertises no ICMP monitoring
+  capability and records PING as `unsupported`; it never calls an external `ping` command or
+  substitutes TCP connect. The deployed `xp` runtime must retain its normal network namespace
+  and outbound access to the public target.
 - Fresh joins may receive an additive `reverse_mesh_bootstrap` response and 0600 bootstrap marker
   after the voter capability barrier. The marker contains only public Rendezvous endpoint
   parameters, assignment generation and epoch; it never replaces learner catch-up or log-index

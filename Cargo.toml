@@ -47,7 +47,7 @@ yaml-edit = "0.2.3"
 sha2 = "0.10"
 futures-util = "0.3"
 flate2 = "1.1"
-tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 trust-dns-resolver = { version = "0.23.2", features = ["dns-over-https-rustls"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 tonic = { version = "0.14", features = ["transport"] }

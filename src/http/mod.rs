@@ -1,11 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    convert::Infallible,
-    path::PathBuf,
-    sync::{Arc, atomic::Ordering},
-    time::Instant as StdInstant,
-};
-
 use axum::{
     Json, Router,
     body::Body,
@@ -22,11 +14,17 @@ use chrono::{DateTime, SecondsFormat, Timelike as _, Utc};
 use futures_util::{Stream, StreamExt as _, future::join_all, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    convert::Infallible,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Instant as StdInstant,
+};
 use tokio::{
     sync::{Mutex, mpsc},
     time::Duration,
 };
-
 mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
@@ -125,6 +123,7 @@ mod join_capability;
 mod join_protocol;
 mod membership_restore;
 mod node_metadata;
+mod service_monitors;
 mod version_check;
 mod web_assets;
 use capabilities::api_capabilities;
@@ -141,6 +140,7 @@ pub struct AppState {
     pub node_runtime: NodeRuntimeHandle,
     pub node_history: NodeHistoryHandle,
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
+    pub uptime: crate::uptime_runtime::UptimeHandle,
     pub node_egress_probe: NodeEgressProbeHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
@@ -224,6 +224,7 @@ impl From<StoreError> for ApiError {
                 crate::domain::DomainError::MissingUser { .. }
                 | crate::domain::DomainError::MissingNode { .. }
                 | crate::domain::DomainError::MissingEndpoint { .. }
+                | crate::domain::DomainError::MissingServiceMonitor { .. }
                 | crate::domain::DomainError::RealityDomainNotFound { .. } => {
                     ApiError::not_found(domain.to_string())
                 }
@@ -233,7 +234,9 @@ impl From<StoreError> for ApiError {
                 }
                 crate::domain::DomainError::NodeEndpointSetChanged { .. }
                 | crate::domain::DomainError::NodeLifecycleOperationActive { .. }
-                | crate::domain::DomainError::EndpointChanged { .. } => {
+                | crate::domain::DomainError::EndpointChanged { .. }
+                | crate::domain::DomainError::ServiceMonitorExists { .. }
+                | crate::domain::DomainError::ServiceMonitorChanged { .. } => {
                     ApiError::conflict(domain.to_string())
                 }
                 _ => ApiError::invalid_request(domain.to_string()),
@@ -1012,6 +1015,8 @@ pub fn build_router_with_mesh_telemetry(
             // advertise incomplete data as a fresh replica.
             panic!("repository replica checkpoint is unusable: {error}");
         });
+    let uptime = crate::uptime_runtime::UptimeHandle::load(&config.data_dir)
+        .expect("open uptime observation storage");
     let mihomo_resource_policy = Arc::new(
         MihomoResourcePolicy::load(&config.data_dir)
             .expect("parse Mihomo private CIDR deployment policy"),
@@ -1026,6 +1031,7 @@ pub fn build_router_with_mesh_telemetry(
         node_runtime,
         node_history,
         endpoint_probe,
+        uptime,
         node_egress_probe,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
@@ -1050,6 +1056,7 @@ pub fn build_router_with_mesh_telemetry(
     spawn_reverse_assignment_worker(app_state.clone());
     spawn_reverse_link_probe_worker(app_state.clone());
     history_repository::spawn_repository_replica_worker(app_state.clone());
+    crate::uptime_runtime::spawn_uptime_worker(app_state.clone());
 
     let admin = Router::new()
         .route(
@@ -1107,6 +1114,10 @@ pub fn build_router_with_mesh_telemetry(
             get(admin_internal_get_user_node_quota_status),
         )
         .route("/_internal/alerts", get(admin_internal_get_alerts))
+        .route(
+            "/_internal/monitors/test",
+            post(service_monitors::admin_internal_test_service_monitor),
+        )
         .route(
             "/_internal/history-repository/sync",
             post(history_repository::admin_internal_receive_history_repository_segment),
@@ -1389,6 +1400,7 @@ pub fn build_router_with_mesh_telemetry(
             "/history-repository",
             get(history_repository::admin_query_history_repository),
         )
+        .merge(service_monitors::router())
         .layer(middleware::from_fn_with_state(auth_state, admin_auth));
 
     let api = Router::new()

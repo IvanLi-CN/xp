@@ -96,6 +96,8 @@ import {
 	membershipOperationResponse,
 	nodeDeleteAcceptedResponse,
 } from "./nodeDeleteOperationMock";
+import { defaultServiceMonitors } from "./serviceMonitorMock";
+import { handleServiceMonitorMockRequest } from "./serviceMonitorRouteMock";
 import {
 	buildFixtureUserQuotaSummaryItem,
 	buildUserNodeQuotaStatusItem,
@@ -1046,6 +1048,7 @@ function createDefaultSeed(): MockStateSeed {
 		nodeWeightPolicies,
 		alerts,
 		subscriptions,
+		serviceMonitors: defaultServiceMonitors(),
 	};
 }
 
@@ -1263,6 +1266,7 @@ async function handleRequest(
 	const method = req.method.toUpperCase();
 	const url = new URL(req.url, "http://localhost");
 	const path = url.pathname;
+	const serviceMonitors = state.serviceMonitors ?? defaultServiceMonitors();
 
 	if (!path.startsWith("/api/")) {
 		return errorResponse(404, "not_found", "mock only handles /api/* requests");
@@ -1284,6 +1288,13 @@ async function handleRequest(
 		return jsonResponse(buildHistoryRepositories(state.nodes));
 	if (path === "/api/admin/history-repository" && method === "GET")
 		return jsonResponse(buildRepositoryHistory(state.nodes));
+
+	const serviceMonitorResponse = handleServiceMonitorMockRequest(
+		serviceMonitors,
+		method,
+		path,
+	);
+	if (serviceMonitorResponse) return serviceMonitorResponse;
 
 	if (path === "/api/version/check" && method === "GET") {
 		if (state.failVersionCheck) {

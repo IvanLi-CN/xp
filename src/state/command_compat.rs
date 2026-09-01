@@ -40,6 +40,34 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::DeleteEndpoint { endpoint_id } => {
                 Self::DeleteEndpoint { endpoint_id }
             }
+            DesiredStateCommandCompat::CreateServiceMonitor { monitor } => {
+                Self::CreateServiceMonitor { monitor }
+            }
+            DesiredStateCommandCompat::UpdateServiceMonitor {
+                monitor,
+                expected_revision,
+            } => Self::UpdateServiceMonitor {
+                monitor,
+                expected_revision,
+            },
+            DesiredStateCommandCompat::SetServiceMonitorLifecycle {
+                monitor_id,
+                lifecycle,
+                expected_revision,
+                revision_effective_at_unix_seconds,
+            } => Self::SetServiceMonitorLifecycle {
+                monitor_id,
+                lifecycle,
+                expected_revision,
+                revision_effective_at_unix_seconds,
+            },
+            DesiredStateCommandCompat::DeleteServiceMonitor {
+                monitor_id,
+                expected_revision,
+            } => Self::DeleteServiceMonitor {
+                monitor_id,
+                expected_revision,
+            },
             DesiredStateCommandCompat::CreateRealityDomain { domain } => {
                 Self::CreateRealityDomain { domain }
             }

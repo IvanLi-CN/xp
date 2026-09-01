@@ -575,7 +575,7 @@
   "src/http/mod.rs": {
     "long_line_count": 5,
     "max_line_length": 128,
-    "source_lines": 8812
+    "source_lines": 8820
   },
   "src/http/mesh.rs": {
     "long_line_count": 2,
@@ -776,7 +776,7 @@
   "web/.storybook/mocks/apiMock.ts": {
     "long_line_count": 6,
     "max_line_length": 198,
-    "source_lines": 2533
+    "source_lines": 2544
   },
   "web/package.json": {
     "long_line_count": 1,
