@@ -3,14 +3,14 @@
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`。
 > 关键演进原因见 `./HISTORY.md`。
 
-## 背景 / 问题陈述
+## Context and Scope
 
 XP 节点当前以本地窗口保存状态、健康、流量、连接数、入站 IP 和 Mesh 观测。
 普通节点通常运行在 NAT LXC VPS 上，磁盘、内存和上行流量有限。
 本地窗口不能作为长期集群历史，也不能在节点失联后提供完整查询。
 Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛，并以增量同步降低网络成本。
 
-## 目标 / 非目标
+### Context
 
 ### Goals
 
@@ -29,8 +29,6 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 不保留任何本机控制面代理；不使用 GZIP 作为新同步编码。
 - 不引入 SQLCipher、透明 SQLite 压缩扩展或例行 full `VACUUM`。
 
-## 范围（Scope）
-
 ### In scope
 
 - 节点历史、Mesh 遥测、入站 IP、TCP 连接历史的 SQLite 存储和原子 JSON 迁移。
@@ -44,7 +42,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - 普通节点采样器重写、生产部署和发布自动化、云端备份服务、任意历史导出。
 
-## 需求（Requirements）
+## Requirements
 
 ### MUST
 
@@ -76,6 +74,22 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - tombstone 必须先于受影响记录同步并阻止复活；同一 epoch 同一 sequence 出现两个有效不同 payload
   时隔离旧流并轮换 epoch。
 
+### Source delivery journal
+
+- `REQ-JOURNAL-BOUNDED`: delivery journal 的状态、epoch 恢复和投递页读取必须使用持久化统计状态与匹配
+  投递顺序的 SQLite 索引；除一次性旧库初始化外，不得扫描或反序列化整个 backlog，每轮最多读取 256 条，
+  且 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
+- `REQ-JOURNAL-REPAIR`: 旧库中缺少投递顺序元数据的 segment 必须通过 state row 的持久主键游标分页校正；
+  每个 60 秒 source cycle 最多提交一页 256 条，失败时游标不前进，重启从最后一次提交的位置继续。
+- `REQ-JOURNAL-PAUSE`: 状态查询不得隐式执行校正；校正期间继续持久化新 segment，但暂停发送 journal page，
+  并以既有 `source_delivery.state=journal_order_repairing` 表示可恢复 backlog。不得新增 partial index。
+- `REQ-JOURNAL-ACK`: ACK 成功时间和实际投递路径必须与 journal 删除在同一持久化边界可观察；ACK 只可删除
+  真实确认的 segment，未确认 payload、cursor 与 epoch high-water 不得被前推或改写。
+- `REQ-JOURNAL-COLLECTOR`: Collector 暂时不可达是正常输入，只形成可恢复 backlog，不得伪造成功或产生无界
+  并发重试；Collector 恢复后必须按固定页继续投递并只删除有效 ACK 所列 segment。
+- `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，5 秒 CPU 采样 p95 不超过 9%，
+  每个 60 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
+
 ### SHOULD
 
 - rendezvous hashing 选择 source 的 primary collector，保留 standby；primary 连续三个一分钟周期失败
@@ -85,7 +99,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - unknown schema 保留并转发签名 raw，不参与查询/聚合；legacy 节点保持原行为并标记
   `sync_unsupported`。
 
-## 功能与行为规格（Functional/Behavior Spec）
+## Behavior
 
 ### Core flows
 
@@ -125,7 +139,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - relay 只承担流式转发；relay 失败不得被误报为数据已持久化。
 - 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
 
-## 接口契约（Interfaces & Contracts）
+## Interfaces and Contracts
 
 同步协议和管理查询接口的具体字段见
 [`contracts/history-sync.md`](./contracts/history-sync.md)。
@@ -139,7 +153,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - `repository history query`：admin JSON；external；新增；详见
   `./contracts/history-sync.md`；NodeDetails、Traffic、IP views 使用。
 
-## 验收标准（Acceptance Criteria）
+## Verification
 
 - Given 普通节点存在旧 JSON，When 启动迁移成功，Then SQLite 与旧窗口语义一致、无双写且可重启
   幂等。
@@ -153,23 +167,29 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
   Raft 和 join 仍可用。
-- Given durable source backlog 至少 128 MiB，When source collection 周期运行，Then journal page、
-  status 和 epoch recovery 不执行全表 wire 解码或临时排序，单轮只处理固定页并保持 Direct/Public
-  与集群控制面可用。
-- Given 旧排序 journal 正在分批校正，When 一个 source collection cycle 运行，Then 只提交一页
-  顺序元数据修复并暂停发送；Given cycle 或进程失败，Then 已确认 payload、ACK、epoch 高水位和
-  游标保持上次提交值，恢复后继续下一页。
-- Given Collector 暂时不可达，When 连续运行多个 collection 周期，Then backlog 原样保留且资源成本
-  有界；Given Collector 恢复并返回有效 ACK，Then ACK 时间/路径可观测且 backlog 持续下降。
+- VER-JOURNAL-BOUNDED covers: REQ-JOURNAL-BOUNDED and REQ-JOURNAL-RESOURCE.
+  A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads one fixed page,
+  while Direct/Public and the cluster control plane remain available.
+- VER-JOURNAL-REPAIR covers: REQ-JOURNAL-REPAIR and REQ-JOURNAL-PAUSE.
+  One source cycle commits at most one repair page and pauses delivery while repair is incomplete.
+  A failed cycle preserves the previous cursor and a restart resumes from that cursor.
+- VER-JOURNAL-ACK covers: REQ-JOURNAL-ACK.
+  A successful ACK updates acknowledgement time and path only when deletion removes real rows;
+  unacknowledged payloads remain unchanged.
+- VER-JOURNAL-COLLECTOR covers: REQ-JOURNAL-COLLECTOR.
+  An unreachable Collector preserves backlog without unbounded retries; after recovery, valid ACKs
+  continue fixed-page drain and expose the actual path and time.
 
-## 验收清单（Acceptance checklist）
+### Verification commands
 
-- [ ] SQLite 迁移、原地空间回收和普通节点兼容行为已覆盖。
-- [ ] 游标、签名、压缩、direct/relay 和解压边界已覆盖。
-- [ ] 多仓库收敛、保留、tombstone、fork 和容量护栏已覆盖。
-- [ ] 管理 API/Web 和 systemd/OpenRC/Docker 验收已覆盖。
+- VER-JOURNAL-TESTS covers: REQ-JOURNAL-BOUNDED, REQ-JOURNAL-REPAIR, REQ-JOURNAL-ACK,
+  and REQ-JOURNAL-COLLECTOR. Rust tests cover migration, cursor recovery, payload integrity,
+  unreachable Collector, and resumed fixed-page drain.
+- VER-JOURNAL-TESTBOX covers: REQ-JOURNAL-RESOURCE.
+  The shared testbox exercises at least 20,000 rows or 128 MiB, an unreachable peer, and recovery,
+  while measuring CPU, database reads, RSS, Direct/Public, and control-plane health.
 
-## 非功能性验收 / 质量门槛（Quality Gates）
+## Resource and Quality Constraints
 
 ### Testing
 
@@ -200,15 +220,11 @@ PR: none
 
 ![Repository status on mobile](./assets/repository-status-mobile.png)
 
-## Related PRs
-
-- Issue #248: https://github.com/IvanLi-CN/xp/issues/248
-
 ## Related ADRs
 
 - [ADR 0002](../../adr/0002-history-synchronization-recovery-order.md)
 
-## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
+## Failure Model and Assumptions
 
 - 风险：历史数据规模与多节点并发可能放大 SQLite 写入和同步队列；必须保持独立低优先级队列与固定预算。
 - 风险：legacy 节点不具备签名能力；不得伪造 source proof，需明确标记 sync unsupported 或先升级。
@@ -220,3 +236,4 @@ PR: none
 - `docs/specs/r26nc-node-user-traffic-analytics/SPEC.md`
 - `docs/specs/56dtr-reality-fallback-control-plane-mesh/SPEC.md`
 - `docs/agents/issue-tracker.md`
+- Issue #248: https://github.com/IvanLi-CN/xp/issues/248
