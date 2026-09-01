@@ -6,15 +6,13 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::{
     ApiError, ApiJson, AppState, CLUSTER_RUNTIME_FANOUT_TIMEOUT, mesh::send_mesh_internal_read,
 };
 use crate::resource_monitoring::{
-    PolicyError, ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries,
-    ResourceRole, ResourceSeriesPoint, ResourceSnapshot, unsupported_snapshot,
-    validate_history_metric,
+    ResourceGap, ResourceHistoryResponse, ResourcePolicy, ResourceRecentSeries, ResourceRole,
+    ResourceSeriesPoint, ResourceSnapshot, unsupported_snapshot, validate_history_metric,
 };
 use crate::state::history_repository::replica::RepositoryHistoryQueryResponse;
 
@@ -290,6 +288,13 @@ pub(super) async fn admin_get_node_resources_history(
         CLUSTER_RUNTIME_FANOUT_TIMEOUT,
     )
     .await?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(ApiError::new(
+            "resource_monitoring_unsupported",
+            StatusCode::NOT_IMPLEMENTED,
+            "node does not expose resource monitoring",
+        ));
+    }
     if !response.status().is_success() {
         return Err(ApiError::new(
             "resource_history_unavailable",
@@ -307,32 +312,34 @@ pub(super) async fn admin_get_node_resources_history(
 pub(super) async fn admin_get_resource_policy(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<ResourcePolicy>, ApiError> {
-    Ok(Json(state.resource_monitoring.policy()))
+    Ok(Json(state.resource_monitoring.effective_policy().await))
 }
 
 pub(super) async fn admin_put_resource_policy(
     Extension(state): Extension<AppState>,
     ApiJson(request): ApiJson<ResourcePolicyUpdateRequest>,
 ) -> Result<Json<ResourcePolicy>, ApiError> {
-    match state
-        .resource_monitoring
-        .update_policy(request.expected_revision, request.policy)
-    {
-        Ok(policy) => Ok(Json(policy)),
-        Err(PolicyError::Conflict { current_revision }) => {
-            let mut error = ApiError::new(
-                "revision_conflict",
-                StatusCode::CONFLICT,
-                "resource policy revision is stale",
-            );
-            error
-                .details
-                .insert("current_revision".to_string(), json!(current_revision));
-            Err(error)
-        }
-        Err(PolicyError::Invalid(message)) => Err(ApiError::invalid_request(message)),
-        Err(PolicyError::Store) => Err(ApiError::internal("resource policy store unavailable")),
+    request
+        .policy
+        .validate()
+        .map_err(ApiError::invalid_request)?;
+    let mut policy = request.policy;
+    policy.revision = request.expected_revision.saturating_add(1);
+    super::raft_write(
+        &state,
+        crate::state::DesiredStateCommand::SetResourcePolicy {
+            policy: policy.clone(),
+            expected_revision: request.expected_revision,
+        },
+    )
+    .await?;
+    if let Err(error) = state.resource_monitoring.sync_policy(&policy) {
+        tracing::warn!(
+            ?error,
+            "resource policy cache update failed after Raft commit"
+        );
     }
+    Ok(Json(policy))
 }
 
 pub(super) async fn admin_internal_get_local_node_resources(

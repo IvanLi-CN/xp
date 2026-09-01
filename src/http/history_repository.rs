@@ -10,6 +10,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
 
+use super::resource_history_capacity;
 use crate::{
     history_sync::{MAX_RESPONSE_WIRE_BYTES, PayloadEncoding},
     http::{ApiError, ApiJson, AppState, InternalSignatureAuth},
@@ -867,6 +868,10 @@ async fn repository_membership_for_nodes(
                 .collect::<std::collections::BTreeSet<_>>(),
         )
     };
+    resource_history_capacity::preflight_resource_history_capacity_for_membership(
+        known_node_ids.len() as u64,
+        current_membership.as_ref(),
+    )?;
     let mut members = Vec::with_capacity(requested_node_ids.len());
     for node_id in requested_node_ids {
         if !known_node_ids.contains(&node_id) {

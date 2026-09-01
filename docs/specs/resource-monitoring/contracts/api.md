@@ -79,6 +79,8 @@
   - 返回 revisioned cluster default 及显式 node/role overrides。
 - `PUT /api/admin/resource-monitoring/policy`
   - 接受完整 policy 与 `expected_revision`，成功时创建下一个 revision。
+  - policy 可选 `node_overrides`（按 node id）和 `role_overrides`（固定 `xp`、`xray`、
+    `cloudflared`、`canary`）；override 只覆盖提供的字段，缺省字段继承 cluster default。
   - 阈值必须有合法范围和非零持续时间；无效输入返回 `invalid_request`。
 
 ## Internal routes

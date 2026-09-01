@@ -20,6 +20,7 @@ use crate::{
         normalize_accepted_authorities, rotate_short_ids_in_place, validate_canary_upstream,
         validate_reality_dest, validate_reality_server_name,
     },
+    resource_monitoring::ResourcePolicy,
     reverse_mesh::ReverseMeshAssignment,
     state::history_repository::{
         HistoryStorage, INBOUND_IP_USAGE_KEY, STATE_KEY, TCP_CONNECTION_USAGE_KEY, USAGE_KEY,
@@ -211,6 +212,8 @@ pub enum StoreError {
     SchemaVersionMismatch { expected: u32, got: u32 },
     InvalidJoinSession { message: &'static str },
     InvalidMembershipOperation { message: &'static str },
+    ResourcePolicyConflict { current_revision: u64 },
+    ResourcePolicyInvalid { message: &'static str },
 }
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -226,6 +229,13 @@ impl std::fmt::Display for StoreError {
             Self::InvalidMembershipOperation { message } => {
                 write!(f, "invalid membership operation: {message}")
             }
+            Self::ResourcePolicyConflict { current_revision } => write!(
+                f,
+                "resource policy revision conflict: current revision {current_revision}"
+            ),
+            Self::ResourcePolicyInvalid { message } => {
+                write!(f, "invalid resource policy: {message}")
+            }
         }
     }
 }
@@ -240,6 +250,7 @@ impl std::error::Error for StoreError {
             Self::SchemaVersionMismatch { .. } => None,
             Self::InvalidJoinSession { .. } => None,
             Self::InvalidMembershipOperation { .. } => None,
+            Self::ResourcePolicyConflict { .. } | Self::ResourcePolicyInvalid { .. } => None,
         }
     }
 }
@@ -374,6 +385,8 @@ pub struct PersistedState {
     pub mihomo_delivery_mode: MihomoDeliveryMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_membership: Option<RepositoryMembership>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_policy: Option<serde_json::Value>,
     /// Raft-authoritative reverse relay epoch. Runtime link state is intentionally not persisted.
     #[serde(default)]
     pub reverse_mesh_epoch: u64,
@@ -413,6 +426,7 @@ impl PersistedState {
             user_mihomo_profiles: BTreeMap::new(),
             mihomo_delivery_mode: MihomoDeliveryMode::Legacy,
             repository_membership: None,
+            resource_policy: None,
             reverse_mesh_epoch: 0,
             reverse_mesh_assignments: BTreeMap::new(),
             reverse_mesh_generation_counters: BTreeMap::new(),
@@ -1837,6 +1851,10 @@ pub enum DesiredStateCommand {
         membership: RepositoryMembership,
     },
     UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
+    SetResourcePolicy {
+        policy: ResourcePolicy,
+        expected_revision: u64,
+    },
     SetReverseMeshEpoch {
         epoch: u64,
     },
@@ -2018,6 +2036,10 @@ enum DesiredStateCommandCompat {
         membership: RepositoryMembership,
     },
     UpdateRepositoryMemberRuntime(RepositoryMemberRuntimePatch),
+    SetResourcePolicy {
+        policy: ResourcePolicy,
+        expected_revision: u64,
+    },
     SetReverseMeshEpoch {
         epoch: u64,
     },
@@ -2330,6 +2352,12 @@ impl DesiredStateCommand {
                     .user_node_weights
                     .retain(|_user_id, nodes| !nodes.is_empty());
                 state.node_weight_policies.remove(node_id);
+                if let Some(value) = state.resource_policy.as_mut()
+                    && let Ok(mut policy) = serde_json::from_value::<ResourcePolicy>(value.clone())
+                    && policy.node_overrides.remove(node_id).is_some()
+                {
+                    *value = serde_json::to_value(policy)?;
+                }
 
                 // Cleanup endpoint probe samples and participation for the removed node.
                 for (_endpoint_id, history) in state.endpoint_probe_history.iter_mut() {
@@ -3201,6 +3229,28 @@ impl DesiredStateCommand {
                         message: error.to_string(),
                     }
                 })?;
+                Ok(DesiredStateApplyResult::Applied)
+            }
+            Self::SetResourcePolicy {
+                policy,
+                expected_revision,
+            } => {
+                let current = state
+                    .resource_policy
+                    .as_ref()
+                    .and_then(|value| serde_json::from_value::<ResourcePolicy>(value.clone()).ok())
+                    .unwrap_or_default();
+                if current.revision != *expected_revision {
+                    return Err(StoreError::ResourcePolicyConflict {
+                        current_revision: current.revision,
+                    });
+                }
+                let mut committed = policy.clone();
+                committed.revision = expected_revision.saturating_add(1);
+                committed
+                    .validate()
+                    .map_err(|message| StoreError::ResourcePolicyInvalid { message })?;
+                state.resource_policy = Some(serde_json::to_value(committed)?);
                 Ok(DesiredStateApplyResult::Applied)
             }
         }

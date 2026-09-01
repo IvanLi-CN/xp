@@ -117,6 +117,7 @@ async fn sample_ring_is_bounded() {
             pending_gap: None,
         })),
         store: Arc::new(StdMutex::new(ResourceStore::memory())),
+        state_store: None,
     };
     for _ in 0..(MAX_SAMPLES + 5) {
         handle.sample_once().await;
@@ -156,5 +157,74 @@ fn alert_policy_emits_one_open_and_one_recovery_transition() {
     assert!(matches!(
         recovered.as_slice(),
         [ResourceAlertAction::Recover(_)]
+    ));
+}
+
+#[test]
+fn raft_policy_command_is_revisioned_and_validated() {
+    let mut state = crate::state::PersistedState::empty();
+    let mut policy = ResourcePolicy {
+        cpu_warning_percent: 80.0,
+        ..ResourcePolicy::default()
+    };
+    policy.node_overrides.insert(
+        "node-a".to_string(),
+        ResourcePolicyOverride {
+            cpu_warning_percent: Some(70.0),
+            ..ResourcePolicyOverride::default()
+        },
+    );
+    policy.role_overrides.insert(
+        ResourceRole::Xp,
+        ResourcePolicyOverride {
+            cpu_warning_percent: Some(60.0),
+            ..ResourcePolicyOverride::default()
+        },
+    );
+    policy.revision = 99;
+    let command = crate::state::DesiredStateCommand::SetResourcePolicy {
+        policy: policy.clone(),
+        expected_revision: 1,
+    };
+    command.apply(&mut state).unwrap();
+    let committed: ResourcePolicy = serde_json::from_value(
+        state
+            .resource_policy
+            .clone()
+            .expect("committed resource policy"),
+    )
+    .unwrap();
+    assert_eq!(committed.revision, 2);
+    assert_eq!(committed.cpu_warning_percent, 80.0);
+    assert_eq!(committed.for_node("node-a").cpu_warning_percent, 70.0);
+    assert_eq!(
+        committed
+            .for_role("node-a", Some(ResourceRole::Xp))
+            .cpu_warning_percent,
+        60.0
+    );
+
+    let stale = crate::state::DesiredStateCommand::SetResourcePolicy {
+        policy,
+        expected_revision: 1,
+    };
+    assert!(matches!(
+        stale.apply(&mut state),
+        Err(crate::state::StoreError::ResourcePolicyConflict {
+            current_revision: 2
+        })
+    ));
+
+    let invalid = ResourcePolicy {
+        cpu_warning_percent: f64::NAN,
+        ..ResourcePolicy::default()
+    };
+    let invalid = crate::state::DesiredStateCommand::SetResourcePolicy {
+        policy: invalid,
+        expected_revision: 2,
+    };
+    assert!(matches!(
+        invalid.apply(&mut state),
+        Err(crate::state::StoreError::ResourcePolicyInvalid { .. })
     ));
 }

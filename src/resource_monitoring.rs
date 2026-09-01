@@ -15,6 +15,7 @@ use tracing::warn;
 
 mod resource_monitoring_collector;
 mod resource_monitoring_logic;
+mod resource_monitoring_policy;
 mod resource_monitoring_store;
 mod resource_monitoring_wire;
 pub(crate) use resource_monitoring_collector::unsupported_snapshot;
@@ -23,6 +24,7 @@ use resource_monitoring_logic::{
     AlertProgress, auto_history_resolution, extract_point, merge_pending_gap,
     resource_capture_alert,
 };
+pub use resource_monitoring_policy::{ResourcePolicy, ResourcePolicyOverride};
 use resource_monitoring_store::ResourceStore;
 pub use resource_monitoring_store::{ResourceCapacityError, resource_history_capacity_preflight};
 
@@ -254,71 +256,6 @@ pub struct ResourceHistoryResponse {
     pub freshness_seconds: Option<i64>,
     pub truncated: bool,
     pub points: Vec<ResourceSeriesPoint>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourcePolicy {
-    pub revision: u64,
-    pub enabled: bool,
-    pub cpu_warning_percent: f64,
-    pub cpu_warning_minutes: u32,
-    pub cpu_critical_percent: f64,
-    pub cpu_critical_minutes: u32,
-    pub memory_warning_percent: f64,
-    pub memory_warning_minutes: u32,
-    pub memory_critical_percent: f64,
-    pub memory_critical_minutes: u32,
-    pub disk_warning_percent: f64,
-    pub disk_critical_percent: f64,
-}
-
-impl Default for ResourcePolicy {
-    fn default() -> Self {
-        Self {
-            revision: 1,
-            enabled: true,
-            cpu_warning_percent: 85.0,
-            cpu_warning_minutes: 10,
-            cpu_critical_percent: 95.0,
-            cpu_critical_minutes: 5,
-            memory_warning_percent: 10.0,
-            memory_warning_minutes: 10,
-            memory_critical_percent: 5.0,
-            memory_critical_minutes: 5,
-            disk_warning_percent: 85.0,
-            disk_critical_percent: 95.0,
-        }
-    }
-}
-
-impl ResourcePolicy {
-    pub fn validate(&self) -> Result<(), &'static str> {
-        let percentages = [
-            self.cpu_warning_percent,
-            self.cpu_critical_percent,
-            self.memory_warning_percent,
-            self.memory_critical_percent,
-            self.disk_warning_percent,
-            self.disk_critical_percent,
-        ];
-        if percentages
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0 || *value > 100.0)
-        {
-            return Err("threshold must be between 0 and 100");
-        }
-        if self.cpu_warning_minutes == 0
-            || self.cpu_critical_minutes == 0
-            || self.memory_warning_minutes == 0
-            || self.memory_critical_minutes == 0
-            || self.cpu_critical_percent < self.cpu_warning_percent
-            || self.memory_critical_percent > self.memory_warning_percent
-            || self.disk_critical_percent < self.disk_warning_percent
-        {
-            return Err("threshold duration must be non-zero and ordered");
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,6 +508,7 @@ impl RollupAccumulator {
 pub struct ResourceMonitorHandle {
     inner: Arc<RwLock<ResourceState>>,
     store: Arc<StdMutex<ResourceStore>>,
+    state_store: Option<Arc<tokio::sync::Mutex<crate::state::JsonSnapshotStore>>>,
 }
 
 struct ResourceState {
@@ -598,6 +536,14 @@ struct ThresholdConfig {
 
 impl ResourceMonitorHandle {
     pub fn start(data_dir: &Path, node_id: String) -> Self {
+        Self::start_with_state(data_dir, node_id, None)
+    }
+
+    pub fn start_with_state(
+        data_dir: &Path,
+        node_id: String,
+        state_store: Option<Arc<tokio::sync::Mutex<crate::state::JsonSnapshotStore>>>,
+    ) -> Self {
         let store = ResourceStore::open(data_dir).unwrap_or_else(|error| {
             warn!(error = %error, "resource store unavailable; using memory-only monitoring");
             ResourceStore::memory()
@@ -628,6 +574,7 @@ impl ResourceMonitorHandle {
                 pending_gap: None,
             })),
             store: Arc::new(StdMutex::new(store)),
+            state_store,
         };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let worker = handle.clone();
@@ -644,7 +591,7 @@ impl ResourceMonitorHandle {
     }
 
     pub async fn sample_once(&self) {
-        let policy = self.policy();
+        let policy = self.effective_policy().await;
         let (reader, node_id, collector) = {
             let mut state = self.inner.write().await;
             (
@@ -910,6 +857,29 @@ impl ResourceMonitorHandle {
             .ok()
             .and_then(|store| store.policy().ok())
             .unwrap_or_default()
+    }
+
+    pub async fn effective_policy(&self) -> ResourcePolicy {
+        if let Some(state_store) = &self.state_store
+            && let Some(policy) = state_store
+                .lock()
+                .await
+                .state()
+                .resource_policy
+                .as_ref()
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+        {
+            return policy;
+        }
+        self.policy()
+    }
+
+    pub fn sync_policy(&self, policy: &ResourcePolicy) -> Result<(), PolicyError> {
+        self.store
+            .lock()
+            .map_err(|_| PolicyError::Store)?
+            .save_policy(policy)
+            .map_err(|_| PolicyError::Store)
     }
 
     pub fn update_policy(

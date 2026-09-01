@@ -30,6 +30,7 @@ mod endpoint_requests;
 mod mesh;
 mod node_delete;
 mod resource_alerts;
+mod resource_history_capacity;
 mod resource_monitoring;
 mod status_events;
 mod unreachable_voter_eviction;
@@ -259,6 +260,19 @@ impl From<StoreError> for ApiError {
             | StoreError::InvalidMembershipOperation { .. } => {
                 ApiError::conflict(value.to_string())
             }
+            StoreError::ResourcePolicyConflict { current_revision } => {
+                let mut error = ApiError::new(
+                    "revision_conflict",
+                    StatusCode::CONFLICT,
+                    "resource policy revision is stale",
+                );
+                error.details.insert(
+                    "current_revision".to_string(),
+                    serde_json::json!(current_revision),
+                );
+                error
+            }
+            StoreError::ResourcePolicyInvalid { message } => ApiError::invalid_request(message),
             StoreError::Io(_) | StoreError::SerdeJson(_) => ApiError::internal(value.to_string()),
         }
     }
@@ -1033,8 +1047,11 @@ pub fn build_router_with_mesh_telemetry(
         MihomoResourcePolicy::load(&config.data_dir)
             .expect("parse Mihomo private CIDR deployment policy"),
     );
-    let resource_monitoring =
-        ResourceMonitorHandle::start(&config.data_dir, cluster.node_id.clone());
+    let resource_monitoring = ResourceMonitorHandle::start_with_state(
+        &config.data_dir,
+        cluster.node_id.clone(),
+        Some(store.clone()),
+    );
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -1752,6 +1769,7 @@ async fn raft_write(
                 "invalid_request" => "invalid_request",
                 "not_found" => "not_found",
                 "conflict" => "conflict",
+                "revision_conflict" => "revision_conflict",
                 "coordinated_upgrade_required" => "coordinated_upgrade_required",
                 "unauthorized" => "unauthorized",
                 _ => "internal",
@@ -2059,7 +2077,6 @@ async fn cluster_join(
     if token.cluster_id != state.cluster.cluster_id {
         return Err(ApiError::invalid_request("join token cluster_id mismatch"));
     }
-
     let node_id = token.token_id.clone();
     let raft_node_id = validate_cluster_join_request(&node_id, &req)?;
     let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()

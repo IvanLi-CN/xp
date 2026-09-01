@@ -12,7 +12,8 @@ impl ResourceState {
         rollup: &ResourceRollup,
         policy: &ResourcePolicy,
     ) -> Vec<ResourceAlertAction> {
-        if !policy.enabled {
+        let node_policy = policy.for_node(&rollup.node_id);
+        if !node_policy.enabled {
             return Vec::new();
         }
         let mut actions = Vec::new();
@@ -28,10 +29,10 @@ impl ResourceState {
                 "cpu_busy_percent",
                 value,
                 ThresholdConfig {
-                    warning: policy.cpu_warning_percent,
-                    warning_minutes: policy.cpu_warning_minutes,
-                    critical: policy.cpu_critical_percent,
-                    critical_minutes: policy.cpu_critical_minutes,
+                    warning: node_policy.cpu_warning_percent,
+                    warning_minutes: node_policy.cpu_warning_minutes,
+                    critical: node_policy.cpu_critical_percent,
+                    critical_minutes: node_policy.cpu_critical_minutes,
                 },
             );
         }
@@ -53,10 +54,10 @@ impl ResourceState {
                 "memory_available_percent",
                 100.0 - available * 100.0 / total,
                 ThresholdConfig {
-                    warning: 100.0 - policy.memory_warning_percent,
-                    warning_minutes: policy.memory_warning_minutes,
-                    critical: 100.0 - policy.memory_critical_percent,
-                    critical_minutes: policy.memory_critical_minutes,
+                    warning: 100.0 - node_policy.memory_warning_percent,
+                    warning_minutes: node_policy.memory_warning_minutes,
+                    critical: 100.0 - node_policy.memory_critical_percent,
+                    critical_minutes: node_policy.memory_critical_minutes,
                 },
             );
         }
@@ -89,9 +90,9 @@ impl ResourceState {
                     &format!("filesystem_{mount}_used_percent"),
                     value,
                     ThresholdConfig {
-                        warning: policy.disk_warning_percent,
+                        warning: node_policy.disk_warning_percent,
                         warning_minutes: 1,
-                        critical: policy.disk_critical_percent,
+                        critical: node_policy.disk_critical_percent,
                         critical_minutes: 1,
                     },
                 );
@@ -105,10 +106,36 @@ impl ResourceState {
                     &format!("filesystem_{mount}_used_inode_percent"),
                     value,
                     ThresholdConfig {
-                        warning: policy.disk_warning_percent,
+                        warning: node_policy.disk_warning_percent,
                         warning_minutes: 1,
-                        critical: policy.disk_critical_percent,
+                        critical: node_policy.disk_critical_percent,
                         critical_minutes: 1,
+                    },
+                );
+            }
+        }
+        for role in ResourceRole::ALL {
+            if !policy.role_overrides.contains_key(&role) {
+                continue;
+            }
+            let role_policy = policy.for_role(&rollup.node_id, Some(role));
+            if !role_policy.enabled {
+                continue;
+            }
+            let key = format!("{}.cpu_percent", role.as_str());
+            if let Some(value) = rollup.values.get(&key).and_then(|value| value.last) {
+                push_threshold_action_scoped(
+                    &mut self.alert_progress,
+                    &mut actions,
+                    rollup,
+                    role.as_str(),
+                    "cpu_percent",
+                    value,
+                    ThresholdConfig {
+                        warning: role_policy.cpu_warning_percent,
+                        warning_minutes: role_policy.cpu_warning_minutes,
+                        critical: role_policy.cpu_critical_percent,
+                        critical_minutes: role_policy.cpu_critical_minutes,
                     },
                 );
             }
@@ -125,6 +152,26 @@ fn push_threshold_action(
     value: f64,
     thresholds: ThresholdConfig,
 ) {
+    push_threshold_action_scoped(
+        progress_map,
+        actions,
+        rollup,
+        "domain",
+        metric,
+        value,
+        thresholds,
+    );
+}
+
+fn push_threshold_action_scoped(
+    progress_map: &mut HashMap<String, AlertProgress>,
+    actions: &mut Vec<ResourceAlertAction>,
+    rollup: &ResourceRollup,
+    scope: &str,
+    metric: &str,
+    value: f64,
+    thresholds: ThresholdConfig,
+) {
     let (severity, required_minutes) = if value >= thresholds.critical {
         (Some("critical"), thresholds.critical_minutes)
     } else if value >= thresholds.warning {
@@ -132,7 +179,7 @@ fn push_threshold_action(
     } else {
         (None, 0)
     };
-    let progress = progress_map.entry(metric.to_owned()).or_default();
+    let progress = progress_map.entry(format!("{scope}.{metric}")).or_default();
     if let Some(severity) = severity {
         progress.streak_minutes = progress.streak_minutes.saturating_add(1);
         if progress.streak_minutes >= required_minutes
@@ -140,10 +187,10 @@ fn push_threshold_action(
         {
             progress.severity = Some(severity.to_owned());
             actions.push(ResourceAlertAction::Open(ResourceAlert {
-                id: format!("{}:domain.{metric}", rollup.node_id),
+                id: format!("{}:{scope}.{metric}", rollup.node_id),
                 alert_type: "resource_threshold".to_owned(),
                 node_id: rollup.node_id.clone(),
-                scope: "domain".to_owned(),
+                scope: scope.to_owned(),
                 metric: metric.to_owned(),
                 severity: severity.to_owned(),
                 opened_at: Utc::now().to_rfc3339(),
@@ -153,7 +200,7 @@ fn push_threshold_action(
     } else if progress.severity.take().is_some() {
         progress.streak_minutes = 0;
         actions.push(ResourceAlertAction::Recover(format!(
-            "{}:domain.{metric}",
+            "{}:{scope}.{metric}",
             rollup.node_id
         )));
     } else {

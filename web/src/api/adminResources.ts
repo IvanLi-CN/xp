@@ -114,6 +114,20 @@ export type AdminNodesResourcesResponse = z.infer<
 	typeof AdminNodesResourcesResponseSchema
 >;
 
+export const ResourcePolicyOverrideSchema = z.object({
+	enabled: z.boolean().optional(),
+	cpu_warning_percent: z.number().optional(),
+	cpu_warning_minutes: z.number().optional(),
+	cpu_critical_percent: z.number().optional(),
+	cpu_critical_minutes: z.number().optional(),
+	memory_warning_percent: z.number().optional(),
+	memory_warning_minutes: z.number().optional(),
+	memory_critical_percent: z.number().optional(),
+	memory_critical_minutes: z.number().optional(),
+	disk_warning_percent: z.number().optional(),
+	disk_critical_percent: z.number().optional(),
+});
+
 export const ResourcePolicySchema = z.object({
 	revision: z.number(),
 	enabled: z.boolean(),
@@ -127,6 +141,13 @@ export const ResourcePolicySchema = z.object({
 	memory_critical_minutes: z.number(),
 	disk_warning_percent: z.number(),
 	disk_critical_percent: z.number(),
+	node_overrides: z
+		.record(z.string(), ResourcePolicyOverrideSchema)
+		.default({}),
+	role_overrides: z
+		.record(ResourceRoleSchema, ResourcePolicyOverrideSchema)
+		.optional()
+		.transform((value) => value ?? {}),
 });
 export type ResourcePolicy = z.infer<typeof ResourcePolicySchema>;
 

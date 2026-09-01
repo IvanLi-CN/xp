@@ -301,6 +301,11 @@ pub(super) async fn resolve_reservation(
     request_fingerprint: &str,
     ca_key_pem: &str,
 ) -> Result<BootstrapReservation, ApiError> {
+    super::resource_history_capacity::preflight_resource_history_capacity_for_join(
+        state,
+        &token.token_id,
+    )
+    .await?;
     let existing = state
         .store
         .lock()

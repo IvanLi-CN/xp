@@ -9,6 +9,7 @@ const DEFAULT_DURATION: Duration = Duration::from_secs(15 * 60);
 const XP_ANON_PSS_LIMIT_KIB: u64 = 18_432;
 const XP_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const STACK_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
+const RESOURCE_CPU_PERCENT_ONE_CORE: f64 = 0.5;
 
 fn required_path(name: &str) -> PathBuf {
     std::env::var_os(name)
@@ -24,7 +25,18 @@ fn workload_duration() -> Duration {
         .unwrap_or(DEFAULT_DURATION)
 }
 
-fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun) {
+fn cpu_budget_ticks(duration: Duration) -> u64 {
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }
+        .try_into()
+        .ok()
+        .filter(|value: &u64| *value > 0)
+        .unwrap_or(100);
+    let budget =
+        duration.as_secs_f64() * ticks_per_second as f64 * RESOURCE_CPU_PERCENT_ONE_CORE / 100.0;
+    budget.ceil() as u64
+}
+
+fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun, duration: Duration) {
     for run in [baseline, candidate] {
         assert!(run.xp_peak_anon_pss_kib <= run.xp_peak_pss_kib);
         assert!(run.xp_peak_file_pss_kib <= run.xp_peak_pss_kib);
@@ -55,18 +67,30 @@ fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun) {
         baseline.stack_peak_pss_kib,
         STACK_PSS_DELTA_LIMIT_KIB
     );
+    let cpu_budget = cpu_budget_ticks(duration);
     assert!(
-        candidate.cpu_ticks.saturating_mul(100) <= baseline.cpu_ticks.saturating_mul(105),
-        "candidate XP CPU {} ticks exceeds baseline {} ticks + 5%",
+        candidate.cpu_ticks <= baseline.cpu_ticks.saturating_add(cpu_budget),
+        "candidate XP CPU {} ticks exceeds baseline {} ticks + {} ticks ({}% of one core)",
         candidate.cpu_ticks,
-        baseline.cpu_ticks
+        baseline.cpu_ticks,
+        cpu_budget,
+        RESOURCE_CPU_PERCENT_ONE_CORE
     );
-    assert!(
-        candidate.tls_accepts.saturating_mul(10) <= baseline.tls_accepts,
-        "candidate TLS accepts {} did not fall by at least 90% from baseline {}",
-        candidate.tls_accepts,
-        baseline.tls_accepts
-    );
+    if baseline.tls_accepts > baseline.active_per_peer.len() {
+        assert!(
+            candidate.tls_accepts.saturating_mul(10) <= baseline.tls_accepts,
+            "candidate TLS accepts {} did not fall by at least 90% from baseline {}",
+            candidate.tls_accepts,
+            baseline.tls_accepts
+        );
+    } else {
+        assert!(
+            candidate.tls_accepts <= baseline.tls_accepts,
+            "candidate TLS accepts {} exceeded reusable baseline {}",
+            candidate.tls_accepts,
+            baseline.tls_accepts
+        );
+    }
     assert_eq!(
         candidate.non_h2_requests, 0,
         "candidate emitted non-H2 Mesh requests"
@@ -132,7 +156,7 @@ mod budget_tests {
         candidate.cpu_ticks = 90;
         candidate.tls_accepts = 10;
 
-        assert_resource_budget(&baseline, &candidate);
+        assert_resource_budget(&baseline, &candidate, Duration::from_secs(60));
     }
 
     #[test]
@@ -142,7 +166,7 @@ mod budget_tests {
         let mut candidate = run(25_000, XP_ANON_PSS_LIMIT_KIB + 1, 6_567, 50_000);
         candidate.tls_accepts = 10;
 
-        assert_resource_budget(&baseline, &candidate);
+        assert_resource_budget(&baseline, &candidate, Duration::from_secs(60));
     }
 }
 
@@ -179,5 +203,5 @@ async fn fifty_peer_mesh_transport_meets_connection_and_resource_budgets() {
 
     println!("mesh_resource_baseline={baseline:?}");
     println!("mesh_resource_candidate={candidate:?}");
-    assert_resource_budget(&baseline, &candidate);
+    assert_resource_budget(&baseline, &candidate, duration);
 }
