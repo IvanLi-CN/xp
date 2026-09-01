@@ -353,9 +353,6 @@ async fn publish_local_history_segment(
             .await
             .acknowledge_tombstones(&tombstone_acknowledgements)?;
     }
-    // The collector fans its signed acknowledgement to every source and repository before it
-    // returns the sync receipt. A non-repository source only records that local acknowledgement;
-    // it must never impersonate a repository to fan it out itself.
     let acknowledgements_replicated = true;
     if should_attempt_source_relay(
         transport_failed,
@@ -396,6 +393,9 @@ async fn publish_local_history_segment(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
         )?;
+    if delivery_succeeded && !transport_failed && acknowledgements_replicated {
+        source_batch.mark_resources_enqueued(state);
+    }
     if delivery_succeeded
         && !transport_failed
         && acknowledgements_replicated

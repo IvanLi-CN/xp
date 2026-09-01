@@ -12,7 +12,6 @@ import {
 } from "../api/adminNodeHistory";
 import {
 	type AdminNodeRuntimeDetailResponse,
-	type NodeRuntimeEvent,
 	type NodeRuntimeHistorySlot,
 	fetchAdminNodeRuntime,
 	startNodeRuntimeEvents,
@@ -47,6 +46,7 @@ import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
+import { ResourceTabContent } from "../components/ResourceSnapshotPanel";
 import { TagInput, type TagInputHandle } from "../components/TagInput";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
@@ -72,6 +72,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui/select";
+import { useNodeResourceQueries } from "../hooks/useNodeResourceQueries";
 import { useNodeTimeWindowReports } from "../hooks/useNodeTimeWindowReports";
 import { useAppRuntime } from "../offline/appRuntime";
 import {
@@ -92,64 +93,16 @@ import {
 	useNodeDeleteFlow,
 } from "./nodeDetailsDeleteOperation";
 import {
+	componentBadgeVariant,
+	eventBadgeVariant,
+	historySlotClass,
+	summaryBadgeVariant,
+} from "./nodeDetailsStatus";
+import {
 	isNodeQuotaDraftDirty,
 	nodeQuotaDraftFromNode,
 	toNodeQuotaReset,
 } from "./nodeQuotaDraft";
-function summaryBadgeVariant(status: string) {
-	switch (status) {
-		case "up":
-			return "success";
-		case "degraded":
-			return "warning";
-		case "down":
-			return "destructive";
-		default:
-			return "ghost";
-	}
-}
-function componentBadgeVariant(status: string) {
-	switch (status) {
-		case "up":
-			return "success";
-		case "degraded":
-			return "warning";
-		case "down":
-			return "destructive";
-		case "disabled":
-			return "ghost";
-		default:
-			return "outline";
-	}
-}
-function eventBadgeVariant(kind: NodeRuntimeEvent["kind"]) {
-	switch (kind) {
-		case "status_changed":
-			return "warning";
-		case "restart_requested":
-			return "info";
-		case "restart_succeeded":
-			return "success";
-		case "restart_failed":
-			return "destructive";
-		default:
-			return "ghost";
-	}
-}
-function historySlotClass(status: string): string {
-	switch (status) {
-		case "up":
-			return "bg-success";
-		case "degraded":
-			return "bg-warning";
-		case "down":
-			return "bg-destructive";
-		case "unknown":
-			return "bg-info";
-		default:
-			return "bg-muted";
-	}
-}
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
 const quotaResetSchema = z
@@ -186,6 +139,7 @@ type RuntimeActivityRow = {
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
 type NodeDetailsTab =
+	| "resources"
 	| "runtime"
 	| "metadata"
 	| "traffic"
@@ -196,6 +150,7 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
 }> = [
+	{ value: "resources", label: "Resources" },
 	{ value: "runtime", label: "Service runtime" },
 	{ value: "metadata", label: "Node metadata" },
 	{ value: "traffic", label: "Traffic" },
@@ -509,6 +464,14 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
+	const { resourceCapability, resourceQuery, resourceHistoryQuery } =
+		useNodeResourceQueries({
+			adminToken,
+			nodeId,
+			nodesAvailable: nodesCapability.available,
+			isOnline: appRuntime.isOnline,
+			activeTab,
+		});
 	const [runtimeLive, setRuntimeLive] =
 		useState<AdminNodeRuntimeDetailResponse | null>(null);
 	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
@@ -981,6 +944,22 @@ export function NodeDetailsPage() {
 					ariaLabel="Node details sections"
 					mobileAriaLabel="Node details section"
 				>
+					<ModuleTabsPanel value="resources">
+						<section className="space-y-4">
+							<ResourceTabContent
+								capabilityUnavailable={resourceCapability.unavailable}
+								capabilityReason={resourceCapability.reason}
+								isLoading={resourceQuery.isLoading}
+								isError={resourceQuery.isError}
+								error={resourceQuery.error}
+								isFetching={resourceQuery.isFetching}
+								isOnline={appRuntime.isOnline}
+								onRetry={() => resourceQuery.refetch()}
+								snapshot={resourceQuery.data}
+								historyPoints={resourceHistoryQuery.data?.points ?? []}
+							/>
+						</section>
+					</ModuleTabsPanel>
 					<ModuleTabsPanel value="runtime">
 						<section className="space-y-4">
 							<NodeRepositoryQuality adminToken={adminToken} nodeId={nodeId} />

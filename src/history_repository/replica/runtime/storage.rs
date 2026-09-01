@@ -204,6 +204,30 @@ impl RepositoryReplicaRuntime {
             .collect()
     }
 
+    pub(crate) fn sqlite_records_for_schema(
+        &self,
+        subject_node_id: Option<&str>,
+        schema_id: Option<&str>,
+        start_unix_seconds: Option<u64>,
+        end_unix_seconds: Option<u64>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<StoredRecord>, RepositoryRuntimeError> {
+        self.storage
+            .repository_history_records_for_schema(
+                subject_node_id,
+                schema_id,
+                start_unix_seconds,
+                end_unix_seconds,
+                offset,
+                limit,
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            .into_iter()
+            .map(StoredRecord::from_sqlite_row)
+            .collect()
+    }
+
     pub(crate) fn incomplete_aggregate_gap(
         &self,
         query: &HistoryQuery,
@@ -211,8 +235,9 @@ impl RepositoryReplicaRuntime {
         if self.uses_sqlite_history() {
             return self
                 .storage
-                .repository_history_incomplete_aggregate_range(
+                .repository_history_incomplete_aggregate_range_for_schema(
                     query.subject_node_id(),
+                    query.schema_id(),
                     query.range().start_unix_seconds(),
                     query.range().end_unix_seconds(),
                 )
@@ -223,6 +248,9 @@ impl RepositoryReplicaRuntime {
                 query
                     .subject_node_id()
                     .is_none_or(|subject_node_id| record.subject_node_id == subject_node_id)
+                    && query
+                        .schema_id()
+                        .is_none_or(|schema_id| record.schema_id == schema_id)
                     && {
                         let (start, end) = retention::record_time_range(record);
                         start <= query.range().end_unix_seconds()

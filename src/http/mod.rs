@@ -29,6 +29,8 @@ mod embedded_ui;
 mod endpoint_requests;
 mod mesh;
 mod node_delete;
+mod resource_alerts;
+mod resource_monitoring;
 mod status_events;
 mod unreachable_voter_eviction;
 use mesh::{
@@ -39,6 +41,14 @@ use mesh::{
     spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
+use resource_alerts::admin_get_alerts_response;
+use resource_monitoring::{
+    admin_get_node_resources, admin_get_node_resources_history, admin_get_node_resources_recent,
+    admin_get_resource_policy, admin_internal_get_local_node_resources,
+    admin_internal_get_local_node_resources_history,
+    admin_internal_get_local_node_resources_recent, admin_list_nodes_resources,
+    admin_put_resource_policy,
+};
 use status_events::StatusEventsHub;
 
 use crate::{
@@ -99,6 +109,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
+    resource_monitoring::ResourceMonitorHandle,
     state::{
         DesiredStateCommand, JsonSnapshotStore, NodeEgressProbeState, NodeSubscriptionRegion,
         StoreError,
@@ -142,6 +153,7 @@ pub struct AppState {
     pub endpoint_probe: crate::endpoint_probe::EndpointProbeHandle,
     pub uptime: crate::uptime_runtime::UptimeHandle,
     pub node_egress_probe: NodeEgressProbeHandle,
+    pub resource_monitoring: ResourceMonitorHandle,
     pub cluster: Arc<ClusterMetadata>,
     pub cluster_ca_pem: Arc<String>,
     pub cluster_ca_key_pem: Arc<Option<String>>,
@@ -1021,6 +1033,8 @@ pub fn build_router_with_mesh_telemetry(
         MihomoResourcePolicy::load(&config.data_dir)
             .expect("parse Mihomo private CIDR deployment policy"),
     );
+    let resource_monitoring =
+        ResourceMonitorHandle::start(&config.data_dir, cluster.node_id.clone());
     let app_state = AppState {
         config: Arc::new(config),
         store,
@@ -1033,6 +1047,7 @@ pub fn build_router_with_mesh_telemetry(
         endpoint_probe,
         uptime,
         node_egress_probe,
+        resource_monitoring,
         cluster: Arc::new(cluster),
         cluster_ca_pem: Arc::new(cluster_ca_pem),
         cluster_ca_key_pem: Arc::new(cluster_ca_key_pem),
@@ -1185,6 +1200,20 @@ pub fn build_router_with_mesh_telemetry(
         )
         .route("/nodes/runtime", get(admin_list_nodes_runtime))
         .route("/nodes/{node_id}/runtime", get(admin_get_node_runtime))
+        .route("/nodes/resources", get(admin_list_nodes_resources))
+        .route("/nodes/{node_id}/resources", get(admin_get_node_resources))
+        .route(
+            "/nodes/{node_id}/resources/recent",
+            get(admin_get_node_resources_recent),
+        )
+        .route(
+            "/nodes/{node_id}/resources/history",
+            get(admin_get_node_resources_history),
+        )
+        .route(
+            "/resource-monitoring/policy",
+            get(admin_get_resource_policy).put(admin_put_resource_policy),
+        )
         .route(
             "/nodes/{node_id}/mihomo-resource-policy",
             get(admin_get_node_mihomo_resource_policy).put(admin_put_node_mihomo_resource_policy),
@@ -1334,6 +1363,18 @@ pub fn build_router_with_mesh_telemetry(
         .route(
             "/_internal/nodes/runtime/local",
             get(admin_internal_get_local_node_runtime),
+        )
+        .route(
+            "/_internal/nodes/resources/local",
+            get(admin_internal_get_local_node_resources),
+        )
+        .route(
+            "/_internal/nodes/resources/local/recent",
+            get(admin_internal_get_local_node_resources_recent),
+        )
+        .route(
+            "/_internal/nodes/resources/local/history",
+            get(admin_internal_get_local_node_resources_history),
         )
         .route(
             "/_internal/nodes/mihomo-resource-policy/local",
@@ -8253,9 +8294,23 @@ struct AlertItem {
     quota_banned_at: Option<String>,
     message: String,
     action_hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resource_node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metric: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    opened_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_bucket_start_unix_seconds: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AlertsResponse {
     partial: bool,
     unreachable_nodes: Vec<String>,
@@ -8303,88 +8358,16 @@ fn build_local_alerts(store: &JsonSnapshotStore, local_node_id: &str) -> Vec<Ale
             quota_banned_at: usage.quota_banned_at.clone(),
             message: ALERT_MESSAGE_QUOTA_BANNED.to_string(),
             action_hint: ALERT_ACTION_HINT_QUOTA_BANNED.to_string(),
+            node_id: None,
+            resource_node_id: None,
+            scope: None,
+            metric: None,
+            severity: None,
+            opened_at: None,
+            latest_bucket_start_unix_seconds: None,
         });
     }
     items
-}
-
-async fn admin_get_alerts_response(
-    state: &AppState,
-    scope: Option<&str>,
-) -> Result<AlertsResponse, ApiError> {
-    if let Some(scope) = scope
-        && scope != "local"
-    {
-        return Err(ApiError::invalid_request(
-            "invalid scope, expected local or omit",
-        ));
-    }
-
-    let local_node_id = state.cluster.node_id.clone();
-    let local_items = {
-        let store = state.store.lock().await;
-        build_local_alerts(&store, &local_node_id)
-    };
-
-    if scope == Some("local") {
-        return Ok(AlertsResponse {
-            partial: false,
-            unreachable_nodes: Vec::new(),
-            items: local_items,
-        });
-    }
-
-    let nodes = {
-        let store = state.store.lock().await;
-        store.list_nodes()
-    };
-    let client = state.mesh_client.clone();
-
-    let mut items = local_items;
-    let mut unreachable_nodes = Vec::new();
-
-    for node in nodes {
-        if node.node_id == local_node_id {
-            continue;
-        }
-        let base = node.api_base_url.trim_end_matches('/');
-        if base.is_empty() {
-            unreachable_nodes.push(node.node_id);
-            continue;
-        }
-        let response = match send_mesh_internal_read(
-            state,
-            &client,
-            &node,
-            "/api/admin/_internal/alerts".to_string(),
-            Duration::from_secs(3),
-        )
-        .await
-        {
-            Ok(response) => response,
-            _ => {
-                unreachable_nodes.push(node.node_id);
-                continue;
-            }
-        };
-
-        if !response.status().is_success() {
-            unreachable_nodes.push(node.node_id);
-            continue;
-        }
-
-        match response.json::<AlertsResponse>().await {
-            Ok(remote) => items.extend(remote.items),
-            Err(_) => unreachable_nodes.push(node.node_id),
-        }
-    }
-
-    let partial = !unreachable_nodes.is_empty();
-    Ok(AlertsResponse {
-        partial,
-        unreachable_nodes,
-        items,
-    })
 }
 
 async fn admin_get_alerts(

@@ -52,13 +52,14 @@ const RETENTION_COMPACTION_BUCKET_LOOKAHEAD: usize = 32;
 const REPLICATION_SEGMENT_PAGE_SIZE: usize = 256;
 const MAX_QUERY_RESPONSE_BYTES: usize = 256 * 1024;
 const TOMBSTONE_HORIZON_SECONDS: u64 = 2 * 365 * 24 * 60 * 60;
-const KNOWN_SCHEMAS: [(&str, u32); 7] = [
+const KNOWN_SCHEMAS: [(&str, u32); 8] = [
     ("runtime.v1", 1),
     ("path_health.v1", 1),
     ("traffic.v1", 1),
     ("connections.v1", 1),
     ("ip_usage.v1", 1),
     (crate::uptime_monitor::UPTIME_HISTORY_SCHEMA, 1),
+    (crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA, 1),
     ("tombstone.v1", 1),
 ];
 
@@ -158,6 +159,10 @@ impl RepositoryHistoryQueryResponse {
 
     pub(crate) fn records_truncated(&self) -> bool {
         self.records_truncated
+    }
+
+    pub(crate) fn next_page_cursor(&self) -> Option<&str> {
+        self.next_page_cursor.as_deref()
     }
 }
 

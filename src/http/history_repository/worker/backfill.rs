@@ -574,6 +574,9 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         "traffic.v1" => "traffic",
         "connections.v1" => "connections",
         "ip_usage.v1" => "ip_usage",
+        crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA => {
+            crate::resource_monitoring::RESOURCE_HISTORY_STREAM
+        }
         _ => return None,
     })
 }

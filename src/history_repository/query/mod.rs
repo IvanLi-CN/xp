@@ -90,6 +90,7 @@ pub(crate) struct HistoryQuery {
     page_size: usize,
     page_cursor: usize,
     subject_node_id: Option<String>,
+    schema_id: Option<String>,
 }
 
 impl HistoryQuery {
@@ -106,6 +107,7 @@ impl HistoryQuery {
             page_size,
             page_cursor: 0,
             subject_node_id: None,
+            schema_id: None,
         })
     }
 
@@ -145,6 +147,19 @@ impl HistoryQuery {
 
     pub(crate) fn subject_node_id(&self) -> Option<&str> {
         self.subject_node_id.as_deref()
+    }
+
+    pub(crate) fn with_schema_id(mut self, schema_id: Option<&str>) -> Result<Self, QueryError> {
+        let Some(schema_id) = schema_id else {
+            return Ok(self);
+        };
+        validate_identifier(schema_id)?;
+        self.schema_id = Some(schema_id.to_owned());
+        Ok(self)
+    }
+
+    pub(crate) fn schema_id(&self) -> Option<&str> {
+        self.schema_id.as_deref()
     }
 
     pub(crate) fn page_offset(&self) -> Result<usize, QueryError> {
@@ -270,6 +285,10 @@ impl QueryGap {
 
     pub(crate) fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
+    }
+
+    pub(crate) fn range(&self) -> QueryRange {
+        self.range
     }
 
     fn intersects(&self, requested: QueryRange) -> bool {

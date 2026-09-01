@@ -650,6 +650,9 @@ pub(crate) fn source_stream_for_schema(schema_id: &str) -> Option<&'static str> 
         crate::uptime_monitor::UPTIME_HISTORY_SCHEMA => {
             crate::uptime_monitor::UPTIME_HISTORY_STREAM
         }
+        crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA => {
+            crate::resource_monitoring::RESOURCE_HISTORY_STREAM
+        }
         _ => return None,
     })
 }

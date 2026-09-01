@@ -425,6 +425,25 @@ impl HistoryStorage {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
+        self.repository_history_records_for_schema(
+            subject_node_id,
+            None,
+            start_unix_seconds,
+            end_unix_seconds,
+            offset,
+            limit,
+        )
+    }
+
+    pub(crate) fn repository_history_records_for_schema(
+        &self,
+        subject_node_id: Option<&str>,
+        schema_id: Option<&str>,
+        start_unix_seconds: Option<u64>,
+        end_unix_seconds: Option<u64>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistoryRecordRow>> {
         let mut backend = self.lock_backend();
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(Vec::new());
@@ -438,10 +457,11 @@ impl HistoryStorage {
                 FROM repository_history_records
                 WHERE is_tombstone = 0
                   AND (?1 IS NULL OR subject_node_id = ?1)
-                  AND (?2 IS NULL OR observed_end >= ?2)
-                  AND (?3 IS NULL OR observed_start <= ?3)
+                  AND (?2 IS NULL OR schema_id = ?2)
+                  AND (?3 IS NULL OR observed_end >= ?3)
+                  AND (?4 IS NULL OR observed_start <= ?4)
                 ORDER BY observed_start, source_node_id, source_epoch, stream, sequence
-                LIMIT ?4 OFFSET ?5
+                LIMIT ?5 OFFSET ?6
                 ",
             )
             .map_err(sqlite_error)?;
@@ -449,6 +469,7 @@ impl HistoryStorage {
             .query_map(
                 params![
                     subject_node_id,
+                    schema_id,
                     start_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
                     end_unix_seconds.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
                     i64::try_from(limit).unwrap_or(i64::MAX),
@@ -808,9 +829,10 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
-    pub(crate) fn repository_history_incomplete_aggregate_range(
+    pub(crate) fn repository_history_incomplete_aggregate_range_for_schema(
         &self,
         subject_node_id: Option<&str>,
+        schema_id: Option<&str>,
         start_unix_seconds: u64,
         end_unix_seconds: u64,
     ) -> Result<Option<(u64, u64)>> {
@@ -826,12 +848,14 @@ impl HistoryStorage {
                 FROM repository_history_records
                 WHERE is_tombstone = 0
                   AND (?1 IS NULL OR subject_node_id = ?1)
+                  AND (?2 IS NULL OR schema_id = ?2)
                   AND (aggregate_complete = 0 OR aggregate_complete IS NULL)
-                  AND COALESCE(aggregate_start, observed_start) <= ?2
-                  AND COALESCE(aggregate_end, observed_end) >= ?3
+                  AND COALESCE(aggregate_start, observed_start) <= ?3
+                  AND COALESCE(aggregate_end, observed_end) >= ?4
                 ",
                 params![
                     subject_node_id,
+                    schema_id,
                     i64::try_from(end_unix_seconds).unwrap_or(i64::MAX),
                     i64::try_from(start_unix_seconds).unwrap_or(i64::MAX),
                 ],
