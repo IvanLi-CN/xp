@@ -10,6 +10,8 @@
 		"primaryIpv4": "192.0.2.10",
 		"secondaryIpv4": "198.51.100.20",
 		"tertiaryIpv4": "203.0.113.30",
+		"privateCidr": "192.168.50.0/24",
+		"privateIpv6Cidr": "fd12:3456:789a:bcde::/64",
 		"loopback": "127.0.0.1",
 		"loopback39043": "127.0.0.1:39043",
 		"loopback49043": "127.0.0.1:49043"

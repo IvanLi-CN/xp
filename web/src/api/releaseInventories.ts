@@ -24,6 +24,7 @@ export const API_CAPABILITIES = [
 	"admin.traffic-usage",
 	"admin.mihomo-tools",
 	"admin.mihomo-resource-policy",
+	"node.mihomo-resource-private-cidrs-v1",
 ] as const;
 export const API_CAPABILITIES_PATH = "/api/capabilities";
 export type ApiCapability = (typeof API_CAPABILITIES)[number] | (string & {});

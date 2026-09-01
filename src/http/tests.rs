@@ -1191,6 +1191,21 @@ async fn internal_endpoint_canary_probe_requires_internal_auth() {
 }
 
 #[tokio::test]
+async fn internal_mihomo_resource_policy_requires_internal_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let res = app
+        .oneshot(req(
+            "GET",
+            "/api/admin/_internal/nodes/mihomo-resource-policy/local",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn repository_history_query_preserves_local_metadata_and_bounds_pages() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
@@ -3110,7 +3125,7 @@ async fn admin_config_patch_is_removed() {
 }
 
 #[tokio::test]
-async fn admin_mihomo_resource_policy_is_cluster_scoped_and_persisted() {
+async fn admin_mihomo_resource_policy_legacy_endpoint_is_retired() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);
 
@@ -3131,8 +3146,8 @@ async fn admin_mihomo_resource_policy_is_cluster_scoped_and_persisted() {
         ))
         .await
         .unwrap();
-    assert_eq!(updated.status(), StatusCode::OK);
-    assert_eq!(body_json(updated).await["allow_private_targets"], true);
+    assert_eq!(updated.status(), StatusCode::GONE);
+    assert_eq!(body_json(updated).await["error"]["code"], "gone");
 
     let config = app
         .oneshot(req_authed("GET", "/api/admin/config"))
@@ -3141,8 +3156,64 @@ async fn admin_mihomo_resource_policy_is_cluster_scoped_and_persisted() {
     assert_eq!(config.status(), StatusCode::OK);
     assert_eq!(
         body_json(config).await["mihomo_resource_allow_private_targets"],
-        true
+        false
     );
+}
+
+#[tokio::test]
+async fn admin_node_mihomo_resource_policy_is_local_and_overridable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+    let node_id = {
+        let response = app
+            .clone()
+            .oneshot(req_authed("GET", "/api/admin/nodes"))
+            .await
+            .unwrap();
+        body_json(response).await["items"][0]["node_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let path = format!("/api/admin/nodes/{node_id}/mihomo-resource-policy");
+
+    let initial = app.clone().oneshot(req_authed("GET", &path)).await.unwrap();
+    assert_eq!(initial.status(), StatusCode::OK);
+    let initial = body_json(initial).await;
+    assert_eq!(initial["source"], "deployment_default");
+    assert_eq!(initial["effective_cidrs"], json!([]));
+
+    let updated = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &path,
+            json!({ "override_cidrs": ["192.168.50.7/24"] }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated = body_json(updated).await;
+    assert_eq!(updated["source"], "override");
+    assert_eq!(updated["effective_cidrs"], json!(["192.168.50.0/24"]));
+
+    let invalid = app
+        .clone()
+        .oneshot(req_authed_json(
+            "PUT",
+            &path,
+            json!({ "override_cidrs": ["192.0.2.0/24"] }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let deleted = app
+        .oneshot(req_authed("DELETE", &format!("{path}/override")))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert_eq!(body_json(deleted).await["source"], "deployment_default");
 }
 
 #[tokio::test]

@@ -47,6 +47,10 @@ struct Addresses {
     secondary_ipv4: String,
     #[serde(rename = "tertiaryIpv4")]
     tertiary_ipv4: String,
+    #[serde(rename = "privateCidr")]
+    private_cidr: String,
+    #[serde(rename = "privateIpv6Cidr")]
+    private_ipv6_cidr: String,
     loopback: String,
     #[serde(rename = "loopback39043")]
     loopback_39043: String,
