@@ -1,8 +1,20 @@
 #[cfg(target_os = "linux")]
 use std::{
-    fs, thread,
+    fs,
+    process::Command,
+    thread,
     time::{Duration, Instant},
 };
+
+#[cfg(target_os = "linux")]
+const RESOURCE_BENCHMARK_CHILD: &str = "XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_CHILD";
+
+#[cfg(target_os = "linux")]
+const RESOURCE_BENCHMARK_TEST: &str = concat!(
+    "state::history_repository::replica::runtime::sync_tests::",
+    "source_delivery_resource_tests::",
+    "source_delivery_journal_resource_budget_stays_fixed_for_large_backlog"
+);
 
 #[cfg(target_os = "linux")]
 fn current_thread_cpu_nanos() -> u64 {
@@ -43,6 +55,21 @@ fn process_rss_bytes() -> u64 {
 #[cfg(target_os = "linux")]
 #[test]
 fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
+    if std::env::var_os(RESOURCE_BENCHMARK_CHILD).is_none() {
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args(["--exact", RESOURCE_BENCHMARK_TEST, "--nocapture"])
+            .env(RESOURCE_BENCHMARK_CHILD, "1")
+            .output()
+            .expect("run isolated source journal resource benchmark");
+        assert!(
+            output.status.success(),
+            "isolated source journal resource benchmark failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
     let temporary = tempfile::tempdir().expect("temporary directory");
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     drop(storage);
