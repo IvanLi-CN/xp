@@ -4,6 +4,7 @@ import type {
 	NodeResourceHistoryMetric,
 	ResourceSnapshot,
 } from "../api/adminResources";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	ResourceSnapshotPanel,
 	ResourceTabContent,
@@ -20,8 +21,8 @@ const measurement = (
 });
 
 const supportedSnapshot: ResourceSnapshot = {
-	node_id: "node-tokyo-1",
-	observed_at: "2026-09-01T11:00:00Z",
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	observed_at: fixtureCatalog.timestamp.t20260901T000000(),
 	resource_domain: "host",
 	capture_state: "active",
 	capability: "supported",
@@ -37,7 +38,7 @@ const supportedSnapshot: ResourceSnapshot = {
 			{
 				mount: "/",
 				capability: "supported",
-				total_bytes: 100 * 1024 ** 3,
+				total_bytes: fixtureCatalog.quota.tenGiB(),
 				available_bytes: 64 * 1024 ** 3,
 				used_percent: 36,
 				total_inodes: 6_000_000,
@@ -150,7 +151,7 @@ const partialSnapshot: ResourceSnapshot = {
 			{
 				mount: "/",
 				capability: "partial",
-				total_bytes: 100 * 1024 ** 3,
+				total_bytes: fixtureCatalog.quota.tenGiB(),
 				available_bytes: 8 * 1024 ** 3,
 				used_percent: 92,
 				used_inode_percent: 88,
@@ -205,8 +206,15 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const resourceHistoryBase =
+	Date.parse(fixtureCatalog.timestamp.t20260901T000000()) + 10 * 60 * 60 * 1000;
+
+function catalogTimestampOffset(index: number): string {
+	return new Date(resourceHistoryBase + index * 60_000).toISOString();
+}
+
 const cpuHistoryPoints = Array.from({ length: 24 }, (_, index) => ({
-	observed_at: `2026-09-01T10:${String(index).padStart(2, "0")}:00Z`,
+	observed_at: catalogTimestampOffset(index),
 	value: 30 + ((index * 7) % 35),
 }));
 

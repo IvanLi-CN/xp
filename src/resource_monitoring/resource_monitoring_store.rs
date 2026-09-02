@@ -505,7 +505,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut store = ResourceStore::open(directory.path()).unwrap();
         let rollup = ResourceRollup {
-            node_id: "node-a".to_string(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
             bucket_start_unix_seconds: 60,
             expected_samples: 4,
             captured_samples: 4,
@@ -557,7 +557,7 @@ mod tests {
         let mut store = ResourceStore::open(directory.path()).unwrap();
         for (bucket, value) in [(0_i64, 10.0), (60, 20.0), (900, 40.0)] {
             let rollup = ResourceRollup {
-                node_id: "node-a".to_string(),
+                node_id: xp_test_fixtures::primary_node_id().to_owned(),
                 bucket_start_unix_seconds: bucket,
                 expected_samples: 4,
                 captured_samples: 4,

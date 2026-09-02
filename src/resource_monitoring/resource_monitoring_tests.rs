@@ -107,7 +107,7 @@ async fn sample_ring_is_bounded() {
     let directory = tempfile::tempdir().unwrap();
     let handle = ResourceMonitorHandle {
         inner: Arc::new(RwLock::new(ResourceState {
-            node_id: "node-a".to_string(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
             reader: LinuxResourceReader::with_runtime_targets(
                 directory.path().to_path_buf(),
                 ManagedRuntimeTargets::default(),
@@ -132,7 +132,7 @@ async fn sample_ring_is_bounded() {
 fn alert_policy_emits_one_open_and_one_recovery_transition() {
     let directory = tempfile::tempdir().unwrap();
     let mut state = ResourceState {
-        node_id: "node-a".to_string(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         reader: LinuxResourceReader::with_runtime_targets(
             directory.path().to_path_buf(),
             ManagedRuntimeTargets::default(),

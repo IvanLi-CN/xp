@@ -104,15 +104,16 @@ const unsupportedMeasurement = (reason_code: string) => ({
 	reason_code,
 });
 
-function resourceObservedAt(index: number): string {
-	const minute = String(Math.floor(index / 4)).padStart(2, "0");
-	const second = String((index % 4) * 15).padStart(2, "0");
-	return `2026-09-01T10:${minute}:${second}Z`;
+const resourceHistoryBase =
+	Date.parse(fixtureCatalog.timestamp.t20260901T000000()) + 10 * 60 * 60 * 1000;
+
+function catalogTimestampOffset(index: number): string {
+	return new Date(resourceHistoryBase + index * 15_000).toISOString();
 }
 
 const resourceSnapshot: ResourceSnapshot = {
-	node_id: node.node_id,
-	observed_at: "2026-09-01T10:05:45Z",
+	node_id: fixtureCatalog.identifier.nodePrimary(),
+	observed_at: catalogTimestampOffset(23),
 	resource_domain: "host",
 	capture_state: "active",
 	capability: "supported",
@@ -128,7 +129,7 @@ const resourceSnapshot: ResourceSnapshot = {
 			{
 				mount: "/",
 				capability: "supported",
-				total_bytes: 100 * 1024 ** 3,
+				total_bytes: fixtureCatalog.quota.tenGiB(),
 				available_bytes: 64 * 1024 ** 3,
 				used_percent: 36,
 				total_inodes: 6_000_000,
@@ -212,7 +213,7 @@ function resourceHistory(
 		freshness_seconds: 5,
 		truncated: false,
 		points: Array.from({ length: 24 }, (_, index) => ({
-			observed_at: resourceObservedAt(index),
+			observed_at: catalogTimestampOffset(index),
 			value: valueAt(index),
 			capability: "supported",
 		})),
@@ -321,7 +322,7 @@ function unsupportedRuntimeResourceHistory(
 	return {
 		...runtimeResourceHistory(role, metric, () => 0),
 		points: Array.from({ length: 24 }, (_, index) => ({
-			observed_at: resourceObservedAt(index),
+			observed_at: catalogTimestampOffset(index),
 			value: null,
 			capability: "unsupported" as const,
 		})),
@@ -394,13 +395,16 @@ const meta = {
 					[node.node_id, tcpConnectionReports],
 				]),
 				nodeResourcesByNodeId: {
-					[node.node_id]: resourceMonitoringFixtures.snapshot,
+					[fixtureCatalog.identifier.nodePrimary()]:
+						resourceMonitoringFixtures.snapshot,
 				},
 				nodeResourceHistoryByNodeId: {
-					[node.node_id]: resourceMonitoringFixtures.historyByMetric,
+					[fixtureCatalog.identifier.nodePrimary()]:
+						resourceMonitoringFixtures.historyByMetric,
 				},
 				nodeResourceRuntimeHistoryByNodeId: {
-					[node.node_id]: resourceMonitoringFixtures.runtimeHistoryByRole,
+					[fixtureCatalog.identifier.nodePrimary()]:
+						resourceMonitoringFixtures.runtimeHistoryByRole,
 				},
 				nodeMihomoResourcePolicyByNodeId: {
 					[fixtureCatalog.identifier.nodePrimary()]: {

@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	RESOURCE_HISTORY_CHARTS,
 	RUNTIME_RESOURCE_HISTORY_CHARTS,
 	buildResourceHistoryChartOption,
 } from "./ResourceSnapshotPanel";
 import type { EChartsThemePalette } from "./echarts-theme";
+
+const resourceHistoryBase = Date.parse(
+	fixtureCatalog.timestamp.t20260901T000000(),
+);
+
+function catalogTimestampOffset(index: number): string {
+	return new Date(resourceHistoryBase + index * 15_000).toISOString();
+}
 
 const palette: EChartsThemePalette = {
 	axis: "axis",
@@ -30,14 +39,23 @@ const palette: EChartsThemePalette = {
 describe("buildResourceHistoryChartOption", () => {
 	it("renders each fixed resource series with the TCP history chart contract", () => {
 		const points = [
-			{ observed_at: "2026-09-01T10:00:00Z", value: 18.4 },
-			{ observed_at: "2026-09-01T10:00:15Z", value: null },
-			{ observed_at: "2026-09-01T10:00:30Z", value: 52.1 },
+			{
+				observed_at: catalogTimestampOffset(0),
+				value: fixtureCatalog.number.value20(),
+			},
+			{
+				observed_at: catalogTimestampOffset(1),
+				value: null,
+			},
+			{
+				observed_at: catalogTimestampOffset(2),
+				value: fixtureCatalog.number.value50(),
+			},
 		];
 
 		for (const chart of RESOURCE_HISTORY_CHARTS) {
 			const option = buildResourceHistoryChartOption(
-				{ [chart.series[0].metric]: points },
+				Object.fromEntries([[chart.series[0].metric, points]]),
 				palette,
 				chart,
 			);
@@ -46,8 +64,8 @@ describe("buildResourceHistoryChartOption", () => {
 				grid: { top: 24, right: 18, bottom: 36, left: 42 },
 				xAxis: {
 					type: "time",
-					min: 1_788_256_800_000,
-					max: 1_788_256_830_000,
+					min: 1_788_220_800_000,
+					max: 1_788_220_830_000,
 				},
 				yAxis: {
 					type: "value",
@@ -59,9 +77,9 @@ describe("buildResourceHistoryChartOption", () => {
 						name: chart.series[0].name,
 						type: "line",
 						data: [
-							[1_788_256_800_000, 18.4],
-							[1_788_256_815_000, null],
-							[1_788_256_830_000, 52.1],
+							[1_788_220_800_000, 20],
+							[1_788_220_815_000, null],
+							[1_788_220_830_000, 50],
 						],
 						step: "end",
 						smooth: false,
@@ -106,8 +124,18 @@ describe("runtime resource charts", () => {
 
 		const option = buildResourceHistoryChartOption(
 			{
-				rss_bytes: [{ observed_at: "2026-09-01T10:00:00Z", value: 96 }],
-				pss_bytes: [{ observed_at: "2026-09-01T10:00:00Z", value: 83 }],
+				rss_bytes: [
+					{
+						observed_at: fixtureCatalog.timestamp.t20260901T000000(),
+						value: fixtureCatalog.number.value100(),
+					},
+				],
+				pss_bytes: [
+					{
+						observed_at: fixtureCatalog.timestamp.t20260901T000000(),
+						value: fixtureCatalog.number.value60(),
+					},
+				],
 			},
 			palette,
 			chart,
