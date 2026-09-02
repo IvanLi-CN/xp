@@ -19,7 +19,7 @@ type Monitor = {
 		  }
 		| { kind: "tcping"; host: string; port: number };
 	interval_seconds: number;
-	observer_node_ids: string[] | null;
+	observer_policy: { mode: "exclude" | "include"; node_ids: string[] };
 	lifecycle: "active" | "paused" | "deleted";
 	revision: number;
 	revision_effective_at_unix_seconds: number;
@@ -131,9 +131,43 @@ async function setupServiceMonitorMocks(page: Page) {
 			capabilities: [
 				...apiCapabilitiesFixture.capabilities,
 				"admin.service-monitors",
+				"admin.service-monitor-observer-policy-v1",
+				"admin.service-monitor-draft-tests-v1",
 			],
 		}),
 	);
+	let draftTest: Record<string, unknown> | null = null;
+	await page.route("**/api/admin/monitor-draft-tests**", async (route) => {
+		const request = route.request();
+		if (request.method() === "POST") {
+			draftTest = {
+				run_id: "01JDRAFT0000000000000000001",
+				target: JSON.parse(request.postData() ?? "{}").target,
+				observer_policy: { mode: "exclude", node_ids: [] },
+				observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
+				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
+				state: "succeeded",
+				created_at_unix_seconds: now,
+				expires_at_unix_seconds: now + 900,
+				observers: [
+					{
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						state: "succeeded",
+						latency_ms: 42,
+						status_code: 200,
+					},
+				],
+			};
+			return json(route, draftTest, 202);
+		}
+		return draftTest
+			? json(route, draftTest)
+			: json(
+					route,
+					{ error: { code: "not_found", message: "not found", details: {} } },
+					404,
+				);
+	});
 
 	let monitor: Monitor = {
 		monitor_id: monitorId,
@@ -145,7 +179,7 @@ async function setupServiceMonitorMocks(page: Page) {
 			accepted_statuses: [{ start: 200, end: 399 }],
 		},
 		interval_seconds: 60,
-		observer_node_ids: null,
+		observer_policy: { mode: "exclude", node_ids: [] },
 		lifecycle: "active",
 		revision: 3,
 		revision_effective_at_unix_seconds: now - 60,
@@ -298,15 +332,32 @@ test("keeps the TCPING editor usable on mobile", async ({ page }) => {
 test("runs the backend cluster test from the B editor workspace", async ({
 	page,
 }) => {
+	await page.setViewportSize({ width: 1536, height: 1000 });
 	await setupServiceMonitorMocks(page);
 	await page.goto("/monitors/new");
 
-	await expect(
-		page.getByRole("heading", { name: "Monitor configuration" }),
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Cluster test results" }),
-	).toBeVisible();
+	const configuration = page.getByRole("heading", {
+		name: "Monitor configuration",
+	});
+	const results = page.getByRole("heading", { name: "Cluster test results" });
+	await expect(configuration).toBeVisible();
+	await expect(results).toBeVisible();
+	const columns = await page.evaluate(() => {
+		const configurationHeading = document.querySelector(
+			"#monitor-configuration-heading",
+		);
+		const resultsHeading = document.querySelector(
+			"#monitor-cluster-test-heading",
+		);
+		if (!configurationHeading || !resultsHeading) {
+			throw new Error("editor columns are not mounted");
+		}
+		return {
+			configurationLeft: configurationHeading.getBoundingClientRect().left,
+			resultsLeft: resultsHeading.getBoundingClientRect().left,
+		};
+	});
+	expect(columns.resultsLeft).toBeGreaterThan(columns.configurationLeft);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(

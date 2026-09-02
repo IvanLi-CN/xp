@@ -41,35 +41,64 @@ export type ServiceMonitorStatus =
 	| "capture_suspended";
 export type HistoryQuality = "complete" | "partial" | "local_only";
 
-export const AdminServiceMonitorSchema = z.object({
+export const ObserverPolicySchema = z.object({
+	mode: z.enum(["exclude", "include"]),
+	node_ids: z.array(z.string()),
+});
+
+export type ObserverPolicy = z.infer<typeof ObserverPolicySchema>;
+
+const AdminServiceMonitorWireSchema = z.object({
 	monitor_id: z.string(),
 	name: z.string(),
 	target: ServiceMonitorTargetSchema,
 	interval_seconds: z.number().int(),
-	observer_node_ids: z.array(z.string()).nullable(),
+	observer_policy: ObserverPolicySchema.optional(),
+	observer_node_ids: z.array(z.string()).nullable().optional(),
 	lifecycle: z.enum(["active", "paused", "deleted"]),
 	revision: z.number().int(),
 	revision_effective_at_unix_seconds: z.number().int(),
 });
 
+export const AdminServiceMonitorSchema =
+	AdminServiceMonitorWireSchema.transform(
+		({ observer_policy, observer_node_ids, ...monitor }) => ({
+			...monitor,
+			observer_policy:
+				observer_policy ??
+				(observer_node_ids && observer_node_ids.length > 0
+					? { mode: "include" as const, node_ids: observer_node_ids }
+					: { mode: "exclude" as const, node_ids: [] }),
+		}),
+	);
+
 export type AdminServiceMonitor = z.infer<typeof AdminServiceMonitorSchema>;
 
-export const ServiceMonitorSummarySchema = AdminServiceMonitorSchema.extend({
-	status: z.enum(["up", "degraded", "down", "unknown", "capture_suspended"]),
-	stale: z.boolean(),
-	quality: z.enum(["complete", "partial", "local_only"]),
-	recent_6h: z.object({
-		availability_percent: z.number().nullable(),
-		coverage_percent: z.number().nullable(),
-		expected: z.number().int(),
-		executed: z.number().int(),
-		latest_latency_ms: z.number().int().nullable(),
-		latest_observed_at_unix_seconds: z.number().int().nullable(),
-		slots: z.array(
-			z.enum(["up", "degraded", "down", "unknown", "capture_suspended"]),
-		),
-	}),
-});
+export const ServiceMonitorSummarySchema = AdminServiceMonitorWireSchema.extend(
+	{
+		status: z.enum(["up", "degraded", "down", "unknown", "capture_suspended"]),
+		stale: z.boolean(),
+		quality: z.enum(["complete", "partial", "local_only"]),
+		recent_6h: z.object({
+			availability_percent: z.number().nullable(),
+			coverage_percent: z.number().nullable(),
+			expected: z.number().int(),
+			executed: z.number().int(),
+			latest_latency_ms: z.number().int().nullable(),
+			latest_observed_at_unix_seconds: z.number().int().nullable(),
+			slots: z.array(
+				z.enum(["up", "degraded", "down", "unknown", "capture_suspended"]),
+			),
+		}),
+	},
+).transform(({ observer_policy, observer_node_ids, ...monitor }) => ({
+	...monitor,
+	observer_policy:
+		observer_policy ??
+		(observer_node_ids && observer_node_ids.length > 0
+			? { mode: "include" as const, node_ids: observer_node_ids }
+			: { mode: "exclude" as const, node_ids: [] }),
+}));
 
 export type ServiceMonitorSummary = z.infer<typeof ServiceMonitorSummarySchema>;
 
@@ -183,6 +212,7 @@ export type ServiceMonitorCreateRequest = {
 	name: string;
 	target: ServiceMonitorTarget;
 	interval_seconds: number;
+	observer_policy?: ObserverPolicy;
 	observer_node_ids?: string[] | null;
 };
 
@@ -200,6 +230,39 @@ export const ServiceMonitorTestResponseSchema = z.object({
 export type ServiceMonitorTestResponse = z.infer<
 	typeof ServiceMonitorTestResponseSchema
 >;
+
+const DraftClusterTestStateSchema = z.enum([
+	"queued",
+	"running",
+	"succeeded",
+	"failed",
+	"unsupported",
+	"interrupted",
+]);
+
+export const DraftClusterTestSchema = z.object({
+	run_id: z.string(),
+	target: ServiceMonitorTargetSchema,
+	observer_policy: ObserverPolicySchema,
+	observer_node_ids: z.array(z.string()),
+	coordinator_node_id: z.string(),
+	state: DraftClusterTestStateSchema,
+	created_at_unix_seconds: z.number().int(),
+	expires_at_unix_seconds: z.number().int(),
+	observers: z.array(
+		z.object({
+			node_id: z.string(),
+			state: DraftClusterTestStateSchema,
+			latency_ms: z.number().int().nullable().optional(),
+			status_code: z.number().int().nullable().optional(),
+			error: z.string().nullable().optional(),
+			started_at_unix_seconds: z.number().int().nullable().optional(),
+			completed_at_unix_seconds: z.number().int().nullable().optional(),
+		}),
+	),
+});
+
+export type DraftClusterTest = z.infer<typeof DraftClusterTestSchema>;
 
 function authHeaders(adminToken: string, json = false): HeadersInit {
 	return {
@@ -280,6 +343,35 @@ export async function testAdminServiceMonitorTarget(
 		adminToken,
 		(value) => ServiceMonitorTestResponseSchema.parse(value),
 		{ method: "POST", body: JSON.stringify({ target }) },
+	);
+}
+
+export async function createAdminMonitorDraftTest(
+	adminToken: string,
+	target: ServiceMonitorTarget,
+	observerPolicy: ObserverPolicy,
+): Promise<DraftClusterTest> {
+	return fetchJson(
+		"/api/admin/monitor-draft-tests",
+		adminToken,
+		(value) => DraftClusterTestSchema.parse(value),
+		{
+			method: "POST",
+			body: JSON.stringify({ target, observer_policy: observerPolicy }),
+		},
+	);
+}
+
+export async function fetchAdminMonitorDraftTest(
+	adminToken: string,
+	runId: string,
+	signal?: AbortSignal,
+): Promise<DraftClusterTest> {
+	return fetchJson(
+		`/api/admin/monitor-draft-tests/${encodeURIComponent(runId)}`,
+		adminToken,
+		(value) => DraftClusterTestSchema.parse(value),
+		{ signal },
 	);
 }
 

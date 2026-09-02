@@ -23,9 +23,16 @@ _Avoid_: agent, runner, probe node
 
 **Observer Set**:
 The capable Observer Nodes from which a Service Monitor is expected to run.
-The default set contains every capable cluster node and may be narrowed by the
-administrator.
+It is resolved from the Monitor's Observer Policy when a Schedule Slot or
+Draft Cluster Test begins.
 _Avoid_: replica set, worker pool
+
+**Observer Policy**:
+The administrator's selection rule for an Observer Set. `exclude` is the
+default: an empty exclusion set means every capable cluster node, and listed
+nodes are omitted. `include` is an explicit allowlist: only listed capable
+nodes are selected. Neither policy changes an already snapshotted set.
+_Avoid_: all-nodes checkbox, implicit allowlist
 
 **Schedule Slot**:
 One expected execution of a Service Monitor by one Observer Node at a fixed UTC
@@ -62,6 +69,13 @@ _Avoid_: mutable monitor state, migration version
 A manually requested check result. It is retained and displayed with history,
 but is excluded from scheduled availability and coverage calculations.
 _Avoid_: retry, scheduled sample
+
+**Draft Cluster Test**:
+A temporary, asynchronous pre-creation check of a candidate Public Target from
+the configuration's Observer Set snapshot. It is evidence for an administrator,
+not a Service Monitor or an Observation: its results never enter uptime history,
+availability, coverage, or a scheduled Slot.
+_Avoid_: required verification, ad-hoc observation, synthetic progress
 
 **Availability**:
 The proportion of successful executable Observations for a selected period.

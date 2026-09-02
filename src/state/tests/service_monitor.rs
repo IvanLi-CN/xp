@@ -1,6 +1,6 @@
 use super::*;
 use crate::uptime_monitor::{
-    HttpMethod, MonitorLifecycle, MonitorTarget, ServiceMonitor, StatusRange,
+    HttpMethod, MonitorLifecycle, MonitorTarget, ObserverPolicyMode, ServiceMonitor, StatusRange,
 };
 use pretty_assertions::assert_eq;
 
@@ -18,7 +18,7 @@ fn monitor(revision: u64) -> ServiceMonitor {
             body_contains: None,
         },
         interval_seconds: 60,
-        observer_node_ids: None,
+        observer_policy: Default::default(),
         lifecycle: MonitorLifecycle::Active,
         revision,
         revision_effective_at_unix_seconds: 120,
@@ -79,4 +79,32 @@ fn v13_snapshot_migrates_with_an_empty_monitor_map() {
     let migrated = migrate_state_value_to_latest(serde_json::to_value(state).unwrap()).unwrap();
     assert_eq!(migrated.schema_version, SCHEMA_VERSION);
     assert!(migrated.service_monitors.is_empty());
+}
+
+#[test]
+fn legacy_observer_node_ids_are_migrated_to_policy_without_dropping_ids() {
+    let monitor = serde_json::json!({
+        "monitor_id": "01JMONITOR00000000000000000",
+        "name": "Public health",
+        "target": {
+            "kind": "https",
+            "url": "https://example.com/health",
+            "method": "get",
+            "accepted_statuses": [{"start": 200, "end": 299}]
+        },
+        "interval_seconds": 60,
+        "observer_node_ids": ["departed-node"],
+        "lifecycle": "active",
+        "revision": 1,
+        "revision_effective_at_unix_seconds": 120
+    });
+    let mut state = serde_json::to_value(PersistedState::empty()).unwrap();
+    state["service_monitors"]["01JMONITOR00000000000000000"] = monitor;
+    let migrated = migrate_state_value_to_latest(state).unwrap();
+    let monitor = migrated
+        .service_monitors
+        .get("01JMONITOR00000000000000000")
+        .unwrap();
+    assert_eq!(monitor.observer_policy.mode, ObserverPolicyMode::Include);
+    assert_eq!(monitor.observer_policy.node_ids, vec!["departed-node"]);
 }

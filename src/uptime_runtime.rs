@@ -28,8 +28,13 @@ const AD_HOC_CONCURRENCY: usize = 4;
 const AD_HOC_RUNS_PER_MINUTE: u8 = 10;
 
 mod capture_gaps;
+mod draft;
 mod scheduler;
 pub use capture_gaps::PendingCaptureGap;
+pub use draft::{
+    DRAFT_TEST_TTL_SECONDS, DraftClusterTest, DraftClusterTestObserver,
+    DraftClusterTestObserverUpdate, DraftClusterTestState,
+};
 pub(crate) use scheduler::spawn_uptime_worker;
 #[cfg(test)]
 mod tests;
@@ -144,6 +149,14 @@ impl UptimeHandle {
             );
             CREATE INDEX IF NOT EXISTS uptime_runs_monitor
                 ON uptime_runs (monitor_id, created_at_unix_seconds DESC);
+            CREATE TABLE IF NOT EXISTS uptime_draft_tests (
+                run_id TEXT PRIMARY KEY,
+                expires_at_unix_seconds INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                payload BLOB NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS uptime_draft_tests_expiry
+                ON uptime_draft_tests (expires_at_unix_seconds);
             ",
         )?;
         migrate_observation_idempotency(&connection)?;
@@ -238,7 +251,6 @@ impl UptimeHandle {
         )?;
         Ok(())
     }
-
     pub async fn mark_ad_hoc_run_running(&self, run_id: &str) -> Result<(), rusqlite::Error> {
         let runtime = self.inner.lock().await;
         runtime.connection.execute(
@@ -247,7 +259,6 @@ impl UptimeHandle {
         )?;
         Ok(())
     }
-
     pub async fn complete_ad_hoc_run(
         &self,
         run_id: &str,
@@ -272,7 +283,6 @@ impl UptimeHandle {
         )?;
         Ok(())
     }
-
     pub async fn reject_ad_hoc_run(
         &self,
         run_id: &str,
@@ -292,7 +302,6 @@ impl UptimeHandle {
         )?;
         Ok(())
     }
-
     pub async fn ad_hoc_run(&self, run_id: &str) -> Result<Option<AdHocRun>, rusqlite::Error> {
         let runtime = self.inner.lock().await;
         runtime
@@ -339,13 +348,11 @@ impl UptimeHandle {
             )
             .optional()
     }
-
     pub async fn capture_state(&self) -> Result<CaptureState, rusqlite::Error> {
         let mut runtime = self.inner.lock().await;
         runtime.refresh_capture_state()?;
         runtime.capture_state()
     }
-
     pub async fn pending(&self, limit: usize) -> Result<Vec<PendingObservation>, rusqlite::Error> {
         let runtime = self.inner.lock().await;
         let mut statement = runtime.connection.prepare(
@@ -370,7 +377,6 @@ impl UptimeHandle {
         })?;
         rows.collect()
     }
-
     pub async fn mark_enqueued(&self, ids: &[String]) -> Result<(), rusqlite::Error> {
         if ids.is_empty() {
             return Ok(());
@@ -386,7 +392,6 @@ impl UptimeHandle {
         transaction.commit()?;
         runtime.refresh_capture_state()
     }
-
     pub async fn observations(
         &self,
         monitor_id: &str,
@@ -423,7 +428,6 @@ impl UptimeHandle {
         )?;
         rows.collect()
     }
-
     pub async fn latest(&self, monitor_id: &str) -> Result<Option<Observation>, rusqlite::Error> {
         let runtime = self.inner.lock().await;
         runtime

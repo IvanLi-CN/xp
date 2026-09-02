@@ -14,14 +14,15 @@ use crate::{
     state::DesiredStateCommand,
     uptime_monitor::{
         CurrentStatus, MAX_HISTORY_POINTS, MonitorKind, MonitorLifecycle, MonitorTarget,
-        Observation, ObservationError, ObservationOutcome, ObservationRollup, ServiceMonitor,
-        next_slot, normalized_observer_set, status_is_stale,
+        Observation, ObservationError, ObservationOutcome, ObservationRollup, ObserverPolicy,
+        ObserverPolicyMode, ServiceMonitor, next_slot, status_is_stale,
     },
     uptime_runtime::{AdHocRun, AdHocRunState, CaptureState},
 };
 
 use super::{ApiError, ApiJson, AppState, Items, raft_write};
 
+mod draft;
 mod history;
 mod status;
 
@@ -38,6 +39,14 @@ pub(super) fn router() -> Router {
             get(admin_list_service_monitors).post(admin_create_service_monitor),
         )
         .route("/monitors/test", post(admin_test_service_monitor))
+        .route(
+            "/monitor-draft-tests",
+            post(draft::admin_create_monitor_draft_test),
+        )
+        .route(
+            "/monitor-draft-tests/{run_id}",
+            get(draft::admin_get_monitor_draft_test),
+        )
         .route(
             "/monitors/{monitor_id}",
             get(admin_get_service_monitor)
@@ -71,7 +80,9 @@ pub(super) struct CreateMonitorRequest {
     target: MonitorTarget,
     #[serde(default)]
     interval_seconds: Option<u32>,
-    #[serde(default, deserialize_with = "deserialize_optional_observer_nodes")]
+    #[serde(default)]
+    observer_policy: Option<ObserverPolicy>,
+    #[serde(default)]
     observer_node_ids: Option<Option<Vec<String>>>,
 }
 
@@ -87,12 +98,21 @@ pub(super) struct TestMonitorResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct DraftClusterTestRequest {
+    target: MonitorTarget,
+    #[serde(default)]
+    observer_policy: ObserverPolicy,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct PatchMonitorRequest {
     expected_revision: u64,
     name: Option<String>,
     target: Option<MonitorTarget>,
     interval_seconds: Option<u32>,
-    #[serde(default, deserialize_with = "deserialize_optional_observer_nodes")]
+    #[serde(default)]
+    observer_policy: Option<ObserverPolicy>,
+    #[serde(default)]
     observer_node_ids: Option<Option<Vec<String>>>,
     lifecycle: Option<MonitorLifecycle>,
 }
@@ -275,7 +295,10 @@ pub(super) async fn admin_create_service_monitor(
         name: request.name,
         target: request.target,
         interval_seconds: request.interval_seconds.unwrap_or(60),
-        observer_node_ids: request.observer_node_ids.unwrap_or(None),
+        observer_policy: request
+            .observer_policy
+            .or_else(|| legacy_observer_policy(request.observer_node_ids))
+            .unwrap_or_default(),
         lifecycle: MonitorLifecycle::Active,
         revision: 1,
         revision_effective_at_unix_seconds: next_slot(now, request.interval_seconds.unwrap_or(60)),
@@ -327,6 +350,7 @@ pub(super) async fn admin_patch_service_monitor(
         && request.name.is_none()
         && request.target.is_none()
         && request.interval_seconds.is_none()
+        && request.observer_policy.is_none()
         && request.observer_node_ids.is_none();
     if lifecycle_only {
         let lifecycle = request.lifecycle.expect("checked lifecycle");
@@ -365,8 +389,11 @@ pub(super) async fn admin_patch_service_monitor(
     if let Some(interval_seconds) = request.interval_seconds {
         replacement.interval_seconds = interval_seconds;
     }
-    if let Some(observer_node_ids) = request.observer_node_ids {
-        replacement.observer_node_ids = observer_node_ids;
+    if let Some(observer_policy) = request
+        .observer_policy
+        .or_else(|| legacy_observer_policy(request.observer_node_ids))
+    {
+        replacement.observer_policy = observer_policy;
     }
     if let Some(lifecycle) = request.lifecycle {
         if lifecycle == MonitorLifecycle::Deleted {
@@ -582,7 +609,10 @@ async fn run_target_preflight(state: &AppState, target: MonitorTarget, now: u64)
         name: "target preflight".to_owned(),
         target,
         interval_seconds: 60,
-        observer_node_ids: Some(vec![state.cluster.node_id.clone()]),
+        observer_policy: ObserverPolicy {
+            mode: ObserverPolicyMode::Include,
+            node_ids: vec![state.cluster.node_id.clone()],
+        },
         lifecycle: MonitorLifecycle::Active,
         revision: 1,
         revision_effective_at_unix_seconds: now,
@@ -620,15 +650,13 @@ async fn monitor_for(state: &AppState, monitor_id: &str) -> Result<ServiceMonito
 }
 
 async fn observer_node_ids(state: &AppState, monitor: &ServiceMonitor) -> Vec<String> {
-    if let Some(node_ids) = &monitor.observer_node_ids {
-        return normalized_observer_set(node_ids).unwrap_or_default();
-    }
     let store = state.store.lock().await;
-    store
+    let all = store
         .list_nodes()
         .into_iter()
         .map(|node| node.node_id)
-        .collect()
+        .collect::<Vec<_>>();
+    monitor.observer_policy.resolve(&all)
 }
 
 async fn ensure_observation_budget(
@@ -636,9 +664,16 @@ async fn ensure_observation_budget(
     candidate: Option<&ServiceMonitor>,
     replacing_monitor_id: Option<&str>,
 ) -> Result<(), ApiError> {
-    let (mut monitors, node_count) = {
+    let (mut monitors, node_ids) = {
         let store = state.store.lock().await;
-        (store.list_service_monitors(), store.list_nodes().len())
+        (
+            store.list_service_monitors(),
+            store
+                .list_nodes()
+                .into_iter()
+                .map(|node| node.node_id)
+                .collect::<Vec<_>>(),
+        )
     };
     if let Some(replacing_monitor_id) = replacing_monitor_id {
         monitors.retain(|monitor| monitor.monitor_id != replacing_monitor_id);
@@ -650,12 +685,7 @@ async fn ensure_observation_budget(
         .iter()
         .filter(|monitor| monitor.lifecycle == MonitorLifecycle::Active)
         .map(|monitor| {
-            let observers = monitor
-                .observer_node_ids
-                .as_ref()
-                .map_or(node_count, |node_ids| {
-                    normalized_observer_set(node_ids).map_or(0, |node_ids| node_ids.len())
-                });
+            let observers = monitor.observer_policy.resolve(&node_ids).len();
             u64::try_from(observers)
                 .unwrap_or(u64::MAX)
                 .saturating_mul(60)
@@ -688,21 +718,23 @@ fn now_unix_seconds() -> u64 {
     u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default()
 }
 
+fn legacy_observer_policy(value: Option<Option<Vec<String>>>) -> Option<ObserverPolicy> {
+    match value {
+        Some(Some(node_ids)) if !node_ids.is_empty() => Some(ObserverPolicy {
+            mode: ObserverPolicyMode::Include,
+            node_ids,
+        }),
+        Some(_) => Some(ObserverPolicy::default()),
+        None => None,
+    }
+}
+
 fn ad_hoc_token_fingerprint(headers: &HeaderMap) -> String {
     let authorization = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     hex::encode(Sha256::digest(authorization.as_bytes()))
-}
-
-fn deserialize_optional_observer_nodes<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<Vec<String>>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::<Vec<String>>::deserialize(deserializer)?))
 }
 
 #[cfg(test)]
@@ -807,7 +839,7 @@ mod tests {
                 host: xp_test_fixtures::primary_host().to_owned(),
             },
             interval_seconds: 3_600,
-            observer_node_ids: None,
+            observer_policy: ObserverPolicy::default(),
             lifecycle: MonitorLifecycle::Active,
             revision: 1,
             revision_effective_at_unix_seconds: 0,

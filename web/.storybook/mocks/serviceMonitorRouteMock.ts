@@ -20,6 +20,53 @@ export function handleServiceMonitorMockRequest(
 	method: string,
 	path: string,
 ): Response | undefined {
+	if (path === "/api/admin/monitor-draft-tests" && method === "POST") {
+		const monitor = serviceMonitors[0];
+		const nodeId = monitor?.observer_policy.node_ids[0] ?? "storybook-observer";
+		return jsonResponse(
+			{
+				run_id: "01JDRAFT0000000000000000001",
+				target: monitor?.target,
+				observer_policy: { mode: "exclude", node_ids: [] },
+				observer_node_ids: [nodeId],
+				coordinator_node_id: nodeId,
+				state: "succeeded",
+				created_at_unix_seconds: 1_700_000_000,
+				expires_at_unix_seconds: 1_700_000_900,
+				observers: [
+					{
+						node_id: nodeId,
+						state: "succeeded",
+						latency_ms: 42,
+						status_code: 200,
+					},
+				],
+			},
+			{ status: 202 },
+		);
+	}
+	if (path.startsWith("/api/admin/monitor-draft-tests/") && method === "GET") {
+		const monitor = serviceMonitors[0];
+		const nodeId = monitor?.observer_policy.node_ids[0] ?? "storybook-observer";
+		return jsonResponse({
+			run_id: path.split("/").at(-1),
+			target: monitor?.target,
+			observer_policy: { mode: "exclude", node_ids: [] },
+			observer_node_ids: [nodeId],
+			coordinator_node_id: nodeId,
+			state: "succeeded",
+			created_at_unix_seconds: 1_700_000_000,
+			expires_at_unix_seconds: 1_700_000_900,
+			observers: [
+				{
+					node_id: nodeId,
+					state: "succeeded",
+					latency_ms: 42,
+					status_code: 200,
+				},
+			],
+		});
+	}
 	if (path === "/api/admin/monitors" && method === "GET") {
 		return jsonResponse({ items: clone(serviceMonitors) });
 	}

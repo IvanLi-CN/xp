@@ -7,7 +7,7 @@ use tokio::{
 
 use crate::{
     http::AppState,
-    uptime_monitor::{MonitorLifecycle, ServiceMonitor, normalized_observer_set, slot_for},
+    uptime_monitor::{MonitorLifecycle, ServiceMonitor, slot_for},
 };
 
 const SCHEDULED_CONCURRENCY: usize = 32;
@@ -48,12 +48,7 @@ pub(crate) fn spawn_uptime_worker(state: AppState) {
                 }
                 let uptime = state.uptime.clone();
                 let observer_node_id = state.cluster.node_id.clone();
-                let observer_set_node_ids = monitor
-                    .observer_node_ids
-                    .as_ref()
-                    .map_or_else(|| all_observer_node_ids.clone(), Clone::clone);
-                let observer_set_node_ids = normalized_observer_set(&observer_set_node_ids)
-                    .unwrap_or_else(|| vec![observer_node_id.clone()]);
+                let observer_set_node_ids = monitor.observer_policy.resolve(&all_observer_node_ids);
                 if !repository_ready || !capture_ready {
                     match uptime
                         .record_capture_gap(&monitor, observer_node_id, observer_set_node_ids, now)
@@ -127,8 +122,9 @@ pub(super) fn is_scheduled_on_local_node(
     monitor.lifecycle == MonitorLifecycle::Active
         && monitor.revision_effective_at_unix_seconds <= now_unix_seconds
         && monitor
-            .observer_node_ids
-            .as_ref()
-            .is_none_or(|node_ids| node_ids.iter().any(|node_id| node_id == local_node_id))
+            .observer_policy
+            .resolve(std::slice::from_ref(&local_node_id.to_owned()))
+            .iter()
+            .any(|node_id| node_id == local_node_id)
         && slot_for(now_unix_seconds, monitor.interval_seconds) == now_unix_seconds
 }

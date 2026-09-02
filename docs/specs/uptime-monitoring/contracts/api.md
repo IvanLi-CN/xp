@@ -29,7 +29,7 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
     "body_contains": "ok"
   },
   "interval_seconds": 60,
-  "observer_node_ids": null,
+  "observer_policy": { "mode": "exclude", "node_ids": [] },
   "lifecycle": "active",
   "revision": 3,
   "revision_effective_at_unix_seconds": 1785278460
@@ -42,7 +42,9 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
 - PING target 为 `{ "kind": "ping", "host": "example.com" }`。
 - TCPING target 为
   `{ "kind": "tcping", "host": "example.com", "port": 443 }`。
-- `observer_node_ids: null` 表示默认 Observer Set；非空数组是显式 allowlist。
+- `observer_policy.mode=exclude` 且 `node_ids=[]` 表示全部当前 Observer Node；
+  非空 exclude 排除指定 ID，`include` 是显式非空白名单。旧服务端的
+  `observer_node_ids` 只作为兼容读取形状，不再由新客户端发送。
 
 ## REST routes
 
@@ -53,7 +55,7 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
   72 个五分钟状态槽；它只汇总本节点最近六小时的 scheduled Observation，必须随
   `local_only` quality 解释，不能替代 Repository history。
 - `POST /api/admin/monitors`：接受 name、target、可选 `interval_seconds`
-  和可选/nullable `observer_node_ids`；创建 revision 1 并返回完整定义。
+  和 `observer_policy`；创建 revision 1 并返回完整定义。
 - `GET /api/admin/monitors/:id`：返回完整定义。
 - `PATCH /api/admin/monitors/:id`：接受 `expected_revision` 及需替换字段，
   创建下一个 revision；仅 lifecycle 的变更也在下一个 UTC Slot 生效。
@@ -69,6 +71,11 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
 - `GET /api/admin/monitors/:id/history`：返回 rollup 点和读取质量。支持
   `from`、`to`、`resolution`、`observer_id`、`limit`；resolution 为
   `auto`、`1m`、`5m` 或 `1h`，limit 被限制为 1 至 1,500。
+- `POST /api/admin/monitor-draft-tests`：接受 target 与 observer_policy，返回
+  `202` 的 Draft Cluster Test。创建即冻结 observer set，不创建 Monitor 或 Observation。
+- `GET /api/admin/monitor-draft-tests/:run_id`：返回临时 run 及逐 Observer 状态；
+  run 超过 15 分钟返回 `interrupted`，未知协调节点的恢复结果也必须显式为
+  `interrupted`，而不是伪造失败 Observation。
 
 history response 包含 `quality`（`complete`、`partial`、`local_only`）、
 `coverage_percent`、`watermark_unix_seconds`、`gaps`、`skew_seconds`、
@@ -107,3 +114,6 @@ history response 包含 `quality`（`complete`、`partial`、`local_only`）、
   HTTP/HTTPS 与 TCPING runtime 可用。
 - `admin.service-monitor-icmp-v1` 仅在本机 Linux ICMP datagram/raw
   capability self-test 成功时出现。
+- `admin.service-monitor-observer-policy-v1` 表示服务端理解 observer_policy；
+  `admin.service-monitor-draft-tests-v1` 表示异步 Draft Cluster Test 可用。旧服务端
+  仅允许新客户端发送空 exclude（映射 legacy null）或 include ID 数组。
