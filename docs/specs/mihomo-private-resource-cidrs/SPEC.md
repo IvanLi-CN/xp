@@ -38,4 +38,5 @@ through the signed Mesh-backed node API.
 
 ## Visual Evidence
 
+![Desktop rejected Mihomo CIDR draft](./assets/node-policy-draft-desktop.png)
 ![IPv6 private CIDR policy on a 393px mobile viewport](./assets/node-policy-ipv6-mobile.png)

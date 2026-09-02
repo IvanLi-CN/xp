@@ -136,7 +136,6 @@ function eventBadgeVariant(kind: NodeRuntimeEvent["kind"]) {
 			return "ghost";
 	}
 }
-
 function historySlotClass(status: string): string {
 	switch (status) {
 		case "up":
@@ -151,10 +150,8 @@ function historySlotClass(status: string): string {
 			return "bg-muted";
 	}
 }
-
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
-
 const quotaResetSchema = z
 	.object({
 		resetPolicy: z.enum(["monthly", "unlimited"]),
@@ -180,17 +177,14 @@ const quotaResetSchema = z
 			});
 		}
 	});
-
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-
 type RuntimeActivityRow = {
 	key: string;
 	label: string;
 	sortKey: number;
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
-
 type NodeDetailsTab =
 	| "runtime"
 	| "metadata"
@@ -198,7 +192,6 @@ type NodeDetailsTab =
 	| "ipUsage"
 	| "tcpConnections"
 	| "settings";
-
 const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
@@ -210,16 +203,13 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 	{ value: "tcpConnections", label: "TCP connections" },
 	{ value: "settings", label: "Node settings" },
 ];
-
 function buildRuntimeActivityRows(
 	recentSlots: NodeRuntimeHistorySlot[],
 ): RuntimeActivityRow[] {
 	const byDay = new Map<string, RuntimeActivityRow>();
-
 	for (const slot of recentSlots) {
 		const at = new Date(slot.slot_start);
 		if (Number.isNaN(at.getTime())) continue;
-
 		const dayStart = new Date(at.getFullYear(), at.getMonth(), at.getDate());
 		const month = String(dayStart.getMonth() + 1).padStart(2, "0");
 		const day = String(dayStart.getDate()).padStart(2, "0");
@@ -480,7 +470,6 @@ function formatEndpointKind(
 			return value;
 	}
 }
-
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
@@ -874,6 +863,36 @@ export function NodeDetailsPage() {
 		if (!result || result.rejected.length > 0) return;
 		void updateMihomoPolicy(result.value);
 	};
+	const mihomoPolicyActions = [
+		{
+			label: "Refresh",
+			variant: "secondary",
+			loading: mihomoPolicyQuery.isFetching,
+			disabled: !appRuntime.isOnline || isSavingMihomoPolicy,
+			onClick: () => void mihomoPolicyQuery.refetch(),
+		},
+		{
+			label: "Disable private targets",
+			variant: "outline",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void updateMihomoPolicy([]),
+		},
+		{
+			label: "Save override",
+			variant: "primary",
+			disabled: appRuntime.isReadOnly || mihomoPolicyHasRejectedDraft,
+			loading: isSavingMihomoPolicy,
+			onClick: saveMihomoPolicy,
+		},
+		{
+			label: "Restore deployment default",
+			variant: "secondary",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void restoreMihomoPolicy(),
+		},
+	] as const;
 	const handleOpenDeleteDialog = async () => {
 		setIsPreparingDelete(true);
 		try {
@@ -1028,7 +1047,6 @@ export function NodeDetailsPage() {
 											<span>Realtime stream degraded: {runtimeSseError}</span>
 										</div>
 									) : null}
-
 									<div className="grid gap-3 lg:grid-cols-3">
 										{runtime.components.map((component) => (
 											<div
@@ -1081,7 +1099,6 @@ export function NodeDetailsPage() {
 											</div>
 										))}
 									</div>
-
 									<div>
 										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
 											<p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -1106,7 +1123,6 @@ export function NodeDetailsPage() {
 												</span>
 											</div>
 										</div>
-
 										<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
 											<div className="overflow-x-auto">
 												<div className="min-w-[28rem]">
@@ -1125,7 +1141,6 @@ export function NodeDetailsPage() {
 															<span>24:00</span>
 														</div>
 													</div>
-
 													<div className="space-y-1.5">
 														{buildRuntimeActivityRows(runtime.recent_slots).map(
 															(row) => (
@@ -1440,7 +1455,7 @@ export function NodeDetailsPage() {
 													resources on this node.
 												</p>
 											</div>
-							{mihomoPolicyQuery.data ? (
+											{mihomoPolicyQuery.data ? (
 												<Badge
 													variant={
 														mihomoPolicyQuery.data.status === "healthy"
@@ -1512,71 +1527,39 @@ export function NodeDetailsPage() {
 														</div>
 													</div>
 												</div>
-							<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
-								<TagInput
-									ref={mihomoPolicyInputRef}
-													label="Web override CIDRs"
-													value={mihomoPolicyDraft}
-													onChange={setMihomoPolicyDraft}
-													placeholder="192.168.0.0/16"
-													helperText="Add a private CIDR or IP with Enter, comma, or paste. Saving replaces the deployment default."
-													validateTag={validateMihomoPrivateCidr}
-													normalizeTag={normalizeMihomoPrivateCidr}
-													onRejectedDraftChange={
-														setMihomoPolicyHasRejectedDraft
-													}
-													allowPrimary={false}
-													disabled={
-										isSavingMihomoPolicy || appRuntime.isReadOnly
-									}
-								/>
-								<div className="grid gap-2 border-t border-border/70 pt-4 sm:grid-cols-4">
-													<Button
-														variant="secondary"
-														size="md"
-										className="w-full"
-										loading={mihomoPolicyQuery.isFetching}
-										disabled={
-															isSavingMihomoPolicy || appRuntime.isReadOnly
+												<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
+													<TagInput
+														ref={mihomoPolicyInputRef}
+														label="Web override CIDRs"
+														value={mihomoPolicyDraft}
+														onChange={setMihomoPolicyDraft}
+														placeholder="192.168.0.0/16"
+														helperText="Add a private CIDR or IP with Enter, comma, or paste. Saving replaces the deployment default."
+														validateTag={validateMihomoPrivateCidr}
+														normalizeTag={normalizeMihomoPrivateCidr}
+														onRejectedDraftChange={
+															setMihomoPolicyHasRejectedDraft
 														}
-														onClick={() => void mihomoPolicyQuery.refetch()}
-													>
-														Refresh
-													</Button>
-													<Button
-														variant="outline"
-														size="md"
-														className="w-full"
+														allowPrimary={false}
 														disabled={
 															isSavingMihomoPolicy || appRuntime.isReadOnly
 														}
-														onClick={() => void updateMihomoPolicy([])}
-													>
-														Disable private targets
-													</Button>
-													<Button
-														size="md"
-														className="w-full"
-														loading={isSavingMihomoPolicy}
-														disabled={
-															appRuntime.isReadOnly ||
-															mihomoPolicyHasRejectedDraft
-														}
-														onClick={saveMihomoPolicy}
-													>
-														Save override
-													</Button>
-													<Button
-														variant="secondary"
-														size="md"
-														className="w-full"
-														disabled={
-															isSavingMihomoPolicy || appRuntime.isReadOnly
-														}
-														onClick={() => void restoreMihomoPolicy()}
-													>
-														Restore deployment default
-													</Button>
+													/>
+													<div className="grid gap-2 border-t border-border/70 pt-4 sm:grid-cols-4">
+														{mihomoPolicyActions.map((action) => (
+															<Button
+																key={action.label}
+																variant={action.variant}
+																size="md"
+																className="w-full"
+																loading={action.loading}
+																disabled={action.disabled}
+																onClick={action.onClick}
+															>
+																{action.label}
+															</Button>
+														))}
+													</div>
 												</div>
 											</>
 										) : null}

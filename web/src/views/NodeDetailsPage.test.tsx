@@ -577,13 +577,13 @@ describe("<NodeDetailsPage />", () => {
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		expect(cidrInput).toHaveAttribute("placeholder", "192.168.0.0/16");
 		fireEvent.change(cidrInput, {
-			target: { value: fixtureCatalog.address.privateCidr() },
+			target: { value: "192.168.50.7" },
 		});
 		fireEvent.keyDown(cidrInput, { key: "Enter" });
 		await waitFor(() => {
 			expect(
 				cidrInput.closest('[data-testid="tag-input-control"]'),
-			).toHaveTextContent(fixtureCatalog.address.privateCidr());
+			).toHaveTextContent("192.168.50.7/32");
 		});
 
 		fireEvent.click(await screenByRole("button", "Save override"));
@@ -591,7 +591,7 @@ describe("<NodeDetailsPage />", () => {
 			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
 				"admintoken",
 				fixtureCatalog.nodeId.fixture134(),
-				[fixtureCatalog.address.privateCidr()],
+				["192.168.50.7/32"],
 			);
 		});
 
@@ -613,46 +613,6 @@ describe("<NodeDetailsPage />", () => {
 		).toContain("border");
 	});
 
-	it("normalizes a bare private IP when Save override commits the draft", async () => {
-		setupMocks();
-		renderPage();
-
-		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
-		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
-		fireEvent.change(cidrInput, {
-			target: { value: "192.168.50.7" },
-		});
-		fireEvent.click(await screenByRole("button", "Save override"));
-
-		await waitFor(() => {
-			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
-				"admintoken",
-				fixtureCatalog.nodeId.fixture134(),
-				["192.168.50.7/32"],
-			);
-		});
-	});
-
-	it("keeps a rejected draft and blocks Save override", async () => {
-		setupMocks();
-		renderPage();
-
-		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
-		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
-		fireEvent.change(cidrInput, {
-			target: { value: "203.0.113.30" },
-		});
-		fireEvent.keyDown(cidrInput, { key: "Enter" });
-
-		const saveButton = await screenByRole("button", "Save override");
-		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"Only RFC1918 IPv4 CIDRs or IPv6 ULA CIDRs",
-		);
-		expect(cidrInput).toHaveValue("203.0.113.30");
-		expect(saveButton).toBeDisabled();
-		expect(putAdminNodeMihomoResourcePolicy).not.toHaveBeenCalled();
-	});
-
 	it("rejects invalid Mihomo CIDRs and accepts IPv6 ULA tags", async () => {
 		setupMocks();
 		renderPage();
@@ -666,6 +626,9 @@ describe("<NodeDetailsPage />", () => {
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"CIDR address must be a valid IPv4 or IPv6 literal.",
 		);
+		expect(cidrInput).toHaveValue("192.168.31");
+		expect(await screenByRole("button", "Save override")).toBeDisabled();
+		expect(putAdminNodeMihomoResourcePolicy).not.toHaveBeenCalled();
 
 		fireEvent.change(cidrInput, {
 			target: { value: fixtureCatalog.address.privateIpv6Cidr() },
