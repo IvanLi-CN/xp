@@ -15,6 +15,30 @@ export const ResourceRoleSchema = z.enum([
 	"canary",
 ]);
 
+export const NODE_RESOURCE_HISTORY_METRICS = [
+	"cpu_busy_percent",
+	"memory_available_bytes",
+	"filesystem.root.used_percent",
+	"cpu_iowait_percent",
+] as const;
+
+export type NodeResourceHistoryMetric =
+	(typeof NODE_RESOURCE_HISTORY_METRICS)[number];
+
+export const RUNTIME_RESOURCE_HISTORY_METRICS = [
+	"cpu_percent",
+	"rss_bytes",
+	"pss_bytes",
+	"read_bytes_per_second",
+	"write_bytes_per_second",
+	"fd_count",
+	"thread_count",
+] as const;
+
+export type RuntimeResourceHistoryMetric =
+	(typeof RUNTIME_RESOURCE_HISTORY_METRICS)[number];
+export type ResourceRole = z.infer<typeof ResourceRoleSchema>;
+
 const MeasurementSchema = z.object({
 	capability: ResourceCapabilitySchema,
 	value: z.number().optional(),
@@ -216,12 +240,14 @@ export function fetchAdminNodeResourceHistory(
 	nodeId: string,
 	metric: string,
 	signal?: AbortSignal,
+	role?: ResourceRole,
 ): Promise<ResourceHistoryResponse> {
 	const params = new URLSearchParams({
 		metric,
 		resolution: "auto",
 		limit: "1500",
 	});
+	if (role) params.set("role", role);
 	return getJson(
 		`/api/admin/nodes/${nodeId}/resources/history?${params.toString()}`,
 		adminToken,

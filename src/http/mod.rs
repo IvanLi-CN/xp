@@ -110,7 +110,7 @@ use crate::{
         },
     },
     reconcile::ReconcileHandle,
-    resource_monitoring::ResourceMonitorHandle,
+    resource_monitoring::{ManagedRuntimeTargets, ResourceMonitorHandle},
     state::{
         DesiredStateCommand, JsonSnapshotStore, NodeEgressProbeState, NodeSubscriptionRegion,
         StoreError,
@@ -1032,7 +1032,6 @@ pub fn build_router_with_mesh_telemetry(
         .expect("build reqwest client");
 
     let raft = crate::raft::app::PanicBoundaryRaft::wrap(raft);
-
     let repository_storage = HistoryStorage::open(&config.data_dir);
     let repository_replica =
         RepositoryReplicaRuntime::load(repository_storage).unwrap_or_else(|error| {
@@ -1047,10 +1046,11 @@ pub fn build_router_with_mesh_telemetry(
         MihomoResourcePolicy::load(&config.data_dir)
             .expect("parse Mihomo private CIDR deployment policy"),
     );
-    let resource_monitoring = ResourceMonitorHandle::start_with_state(
+    let resource_monitoring = ResourceMonitorHandle::start_with_state_and_runtime_targets(
         &config.data_dir,
         cluster.node_id.clone(),
         Some(store.clone()),
+        ManagedRuntimeTargets::from(&config),
     );
     let app_state = AppState {
         config: Arc::new(config),

@@ -108,7 +108,10 @@ async fn sample_ring_is_bounded() {
     let handle = ResourceMonitorHandle {
         inner: Arc::new(RwLock::new(ResourceState {
             node_id: "node-a".to_string(),
-            reader: LinuxResourceReader::new(directory.path().to_path_buf()),
+            reader: LinuxResourceReader::with_runtime_targets(
+                directory.path().to_path_buf(),
+                ManagedRuntimeTargets::default(),
+            ),
             collector: CollectorState::default(),
             samples: VecDeque::with_capacity(MAX_SAMPLES),
             current: None,
@@ -130,7 +133,10 @@ fn alert_policy_emits_one_open_and_one_recovery_transition() {
     let directory = tempfile::tempdir().unwrap();
     let mut state = ResourceState {
         node_id: "node-a".to_string(),
-        reader: LinuxResourceReader::new(directory.path().to_path_buf()),
+        reader: LinuxResourceReader::with_runtime_targets(
+            directory.path().to_path_buf(),
+            ManagedRuntimeTargets::default(),
+        ),
         collector: CollectorState::default(),
         samples: VecDeque::new(),
         current: None,

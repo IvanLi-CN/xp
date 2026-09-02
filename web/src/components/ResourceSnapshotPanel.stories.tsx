@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
-import type { ResourceSnapshot } from "../api/adminResources";
+import type {
+	NodeResourceHistoryMetric,
+	ResourceSnapshot,
+} from "../api/adminResources";
 import {
 	ResourceSnapshotPanel,
 	ResourceTabContent,
@@ -74,24 +77,58 @@ const supportedSnapshot: ResourceSnapshot = {
 		},
 		{
 			role: "cloudflared",
-			state: "not_managed",
-			capability: "partial",
+			state: "managed",
+			capability: "supported",
 			metrics: {
-				cpu_percent: measurement(undefined, "unsupported", "not_managed"),
-				rss_bytes: measurement(undefined, "unsupported", "not_managed"),
-				pss_bytes: measurement(undefined, "unsupported", "not_managed"),
+				cpu_percent: measurement(3.2),
+				rss_bytes: measurement(28 * 1024 * 1024),
+				pss_bytes: measurement(24 * 1024 * 1024),
+				read_bytes_per_second: measurement(96 * 1024),
+				write_bytes_per_second: measurement(31 * 1024),
+				fd_count: measurement(48),
+				thread_count: measurement(9),
+			},
+		},
+		{
+			role: "canary",
+			state: "managed",
+			capability: "unsupported",
+			metrics: {
+				cpu_percent: measurement(
+					undefined,
+					"unsupported",
+					"runtime_not_separable",
+				),
+				rss_bytes: measurement(
+					undefined,
+					"unsupported",
+					"runtime_not_separable",
+				),
+				pss_bytes: measurement(
+					undefined,
+					"unsupported",
+					"runtime_not_separable",
+				),
 				read_bytes_per_second: measurement(
 					undefined,
 					"unsupported",
-					"not_managed",
+					"runtime_not_separable",
 				),
 				write_bytes_per_second: measurement(
 					undefined,
 					"unsupported",
-					"not_managed",
+					"runtime_not_separable",
 				),
-				fd_count: measurement(undefined, "unsupported", "not_managed"),
-				thread_count: measurement(undefined, "unsupported", "not_managed"),
+				fd_count: measurement(
+					undefined,
+					"unsupported",
+					"runtime_not_separable",
+				),
+				thread_count: measurement(
+					undefined,
+					"unsupported",
+					"runtime_not_separable",
+				),
 			},
 		},
 	],
@@ -154,17 +191,7 @@ const meta = {
 	title: "Components/ResourceSnapshotPanel",
 	component: ResourceSnapshotPanel,
 	tags: ["autodocs", "coverage-ui"],
-	decorators: [
-		(Story) => (
-			<div className="p-12">
-				<div className="rounded border border-border bg-slate-800 p-6">
-					<Story />
-				</div>
-			</div>
-		),
-	],
 	parameters: {
-		layout: "padded",
 		docs: {
 			description: {
 				component:
@@ -178,34 +205,123 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-const historyPoints = Array.from({ length: 24 }, (_, index) => ({
+const cpuHistoryPoints = Array.from({ length: 24 }, (_, index) => ({
 	observed_at: `2026-09-01T10:${String(index).padStart(2, "0")}:00Z`,
 	value: 30 + ((index * 7) % 35),
 }));
 
+const historyByMetric = {
+	cpu_busy_percent: cpuHistoryPoints,
+	memory_available_bytes: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: (7 + ((index * 3) % 4) / 10) * 1024 ** 3,
+	})),
+	"filesystem.root.used_percent": cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: 34 + ((index * 5) % 9),
+	})),
+	cpu_iowait_percent: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: 0.8 + ((index * 4) % 10) / 10,
+	})),
+} satisfies Record<
+	NodeResourceHistoryMetric,
+	Array<{ observed_at: string; value: number }>
+>;
+
+const runtimeHistoryByMetric = {
+	cpu_percent: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: 2 + ((index * 5) % 17),
+	})),
+	rss_bytes: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: (42 + ((index * 3) % 9)) * 1024 ** 2,
+	})),
+	pss_bytes: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: (36 + ((index * 2) % 8)) * 1024 ** 2,
+	})),
+	read_bytes_per_second: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: (8 + ((index * 7) % 12)) * 1024,
+	})),
+	write_bytes_per_second: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: (4 + ((index * 5) % 9)) * 1024,
+	})),
+	fd_count: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: 24 + ((index * 3) % 12),
+	})),
+	thread_count: cpuHistoryPoints.map((point, index) => ({
+		...point,
+		value: 8 + ((index * 2) % 7),
+	})),
+};
+
+function takeRecentHistory(pointCount: number) {
+	return Object.fromEntries(
+		Object.entries(historyByMetric).map(([metric, points]) => [
+			metric,
+			points.slice(-pointCount),
+		]),
+	);
+}
+
 export const Supported: Story = {
-	args: { snapshot: supportedSnapshot, historyPoints },
+	args: {
+		snapshot: supportedSnapshot,
+		historyByMetric,
+		runtimeHistoryByMetric,
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
+	},
 };
 
 export const PartialAndSuspended: Story = {
-	args: { snapshot: partialSnapshot, historyPoints: historyPoints.slice(-8) },
+	args: {
+		snapshot: partialSnapshot,
+		historyByMetric: takeRecentHistory(8),
+		runtimeHistoryByMetric: {},
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
+	},
 };
 
 export const SamplingGap: Story = {
 	args: {
 		snapshot: supportedSnapshot,
-		historyPoints: historyPoints.map((point, index) =>
-			index === 12 ? { ...point, value: null } : point,
-		),
+		historyByMetric: {
+			...historyByMetric,
+			cpu_busy_percent: cpuHistoryPoints.map((point, index) =>
+				index === 12 ? { ...point, value: null } : point,
+			),
+		},
+		runtimeHistoryByMetric,
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
 	},
 };
 
 export const Unsupported: Story = {
-	args: { snapshot: unsupportedSnapshot, historyPoints: [] },
+	args: {
+		snapshot: unsupportedSnapshot,
+		historyByMetric: {},
+		runtimeHistoryByMetric: {},
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
+	},
 };
 
 export const Loading: Story = {
-	args: { snapshot: supportedSnapshot, historyPoints: [] },
+	args: {
+		snapshot: supportedSnapshot,
+		historyByMetric: {},
+		runtimeHistoryByMetric: {},
+		selectedRuntimeRole: null,
+		onRuntimeDetailsChange: () => undefined,
+	},
 	render: () => (
 		<ResourceTabContent
 			capabilityUnavailable={false}
@@ -215,7 +331,10 @@ export const Loading: Story = {
 			isFetching
 			isOnline
 			onRetry={() => undefined}
-			historyPoints={[]}
+			historyByMetric={{}}
+			runtimeHistoryByMetric={{}}
+			selectedRuntimeRole={null}
+			onRuntimeDetailsChange={() => undefined}
 		/>
 	),
 };

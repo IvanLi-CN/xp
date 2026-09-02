@@ -50,6 +50,17 @@ root 常驻服务来解决可观测性问题。
 
 - [ADR 0009](../../adr/0009-bounded-resource-monitoring-history.md)
 
+## Visual Evidence
+
+- source_type: storybook_canvas
+  story_id_or_title: Pages/NodeDetailsPage/ResourcesRuntimeDetail
+  state: Xray runtime detail with paired history series
+  evidence_note: Confirms the existing resource card layout with CPU, paired RSS/PSS memory,
+  paired read/write throughput, file descriptors, and threads; paired chart titles show
+  right-aligned colored line keys.
+  image:
+  ![Xray runtime resource history](./assets/node-details-xray-runtime-history.png)
+
 ## 需求（Requirements）
 
 ### MUST
@@ -63,6 +74,13 @@ root 常驻服务来解决可观测性问题。
   文件系统容量/可用量/inode，以及在该 Domain 可归属时的读写速率。
 - 每个运行角色包含 CPU 利用率、RSS、PSS、读写速率、FD 数和线程数。单项无法读取时仅该字段降级，不得让其他可读字段丢失。
 - 值为零只表示一次成功测量得到的零。不可测量的字段必须省略 `value`，并返回 capability 与稳定 reason code。
+- `xp` 是当前 XP 控制面进程；Xray 与 cloudflared 分别是由 XP 托管的代理和 Tunnel 运行时。host-managed
+  systemd 只读取已配置 unit 的固定 cgroup，OpenRC 只读取该服务的 `/run` 或 `/var/run` 固定 supervisor PID
+  文件及其直接子进程；官方单镜像容器只读取由入口原子写入、含 PID 与启动时间的私有身份文件。身份不匹配或 PID
+  已复用时必须拒绝采样。上述读取路径不得启动命令、读取进程命令行或枚举其他 PID。
+- XP-owned canary 是 XP 进程内任务，不是独立 OS 进程。canary 启用时角色状态为 `managed`，但所有进程级指标必须以
+  `runtime_not_separable` 返回 `unsupported`；不得重复使用 XP 的 CPU、内存、I/O、FD 或线程数。canary 未启用时为
+  `not_managed`。
 
 #### Sampling and local state
 
@@ -117,6 +135,19 @@ root 常驻服务来解决可观测性问题。
 - 历史由专用 Resource History API 从最完整健康的 ready History Repository 查询；不得让 Web 解释 generic `unknown[]`
   Repository records 或扫描所有 schema。
 - Web 提供集群资源总览与 Node Details 的 Resources Tab。当前值每 15 秒轮询，历史每 30 秒轮询；不通过 SSE 传输 15 秒原始样本。
+- Node Details Resources Tab 的既有标题、说明、指标卡、文件系统与运行角色区块保持原有布局。历史区固定显示四张
+  Domain 图表：CPU busy、available memory、root filesystem use 和 I/O wait；不得按 PID、任意挂载点或标签扩展图表。
+  运行角色仍只限 `xp`、`xray`、`cloudflared`、`canary` 四张现有角色卡。点击任一角色卡只能在该区块后展开或收起该角色的
+  详情；同一时刻只允许一个详情。详情固定显示 CPU、内存（RSS/PSS 双序列）、吞吐（读/写双序列）、FD 与线程五张图；底层
+  仍只读取 CPU、RSS、PSS、读吞吐、写吞吐、FD 与线程七项固定指标，不得引入任意指标、角色、PID 或标签选择器。
+- 所有 Domain 与角色历史图均以同一页面的 `TCP connections` 图表作为视觉合同：复用 ECharts `time` 轴、24/18/36/42 grid、
+  主题 tooltip、隐藏 symbol、2px primary 阶梯线、18% primary 面积填充、axis/grid 样式和缺口不连线。双序列运行时图的标题行
+  右端固定显示同色短线图示：RSS/读为 primary 主序列；PSS/写为 2px 实线蓝色比较序列（`#3478c6`，复用 Service Monitor
+  Average latency 的中性数据色），不填充面积。CPU、root filesystem 与 I/O wait 使用 `0..100%` 百分比纵轴；内存使用 byte
+  纵轴；读写吞吐使用 byte/s 纵轴；FD 与线程使用整数纵轴。不得以指标语义为由改变这些视觉规则。
+- Resources Tab 仅在激活且节点在线时并行查询四个固定 Domain 单指标 History series；展开一个角色才额外查询该角色固定的
+  七个单指标 series。每个请求保持 `resolution=auto`、`limit=1500` 与 30 秒轮询，任何时刻最多 11 个历史请求。单个
+  History API 响应不得含多条 series，避免 UI 查询引入任意 fan-out 或无界响应。
 - capability `admin.resource-monitoring` 是 additive。未升级或不支持的节点显示 `unsupported`，不把整个集群标记为
   down/degraded。没有历史回填，采样从新二进制首次成功 tick 后开始。
 - host-managed systemd、OpenRC 与官方单镜像 Docker/Compose 的升级都必须保留

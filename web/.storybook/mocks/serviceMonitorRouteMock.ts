@@ -2,6 +2,10 @@ import type { ServiceMonitorSummary } from "../../src/api/adminServiceMonitors";
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { clone, errorResponse, jsonResponse } from "./mockResponses";
 import {
+	type ResourceMonitoringMockState,
+	handleResourceMonitoringMockRequest,
+} from "./resourceMonitoringMock";
+import {
 	monitorDefinition,
 	monitorHistory,
 	monitorStatus,
@@ -19,8 +23,10 @@ function findMonitor(
 export function handleServiceMonitorMockRequest(
 	serviceMonitors: ServiceMonitorSummary[],
 	method: string,
-	path: string,
+	url: URL,
+	resourceMonitoringState?: ResourceMonitoringMockState,
 ): Response | undefined {
+	const path = url.pathname;
 	if (path === "/api/admin/monitor-draft-tests" && method === "POST") {
 		const monitor = serviceMonitors[0];
 		return jsonResponse(
@@ -65,6 +71,15 @@ export function handleServiceMonitorMockRequest(
 				},
 			],
 		});
+	}
+	if (resourceMonitoringState) {
+		const resourceResponse = handleResourceMonitoringMockRequest(
+			resourceMonitoringState,
+			method,
+			path,
+			url.searchParams,
+		);
+		if (resourceResponse) return resourceResponse;
 	}
 	if (path === "/api/admin/monitors" && method === "GET") {
 		return jsonResponse({ items: clone(serviceMonitors) });

@@ -1,12 +1,21 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
+import { DEFAULT_API_CAPABILITIES } from "../../.storybook/mocks/apiMockContract";
+import type { ResourceMonitoringMockFixtures } from "../../.storybook/mocks/resourceMonitoringMock";
 import type { AdminEndpoint } from "../api/adminEndpoints";
 import type {
 	AdminMembershipOperation,
 	AdminNode,
 	AdminNodeMihomoResourcePolicy,
 } from "../api/adminNodes";
+import type {
+	NodeResourceHistoryMetric,
+	ResourceHistoryResponse,
+	ResourceRole,
+	ResourceSnapshot,
+	RuntimeResourceHistoryMetric,
+} from "../api/adminResources";
 import { fixtureCatalog } from "../fixture-policy/catalog";
 import { buildDenseNodeIpUsageStories } from "../storybook/ipUsageStoryData";
 import { buildDenseNodeTcpConnectionStories } from "../storybook/tcpConnectionStoryData";
@@ -85,6 +94,281 @@ const blockedDeleteOperation: AdminMembershipOperation = {
 const ipUsageReports = buildDenseNodeIpUsageStories();
 const tcpConnectionReports = buildDenseNodeTcpConnectionStories();
 
+const supportedMeasurement = (value: number) => ({
+	capability: "supported" as const,
+	value,
+});
+
+const unsupportedMeasurement = (reason_code: string) => ({
+	capability: "unsupported" as const,
+	reason_code,
+});
+
+function resourceObservedAt(index: number): string {
+	const minute = String(Math.floor(index / 4)).padStart(2, "0");
+	const second = String((index % 4) * 15).padStart(2, "0");
+	return `2026-09-01T10:${minute}:${second}Z`;
+}
+
+const resourceSnapshot: ResourceSnapshot = {
+	node_id: node.node_id,
+	observed_at: "2026-09-01T10:05:45Z",
+	resource_domain: "host",
+	capture_state: "active",
+	capability: "supported",
+	domain: {
+		cpu_busy_percent: supportedMeasurement(48.2),
+		cpu_iowait_percent: supportedMeasurement(1.6),
+		load1: supportedMeasurement(1.4),
+		memory_total_bytes: supportedMeasurement(16 * 1024 ** 3),
+		memory_available_bytes: supportedMeasurement(7.3 * 1024 ** 3),
+		swap_total_bytes: supportedMeasurement(2 * 1024 ** 3),
+		swap_free_bytes: supportedMeasurement(2 * 1024 ** 3),
+		filesystems: [
+			{
+				mount: "/",
+				capability: "supported",
+				total_bytes: 100 * 1024 ** 3,
+				available_bytes: 64 * 1024 ** 3,
+				used_percent: 36,
+				total_inodes: 6_000_000,
+				available_inodes: 5_200_000,
+				used_inode_percent: 13.3,
+			},
+		],
+	},
+	runtimes: [
+		{
+			role: "xp",
+			state: "managed",
+			capability: "supported",
+			metrics: {
+				cpu_percent: supportedMeasurement(8.1),
+				rss_bytes: supportedMeasurement(48 * 1024 * 1024),
+				pss_bytes: supportedMeasurement(42 * 1024 * 1024),
+				read_bytes_per_second: supportedMeasurement(12 * 1024),
+				write_bytes_per_second: supportedMeasurement(8 * 1024),
+				fd_count: supportedMeasurement(32),
+				thread_count: supportedMeasurement(12),
+			},
+		},
+		{
+			role: "xray",
+			state: "managed",
+			capability: "supported",
+			metrics: {
+				cpu_percent: supportedMeasurement(18.4),
+				rss_bytes: supportedMeasurement(96 * 1024 * 1024),
+				pss_bytes: supportedMeasurement(83 * 1024 * 1024),
+				read_bytes_per_second: supportedMeasurement(240 * 1024),
+				write_bytes_per_second: supportedMeasurement(76 * 1024),
+				fd_count: supportedMeasurement(188),
+				thread_count: supportedMeasurement(21),
+			},
+		},
+		{
+			role: "cloudflared",
+			state: "managed",
+			capability: "supported",
+			metrics: {
+				cpu_percent: supportedMeasurement(3.2),
+				rss_bytes: supportedMeasurement(28 * 1024 * 1024),
+				pss_bytes: supportedMeasurement(24 * 1024 * 1024),
+				read_bytes_per_second: supportedMeasurement(96 * 1024),
+				write_bytes_per_second: supportedMeasurement(31 * 1024),
+				fd_count: supportedMeasurement(48),
+				thread_count: supportedMeasurement(9),
+			},
+		},
+		{
+			role: "canary",
+			state: "managed",
+			capability: "unsupported",
+			metrics: {
+				cpu_percent: unsupportedMeasurement("runtime_not_separable"),
+				rss_bytes: unsupportedMeasurement("runtime_not_separable"),
+				pss_bytes: unsupportedMeasurement("runtime_not_separable"),
+				read_bytes_per_second: unsupportedMeasurement("runtime_not_separable"),
+				write_bytes_per_second: unsupportedMeasurement("runtime_not_separable"),
+				fd_count: unsupportedMeasurement("runtime_not_separable"),
+				thread_count: unsupportedMeasurement("runtime_not_separable"),
+			},
+		},
+	],
+};
+
+function resourceHistory(
+	metric: NodeResourceHistoryMetric,
+	valueAt: (index: number) => number,
+): ResourceHistoryResponse {
+	return {
+		metric,
+		role: null,
+		resolution: "15s",
+		quality: "complete",
+		coverage: [1_788_256_800, 1_788_257_145],
+		watermark: 1_788_257_145,
+		gaps: [],
+		freshness_seconds: 5,
+		truncated: false,
+		points: Array.from({ length: 24 }, (_, index) => ({
+			observed_at: resourceObservedAt(index),
+			value: valueAt(index),
+			capability: "supported",
+		})),
+	};
+}
+
+function runtimeResourceHistory(
+	role: ResourceRole,
+	metric: string,
+	valueAt: (index: number) => number,
+): ResourceHistoryResponse {
+	return {
+		...resourceHistory("cpu_busy_percent", valueAt),
+		metric,
+		role,
+	};
+}
+
+const resourceHistoryByMetric = {
+	cpu_busy_percent: resourceHistory(
+		"cpu_busy_percent",
+		(index) => 30 + ((index * 7) % 35),
+	),
+	memory_available_bytes: resourceHistory(
+		"memory_available_bytes",
+		(index) => (7 + ((index * 3) % 5) / 10) * 1024 ** 3,
+	),
+	"filesystem.root.used_percent": resourceHistory(
+		"filesystem.root.used_percent",
+		(index) => 34 + ((index * 5) % 9),
+	),
+	cpu_iowait_percent: resourceHistory(
+		"cpu_iowait_percent",
+		(index) => 0.8 + ((index * 4) % 10) / 10,
+	),
+} satisfies Record<NodeResourceHistoryMetric, ResourceHistoryResponse>;
+
+const RUNTIME_RESOURCE_HISTORY_METRICS = [
+	"cpu_percent",
+	"rss_bytes",
+	"pss_bytes",
+	"read_bytes_per_second",
+	"write_bytes_per_second",
+	"fd_count",
+	"thread_count",
+] as const satisfies readonly RuntimeResourceHistoryMetric[];
+
+const runtimeHistoryBase = {
+	xp: {
+		cpu: 8,
+		fd: 32,
+		pss_mib: 42,
+		read_kib_per_second: 12,
+		rss_mib: 48,
+		thread: 12,
+		write_kib_per_second: 8,
+	},
+	xray: {
+		cpu: 18,
+		fd: 188,
+		pss_mib: 83,
+		read_kib_per_second: 240,
+		rss_mib: 96,
+		thread: 21,
+		write_kib_per_second: 76,
+	},
+	cloudflared: {
+		cpu: 3,
+		fd: 48,
+		pss_mib: 24,
+		read_kib_per_second: 96,
+		rss_mib: 28,
+		thread: 9,
+		write_kib_per_second: 31,
+	},
+} as const;
+
+function runtimeHistoryValue(
+	role: keyof typeof runtimeHistoryBase,
+	metric: RuntimeResourceHistoryMetric,
+	point: number,
+): number {
+	const base = runtimeHistoryBase[role];
+	switch (metric) {
+		case "cpu_percent":
+			return base.cpu + point * 0.9;
+		case "rss_bytes":
+			return (base.rss_mib + point * 0.6) * 1024 ** 2;
+		case "pss_bytes":
+			return (base.pss_mib + point * 0.4) * 1024 ** 2;
+		case "read_bytes_per_second":
+			return (base.read_kib_per_second + point * 7) * 1024;
+		case "write_bytes_per_second":
+			return (base.write_kib_per_second + point * 3) * 1024;
+		case "fd_count":
+			return base.fd + point;
+		case "thread_count":
+			return base.thread + Math.floor(point / 2);
+	}
+}
+
+function unsupportedRuntimeResourceHistory(
+	role: ResourceRole,
+	metric: RuntimeResourceHistoryMetric,
+): ResourceHistoryResponse {
+	return {
+		...runtimeResourceHistory(role, metric, () => 0),
+		points: Array.from({ length: 24 }, (_, index) => ({
+			observed_at: resourceObservedAt(index),
+			value: null,
+			capability: "unsupported" as const,
+		})),
+	};
+}
+
+const runtimeHistoryByRole = {
+	xp: Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => [
+			metric,
+			runtimeResourceHistory("xp", metric, (point) =>
+				runtimeHistoryValue("xp", metric, point),
+			),
+		]),
+	),
+	xray: Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => [
+			metric,
+			runtimeResourceHistory("xray", metric, (point) =>
+				runtimeHistoryValue("xray", metric, point),
+			),
+		]),
+	),
+	cloudflared: Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => [
+			metric,
+			runtimeResourceHistory("cloudflared", metric, (point) =>
+				runtimeHistoryValue("cloudflared", metric, point),
+			),
+		]),
+	),
+	canary: Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => [
+			metric,
+			unsupportedRuntimeResourceHistory("canary", metric),
+		]),
+	),
+} satisfies Partial<
+	Record<ResourceRole, Record<string, ResourceHistoryResponse>>
+>;
+
+const resourceMonitoringFixtures = {
+	snapshot: resourceSnapshot,
+	historyByMetric: resourceHistoryByMetric,
+	runtimeHistoryByRole,
+} satisfies ResourceMonitoringMockFixtures;
+
 const meta = {
 	title: "Pages/NodeDetailsPage",
 	tags: ["autodocs"],
@@ -95,6 +379,13 @@ const meta = {
 		},
 		mockApi: {
 			data: {
+				capabilities: {
+					...DEFAULT_API_CAPABILITIES,
+					capabilities: [
+						...DEFAULT_API_CAPABILITIES.capabilities,
+						"admin.resource-monitoring",
+					],
+				},
 				nodes: [node],
 				nodeIpUsageByNodeId: Object.fromEntries([
 					[node.node_id, ipUsageReports],
@@ -102,6 +393,15 @@ const meta = {
 				nodeTcpConnectionsByNodeId: Object.fromEntries([
 					[node.node_id, tcpConnectionReports],
 				]),
+				nodeResourcesByNodeId: {
+					[node.node_id]: resourceMonitoringFixtures.snapshot,
+				},
+				nodeResourceHistoryByNodeId: {
+					[node.node_id]: resourceMonitoringFixtures.historyByMetric,
+				},
+				nodeResourceRuntimeHistoryByNodeId: {
+					[node.node_id]: resourceMonitoringFixtures.runtimeHistoryByRole,
+				},
 				nodeMihomoResourcePolicyByNodeId: {
 					[fixtureCatalog.identifier.nodePrimary()]: {
 						node_id: fixtureCatalog.identifier.nodePrimary(),
@@ -182,6 +482,75 @@ export const TcpConnectionsTab: Story = {
 		await expect(
 			await canvas.findByText(/Combined across selected endpoints/i),
 		).toBeInTheDocument();
+	},
+};
+
+export const ResourcesTab: Story = {
+	tags: ["resource-monitoring"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Resources" }),
+		);
+		await expect(
+			await canvas.findByText("Root filesystem use history"),
+		).toBeInTheDocument();
+		for (const label of [
+			"CPU busy history chart",
+			"Available memory history chart",
+			"Root filesystem use history chart",
+			"I/O wait history chart",
+		]) {
+			await expect(await canvas.findByLabelText(label)).toBeInTheDocument();
+		}
+	},
+};
+
+export const ResourcesRuntimeDetail: Story = {
+	tags: ["resource-monitoring"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Resources" }),
+		);
+		for (const role of ["xp", "xray", "cloudflared", "canary"]) {
+			await expect(
+				await canvas.findByRole("button", {
+					name: `Open ${role} resource details`,
+				}),
+			).toBeInTheDocument();
+			await userEvent.click(
+				await canvas.findByRole("button", {
+					name: `Open ${role} resource details`,
+				}),
+			);
+			await expect(
+				await canvas.findByText(`${role} resource history`),
+			).toBeInTheDocument();
+		}
+		await userEvent.click(
+			await canvas.findByRole("button", {
+				name: "Open xray resource details",
+			}),
+		);
+		await expect(
+			await canvas.findByText("xray resource history"),
+		).toBeInTheDocument();
+		for (const label of [
+			"Runtime CPU history chart",
+			"Runtime memory history chart",
+			"Runtime throughput history chart",
+			"Runtime file descriptor history chart",
+			"Runtime thread history chart",
+		]) {
+			await expect(await canvas.findByLabelText(label)).toBeInTheDocument();
+		}
+		for (const label of [
+			"Memory (RSS / PSS) legend",
+			"Throughput (Read / Write) legend",
+		]) {
+			await expect(await canvas.findByLabelText(label)).toBeInTheDocument();
+		}
 	},
 };
 

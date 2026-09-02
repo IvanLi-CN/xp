@@ -1,37 +1,42 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
 
-use chrono::Utc;
-
 use super::*;
+use chrono::Utc;
 
 #[derive(Debug, Clone)]
 pub(super) struct ProcCounters {
+    pid: u32,
     total: u64,
     idle: u64,
     iowait: u64,
     process: u64,
-    read_bytes: u64,
-    write_bytes: u64,
+    read_bytes: Option<u64>,
+    write_bytes: Option<u64>,
     cpu_capacity: Option<f64>,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct CollectorState {
     pub(super) system: Option<ProcCounters>,
-    pub(super) process: Option<ProcCounters>,
+    pub(super) runtimes: BTreeMap<ResourceRole, ProcCounters>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct LinuxResourceReader {
     data_dir: PathBuf,
     domain: ResourceDomain,
+    runtime_targets: ManagedRuntimeTargets,
 }
 
 impl LinuxResourceReader {
-    pub(super) fn new(data_dir: PathBuf) -> Self {
+    pub(super) fn with_runtime_targets(
+        data_dir: PathBuf,
+        runtime_targets: ManagedRuntimeTargets,
+    ) -> Self {
         let domain = if Path::new("/run/.containerenv").exists()
             || Path::new("/.dockerenv").exists()
             || std::env::var_os("XP_RESOURCE_DOMAIN").as_deref() == Some("cgroup".as_ref())
@@ -40,7 +45,11 @@ impl LinuxResourceReader {
         } else {
             ResourceDomain::Host
         };
-        Self { data_dir, domain }
+        Self {
+            data_dir,
+            domain,
+            runtime_targets,
+        }
     }
 
     pub(super) fn read(&self, node_id: &str, state: &mut CollectorState) -> ResourceSnapshot {
@@ -97,29 +106,25 @@ impl LinuxResourceReader {
             capability = capability.worst(Capability::Partial);
         }
 
-        let process = read_process_counters();
-        let xp_metrics = read_runtime_metrics(process.as_ref(), state.process.as_ref());
-        state.process = process;
-        if xp_metrics.cpu_percent.capability != Capability::Supported {
-            capability = capability.worst(Capability::Partial);
-        }
         let runtimes = ResourceRole::ALL
             .into_iter()
             .map(|role| {
-                if role == ResourceRole::Xp {
-                    RuntimeSnapshot {
-                        role,
-                        state: "managed".to_string(),
-                        capability: xp_metrics_capability(&xp_metrics),
-                        metrics: xp_metrics.clone(),
-                    }
+                let target = self.runtime_target(role);
+                let counters = target.pid().and_then(read_process_counters_for_pid);
+                let metrics = counters
+                    .as_ref()
+                    .map(|current| read_runtime_metrics(current, state.runtimes.get(&role)))
+                    .unwrap_or_else(|| unsupported_runtime(target.reason_code()));
+                if let Some(counters) = counters {
+                    state.runtimes.insert(role, counters);
                 } else {
-                    RuntimeSnapshot {
-                        role,
-                        state: "not_managed".to_string(),
-                        capability: Capability::Unsupported,
-                        metrics: unsupported_runtime("role_not_managed"),
-                    }
+                    state.runtimes.remove(&role);
+                }
+                RuntimeSnapshot {
+                    role,
+                    state: target.state().to_string(),
+                    capability: xp_metrics_capability(&metrics),
+                    metrics,
                 }
             })
             .collect::<Vec<_>>();
@@ -144,6 +149,68 @@ impl LinuxResourceReader {
             capability,
             domain,
             runtimes,
+        }
+    }
+
+    fn runtime_target(&self, role: ResourceRole) -> RuntimeTarget {
+        if role == ResourceRole::Xp {
+            return RuntimeTarget::Managed(std::process::id());
+        }
+        if role == ResourceRole::Canary {
+            return if canary_is_managed(&self.data_dir) {
+                RuntimeTarget::ManagedUnavailable("runtime_not_separable")
+            } else {
+                RuntimeTarget::NotManaged
+            };
+        }
+        if self.domain == ResourceDomain::Cgroup {
+            return container_runtime_target(&self.data_dir, role);
+        }
+        let (unit, service) = match role {
+            ResourceRole::Xray => (
+                self.runtime_targets.xray_systemd_unit.as_str(),
+                self.runtime_targets.xray_openrc_service.as_str(),
+            ),
+            ResourceRole::Cloudflared => (
+                self.runtime_targets.cloudflared_systemd_unit.as_str(),
+                self.runtime_targets.cloudflared_openrc_service.as_str(),
+            ),
+            _ => return RuntimeTarget::NotManaged,
+        };
+        prefer_runtime_target(
+            fixed_systemd_runtime_target(unit),
+            fixed_openrc_runtime_target(service),
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RuntimeTarget {
+    Managed(u32),
+    ManagedUnavailable(&'static str),
+    NotManaged,
+}
+
+impl RuntimeTarget {
+    fn pid(&self) -> Option<u32> {
+        match self {
+            Self::Managed(pid) => Some(*pid),
+            Self::ManagedUnavailable(_) | Self::NotManaged => None,
+        }
+    }
+
+    fn state(&self) -> &'static str {
+        match self {
+            Self::Managed(_) | Self::ManagedUnavailable(_) => "managed",
+            Self::NotManaged => "not_managed",
+        }
+    }
+
+    fn reason_code(&self) -> &'static str {
+        match self {
+            Self::Managed(_) => "proc_process_unreadable",
+            Self::ManagedUnavailable(reason) => reason,
+            Self::NotManaged => "runtime_not_managed",
         }
     }
 }
@@ -203,13 +270,8 @@ pub(crate) fn unsupported_snapshot(node_id: &str) -> ResourceSnapshot {
     }
 }
 
-fn read_runtime_metrics(
-    process: Option<&ProcCounters>,
-    previous: Option<&ProcCounters>,
-) -> RuntimeMetrics {
-    let Some(process) = process else {
-        return unsupported_runtime("proc_process_unreadable");
-    };
+fn read_runtime_metrics(process: &ProcCounters, previous: Option<&ProcCounters>) -> RuntimeMetrics {
+    let previous = previous.filter(|previous| previous.pid == process.pid);
     let cpu_percent = previous
         .and_then(|previous| {
             let delta = process.process.checked_sub(previous.process)? as f64;
@@ -225,17 +287,18 @@ fn read_runtime_metrics(
         })
         .unwrap_or_else(|| Measurement::unsupported("counter_baseline"));
     let read_rate = previous.and_then(|previous| {
-        process
+        previous
             .read_bytes
-            .checked_sub(previous.read_bytes)
+            .zip(process.read_bytes)
+            .and_then(|(previous, current)| current.checked_sub(previous))
             .map(|value| value as f64 / SAMPLE_INTERVAL.as_secs() as f64)
     });
     RuntimeMetrics {
         cpu_percent,
-        rss_bytes: read_proc_status_value("VmRSS")
+        rss_bytes: read_proc_status_value_for_pid(process.pid, "VmRSS")
             .map(Measurement::supported)
             .unwrap_or_else(|| Measurement::unsupported("proc_status_unreadable")),
-        pss_bytes: read_pss_bytes()
+        pss_bytes: read_pss_bytes_for_pid(process.pid)
             .map(Measurement::supported)
             .unwrap_or_else(|| Measurement::unsupported("proc_pss_unreadable")),
         read_bytes_per_second: read_rate
@@ -243,18 +306,19 @@ fn read_runtime_metrics(
             .unwrap_or_else(|| Measurement::unsupported("proc_io_unreadable")),
         write_bytes_per_second: previous
             .and_then(|previous| {
-                process
+                previous
                     .write_bytes
-                    .checked_sub(previous.write_bytes)
+                    .zip(process.write_bytes)
+                    .and_then(|(previous, current)| current.checked_sub(previous))
                     .map(|value| value as f64 / SAMPLE_INTERVAL.as_secs() as f64)
             })
             .map(Measurement::supported)
             .unwrap_or_else(|| Measurement::unsupported("proc_io_unreadable")),
-        fd_count: fs::read_dir("/proc/self/fd")
+        fd_count: fs::read_dir(proc_path(process.pid, "fd"))
             .map(|entries| entries.count() as u64)
             .map(Measurement::supported)
             .unwrap_or_else(|_| Measurement::unsupported("proc_fd_unreadable")),
-        thread_count: read_proc_status_value("Threads")
+        thread_count: read_proc_status_value_for_pid(process.pid, "Threads")
             .map(Measurement::supported)
             .unwrap_or_else(|| Measurement::unsupported("proc_status_unreadable")),
     }
@@ -273,12 +337,13 @@ fn read_proc_stat() -> Option<ProcCounters> {
         return None;
     }
     Some(ProcCounters {
+        pid: 0,
         total: values.iter().sum(),
         idle: values[3],
         iowait: values[4],
         process: 0,
-        read_bytes: 0,
-        write_bytes: 0,
+        read_bytes: Some(0),
+        write_bytes: Some(0),
         cpu_capacity: None,
     })
 }
@@ -301,18 +366,19 @@ fn read_cgroup_cpu() -> Option<ProcCounters> {
             Some(quota.parse::<f64>().ok()? / period)
         })?;
     Some(ProcCounters {
+        pid: 0,
         total: usage,
         idle: 0,
         iowait: 0,
         process: 0,
-        read_bytes: 0,
-        write_bytes: 0,
+        read_bytes: Some(0),
+        write_bytes: Some(0),
         cpu_capacity: Some(capacity.max(0.001)),
     })
 }
 
-fn read_process_counters() -> Option<ProcCounters> {
-    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+fn read_process_counters_for_pid(pid: u32) -> Option<ProcCounters> {
+    let stat = fs::read_to_string(proc_path(pid, "stat")).ok()?;
     let fields = stat
         .rsplit_once(") ")?
         .1
@@ -320,18 +386,9 @@ fn read_process_counters() -> Option<ProcCounters> {
         .collect::<Vec<_>>();
     let utime = fields.get(11)?.parse::<u64>().ok()?;
     let stime = fields.get(12)?.parse::<u64>().ok()?;
-    let io = fs::read_to_string("/proc/self/io").ok()?;
-    let mut read_bytes = 0;
-    let mut write_bytes = 0;
-    for line in io.lines() {
-        if let Some(value) = line.strip_prefix("read_bytes:") {
-            read_bytes = value.trim().parse().ok()?;
-        }
-        if let Some(value) = line.strip_prefix("write_bytes:") {
-            write_bytes = value.trim().parse().ok()?;
-        }
-    }
+    let (read_bytes, write_bytes) = read_process_io_counters(pid);
     Some(ProcCounters {
+        pid,
         total: 0,
         idle: 0,
         iowait: 0,
@@ -340,6 +397,166 @@ fn read_process_counters() -> Option<ProcCounters> {
         write_bytes,
         cpu_capacity: None,
     })
+}
+
+fn read_process_io_counters(pid: u32) -> (Option<u64>, Option<u64>) {
+    let Ok(io) = fs::read_to_string(proc_path(pid, "io")) else {
+        return (None, None);
+    };
+    let mut read_bytes = None;
+    let mut write_bytes = None;
+    for line in io.lines() {
+        if let Some(value) = line.strip_prefix("read_bytes:") {
+            read_bytes = value.trim().parse().ok();
+        }
+        if let Some(value) = line.strip_prefix("write_bytes:") {
+            write_bytes = value.trim().parse().ok();
+        }
+    }
+    (read_bytes, write_bytes)
+}
+
+fn container_runtime_target(data_dir: &Path, role: ResourceRole) -> RuntimeTarget {
+    let Ok(raw) = fs::read(data_dir.join(CONTAINER_RUNTIME_IDENTITIES_FILE)) else {
+        return RuntimeTarget::ManagedUnavailable("runtime_identity_unavailable");
+    };
+    let Ok(identities) = serde_json::from_slice::<ContainerRuntimeIdentities>(&raw) else {
+        return RuntimeTarget::ManagedUnavailable("runtime_identity_invalid");
+    };
+    let identity = match role {
+        ResourceRole::Xray => Some(identities.xray),
+        ResourceRole::Cloudflared => identities.cloudflared,
+        _ => return RuntimeTarget::NotManaged,
+    };
+    let Some(identity) = identity else {
+        return RuntimeTarget::NotManaged;
+    };
+    if process_start_time_ticks(identity.pid) == Some(identity.start_time_ticks) {
+        RuntimeTarget::Managed(identity.pid)
+    } else {
+        RuntimeTarget::ManagedUnavailable("runtime_identity_mismatch")
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ContainerRuntimeIdentities {
+    xray: RuntimeIdentity,
+    cloudflared: Option<RuntimeIdentity>,
+}
+
+#[derive(serde::Deserialize)]
+struct RuntimeIdentity {
+    pid: u32,
+    start_time_ticks: u64,
+}
+
+fn fixed_systemd_runtime_target(unit: &str) -> RuntimeTarget {
+    if !valid_systemd_unit(unit) {
+        return RuntimeTarget::ManagedUnavailable("runtime_identity_invalid");
+    }
+    let path = Path::new("/sys/fs/cgroup/system.slice")
+        .join(unit)
+        .join("cgroup.procs");
+    if !path.exists() {
+        return RuntimeTarget::NotManaged;
+    }
+    read_single_pid_file(&path)
+        .map(RuntimeTarget::Managed)
+        .unwrap_or(RuntimeTarget::ManagedUnavailable("runtime_pid_unreadable"))
+}
+
+fn fixed_openrc_runtime_target(service: &str) -> RuntimeTarget {
+    if !valid_openrc_service(service) {
+        return RuntimeTarget::ManagedUnavailable("runtime_identity_invalid");
+    }
+    let pidfiles = [
+        PathBuf::from(format!("/run/supervise-{service}.pid")),
+        PathBuf::from(format!("/var/run/supervise-{service}.pid")),
+    ];
+    let existing_pidfiles = pidfiles
+        .iter()
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+    if existing_pidfiles.is_empty() {
+        return RuntimeTarget::NotManaged;
+    }
+    let Some(supervisor) = existing_pidfiles
+        .into_iter()
+        .find_map(|path| read_single_pid_file(path))
+    else {
+        return RuntimeTarget::ManagedUnavailable("runtime_pid_unreadable");
+    };
+    read_single_pid_file(&proc_path(
+        supervisor,
+        &format!("task/{supervisor}/children"),
+    ))
+    .map(RuntimeTarget::Managed)
+    .unwrap_or(RuntimeTarget::ManagedUnavailable("runtime_pid_unreadable"))
+}
+
+fn prefer_runtime_target(primary: RuntimeTarget, fallback: RuntimeTarget) -> RuntimeTarget {
+    match (primary, fallback) {
+        (managed @ RuntimeTarget::Managed(_), _) | (_, managed @ RuntimeTarget::Managed(_)) => {
+            managed
+        }
+        (unavailable @ RuntimeTarget::ManagedUnavailable(_), _) => unavailable,
+        (_, unavailable @ RuntimeTarget::ManagedUnavailable(_)) => unavailable,
+        _ => RuntimeTarget::NotManaged,
+    }
+}
+
+fn valid_systemd_unit(unit: &str) -> bool {
+    unit.ends_with(".service")
+        && !unit.is_empty()
+        && unit
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'@'))
+}
+
+fn valid_openrc_service(service: &str) -> bool {
+    !service.is_empty()
+        && service
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn read_single_pid_file(path: &Path) -> Option<u32> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut pids = contents
+        .split_whitespace()
+        .filter_map(|raw| raw.parse::<u32>().ok());
+    let pid = pids.next()?;
+    pids.next().is_none().then_some(pid)
+}
+
+fn proc_path(pid: u32, entry: &str) -> PathBuf {
+    Path::new("/proc").join(pid.to_string()).join(entry)
+}
+
+fn process_start_time_ticks(pid: u32) -> Option<u64> {
+    process_start_time_ticks_from_stat(&fs::read_to_string(proc_path(pid, "stat")).ok()?)
+}
+
+fn process_start_time_ticks_from_stat(stat: &str) -> Option<u64> {
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+fn canary_is_managed(data_dir: &Path) -> bool {
+    let path = crate::vless_https_canary::VlessHttpsCanaryPaths::new(data_dir).status_json;
+    fs::read(path)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<CanaryStatus>(&raw).ok())
+        .is_some_and(|status| status.enabled)
+}
+
+#[derive(serde::Deserialize)]
+struct CanaryStatus {
+    enabled: bool,
 }
 
 fn percent_from_delta(
@@ -439,8 +656,8 @@ fn read_swap_free(domain: ResourceDomain) -> Option<u64> {
     }
 }
 
-fn read_proc_status_value(key: &str) -> Option<u64> {
-    let contents = fs::read_to_string("/proc/self/status").ok()?;
+fn read_proc_status_value_for_pid(pid: u32, key: &str) -> Option<u64> {
+    let contents = fs::read_to_string(proc_path(pid, "status")).ok()?;
     let line = contents.lines().find(|line| line.starts_with(key))?;
     let value = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
     if key == "VmRSS" {
@@ -450,8 +667,8 @@ fn read_proc_status_value(key: &str) -> Option<u64> {
     }
 }
 
-fn read_pss_bytes() -> Option<u64> {
-    let contents = fs::read_to_string("/proc/self/smaps_rollup").ok()?;
+fn read_pss_bytes_for_pid(pid: u32) -> Option<u64> {
+    let contents = fs::read_to_string(proc_path(pid, "smaps_rollup")).ok()?;
     let line = contents.lines().find(|line| line.starts_with("Pss:"))?;
     let value = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
     Some(value.saturating_mul(1024))
@@ -530,23 +747,94 @@ mod tests {
     #[test]
     fn counter_rates_never_go_negative() {
         let previous = ProcCounters {
+            pid: 0,
             total: 100,
             idle: 50,
             iowait: 5,
             process: 10,
-            read_bytes: 100,
-            write_bytes: 100,
+            read_bytes: Some(100),
+            write_bytes: Some(100),
             cpu_capacity: None,
         };
         let current = ProcCounters {
+            pid: 0,
             total: 90,
             idle: 40,
             iowait: 4,
             process: 8,
-            read_bytes: 10,
-            write_bytes: 10,
+            read_bytes: Some(10),
+            write_bytes: Some(10),
             cpu_capacity: None,
         };
         assert_eq!(percent_from_delta(Some(&previous), &current, false), 0.0);
+    }
+
+    #[test]
+    fn fixed_role_identity_paths_reject_unbounded_names() {
+        assert!(valid_systemd_unit("xray.service"));
+        assert!(!valid_systemd_unit("xray.service/../../other"));
+        assert!(valid_openrc_service("cloudflared"));
+        assert!(!valid_openrc_service("cloudflared;ps"));
+    }
+
+    #[test]
+    fn role_identity_keeps_managed_failures_distinct_from_absence() {
+        assert_eq!(RuntimeTarget::NotManaged.state(), "not_managed");
+        assert_eq!(
+            RuntimeTarget::ManagedUnavailable("runtime_pid_unreadable").state(),
+            "managed"
+        );
+        assert_eq!(
+            prefer_runtime_target(
+                RuntimeTarget::ManagedUnavailable("runtime_pid_unreadable"),
+                RuntimeTarget::Managed(42),
+            )
+            .pid(),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn replacing_a_runtime_pid_resets_the_rate_baseline() {
+        let previous = ProcCounters {
+            pid: 10,
+            total: 0,
+            idle: 0,
+            iowait: 0,
+            process: 100,
+            read_bytes: Some(1_000),
+            write_bytes: Some(1_000),
+            cpu_capacity: None,
+        };
+        let current = ProcCounters {
+            pid: 11,
+            total: 0,
+            idle: 0,
+            iowait: 0,
+            process: 10_000,
+            read_bytes: Some(1_000_000),
+            write_bytes: Some(1_000_000),
+            cpu_capacity: None,
+        };
+
+        let metrics = read_runtime_metrics(&current, Some(&previous));
+        assert_eq!(
+            metrics.cpu_percent.reason_code.as_deref(),
+            Some("counter_baseline")
+        );
+        assert_eq!(
+            metrics.read_bytes_per_second.reason_code.as_deref(),
+            Some("proc_io_unreadable")
+        );
+        assert_eq!(
+            metrics.write_bytes_per_second.reason_code.as_deref(),
+            Some("proc_io_unreadable")
+        );
+    }
+
+    #[test]
+    fn parses_process_start_time_after_parenthesized_command() {
+        let stat = "42 (xray worker) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 12345 0";
+        assert_eq!(process_start_time_ticks_from_stat(stat), Some(12_345));
     }
 }

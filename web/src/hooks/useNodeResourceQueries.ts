@@ -1,6 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 
 import {
+	NODE_RESOURCE_HISTORY_METRICS,
+	RUNTIME_RESOURCE_HISTORY_METRICS,
+	type ResourceRole,
 	fetchAdminNodeResourceHistory,
 	fetchAdminNodeResources,
 } from "../api/adminResources";
@@ -12,6 +15,7 @@ export function useNodeResourceQueries(props: {
 	nodesAvailable: boolean;
 	isOnline: boolean;
 	activeTab: string;
+	selectedRuntimeRole: ResourceRole | null;
 }) {
 	const resourceCapability = useApiCapability("admin.resource-monitoring");
 	const enabled =
@@ -25,17 +29,65 @@ export function useNodeResourceQueries(props: {
 			fetchAdminNodeResources(props.adminToken, props.nodeId, signal),
 		refetchInterval: props.isOnline ? 15_000 : false,
 	});
-	const resourceHistoryQuery = useQuery({
-		queryKey: ["adminNodeResourceHistory", props.adminToken, props.nodeId],
-		enabled: enabled && props.activeTab === "resources",
-		queryFn: ({ signal }) =>
-			fetchAdminNodeResourceHistory(
+	const resourceHistoryQueries = useQueries({
+		queries: NODE_RESOURCE_HISTORY_METRICS.map((metric) => ({
+			queryKey: [
+				"adminNodeResourceHistory",
 				props.adminToken,
 				props.nodeId,
-				"cpu_busy_percent",
-				signal,
-			),
-		refetchInterval: props.isOnline ? 30_000 : false,
+				metric,
+			],
+			enabled: enabled && props.activeTab === "resources",
+			queryFn: ({ signal }: { signal: AbortSignal }) =>
+				fetchAdminNodeResourceHistory(
+					props.adminToken,
+					props.nodeId,
+					metric,
+					signal,
+				),
+			refetchInterval: props.isOnline ? 30_000 : false,
+		})),
 	});
-	return { resourceCapability, resourceQuery, resourceHistoryQuery };
+	const resourceHistoryByMetric = Object.fromEntries(
+		NODE_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			resourceHistoryQueries[index]?.data?.points ?? [],
+		]),
+	);
+	const runtimeHistoryQueries = useQueries({
+		queries: RUNTIME_RESOURCE_HISTORY_METRICS.map((metric) => ({
+			queryKey: [
+				"adminNodeRuntimeResourceHistory",
+				props.adminToken,
+				props.nodeId,
+				props.selectedRuntimeRole,
+				metric,
+			],
+			enabled:
+				enabled &&
+				props.activeTab === "resources" &&
+				props.selectedRuntimeRole !== null,
+			queryFn: ({ signal }: { signal: AbortSignal }) =>
+				fetchAdminNodeResourceHistory(
+					props.adminToken,
+					props.nodeId,
+					metric,
+					signal,
+					props.selectedRuntimeRole ?? undefined,
+				),
+			refetchInterval: props.isOnline ? 30_000 : false,
+		})),
+	});
+	const runtimeHistoryByMetric = Object.fromEntries(
+		RUNTIME_RESOURCE_HISTORY_METRICS.map((metric, index) => [
+			metric,
+			runtimeHistoryQueries[index]?.data?.points ?? [],
+		]),
+	);
+	return {
+		resourceCapability,
+		resourceQuery,
+		resourceHistoryByMetric,
+		runtimeHistoryByMetric,
+	};
 }

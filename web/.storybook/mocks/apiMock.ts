@@ -1289,13 +1289,13 @@ async function handleRequest(
 	if (path === "/api/admin/history-repository" && method === "GET")
 		return jsonResponse(buildRepositoryHistory(state.nodes));
 
-	const serviceMonitorResponse = handleServiceMonitorMockRequest(
+	const serviceResponse = handleServiceMonitorMockRequest(
 		serviceMonitors,
 		method,
-		path,
+		url,
+		state,
 	);
-	if (serviceMonitorResponse) return serviceMonitorResponse;
-
+	if (serviceResponse) return serviceResponse;
 	if (path === "/api/version/check" && method === "GET") {
 		if (state.failVersionCheck) {
 			return errorResponse(502, "upstream_error", "mock version check failure");

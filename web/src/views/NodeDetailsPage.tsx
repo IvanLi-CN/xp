@@ -29,6 +29,7 @@ import {
 	putAdminNodeMihomoResourcePolicy,
 	refreshAdminNodeEgressProbe,
 } from "../api/adminNodes";
+import type { ResourceRole } from "../api/adminResources";
 import type { AdminTcpConnectionUsageWindow } from "../api/adminTcpConnections";
 import { useApiCapability } from "../api/useApiCompatibility";
 import { Button } from "../components/Button";
@@ -431,6 +432,9 @@ export function NodeDetailsPage() {
 	const appRuntime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const nodesCapability = useApiCapability("admin.nodes");
+	const [activeTab, setActiveTab] = useState<NodeDetailsTab>("runtime");
+	const [selectedRuntimeRole, setSelectedRuntimeRole] =
+		useState<ResourceRole | null>(null);
 	const mihomoPrivateCidrsCapability = useApiCapability(
 		"node.mihomo-resource-private-cidrs-v1",
 	);
@@ -464,19 +468,23 @@ export function NodeDetailsPage() {
 		enabled: adminToken.length > 0 && nodesCapability.available,
 		queryFn: ({ signal }) => fetchAdminNodeHistory(adminToken, nodeId, signal),
 	});
-	const { resourceCapability, resourceQuery, resourceHistoryQuery } =
-		useNodeResourceQueries({
-			adminToken,
-			nodeId,
-			nodesAvailable: nodesCapability.available,
-			isOnline: appRuntime.isOnline,
-			activeTab,
-		});
+	const {
+		resourceCapability,
+		resourceQuery,
+		resourceHistoryByMetric,
+		runtimeHistoryByMetric,
+	} = useNodeResourceQueries({
+		adminToken,
+		nodeId,
+		nodesAvailable: nodesCapability.available,
+		isOnline: appRuntime.isOnline,
+		activeTab,
+		selectedRuntimeRole,
+	});
 	const [runtimeLive, setRuntimeLive] =
 		useState<AdminNodeRuntimeDetailResponse | null>(null);
 	const [runtimeSseConnected, setRuntimeSseConnected] = useState(false);
 	const [runtimeSseError, setRuntimeSseError] = useState<string | null>(null);
-	const [activeTab, setActiveTab] = useState<NodeDetailsTab>("runtime");
 	const [ipUsageWindow, setIpUsageWindow] = useState<AdminIpUsageWindow>("24h");
 	const [tcpConnectionsWindow, setTcpConnectionsWindow] =
 		useState<AdminTcpConnectionUsageWindow>("24h");
@@ -955,8 +963,11 @@ export function NodeDetailsPage() {
 								isFetching={resourceQuery.isFetching}
 								isOnline={appRuntime.isOnline}
 								onRetry={() => resourceQuery.refetch()}
+								onRuntimeDetailsChange={setSelectedRuntimeRole}
+								selectedRuntimeRole={selectedRuntimeRole}
 								snapshot={resourceQuery.data}
-								historyPoints={resourceHistoryQuery.data?.points ?? []}
+								historyByMetric={resourceHistoryByMetric}
+								runtimeHistoryByMetric={runtimeHistoryByMetric}
 							/>
 						</section>
 					</ModuleTabsPanel>

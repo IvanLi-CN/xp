@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildResourceCpuHistoryChartOption } from "./ResourceSnapshotPanel";
+import {
+	RESOURCE_HISTORY_CHARTS,
+	RUNTIME_RESOURCE_HISTORY_CHARTS,
+	buildResourceHistoryChartOption,
+} from "./ResourceSnapshotPanel";
 import type { EChartsThemePalette } from "./echarts-theme";
 
 const palette: EChartsThemePalette = {
@@ -23,39 +27,102 @@ const palette: EChartsThemePalette = {
 	},
 };
 
-describe("buildResourceCpuHistoryChartOption", () => {
-	it("renders CPU samples as a time series and retains sampling gaps", () => {
-		const option = buildResourceCpuHistoryChartOption(
-			[
-				{ observed_at: "2026-09-01T10:00:00Z", value: 18.4 },
-				{ observed_at: "2026-09-01T10:00:15Z", value: null },
-				{ observed_at: "2026-09-01T10:00:30Z", value: 52.1 },
-			],
+describe("buildResourceHistoryChartOption", () => {
+	it("renders each fixed resource series with the TCP history chart contract", () => {
+		const points = [
+			{ observed_at: "2026-09-01T10:00:00Z", value: 18.4 },
+			{ observed_at: "2026-09-01T10:00:15Z", value: null },
+			{ observed_at: "2026-09-01T10:00:30Z", value: 52.1 },
+		];
+
+		for (const chart of RESOURCE_HISTORY_CHARTS) {
+			const option = buildResourceHistoryChartOption(
+				{ [chart.series[0].metric]: points },
+				palette,
+				chart,
+			);
+
+			expect(option).toMatchObject({
+				grid: { top: 24, right: 18, bottom: 36, left: 42 },
+				xAxis: {
+					type: "time",
+					min: 1_788_256_800_000,
+					max: 1_788_256_830_000,
+				},
+				yAxis: {
+					type: "value",
+					min: 0,
+					axisLabel: { formatter: expect.any(Function) },
+				},
+				series: [
+					{
+						name: chart.series[0].name,
+						type: "line",
+						data: [
+							[1_788_256_800_000, 18.4],
+							[1_788_256_815_000, null],
+							[1_788_256_830_000, 52.1],
+						],
+						step: "end",
+						smooth: false,
+						connectNulls: false,
+						showSymbol: false,
+						lineStyle: { width: 2, color: "primary", join: "round" },
+						areaStyle: { color: "primary", opacity: 0.18 },
+					},
+				],
+			});
+
+			if (chart.unit === "percent") {
+				expect(option.yAxis).toMatchObject({ max: 100 });
+			} else {
+				expect(option.yAxis).not.toMatchObject({ max: 100 });
+			}
+		}
+	});
+});
+
+describe("runtime resource charts", () => {
+	it("keeps the runtime detail metrics fixed while grouping related series", () => {
+		expect(
+			RUNTIME_RESOURCE_HISTORY_CHARTS.map((chart) =>
+				chart.series.map((series) => series.metric),
+			),
+		).toEqual([
+			["cpu_percent"],
+			["rss_bytes", "pss_bytes"],
+			["read_bytes_per_second", "write_bytes_per_second"],
+			["fd_count"],
+			["thread_count"],
+		]);
+	});
+
+	it("renders paired runtime metrics with the existing blue comparison-series style", () => {
+		const chart = RUNTIME_RESOURCE_HISTORY_CHARTS.find(
+			(candidate) => candidate.key === "memory",
+		);
+		expect(chart).toBeDefined();
+		if (!chart) return;
+
+		const option = buildResourceHistoryChartOption(
+			{
+				rss_bytes: [{ observed_at: "2026-09-01T10:00:00Z", value: 96 }],
+				pss_bytes: [{ observed_at: "2026-09-01T10:00:00Z", value: 83 }],
+			},
 			palette,
+			chart,
 		);
 
-		expect(option).toMatchObject({
-			xAxis: {
-				type: "category",
-				boundaryGap: false,
-				data: [
-					"2026-09-01T10:00:00Z",
-					"2026-09-01T10:00:15Z",
-					"2026-09-01T10:00:30Z",
-				],
+		expect(option.series).toMatchObject([
+			{
+				name: "RSS",
+				lineStyle: { width: 2, color: "primary", join: "round" },
+				areaStyle: { color: "primary", opacity: 0.18 },
 			},
-			yAxis: { type: "value", min: 0, max: 100 },
-			series: [
-				{
-					name: "CPU busy",
-					type: "line",
-					data: [18.4, null, 52.1],
-					smooth: false,
-					connectNulls: false,
-					symbol: "none",
-					lineStyle: { color: "primary", width: 2, join: "round" },
-				},
-			],
-		});
+			{
+				name: "PSS",
+				lineStyle: { width: 2, color: "#3478c6", join: "round" },
+			},
+		]);
 	});
 });

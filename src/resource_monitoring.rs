@@ -17,6 +17,7 @@ mod resource_monitoring_collector;
 mod resource_monitoring_logic;
 mod resource_monitoring_policy;
 mod resource_monitoring_store;
+mod resource_monitoring_targets;
 mod resource_monitoring_wire;
 pub(crate) use resource_monitoring_collector::unsupported_snapshot;
 use resource_monitoring_collector::{CollectorState, LinuxResourceReader};
@@ -27,6 +28,7 @@ use resource_monitoring_logic::{
 pub use resource_monitoring_policy::{ResourcePolicy, ResourcePolicyOverride};
 use resource_monitoring_store::ResourceStore;
 pub use resource_monitoring_store::{ResourceCapacityError, resource_history_capacity_preflight};
+pub use resource_monitoring_targets::ManagedRuntimeTargets;
 
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
 pub const MAX_SAMPLES: usize = 240;
@@ -37,6 +39,7 @@ pub const RESOURCE_15_MINUTE_PAYLOAD_LIMIT: usize = 1024;
 pub const RESOURCE_HOUR_PAYLOAD_LIMIT: usize = 768;
 pub const RESOURCE_HISTORY_PER_NODE_CAPACITY_BYTES: u64 = 82 * 1024 * 1024;
 pub const RESOURCE_HISTORY_MAX_QUOTA_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub const CONTAINER_RUNTIME_IDENTITIES_FILE: &str = "resource-runtime-identities.json";
 const RESOURCE_SAMPLE_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_LOCAL_ROLLUPS: usize = 1_440;
 const MAX_ALERT_TRANSITIONS: usize = 1_000;
@@ -544,6 +547,20 @@ impl ResourceMonitorHandle {
         node_id: String,
         state_store: Option<Arc<tokio::sync::Mutex<crate::state::JsonSnapshotStore>>>,
     ) -> Self {
+        Self::start_with_state_and_runtime_targets(
+            data_dir,
+            node_id,
+            state_store,
+            ManagedRuntimeTargets::default(),
+        )
+    }
+
+    pub fn start_with_state_and_runtime_targets(
+        data_dir: &Path,
+        node_id: String,
+        state_store: Option<Arc<tokio::sync::Mutex<crate::state::JsonSnapshotStore>>>,
+        runtime_targets: ManagedRuntimeTargets,
+    ) -> Self {
         let store = ResourceStore::open(data_dir).unwrap_or_else(|error| {
             warn!(error = %error, "resource store unavailable; using memory-only monitoring");
             ResourceStore::memory()
@@ -565,7 +582,10 @@ impl ResourceMonitorHandle {
         let handle = Self {
             inner: Arc::new(RwLock::new(ResourceState {
                 node_id: node_id.clone(),
-                reader: LinuxResourceReader::new(data_dir.to_path_buf()),
+                reader: LinuxResourceReader::with_runtime_targets(
+                    data_dir.to_path_buf(),
+                    runtime_targets,
+                ),
                 collector: CollectorState::default(),
                 samples: VecDeque::with_capacity(MAX_SAMPLES),
                 current: None,

@@ -55,6 +55,11 @@
   with `history.sqlite3`; no monitor sidecar or external `ping` command is supported. Linux ICMP
   datagram/raw capability is optional and fail-closed as `unsupported`, while HTTP/HTTPS/TCPING
   remain available.
+- Resource Monitoring persists bounded minute Rollups in `${XP_DATA_DIR}/resource_metrics.sqlite3`.
+  It reads only fixed XP/Xray/cloudflared/canary identities: configured systemd cgroups, fixed
+  OpenRC supervisor PID files and direct children, or the official container entrypoint's private
+  PID/start-time identity file. It never enumerates arbitrary processes, starts a helper, or
+  treats XP-internal canary work as a separate process. Upgrades preserve the Resource Store.
 - Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
   `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
   listener. A durable assignment does not itself keep a target Xray initiating outbound installed:
