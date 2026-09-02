@@ -5,6 +5,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureCatalog } from "../fixture-policy/catalog";
@@ -28,6 +29,10 @@ import {
 import { fetchAdminRepositoryHistory } from "../api/adminRepositoryHistory";
 import { fetchAdminNodeTcpConnections } from "../api/adminTcpConnections";
 import { BackendApiError } from "../api/backendError";
+import {
+	ObjectNavigationGuardProvider,
+	useObjectNavigationGuard,
+} from "../components/ObjectNavigationGuard";
 import { ToastProvider } from "../components/Toast";
 import { UiPrefsProvider } from "../components/UiPrefs";
 import { createQueryClient } from "../queryClient";
@@ -78,21 +83,40 @@ vi.mock("../components/auth", async (importOriginal) => {
 	};
 });
 
-function renderPage() {
+function NavigationProbe({ onNavigate }: { onNavigate: () => void }) {
+	const { requestNavigation } = useObjectNavigationGuard();
+	return (
+		<button type="button" onClick={() => requestNavigation(onNavigate)}>
+			Open next node
+		</button>
+	);
+}
+
+function renderPage(args?: {
+	includeNavigationProbe?: boolean;
+	onNavigate?: () => void;
+}) {
 	const queryClient = createQueryClient();
+	const onNavigate = args?.onNavigate ?? vi.fn();
 	const page = () => (
 		<QueryClientProvider client={queryClient}>
-			<UiPrefsProvider>
-				<ToastProvider>
-					<NodeDetailsPage />
-				</ToastProvider>
-			</UiPrefsProvider>
+			<ObjectNavigationGuardProvider>
+				<UiPrefsProvider>
+					<ToastProvider>
+						<NodeDetailsPage />
+						{args?.includeNavigationProbe ? (
+							<NavigationProbe onNavigate={onNavigate} />
+						) : null}
+					</ToastProvider>
+				</UiPrefsProvider>
+			</ObjectNavigationGuardProvider>
 		</QueryClientProvider>
 	);
 	const result = render(page());
 	return {
 		...result,
 		queryClient,
+		onNavigate,
 		rerenderPage: () => result.rerender(page()),
 	};
 }
@@ -523,11 +547,33 @@ describe("<NodeDetailsPage />", () => {
 		expect(tcpTab.className).toContain("min-h-11");
 	});
 
+	it("keeps node settings as the final tab and groups its sections", async () => {
+		setupMocks();
+		renderPage();
+		await waitFor(() => expect(fetchAdminNode).toHaveBeenCalled());
+		await screenByRole("tab", "Node settings");
+
+		const tabs = screen.getAllByRole("tab");
+		expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+			"Service runtime",
+			"Node metadata",
+			"Traffic",
+			"IP usage",
+			"TCP connections",
+			"Node settings",
+		]);
+
+		fireEvent.click(await screenByRole("tab", "Node settings"));
+		expect(await screenByRole("heading", "Mihomo resources")).toBeTruthy();
+		expect(await screenByRole("heading", "Quota settings")).toBeTruthy();
+		expect(await screenByRole("heading", "Danger zone")).toBeTruthy();
+	});
+
 	it("edits Mihomo private CIDRs as tags and saves the override", async () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		expect(cidrInput).toHaveAttribute("placeholder", "192.168.0.0/16");
 		fireEvent.change(cidrInput, {
@@ -549,13 +595,16 @@ describe("<NodeDetailsPage />", () => {
 			);
 		});
 
+		const mihomoSection = screen.getByRole("region", {
+			name: "Mihomo resources",
+		});
 		for (const name of [
 			"Refresh",
 			"Disable private targets",
 			"Save override",
 			"Restore deployment default",
 		]) {
-			const button = await screenByRole("button", name);
+			const button = within(mihomoSection).getByRole("button", { name });
 			expect(button.className).toContain("h-10");
 			expect(button.className).toContain("min-h-11");
 		}
@@ -568,7 +617,7 @@ describe("<NodeDetailsPage />", () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		fireEvent.change(cidrInput, {
 			target: { value: fixtureCatalog.address.privateCidr().replace("/", "") },
@@ -589,11 +638,77 @@ describe("<NodeDetailsPage />", () => {
 		});
 	});
 
+	it("protects an unsaved Mihomo draft and restores the server override on discard", async () => {
+		setupMocks();
+		const onNavigate = vi.fn();
+		renderPage({ includeNavigationProbe: true, onNavigate });
+		await waitFor(() => expect(fetchAdminNode).toHaveBeenCalled());
+
+		fireEvent.click(await screenByRole("tab", "Node settings"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: fixtureCatalog.address.privateCidr() },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+		await waitFor(() => {
+			expect(
+				cidrInput.closest('[data-testid="tag-input-control"]'),
+			).toHaveTextContent(fixtureCatalog.address.privateCidr());
+		});
+
+		fireEvent.click(await screenByRole("button", "Open next node"));
+		expect(
+			await screenByRole("heading", "Unsaved Mihomo resources changes"),
+		).toBeTruthy();
+		fireEvent.click(await screenByRole("button", "Discard and continue"));
+
+		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
+		expect(
+			cidrInput.closest('[data-testid="tag-input-control"]'),
+		).not.toHaveTextContent(fixtureCatalog.address.privateCidr());
+	});
+
+	it("saves Mihomo before prompting for a dirty quota section", async () => {
+		setupMocks();
+		const onNavigate = vi.fn();
+		renderPage({ includeNavigationProbe: true, onNavigate });
+		await waitFor(() => expect(fetchAdminNode).toHaveBeenCalled());
+
+		fireEvent.click(await screenByRole("tab", "Node settings"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: fixtureCatalog.address.privateCidr() },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+		fireEvent.change(await screenByLabel("Day of month"), {
+			target: { value: "2" },
+		});
+
+		fireEvent.click(await screenByRole("button", "Open next node"));
+		expect(
+			await screenByRole("heading", "Unsaved Mihomo resources changes"),
+		).toBeTruthy();
+		fireEvent.click(await screenByRole("button", "Save and continue"));
+
+		await waitFor(() => {
+			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+				[fixtureCatalog.address.privateCidr()],
+			);
+		});
+		expect(
+			await screenByRole("heading", "Unsaved Quota settings changes"),
+		).toBeTruthy();
+		fireEvent.click(await screenByRole("button", "Discard and continue"));
+		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
+	});
+
 	it("allows saving unlimited quota reset after entering an invalid monthly day", async () => {
 		setupMocks();
 		renderPage();
 
-		fireEvent.click(await screenByRole("tab", "Quota reset"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		fireEvent.change(await screenByLabel("Day of month"), {
 			target: { value: "99" },
 		});
@@ -682,7 +797,7 @@ describe("<NodeDetailsPage />", () => {
 		});
 		renderPage();
 
-		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		fireEvent.click(await screenByRole("button", "Delete node"));
 
 		expect(await screenByText("Endpoints to delete: 1")).toBeTruthy();
@@ -725,7 +840,7 @@ describe("<NodeDetailsPage />", () => {
 			],
 		});
 
-		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		fireEvent.click(await screenByRole("button", "Delete node"));
 		fireEvent.click(await screenByRole("button", "Delete node and endpoints"));
 
@@ -778,7 +893,7 @@ describe("<NodeDetailsPage />", () => {
 		});
 		renderPage();
 
-		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		fireEvent.click(await screenByRole("button", "Delete node"));
 		fireEvent.click(await screenByRole("button", "Delete"));
 
@@ -814,7 +929,7 @@ describe("<NodeDetailsPage />", () => {
 				),
 			).toBeNull();
 		});
-		fireEvent.click(await screenByRole("tab", "Danger zone"));
+		fireEvent.click(await screenByRole("tab", "Node settings"));
 		expect(await screenByRole("button", "Delete node")).toBeEnabled();
 	});
 

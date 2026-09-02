@@ -227,3 +227,10 @@ None
 
 - daisyUI theme / components
 - Iconify icons（建议：Tabler Icons 集）
+
+## Visual Evidence
+
+- Storybook canvas `Pages/NodeDetailsPage/NodeSettings`：桌面端展示六个一级入口及 Mihomo → Quota → Danger 设置分区顺序。
+  ![Node settings desktop](./assets/node-settings-desktop.png)
+- Storybook canvas `Pages/NodeDetailsPage/NodeSettingsMobile`：393x852 移动端设置视口。
+  ![Node settings mobile](./assets/node-settings-mobile.png)
