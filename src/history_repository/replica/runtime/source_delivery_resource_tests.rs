@@ -88,6 +88,15 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
     let _ = storage
         .source_delivery_journal_page(256)
         .expect("warm page");
+    // Let SQLite's page cache and the allocator settle before measuring steady-state reads.
+    for _ in 0..3 {
+        let _ = storage
+            .source_delivery_journal_summary()
+            .expect("settle summary");
+        let _ = storage
+            .source_delivery_journal_page(usize::MAX)
+            .expect("settle page");
+    }
     let baseline_rss = process_rss_bytes();
     let mut cpu_percentages = Vec::with_capacity(5);
     let mut max_read_bytes = 0_u64;
