@@ -310,18 +310,18 @@ async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
     let temporary = TempDir::new().unwrap();
     let handle = UptimeHandle::load(temporary.path()).unwrap();
     let run = DraftClusterTest {
-        run_id: "draft-run".to_owned(),
+        run_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
         target: MonitorTarget::Ping {
             host: xp_test_fixtures::primary_host().to_owned(),
         },
         observer_policy: crate::uptime_monitor::ObserverPolicy::default(),
-        observer_node_ids: vec!["node".to_owned()],
-        coordinator_node_id: "coordinator".to_owned(),
+        observer_node_ids: vec![xp_test_fixtures::primary_node_id().to_owned()],
+        coordinator_node_id: xp_test_fixtures::secondary_node_id().to_owned(),
         state: DraftClusterTestState::Queued,
         created_at_unix_seconds: 100,
         expires_at_unix_seconds: 200,
         observers: vec![DraftClusterTestObserver {
-            node_id: "node".to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
             state: DraftClusterTestState::Queued,
             latency_ms: None,
             status_code: None,
@@ -333,11 +333,11 @@ async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
     handle.create_draft_test(&run).await.unwrap();
     handle
         .update_draft_test_observer(
-            "draft-run",
+            xp_test_fixtures::primary_probe_run_id(),
             DraftClusterTestObserverUpdate {
-                node_id: "node".to_owned(),
+                node_id: xp_test_fixtures::primary_node_id().to_owned(),
                 state: DraftClusterTestState::Succeeded,
-                latency_ms: Some(42),
+                latency_ms: Some(xp_test_fixtures::number_value42()),
                 status_code: Some(200),
                 error: None,
                 observed_at_unix_seconds: 120,
@@ -345,16 +345,24 @@ async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
         )
         .await
         .unwrap();
-    let completed = handle.draft_test("draft-run", 120).await.unwrap().unwrap();
+    let completed = handle
+        .draft_test(xp_test_fixtures::primary_probe_run_id(), 120)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(matches!(completed.state, DraftClusterTestState::Succeeded));
     assert!(
         handle
-            .observations("draft-run", 0, 300, 10)
+            .observations(xp_test_fixtures::primary_probe_run_id(), 0, 300, 10)
             .await
             .unwrap()
             .is_empty()
     );
-    let expired = handle.draft_test("draft-run", 200).await.unwrap().unwrap();
+    let expired = handle
+        .draft_test(xp_test_fixtures::primary_probe_run_id(), 200)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(matches!(expired.state, DraftClusterTestState::Interrupted));
 }
 

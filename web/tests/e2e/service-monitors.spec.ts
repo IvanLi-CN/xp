@@ -141,7 +141,7 @@ async function setupServiceMonitorMocks(page: Page) {
 		const request = route.request();
 		if (request.method() === "POST") {
 			draftTest = {
-				run_id: "01JDRAFT0000000000000000001",
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
 				target: JSON.parse(request.postData() ?? "{}").target,
 				observer_policy: { mode: "exclude", node_ids: [] },
 				observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
@@ -153,7 +153,7 @@ async function setupServiceMonitorMocks(page: Page) {
 					{
 						node_id: fixtureCatalog.identifier.nodePrimary(),
 						state: "succeeded",
-						latency_ms: 42,
+						latency_ms: fixtureCatalog.number.value42(),
 						status_code: 200,
 					},
 				],
