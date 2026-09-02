@@ -188,3 +188,5 @@ Raft 也不应承载高频 Observation。
 
 - [Service monitoring overview](./assets/service-monitor-overview.png)
 - [Cluster test workspace](./assets/service-monitor-create-cluster-test.png)
+- [Editor workspace on wide screens](./assets/service-monitor-editor-wide.png)
+- [Editor result table on mobile](./assets/service-monitor-editor-mobile-results.png)
