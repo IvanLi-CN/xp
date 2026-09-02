@@ -514,7 +514,7 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 								}
 								className="mt-4"
 							>
-								<TabsList className="w-full justify-start">
+								<TabsList className="w-fit max-w-full justify-start">
 									<TabsTrigger value="exclude">Exclude nodes</TabsTrigger>
 									<TabsTrigger value="include">Include only</TabsTrigger>
 								</TabsList>

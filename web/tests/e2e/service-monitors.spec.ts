@@ -358,6 +358,24 @@ test("runs the backend cluster test from the B editor workspace", async ({
 		};
 	});
 	expect(columns.resultsLeft).toBeGreaterThan(columns.configurationLeft);
+	const policyTabs = page.getByRole("tablist");
+	await expect(policyTabs).toBeVisible();
+	const policyLayout = await page.evaluate(() => {
+		const tablist = document.querySelector('[role="tablist"]');
+		const configuration = document
+			.querySelector("#monitor-configuration-heading")
+			?.closest("section");
+		if (!tablist || !configuration) {
+			throw new Error("observer policy tabs are not mounted");
+		}
+		return {
+			tablistWidth: tablist.getBoundingClientRect().width,
+			configurationWidth: configuration.getBoundingClientRect().width,
+		};
+	});
+	expect(policyLayout.tablistWidth).toBeLessThan(
+		policyLayout.configurationWidth,
+	);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(
