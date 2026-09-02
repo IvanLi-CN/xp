@@ -102,6 +102,28 @@ function targetFromForm(form: FormState): ServiceMonitorTarget {
 		: { kind: "https", ...value };
 }
 
+function invertObserverPolicy(
+	policy: ObserverPolicy,
+	nodes: AdminNode[],
+	mode: ObserverPolicy["mode"],
+): ObserverPolicy {
+	const registeredNodeIds = new Set(nodes.map((node) => node.node_id));
+	const selectedNodeIds = new Set(policy.node_ids);
+	const departedNodeIds = policy.node_ids.filter(
+		(nodeId) => !registeredNodeIds.has(nodeId),
+	);
+
+	return {
+		mode,
+		node_ids: [
+			...nodes
+				.filter((node) => !selectedNodeIds.has(node.node_id))
+				.map((node) => node.node_id),
+			...departedNodeIds,
+		],
+	};
+}
+
 function terminalDraftState(state: string | undefined): boolean {
 	return (
 		state === "succeeded" ||
@@ -493,10 +515,14 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 									aria-label="Observer policy"
 									value={form.observerPolicy.mode}
 									onValueChange={(value) =>
-										update("observerPolicy", {
-											mode: value as ObserverPolicy["mode"],
-											node_ids: [],
-										})
+										update(
+											"observerPolicy",
+											invertObserverPolicy(
+												form.observerPolicy,
+												nodes,
+												value as ObserverPolicy["mode"],
+											),
+										)
 									}
 								>
 									<TabsList className="w-fit max-w-full justify-start">

@@ -329,6 +329,18 @@ test("keeps the TCPING editor usable on mobile", async ({ page }) => {
 	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
 });
 
+test("inverts observer choices when changing policy mode", async ({ page }) => {
+	await setupServiceMonitorMocks(page);
+	await page.goto("/monitors/new");
+
+	const observer = page.getByRole("checkbox");
+	await expect(observer).not.toBeChecked();
+	await page.getByRole("tab", { name: "Include only" }).click();
+	await expect(observer).toBeChecked();
+	await page.getByRole("tab", { name: "Exclude nodes" }).click();
+	await expect(observer).not.toBeChecked();
+});
+
 test("runs the backend cluster test from the B editor workspace", async ({
 	page,
 }) => {
