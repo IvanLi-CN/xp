@@ -376,6 +376,25 @@ test("runs the backend cluster test from the B editor workspace", async ({
 	expect(policyLayout.tablistWidth).toBeLessThan(
 		policyLayout.configurationWidth,
 	);
+	const compactPolicyLayout = await page.evaluate(() => {
+		const heading = document.querySelector("#monitor-observer-policy-heading");
+		const tablist = document.querySelector('[role="tablist"]');
+		const nodes = heading?.closest("section")?.querySelector("fieldset");
+		if (!heading || !tablist || !nodes) {
+			throw new Error("compact observer policy controls are not mounted");
+		}
+		return {
+			headingTop: heading.getBoundingClientRect().top,
+			tablistTop: tablist.getBoundingClientRect().top,
+			nodesTop: nodes.getBoundingClientRect().top,
+		};
+	});
+	expect(
+		Math.abs(compactPolicyLayout.headingTop - compactPolicyLayout.tablistTop),
+	).toBeLessThanOrEqual(8);
+	expect(
+		compactPolicyLayout.nodesTop - compactPolicyLayout.headingTop,
+	).toBeLessThanOrEqual(80);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(

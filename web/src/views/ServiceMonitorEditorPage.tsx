@@ -481,16 +481,38 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							aria-labelledby="monitor-observer-policy-heading"
 							className="border-t border-border/70 pt-6"
 						>
-							<h2
-								id="monitor-observer-policy-heading"
-								className="font-semibold"
+							<div className="flex flex-wrap items-center gap-2">
+								<h2
+									id="monitor-observer-policy-heading"
+									className="font-semibold"
+								>
+									Observers
+								</h2>
+								<Tabs
+									aria-label="Observer policy"
+									value={form.observerPolicy.mode}
+									onValueChange={(value) =>
+										update("observerPolicy", {
+											mode: value as ObserverPolicy["mode"],
+											node_ids: [],
+										})
+									}
+								>
+									<TabsList className="w-fit max-w-full justify-start">
+										<TabsTrigger value="exclude">Exclude nodes</TabsTrigger>
+										<TabsTrigger value="include">Include only</TabsTrigger>
+									</TabsList>
+								</Tabs>
+							</div>
+							<div
+								className={[
+									"mt-1.5 flex items-center justify-between gap-3",
+									"text-xs text-muted-foreground",
+								].join(" ")}
 							>
-								Observer policy
-							</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								Exclude mode is the default. An empty exclusion list means every
-								current observer node.
-							</p>
+								<span>{policySummary}</span>
+								<span>{nodes.length} registered</span>
+							</div>
 							{!policyCapability.available &&
 							form.observerPolicy.mode === "exclude" &&
 							form.observerPolicy.node_ids.length > 0 ? (
@@ -504,33 +526,9 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 									Use Include only or leave exclusions empty.
 								</p>
 							) : null}
-							<Tabs
-								value={form.observerPolicy.mode}
-								onValueChange={(value) =>
-									update("observerPolicy", {
-										mode: value as ObserverPolicy["mode"],
-										node_ids: [],
-									})
-								}
-								className="mt-4"
-							>
-								<TabsList className="w-fit max-w-full justify-start">
-									<TabsTrigger value="exclude">Exclude nodes</TabsTrigger>
-									<TabsTrigger value="include">Include only</TabsTrigger>
-								</TabsList>
-							</Tabs>
-							<div
-								className={[
-									"mt-3 flex items-center justify-between gap-3",
-									"text-xs text-muted-foreground",
-								].join(" ")}
-							>
-								<span>{policySummary}</span>
-								<span>{nodes.length} registered</span>
-							</div>
 							<fieldset
 								className={[
-									"mt-3 max-h-56 overflow-y-auto rounded-xl border",
+									"mt-2 max-h-56 overflow-y-auto rounded-xl border",
 									"border-border/70 p-2",
 								].join(" ")}
 							>
