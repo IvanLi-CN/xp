@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { fixtureCatalog } from "../fixture-policy/catalog";
-import { validateMihomoPrivateCidr } from "./mihomoPrivateCidr";
+import {
+	normalizeMihomoPrivateCidr,
+	validateMihomoPrivateCidr,
+} from "./mihomoPrivateCidr";
 
 describe("validateMihomoPrivateCidr", () => {
 	it("accepts RFC1918 IPv4 and IPv6 ULA CIDRs", () => {
@@ -13,12 +16,19 @@ describe("validateMihomoPrivateCidr", () => {
 		).toBeNull();
 	});
 
+	it("normalizes bare private IP literals to host CIDRs", () => {
+		expect(normalizeMihomoPrivateCidr(" 192.168.31.11 ")).toBe(
+			"192.168.31.11/32",
+		);
+		expect(normalizeMihomoPrivateCidr("fd12:3456::7")).toBe("fd12:3456::7/128");
+		expect(validateMihomoPrivateCidr("192.168.31.11")).toBeNull();
+		expect(validateMihomoPrivateCidr("fd12:3456::7")).toBeNull();
+	});
+
 	it("rejects malformed addresses and invalid prefix lengths", () => {
-		expect(
-			validateMihomoPrivateCidr(
-				fixtureCatalog.address.privateCidr().replace("/", ""),
-			),
-		).toBe("CIDR must use address/prefix notation.");
+		expect(validateMihomoPrivateCidr("192.168.31")).toBe(
+			"CIDR address must be a valid IPv4 or IPv6 literal.",
+		);
 		expect(
 			validateMihomoPrivateCidr(
 				fixtureCatalog.address.privateCidr().replace("/24", "/33"),

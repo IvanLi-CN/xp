@@ -1,4 +1,12 @@
-import { useId, useMemo, useRef, useState } from "react";
+import {
+	type ForwardedRef,
+	forwardRef,
+	useId,
+	useImperativeHandle,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -21,7 +29,17 @@ import {
 	PopoverTrigger,
 } from "./ui/popover";
 
-type TagInputProps = {
+export type TagInputCommitResult = {
+	value: string[];
+	rejected: string[];
+	error: string | null;
+};
+
+export type TagInputHandle = {
+	commitDraft: () => TagInputCommitResult;
+};
+
+export type TagInputProps = {
 	label: string;
 	value: string[];
 	onChange: (next: string[]) => void;
@@ -32,6 +50,8 @@ type TagInputProps = {
 	inputClass?: string;
 	compact?: boolean;
 	validateTag?: (value: string) => string | null;
+	normalizeTag?: (value: string) => string;
+	onRejectedDraftChange?: (hasRejectedDraft: boolean) => void;
 	allowPrimary?: boolean;
 	suggestions?: string[];
 	suggestionLabel?: string;
@@ -44,6 +64,10 @@ function defaultValidateTag(value: string): string | null {
 
 function normalizeToken(token: string): string {
 	return token.trim();
+}
+
+function identity(value: string): string {
+	return value;
 }
 
 function splitTokens(text: string): string[] {
@@ -64,21 +88,26 @@ function dedupePreserveOrder(input: string[]): string[] {
 	return out;
 }
 
-export function TagInput({
-	label,
-	value,
-	onChange,
-	placeholder,
-	helperText,
-	tooltipText,
-	disabled = false,
-	inputClass = "xp-input",
-	compact = false,
-	validateTag = defaultValidateTag,
-	allowPrimary = true,
-	suggestions = [],
-	suggestionLabel = "Show suggestions",
-}: TagInputProps) {
+function TagInputImpl(
+	{
+		label,
+		value,
+		onChange,
+		placeholder,
+		helperText,
+		tooltipText,
+		disabled = false,
+		inputClass = "xp-input",
+		compact = false,
+		validateTag = defaultValidateTag,
+		normalizeTag = identity,
+		onRejectedDraftChange,
+		allowPrimary = true,
+		suggestions = [],
+		suggestionLabel = "Show suggestions",
+	}: TagInputProps,
+	ref: ForwardedRef<TagInputHandle>,
+) {
 	const inputId = useId();
 	const helperTextId = useId();
 	const errorTextId = useId();
@@ -117,16 +146,20 @@ export function TagInput({
 		onChange(dedupePreserveOrder(next.map(normalizeToken).filter(Boolean)));
 	}
 
-	function addManyTokens(rawTokens: string[]): void {
-		if (rawTokens.length === 0) return;
+	function addManyTokens(rawTokens: string[]): TagInputCommitResult {
+		if (rawTokens.length === 0) {
+			return { value: tags.slice(), rejected: [], error: null };
+		}
 		let next = tags.slice();
 		let nextError: string | null = null;
+		const rejected: string[] = [];
 		for (const raw of rawTokens) {
-			const token = normalizeToken(raw);
-			if (!token) continue;
+			const rawToken = normalizeToken(raw);
+			if (!rawToken) continue;
+			const token = normalizeToken(normalizeTag(rawToken));
 			const validateMessage = validateTag(token);
 			if (validateMessage) {
-				// Keep best-effort behavior: add valid tokens, surface the first error.
+				rejected.push(rawToken);
 				if (!nextError) nextError = validateMessage;
 				continue;
 			}
@@ -135,19 +168,24 @@ export function TagInput({
 		next = dedupePreserveOrder(next);
 		setTags(next);
 		setError(nextError);
+		onRejectedDraftChange?.(rejected.length > 0);
+		return { value: next, rejected, error: nextError };
 	}
 
 	function addSuggestion(suggestion: string): void {
-		addManyTokens([suggestion]);
-		setDraft("");
-		setOpen(false);
+		const result = addManyTokens([suggestion]);
+		setDraft(result.rejected.join(", "));
+		setOpen(result.rejected.length > 0);
 		setActiveSuggestionIndex(0);
 		inputRef.current?.focus();
 	}
 
 	function removeAt(index: number): void {
 		const next = tags.filter((_, i) => i !== index);
-		setError(null);
+		if (!draft.trim()) {
+			setError(null);
+			onRejectedDraftChange?.(false);
+		}
 		setTags(next);
 	}
 
@@ -156,15 +194,25 @@ export function TagInput({
 		if (index <= 0 || index >= tags.length) return;
 		const chosen = tags[index];
 		const next = [chosen, ...tags.slice(0, index), ...tags.slice(index + 1)];
-		setError(null);
+		if (!draft.trim()) {
+			setError(null);
+			onRejectedDraftChange?.(false);
+		}
 		setTags(next);
 	}
 
-	function commitDraft(): void {
+	function commitDraft(): TagInputCommitResult {
 		const raw = draft;
-		setDraft("");
-		addManyTokens(splitTokens(raw));
+		if (!raw.trim()) {
+			setDraft("");
+			return { value: tags.slice(), rejected: [], error: null };
+		}
+		const result = addManyTokens(splitTokens(raw));
+		setDraft(result.rejected.join(", "));
+		return result;
 	}
+
+	useImperativeHandle(ref, () => ({ commitDraft }));
 
 	return (
 		<div
@@ -309,6 +357,7 @@ export function TagInput({
 										setActiveSuggestionIndex(0);
 										setOpen(true);
 										if (error) setError(null);
+										if (error) onRejectedDraftChange?.(false);
 									}}
 									onFocus={() => {
 										setOpen(true);
@@ -366,8 +415,8 @@ export function TagInput({
 										const tokens = splitTokens(text);
 										if (tokens.length >= 2) {
 											event.preventDefault();
-											addManyTokens(tokens);
-											setDraft("");
+											const result = addManyTokens(tokens);
+											setDraft(result.rejected.join(", "));
 										}
 									}}
 								/>
@@ -456,3 +505,7 @@ export function TagInput({
 		</div>
 	);
 }
+
+export const TagInput = forwardRef<TagInputHandle, TagInputProps>(TagInputImpl);
+
+TagInput.displayName = "TagInput";

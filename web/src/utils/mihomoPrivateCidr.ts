@@ -22,6 +22,12 @@ function isPrivateIpv4(octets: number[], prefix: number): boolean {
 	);
 }
 
+export function normalizeMihomoPrivateCidr(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.includes("/")) return trimmed;
+	return `${trimmed}${trimmed.includes(":") ? "/128" : "/32"}`;
+}
+
 function firstIpv6Hextet(value: string): number | null {
 	if (value.includes("%")) return null;
 	try {
@@ -41,7 +47,8 @@ function firstIpv6Hextet(value: string): number | null {
  * The API remains authoritative and normalizes the network when it saves it.
  */
 export function validateMihomoPrivateCidr(value: string): string | null {
-	const [address, rawPrefix, ...rest] = value.trim().split("/");
+	const [address, rawPrefix, ...rest] =
+		normalizeMihomoPrivateCidr(value).split("/");
 	if (!address || !rawPrefix || rest.length > 0) {
 		return "CIDR must use address/prefix notation.";
 	}

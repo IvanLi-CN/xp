@@ -613,6 +613,46 @@ describe("<NodeDetailsPage />", () => {
 		).toContain("border");
 	});
 
+	it("normalizes a bare private IP when Save override commits the draft", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: "192.168.50.7" },
+		});
+		fireEvent.click(await screenByRole("button", "Save override"));
+
+		await waitFor(() => {
+			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
+				"admintoken",
+				fixtureCatalog.nodeId.fixture134(),
+				["192.168.50.7/32"],
+			);
+		});
+	});
+
+	it("keeps a rejected draft and blocks Save override", async () => {
+		setupMocks();
+		renderPage();
+
+		fireEvent.click(await screenByRole("tab", "Mihomo resources"));
+		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
+		fireEvent.change(cidrInput, {
+			target: { value: "203.0.113.30" },
+		});
+		fireEvent.keyDown(cidrInput, { key: "Enter" });
+
+		const saveButton = await screenByRole("button", "Save override");
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"Only RFC1918 IPv4 CIDRs or IPv6 ULA CIDRs",
+		);
+		expect(cidrInput).toHaveValue("203.0.113.30");
+		expect(saveButton).toBeDisabled();
+		expect(putAdminNodeMihomoResourcePolicy).not.toHaveBeenCalled();
+	});
+
 	it("rejects invalid Mihomo CIDRs and accepts IPv6 ULA tags", async () => {
 		setupMocks();
 		renderPage();
@@ -620,11 +660,11 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("tab", "Node settings"));
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		fireEvent.change(cidrInput, {
-			target: { value: fixtureCatalog.address.privateCidr().replace("/", "") },
+			target: { value: "192.168.31" },
 		});
 		fireEvent.keyDown(cidrInput, { key: "Enter" });
 		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"CIDR must use address/prefix notation.",
+			"CIDR address must be a valid IPv4 or IPv6 literal.",
 		);
 
 		fireEvent.change(cidrInput, {
