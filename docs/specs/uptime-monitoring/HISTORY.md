@@ -8,6 +8,8 @@
 - v1 复用 Cluster History Repository 的 stream、cursor、ready、quality 与 retention 合同。
 - 新增 HTTP API、`service_monitor_observation-v1` 与 SQLite uptime schema。
 - 不改变既有 endpoint probe 和节点局部历史行为。
+- Observer Policy 兼容旧 `observer_node_ids`，并以独立的短期 Draft Cluster Test
+  记录创建前的集群证据；草稿结果不进入 Observation 或长期历史。
 
 ## Replacements / Background
 

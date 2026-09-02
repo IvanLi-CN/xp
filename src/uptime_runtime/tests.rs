@@ -69,7 +69,10 @@ async fn coalesces_skipped_slots_into_a_persisted_capture_gap() {
             port: 443,
         },
         interval_seconds: 60,
-        observer_node_ids: Some(vec!["node".to_owned()]),
+        observer_policy: crate::uptime_monitor::ObserverPolicy {
+            mode: crate::uptime_monitor::ObserverPolicyMode::Include,
+            node_ids: vec!["node".to_owned()],
+        },
         lifecycle: MonitorLifecycle::Active,
         revision: 1,
         revision_effective_at_unix_seconds: 60,
@@ -141,7 +144,10 @@ async fn suspends_capture_when_the_gap_backlog_reaches_its_high_watermark() {
             port: 443,
         },
         interval_seconds: 60,
-        observer_node_ids: Some(vec!["node".to_owned()]),
+        observer_policy: crate::uptime_monitor::ObserverPolicy {
+            mode: crate::uptime_monitor::ObserverPolicyMode::Include,
+            node_ids: vec!["node".to_owned()],
+        },
         lifecycle: MonitorLifecycle::Active,
         revision: 1,
         revision_effective_at_unix_seconds: 60,
@@ -299,6 +305,67 @@ async fn applies_ad_hoc_limit_per_token_fingerprint() {
     assert!(handle.acquire_ad_hoc(60, "token-b").await.is_some());
 }
 
+#[tokio::test]
+async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
+    let temporary = TempDir::new().unwrap();
+    let handle = UptimeHandle::load(temporary.path()).unwrap();
+    let run = DraftClusterTest {
+        run_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
+        target: MonitorTarget::Ping {
+            host: xp_test_fixtures::primary_host().to_owned(),
+        },
+        observer_policy: crate::uptime_monitor::ObserverPolicy::default(),
+        observer_node_ids: vec![xp_test_fixtures::primary_node_id().to_owned()],
+        coordinator_node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+        state: DraftClusterTestState::Queued,
+        created_at_unix_seconds: 100,
+        expires_at_unix_seconds: 200,
+        observers: vec![DraftClusterTestObserver {
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            state: DraftClusterTestState::Queued,
+            latency_ms: None,
+            status_code: None,
+            error: None,
+            started_at_unix_seconds: None,
+            completed_at_unix_seconds: None,
+        }],
+    };
+    handle.create_draft_test(&run).await.unwrap();
+    handle
+        .update_draft_test_observer(
+            xp_test_fixtures::primary_probe_run_id(),
+            DraftClusterTestObserverUpdate {
+                node_id: xp_test_fixtures::primary_node_id().to_owned(),
+                state: DraftClusterTestState::Succeeded,
+                latency_ms: Some(xp_test_fixtures::number_value42()),
+                status_code: Some(200),
+                error: None,
+                observed_at_unix_seconds: 120,
+            },
+        )
+        .await
+        .unwrap();
+    let completed = handle
+        .draft_test(xp_test_fixtures::primary_probe_run_id(), 120)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(completed.state, DraftClusterTestState::Succeeded));
+    assert!(
+        handle
+            .observations(xp_test_fixtures::primary_probe_run_id(), 0, 300, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let expired = handle
+        .draft_test(xp_test_fixtures::primary_probe_run_id(), 200)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(expired.state, DraftClusterTestState::Interrupted));
+}
+
 #[test]
 fn scheduled_monitor_requires_exact_slot_and_active_lifecycle() {
     let monitor = ServiceMonitor {
@@ -309,7 +376,10 @@ fn scheduled_monitor_requires_exact_slot_and_active_lifecycle() {
             port: 443,
         },
         interval_seconds: 60,
-        observer_node_ids: Some(vec!["node".to_owned()]),
+        observer_policy: crate::uptime_monitor::ObserverPolicy {
+            mode: crate::uptime_monitor::ObserverPolicyMode::Include,
+            node_ids: vec!["node".to_owned()],
+        },
         lifecycle: MonitorLifecycle::Active,
         revision: 1,
         revision_effective_at_unix_seconds: 60,

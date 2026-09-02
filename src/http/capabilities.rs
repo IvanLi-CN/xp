@@ -47,6 +47,8 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.users",
         "admin.endpoints",
         "admin.service-monitors",
+        "admin.service-monitor-observer-policy-v1",
+        "admin.service-monitor-draft-tests-v1",
         "admin.service-monitor-http-v1",
         "admin.service-monitor-tcp-v1",
         "admin.endpoint-mihomo-smux",

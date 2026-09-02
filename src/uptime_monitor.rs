@@ -2,7 +2,9 @@ use std::{collections::BTreeMap, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 
+mod observer_policy;
 mod ranges;
+pub use observer_policy::{ObserverPolicy, ObserverPolicyMode};
 pub use ranges::ExpectedSlotRange;
 
 pub const DEFAULT_INTERVAL_SECONDS: u32 = 60;
@@ -139,7 +141,7 @@ pub enum MonitorLifecycle {
     Deleted,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ServiceMonitor {
     pub monitor_id: String,
     pub name: String,
@@ -147,7 +149,7 @@ pub struct ServiceMonitor {
     #[serde(default = "default_interval_seconds")]
     pub interval_seconds: u32,
     #[serde(default)]
-    pub observer_node_ids: Option<Vec<String>>,
+    pub observer_policy: ObserverPolicy,
     #[serde(default)]
     pub lifecycle: MonitorLifecycle,
     #[serde(default = "default_revision")]
@@ -170,14 +172,7 @@ impl ServiceMonitor {
             return Err(MonitorValidationError::InvalidRevision);
         }
         self.target.validate()?;
-        if let Some(observer_node_ids) = &self.observer_node_ids {
-            let Some(normalized) = normalized_observer_set(observer_node_ids) else {
-                return Err(MonitorValidationError::InvalidObserverSet);
-            };
-            if normalized.len() != observer_node_ids.len() {
-                return Err(MonitorValidationError::InvalidObserverSet);
-            }
-        }
+        self.observer_policy.validate()?;
         Ok(())
     }
 
@@ -199,6 +194,7 @@ pub enum MonitorValidationError {
     InvalidInterval,
     InvalidRevision,
     InvalidObserverSet,
+    EmptyObserverAllowList,
     InvalidUrl,
     InvalidScheme,
     InvalidHost,
@@ -216,6 +212,7 @@ impl std::fmt::Display for MonitorValidationError {
             Self::InvalidInterval => "interval_seconds must be 60, 300, 900, or 3600",
             Self::InvalidRevision => "revision must be greater than zero",
             Self::InvalidObserverSet => "observer_node_ids cannot contain an empty node id",
+            Self::EmptyObserverAllowList => "include observer policy requires at least one node id",
             Self::InvalidUrl => "target URL is invalid",
             Self::InvalidScheme => "target URL does not match the monitor method",
             Self::InvalidHost => "target host is invalid",
@@ -822,20 +819,41 @@ mod tests {
                 host: xp_test_fixtures::primary_host().to_owned(),
             },
             interval_seconds: 60,
-            observer_node_ids: Some(Vec::new()),
+            observer_policy: ObserverPolicy::default(),
             lifecycle: MonitorLifecycle::Active,
             revision: 1,
             revision_effective_at_unix_seconds: 60,
         };
+        monitor.observer_policy.mode = ObserverPolicyMode::Include;
+        assert_eq!(
+            monitor.validate(),
+            Err(MonitorValidationError::EmptyObserverAllowList)
+        );
+        monitor.observer_policy.node_ids = vec!["node-a".to_owned(), "node-a".to_owned()];
         assert_eq!(
             monitor.validate(),
             Err(MonitorValidationError::InvalidObserverSet)
         );
-        monitor.observer_node_ids = Some(vec!["node-a".to_owned(), "node-a".to_owned()]);
-        assert_eq!(
-            monitor.validate(),
-            Err(MonitorValidationError::InvalidObserverSet)
-        );
+    }
+
+    #[test]
+    fn observer_policy_resolves_empty_exclude_to_current_nodes() {
+        let all = vec![
+            "tokyo".to_owned(),
+            "singapore".to_owned(),
+            "frankfurt".to_owned(),
+        ];
+        assert_eq!(ObserverPolicy::default().resolve(&all), all);
+        let excluded = ObserverPolicy {
+            mode: ObserverPolicyMode::Exclude,
+            node_ids: vec!["singapore".to_owned(), "departed".to_owned()],
+        };
+        assert_eq!(excluded.resolve(&all), vec!["tokyo", "frankfurt"]);
+        let included = ObserverPolicy {
+            mode: ObserverPolicyMode::Include,
+            node_ids: vec!["departed".to_owned(), "tokyo".to_owned()],
+        };
+        assert_eq!(included.resolve(&all), vec!["departed", "tokyo"]);
     }
 
     #[test]

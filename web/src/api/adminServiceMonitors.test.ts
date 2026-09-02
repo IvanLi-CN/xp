@@ -28,7 +28,7 @@ describe("service monitor API schema", () => {
 				name: "Public API health",
 				target: { https: { url: "https://status.example.com" } },
 				interval_seconds: 60,
-				observer_node_ids: null,
+				observer_policy: { mode: "exclude", node_ids: [] },
 				lifecycle: "active",
 				revision: 1,
 				revision_effective_at_unix_seconds: 60,

@@ -19,7 +19,7 @@ type Monitor = {
 		  }
 		| { kind: "tcping"; host: string; port: number };
 	interval_seconds: number;
-	observer_node_ids: string[] | null;
+	observer_policy: { mode: "exclude" | "include"; node_ids: string[] };
 	lifecycle: "active" | "paused" | "deleted";
 	revision: number;
 	revision_effective_at_unix_seconds: number;
@@ -131,9 +131,43 @@ async function setupServiceMonitorMocks(page: Page) {
 			capabilities: [
 				...apiCapabilitiesFixture.capabilities,
 				"admin.service-monitors",
+				"admin.service-monitor-observer-policy-v1",
+				"admin.service-monitor-draft-tests-v1",
 			],
 		}),
 	);
+	let draftTest: Record<string, unknown> | null = null;
+	await page.route("**/api/admin/monitor-draft-tests**", async (route) => {
+		const request = route.request();
+		if (request.method() === "POST") {
+			draftTest = {
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				target: JSON.parse(request.postData() ?? "{}").target,
+				observer_policy: { mode: "exclude", node_ids: [] },
+				observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
+				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
+				state: "succeeded",
+				created_at_unix_seconds: now,
+				expires_at_unix_seconds: now + 900,
+				observers: [
+					{
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						state: "succeeded",
+						latency_ms: fixtureCatalog.number.value42(),
+						status_code: 200,
+					},
+				],
+			};
+			return json(route, draftTest, 202);
+		}
+		return draftTest
+			? json(route, draftTest)
+			: json(
+					route,
+					{ error: { code: "not_found", message: "not found", details: {} } },
+					404,
+				);
+	});
 
 	let monitor: Monitor = {
 		monitor_id: monitorId,
@@ -145,7 +179,7 @@ async function setupServiceMonitorMocks(page: Page) {
 			accepted_statuses: [{ start: 200, end: 399 }],
 		},
 		interval_seconds: 60,
-		observer_node_ids: null,
+		observer_policy: { mode: "exclude", node_ids: [] },
 		lifecycle: "active",
 		revision: 3,
 		revision_effective_at_unix_seconds: now - 60,
@@ -287,6 +321,44 @@ test("keeps the TCPING editor usable on mobile", async ({ page }) => {
 	await page.getByRole("combobox", { name: "Method", exact: true }).click();
 	await page.getByRole("option", { name: "TCPING" }).click();
 	await expect(page.getByLabel("TCP port")).toBeVisible();
+	const emptyResultLayout = await page.evaluate(() => {
+		const section = document
+			.querySelector("#monitor-cluster-test-heading")
+			?.closest("section");
+		const table = section?.querySelector<HTMLTableElement>("table");
+		const viewport = table?.parentElement;
+		if (!table || !viewport) {
+			throw new Error("draft result table is not mounted");
+		}
+		return {
+			clientWidth: viewport.clientWidth,
+			scrollWidth: viewport.scrollWidth,
+		};
+	});
+	expect(emptyResultLayout.scrollWidth).toBeLessThanOrEqual(
+		emptyResultLayout.clientWidth,
+	);
+	await page.getByRole("button", { name: "Run cluster test" }).click();
+	await expect(
+		page.getByText("1 / 1 observers reached the target"),
+	).toBeVisible();
+	const populatedResultLayout = await page.evaluate(() => {
+		const section = document
+			.querySelector("#monitor-cluster-test-heading")
+			?.closest("section");
+		const table = section?.querySelector<HTMLTableElement>("table");
+		const viewport = table?.parentElement;
+		if (!table || !viewport) {
+			throw new Error("populated draft result table is not mounted");
+		}
+		return {
+			clientWidth: viewport.clientWidth,
+			scrollWidth: viewport.scrollWidth,
+		};
+	});
+	expect(populatedResultLayout.scrollWidth).toBeLessThanOrEqual(
+		populatedResultLayout.clientWidth,
+	);
 
 	const viewport = await page.evaluate(() => ({
 		clientWidth: document.documentElement.clientWidth,
@@ -295,18 +367,119 @@ test("keeps the TCPING editor usable on mobile", async ({ page }) => {
 	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
 });
 
-test("runs the backend cluster test from the B editor workspace", async ({
-	page,
-}) => {
+test("inverts observer choices when changing policy mode", async ({ page }) => {
 	await setupServiceMonitorMocks(page);
 	await page.goto("/monitors/new");
 
-	await expect(
-		page.getByRole("heading", { name: "Monitor configuration" }),
-	).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "Cluster test results" }),
-	).toBeVisible();
+	const observer = page.getByRole("checkbox");
+	await expect(observer).not.toBeChecked();
+	await page.getByRole("tab", { name: "Include only" }).click();
+	await expect(observer).toBeChecked();
+	await page.getByRole("tab", { name: "Exclude nodes" }).click();
+	await expect(observer).not.toBeChecked();
+});
+
+test("runs the backend cluster test from the B editor workspace", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1536, height: 1000 });
+	await setupServiceMonitorMocks(page);
+	await page.goto("/monitors/new");
+
+	const configuration = page.getByRole("heading", {
+		name: "Monitor configuration",
+	});
+	const results = page.getByRole("heading", { name: "Cluster test results" });
+	await expect(configuration).toBeVisible();
+	await expect(results).toBeVisible();
+	const columns = await page.evaluate(() => {
+		const configurationHeading = document.querySelector(
+			"#monitor-configuration-heading",
+		);
+		const resultsHeading = document.querySelector(
+			"#monitor-cluster-test-heading",
+		);
+		if (!configurationHeading || !resultsHeading) {
+			throw new Error("editor columns are not mounted");
+		}
+		return {
+			configurationLeft: configurationHeading.getBoundingClientRect().left,
+			resultsLeft: resultsHeading.getBoundingClientRect().left,
+		};
+	});
+	expect(columns.resultsLeft).toBeGreaterThan(columns.configurationLeft);
+	const policyTabs = page.getByRole("tablist");
+	await expect(policyTabs).toBeVisible();
+	const policyLayout = await page.evaluate(() => {
+		const tablist = document.querySelector('[role="tablist"]');
+		const configuration = document
+			.querySelector("#monitor-configuration-heading")
+			?.closest("section");
+		if (!tablist || !configuration) {
+			throw new Error("observer policy tabs are not mounted");
+		}
+		return {
+			tablistWidth: tablist.getBoundingClientRect().width,
+			configurationWidth: configuration.getBoundingClientRect().width,
+		};
+	});
+	expect(policyLayout.tablistWidth).toBeLessThan(
+		policyLayout.configurationWidth,
+	);
+	const compactPolicyLayout = await page.evaluate(() => {
+		const heading = document.querySelector("#monitor-observer-policy-heading");
+		const tablist = document.querySelector('[role="tablist"]');
+		const nodes = heading?.closest("section")?.querySelector("fieldset");
+		if (!heading || !tablist || !nodes) {
+			throw new Error("compact observer policy controls are not mounted");
+		}
+		return {
+			headingTop: heading.getBoundingClientRect().top,
+			tablistTop: tablist.getBoundingClientRect().top,
+			tablistRight: tablist.getBoundingClientRect().right,
+			nodesTop: nodes.getBoundingClientRect().top,
+			sectionRight: heading.closest("section")?.getBoundingClientRect().right,
+		};
+	});
+	expect(
+		Math.abs(compactPolicyLayout.headingTop - compactPolicyLayout.tablistTop),
+	).toBeLessThanOrEqual(8);
+	expect(
+		compactPolicyLayout.nodesTop - compactPolicyLayout.headingTop,
+	).toBeLessThanOrEqual(80);
+	expect(compactPolicyLayout.sectionRight).toBeDefined();
+	expect(
+		Math.abs(
+			compactPolicyLayout.tablistRight -
+				(compactPolicyLayout.sectionRight ?? 0),
+		),
+	).toBeLessThanOrEqual(2);
+	const actionLayout = await page.evaluate(() => {
+		const create = document.querySelector<HTMLButtonElement>(
+			'button[type="submit"]',
+		);
+		const actions = create?.parentElement;
+		const form = create?.closest("form");
+		if (!create || !actions || !form) {
+			throw new Error("monitor editor actions are not mounted");
+		}
+		return {
+			actionsLeft: actions.getBoundingClientRect().left,
+			actionsRight: actions.getBoundingClientRect().right,
+			createRight: create.getBoundingClientRect().right,
+			formLeft: form.getBoundingClientRect().left,
+			formRight: form.getBoundingClientRect().right,
+		};
+	});
+	expect(
+		Math.abs(actionLayout.actionsLeft - actionLayout.formLeft),
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(actionLayout.actionsRight - actionLayout.formRight),
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(actionLayout.createRight - actionLayout.formRight),
+	).toBeLessThanOrEqual(2);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(

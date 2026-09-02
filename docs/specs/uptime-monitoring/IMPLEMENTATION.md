@@ -9,6 +9,8 @@
 - `src/state.rs` 把 Monitor 写入 DesiredState/Raft；schema migration 保持旧
   state 可启动。创建和编辑在下一个 UTC Slot 生效，pause/resume/delete 都通过
   revision-safe lifecycle command 收敛。
+- `ObserverPolicy` 以兼容反序列化读取旧 `observer_node_ids`：null 迁移为空
+  exclude，非空数组迁移为 include；新快照只写 policy，离开集群 ID 不被清理。
 - `src/http/service_monitors.rs` 在 Leader 写路径执行 300
   `monitor x observer` slots/min admission；超额返回
   `observation_budget_exceeded`，不减少 Observer Set。
@@ -27,6 +29,9 @@
   `unsupported`。
 - ad-hoc run 受每 token 每分钟 10 次、每 Observer 4 个并发限制；它独立于
   scheduled idempotency，且不进入 availability/coverage 分母。
+- Draft Cluster Test 使用 `uptime_draft_tests` 独立表和 JSON runtime payload，
+  复用 token/concurrency limiter，以 0--750ms 确定性偏移并行调用各 Observer；
+  结果只保留 15 分钟，永不进入 observation capture 或 repository stream。
 
 ## Persistence and query
 
@@ -49,7 +54,8 @@
 ## API and Web
 
 - 后端提供 monitor list/create/get/patch/delete、status、history、run 和 run status
-  routes；定义、fixture 和 Web Zod schema 共同使用 internally-tagged `target.kind`
+  routes，以及 `monitor-draft-tests` create/status routes；定义、fixture 和 Web Zod
+  schema 共同使用 internally-tagged `target.kind`
   wire shape。每个持久化 Observation 都带有 UTC Slot 的 Observer Set 快照；Repository
   status 读取按 observer 保留的最新 Observation 供矩阵展示，但总状态仅聚合最新、同 revision
   且完整的 Observer Set Slot；缺失、不同 Slot 或不同快照均返回 `unknown`/`partial`。历史分母
@@ -60,6 +66,9 @@
 - 详情页展示 capture/quality 横幅、状态、availability/coverage/latency 图、
   Observer 矩阵和 ad-hoc 操作。远端 ICMP capability 未知时显示 `Unknown`，不会把
   本机自检结果投射到远端节点。
+- 正式编辑器仅在容器宽度至少 68rem 且配置栏至少 26rem 时启用 B 双栏；中等桌面
+  和移动端使用独立单栏页面。Observer Policy 使用 Exclude nodes / Include only
+  分段控件，结果表固定表头并内部滚动；创建按钮不受测试状态影响。
 
 ## Deployment and migration
 

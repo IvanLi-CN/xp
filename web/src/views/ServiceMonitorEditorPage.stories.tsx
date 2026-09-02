@@ -42,7 +42,8 @@ export const NewMonitor: Story = {
 		).toBeInTheDocument();
 		await expect(
 			await canvas.findByText(
-				"Target evidence is the primary decision surface before creation.",
+				"Optional evidence from a staggered test across the frozen observer set. " +
+					"It never blocks creation.",
 			),
 		).toBeInTheDocument();
 		await userEvent.click(

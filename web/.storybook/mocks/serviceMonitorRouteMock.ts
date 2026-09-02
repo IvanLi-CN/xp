@@ -1,4 +1,5 @@
 import type { ServiceMonitorSummary } from "../../src/api/adminServiceMonitors";
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { clone, errorResponse, jsonResponse } from "./mockResponses";
 import {
 	monitorDefinition,
@@ -20,6 +21,51 @@ export function handleServiceMonitorMockRequest(
 	method: string,
 	path: string,
 ): Response | undefined {
+	if (path === "/api/admin/monitor-draft-tests" && method === "POST") {
+		const monitor = serviceMonitors[0];
+		return jsonResponse(
+			{
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				target: monitor?.target,
+				observer_policy: { mode: "exclude", node_ids: [] },
+				observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
+				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
+				state: "succeeded",
+				created_at_unix_seconds: 1_700_000_000,
+				expires_at_unix_seconds: 1_700_000_900,
+				observers: [
+					{
+						node_id: fixtureCatalog.identifier.nodePrimary(),
+						state: "succeeded",
+						latency_ms: fixtureCatalog.number.value42(),
+						status_code: 200,
+					},
+				],
+			},
+			{ status: 202 },
+		);
+	}
+	if (path.startsWith("/api/admin/monitor-draft-tests/") && method === "GET") {
+		const monitor = serviceMonitors[0];
+		return jsonResponse({
+			run_id: fixtureCatalog.identifier.probeRunPrimary(),
+			target: monitor?.target,
+			observer_policy: { mode: "exclude", node_ids: [] },
+			observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
+			coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
+			state: "succeeded",
+			created_at_unix_seconds: 1_700_000_000,
+			expires_at_unix_seconds: 1_700_000_900,
+			observers: [
+				{
+					node_id: fixtureCatalog.identifier.nodePrimary(),
+					state: "succeeded",
+					latency_ms: fixtureCatalog.number.value42(),
+					status_code: 200,
+				},
+			],
+		});
+	}
 	if (path === "/api/admin/monitors" && method === "GET") {
 		return jsonResponse({ items: clone(serviceMonitors) });
 	}
