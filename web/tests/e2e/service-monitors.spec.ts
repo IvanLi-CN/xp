@@ -386,7 +386,9 @@ test("runs the backend cluster test from the B editor workspace", async ({
 		return {
 			headingTop: heading.getBoundingClientRect().top,
 			tablistTop: tablist.getBoundingClientRect().top,
+			tablistRight: tablist.getBoundingClientRect().right,
 			nodesTop: nodes.getBoundingClientRect().top,
+			sectionRight: heading.closest("section")?.getBoundingClientRect().right,
 		};
 	});
 	expect(
@@ -395,6 +397,13 @@ test("runs the backend cluster test from the B editor workspace", async ({
 	expect(
 		compactPolicyLayout.nodesTop - compactPolicyLayout.headingTop,
 	).toBeLessThanOrEqual(80);
+	expect(compactPolicyLayout.sectionRight).toBeDefined();
+	expect(
+		Math.abs(
+			compactPolicyLayout.tablistRight -
+				(compactPolicyLayout.sectionRight ?? 0),
+		),
+	).toBeLessThanOrEqual(2);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(

@@ -489,6 +489,7 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 									Observers
 								</h2>
 								<Tabs
+									className="ml-auto"
 									aria-label="Observer policy"
 									value={form.observerPolicy.mode}
 									onValueChange={(value) =>
