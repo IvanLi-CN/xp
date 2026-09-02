@@ -7,6 +7,11 @@ import type {
 } from "../../src/api/adminNodes";
 import type { AdminQuotaPolicyNodePolicy } from "../../src/api/adminQuotaPolicyNodePolicy";
 import type { AdminRealityDomain } from "../../src/api/adminRealityDomains";
+import type {
+	ResourceHistoryResponse,
+	ResourceRole,
+	ResourceSnapshot,
+} from "../../src/api/adminResources";
 import type { ServiceMonitorSummary } from "../../src/api/adminServiceMonitors";
 import type { AdminUserAccessItem } from "../../src/api/adminUserAccess";
 import type { AdminUserNodeQuota } from "../../src/api/adminUserNodeQuotas";
@@ -52,6 +57,15 @@ export type MockStateSeed = {
 		AdminNodeMihomoResourcePolicy
 	>;
 	nodeTcpConnectionsByNodeId: Record<string, MockWindowedNodeTcpConnections>;
+	nodeResourcesByNodeId?: Record<string, ResourceSnapshot>;
+	nodeResourceHistoryByNodeId?: Record<
+		string,
+		Record<string, ResourceHistoryResponse>
+	>;
+	nodeResourceRuntimeHistoryByNodeId?: Record<
+		string,
+		Partial<Record<ResourceRole, Record<string, ResourceHistoryResponse>>>
+	>;
 	nodeHistoryByNodeId: Record<string, NodeHistorySnapshot>;
 	userIpUsageByUserId: Record<string, MockWindowedUserIpUsage>;
 	nodeTrafficByNodeId: Record<string, MockWindowedNodeTraffic>;

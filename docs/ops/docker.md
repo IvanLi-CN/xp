@@ -80,6 +80,8 @@ They persist:
 - cluster metadata / raft state / certificates
 - the local `history.sqlite3` repository replica database, including its WAL and incremental
   release state
+- the local `resource_metrics.sqlite3` WAL store containing bounded resource Rollups, capture
+  gaps, policy and alert state
 - VLESS HTTPS canary ACME account key / cert / key under `/var/lib/xp/data/vless-https-canary`
 - `cloudflared` credentials and config
 - Cloudflare Tunnel settings (`settings.json`)

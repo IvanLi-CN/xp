@@ -595,6 +595,23 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 result: apply_result,
                             }
                         }
+                        Err(crate::state::StoreError::ResourcePolicyConflict {
+                            current_revision,
+                        }) => ClientResponse::Err {
+                            status: 409,
+                            code: "revision_conflict".to_string(),
+                            message: format!(
+                                "resource policy revision is stale \
+                                     (current revision {current_revision})"
+                            ),
+                        },
+                        Err(crate::state::StoreError::ResourcePolicyInvalid { message }) => {
+                            ClientResponse::Err {
+                                status: 400,
+                                code: "invalid_request".to_string(),
+                                message: message.to_string(),
+                            }
+                        }
                         Err(crate::state::StoreError::Domain(domain)) => {
                             let code = domain.code();
                             let status = match code {

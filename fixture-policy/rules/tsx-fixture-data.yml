@@ -32,6 +32,7 @@ rule:
           any:
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR()
             - pattern: fixtureCatalog.$GROUP.$ACCESSOR() as $TYPE
+            - pattern: catalogTimestampOffset($$$)
             - pattern: >-
                 $CONDITION ? fixtureCatalog.$GROUP.$ACCESSOR() :
                 fixtureCatalog.$OTHER_GROUP.$OTHER_ACCESSOR()

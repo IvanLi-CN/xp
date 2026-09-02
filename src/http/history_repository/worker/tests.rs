@@ -289,6 +289,10 @@ fn peer_backfill_streams_are_independent_from_the_live_source_cursor_chain() {
         super::peer_backfill_stream_for_schema("traffic.v1", "node-a").expect("backfill stream"),
         super::source_stream_for_schema("traffic.v1").expect("live stream")
     );
+    assert_eq!(
+        super::source_stream_for_schema(crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA),
+        Some(crate::resource_monitoring::RESOURCE_HISTORY_STREAM)
+    );
 }
 
 #[test]

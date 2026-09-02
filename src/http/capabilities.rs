@@ -55,6 +55,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.endpoint-vless-xhttp",
         "admin.endpoint-conditional-update",
         "admin.alerts",
+        "admin.resource-monitoring",
         "admin.config",
         "admin.quota-policy",
         "admin.status-events",

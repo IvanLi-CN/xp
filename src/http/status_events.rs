@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     convert::Infallible,
     future::Future,
     sync::{Arc, Mutex as StdMutex},
@@ -21,6 +21,10 @@ use super::{
 pub(super) enum StatusEventUpdate {
     Snapshot(String),
     SnapshotError(AdminStatusSnapshotError),
+    ResourceAlert {
+        event_type: &'static str,
+        alert: Box<super::AlertItem>,
+    },
 }
 
 impl StatusEventUpdate {
@@ -28,6 +32,7 @@ impl StatusEventUpdate {
         match self {
             Self::Snapshot(snapshot) => Event::default().event("snapshot").data(snapshot),
             Self::SnapshotError(error) => sse_json_event("snapshot_error", &error),
+            Self::ResourceAlert { event_type, alert } => sse_json_event(event_type, &alert),
         }
     }
 }
@@ -243,6 +248,7 @@ impl StatusEventsHub {
     {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut last_snapshot_fingerprint: Option<String> = None;
+        let mut last_resource_alerts: Option<BTreeMap<String, super::AlertItem>> = None;
 
         loop {
             tokio::select! {
@@ -254,6 +260,7 @@ impl StatusEventsHub {
                     self.publish_built_snapshot(
                         build_snapshot().await,
                         &mut last_snapshot_fingerprint,
+                        &mut last_resource_alerts,
                     );
                 }
                 _ = self.shutdown.notified() => {
@@ -264,6 +271,7 @@ impl StatusEventsHub {
                     self.publish_built_snapshot(
                         build_snapshot().await,
                         &mut last_snapshot_fingerprint,
+                        &mut last_resource_alerts,
                     );
                 }
             }
@@ -274,9 +282,14 @@ impl StatusEventsHub {
         &self,
         result: Result<super::AdminStatusSnapshot, String>,
         last_snapshot_fingerprint: &mut Option<String>,
+        last_resource_alerts: &mut Option<BTreeMap<String, super::AlertItem>>,
     ) {
         match result {
-            Ok(snapshot) => self.publish_serialized_snapshot(snapshot, last_snapshot_fingerprint),
+            Ok(snapshot) => self.publish_serialized_snapshot(
+                snapshot,
+                last_snapshot_fingerprint,
+                last_resource_alerts,
+            ),
             Err(message) => self.publish_error(message, last_snapshot_fingerprint),
         }
     }
@@ -285,7 +298,9 @@ impl StatusEventsHub {
         &self,
         snapshot: super::AdminStatusSnapshot,
         last_snapshot_fingerprint: &mut Option<String>,
+        last_resource_alerts: &mut Option<BTreeMap<String, super::AlertItem>>,
     ) {
+        let resource_events = resource_alert_events(last_resource_alerts, &snapshot.alerts);
         let snapshot_json = match serde_json::to_string(&snapshot) {
             Ok(snapshot_json) => snapshot_json,
             Err(error) => {
@@ -310,6 +325,9 @@ impl StatusEventsHub {
                 format!("serialize status snapshot: {error}"),
                 last_snapshot_fingerprint,
             ),
+        }
+        for event in resource_events {
+            self.publish_update_without_replay(event);
         }
     }
 
@@ -356,6 +374,66 @@ impl StatusEventsHub {
         let _ = self.sender.send(update);
         true
     }
+
+    fn publish_update_without_replay(&self, update: StatusEventUpdate) -> bool {
+        let lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lifecycle.subscribers == 0 {
+            return false;
+        }
+        let _ = self.sender.send(update);
+        true
+    }
+}
+
+fn resource_alert_key(alert: &super::AlertItem) -> Option<String> {
+    alert.resource_node_id.as_ref().map(|node_id| {
+        format!(
+            "{}:{}:{}",
+            node_id,
+            alert.scope.as_deref().unwrap_or_default(),
+            alert.metric.as_deref().unwrap_or_default()
+        )
+    })
+}
+
+fn resource_alert_events(
+    previous: &mut Option<BTreeMap<String, super::AlertItem>>,
+    alerts: &super::AlertsResponse,
+) -> Vec<StatusEventUpdate> {
+    let current = alerts
+        .items
+        .iter()
+        .filter_map(|alert| resource_alert_key(alert).map(|key| (key, alert.clone())))
+        .collect::<BTreeMap<_, _>>();
+    let old = previous.replace(current.clone()).unwrap_or_default();
+    let mut events = Vec::new();
+    for (key, alert) in &current {
+        let event_type = match old.get(key) {
+            None => Some("resource_alert_opened"),
+            Some(previous) if previous.severity.as_deref() != alert.severity.as_deref() => {
+                Some("resource_alert_escalated")
+            }
+            Some(_) => None,
+        };
+        if let Some(event_type) = event_type {
+            events.push(StatusEventUpdate::ResourceAlert {
+                event_type,
+                alert: Box::new(alert.clone()),
+            });
+        }
+    }
+    for (key, alert) in old {
+        if !current.contains_key(&key) {
+            events.push(StatusEventUpdate::ResourceAlert {
+                event_type: "resource_alert_recovered",
+                alert: Box::new(alert),
+            });
+        }
+    }
+    events
 }
 
 pub(super) fn stream_events(
@@ -585,6 +663,68 @@ mod tests {
         drop(subscriber);
         assert!(hub.stop_if_inactive());
         assert_eq!(hub.lifecycle_for_test(), (0, false));
+    }
+
+    #[tokio::test]
+    async fn resource_alert_events_emit_open_and_recovery_once() {
+        let alert = super::super::AlertItem {
+            alert_type: "resource_threshold".to_string(),
+            membership_key: String::new(),
+            user_id: String::new(),
+            endpoint_id: xp_test_fixtures::label_empty().to_owned(),
+            owner_node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            quota_banned: false,
+            quota_banned_at: None,
+            message: "resource threshold".to_string(),
+            action_hint: "inspect node resources".to_string(),
+            node_id: Some(xp_test_fixtures::primary_node_id().to_owned()),
+            resource_node_id: Some(xp_test_fixtures::primary_node_id().to_owned()),
+            scope: Some("domain".to_string()),
+            metric: Some("cpu_busy_percent".to_string()),
+            severity: Some("warning".to_string()),
+            opened_at: Some(xp_test_fixtures::timestamp_at20260901_t000000_z().to_owned()),
+            latest_bucket_start_unix_seconds: Some(60),
+        };
+        let mut previous = None;
+        let opened = resource_alert_events(
+            &mut previous,
+            &super::super::AlertsResponse {
+                partial: false,
+                unreachable_nodes: Vec::new(),
+                items: vec![alert.clone()],
+            },
+        );
+        assert!(matches!(
+            opened.as_slice(),
+            [StatusEventUpdate::ResourceAlert {
+                event_type: "resource_alert_opened",
+                ..
+            }]
+        ));
+        let repeated = resource_alert_events(
+            &mut previous,
+            &super::super::AlertsResponse {
+                partial: false,
+                unreachable_nodes: Vec::new(),
+                items: vec![alert],
+            },
+        );
+        assert!(repeated.is_empty());
+        let recovered = resource_alert_events(
+            &mut previous,
+            &super::super::AlertsResponse {
+                partial: false,
+                unreachable_nodes: Vec::new(),
+                items: Vec::new(),
+            },
+        );
+        assert!(matches!(
+            recovered.as_slice(),
+            [StatusEventUpdate::ResourceAlert {
+                event_type: "resource_alert_recovered",
+                ..
+            }]
+        ));
     }
 
     #[test]

@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "#3478c6",
+        "createdAt": "2026-09-02T12:15:34.688Z",
+        "reason": "user confirmed paired resource comparison series color"
+      }
+    ]
+  }
+}

@@ -813,6 +813,18 @@ impl RaftFacade for LocalRaft {
 
 fn map_store_error(err: StoreError) -> ClientResponse {
     match err {
+        StoreError::ResourcePolicyConflict { current_revision } => ClientResponse::Err {
+            status: 409,
+            code: "revision_conflict".to_string(),
+            message: format!(
+                "resource policy revision is stale (current revision {current_revision})"
+            ),
+        },
+        StoreError::ResourcePolicyInvalid { message } => ClientResponse::Err {
+            status: 400,
+            code: "invalid_request".to_string(),
+            message: message.to_string(),
+        },
         StoreError::Domain(domain) => match domain {
             DomainError::MissingUser { .. }
             | DomainError::MissingNode { .. }

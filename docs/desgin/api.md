@@ -84,6 +84,24 @@
 
 `vless_https_canary` 是增量字段：用于 VLESS/REALITY HTTPS canary（`GET /generate_204`）的运行态可观测信息。它描述的是 xp 进程内 loopback TLS canary，而不是额外公网监听器。即使证书获取失败，`/api/health` 仍保持服务存活语义。
 
+### 1.3.1 资源监控（增量能力）
+
+当节点声明 `admin.resource-monitoring` capability 时，管理员可读取固定 Resource
+Domain（host 或 cgroup）、CPU、内存、Swap、root/data 文件系统与四个固定运行角色的
+资源快照：
+
+- `GET /api/admin/nodes/resources`：集群 current 聚合，返回 `partial` 与
+  `unreachable_nodes`。
+- `GET /api/admin/nodes/{node_id}/resources`：单节点 current 快照。
+- `GET /api/admin/nodes/{node_id}/resources/recent?metric=...`：最多 240 个 15 秒点。
+- `GET /api/admin/nodes/{node_id}/resources/history?metric=...&resolution=auto|1m|15m|1h`：
+  有界历史与 `quality`、`coverage`、`watermark`、`gaps`、`freshness`。
+- `GET/PUT /api/admin/resource-monitoring/policy`：revisioned 阈值策略；过期 revision
+  返回 `revision_conflict`，不支持或不可读的字段省略 value 并返回 capability reason。
+
+资源历史只使用 `${XP_DATA_DIR}/resource_metrics.sqlite3` 的分钟 Rollup 和 capture gap，
+不保存 15 秒原始样本；旧节点按 additive capability 显示 `unsupported`。
+
 ### 1.4 服务配置只读视图
 
 `GET /api/admin/config`

@@ -19,6 +19,15 @@ This directory contains both the traditional host-managed service examples and t
 Current support boundaries that operators must know:
 
 - Host-managed automation in `xp-ops` currently recognizes Arch/Debian/Ubuntu/RHEL-family/Alpine distro families. Historical CentOS 7 / RHEL-family host-managed nodes are first-class host-managed targets and should use the host-managed deployment / upgrade paths in this document.
+- Resource Monitoring stores bounded minute Rollups, policy, alert state, and capture gaps in
+  `${XP_DATA_DIR}/resource_metrics.sqlite3`. Host-managed systemd/OpenRC upgrades must preserve
+  this file together with `history.sqlite3` and `uptime.sqlite3`; Docker/Compose operators must
+  mount the complete `XP_DATA_DIR` volume across image replacement.
+- Resource Monitoring is additive and Linux-only: host-managed nodes report `resource_domain=host`,
+  official single-image containers report `resource_domain=cgroup`, and older or unsupported nodes
+  remain available with `admin.resource-monitoring=unsupported`. Missing `/proc`, cgroup, PSS, or
+  I/O fields report capability reason codes; no root daemon, shell, external `ping`, PID scan, or
+  automatic restart is introduced.
 - Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
 - Managed-default endpoint ports are cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only bootstrap a missing endpoint; changing or
@@ -713,6 +722,8 @@ ${XP_DATA_DIR}/
   inbound_ip_usage.json
   service_runtime.json
   ddns_state.json
+  resource_metrics.sqlite3
+  resource-runtime-identities.json
 ```
 
 Notes:
@@ -754,6 +765,12 @@ Notes:
 - Missing samples, first tracking, and counter resets remain partial and are surfaced as warnings; operators must not treat gaps as zero traffic. Deleting a user clears its stored history, deleting a node clears its node and user-node history, and removed memberships expire naturally with the retention windows. These node-data retention semantics are unchanged by the repository storage-medium migration.
 - `service_runtime.json` stores local runtime status/event history used by `/api/admin/nodes/*/runtime` views (7-day window, local node only).
 - `ddns_state.json` stores local Cloudflare DDNS reconcile state (last synced IPs, record ids, error state, fast-mode window). It is **not** replicated via raft.
+- `resource_metrics.sqlite3` stores bounded Resource Monitoring minute rollups, policy cache, alerts,
+  and capture gaps. It uses WAL, retains no 15-second raw samples, and survives systemd, OpenRC,
+  and Compose upgrades.
+- `resource-runtime-identities.json` is a private, container-only entrypoint file containing the
+  current Xray and optional cloudflared PID/start-time identities. XP validates it before reading
+  `/proc`; operators must not create or edit it manually.
 - Geo enrichment uses a hosted API (`https://api.country.is/`); there are no local Geo DB files under `XP_DATA_DIR`.
 
 ## Service examples

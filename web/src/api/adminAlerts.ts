@@ -12,6 +12,13 @@ export const AlertItemSchema = z.object({
 	quota_banned_at: z.string().nullable(),
 	message: z.string(),
 	action_hint: z.string(),
+	node_id: z.string().optional(),
+	resource_node_id: z.string().optional(),
+	scope: z.string().optional(),
+	metric: z.string().optional(),
+	severity: z.string().optional(),
+	opened_at: z.string().optional(),
+	latest_bucket_start_unix_seconds: z.number().optional(),
 });
 
 export type AlertItem = z.infer<typeof AlertItemSchema>;

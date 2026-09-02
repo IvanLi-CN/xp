@@ -12,7 +12,9 @@ set -euo pipefail
 TESTBOX="${TESTBOX:-codex-testbox}"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
-MESH_RESOURCE_BASELINE_SHA="962751d70bfb3488eb78b84fd1e369c97c304f6f"
+# Compare resource changes with the checked-out development baseline. Older hard-coded
+# Mesh baselines can no longer exercise the current signed control-plane protocol.
+MESH_RESOURCE_BASELINE_SHA="${XP_MESH_RESOURCE_BASELINE_SHA:-origin/main}"
 
 # 1) Identify local repo root (fallback to current dir if not a git repo).
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then

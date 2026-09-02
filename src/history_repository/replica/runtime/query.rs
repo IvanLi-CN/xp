@@ -11,6 +11,7 @@ impl RepositoryReplicaRuntime {
         let mut truncated = false;
         let candidates = self.records_for_query(
             query.subject_node_id(),
+            query.schema_id(),
             query.range().start_unix_seconds(),
             query.range().end_unix_seconds(),
             query.page_offset()?,
@@ -46,14 +47,16 @@ impl RepositoryReplicaRuntime {
     pub(super) fn records_for_query(
         &self,
         subject_node_id: Option<&str>,
+        schema_id: Option<&str>,
         start_unix_seconds: u64,
         end_unix_seconds: u64,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<StoredRecord>, RepositoryRuntimeError> {
         if self.uses_sqlite_history() {
-            return self.sqlite_records(
+            return self.sqlite_records_for_schema(
                 subject_node_id,
+                schema_id,
                 Some(start_unix_seconds),
                 Some(end_unix_seconds),
                 offset,
@@ -68,6 +71,7 @@ impl RepositoryReplicaRuntime {
                 subject_node_id
                     .is_none_or(|subject_node_id| record.subject_node_id == subject_node_id)
             })
+            .filter(|record| schema_id.is_none_or(|schema_id| record.schema_id == schema_id))
             .filter(|record| {
                 let (start, end) = retention::record_time_range(record);
                 start <= end_unix_seconds && start_unix_seconds <= end

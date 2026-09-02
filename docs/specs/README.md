@@ -121,3 +121,4 @@
 | 发布意图治理          | active    | in progress     | release-intent-governance     | -          |
 | Mihomo 私网资源 CIDR  | active    | complete        | mihomo-private-resource-cidrs | -          |
 | 服务监控              | active    | 已实现          | uptime-monitoring             | -          |
+| 资源监控              | active    | 未开始          | resource-monitoring           | -          |

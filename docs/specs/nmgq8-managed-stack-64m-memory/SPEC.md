@@ -13,7 +13,8 @@
   总 PSS 峰值不超过 65,536 KiB。
 - systemd、OpenRC、单镜像 Docker/Compose 使用相同内存合同。
 - 禁止周期或阈值重启掩盖增长；rollout 和故障恢复重启不受此限制。
-- 不把内核、page cache 或节点其他进程计入本规格，也不新增通用 metrics 系统。
+- 不把内核、page cache 或节点其他进程计入本规格，也不新增不受约束的通用 metrics 平台；固定范围的
+  [Resource Monitoring](../resource-monitoring/SPEC.md) 另有独立的采样、容量和权限合同。
 
 ## 运行时契约
 
@@ -80,3 +81,4 @@ PR: none
 - `docs/specs/k9n2r-xp-ops-admin-token-ops/SPEC.md`
 - `docs/solutions/ci/real-xray-e2e-runner-guardrails.md`
 - `../56dtr-reality-fallback-control-plane-mesh/SPEC.md`
+- `../resource-monitoring/SPEC.md`

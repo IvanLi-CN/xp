@@ -178,6 +178,13 @@ impl From<DesiredStateCommandCompat> for DesiredStateCommand {
             DesiredStateCommandCompat::UpdateRepositoryMemberRuntime(patch) => {
                 Self::UpdateRepositoryMemberRuntime(patch)
             }
+            DesiredStateCommandCompat::SetResourcePolicy {
+                policy,
+                expected_revision,
+            } => Self::SetResourcePolicy {
+                policy,
+                expected_revision,
+            },
             DesiredStateCommandCompat::SetReverseMeshEpoch { epoch } => {
                 Self::SetReverseMeshEpoch { epoch }
             }

@@ -10,6 +10,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use x25519_dalek::{PublicKey as X25519DalekPublicKey, StaticSecret};
 
+use super::resource_history_capacity;
 use crate::{
     history_sync::{MAX_RESPONSE_WIRE_BYTES, PayloadEncoding},
     http::{ApiError, ApiJson, AppState, InternalSignatureAuth},
@@ -49,6 +50,8 @@ pub(super) struct RepositoryHistoryQuery {
     page_cursor: Option<String>,
     #[serde(default)]
     subject_node_id: Option<String>,
+    #[serde(default)]
+    schema_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,6 +398,7 @@ pub(super) async fn admin_internal_query_history_repository(
     )
     .and_then(|query| query.with_page_cursor(request.page_cursor.as_deref()))
     .and_then(|query| query.with_subject_node_id(request.subject_node_id.as_deref()))
+    .and_then(|query| query.with_schema_id(request.schema_id.as_deref()))
     .map_err(|error| ApiError::invalid_request(error.to_string()))?;
     let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
     let mut runtime = state.repository_replica.lock().await;
@@ -645,6 +649,7 @@ pub(super) async fn query_history_repository(
         page_size: request.page_size,
         page_cursor: request.page_cursor.clone(),
         subject_node_id: request.subject_node_id.clone(),
+        schema_id: request.schema_id.clone(),
     })
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let mut responses = vec![local_response];
@@ -704,6 +709,46 @@ pub(super) async fn query_history_repository(
     Ok(response)
 }
 
+pub(super) async fn query_resource_history_repository(
+    state: &AppState,
+    node_id: &str,
+    start_unix_seconds: u64,
+    end_unix_seconds: u64,
+    page_size: usize,
+) -> Result<RepositoryHistoryQueryResponse, ApiError> {
+    query_resource_history_repository_page(
+        state,
+        node_id,
+        start_unix_seconds,
+        end_unix_seconds,
+        page_size,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn query_resource_history_repository_page(
+    state: &AppState,
+    node_id: &str,
+    start_unix_seconds: u64,
+    end_unix_seconds: u64,
+    page_size: usize,
+    page_cursor: Option<String>,
+) -> Result<RepositoryHistoryQueryResponse, ApiError> {
+    query_history_repository(
+        state,
+        RepositoryHistoryQuery {
+            start_unix_seconds,
+            end_unix_seconds,
+            page_size,
+            page_cursor,
+            subject_node_id: Some(node_id.to_owned()),
+            schema_id: Some(crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA.to_owned()),
+        },
+    )
+    .await
+}
+
 pub(super) async fn query_service_monitor_history(
     state: &AppState,
     monitor_id: &str,
@@ -718,6 +763,7 @@ pub(super) async fn query_service_monitor_history(
             page_size: 1_000,
             page_cursor: None,
             subject_node_id: Some(monitor_id.to_owned()),
+            schema_id: None,
         },
     )
     .await
@@ -822,6 +868,10 @@ async fn repository_membership_for_nodes(
                 .collect::<std::collections::BTreeSet<_>>(),
         )
     };
+    resource_history_capacity::preflight_resource_history_capacity_for_membership(
+        known_node_ids.len() as u64,
+        current_membership.as_ref(),
+    )?;
     let mut members = Vec::with_capacity(requested_node_ids.len());
     for node_id in requested_node_ids {
         if !known_node_ids.contains(&node_id) {

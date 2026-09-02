@@ -5,6 +5,7 @@ import { useState } from "react";
 import { fetchAdminAlerts } from "../api/adminAlerts";
 import { verifyAdminToken } from "../api/adminAuth";
 import { fetchAdminNodesRuntime } from "../api/adminNodeRuntime";
+import { fetchAdminNodesResources } from "../api/adminResources";
 import { isBackendApiError } from "../api/backendError";
 import { fetchClusterInfo } from "../api/clusterInfo";
 import { fetchHealth } from "../api/health";
@@ -68,6 +69,7 @@ export function HomePage() {
 	const runtime = useAppRuntime();
 	const nodesCapability = useApiCapability("admin.nodes");
 	const alertsCapability = useApiCapability("admin.alerts");
+	const resourcesCapability = useApiCapability("admin.resource-monitoring");
 	const [adminToken, setAdminToken] = useState(() => readAdminToken());
 	const [adminTokenDraft, setAdminTokenDraft] = useState(() =>
 		readAdminToken(),
@@ -97,11 +99,19 @@ export function HomePage() {
 		queryFn: ({ signal }) => fetchAdminAlerts(adminToken, signal),
 	});
 
+	const adminResources = useQuery({
+		queryKey: ["adminNodesResources", adminToken],
+		enabled: adminToken.length > 0 && resourcesCapability.available,
+		queryFn: ({ signal }) => fetchAdminNodesResources(adminToken, signal),
+		refetchInterval: runtime.isOnline ? 15_000 : false,
+	});
+
 	const latestSyncedAt = latestQueryDataUpdatedAt([
 		health,
 		clusterInfo,
 		adminAlerts,
 		adminNodes,
+		adminResources,
 	]);
 	const showCachedBanner =
 		latestSyncedAt !== null &&
@@ -434,6 +444,62 @@ export function HomePage() {
 						isRefreshing={adminNodes.isFetching}
 						onRefresh={() => adminNodes.refetch()}
 					/>
+				)}
+			</DashboardCard>
+
+			<DashboardCard title="Resources">
+				{resourcesCapability.unavailable ? (
+					<CapabilityUnavailableState
+						title="Resource monitoring unavailable"
+						reason={resourcesCapability.reason}
+					/>
+				) : adminToken.length === 0 ? (
+					<p className="text-warning">Please set admin token.</p>
+				) : adminResources.isLoading && !hasQueryData(adminResources) ? (
+					<p>Loading...</p>
+				) : adminResources.isError && !hasQueryData(adminResources) ? (
+					<p className="text-destructive">Failed to load resources.</p>
+				) : adminResources.data ? (
+					<div className="space-y-3">
+						{adminResources.data.partial ? (
+							<div className={alertClass("warning")}>
+								Partial resource data:{" "}
+								{adminResources.data.unreachable_nodes.join(", ") ||
+									"some nodes are unreachable"}
+							</div>
+						) : null}
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							{adminResources.data.items.map((item) => (
+								<div
+									className="rounded-lg border border-border/60 bg-muted/20 p-3"
+									key={item.node_id}
+								>
+									<div className="mb-2 flex items-center justify-between gap-2">
+										<span className="font-semibold">{item.node_id}</span>
+										<span className="text-xs text-muted-foreground">
+											{item.resource_domain} · {item.capability}
+										</span>
+									</div>
+									<p className="font-mono text-sm">
+										CPU{" "}
+										{item.domain.cpu_busy_percent.value === undefined
+											? "unsupported"
+											: `${item.domain.cpu_busy_percent.value.toFixed(1)}%`}
+									</p>
+									<p className="font-mono text-sm">
+										Memory{" "}
+										{item.domain.memory_available_bytes.value === undefined
+											? "unsupported"
+											: `${(item.domain.memory_available_bytes.value / 1024 / 1024).toFixed(0)} MiB available`}
+									</p>
+								</div>
+							))}
+						</div>
+					</div>
+				) : (
+					<p className="text-sm text-muted-foreground">
+						No resource snapshots yet.
+					</p>
 				)}
 			</DashboardCard>
 		</div>

@@ -3,9 +3,16 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::uptime_monitor::{UPTIME_HISTORY_SCHEMA, UptimeHistoryPayload};
+use crate::{
+    resource_monitoring::{RESOURCE_HISTORY_SCHEMA, ResourceHistoryPayload, ResourceRollup},
+    uptime_monitor::{UPTIME_HISTORY_SCHEMA, UptimeHistoryPayload},
+};
 
 use super::{StoredGap, StoredRecord};
+
+const RESOURCE_MINUTE_RETENTION_SECONDS: u64 = 14 * 24 * 60 * 60;
+const RESOURCE_15_MINUTE_RETENTION_SECONDS: u64 = 90 * 24 * 60 * 60;
+const RESOURCE_HOUR_RETENTION_SECONDS: u64 = 365 * 24 * 60 * 60;
 
 pub(super) fn prune_records(
     records: &mut Vec<StoredRecord>,
@@ -24,10 +31,19 @@ pub(super) fn prune_records(
             continue;
         }
         let age = now_unix_seconds.saturating_sub(record.observed_at_unix_seconds);
-        let Some(resolution) = policy.resolution_for_age(age) else {
+        let resolution = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+            resource_resolution_for_age(age)
+        } else {
+            policy.resolution_for_age(age)
+        };
+        let Some(resolution) = resolution else {
             continue;
         };
-        let preserves_minute_detail = policy.keeps_minute_detail(age);
+        let preserves_minute_detail = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+            age <= RESOURCE_MINUTE_RETENTION_SECONDS
+        } else {
+            policy.keeps_minute_detail(age)
+        };
         let bucket =
             RetentionBucket::for_record(&record, resolution, preserves_minute_detail, cluster_id);
         match retained.entry(bucket) {
@@ -75,14 +91,9 @@ impl RetentionBucket {
         preserves_minute_detail: bool,
         cluster_id: Option<&str>,
     ) -> Self {
-        let seconds = match resolution {
-            super::super::RetentionResolution::Minute => 60,
-            super::super::RetentionResolution::FiveMinutes => 5 * 60,
-            super::super::RetentionResolution::Hour => 60 * 60,
-        };
         Self::with_bucket(
             record,
-            record.observed_at_unix_seconds / seconds * seconds,
+            bucket_time_range_for_record(record, resolution).0,
             preserves_minute_detail,
             cluster_id,
         )
@@ -113,6 +124,25 @@ impl RetentionBucket {
 }
 
 pub(super) fn record_time_range(record: &StoredRecord) -> (u64, u64) {
+    if record.schema_id == RESOURCE_HISTORY_SCHEMA
+        && let Some(payload) = resource_payload(record)
+    {
+        return match payload {
+            ResourceHistoryPayload::Rollup { rollup, resolution } => {
+                let start = rollup.bucket_start_unix_seconds.max(0) as u64;
+                let seconds: u64 = match resolution.as_str() {
+                    "15m" => 15 * 60,
+                    "1h" => 60 * 60,
+                    _ => 60,
+                };
+                (start, start.saturating_add(seconds.saturating_sub(1)))
+            }
+            ResourceHistoryPayload::CaptureGap { gap, .. } => (
+                gap.from_bucket_start_unix_seconds.max(0) as u64,
+                gap.to_bucket_start_unix_seconds.max(0) as u64,
+            ),
+        };
+    }
     aggregate_payload(record)
         .and_then(|payload| {
             payload
@@ -134,9 +164,14 @@ pub(super) fn compaction_bucket_end(record: &StoredRecord, now_unix_seconds: u64
         return None;
     }
     let policy = super::super::RepositoryRetentionPolicy::default();
-    let resolution = policy
-        .resolution_for_age(now_unix_seconds.saturating_sub(record.observed_at_unix_seconds))?;
-    Some(bucket_time_range(record.observed_at_unix_seconds, resolution).1)
+    let resolution = if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+        resource_resolution_for_age(
+            now_unix_seconds.saturating_sub(record.observed_at_unix_seconds),
+        )
+    } else {
+        policy.resolution_for_age(now_unix_seconds.saturating_sub(record.observed_at_unix_seconds))
+    }?;
+    Some(bucket_time_range_for_record(record, resolution).1)
 }
 
 /// Returns whether a record's time bucket can still receive rows after a keyset page boundary.
@@ -195,6 +230,16 @@ fn retention_identifier(
                 .into_bytes()
             });
     }
+    if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+        return resource_payload(record).map(|payload| {
+            match payload {
+                ResourceHistoryPayload::Rollup { .. } => "resource:rollup",
+                ResourceHistoryPayload::CaptureGap { .. } => "resource:gap",
+            }
+            .as_bytes()
+            .to_vec()
+        });
+    }
     (record.schema_id == "ip_usage.v1").then(|| {
         aggregate_contribution(record)
             .anonymized_identifier
@@ -204,7 +249,6 @@ fn retention_identifier(
             .into_bytes()
     })
 }
-
 enum RetainedRecord {
     Raw(StoredRecord),
     Aggregate(Box<RetentionAggregate>),
@@ -249,6 +293,7 @@ struct RetentionAggregate {
     complete: bool,
     anonymized_identifier: Option<String>,
     uptime_payload: Option<UptimeHistoryPayload>,
+    resource_payload: Option<ResourceHistoryPayload>,
 }
 
 impl RetentionAggregate {
@@ -259,8 +304,9 @@ impl RetentionAggregate {
     ) -> Self {
         let contribution = aggregate_contribution(&record);
         let uptime_payload = uptime_payload(&record);
+        let resource_payload = resource_payload(&record);
         let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
-            bucket_time_range(record.observed_at_unix_seconds, resolution);
+            bucket_time_range_for_record(&record, resolution);
         Self {
             first_sequence: contribution.first_sequence,
             last_sequence: contribution.last_sequence,
@@ -274,14 +320,16 @@ impl RetentionAggregate {
             complete: contribution.complete,
             anonymized_identifier: contribution.anonymized_identifier,
             uptime_payload,
+            resource_payload,
         }
     }
 
     fn add(&mut self, record: StoredRecord) {
         let contribution = aggregate_contribution(&record);
         let incoming_uptime_payload = uptime_payload(&record);
+        let incoming_resource_payload = resource_payload(&record);
         let (bucket_start_unix_seconds, bucket_end_unix_seconds) =
-            bucket_time_range(record.observed_at_unix_seconds, self.resolution);
+            bucket_time_range_for_record(&record, self.resolution);
         self.bucket_start_unix_seconds = self
             .bucket_start_unix_seconds
             .min(bucket_start_unix_seconds);
@@ -300,6 +348,13 @@ impl RetentionAggregate {
         self.uptime_payload = match (self.uptime_payload.take(), incoming_uptime_payload) {
             (Some(mut current), Some(incoming)) => {
                 current.merge_rollup(&incoming);
+                Some(current)
+            }
+            _ => None,
+        };
+        self.resource_payload = match (self.resource_payload.take(), incoming_resource_payload) {
+            (Some(mut current), Some(incoming)) => {
+                merge_resource_payload(&mut current, incoming);
                 Some(current)
             }
             _ => None,
@@ -350,6 +405,33 @@ impl RetentionAggregate {
             record.sequence = self.last_sequence;
             record.payload = serde_json::to_vec(&uptime_payload)
                 .expect("uptime retention aggregate is serializable");
+            return record;
+        }
+        if let Some(mut resource_payload) = self.resource_payload {
+            if let ResourceHistoryPayload::Rollup { rollup, .. } = &mut resource_payload {
+                rollup.bucket_start_unix_seconds = self.bucket_start_unix_seconds as i64;
+            }
+            let resource_resolution = match self.resolution {
+                super::super::RetentionResolution::Minute => "1m",
+                super::super::RetentionResolution::FiveMinutes => "15m",
+                super::super::RetentionResolution::Hour => "1h",
+            };
+            record.sequence = self.last_sequence;
+            record.payload = match resource_payload {
+                ResourceHistoryPayload::Rollup { rollup, .. } => {
+                    serde_json::to_vec(&ResourceHistoryPayload::Rollup {
+                        resolution: resource_resolution.to_owned(),
+                        rollup,
+                    })
+                }
+                ResourceHistoryPayload::CaptureGap { gap, .. } => {
+                    serde_json::to_vec(&ResourceHistoryPayload::CaptureGap {
+                        resolution: resource_resolution.to_owned(),
+                        gap,
+                    })
+                }
+            }
+            .expect("resource retention aggregate is serializable");
             return record;
         }
         let payload = RetentionAggregatePayload {
@@ -436,6 +518,137 @@ fn uptime_payload(record: &StoredRecord) -> Option<UptimeHistoryPayload> {
         .flatten()
 }
 
+fn resource_payload(record: &StoredRecord) -> Option<ResourceHistoryPayload> {
+    (record.schema_id == RESOURCE_HISTORY_SCHEMA)
+        .then(|| serde_json::from_slice::<ResourceHistoryPayload>(&record.payload).ok())?
+}
+
+fn resource_resolution_for_age(age_seconds: u64) -> Option<super::super::RetentionResolution> {
+    if age_seconds <= RESOURCE_MINUTE_RETENTION_SECONDS {
+        Some(super::super::RetentionResolution::Minute)
+    } else if age_seconds <= RESOURCE_15_MINUTE_RETENTION_SECONDS {
+        Some(super::super::RetentionResolution::FiveMinutes)
+    } else if age_seconds <= RESOURCE_HOUR_RETENTION_SECONDS {
+        Some(super::super::RetentionResolution::Hour)
+    } else {
+        None
+    }
+}
+
+fn resource_bucket_seconds(
+    record: &StoredRecord,
+    resolution: super::super::RetentionResolution,
+) -> u64 {
+    if record.schema_id == RESOURCE_HISTORY_SCHEMA {
+        match resolution {
+            super::super::RetentionResolution::Minute => 60,
+            super::super::RetentionResolution::FiveMinutes => 15 * 60,
+            super::super::RetentionResolution::Hour => 60 * 60,
+        }
+    } else {
+        match resolution {
+            super::super::RetentionResolution::Minute => 60,
+            super::super::RetentionResolution::FiveMinutes => 5 * 60,
+            super::super::RetentionResolution::Hour => 60 * 60,
+        }
+    }
+}
+
+fn bucket_time_range_for_record(
+    record: &StoredRecord,
+    resolution: super::super::RetentionResolution,
+) -> (u64, u64) {
+    if record.schema_id == RESOURCE_HISTORY_SCHEMA
+        && let Some(payload) = resource_payload(record)
+    {
+        return match payload {
+            ResourceHistoryPayload::Rollup { rollup, .. } => {
+                let start = rollup.bucket_start_unix_seconds.max(0) as u64;
+                let seconds = resource_bucket_seconds(record, resolution);
+                (start, start.saturating_add(seconds.saturating_sub(1)))
+            }
+            ResourceHistoryPayload::CaptureGap { gap, .. } => (
+                gap.from_bucket_start_unix_seconds.max(0) as u64,
+                gap.to_bucket_start_unix_seconds.max(0) as u64,
+            ),
+        };
+    }
+    bucket_time_range(record.observed_at_unix_seconds, resolution)
+}
+
+fn merge_resource_payload(current: &mut ResourceHistoryPayload, incoming: ResourceHistoryPayload) {
+    match (current, incoming) {
+        (
+            ResourceHistoryPayload::Rollup {
+                rollup: current, ..
+            },
+            ResourceHistoryPayload::Rollup {
+                rollup: incoming, ..
+            },
+        ) => merge_resource_rollup(current, &incoming),
+        (
+            ResourceHistoryPayload::CaptureGap { gap: current, .. },
+            ResourceHistoryPayload::CaptureGap { gap: incoming, .. },
+        ) => {
+            current.from_bucket_start_unix_seconds = current
+                .from_bucket_start_unix_seconds
+                .min(incoming.from_bucket_start_unix_seconds);
+            current.to_bucket_start_unix_seconds = current
+                .to_bucket_start_unix_seconds
+                .max(incoming.to_bucket_start_unix_seconds);
+            if current.reason_code != incoming.reason_code {
+                current.reason_code = "multiple_reasons".to_owned();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn merge_resource_rollup(current: &mut ResourceRollup, incoming: &ResourceRollup) {
+    current.bucket_start_unix_seconds = current
+        .bucket_start_unix_seconds
+        .min(incoming.bucket_start_unix_seconds);
+    current.expected_samples = current
+        .expected_samples
+        .saturating_add(incoming.expected_samples);
+    current.captured_samples = current
+        .captured_samples
+        .saturating_add(incoming.captured_samples);
+    current.capability = current.capability.max(incoming.capability);
+    for (key, incoming_value) in &incoming.values {
+        let value = current
+            .values
+            .entry(key.clone())
+            .or_insert_with(|| incoming_value.clone());
+        value.min = match (value.min, incoming_value.min) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (left, right) => left.or(right),
+        };
+        value.max = match (value.max, incoming_value.max) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (left, right) => left.or(right),
+        };
+        let left_count = f64::from(
+            current
+                .captured_samples
+                .saturating_sub(incoming.captured_samples),
+        );
+        let right_count = f64::from(incoming.captured_samples);
+        value.mean = match (value.mean, incoming_value.mean) {
+            (Some(left), Some(right)) if left_count + right_count > 0.0 => {
+                Some((left * left_count + right * right_count) / (left_count + right_count))
+            }
+            (left, right) => left.or(right),
+        };
+        value.counter_delta = match (value.counter_delta, incoming_value.counter_delta) {
+            (Some(left), Some(right)) => Some(left + right),
+            (left, right) => left.or(right),
+        };
+        value.last = incoming_value.last.or(value.last);
+        value.capability = value.capability.max(incoming_value.capability);
+    }
+}
+
 fn bucket_time_range(
     observed_at_unix_seconds: u64,
     resolution: super::super::RetentionResolution,
@@ -494,4 +707,127 @@ fn anonymized_identifier(
     hasher.update(subject_node_id.as_bytes());
     hasher.update(raw_identifier);
     hex::encode(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resource_monitoring::{
+        Capability, ResourceGap, ResourceHistoryPayload, RollupValue,
+    };
+
+    #[test]
+    fn resource_retention_preserves_numeric_rollup_semantics() {
+        const DAY: u64 = 24 * 60 * 60;
+        let now = 100 * DAY;
+        let observed = now - 20 * DAY;
+        let make_record = |sequence: u64, bucket: i64, value: f64| StoredRecord {
+            observed_at_unix_seconds: (bucket as u64) + sequence * 60,
+            received_at_unix_seconds: now,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 1,
+            stream: "resource_metrics-v1".to_owned(),
+            sequence,
+            subject_node_id: "node-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: RESOURCE_HISTORY_SCHEMA.to_owned(),
+            schema_version: 1,
+            record_key: format!("resource:{bucket}:{sequence}").into_bytes(),
+            payload: serde_json::to_vec(&ResourceHistoryPayload::Rollup {
+                resolution: "1m".to_owned(),
+                rollup: ResourceRollup {
+                    node_id: xp_test_fixtures::primary_node_id().to_owned(),
+                    bucket_start_unix_seconds: bucket,
+                    expected_samples: 4,
+                    captured_samples: 4,
+                    capability: Capability::Supported,
+                    values: [(
+                        "domain.cpu_busy_percent".to_owned(),
+                        RollupValue {
+                            min: Some(value - 1.0),
+                            mean: Some(value),
+                            max: Some(value + 1.0),
+                            last: Some(value),
+                            counter_delta: None,
+                            capability: Capability::Supported,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            })
+            .unwrap(),
+            tombstone: false,
+        };
+        let mut records = vec![make_record(1, observed as i64, 10.0)];
+        records.push(make_record(2, observed as i64, 30.0));
+        prune_records(&mut records, &[], now, None);
+        assert_eq!(records.len(), 1);
+        let payload: ResourceHistoryPayload = serde_json::from_slice(&records[0].payload).unwrap();
+        let ResourceHistoryPayload::Rollup { resolution, rollup } = payload else {
+            panic!("expected resource rollup");
+        };
+        assert_eq!(resolution, "15m");
+        assert_eq!(rollup.expected_samples, 8);
+        assert_eq!(rollup.captured_samples, 8);
+        let value = rollup.values.get("domain.cpu_busy_percent").unwrap();
+        assert_eq!(value.min, Some(9.0));
+        assert_eq!(value.mean, Some(20.0));
+        assert_eq!(value.max, Some(31.0));
+        assert_eq!(value.last, Some(30.0));
+    }
+
+    #[test]
+    fn resource_retention_preserves_capture_gap_payloads() {
+        let now = 100 * 24 * 60 * 60;
+        let gap = ResourceGap {
+            from_bucket_start_unix_seconds: 1_000,
+            to_bucket_start_unix_seconds: 1_120,
+            reason_code: "journal_full".to_owned(),
+        };
+        let mut records = vec![StoredRecord {
+            observed_at_unix_seconds: now - 8 * 24 * 60 * 60,
+            received_at_unix_seconds: now,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 1,
+            stream: "resource_metrics-v1".to_owned(),
+            sequence: 1,
+            subject_node_id: "node-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: RESOURCE_HISTORY_SCHEMA.to_owned(),
+            schema_version: 1,
+            record_key: b"resource-gap".to_vec(),
+            payload: serde_json::to_vec(&ResourceHistoryPayload::CaptureGap {
+                resolution: "1m".to_owned(),
+                gap: gap.clone(),
+            })
+            .unwrap(),
+            tombstone: false,
+        }];
+        prune_records(&mut records, &[], now, None);
+        let payload: ResourceHistoryPayload = serde_json::from_slice(&records[0].payload).unwrap();
+        assert!(matches!(
+            payload,
+            ResourceHistoryPayload::CaptureGap { gap: result, .. }
+                if result.reason_code == "journal_full"
+        ));
+    }
+
+    #[test]
+    fn resource_retention_uses_absolute_age_windows() {
+        const DAY: u64 = 24 * 60 * 60;
+        assert_eq!(
+            resource_resolution_for_age(14 * DAY),
+            Some(crate::state::history_repository::replica::RetentionResolution::Minute)
+        );
+        assert_eq!(
+            resource_resolution_for_age(90 * DAY),
+            Some(crate::state::history_repository::replica::RetentionResolution::FiveMinutes)
+        );
+        assert_eq!(
+            resource_resolution_for_age(365 * DAY),
+            Some(crate::state::history_repository::replica::RetentionResolution::Hour)
+        );
+        assert_eq!(resource_resolution_for_age(366 * DAY), None);
+    }
 }

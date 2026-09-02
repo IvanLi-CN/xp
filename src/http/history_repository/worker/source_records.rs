@@ -8,6 +8,8 @@ pub(super) struct SourceRecordBatch {
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,
     pub(super) uptime_observation_ids: Vec<String>,
     pub(super) uptime_capture_gap_ids: Vec<String>,
+    pub(super) resource_rollup_buckets: Vec<i64>,
+    pub(super) resource_gap_ids: Vec<i64>,
 }
 
 impl SourceRecordBatch {
@@ -28,6 +30,15 @@ impl SourceRecordBatch {
             .mark_capture_gaps_enqueued(&self.uptime_capture_gap_ids)
             .await?;
         Ok(())
+    }
+
+    pub(super) fn mark_resources_enqueued(&self, state: &AppState) {
+        state
+            .resource_monitoring
+            .mark_rollups_enqueued(&self.resource_rollup_buckets);
+        state
+            .resource_monitoring
+            .mark_gaps_enqueued(&self.resource_gap_ids);
     }
 }
 
@@ -51,6 +62,8 @@ pub(super) async fn source_records(
         .await;
     let pending_uptime_observations = state.uptime.pending(512).await?;
     let pending_uptime_capture_gaps = state.uptime.pending_capture_gaps(512).await?;
+    let pending_resource_rollups = state.resource_monitoring.pending_rollups(64);
+    let pending_resource_gaps = state.resource_monitoring.pending_gaps(64);
     let (inbound_ip, connections) = {
         let store = state.store.lock().await;
         let inbound_ip = serde_json::json!({
@@ -200,6 +213,48 @@ pub(super) async fn source_records(
             false,
         )?);
     }
+    let resource_rollup_buckets = pending_resource_rollups
+        .iter()
+        .map(|rollup| rollup.bucket_start_unix_seconds)
+        .collect::<Vec<_>>();
+    for rollup in pending_resource_rollups {
+        let payload = crate::resource_monitoring::ResourceHistoryPayload::Rollup {
+            resolution: "1m".to_string(),
+            rollup: rollup.clone(),
+        };
+        records.push(source_record_with_key_for_subject(
+            crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA,
+            &rollup.node_id,
+            &state.cluster.node_id,
+            u64::try_from(rollup.bucket_start_unix_seconds).unwrap_or_default(),
+            format!("resource:{}", rollup.bucket_start_unix_seconds).into_bytes(),
+            serde_json::to_value(payload)?,
+            false,
+        )?);
+    }
+    let resource_gap_ids = pending_resource_gaps
+        .iter()
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    for (_, gap) in pending_resource_gaps {
+        let payload = crate::resource_monitoring::ResourceHistoryPayload::CaptureGap {
+            resolution: "1m".to_string(),
+            gap: gap.clone(),
+        };
+        records.push(source_record_with_key_for_subject(
+            crate::resource_monitoring::RESOURCE_HISTORY_SCHEMA,
+            &state.cluster.node_id,
+            &state.cluster.node_id,
+            u64::try_from(gap.to_bucket_start_unix_seconds).unwrap_or_default(),
+            format!(
+                "resource-gap:{}:{}",
+                gap.from_bucket_start_unix_seconds, gap.to_bucket_start_unix_seconds
+            )
+            .into_bytes(),
+            serde_json::to_value(payload)?,
+            false,
+        )?);
+    }
     Ok(SourceRecordBatch {
         records: Some(records),
         deletion_markers,
@@ -211,6 +266,8 @@ pub(super) async fn source_records(
             .into_iter()
             .map(|pending| pending.id)
             .collect(),
+        resource_rollup_buckets,
+        resource_gap_ids,
     })
 }
 

@@ -30,8 +30,11 @@ use tokio::time::{Instant, sleep, timeout};
 mod admin_token_sync;
 #[path = "container_managed_default.rs"]
 mod container_managed_default;
+#[path = "container_runtime_identity.rs"]
+mod container_runtime_identity;
 mod runtime_env;
 use admin_token_sync::reconcile_configured_admin_token_hash;
+use container_runtime_identity::write_runtime_identities;
 use runtime_env::build_runtime_env;
 
 #[cfg(unix)]
@@ -246,6 +249,15 @@ pub async fn cmd_container_run(paths: Paths, args: ContainerRunArgs) -> Result<(
         }
     }
 
+    if let Err(err) = write_runtime_identities(
+        &paths.map_abs(&spec.data_dir),
+        &xray_child,
+        cloudflared_child.as_ref(),
+    ) {
+        cleanup_child(&mut xray_child).await;
+        cleanup_optional_child(&mut cloudflared_child).await;
+        return Err(err);
+    }
     let mut xp_child = match spawn_xp(&binaries.xp, &spec, &effective_admin_token_hash) {
         Ok(child) => child,
         Err(err) => {
