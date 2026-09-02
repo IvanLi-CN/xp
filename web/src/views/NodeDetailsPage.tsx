@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -47,7 +47,7 @@ import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
-import { TagInput } from "../components/TagInput";
+import { TagInput, type TagInputHandle } from "../components/TagInput";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
@@ -81,7 +81,10 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
-import { validateMihomoPrivateCidr } from "../utils/mihomoPrivateCidr";
+import {
+	normalizeMihomoPrivateCidr,
+	validateMihomoPrivateCidr,
+} from "../utils/mihomoPrivateCidr";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
@@ -133,7 +136,6 @@ function eventBadgeVariant(kind: NodeRuntimeEvent["kind"]) {
 			return "ghost";
 	}
 }
-
 function historySlotClass(status: string): string {
 	switch (status) {
 		case "up":
@@ -148,10 +150,8 @@ function historySlotClass(status: string): string {
 			return "bg-muted";
 	}
 }
-
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
-
 const quotaResetSchema = z
 	.object({
 		resetPolicy: z.enum(["monthly", "unlimited"]),
@@ -177,50 +177,39 @@ const quotaResetSchema = z
 			});
 		}
 	});
-
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-
 type RuntimeActivityRow = {
 	key: string;
 	label: string;
 	sortKey: number;
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
-
 type NodeDetailsTab =
 	| "runtime"
 	| "metadata"
-	| "mihomo"
-	| "quota"
 	| "traffic"
 	| "ipUsage"
 	| "tcpConnections"
-	| "danger";
-
+	| "settings";
 const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
 }> = [
 	{ value: "runtime", label: "Service runtime" },
 	{ value: "metadata", label: "Node metadata" },
-	{ value: "mihomo", label: "Mihomo resources" },
-	{ value: "quota", label: "Quota reset" },
 	{ value: "traffic", label: "Traffic" },
 	{ value: "ipUsage", label: "IP usage" },
 	{ value: "tcpConnections", label: "TCP connections" },
-	{ value: "danger", label: "Danger zone" },
+	{ value: "settings", label: "Node settings" },
 ];
-
 function buildRuntimeActivityRows(
 	recentSlots: NodeRuntimeHistorySlot[],
 ): RuntimeActivityRow[] {
 	const byDay = new Map<string, RuntimeActivityRow>();
-
 	for (const slot of recentSlots) {
 		const at = new Date(slot.slot_start);
 		if (Number.isNaN(at.getTime())) continue;
-
 		const dayStart = new Date(at.getFullYear(), at.getMonth(), at.getDate());
 		const month = String(dayStart.getMonth() + 1).padStart(2, "0");
 		const day = String(dayStart.getDate()).padStart(2, "0");
@@ -481,7 +470,6 @@ function formatEndpointKind(
 			return value;
 	}
 }
-
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
@@ -564,6 +552,9 @@ export function NodeDetailsPage() {
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [mihomoPolicyDraft, setMihomoPolicyDraft] = useState<string[]>([]);
+	const [mihomoPolicyHasRejectedDraft, setMihomoPolicyHasRejectedDraft] =
+		useState(false);
+	const mihomoPolicyInputRef = useRef<TagInputHandle>(null);
 	const [isSavingMihomoPolicy, setIsSavingMihomoPolicy] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -608,30 +599,25 @@ export function NodeDetailsPage() {
 		resetQuotaForm(nodeQuotaDraftFromNode(nodeQuery.data));
 		setSaveError(null);
 	}, [nodeQuery.data, resetQuotaForm]);
-
 	useEffect(() => {
 		resetQuotaDraft();
 	}, [resetQuotaDraft]);
-
 	useEffect(() => {
 		if (!nodeId) return;
 		setDeleteOpen(false);
 		setDeletePreviewEndpoints([]);
 	}, [nodeId]);
-
 	useEffect(() => {
 		if (runtimeQuery.data) {
 			setRuntimeLive(runtimeQuery.data);
 		}
 	}, [runtimeQuery.data]);
-
 	useEffect(() => {
 		setMihomoPolicyDraft(mihomoPolicyQuery.data?.override_cidrs ?? []);
+		setMihomoPolicyHasRejectedDraft(false);
 	}, [mihomoPolicyQuery.data]);
-
 	useEffect(() => {
 		if (!canReadRuntime) return;
-
 		let unmounted = false;
 		const stream = startNodeRuntimeEvents({
 			adminToken,
@@ -687,13 +673,11 @@ export function NodeDetailsPage() {
 				}
 			},
 		});
-
 		return () => {
 			unmounted = true;
 			stream.close();
 		};
 	}, [adminToken, canReadRuntime, nodeId, runtimeQuery.refetch]);
-
 	useEffect(() => {
 		if (!canReadRuntime || runtimeSseConnected) return;
 		const timer = window.setInterval(() => {
@@ -701,9 +685,7 @@ export function NodeDetailsPage() {
 		}, 10000);
 		return () => window.clearInterval(timer);
 	}, [canReadRuntime, runtimeSseConnected, runtimeQuery.refetch]);
-
 	const quotaValues = quotaForm.watch();
-
 	const desiredQuotaReset = useMemo(
 		() => toNodeQuotaReset(quotaValues),
 		[quotaValues],
@@ -712,7 +694,12 @@ export function NodeDetailsPage() {
 		() => isNodeQuotaDraftDirty(nodeQuery.data, quotaValues),
 		[nodeQuery.data, quotaValues],
 	);
-
+	const mihomoServerOverride = mihomoPolicyQuery.data?.override_cidrs ?? [];
+	const isMihomoPolicyDirty =
+		JSON.stringify(mihomoPolicyDraft) !== JSON.stringify(mihomoServerOverride);
+	const resetMihomoPolicyDraft = useCallback(() => {
+		setMihomoPolicyDraft(mihomoPolicyQuery.data?.override_cidrs ?? []);
+	}, [mihomoPolicyQuery.data]);
 	const saveQuotaReset = useCallback(async (): Promise<boolean> => {
 		if (!nodeQuery.data) return false;
 		const valid = await quotaForm.trigger();
@@ -725,7 +712,6 @@ export function NodeDetailsPage() {
 		const payload: AdminNodePatchRequest = {
 			quota_reset: desiredQuotaReset,
 		};
-
 		try {
 			await patchAdminNode(adminToken, nodeId, payload);
 			syncNode(queryClient, adminToken, nodeId, payload);
@@ -756,17 +742,6 @@ export function NodeDetailsPage() {
 	const handleSaveQuotaReset = quotaForm.handleSubmit(() => {
 		void saveQuotaReset();
 	});
-
-	useObjectNavigationDirtySections(`node:${nodeId}`, [
-		{
-			id: "quota-reset",
-			label: "quota reset",
-			isDirty: () => isDirty,
-			save: saveQuotaReset,
-			discard: resetQuotaDraft,
-		},
-	]);
-
 	const handleRefreshEgressProbe = async () => {
 		setIsRefreshingEgressProbe(true);
 		try {
@@ -810,8 +785,9 @@ export function NodeDetailsPage() {
 			setIsRefreshingEgressProbe(false);
 		}
 	};
-
-	const updateMihomoPolicy = async (overrideCidrs: string[]) => {
+	const updateMihomoPolicy = async (
+		overrideCidrs: string[],
+	): Promise<boolean> => {
 		setIsSavingMihomoPolicy(true);
 		try {
 			const result = await putAdminNodeMihomoResourcePolicy(
@@ -824,20 +800,38 @@ export function NodeDetailsPage() {
 				result,
 			);
 			setMihomoPolicyDraft(result.override_cidrs ?? []);
+			setMihomoPolicyHasRejectedDraft(false);
 			pushToast({
 				variant: "success",
 				message: "Mihomo resource policy updated.",
 			});
+			return true;
 		} catch (error) {
 			pushToast({
 				variant: "error",
 				message: `Failed to update Mihomo resource policy: ${formatErrorMessage(error)}`,
 			});
+			return false;
 		} finally {
 			setIsSavingMihomoPolicy(false);
 		}
 	};
-
+	useObjectNavigationDirtySections(`node:${nodeId}`, [
+		{
+			id: "mihomo-policy",
+			label: "Mihomo resources",
+			isDirty: () => isMihomoPolicyDirty,
+			save: () => updateMihomoPolicy(mihomoPolicyDraft),
+			discard: resetMihomoPolicyDraft,
+		},
+		{
+			id: "quota-reset",
+			label: "Quota settings",
+			isDirty: () => isDirty,
+			save: saveQuotaReset,
+			discard: resetQuotaDraft,
+		},
+	]);
 	const restoreMihomoPolicy = async () => {
 		setIsSavingMihomoPolicy(true);
 		try {
@@ -850,6 +844,7 @@ export function NodeDetailsPage() {
 				result,
 			);
 			setMihomoPolicyDraft([]);
+			setMihomoPolicyHasRejectedDraft(false);
 			pushToast({
 				variant: "success",
 				message: "Mihomo policy restored to deployment default.",
@@ -863,7 +858,41 @@ export function NodeDetailsPage() {
 			setIsSavingMihomoPolicy(false);
 		}
 	};
-
+	const saveMihomoPolicy = () => {
+		const result = mihomoPolicyInputRef.current?.commitDraft();
+		if (!result || result.rejected.length > 0) return;
+		void updateMihomoPolicy(result.value);
+	};
+	const mihomoPolicyActions = [
+		{
+			label: "Refresh",
+			variant: "secondary",
+			loading: mihomoPolicyQuery.isFetching,
+			disabled: !appRuntime.isOnline || isSavingMihomoPolicy,
+			onClick: () => void mihomoPolicyQuery.refetch(),
+		},
+		{
+			label: "Disable private targets",
+			variant: "outline",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void updateMihomoPolicy([]),
+		},
+		{
+			label: "Save override",
+			variant: "primary",
+			disabled: appRuntime.isReadOnly || mihomoPolicyHasRejectedDraft,
+			loading: isSavingMihomoPolicy,
+			onClick: saveMihomoPolicy,
+		},
+		{
+			label: "Restore deployment default",
+			variant: "secondary",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void restoreMihomoPolicy(),
+		},
+	] as const;
 	const handleOpenDeleteDialog = async () => {
 		setIsPreparingDelete(true);
 		try {
@@ -880,7 +909,6 @@ export function NodeDetailsPage() {
 		}
 	};
 	const hasPendingDeleteOperation = pendingDeleteOperationId !== null;
-
 	const content = (() => {
 		if (nodesCapability.unavailable) {
 			return (
@@ -899,7 +927,6 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		if (nodeQuery.isLoading && !hasQueryData(nodeQuery)) {
 			return (
 				<PageState
@@ -909,7 +936,6 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		if (
 			!hasQueryData(nodeQuery) &&
 			queryIsOfflineBlocked(nodeQuery, appRuntime.isOnline)
@@ -933,7 +959,6 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		if (!nodeQuery.data) {
 			return (
 				<PageState
@@ -943,12 +968,10 @@ export function NodeDetailsPage() {
 				/>
 			);
 		}
-
 		const runtime = runtimeLive ?? runtimeQuery.data;
 		const history = historyQuery.data?.history ?? null;
 		const quotaPolicy = quotaForm.watch("resetPolicy");
 		const egressProbe = nodeQuery.data.egress_probe;
-
 		return (
 			<div className="space-y-4">
 				<ModuleTabsLayout
@@ -981,7 +1004,6 @@ export function NodeDetailsPage() {
 									</Badge>
 								</div>
 							</div>
-
 							{runtimeQuery.isLoading && !runtime ? (
 								<PageState
 									variant="loading"
@@ -989,7 +1011,6 @@ export function NodeDetailsPage() {
 									description="Fetching service runtime details."
 								/>
 							) : null}
-
 							{!runtime &&
 							!history &&
 							queryIsOfflineBlocked(runtimeQuery, appRuntime.isOnline) ? (
@@ -999,7 +1020,6 @@ export function NodeDetailsPage() {
 									description="Open this node's runtime tab while online to keep the latest timeline and events available offline."
 								/>
 							) : null}
-
 							{runtimeQuery.isError &&
 							!runtime &&
 							!history &&
@@ -1013,7 +1033,6 @@ export function NodeDetailsPage() {
 									onRetry={() => runtimeQuery.refetch()}
 								/>
 							) : null}
-
 							{runtimeQuery.isError && !runtime && history ? (
 								<NodeHistoryFallbackPanel
 									history={history}
@@ -1021,7 +1040,6 @@ export function NodeDetailsPage() {
 									onRefresh={() => historyQuery.refetch()}
 								/>
 							) : null}
-
 							{runtime ? (
 								<>
 									{runtimeSseError ? (
@@ -1029,7 +1047,6 @@ export function NodeDetailsPage() {
 											<span>Realtime stream degraded: {runtimeSseError}</span>
 										</div>
 									) : null}
-
 									<div className="grid gap-3 lg:grid-cols-3">
 										{runtime.components.map((component) => (
 											<div
@@ -1082,7 +1099,6 @@ export function NodeDetailsPage() {
 											</div>
 										))}
 									</div>
-
 									<div>
 										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
 											<p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -1107,7 +1123,6 @@ export function NodeDetailsPage() {
 												</span>
 											</div>
 										</div>
-
 										<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
 											<div className="overflow-x-auto">
 												<div className="min-w-[28rem]">
@@ -1126,7 +1141,6 @@ export function NodeDetailsPage() {
 															<span>24:00</span>
 														</div>
 													</div>
-
 													<div className="space-y-1.5">
 														{buildRuntimeActivityRows(runtime.recent_slots).map(
 															(row) => (
@@ -1411,331 +1425,354 @@ export function NodeDetailsPage() {
 							</div>
 						</section>
 					</ModuleTabsPanel>
-
-					<ModuleTabsPanel value="mihomo">
-						<section className="space-y-4">
-							{mihomoPrivateCidrsCapability.unavailable ? (
-								<CapabilityUnavailableState
-									title="Mihomo private resource policy unavailable"
-									reason={mihomoPrivateCidrsCapability.reason}
-								/>
-							) : null}
-							{!mihomoPrivateCidrsCapability.unavailable ? (
-								<>
-									<div className="flex flex-wrap items-start justify-between gap-3">
-										<div>
-											<p className="text-sm font-semibold">
-												Mihomo private resource policy
-											</p>
-											<p className="text-sm text-muted-foreground">
-												Allow only approved private CIDRs for split-DNS mirror
-												resources on this node.
-											</p>
-										</div>
-										{mihomoPolicyQuery.data ? (
-											<Badge
-												variant={
-													mihomoPolicyQuery.data.status === "healthy"
-														? "success"
-														: "warning"
-												}
-											>
-												{mihomoPolicyQuery.data.source}
-											</Badge>
-										) : null}
-									</div>
-
-									{mihomoPolicyQuery.isLoading ? (
-										<PageState
-											variant="loading"
-											title="Loading Mihomo policy"
-											description="Fetching node-local private CIDR policy."
-										/>
-									) : null}
-									{mihomoPolicyQuery.isError ? (
-										<QueryErrorState
-											title="Mihomo policy unavailable"
-											description={formatErrorMessage(mihomoPolicyQuery.error)}
-											error={mihomoPolicyQuery.error}
-											loading={mihomoPolicyQuery.isFetching}
-											onRetry={() => mihomoPolicyQuery.refetch()}
-										/>
-									) : null}
-									{mihomoPolicyQuery.data ? (
-										<>
-											<div className="grid gap-3 md:grid-cols-3">
-												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
-													<div className="text-xs uppercase tracking-wide text-muted-foreground">
-														Deployment default
-													</div>
-													<div className="mt-2 space-y-1 font-mono text-sm break-all">
-														{mihomoPolicyQuery.data.deployment_default_cidrs
-															.length > 0
-															? mihomoPolicyQuery.data.deployment_default_cidrs.map(
-																	(cidr) => <div key={cidr}>{cidr}</div>,
-																)
-															: "(empty)"}
-													</div>
-												</div>
-												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
-													<div className="text-xs uppercase tracking-wide text-muted-foreground">
-														Effective policy
-													</div>
-													<div className="mt-2 space-y-1 font-mono text-sm break-all">
-														{mihomoPolicyQuery.data.effective_cidrs.length > 0
-															? mihomoPolicyQuery.data.effective_cidrs.map(
-																	(cidr) => <div key={cidr}>{cidr}</div>,
-																)
-															: "(private targets disabled)"}
-													</div>
-												</div>
-												<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
-													<div className="text-xs uppercase tracking-wide text-muted-foreground">
-														Status
-													</div>
-													<div className="mt-2 text-sm">
-														{mihomoPolicyQuery.data.status}
-														{mihomoPolicyQuery.data.error ? (
-															<p className="mt-1 break-words text-warning">
-																{mihomoPolicyQuery.data.error}
-															</p>
-														) : null}
-													</div>
-												</div>
+					<ModuleTabsPanel value="settings">
+						<div className="space-y-8">
+							<section
+								aria-labelledby="mihomo-settings-heading"
+								className="space-y-4"
+							>
+								{mihomoPrivateCidrsCapability.unavailable ? (
+									<CapabilityUnavailableState
+										title="Mihomo private resource policy unavailable"
+										reason={mihomoPrivateCidrsCapability.reason}
+									/>
+								) : null}
+								{!mihomoPrivateCidrsCapability.unavailable ? (
+									<>
+										<div className="flex flex-wrap items-start justify-between gap-3">
+											<div>
+												<h2
+													id="mihomo-settings-heading"
+													className="text-lg font-semibold"
+												>
+													Mihomo resources
+												</h2>
+												<p className="text-sm text-muted-foreground">
+													Mihomo private resource policy
+												</p>
+												<p className="text-sm text-muted-foreground">
+													Allow only approved private CIDRs for split-DNS mirror
+													resources on this node.
+												</p>
 											</div>
-
-											<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
-												<TagInput
-													label="Web override CIDRs"
-													value={mihomoPolicyDraft}
-													onChange={setMihomoPolicyDraft}
-													placeholder="192.168.0.0/16"
-													helperText="Add a CIDR with Enter or comma, or paste a list. Saving replaces the deployment default for this node."
-													validateTag={validateMihomoPrivateCidr}
-													allowPrimary={false}
-													disabled={
-														isSavingMihomoPolicy || appRuntime.isReadOnly
+											{mihomoPolicyQuery.data ? (
+												<Badge
+													variant={
+														mihomoPolicyQuery.data.status === "healthy"
+															? "success"
+															: "warning"
 													}
-												/>
-												<div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
-													<Button
-														variant="secondary"
-														size="md"
-														className="w-full sm:w-auto"
-														loading={mihomoPolicyQuery.isFetching}
-														disabled={
-															!appRuntime.isOnline || isSavingMihomoPolicy
-														}
-														onClick={() => void mihomoPolicyQuery.refetch()}
-													>
-														Refresh
-													</Button>
-													<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-														<Button
-															variant="outline"
-															size="md"
-															className="w-full sm:w-auto"
-															disabled={
-																isSavingMihomoPolicy || appRuntime.isReadOnly
-															}
-															onClick={() => void updateMihomoPolicy([])}
-														>
-															Disable private targets
-														</Button>
-														<Button
-															size="md"
-															className="w-full sm:w-auto"
-															loading={isSavingMihomoPolicy}
-															disabled={appRuntime.isReadOnly}
-															onClick={() =>
-																void updateMihomoPolicy(mihomoPolicyDraft)
-															}
-														>
-															Save override
-														</Button>
-														<Button
-															variant="secondary"
-															size="md"
-															className="w-full sm:w-auto"
-															disabled={
-																isSavingMihomoPolicy || appRuntime.isReadOnly
-															}
-															onClick={() => void restoreMihomoPolicy()}
-														>
-															Restore deployment default
-														</Button>
+												>
+													{mihomoPolicyQuery.data.source}
+												</Badge>
+											) : null}
+										</div>
+										{mihomoPolicyQuery.isLoading ? (
+											<PageState
+												variant="loading"
+												title="Loading Mihomo policy"
+												description="Fetching node-local private CIDR policy."
+											/>
+										) : null}
+										{mihomoPolicyQuery.isError ? (
+											<QueryErrorState
+												title="Mihomo policy unavailable"
+												description={formatErrorMessage(
+													mihomoPolicyQuery.error,
+												)}
+												error={mihomoPolicyQuery.error}
+												loading={mihomoPolicyQuery.isFetching}
+												onRetry={() => mihomoPolicyQuery.refetch()}
+											/>
+										) : null}
+										{mihomoPolicyQuery.data ? (
+											<>
+												<div className="grid gap-3 md:grid-cols-3">
+													<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+														<div className="text-xs uppercase tracking-wide text-muted-foreground">
+															Deployment default
+														</div>
+														<div className="mt-2 space-y-1 font-mono text-sm break-all">
+															{mihomoPolicyQuery.data.deployment_default_cidrs
+																.length > 0
+																? mihomoPolicyQuery.data.deployment_default_cidrs.map(
+																		(cidr) => <div key={cidr}>{cidr}</div>,
+																	)
+																: "(empty)"}
+														</div>
+													</div>
+													<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+														<div className="text-xs uppercase tracking-wide text-muted-foreground">
+															Effective policy
+														</div>
+														<div className="mt-2 space-y-1 font-mono text-sm break-all">
+															{mihomoPolicyQuery.data.effective_cidrs.length > 0
+																? mihomoPolicyQuery.data.effective_cidrs.map(
+																		(cidr) => <div key={cidr}>{cidr}</div>,
+																	)
+																: "(private targets disabled)"}
+														</div>
+													</div>
+													<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
+														<div className="text-xs uppercase tracking-wide text-muted-foreground">
+															Status
+														</div>
+														<div className="mt-2 text-sm">
+															{mihomoPolicyQuery.data.status}
+															{mihomoPolicyQuery.data.error ? (
+																<p className="mt-1 break-words text-warning">
+																	{mihomoPolicyQuery.data.error}
+																</p>
+															) : null}
+														</div>
 													</div>
 												</div>
-											</div>
-										</>
-									) : null}
-								</>
-							) : null}
-						</section>
-					</ModuleTabsPanel>
-
-					<ModuleTabsPanel value="quota">
-						<section className="space-y-4">
-							<div>
-								<p className="text-sm text-muted-foreground">
-									Runtime admin setting. Safe to edit via the admin API.
-								</p>
-							</div>
-							<div className="rounded-2xl bg-muted/35 p-4 space-y-1">
-								<div className="text-xs uppercase tracking-wide text-muted-foreground">
-									Quota budget
+												<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
+													<TagInput
+														ref={mihomoPolicyInputRef}
+														label="Web override CIDRs"
+														value={mihomoPolicyDraft}
+														onChange={setMihomoPolicyDraft}
+														placeholder="192.168.0.0/16"
+														helperText="Add a private CIDR or IP with Enter, comma, or paste. Saving replaces the deployment default."
+														validateTag={validateMihomoPrivateCidr}
+														normalizeTag={normalizeMihomoPrivateCidr}
+														onRejectedDraftChange={
+															setMihomoPolicyHasRejectedDraft
+														}
+														allowPrimary={false}
+														disabled={
+															isSavingMihomoPolicy || appRuntime.isReadOnly
+														}
+													/>
+													<div className="grid gap-2 border-t border-border/70 pt-4 sm:grid-cols-4">
+														{mihomoPolicyActions.map((action) => (
+															<Button
+																key={action.label}
+																variant={action.variant}
+																size="md"
+																className="w-full"
+																loading={action.loading}
+																disabled={action.disabled}
+																onClick={action.onClick}
+															>
+																{action.label}
+															</Button>
+														))}
+													</div>
+												</div>
+											</>
+										) : null}
+									</>
+								) : null}
+							</section>
+							<div className="border-t border-border/70" />
+							<section
+								aria-labelledby="quota-settings-heading"
+								className="space-y-4"
+							>
+								<div>
+									<h2
+										id="quota-settings-heading"
+										className="text-lg font-semibold"
+									>
+										Quota settings
+									</h2>
+									<p className="text-sm text-muted-foreground">
+										Runtime admin setting. Safe to edit via the admin API.
+									</p>
 								</div>
-								<div className="text-sm text-muted-foreground">
-									Total bytes per cycle for this node. Set to{" "}
-									<span className="font-mono">0</span> to disable shared quota
-									enforcement (unlimited).
+								<div className="rounded-2xl bg-muted/35 p-4 space-y-1">
+									<div className="text-xs uppercase tracking-wide text-muted-foreground">
+										Quota budget
+									</div>
+									<div className="text-sm text-muted-foreground">
+										Total bytes per cycle for this node. Set to{" "}
+										<span className="font-mono">0</span> to disable shared quota
+										enforcement (unlimited).
+									</div>
+									<NodeQuotaEditor
+										value={nodeQuery.data.quota_limit_bytes}
+										disabled={isSaving || appRuntime.isReadOnly}
+										onApply={async (nextBytes: number) => {
+											try {
+												await patchAdminNode(adminToken, nodeId, {
+													quota_limit_bytes: nextBytes,
+												});
+												syncNode(queryClient, adminToken, nodeId, {
+													quota_limit_bytes: nextBytes,
+												});
+												pushToast({
+													variant: "success",
+													message: "Node quota budget updated.",
+												});
+												await nodeQuery.refetch();
+											} catch (error) {
+												const message = formatErrorMessage(error);
+												pushToast({
+													variant: "error",
+													message: `Failed to update node quota budget: ${message}`,
+												});
+												throw new Error(message);
+											}
+										}}
+									/>
 								</div>
-								<NodeQuotaEditor
-									value={nodeQuery.data.quota_limit_bytes}
-									disabled={isSaving || appRuntime.isReadOnly}
-									onApply={async (nextBytes: number) => {
-										try {
-											await patchAdminNode(adminToken, nodeId, {
-												quota_limit_bytes: nextBytes,
-											});
-											syncNode(queryClient, adminToken, nodeId, {
-												quota_limit_bytes: nextBytes,
-											});
-											pushToast({
-												variant: "success",
-												message: "Node quota budget updated.",
-											});
-											await nodeQuery.refetch();
-										} catch (error) {
-											const message = formatErrorMessage(error);
-											pushToast({
-												variant: "error",
-												message: `Failed to update node quota budget: ${message}`,
-											});
-											throw new Error(message);
-										}
-									}}
-								/>
-							</div>
-							<Form {...quotaForm}>
-								<form className="space-y-4" onSubmit={handleSaveQuotaReset}>
-									<div className="grid gap-4 md:grid-cols-3">
-										<FormField
-											control={quotaForm.control}
-											name="resetPolicy"
-											render={({ field }) => (
-												<FormItem>
-													<FormLabel>Policy</FormLabel>
-													<Select
-														value={field.value}
-														onValueChange={(value) => {
-															field.onChange(value);
-															if (value !== "monthly") {
-																quotaForm.setValue("resetDay", 1, {
-																	shouldDirty: true,
-																	shouldValidate: false,
-																});
-																quotaForm.clearErrors("resetDay");
-															}
-														}}
-													>
+								<Form {...quotaForm}>
+									<form className="space-y-4" onSubmit={handleSaveQuotaReset}>
+										<div className="grid gap-4 md:grid-cols-3">
+											<FormField
+												control={quotaForm.control}
+												name="resetPolicy"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>Policy</FormLabel>
+														<Select
+															value={field.value}
+															onValueChange={(value) => {
+																field.onChange(value);
+																if (value !== "monthly") {
+																	quotaForm.setValue("resetDay", 1, {
+																		shouldDirty: true,
+																		shouldValidate: false,
+																	});
+																	quotaForm.clearErrors("resetDay");
+																}
+															}}
+														>
+															<FormControl>
+																<SelectTrigger>
+																	<SelectValue />
+																</SelectTrigger>
+															</FormControl>
+															<SelectContent>
+																<SelectItem value="monthly">monthly</SelectItem>
+																<SelectItem value="unlimited">
+																	unlimited
+																</SelectItem>
+															</SelectContent>
+														</Select>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={quotaForm.control}
+												name="resetDay"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>Day of month</FormLabel>
 														<FormControl>
-															<SelectTrigger>
-																<SelectValue />
-															</SelectTrigger>
+															<Input
+																type="number"
+																min={1}
+																max={31}
+																step={1}
+																disabled={quotaPolicy !== "monthly"}
+																name={field.name}
+																ref={field.ref}
+																onBlur={field.onBlur}
+																value={
+																	typeof field.value === "number" ||
+																	typeof field.value === "string"
+																		? field.value
+																		: ""
+																}
+																onChange={(event) =>
+																	field.onChange(event.target.value)
+																}
+															/>
 														</FormControl>
-														<SelectContent>
-															<SelectItem value="monthly">monthly</SelectItem>
-															<SelectItem value="unlimited">
-																unlimited
-															</SelectItem>
-														</SelectContent>
-													</Select>
-													<FormMessage />
-												</FormItem>
-											)}
-										/>
-										<FormField
-											control={quotaForm.control}
-											name="resetDay"
-											render={({ field }) => (
-												<FormItem>
-													<FormLabel>Day of month</FormLabel>
-													<FormControl>
-														<Input
-															type="number"
-															min={1}
-															max={31}
-															step={1}
-															disabled={quotaPolicy !== "monthly"}
-															name={field.name}
-															ref={field.ref}
-															onBlur={field.onBlur}
-															value={
-																typeof field.value === "number" ||
-																typeof field.value === "string"
-																	? field.value
-																	: ""
-															}
-															onChange={(event) =>
-																field.onChange(event.target.value)
-															}
-														/>
-													</FormControl>
-													<FormDescription>
-														Used when the policy is monthly.
-													</FormDescription>
-													<FormMessage />
-												</FormItem>
-											)}
-										/>
-										<FormField
-											control={quotaForm.control}
-											name="resetTzOffsetMinutes"
-											render={({ field }) => (
-												<FormItem>
-													<FormLabel>tz_offset_minutes</FormLabel>
-													<FormControl>
-														<Input
-															{...field}
-															type="text"
-															placeholder="(empty)"
-														/>
-													</FormControl>
-													<FormDescription>
-														Leave empty to follow node-local defaults.
-													</FormDescription>
-													<FormMessage />
-												</FormItem>
-											)}
-										/>
-									</div>
-
-									{saveError ? (
-										<p className="text-sm text-destructive">{saveError}</p>
-									) : null}
-
-									<div className="flex justify-end gap-2">
-										<Button
-											variant="secondary"
-											type="button"
-											loading={nodeQuery.isFetching}
-											disabled={!appRuntime.isOnline}
-											onClick={() => nodeQuery.refetch()}
-										>
-											Refresh
-										</Button>
-										<Button
-											type="submit"
-											loading={isSaving}
-											disabled={!isDirty || appRuntime.isReadOnly}
-										>
-											Save changes
-										</Button>
-									</div>
-								</form>
-							</Form>
-						</section>
+														<FormDescription>
+															Used when the policy is monthly.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+											<FormField
+												control={quotaForm.control}
+												name="resetTzOffsetMinutes"
+												render={({ field }) => (
+													<FormItem>
+														<FormLabel>tz_offset_minutes</FormLabel>
+														<FormControl>
+															<Input
+																{...field}
+																type="text"
+																placeholder="(empty)"
+															/>
+														</FormControl>
+														<FormDescription>
+															Leave empty to follow node-local defaults.
+														</FormDescription>
+														<FormMessage />
+													</FormItem>
+												)}
+											/>
+										</div>
+										{saveError ? (
+											<p className="text-sm text-destructive">{saveError}</p>
+										) : null}
+										<div className="flex justify-end gap-2">
+											<Button
+												variant="secondary"
+												type="button"
+												loading={nodeQuery.isFetching}
+												disabled={!appRuntime.isOnline}
+												onClick={() => nodeQuery.refetch()}
+											>
+												Refresh
+											</Button>
+											<Button
+												type="submit"
+												loading={isSaving}
+												disabled={!isDirty || appRuntime.isReadOnly}
+											>
+												Save changes
+											</Button>
+										</div>
+									</form>
+								</Form>
+							</section>
+							<div className="border-t border-border/70" />
+							<section
+								aria-labelledby="danger-zone-heading"
+								className="space-y-4"
+							>
+								<div>
+									<h2
+										id="danger-zone-heading"
+										className="text-lg font-semibold text-destructive"
+									>
+										Danger zone
+									</h2>
+								</div>
+								<NodeDeleteOperationStatus
+									operation={pendingDeleteOperation}
+									visible={hasPendingDeleteOperation}
+								/>
+								<p className="text-sm text-muted-foreground">
+									Deleting a node removes it from the cluster membership and
+									inventory. If the node still owns endpoints, the next step
+									shows exactly what will be deleted.
+								</p>
+								<div>
+									<Button
+										variant="danger"
+										onClick={() => void handleOpenDeleteDialog()}
+										loading={isPreparingDelete}
+										disabled={
+											isDeleting ||
+											hasPendingDeleteOperation ||
+											appRuntime.isReadOnly
+										}
+									>
+										Delete node
+									</Button>
+								</div>
+							</section>
+						</div>
 					</ModuleTabsPanel>
 
 					<ModuleTabsPanel value="traffic">
@@ -1907,34 +1944,6 @@ export function NodeDetailsPage() {
 								/>
 							) : null}
 						</div>
-					</ModuleTabsPanel>
-
-					<ModuleTabsPanel value="danger">
-						<section className="space-y-4">
-							<NodeDeleteOperationStatus
-								operation={pendingDeleteOperation}
-								visible={hasPendingDeleteOperation}
-							/>
-							<p className="text-sm text-muted-foreground">
-								Deleting a node removes it from the cluster membership and
-								inventory. If the node still owns endpoints, the next step shows
-								exactly what will be deleted.
-							</p>
-							<div>
-								<Button
-									variant="danger"
-									onClick={() => void handleOpenDeleteDialog()}
-									loading={isPreparingDelete}
-									disabled={
-										isDeleting ||
-										hasPendingDeleteOperation ||
-										appRuntime.isReadOnly
-									}
-								>
-									Delete node
-								</Button>
-							</div>
-						</section>
 					</ModuleTabsPanel>
 				</ModuleTabsLayout>
 

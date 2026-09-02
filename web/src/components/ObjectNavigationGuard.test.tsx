@@ -39,34 +39,38 @@ function renderGuard(
 
 describe("<ObjectNavigationGuardProvider />", () => {
 	it("resolves dirty sections in registration order before navigating", async () => {
-		const saveProfile = vi.fn(async () => true);
-		const discardAccess = vi.fn();
+		const saveMihomo = vi.fn(async () => true);
+		const discardQuota = vi.fn();
 		const onNavigate = renderGuard([
 			{
-				id: "profile",
-				label: "profile",
+				id: "mihomo-policy",
+				label: "Mihomo resources",
 				isDirty: () => true,
-				save: saveProfile,
+				save: saveMihomo,
 				discard: vi.fn(),
 			},
 			{
-				id: "access",
-				label: "access",
+				id: "quota-reset",
+				label: "Quota settings",
 				isDirty: () => true,
 				save: vi.fn(async () => true),
-				discard: discardAccess,
+				discard: discardQuota,
 			},
 		]);
 
 		fireEvent.click(screen.getByRole("button", { name: "Open next object" }));
 		expect(
-			screen.getByRole("heading", { name: "Unsaved profile changes" }),
+			screen.getByRole("heading", {
+				name: "Unsaved Mihomo resources changes",
+			}),
 		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
 		await waitFor(() =>
 			expect(
-				screen.getByRole("heading", { name: "Unsaved access changes" }),
+				screen.getByRole("heading", {
+					name: "Unsaved Quota settings changes",
+				}),
 			).toBeInTheDocument(),
 		);
 		expect(onNavigate).not.toHaveBeenCalled();
@@ -75,8 +79,8 @@ describe("<ObjectNavigationGuardProvider />", () => {
 			screen.getByRole("button", { name: "Discard and continue" }),
 		);
 		await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
-		expect(saveProfile).toHaveBeenCalledTimes(1);
-		expect(discardAccess).toHaveBeenCalledTimes(1);
+		expect(saveMihomo).toHaveBeenCalledTimes(1);
+		expect(discardQuota).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps the current object open when saving a dirty section fails", async () => {

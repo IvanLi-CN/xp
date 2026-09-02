@@ -14,7 +14,7 @@
 
 - Mihomo 订阅工具栏和预览弹窗提供临时的 `Use XP mirror for external resources` 选项，默认使用原地址；Raw/Clash 不显示该选项。
 - 勾选后只改写 GeoX、`rule-providers`、`proxy-providers` 的无认证 HTTPS URL，并通过 `external_resources=mirror` 传递给 canonical/provider URL。镜像 provider 固定使用 `proxy: DIRECT`，不转发自定义 Header。
-- 镜像访问使用节点本地私网 CIDR 策略；部署默认来自 `XP_MIHOMO_ALLOWED_PRIVATE_CIDRS`，节点详情页可以为单个节点设置覆盖。未获准的私网和特殊地址仍被拒绝，该策略对初始 URL 与每次重定向同时生效。
+- 镜像访问使用节点本地私网 CIDR 策略；部署默认来自 `XP_MIHOMO_ALLOWED_PRIVATE_CIDRS`，节点详情页可以为单个节点设置覆盖。策略入口接受裸私网 IP，并统一规范为主机 CIDR（IPv4 `/32`、原生 ULA IPv6 `/128`）；未获准的私网和特殊地址仍被拒绝，该策略对初始 URL 与每次重定向同时生效。
 - XP 只为当前 profile 引用的 URL 和固定 MetaCubeX GeoX 资产建立一对一 HMAC 目录；没有任意 URL 代理参数。删除最后一个引用后资源 ID 立即失效。
 - 镜像端点使用 256 MiB、90 秒、全局 32/单资源 4 的流式限制，不缓存内容、不落盘、不聚合响应；仅跟随无 userinfo 的 HTTPS 重定向，最多服务端跟随 5 次且不向客户端暴露跳转。
 

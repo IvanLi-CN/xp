@@ -96,6 +96,7 @@ describe("<TagInput />", () => {
 
 		expect(screen.queryByText("https://example.com")).toBeNull();
 		expect(screen.getByRole("alert")).toBeInTheDocument();
+		expect(input).toHaveValue("https://example.com");
 	});
 
 	it("adds a suggestion from the custom suggestions panel", async () => {
@@ -119,6 +120,20 @@ describe("<TagInput />", () => {
 		expect(screen.getByText("a.example.com")).toBeInTheDocument();
 		expect(screen.queryByText("https://example.com")).toBeNull();
 		expect(screen.getByRole("alert")).toBeInTheDocument();
+		expect(input).toHaveValue("https://example.com");
+	});
+
+	it("keeps only rejected values when a pasted batch is mixed", () => {
+		render(<Harness />);
+
+		const input = screen.getByPlaceholderText("download.example.com");
+		fireEvent.paste(input, {
+			clipboardData: { getData: () => "a.example.com, https://example.com" },
+		});
+
+		expect(screen.getByText("a.example.com")).toBeInTheDocument();
+		expect(screen.getByRole("alert")).toBeInTheDocument();
+		expect(input).toHaveValue("https://example.com");
 	});
 
 	it("does not remove tags when clicking helper/empty areas", () => {

@@ -172,11 +172,11 @@ pub fn parse_cidrs(values: Vec<String>) -> Result<Vec<IpNet>> {
     }
     let mut result = Vec::new();
     for (index, raw) in values.into_iter().enumerate() {
+        let raw = raw.trim();
         if raw.is_empty() {
             bail!("private CIDR at index {index} is empty");
         }
-        let net: IpNet = raw
-            .parse()
+        let net = parse_network_or_host(raw)
             .map_err(|error| anyhow!("private CIDR at index {index} is invalid: {error}"))?;
         let net = normalize_network(net);
         if !is_allowed_private_network(net) {
@@ -187,6 +187,22 @@ pub fn parse_cidrs(values: Vec<String>) -> Result<Vec<IpNet>> {
         }
     }
     Ok(result)
+}
+
+fn parse_network_or_host(raw: &str) -> Result<IpNet> {
+    if raw.contains('/') {
+        return raw
+            .parse()
+            .map_err(|error| anyhow!("invalid network: {error}"));
+    }
+
+    let address: IpAddr = raw
+        .parse()
+        .map_err(|error| anyhow!("invalid IP address: {error}"))?;
+    Ok(match address {
+        IpAddr::V4(address) => IpNet::V4(ipnet::Ipv4Net::new(address, 32).unwrap()),
+        IpAddr::V6(address) => IpNet::V6(ipnet::Ipv6Net::new(address, 128).unwrap()),
+    })
 }
 
 fn parse_persisted(bytes: &[u8]) -> Result<Vec<IpNet>> {
@@ -303,14 +319,28 @@ mod tests {
 
     #[test]
     fn parses_and_normalizes_private_cidrs() {
-        let values = parse_cidrs(vec!["192.168.1.7/24".into(), "192.168.1.0/24".into()]).unwrap();
-        assert_eq!(values, vec!["192.168.1.0/24".parse().unwrap()]);
+        let values = parse_cidrs(vec![
+            "192.168.1.7/24".into(),
+            "192.168.1.0/24".into(),
+            "192.168.1.7".into(),
+            "fd12:3456::7".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            values,
+            vec![
+                "192.168.1.0/24".parse().unwrap(),
+                "192.168.1.7/32".parse().unwrap(),
+                "fd12:3456::7/128".parse().unwrap(),
+            ]
+        );
     }
 
     #[test]
     fn rejects_networks_outside_allowed_private_ranges() {
         assert!(parse_cidrs(vec!["192.0.2.0/24".into()]).is_err());
         assert!(parse_cidrs(vec!["0.0.0.0/0".into()]).is_err());
+        assert!(parse_cidrs(vec!["::ffff:192.168.1.1".into()]).is_err());
     }
 
     #[test]
@@ -328,6 +358,14 @@ mod tests {
         assert!(parse_cidrs(too_many).is_err());
         let error = parse_env(Some("10.0.0.0/24,not-a-cidr".into())).unwrap_err();
         assert!(error.to_string().contains("index 1"));
+        let values = parse_env(Some("10.0.0.7,fd12::7".into())).unwrap();
+        assert_eq!(
+            values,
+            vec![
+                "10.0.0.7/32".parse().unwrap(),
+                "fd12::7/128".parse().unwrap()
+            ]
+        );
     }
 
     #[test]
@@ -386,12 +424,12 @@ mod tests {
             assert!(snapshot.effective.is_empty());
 
             let snapshot = policy
-                .set_override(vec!["192.168.50.7/24".into()])
+                .set_override(vec!["192.168.50.7".into()])
                 .await
                 .unwrap();
-            assert_eq!(snapshot.effective, vec!["192.168.50.0/24".parse().unwrap()]);
+            assert_eq!(snapshot.effective, vec!["192.168.50.7/32".parse().unwrap()]);
             let persisted = std::fs::read(&path).unwrap();
-            assert!(String::from_utf8_lossy(&persisted).contains("192.168.50.0/24"));
+            assert!(String::from_utf8_lossy(&persisted).contains("192.168.50.7/32"));
             #[cfg(unix)]
             assert_eq!(
                 std::os::unix::fs::MetadataExt::mode(&std::fs::metadata(&path).unwrap()) & 0o777,

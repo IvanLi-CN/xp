@@ -184,7 +184,10 @@
 - Style budget: `bun run check:style-budget`
 - Run backend locally: `cargo run` (default bind `127.0.0.1:62416`)
 - Sanitize Mihomo subscriptions/configs before sharing: `xp-ops mihomo redact [SOURCE]` (`SOURCE` supports URL, file path, `-` for stdin, or omit for stdin)
-- Mihomo mirror private targets are authorized per node by `XP_MIHOMO_ALLOWED_PRIVATE_CIDRS` and the node-local `${XP_DATA_DIR}/mihomo-resource-policy.json` Web override; policy state is never stored in Raft.
+- Mihomo mirror private targets are authorized per node by `XP_MIHOMO_ALLOWED_PRIVATE_CIDRS`
+  and the node-local `${XP_DATA_DIR}/mihomo-resource-policy.json` Web override; all policy
+  inputs accept bare private IPs and canonicalize them to `/32` or `/128`; policy state is
+  never stored in Raft.
 - Backend checks: `cargo test`, `cargo fmt`, `cargo clippy -- -D warnings`
 - Install frontend deps: `cd web && bun install`
 - Run frontend dev server: `cd web && bun run dev` (binds `127.0.0.1:60080`)
