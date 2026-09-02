@@ -39,9 +39,9 @@ function ResourceMetric(props: {
 	bytes?: boolean;
 }) {
 	return (
-		<div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+		<div className="min-w-0 rounded-lg border border-border/60 bg-muted/20 p-3">
 			<p className="text-xs text-muted-foreground">{props.label}</p>
-			<p className="font-mono text-sm">
+			<p className="break-words font-mono text-sm leading-tight">
 				{props.bytes
 					? resourceBytesText(props.measurement.value)
 					: resourceMeasurementText(props.measurement)}
