@@ -217,14 +217,61 @@ export const MetadataEgressProbe: Story = {
 	},
 };
 
+export const NodeSettings: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Mihomo resources" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Quota settings" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Danger zone" }),
+		).toBeInTheDocument();
+	},
+};
+
+export const NodeSettingsMobile: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "nodeSettingsMobile",
+			viewports: {
+				nodeSettingsMobile: {
+					name: "Node settings mobile",
+					styles: { width: "393px", height: "852px" },
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			await canvas.findByRole("tab", { name: "Node settings" }),
+		);
+		await expect(
+			await canvas.findByRole("heading", { name: "Mihomo resources" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Quota settings" }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Danger zone" }),
+		).toBeInTheDocument();
+	},
+};
+
 async function verifyMihomoPrivateResourcePolicy(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	await canvas.findByText("Mihomo resources", { exact: true });
-	const mihomoTab = Array.from(
+	await canvas.findByText("Node settings", { exact: true });
+	const settingsTab = Array.from(
 		canvasElement.querySelectorAll<HTMLElement>('[role="tab"]'),
-	).find((element) => element.textContent?.trim() === "Mihomo resources");
-	if (mihomoTab) {
-		mihomoTab.click();
+	).find((element) => element.textContent?.trim() === "Node settings");
+	if (settingsTab) {
+		settingsTab.click();
 	} else {
 		const mobileSelect = canvasElement.querySelector<HTMLElement>(
 			'[role="combobox"][aria-label="Node details section"]',
@@ -233,10 +280,13 @@ async function verifyMihomoPrivateResourcePolicy(canvasElement: HTMLElement) {
 		mobileSelect.click();
 		await userEvent.click(
 			await within(canvasElement.ownerDocument.body).findByRole("option", {
-				name: "Mihomo resources",
+				name: "Node settings",
 			}),
 		);
 	}
+	await expect(
+		await canvas.findByRole("heading", { name: "Mihomo resources" }),
+	).toBeInTheDocument();
 	await expect(
 		await canvas.findByText("Mihomo private resource policy"),
 	).toBeInTheDocument();
@@ -336,7 +386,7 @@ export const DeleteWithEndpointCleanup: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("tab", { name: "Danger zone" }),
+			await canvas.findByRole("tab", { name: "Node settings" }),
 		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
@@ -373,7 +423,7 @@ export const DeletePending: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("tab", { name: "Danger zone" }),
+			await canvas.findByRole("tab", { name: "Node settings" }),
 		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
@@ -405,7 +455,7 @@ export const DeleteBlocked: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			await canvas.findByRole("tab", { name: "Danger zone" }),
+			await canvas.findByRole("tab", { name: "Node settings" }),
 		);
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "Delete node" }),
