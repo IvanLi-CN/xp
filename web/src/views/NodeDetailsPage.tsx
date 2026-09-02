@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -47,7 +47,7 @@ import { CapabilityUnavailableState, PageState } from "../components/PageState";
 import { QueryErrorState } from "../components/QueryErrorState";
 import { QueryRefreshError } from "../components/QueryRefreshError";
 import { ReadStateBanner } from "../components/ReadStateBanner";
-import { TagInput } from "../components/TagInput";
+import { TagInput, type TagInputHandle } from "../components/TagInput";
 import { TcpConnectionUsageView } from "../components/TcpConnectionUsageView";
 import { useToast } from "../components/Toast";
 import { TrafficView } from "../components/TrafficView";
@@ -81,7 +81,10 @@ import {
 	queryIsOfflineBlocked,
 } from "../offline/queryReadState";
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
-import { validateMihomoPrivateCidr } from "../utils/mihomoPrivateCidr";
+import {
+	normalizeMihomoPrivateCidr,
+	validateMihomoPrivateCidr,
+} from "../utils/mihomoPrivateCidr";
 import { formatQuotaBytesHuman } from "../utils/quota";
 import { resourceListCache, syncNode } from "./adminEndpointsCache";
 import {
@@ -133,7 +136,6 @@ function eventBadgeVariant(kind: NodeRuntimeEvent["kind"]) {
 			return "ghost";
 	}
 }
-
 function historySlotClass(status: string): string {
 	switch (status) {
 		case "up":
@@ -148,10 +150,8 @@ function historySlotClass(status: string): string {
 			return "bg-muted";
 	}
 }
-
 const SLOTS_PER_DAY = 48;
 const ACTIVITY_DAYS = 7;
-
 const quotaResetSchema = z
 	.object({
 		resetPolicy: z.enum(["monthly", "unlimited"]),
@@ -177,17 +177,14 @@ const quotaResetSchema = z
 			});
 		}
 	});
-
 type QuotaResetFormValues = z.infer<typeof quotaResetSchema>;
 type QuotaResetFormInput = z.input<typeof quotaResetSchema>;
-
 type RuntimeActivityRow = {
 	key: string;
 	label: string;
 	sortKey: number;
 	slots: Array<NodeRuntimeHistorySlot | null>;
 };
-
 type NodeDetailsTab =
 	| "runtime"
 	| "metadata"
@@ -195,7 +192,6 @@ type NodeDetailsTab =
 	| "ipUsage"
 	| "tcpConnections"
 	| "settings";
-
 const NODE_DETAILS_TAB_OPTIONS: Array<{
 	value: NodeDetailsTab;
 	label: string;
@@ -207,16 +203,13 @@ const NODE_DETAILS_TAB_OPTIONS: Array<{
 	{ value: "tcpConnections", label: "TCP connections" },
 	{ value: "settings", label: "Node settings" },
 ];
-
 function buildRuntimeActivityRows(
 	recentSlots: NodeRuntimeHistorySlot[],
 ): RuntimeActivityRow[] {
 	const byDay = new Map<string, RuntimeActivityRow>();
-
 	for (const slot of recentSlots) {
 		const at = new Date(slot.slot_start);
 		if (Number.isNaN(at.getTime())) continue;
-
 		const dayStart = new Date(at.getFullYear(), at.getMonth(), at.getDate());
 		const month = String(dayStart.getMonth() + 1).padStart(2, "0");
 		const day = String(dayStart.getDate()).padStart(2, "0");
@@ -477,7 +470,6 @@ function formatEndpointKind(
 			return value;
 	}
 }
-
 export function NodeDetailsPage() {
 	const { nodeId } = useParams({ from: "/app/nodes/$nodeId" });
 	const [adminToken] = useState(() => readAdminToken());
@@ -560,6 +552,9 @@ export function NodeDetailsPage() {
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [mihomoPolicyDraft, setMihomoPolicyDraft] = useState<string[]>([]);
+	const [mihomoPolicyHasRejectedDraft, setMihomoPolicyHasRejectedDraft] =
+		useState(false);
+	const mihomoPolicyInputRef = useRef<TagInputHandle>(null);
 	const [isSavingMihomoPolicy, setIsSavingMihomoPolicy] = useState(false);
 	const [isRefreshingEgressProbe, setIsRefreshingEgressProbe] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -619,6 +614,7 @@ export function NodeDetailsPage() {
 	}, [runtimeQuery.data]);
 	useEffect(() => {
 		setMihomoPolicyDraft(mihomoPolicyQuery.data?.override_cidrs ?? []);
+		setMihomoPolicyHasRejectedDraft(false);
 	}, [mihomoPolicyQuery.data]);
 	useEffect(() => {
 		if (!canReadRuntime) return;
@@ -804,6 +800,7 @@ export function NodeDetailsPage() {
 				result,
 			);
 			setMihomoPolicyDraft(result.override_cidrs ?? []);
+			setMihomoPolicyHasRejectedDraft(false);
 			pushToast({
 				variant: "success",
 				message: "Mihomo resource policy updated.",
@@ -847,6 +844,7 @@ export function NodeDetailsPage() {
 				result,
 			);
 			setMihomoPolicyDraft([]);
+			setMihomoPolicyHasRejectedDraft(false);
 			pushToast({
 				variant: "success",
 				message: "Mihomo policy restored to deployment default.",
@@ -860,6 +858,41 @@ export function NodeDetailsPage() {
 			setIsSavingMihomoPolicy(false);
 		}
 	};
+	const saveMihomoPolicy = () => {
+		const result = mihomoPolicyInputRef.current?.commitDraft();
+		if (!result || result.rejected.length > 0) return;
+		void updateMihomoPolicy(result.value);
+	};
+	const mihomoPolicyActions = [
+		{
+			label: "Refresh",
+			variant: "secondary",
+			loading: mihomoPolicyQuery.isFetching,
+			disabled: !appRuntime.isOnline || isSavingMihomoPolicy,
+			onClick: () => void mihomoPolicyQuery.refetch(),
+		},
+		{
+			label: "Disable private targets",
+			variant: "outline",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void updateMihomoPolicy([]),
+		},
+		{
+			label: "Save override",
+			variant: "primary",
+			disabled: appRuntime.isReadOnly || mihomoPolicyHasRejectedDraft,
+			loading: isSavingMihomoPolicy,
+			onClick: saveMihomoPolicy,
+		},
+		{
+			label: "Restore deployment default",
+			variant: "secondary",
+			loading: false,
+			disabled: isSavingMihomoPolicy || appRuntime.isReadOnly,
+			onClick: () => void restoreMihomoPolicy(),
+		},
+	] as const;
 	const handleOpenDeleteDialog = async () => {
 		setIsPreparingDelete(true);
 		try {
@@ -1014,7 +1047,6 @@ export function NodeDetailsPage() {
 											<span>Realtime stream degraded: {runtimeSseError}</span>
 										</div>
 									) : null}
-
 									<div className="grid gap-3 lg:grid-cols-3">
 										{runtime.components.map((component) => (
 											<div
@@ -1067,7 +1099,6 @@ export function NodeDetailsPage() {
 											</div>
 										))}
 									</div>
-
 									<div>
 										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
 											<p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -1092,7 +1123,6 @@ export function NodeDetailsPage() {
 												</span>
 											</div>
 										</div>
-
 										<div className="rounded-2xl border border-border/70 bg-muted/35 p-3">
 											<div className="overflow-x-auto">
 												<div className="min-w-[28rem]">
@@ -1111,7 +1141,6 @@ export function NodeDetailsPage() {
 															<span>24:00</span>
 														</div>
 													</div>
-
 													<div className="space-y-1.5">
 														{buildRuntimeActivityRows(runtime.recent_slots).map(
 															(row) => (
@@ -1500,65 +1529,36 @@ export function NodeDetailsPage() {
 												</div>
 												<div className="space-y-4 rounded-2xl border border-border/70 bg-muted/35 p-4">
 													<TagInput
+														ref={mihomoPolicyInputRef}
 														label="Web override CIDRs"
 														value={mihomoPolicyDraft}
 														onChange={setMihomoPolicyDraft}
 														placeholder="192.168.0.0/16"
-														helperText="Add a CIDR with Enter or comma, or paste a list. Saving replaces the deployment default for this node."
+														helperText="Add a private CIDR or IP with Enter, comma, or paste. Saving replaces the deployment default."
 														validateTag={validateMihomoPrivateCidr}
+														normalizeTag={normalizeMihomoPrivateCidr}
+														onRejectedDraftChange={
+															setMihomoPolicyHasRejectedDraft
+														}
 														allowPrimary={false}
 														disabled={
 															isSavingMihomoPolicy || appRuntime.isReadOnly
 														}
 													/>
-													<div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
-														<Button
-															variant="secondary"
-															size="md"
-															className="w-full sm:w-auto"
-															loading={mihomoPolicyQuery.isFetching}
-															disabled={
-																!appRuntime.isOnline || isSavingMihomoPolicy
-															}
-															onClick={() => void mihomoPolicyQuery.refetch()}
-														>
-															Refresh
-														</Button>
-														<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+													<div className="grid gap-2 border-t border-border/70 pt-4 sm:grid-cols-4">
+														{mihomoPolicyActions.map((action) => (
 															<Button
-																variant="outline"
+																key={action.label}
+																variant={action.variant}
 																size="md"
-																className="w-full sm:w-auto"
-																disabled={
-																	isSavingMihomoPolicy || appRuntime.isReadOnly
-																}
-																onClick={() => void updateMihomoPolicy([])}
+																className="w-full"
+																loading={action.loading}
+																disabled={action.disabled}
+																onClick={action.onClick}
 															>
-																Disable private targets
+																{action.label}
 															</Button>
-															<Button
-																size="md"
-																className="w-full sm:w-auto"
-																loading={isSavingMihomoPolicy}
-																disabled={appRuntime.isReadOnly}
-																onClick={() =>
-																	void updateMihomoPolicy(mihomoPolicyDraft)
-																}
-															>
-																Save override
-															</Button>
-															<Button
-																variant="secondary"
-																size="md"
-																className="w-full sm:w-auto"
-																disabled={
-																	isSavingMihomoPolicy || appRuntime.isReadOnly
-																}
-																onClick={() => void restoreMihomoPolicy()}
-															>
-																Restore deployment default
-															</Button>
-														</div>
+														))}
 													</div>
 												</div>
 											</>

@@ -577,13 +577,13 @@ describe("<NodeDetailsPage />", () => {
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		expect(cidrInput).toHaveAttribute("placeholder", "192.168.0.0/16");
 		fireEvent.change(cidrInput, {
-			target: { value: fixtureCatalog.address.privateCidr() },
+			target: { value: "192.168.50.7" },
 		});
 		fireEvent.keyDown(cidrInput, { key: "Enter" });
 		await waitFor(() => {
 			expect(
 				cidrInput.closest('[data-testid="tag-input-control"]'),
-			).toHaveTextContent(fixtureCatalog.address.privateCidr());
+			).toHaveTextContent("192.168.50.7/32");
 		});
 
 		fireEvent.click(await screenByRole("button", "Save override"));
@@ -591,7 +591,7 @@ describe("<NodeDetailsPage />", () => {
 			expect(putAdminNodeMihomoResourcePolicy).toHaveBeenCalledWith(
 				"admintoken",
 				fixtureCatalog.nodeId.fixture134(),
-				[fixtureCatalog.address.privateCidr()],
+				["192.168.50.7/32"],
 			);
 		});
 
@@ -620,12 +620,15 @@ describe("<NodeDetailsPage />", () => {
 		fireEvent.click(await screenByRole("tab", "Node settings"));
 		const cidrInput = await screenByRole("textbox", "Web override CIDRs");
 		fireEvent.change(cidrInput, {
-			target: { value: fixtureCatalog.address.privateCidr().replace("/", "") },
+			target: { value: "192.168.31" },
 		});
 		fireEvent.keyDown(cidrInput, { key: "Enter" });
 		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"CIDR must use address/prefix notation.",
+			"CIDR address must be a valid IPv4 or IPv6 literal.",
 		);
+		expect(cidrInput).toHaveValue("192.168.31");
+		expect(await screenByRole("button", "Save override")).toBeDisabled();
+		expect(putAdminNodeMihomoResourcePolicy).not.toHaveBeenCalled();
 
 		fireEvent.change(cidrInput, {
 			target: { value: fixtureCatalog.address.privateIpv6Cidr() },

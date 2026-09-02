@@ -313,6 +313,25 @@ export const MihomoPrivateResourcePolicyDesktop: Story = {
 	},
 };
 
+export const MihomoPrivateResourcePolicyDraftDesktop: Story = {
+	play: async ({ canvasElement }) => {
+		await verifyMihomoPrivateResourcePolicy(canvasElement);
+		const canvas = within(canvasElement);
+		const input = await canvas.findByRole("textbox", {
+			name: "Web override CIDRs",
+		});
+		await userEvent.type(input, "203.0.113.30");
+		await userEvent.keyboard("{Enter}");
+		await expect(input).toHaveValue("203.0.113.30");
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"Only RFC1918 IPv4 CIDRs or IPv6 ULA CIDRs",
+		);
+		await expect(
+			await canvas.findByRole("button", { name: "Save override" }),
+		).toBeDisabled();
+	},
+};
+
 export const MihomoPrivateResourcePolicy: Story = {
 	parameters: {
 		viewport: {

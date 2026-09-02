@@ -10,6 +10,17 @@ through the signed Mesh-backed node API.
 ## Contract
 
 - Only RFC1918 IPv4 and IPv6 ULA (`fc00::/7`) networks can be configured.
+- Every policy-list input accepts either CIDR notation or one private IP literal.
+  A host literal is normalized at ingress to an exact host CIDR: IPv4 uses
+  `/32` and native IPv6 ULA uses `/128`. API reads, persisted policy state,
+  and Web tags always use CIDR notation.
+- The Web tag editor commits valid entries from a submitted batch and retains
+  every rejected entry as an editable draft with its validation error. Local
+  validation must never discard rejected input.
+- `Save override` first attempts to commit the current editor draft. A rejected
+  draft blocks the API request and remains editable. Explicit successful
+  replacement actions (`Disable private targets` and `Restore deployment default`)
+  may clear it; a failed action leaves it intact.
 - Loopback, link-local, multicast, unspecified, documentation, shared-address,
   and metadata ranges remain blocked even when a containing network is listed.
 - DNS answers are filtered individually. Each HTTPS redirect repeats URL, DNS,
@@ -27,4 +38,5 @@ through the signed Mesh-backed node API.
 
 ## Visual Evidence
 
+![Desktop rejected Mihomo CIDR draft](./assets/node-policy-draft-desktop.png)
 ![IPv6 private CIDR policy on a 393px mobile viewport](./assets/node-policy-ipv6-mobile.png)

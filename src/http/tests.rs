@@ -3188,14 +3188,14 @@ async fn admin_node_mihomo_resource_policy_is_local_and_overridable() {
         .oneshot(req_authed_json(
             "PUT",
             &path,
-            json!({ "override_cidrs": ["192.168.50.7/24"] }),
+            json!({ "override_cidrs": ["192.168.50.7"] }),
         ))
         .await
         .unwrap();
     assert_eq!(updated.status(), StatusCode::OK);
     let updated = body_json(updated).await;
     assert_eq!(updated["source"], "override");
-    assert_eq!(updated["effective_cidrs"], json!(["192.168.50.0/24"]));
+    assert_eq!(updated["effective_cidrs"], json!(["192.168.50.7/32"]));
 
     let invalid = app
         .clone()
