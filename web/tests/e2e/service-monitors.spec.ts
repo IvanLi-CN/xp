@@ -416,6 +416,32 @@ test("runs the backend cluster test from the B editor workspace", async ({
 				(compactPolicyLayout.sectionRight ?? 0),
 		),
 	).toBeLessThanOrEqual(2);
+	const actionLayout = await page.evaluate(() => {
+		const create = document.querySelector<HTMLButtonElement>(
+			'button[type="submit"]',
+		);
+		const actions = create?.parentElement;
+		const form = create?.closest("form");
+		if (!create || !actions || !form) {
+			throw new Error("monitor editor actions are not mounted");
+		}
+		return {
+			actionsLeft: actions.getBoundingClientRect().left,
+			actionsRight: actions.getBoundingClientRect().right,
+			createRight: create.getBoundingClientRect().right,
+			formLeft: form.getBoundingClientRect().left,
+			formRight: form.getBoundingClientRect().right,
+		};
+	});
+	expect(
+		Math.abs(actionLayout.actionsLeft - actionLayout.formLeft),
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(actionLayout.actionsRight - actionLayout.formRight),
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(actionLayout.createRight - actionLayout.formRight),
+	).toBeLessThanOrEqual(2);
 	await page.getByRole("button", { name: "Run cluster test" }).click();
 
 	await expect(

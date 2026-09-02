@@ -599,23 +599,6 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 								)}
 							</fieldset>
 						</section>
-						<div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-6">
-							<Button asChild variant="secondary">
-								<Link
-									to={editing ? "/monitors/$monitorId" : "/monitors"}
-									params={editing ? { monitorId: monitorId ?? "" } : undefined}
-								>
-									Cancel
-								</Link>
-							</Button>
-							<Button
-								type="submit"
-								loading={saveMutation.isPending}
-								disabled={!canCreate}
-							>
-								{editing ? "Save changes" : "Create monitor"}
-							</Button>
-						</div>
 					</section>
 					<section
 						aria-labelledby="monitor-cluster-test-heading"
@@ -786,6 +769,28 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							</table>
 						</div>
 					</section>
+					<div
+						className={[
+							"flex flex-wrap items-center justify-end gap-2 border-t",
+							"border-border/70 pt-6 @min-[68rem]:col-span-2",
+						].join(" ")}
+					>
+						<Button asChild variant="secondary">
+							<Link
+								to={editing ? "/monitors/$monitorId" : "/monitors"}
+								params={editing ? { monitorId: monitorId ?? "" } : undefined}
+							>
+								Cancel
+							</Link>
+						</Button>
+						<Button
+							type="submit"
+							loading={saveMutation.isPending}
+							disabled={!canCreate}
+						>
+							{editing ? "Save changes" : "Create monitor"}
+						</Button>
+					</div>
 				</form>
 			</div>
 		</div>
