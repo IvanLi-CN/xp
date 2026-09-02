@@ -191,6 +191,15 @@ export const PartialAndSuspended: Story = {
 	args: { snapshot: partialSnapshot, historyPoints: historyPoints.slice(-8) },
 };
 
+export const SamplingGap: Story = {
+	args: {
+		snapshot: supportedSnapshot,
+		historyPoints: historyPoints.map((point, index) =>
+			index === 12 ? { ...point, value: null } : point,
+		),
+	},
+};
+
 export const Unsupported: Story = {
 	args: { snapshot: unsupportedSnapshot, historyPoints: [] },
 };

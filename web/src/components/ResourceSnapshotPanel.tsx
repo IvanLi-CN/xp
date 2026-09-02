@@ -1,8 +1,130 @@
+import type { EChartsOption } from "echarts";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import { LineChart } from "echarts/charts";
+import { GridComponent, TooltipComponent } from "echarts/components";
+import * as echarts from "echarts/core";
+import { SVGRenderer } from "echarts/renderers";
+import { useMemo } from "react";
+
 import type { ResourceSnapshot } from "../api/adminResources";
 import { formatBackendError as formatErrorMessage } from "../utils/backendErrorMessage";
 import { CapabilityUnavailableState, PageState } from "./PageState";
 import { QueryErrorState } from "./QueryErrorState";
+import {
+	type EChartsThemePalette,
+	STATIC_LINE_SERIES_EMPHASIS,
+	createThemedTooltipSurface,
+	useEChartsThemePalette,
+} from "./echarts-theme";
 import { Badge } from "./ui/badge";
+
+echarts.use([GridComponent, TooltipComponent, LineChart, SVGRenderer]);
+
+const CPU_HISTORY_CHART_HEIGHT = 152;
+
+type ResourceHistoryPoint = {
+	observed_at: string;
+	value?: number | null;
+};
+
+function formatCpuHistoryAxisLabel(
+	observedAt: string,
+	index: number,
+	pointCount: number,
+): string {
+	const timestamp = Date.parse(observedAt);
+	if (Number.isNaN(timestamp)) return observedAt;
+	const value = new Date(timestamp).toISOString();
+	const firstTimestamp = pointCount > 0 ? index === 0 : false;
+	const lastTimestamp = pointCount > 1 && index === pointCount - 1;
+	const step = Math.max(1, Math.ceil((pointCount - 1) / 3));
+	if (!firstTimestamp && !lastTimestamp && index % step !== 0) return "";
+	return pointCount > 96
+		? value.slice(5, 16).replace("T", " ")
+		: value.slice(11, 16);
+}
+
+export function buildResourceCpuHistoryChartOption(
+	historyPoints: ResourceHistoryPoint[],
+	palette: EChartsThemePalette,
+): EChartsOption {
+	return {
+		animation: false,
+		grid: { top: 16, right: 12, bottom: 28, left: 40 },
+		tooltip: {
+			...createThemedTooltipSurface(palette),
+			trigger: "axis",
+			confine: true,
+		},
+		xAxis: {
+			type: "category",
+			boundaryGap: false,
+			data: historyPoints.map((point) => point.observed_at),
+			axisLabel: {
+				color: palette.axis,
+				hideOverlap: true,
+				interval: 0,
+				formatter: (value: string, index: number) =>
+					formatCpuHistoryAxisLabel(value, index, historyPoints.length),
+			},
+			axisLine: { lineStyle: { color: palette.grid } },
+			axisTick: { show: false },
+		},
+		yAxis: {
+			type: "value",
+			min: 0,
+			max: 100,
+			axisLabel: { color: palette.axis, formatter: "{value}%" },
+			splitLine: { lineStyle: { color: palette.grid } },
+		},
+		series: [
+			{
+				name: "CPU busy",
+				type: "line",
+				data: historyPoints.map((point) => point.value ?? null),
+				smooth: false,
+				connectNulls: false,
+				symbol: "none",
+				emphasis: STATIC_LINE_SERIES_EMPHASIS,
+				lineStyle: { color: palette.primary, width: 2, join: "round" },
+			},
+		],
+	};
+}
+
+function ResourceCpuHistoryChart(props: {
+	historyPoints: ResourceHistoryPoint[];
+}) {
+	const palette = useEChartsThemePalette();
+	const option = useMemo(
+		() => buildResourceCpuHistoryChartOption(props.historyPoints, palette),
+		[palette, props.historyPoints],
+	);
+	const hasSamples = props.historyPoints.some(
+		(point) => point.value !== null && point.value !== undefined,
+	);
+
+	if (!hasSamples) {
+		return (
+			<p className="py-10 text-xs text-muted-foreground">
+				No CPU rollup points yet.
+			</p>
+		);
+	}
+
+	return (
+		<div aria-label="CPU busy history chart" className="w-full">
+			<ReactEChartsCore
+				echarts={echarts}
+				option={option}
+				notMerge
+				lazyUpdate
+				style={{ height: CPU_HISTORY_CHART_HEIGHT, width: "100%" }}
+				opts={{ renderer: "svg" }}
+			/>
+		</div>
+	);
+}
 
 function resourceMeasurementText(measurement: {
 	capability: string;
@@ -127,26 +249,8 @@ export function ResourceSnapshotPanel(props: {
 					</div>
 				</div>
 				<div className="rounded-lg border border-border/60 p-3">
-					<p className="mb-2 font-semibold">Recent CPU series</p>
-					<div
-						className="flex h-16 items-end gap-1"
-						aria-label="Recent CPU series"
-					>
-						{props.historyPoints.slice(-48).map((point) => (
-							<div
-								className="min-w-1 flex-1 bg-primary/70"
-								key={point.observed_at}
-								style={{
-									height: `${Math.max(2, Math.min(100, point.value ?? 0))}%`,
-								}}
-							/>
-						))}
-						{props.historyPoints.length === 0 ? (
-							<span className="text-xs text-muted-foreground">
-								No rollup points yet.
-							</span>
-						) : null}
-					</div>
+					<p className="font-semibold">CPU busy history</p>
+					<ResourceCpuHistoryChart historyPoints={props.historyPoints} />
 				</div>
 			</div>
 			<div>
