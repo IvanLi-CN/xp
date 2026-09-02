@@ -154,6 +154,15 @@ const meta = {
 	title: "Components/ResourceSnapshotPanel",
 	component: ResourceSnapshotPanel,
 	tags: ["autodocs", "coverage-ui"],
+	decorators: [
+		(Story) => (
+			<div className="p-12">
+				<div className="rounded border border-border bg-slate-800 p-6">
+					<Story />
+				</div>
+			</div>
+		),
+	],
 	parameters: {
 		layout: "padded",
 		docs: {
