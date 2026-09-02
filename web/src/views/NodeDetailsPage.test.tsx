@@ -555,6 +555,7 @@ describe("<NodeDetailsPage />", () => {
 
 		const tabs = screen.getAllByRole("tab");
 		expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+			"Resources",
 			"Service runtime",
 			"Node metadata",
 			"Traffic",
