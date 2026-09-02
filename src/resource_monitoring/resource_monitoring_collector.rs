@@ -733,10 +733,10 @@ fn statvfs(path: &Path) -> std::io::Result<VfsStats> {
     let stats = unsafe { stats.assume_init() };
     Ok(VfsStats {
         fsid: stats.f_fsid,
-        total_bytes: stats.f_blocks as u64 * stats.f_frsize,
-        available_bytes: stats.f_bavail as u64 * stats.f_frsize,
-        total_inodes: stats.f_files as u64,
-        available_inodes: stats.f_favail as u64,
+        total_bytes: Into::<u64>::into(stats.f_blocks) * stats.f_frsize,
+        available_bytes: Into::<u64>::into(stats.f_bavail) * stats.f_frsize,
+        total_inodes: Into::<u64>::into(stats.f_files),
+        available_inodes: Into::<u64>::into(stats.f_favail),
     })
 }
 
