@@ -688,11 +688,16 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							</p>
 						</div>
 						<div className="mt-3 max-h-[32rem] overflow-auto rounded-xl border border-border/70">
-							<table className="w-full min-w-[38rem] table-fixed border-collapse text-sm">
+							<table
+								className={[
+									"w-full min-w-0 table-fixed border-collapse text-sm",
+									"@min-[40rem]:min-w-[38rem]",
+								].join(" ")}
+							>
 								<colgroup>
 									<col />
-									<col className="w-28" />
-									<col className="w-32" />
+									<col className="w-20 @min-[40rem]:w-28" />
+									<col className="w-24 @min-[40rem]:w-32" />
 								</colgroup>
 								<thead
 									className={[

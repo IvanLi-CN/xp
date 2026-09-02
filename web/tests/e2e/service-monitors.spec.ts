@@ -321,6 +321,44 @@ test("keeps the TCPING editor usable on mobile", async ({ page }) => {
 	await page.getByRole("combobox", { name: "Method", exact: true }).click();
 	await page.getByRole("option", { name: "TCPING" }).click();
 	await expect(page.getByLabel("TCP port")).toBeVisible();
+	const emptyResultLayout = await page.evaluate(() => {
+		const section = document
+			.querySelector("#monitor-cluster-test-heading")
+			?.closest("section");
+		const table = section?.querySelector<HTMLTableElement>("table");
+		const viewport = table?.parentElement;
+		if (!table || !viewport) {
+			throw new Error("draft result table is not mounted");
+		}
+		return {
+			clientWidth: viewport.clientWidth,
+			scrollWidth: viewport.scrollWidth,
+		};
+	});
+	expect(emptyResultLayout.scrollWidth).toBeLessThanOrEqual(
+		emptyResultLayout.clientWidth,
+	);
+	await page.getByRole("button", { name: "Run cluster test" }).click();
+	await expect(
+		page.getByText("1 / 1 observers reached the target"),
+	).toBeVisible();
+	const populatedResultLayout = await page.evaluate(() => {
+		const section = document
+			.querySelector("#monitor-cluster-test-heading")
+			?.closest("section");
+		const table = section?.querySelector<HTMLTableElement>("table");
+		const viewport = table?.parentElement;
+		if (!table || !viewport) {
+			throw new Error("populated draft result table is not mounted");
+		}
+		return {
+			clientWidth: viewport.clientWidth,
+			scrollWidth: viewport.scrollWidth,
+		};
+	});
+	expect(populatedResultLayout.scrollWidth).toBeLessThanOrEqual(
+		populatedResultLayout.clientWidth,
+	);
 
 	const viewport = await page.evaluate(() => ({
 		clientWidth: document.documentElement.clientWidth,
