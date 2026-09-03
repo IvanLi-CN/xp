@@ -26,6 +26,10 @@ mod draft;
 mod history;
 mod status;
 
+pub(super) use draft::{
+    admin_internal_create_monitor_draft_test as draft_create,
+    admin_internal_get_monitor_draft_test as draft_status,
+};
 use history::{recent_history_summary, status_for};
 
 const OBSERVATION_BUDGET_PER_MINUTE: u64 = 300;
@@ -47,6 +51,8 @@ pub(super) fn router() -> Router {
             "/monitor-draft-tests/{run_id}",
             get(draft::admin_get_monitor_draft_test),
         )
+        .route("/_internal/monitor-draft-tests", post(draft_create))
+        .route("/_internal/monitor-draft-tests/{run_id}", get(draft_status))
         .route(
             "/monitors/{monitor_id}",
             get(admin_get_service_monitor)
@@ -97,7 +103,7 @@ pub(super) struct TestMonitorResponse {
     observations: Vec<Observation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct DraftClusterTestRequest {
     target: MonitorTarget,
     #[serde(default)]

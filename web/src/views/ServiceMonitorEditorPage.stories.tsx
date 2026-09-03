@@ -71,3 +71,24 @@ export const MobileTcping: Story = {
 		await expect(await canvas.findByLabelText("TCP port")).toBeInTheDocument();
 	},
 };
+
+export const WideEvidence: Story = {
+	parameters: {
+		viewport: {
+			defaultViewport: "serviceMonitorFormWide",
+			viewports: {
+				serviceMonitorFormWide: {
+					name: "Service monitor form wide (1536x1000)",
+					styles: { height: "1000px", width: "1536px" },
+					type: "desktop",
+				},
+			},
+		},
+	},
+};
+
+export const MobileEvidence: Story = {
+	parameters: {
+		viewport: { defaultViewport: "serviceMonitorFormMobile" },
+	},
+};

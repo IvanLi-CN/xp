@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	AdminServiceMonitorSchema,
+	DraftClusterTestStatusSchema,
 	ServiceMonitorTargetSchema,
 	monitorKind,
 	monitorTargetLabel,
@@ -34,5 +36,17 @@ describe("service monitor API schema", () => {
 				revision_effective_at_unix_seconds: 60,
 			}),
 		).toThrow();
+	});
+
+	it("accepts the minimal interrupted draft status", () => {
+		expect(
+			DraftClusterTestStatusSchema.parse({
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
+				state: "interrupted",
+				interrupted_at_unix_seconds: 1_700_000_000,
+				reason: "coordinator_unavailable",
+			}).state,
+		).toBe("interrupted");
 	});
 });

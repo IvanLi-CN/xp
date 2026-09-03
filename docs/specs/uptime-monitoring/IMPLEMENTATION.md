@@ -32,6 +32,11 @@
 - Draft Cluster Test 使用 `uptime_draft_tests` 独立表和 JSON runtime payload，
   复用 token/concurrency limiter，以 0--750ms 确定性偏移并行调用各 Observer；
   结果只保留 15 分钟，永不进入 observation capture 或 repository stream。
+- Draft Cluster Test 的浏览器 create/status 永远由访问页面的同源节点响应。follower
+  在本地完成 admin token 验证后，经签名内部 route 将 target、policy、调用者
+  fingerprint 与 idempotency key 发送到 Coordinator；不得对 browser POST 返回 307，
+  也不得转发 bearer token。无法开始时返回 `leader_unavailable`，无法恢复已创建 run
+  时返回 `interrupted`。
 
 ## Persistence and query
 
@@ -69,6 +74,15 @@
 - 正式编辑器仅在容器宽度至少 68rem 且配置栏至少 26rem 时启用 B 双栏；中等桌面
   和移动端使用独立单栏页面。Observer Policy 使用 Exclude nodes / Include only
   分段控件，结果表固定表头并内部滚动；创建按钮不受测试状态影响。
+- 具有 `admin.service-monitor-draft-tests-same-origin-v1` capability 的服务端才启用
+  Draft Cluster Test。测试 run、coordinator、配置指纹保存在 route search；刷新时从同源
+  status endpoint 恢复 15 分钟内的 queued/running/terminal run，表单 target 或 policy
+  改变时把旧证据标记为 stale，但不影响创建。
+
+## Verification
+
+- Draft Test 的幂等和同源转发测试使用 fixture catalog 提供的稳定身份，兼容
+  fixture-policy 对测试节点和 run 的确定性重写，不依赖硬编码的运行 ID。
 
 ## Deployment and migration
 
