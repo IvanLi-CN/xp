@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { type AdminNode, fetchAdminNodes } from "../api/adminNodes";
 import {
 	type AdminServiceMonitor,
+	type DraftClusterTest,
+	type DraftClusterTestStatus,
 	type ObserverPolicy,
 	ObserverPolicySchema,
 	type ServiceMonitorKind,
@@ -63,6 +65,48 @@ const INITIAL_FORM: FormState = {
 function errorMessage(error: unknown): string {
 	if (isBackendApiError(error)) return `${error.code}: ${error.message}`;
 	return error instanceof Error ? error.message : String(error);
+}
+
+function isFullDraftTest(
+	draft: DraftClusterTestStatus,
+): draft is DraftClusterTest {
+	return "observers" in draft;
+}
+
+async function draftSnapshotHash(
+	target: ServiceMonitorTarget,
+	observerPolicy: ObserverPolicy,
+): Promise<string> {
+	const canonical = JSON.stringify({
+		target,
+		observer_policy: observerPolicy,
+	});
+	if (globalThis.crypto?.subtle) {
+		const digest = await globalThis.crypto.subtle.digest(
+			"SHA-256",
+			new TextEncoder().encode(canonical),
+		);
+		return [...new Uint8Array(digest)]
+			.map((byte) => byte.toString(16).padStart(2, "0"))
+			.join("");
+	}
+	return btoa(canonical);
+}
+
+function sessionDraftIdempotencyKey(snapshotHash: string): string {
+	const storageKey = `xp-draft-test-idempotency:${snapshotHash}`;
+	try {
+		const existing = sessionStorage.getItem(storageKey);
+		if (existing) return existing;
+		const value =
+			globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+		sessionStorage.setItem(storageKey, value);
+		return value;
+	} catch {
+		return (
+			globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+		);
+	}
 }
 
 function formFromMonitor(monitor: AdminServiceMonitor): FormState {
@@ -153,6 +197,9 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 	const draftCapability = useApiCapability(
 		"admin.service-monitor-draft-tests-v1",
 	);
+	const draftSameOriginCapability = useApiCapability(
+		"admin.service-monitor-draft-tests-same-origin-v1",
+	);
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { pushToast } = useToast();
@@ -160,10 +207,12 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 	const [draftRunId, setDraftRunId] = useState(
 		() => new URLSearchParams(window.location.search).get("draft_run") ?? "",
 	);
-	const [draft, setDraft] = useState<Awaited<
-		ReturnType<typeof fetchAdminMonitorDraftTest>
+	const [draft, setDraft] = useState<DraftClusterTest | null>(null);
+	const [draftInterrupted, setDraftInterrupted] = useState<Extract<
+		DraftClusterTestStatus,
+		{ state: "interrupted" }
 	> | null>(null);
-	const [draftInterrupted, setDraftInterrupted] = useState(false);
+	const [draftStale, setDraftStale] = useState(false);
 
 	const monitorQuery = useQuery({
 		queryKey: ["adminServiceMonitor", adminToken, monitorId],
@@ -179,9 +228,19 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 	});
 	const draftQuery = useQuery({
 		queryKey: ["adminMonitorDraftTest", adminToken, draftRunId],
-		enabled: adminToken.length > 0 && Boolean(draftRunId),
+		enabled:
+			adminToken.length > 0 &&
+			Boolean(draftRunId) &&
+			draftCapability.available &&
+			draftSameOriginCapability.available,
 		queryFn: ({ signal }) =>
-			fetchAdminMonitorDraftTest(adminToken, draftRunId, signal),
+			fetchAdminMonitorDraftTest(
+				adminToken,
+				draftRunId,
+				new URLSearchParams(window.location.search).get("draft_coordinator") ??
+					undefined,
+				signal,
+			),
 		refetchInterval: (query) =>
 			terminalDraftState(query.state.data?.state) ? false : 500,
 	});
@@ -191,10 +250,24 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 	}, [monitorQuery.data]);
 	useEffect(() => {
 		if (draftQuery.data) {
-			setDraft(draftQuery.data);
-			setDraftInterrupted(false);
+			if (isFullDraftTest(draftQuery.data)) {
+				setDraft(draftQuery.data);
+				setDraftInterrupted(null);
+			} else {
+				setDraft(null);
+				setDraftInterrupted(draftQuery.data);
+			}
 		}
 	}, [draftQuery.data]);
+	useEffect(() => {
+		if (!draft) return;
+		const targetMatches =
+			JSON.stringify(targetFromForm(form)) === JSON.stringify(draft.target);
+		const policyMatches =
+			JSON.stringify(form.observerPolicy) ===
+			JSON.stringify(draft.observer_policy);
+		setDraftStale(() => !(targetMatches && policyMatches));
+	}, [draft, form]);
 	useEffect(() => {
 		if (
 			draftRunId &&
@@ -203,24 +276,38 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 			draftQuery.error.status === 404
 		) {
 			setDraft(null);
-			setDraftInterrupted(true);
+			setDraftInterrupted(null);
 		}
 	}, [draftQuery.error, draftQuery.isError, draftRunId]);
 
 	const testMutation = useMutation({
-		mutationFn: () =>
-			createAdminMonitorDraftTest(
+		mutationFn: async () => {
+			const target = targetFromForm(form);
+			const snapshotHash = await draftSnapshotHash(target, form.observerPolicy);
+			const idempotencyKey = sessionDraftIdempotencyKey(snapshotHash);
+			const result = await createAdminMonitorDraftTest(
 				adminToken,
-				targetFromForm(form),
+				target,
 				form.observerPolicy,
-			),
-		onSuccess: (run) => {
-			setDraft(run);
-			setDraftInterrupted(false);
-			setDraftRunId(run.run_id);
+				idempotencyKey,
+			);
+			return { result, snapshotHash };
+		},
+		onSuccess: ({ result, snapshotHash }) => {
+			if (isFullDraftTest(result)) {
+				setDraft(result);
+				setDraftInterrupted(null);
+				setDraftRunId(result.run_id);
+			} else {
+				setDraft(null);
+				setDraftInterrupted(result);
+				setDraftRunId(result.run_id);
+			}
+			setDraftStale(false);
 			const search = new URLSearchParams(window.location.search);
-			search.set("draft_run", run.run_id);
-			search.set("draft_coordinator", run.coordinator_node_id);
+			search.set("draft_run", result.run_id);
+			search.set("draft_coordinator", result.coordinator_node_id);
+			search.set("draft_snapshot", snapshotHash);
 			window.history.replaceState(
 				{},
 				"",
@@ -298,18 +385,7 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 		);
 
 	const clearDraftEvidence = () => {
-		setDraft(null);
-		setDraftInterrupted(false);
-		setDraftRunId("");
-		const search = new URLSearchParams(window.location.search);
-		search.delete("draft_run");
-		search.delete("draft_coordinator");
-		const query = search.toString();
-		window.history.replaceState(
-			{},
-			"",
-			`${window.location.pathname}${query ? `?${query}` : ""}`,
-		);
+		setDraftStale(true);
 	};
 	const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
 		setForm((current) => ({ ...current, [key]: value }));
@@ -330,6 +406,8 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 		(observer) => observer.state === "succeeded",
 	).length;
 	const draftState = draftInterrupted ? "interrupted" : draft?.state;
+	const draftForwardingAvailable =
+		draftCapability.available && draftSameOriginCapability.available;
 	const policySummary =
 		form.observerPolicy.mode === "exclude"
 			? form.observerPolicy.node_ids.length === 0
@@ -621,22 +699,29 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 							<Button
 								type="button"
 								loading={testMutation.isPending}
-								disabled={!draftCapability.available}
+								disabled={!draftForwardingAvailable}
 								iconLeft={<Icon name="tabler:player-play" />}
 								onClick={() => testMutation.mutate()}
 							>
 								Run cluster test
 							</Button>
 						</div>
-						{!draftCapability.available ? (
+						{!draftForwardingAvailable ? (
 							<p
 								className={[
 									"mt-4 rounded-lg border border-warning/40 bg-warning/10",
 									"px-3 py-2 text-sm text-warning-foreground",
 								].join(" ")}
 							>
-								This server does not expose Draft Cluster Test yet. You can
-								still create the monitor.
+								This server does not expose same-origin Draft Cluster Test yet.
+								You can still create the monitor.
+							</p>
+						) : null}
+						{isBackendApiError(testMutation.error) &&
+						testMutation.error.code === "leader_unavailable" ? (
+							<p className="mt-3 text-sm text-warning-foreground">
+								Test not started because the cluster coordinator is unavailable.
+								Retry when a leader is ready.
 							</p>
 						) : null}
 						<div
@@ -675,16 +760,29 @@ function ServiceMonitorEditor({ monitorId }: { monitorId?: string }) {
 													? "Test interrupted; run it again to collect fresh evidence"
 													: `Test ${draftState}`}
 									</div>
+								) : draftInterrupted ? (
+									<div className="flex items-center gap-2 font-medium">
+										<Icon name="tabler:alert-triangle" />
+										Test interrupted; run it again to collect fresh evidence
+									</div>
 								) : (
 									<p className="text-sm text-muted-foreground">
 										Run a test to collect cluster evidence.
 									</p>
 								)}
 							</div>
+							{draftStale ? (
+								<p className="basis-full text-xs text-warning-foreground">
+									Evidence is stale because the target or observer policy
+									changed.
+								</p>
+							) : null}
 							<p className="font-mono text-xs text-muted-foreground">
 								{draft
 									? `coordinator: ${draft.coordinator_node_id}`
-									: `observer set: ${policySummary}`}
+									: draftInterrupted
+										? `coordinator: ${draftInterrupted.coordinator_node_id}`
+										: `observer set: ${policySummary}`}
 							</p>
 						</div>
 						<div className="mt-3 max-h-[32rem] overflow-auto rounded-xl border border-border/70">

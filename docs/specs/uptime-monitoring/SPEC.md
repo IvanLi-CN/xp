@@ -38,6 +38,7 @@ Raft 也不应承载高频 Observation。
 - [ADR 0007](../../adr/0007-immutable-monitor-revisions-and-slotted-execution.md)
 - [ADR 0008](../../adr/0008-repository-first-observation-persistence.md)
 - [ADR 0009](../../adr/0009-observer-policy-and-draft-cluster-tests.md)
+- [ADR 0010](../../adr/0010-same-origin-draft-test-forwarding.md)
 
 ## Requirements
 
@@ -114,7 +115,10 @@ Raft 也不应承载高频 Observation。
   succeeded、failed、unsupported 或 interrupted 以及逐节点结果。run 只保留 15 分钟
   于协调节点的 `uptime.sqlite3`，不得写 Observation、journal、Repository 或 rollup。
   测试状态永远不禁用或改变 Monitor 创建请求；协调 Leader 变化导致无法恢复时返回
-  `interrupted`，管理员可重新测试。
+  `interrupted`，管理员可重新测试。浏览器从 follower 打开工作台时，create 与 status
+  请求必须保持当前 origin：follower 先校验 admin token，再用签名内部请求转发到 Draft
+  Test Coordinator；bearer token 不跨节点，浏览器不能收到跨 origin redirect。未能创建
+  的请求返回 `leader_unavailable`，已创建但无法恢复的 run 返回 `interrupted`。
 - history 自动选择 `1m`、`5m`、`1h`，
   最多约 1,500 点，并支持有界最近检查分页。
 - REQ-MONITOR-WORKSPACE: Web 新增一级导航“服务监控”与 `/monitors`、new、detail、edit
@@ -148,7 +152,9 @@ Raft 也不应承载高频 Observation。
 - VER-MONITOR-POLICY covers: REQ-MONITOR-POLICY: 空 exclude 解析为全部当前节点，include 必须非空，
   旧数组迁移保留离开节点 ID。
 - VER-MONITOR-DRAFT covers: REQ-MONITOR-DRAFT-TEST: Draft Test 使用冻结策略和节点集合，15 分钟后为
-  interrupted，且不写 Observation 或 Repository。
+  interrupted，且不写 Observation 或 Repository；follower ingress 的 create/status
+  保持同源、不出现 HTTP redirect，管理员 token 不进入内部转发 payload；同一幂等键的
+  重试只创建一个 run。
 - VER-MONITOR-TARGET covers: REQ-MONITOR-HTTP, REQ-MONITOR-HTTPS: HTTP/HTTPS executor 遵守方法、
   证书和响应体边界。
 

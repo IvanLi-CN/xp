@@ -77,6 +77,19 @@ not a Service Monitor or an Observation: its results never enter uptime history,
 availability, coverage, or a scheduled Slot.
 _Avoid_: required verification, ad-hoc observation, synthetic progress
 
+**Draft Test Coordinator**:
+The Leader Node that owns one Draft Cluster Test's short-lived runtime record and
+dispatches its frozen Observer Set. It is an owner of temporary test state, not
+an additional Observer or a Monitor owner.
+_Avoid_: test leader, observer coordinator
+
+**Same-Origin Draft Test Forwarding**:
+The server-side forwarding of a browser's Draft Cluster Test request from a
+follower ingress node to the Draft Test Coordinator through signed cluster
+traffic. The browser continues to use its original origin and its admin token
+never leaves that ingress request.
+_Avoid_: browser redirect, cross-origin test request, CORS forwarding
+
 **Availability**:
 The proportion of successful executable Observations for a selected period.
 Unsupported, suspended, and otherwise uncaptured Schedule Slots do not enter

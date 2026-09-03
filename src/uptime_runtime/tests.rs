@@ -329,6 +329,7 @@ async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
             started_at_unix_seconds: None,
             completed_at_unix_seconds: None,
         }],
+        reason: None,
     };
     handle.create_draft_test(&run).await.unwrap();
     handle
@@ -364,6 +365,51 @@ async fn draft_cluster_test_is_isolated_from_observation_capture_and_expires() {
         .unwrap()
         .unwrap();
     assert!(matches!(expired.state, DraftClusterTestState::Interrupted));
+}
+
+#[tokio::test]
+async fn draft_cluster_test_idempotency_reuses_matching_snapshot_and_rejects_conflicts() {
+    let temporary = TempDir::new().unwrap();
+    let handle = UptimeHandle::load(temporary.path()).unwrap();
+    let run = DraftClusterTest {
+        run_id: "draft-idempotent-1".to_owned(),
+        target: MonitorTarget::Ping {
+            host: xp_test_fixtures::primary_host().to_owned(),
+        },
+        observer_policy: crate::uptime_monitor::ObserverPolicy::default(),
+        observer_node_ids: vec![],
+        coordinator_node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        state: DraftClusterTestState::Queued,
+        created_at_unix_seconds: 100,
+        expires_at_unix_seconds: 1_000,
+        observers: vec![],
+        reason: None,
+    };
+    let first = handle
+        .create_draft_test_idempotent(&run, "caller", Some("key"), "snapshot-a", 100)
+        .await
+        .unwrap();
+    assert!(matches!(first, DraftTestCreateOutcome::Created(_)));
+
+    let mut retry = run.clone();
+    retry.run_id = "draft-idempotent-2".to_owned();
+    let existing = handle
+        .create_draft_test_idempotent(&retry, "caller", Some("key"), "snapshot-a", 101)
+        .await
+        .unwrap();
+    assert!(matches!(
+        existing,
+        DraftTestCreateOutcome::Existing(run) if run.run_id == "draft-idempotent-1"
+    ));
+
+    let conflict = handle
+        .create_draft_test_idempotent(&retry, "caller", Some("key"), "snapshot-b", 101)
+        .await
+        .unwrap();
+    assert!(matches!(
+        conflict,
+        DraftTestCreateOutcome::IdempotencyConflict
+    ));
 }
 
 #[test]

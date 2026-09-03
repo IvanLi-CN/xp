@@ -75,6 +75,7 @@ export const DEFAULT_API_CAPABILITIES = {
 		"admin.service-monitors",
 		"admin.service-monitor-observer-policy-v1",
 		"admin.service-monitor-draft-tests-v1",
+		"admin.service-monitor-draft-tests-same-origin-v1",
 	] satisfies ApiCapability[],
 	fingerprint: Object.fromEntries(
 		Object.entries(CURRENT_API_FINGERPRINT).map(([path, fields]) => [

@@ -1729,8 +1729,7 @@ async fn redirect_follower_writes(req: Request<Body>, next: Next) -> Response {
         method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    let is_leader_coordinated_write =
-        path == "/api/cluster/join" || path == "/api/admin/monitor-draft-tests";
+    let is_leader_coordinated_write = path == "/api/cluster/join";
 
     if !is_write || !is_leader_coordinated_write {
         return next.run(req).await;

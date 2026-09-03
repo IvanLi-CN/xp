@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	AdminServiceMonitorSchema,
+	DraftClusterTestStatusSchema,
 	ServiceMonitorTargetSchema,
 	monitorKind,
 	monitorTargetLabel,
@@ -34,5 +35,17 @@ describe("service monitor API schema", () => {
 				revision_effective_at_unix_seconds: 60,
 			}),
 		).toThrow();
+	});
+
+	it("accepts the minimal interrupted draft status", () => {
+		expect(
+			DraftClusterTestStatusSchema.parse({
+				run_id: "01JMONITOR00000000000000001",
+				coordinator_node_id: "01JMONITOR00000000000000002",
+				state: "interrupted",
+				interrupted_at_unix_seconds: 1_700_000_000,
+				reason: "coordinator_unavailable",
+			}).state,
+		).toBe("interrupted");
 	});
 });

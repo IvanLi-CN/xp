@@ -260,9 +260,27 @@ export const DraftClusterTestSchema = z.object({
 			completed_at_unix_seconds: z.number().int().nullable().optional(),
 		}),
 	),
+	reason: z.string().nullable().optional(),
 });
 
 export type DraftClusterTest = z.infer<typeof DraftClusterTestSchema>;
+
+export const InterruptedDraftClusterTestSchema = z.object({
+	run_id: z.string(),
+	coordinator_node_id: z.string(),
+	state: z.literal("interrupted"),
+	interrupted_at_unix_seconds: z.number().int(),
+	reason: z.string(),
+});
+
+export const DraftClusterTestStatusSchema = z.union([
+	DraftClusterTestSchema,
+	InterruptedDraftClusterTestSchema,
+]);
+
+export type DraftClusterTestStatus = z.infer<
+	typeof DraftClusterTestStatusSchema
+>;
 
 function authHeaders(adminToken: string, json = false): HeadersInit {
 	return {
@@ -278,9 +296,15 @@ async function fetchJson<T>(
 	parse: (value: unknown) => T,
 	init?: RequestInit,
 ): Promise<T> {
+	const headers = new Headers(
+		authHeaders(adminToken, init?.body !== undefined),
+	);
+	if (init?.headers) {
+		new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+	}
 	const res = await fetch(url, {
 		...init,
-		headers: authHeaders(adminToken, init?.body !== undefined),
+		headers,
 	});
 	await throwIfNotOk(res);
 	return parse((await res.json()) as unknown);
@@ -350,7 +374,8 @@ export async function createAdminMonitorDraftTest(
 	adminToken: string,
 	target: ServiceMonitorTarget,
 	observerPolicy: ObserverPolicy,
-): Promise<DraftClusterTest> {
+	idempotencyKey?: string,
+): Promise<DraftClusterTestStatus> {
 	return fetchJson(
 		"/api/admin/monitor-draft-tests",
 		adminToken,
@@ -358,6 +383,9 @@ export async function createAdminMonitorDraftTest(
 		{
 			method: "POST",
 			body: JSON.stringify({ target, observer_policy: observerPolicy }),
+			headers: idempotencyKey
+				? { "Idempotency-Key": idempotencyKey }
+				: undefined,
 		},
 	);
 }
@@ -365,12 +393,16 @@ export async function createAdminMonitorDraftTest(
 export async function fetchAdminMonitorDraftTest(
 	adminToken: string,
 	runId: string,
+	coordinatorNodeId?: string,
 	signal?: AbortSignal,
-): Promise<DraftClusterTest> {
+): Promise<DraftClusterTestStatus> {
+	const search = coordinatorNodeId
+		? `?coordinator_node_id=${encodeURIComponent(coordinatorNodeId)}`
+		: "";
 	return fetchJson(
-		`/api/admin/monitor-draft-tests/${encodeURIComponent(runId)}`,
+		`/api/admin/monitor-draft-tests/${encodeURIComponent(runId)}${search}`,
 		adminToken,
-		(value) => DraftClusterTestSchema.parse(value),
+		(value) => DraftClusterTestStatusSchema.parse(value),
 		{ signal },
 	);
 }

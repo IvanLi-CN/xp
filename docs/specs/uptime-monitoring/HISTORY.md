@@ -10,11 +10,14 @@
 - 不改变既有 endpoint probe 和节点局部历史行为。
 - Observer Policy 兼容旧 `observer_node_ids`，并以独立的短期 Draft Cluster Test
   记录创建前的集群证据；草稿结果不进入 Observation 或长期历史。
+- Draft Cluster Test 由协调 Leader 保存短期 runtime，但浏览器访问任何 follower 时仍
+  通过同源、签名的服务端 forwarding 创建和读取；该边界由 ADR 0010 固定。
 
 ## Replacements / Background
 
 - 采集暂停、不变 revision/不补跑、Repository-first 持久化分别由
   ADR 0006、0007、0008 冻结。
+- Observer Policy、临时测试和同源转发分别由 ADR 0009、0010 冻结。
 - 未来 Incident/告警应扩展读模型，不能把告警状态写回 Observation outcome。
 
 ## References

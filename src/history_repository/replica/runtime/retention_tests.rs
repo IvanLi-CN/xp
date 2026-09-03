@@ -364,7 +364,6 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             summary_pending_next_cursor: Some("segment-3".to_owned()),
             summary_complete: false,
             summary_requires_tiered_backfill: true,
-            ..InitialPeerBackfillCheckpoint::default()
         })
     );
 }

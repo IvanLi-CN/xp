@@ -133,6 +133,7 @@ async function setupServiceMonitorMocks(page: Page) {
 				"admin.service-monitors",
 				"admin.service-monitor-observer-policy-v1",
 				"admin.service-monitor-draft-tests-v1",
+				"admin.service-monitor-draft-tests-same-origin-v1",
 			],
 		}),
 	);
@@ -140,10 +141,12 @@ async function setupServiceMonitorMocks(page: Page) {
 	await page.route("**/api/admin/monitor-draft-tests**", async (route) => {
 		const request = route.request();
 		if (request.method() === "POST") {
+			const postBody = JSON.parse(request.postData() ?? "{}");
+			expect(request.headers()["idempotency-key"]).toBeTruthy();
 			draftTest = {
 				run_id: fixtureCatalog.identifier.probeRunPrimary(),
-				target: JSON.parse(request.postData() ?? "{}").target,
-				observer_policy: { mode: "exclude", node_ids: [] },
+				target: postBody.target,
+				observer_policy: postBody.observer_policy,
 				observer_node_ids: [fixtureCatalog.identifier.nodePrimary()],
 				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
 				state: "succeeded",
