@@ -2106,9 +2106,11 @@ async fn cluster_join(
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
     if existing_session.is_none() {
-        crate::raft_membership_guard::require_clean_membership_for_write(
+        crate::join_admission::require_fresh_join_admission(
             state.raft.clone(),
             state.store.clone(),
+            &node_id,
+            raft_node_id,
         )
         .await
         .map_err(|error| ApiError::conflict(error.to_string()))?;
@@ -2163,7 +2165,6 @@ async fn cluster_join(
             xp_admin_token_hash: state.config.admin_token_hash.clone(),
         }));
     }
-
     let node = Node {
         node_id: node_id.clone(),
         node_name: req.node_name.clone(),
@@ -2172,7 +2173,6 @@ async fn cluster_join(
         quota_limit_bytes: 0,
         quota_reset: NodeQuotaReset::default(),
     };
-
     let expected_membership =
         crate::raft_membership_guard::membership_revision(&raft_metrics(&state))
             .map_err(|error| ApiError::internal(error.to_string()))?;

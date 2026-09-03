@@ -19,3 +19,5 @@
 - A Stale Learner is recovered by explicitly adopting only the proven learner into the existing
   Restore lifecycle. It is distinct from an absent-node restore and from a pending Join session;
   automatic promotion remains forbidden.
+- Fresh joins are admitted independently of unrelated stale learners. An expired legacy Reserved
+  session keeps its learner and DesiredState Node while only the session is terminalized.

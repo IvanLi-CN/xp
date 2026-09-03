@@ -14,9 +14,11 @@ metadata into an orphan voter without a DesiredState Node mapping.
   voter repair.
 - Check a quorum-backed, linearizable membership view before a lifecycle write.
 - Preserve a strict mapping from every voter to exactly one DesiredState Node.
-- Permit learners only while the recorded join or restore operation owns their transition.
-- Make an abnormal member shape visible and block further unrelated membership writes; never infer
-  a promotion, deletion, rollback, or disk rewrite from a periodic scan.
+- Permit learner promotion only while the recorded join or restore operation owns the exact target
+  transition.
+- Make every abnormal member shape visible. Keep clean-membership gates for operations that can
+  remove or recover an existing member, while allowing an unrelated fresh learner registration to
+  proceed; never infer a promotion, deletion, rollback, or disk rewrite from a periodic scan.
 - Permit one exact, leader-local orphan voter repair after dry-run fingerprint confirmation.
 - Permit one exact, leader-local eviction of an unreachable DesiredState-mapped voter after
   dry-run fingerprint and endpoint-cleanup confirmation.
@@ -27,17 +29,22 @@ metadata into an orphan voter without a DesiredState Node mapping.
 
 - [0003-unreachable-mapped-voter-eviction](../../adr/0003-unreachable-mapped-voter-eviction.md)
 - [0006-stale-learner-recovery](../../adr/0006-stale-learner-recovery.md)
+- [0010-fresh-join-admission](../../adr/0010-fresh-join-admission.md)
 
 ## Roles and invariants
 
 - `voter`: Raft voting member with a DesiredState Node mapping; valid in steady state.
-- `learner`: replication-only member owned by an active Join or Restore operation; never steady.
+- `learner`: replication-only member. A normal learner is owned by the exact active Join or Restore
+  operation that is bringing it in; a learner without that owner is an incident, never steady.
 - `absent`: no Raft membership identity; valid for deleted and repaired targets.
 - `stale learner`: a DesiredState-mapped learner without an owning active operation; an incident
-  shape that requires explicit recovery rather than a periodic promotion.
+  shape that requires explicit recovery rather than a periodic promotion. Its presence is reported
+  but does not block an unrelated fresh join.
 
 - Every voter maps to one DesiredState Node. A voter without that mapping is an orphan voter.
-- A learner is valid only for the active operation's target during its recorded learner phase.
+- A learner is eligible for automatic promotion only when it is the exact target of the active
+  operation during its recorded learner phase. An unexpected learner remains observable incident
+  state and is not a promotion or deletion signal.
 - A DesiredState Node without a Raft member is valid only for the target of a recorded removal
   after membership has become absent.
 - Operations advance monotonically through `prepared`, learner/voter/removal phases, and a terminal
@@ -49,8 +56,12 @@ metadata into an orphan voter without a DesiredState Node mapping.
 ## Lifecycle contract
 
 - A fresh join passes `cluster.membership-lifecycle-v1` on every current voter before the first
-  lifecycle command. It records Join intent, registers the learner, waits for the durable log
-  index, promotes only that recorded learner, then terminally records completion.
+  lifecycle command. Its dedicated admission gate requires a quorum-backed linearizable leader
+  view, a non-joint membership configuration, an absent target in both Raft membership and
+  DesiredState, no active membership operation, and valid voter/DesiredState mappings. It ignores
+  `unexpected_learners` belonging to other identities for this admission only. It then records Join
+  intent, registers the learner, waits for the durable log index of that exact target, promotes only
+  that recorded learner, and terminally records completion.
 - Delete records its endpoint snapshot and RemoveNode intent, requires the mapped target to be a
   voter, uses `RemoveVoters(..., false)`, verifies `absent`, and only then deletes DesiredState
   Node/endpoints. It never performs a compensating re-add on an unknown result.
@@ -70,6 +81,12 @@ metadata into an orphan voter without a DesiredState Node mapping.
   Upgrade one voter at a time while retaining serving quorum. After that barrier, a replayable
   legacy JoinSession converts to a Join operation; malformed legacy material records a terminal
   Blocked operation. New binaries do not fall back to the old auto-promotion behavior.
+- When migration finds a legacy `Reserved` JoinSession whose activation deadline has expired while
+  its exact target is still a non-voter learner, it atomically marks that session `Expired` through
+  the existing additive `UpsertNode` command. It retains the DesiredState Node and learner, creates
+  no cleanup membership operation, and issues no `RemoveNodes`; explicit stale-learner recovery
+  remains a separate operator decision. Expiry of a recorded active Join operation keeps its
+  existing owned-learner cleanup contract.
 
 ## Stale learner recovery
 
@@ -179,6 +196,10 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 ## Acceptance
 
 - Unknown learners are never automatically promoted.
+- A fresh join succeeds after the voter capability barrier when an unrelated stale learner is
+  present; the stale learner, its DesiredState Node, and its terminalized legacy session remain
+  unchanged except for the session's `Expired` status, and no catch-up, promotion, or removal is
+  issued for that learner.
 - Dry-run repair performs zero writes; a stale fingerprint, leader target, joint membership, active
   operation, mapping conflict, or multiple orphan voters is rejected.
 - An unreachable public URL on the proven orphan does not block repair when retained mapped voters
@@ -199,8 +220,6 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
   refreshes inventory after a terminal completion.
 
 ## Visual Evidence
-
-PR: none
 
 - source_type: `storybook_canvas`
   target_program: `mock-only`

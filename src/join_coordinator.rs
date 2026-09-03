@@ -72,8 +72,10 @@ pub fn spawn_join_coordinator(
 }
 
 /// This runs only after the caller has crossed the all-voter capability barrier and acquired the
-/// lifecycle gate. It converts one replayable legacy reservation at a time; malformed legacy
-/// material is preserved as terminal evidence and is never eligible for promotion.
+/// lifecycle gate. It converts one replayable legacy reservation at a time. A known expired
+/// reservation whose non-voter learner is still present is terminalized without changing Raft
+/// membership or deleting its DesiredState node; unrelated fresh joins must not inherit cleanup
+/// authority over that learner.
 pub async fn migrate_one_legacy_join_session(
     raft: &Arc<dyn RaftFacade>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -112,8 +114,11 @@ pub async fn migrate_one_legacy_join_session(
         .voter_ids()
         .any(|node_id| node_id == raft_node_id);
     let target_exists = membership.get_node(&raft_node_id).is_some();
-    let deadline_valid = DateTime::parse_from_rfc3339(&session.activation_deadline)
-        .is_ok_and(|deadline| deadline.with_timezone(&Utc) > Utc::now());
+    let deadline = DateTime::parse_from_rfc3339(&session.activation_deadline)
+        .ok()
+        .map(|deadline| deadline.with_timezone(&Utc));
+    let deadline_valid = deadline.is_some_and(|deadline| deadline > Utc::now());
+    let deadline_expired = deadline.is_some_and(|deadline| deadline <= Utc::now());
     let replayable = parsed_raft_node_id.is_some()
         && node.as_ref().is_some_and(|node| {
             node.node_id == session.node_id
@@ -123,6 +128,32 @@ pub async fn migrate_one_legacy_join_session(
                 && !target_is_voter
                 && (target_exists || session.status == JoinSessionStatus::Reserved)
         });
+    if session.status == JoinSessionStatus::Reserved
+        && parsed_raft_node_id.is_some()
+        && deadline_expired
+        && !target_is_voter
+        && target_exists
+        && let Some(node) = node.as_ref()
+        && node.node_id == session.node_id
+    {
+        let mut expired_session = session.clone();
+        expired_session.status = JoinSessionStatus::Expired;
+        expired_session.terminal_at = Some(Utc::now().to_rfc3339());
+        write_applied(
+            raft,
+            DesiredStateCommand::UpsertNode {
+                node: node.clone(),
+                join_session: Some(expired_session),
+            },
+        )
+        .await?;
+        tracing::warn!(
+            node_id = %session.node_id,
+            raft_node_id,
+            "expired legacy join reservation retained its existing learner for explicit recovery"
+        );
+        return Ok(());
+    }
     let evidence = if replayable {
         "legacy join session converted after capability barrier"
     } else {

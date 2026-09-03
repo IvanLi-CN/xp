@@ -13,6 +13,10 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 
 不引入 RBAC、SSO、Vault/KMS 或管理员 Token 找回协议。
 
+## Related ADRs
+
+- [0010-fresh-join-admission](../../adr/0010-fresh-join-admission.md)
+
 ## 契约
 
 - `/etc/xp/xp.env` 使用 `XP_ADMIN_TOKEN_HASH='<argon2id PHC>'`；PHC 必须能被 POSIX shell 安全读取。
@@ -29,9 +33,12 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   pending identity；只有证书、CA、PHC、metadata 和初始 store 全部持久化后才能删除 pending
   文件并返回成功。
 - leader coordinator 从 Raft session 恢复工作：认证 learner 达到 required log index 后才晋升
-  voter 并标记 consumed。leader 重启或换主必须继续；超出 activation deadline 时移除未完成
-  membership/desired-state node 并标记 expired。terminal tombstone 至少保留 24 小时且覆盖 token
-  expiry，节点删除也不得使 token 可复用。
+  voter 并标记 consumed。leader 重启或换主必须继续；超出 activation deadline 时，记录在
+  active Join operation 所拥有的未完成 membership/desired-state node 会被移除并标记 expired。
+  对没有 active operation 的 legacy `Reserved` session，如果其 exact target 仍是 non-voter
+  learner，leader 只将 session 标记为 `Expired`，保留 learner 和 DesiredState Node，交由显式
+  stale-learner recovery 处理。terminal tombstone 至少保留 24 小时且覆盖 token expiry，节点
+  删除也不得使 token 可复用。
 - 接受 fresh join 前，leader 必须确认所有现有 voter 声明
   `cluster.membership-lifecycle-v1` capability；未完成滚动升级或无法验证的集群返回
   `coordinated_upgrade_required`，不创建 reservation 或 lifecycle command。
@@ -44,8 +51,14 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
   都已出现在本地 state 且一次 RPC 成功后才删除 marker；过期 marker 在读取时清理，后续请求恢复
   为正常 membership 校验。
 - membership guard 不得晋升任何 learner。它只报告异常并由 recorded Join operation / JoinSession
-  coordinator 续跑合法 learner；没有 session 的 learner 是阻断成员变更的异常，而非 recovery
-  候选。
+  coordinator 续跑合法 learner；没有 session 的 learner 是需要显式处理的异常，而非 recovery
+  候选。异常 learner 不阻塞无关 fresh join；删除、恢复等需要精确成员前置条件的操作仍使用
+  strict clean-membership gate。
+- fresh join 在 voter capability barrier 后使用独立 admission gate：需要 quorum-backed
+  linearizable leader、非 joint membership、目标同时不在 Raft membership 和 DesiredState、无
+  active membership operation，以及其余 voter/DesiredState mapping invariant 通过。无关
+  learner 的存在、落后或离线状态不参与该 gate；只有该次 join 记录的 exact learner 才参与
+  catch-up 与 promotion 判断。
 - single-image wrapper 在 fresh learner 首次复制完成前必须保持 XP 子进程存活。managed-default
   reconcile 必须先通过本机 internal API 验证复制完成，再由本机 Raft 转发写入；仅当本机 API
   明确返回 signer 尚未进入 state machine 的认证失败或本地 leader membership 尚未复制时，才可
@@ -69,7 +82,8 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - join 测试覆盖服务启动顺序、严格公共健康门禁，以及 post-join 失败后的可恢复重试
   语义。
 - join 测试必须覆盖 Phase 1 不等待 catch-up、同指纹幂等重试、冲突请求、响应丢失、joiner/leader
-  重启、promotion failure retry、expiry cleanup，以及旧 state/existing-node recovery 兼容。
+  重启、promotion failure retry、expiry cleanup、无关 stale learner 存在时的 fresh join，以及
+  旧 state/existing-node recovery 兼容。
 
 ## 参考
 

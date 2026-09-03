@@ -4,3 +4,5 @@
 - 2026-07-29: 迁入 canonical spec；legacy source 暂时保留，等待删除确认。
 - 2026-07-29: 低内存参数和生产轮换由 #nmgq8 接管。
 - 2026-08-16: fresh join 改为 durable bootstrap 与后台 catch-up/promotion 两阶段协议。
+- 2026-09-03: fresh join admission 不再被无关 stale learner 阻塞；legacy 过期 reservation 保留
+  learner 与 DesiredState Node，仅记录 session 终结。

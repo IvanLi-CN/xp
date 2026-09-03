@@ -143,14 +143,19 @@
   host-managed `--ip-geo` / TUI opt-in, never by automatic backfill.
 - Raft member roles are only `voter`, transient `learner`, and `absent`; “non-voter member” is a
   set description, never a promotable role. Every voter maps to one DesiredState Node. An unexpected
-  learner or orphan voter blocks lifecycle writes and is reported, never automatically promoted,
-  deleted, rolled back, or repaired by periodic work.
+  learner or orphan voter is reported; the unexpected learner blocks only lifecycle operations that
+  require a clean membership shape, never an unrelated fresh join. Neither is automatically
+  promoted, deleted, rolled back, or repaired by periodic work.
 - Fresh joins use a durable two-stage protocol: the leader records a Join membership operation and
-  reservation, registers the learner, and returns bootstrap identity before catch-up; after the
-  authenticated runtime starts, the leader coordinator waits for the recorded log index and promotes
-  only that recorded learner. Same-request retries replay the reservation without extending its
-  10-minute activation deadline. Expired sessions are cleaned by the leader; existing-node recovery
-  remains separate.
+  reservation, registers the learner, and returns bootstrap identity before catch-up. Fresh-join
+  admission still requires a quorum-backed linearizable, non-joint membership view, an absent target
+  identity, and no active membership operation; it does not use an unrelated learner as a
+  precondition. After the authenticated runtime starts, the leader coordinator waits for the
+  recorded log index and promotes only that recorded learner. Same-request retries replay the
+  reservation without extending its 10-minute activation deadline. Expiry cleanup for a recorded
+  Join operation removes its owned learner and DesiredState node; an expired legacy `Reserved`
+  session whose learner remains is only terminalized as `Expired`, retaining that learner and node
+  for explicit recovery.
 - Fresh join, restore and delete require every current voter to expose
   `cluster.membership-lifecycle-v1`. Orphan-voter repair first proves one exact non-leader orphan,
   then requires that capability only from every retained DesiredState-mapped voter; the proven

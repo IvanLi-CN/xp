@@ -1087,6 +1087,14 @@ around that freeze by calling internal membership APIs or editing Raft files. Or
 first proves the exact target, then applies this capability barrier only to retained
 DesiredState-mapped voters.
 
+After the voter capability barrier passes, a fresh join has its own admission check. It requires a
+quorum-backed linearizable leader, a stable non-joint membership view, a target identity absent from
+both Raft and DesiredState, no active membership operation, and valid voter/DesiredState mappings.
+An unrelated learner is reported as an incident but does not block the new learner registration;
+its lag, health, and availability are irrelevant to this join. Only the learner recorded by the new
+Join operation is checked for catch-up before promotion. This does not permit joining a duplicate
+identity or bypassing the voter capability barrier.
+
 ### Orphan voter incident
 
 An orphan voter is a current voter without a DesiredState Node mapping. It is not a learner and it
@@ -1196,15 +1204,19 @@ After recovery:
   until membership reports the node as a voter and its public health endpoint returns `200`.
 - Re-running `xp join` after a lost response reuses the pending node key/CSR and the same reserved
   token. Retries do not extend the fixed 10-minute activation deadline. If the learner never starts,
-  the leader removes the incomplete membership/node and expires the reservation.
+  the leader removes the incomplete membership/node and expires the reservation when that session is
+  owned by a recorded Join operation. A legacy `Reserved` session that is already expired while its
+  non-voter learner remains is only marked `Expired`; its learner and DesiredState Node stay in
+  place for explicit stale-learner recovery.
 - Run `xp-ops xp sync-node-meta` on each node after updating `/etc/xp/xp.env` to ensure membership
   `NodeMeta` (leader discovery/forwarding) matches config. This command preserves existing
   managed-default endpoint ports from Raft even when the local bootstrap env differs.
 - After all intended nodes are rejoined, confirm `/api/cluster/info` has a leader and endpoint
   creation succeeds through the admin UI/API. Any unexpected learner or voter without a DesiredState
-  mapping is an incident. The periodic worker reports it but never repairs it; use the bounded
-  orphan-voter runbook above only when its preconditions hold, otherwise use explicit disaster
-  recovery.
+  mapping is an incident. The periodic worker reports it but never repairs it. An unexpected learner
+  does not by itself block an unrelated fresh join; use the explicit stale-learner runbook only when
+  its exact-target preconditions hold, and use the bounded orphan-voter runbook above only for an
+  orphan voter.
 
 ### Backup before upgrade
 
