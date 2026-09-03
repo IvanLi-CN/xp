@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCatalog } from "../fixture-policy/catalog";
 
 import {
 	AdminServiceMonitorSchema,
@@ -40,8 +41,8 @@ describe("service monitor API schema", () => {
 	it("accepts the minimal interrupted draft status", () => {
 		expect(
 			DraftClusterTestStatusSchema.parse({
-				run_id: "01JMONITOR00000000000000001",
-				coordinator_node_id: "01JMONITOR00000000000000002",
+				run_id: fixtureCatalog.identifier.probeRunPrimary(),
+				coordinator_node_id: fixtureCatalog.identifier.nodePrimary(),
 				state: "interrupted",
 				interrupted_at_unix_seconds: 1_700_000_000,
 				reason: "coordinator_unavailable",

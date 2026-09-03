@@ -372,7 +372,7 @@ async fn draft_cluster_test_idempotency_reuses_matching_snapshot_and_rejects_con
     let temporary = TempDir::new().unwrap();
     let handle = UptimeHandle::load(temporary.path()).unwrap();
     let run = DraftClusterTest {
-        run_id: "draft-idempotent-1".to_owned(),
+        run_id: xp_test_fixtures::primary_probe_run_id().to_owned(),
         target: MonitorTarget::Ping {
             host: xp_test_fixtures::primary_host().to_owned(),
         },
