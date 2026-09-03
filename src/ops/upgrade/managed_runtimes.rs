@@ -1,9 +1,9 @@
-use super::failure::rollback_xp_after_xray_failure;
+use super::failure::rollback_xp_after_runtime_failure;
 use super::*;
 use crate::ops::init::{backfill_low_memory_runtime_defaults, write_static_xray_config};
 use crate::ops::runtime_activation::{
-    reload_systemd_units, restart_cloudflared_service, restart_xray_service, start_xp_service,
-    stop_xp_service,
+    reload_systemd_units, restart_cloudflared_service, restart_xray_service,
+    service_commands_are_disabled, start_xp_service, stop_xp_service,
 };
 use crate::ops::upgrade_artifacts::managed_cloudflared_dest;
 
@@ -58,20 +58,28 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
     {
         Ok(backups) => backups,
         Err(err) => {
-            return Err(
-                finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure)
-                    .expect_err("runtime failure helper must return an error"),
-            );
+            return Err(finish_runtime_failure(
+                paths,
+                xp_backup,
+                err,
+                rollback_xp_on_failure,
+                true,
+            )
+            .expect_err("runtime failure helper must return an error"));
         }
     };
     let runtime_defaults = match snapshot_runtime_defaults(paths) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             let err = retain_original_error(err, rollback_runtime_binaries(&backups));
-            return Err(
-                finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure)
-                    .expect_err("runtime failure helper must return an error"),
-            );
+            return Err(finish_runtime_failure(
+                paths,
+                xp_backup,
+                err,
+                rollback_xp_on_failure,
+                true,
+            )
+            .expect_err("runtime failure helper must return an error"));
         }
     };
     if !stop_xp_service(paths) {
@@ -83,39 +91,49 @@ pub(super) async fn upgrade_and_reconcile_managed_runtimes(
             rollback_runtime_binaries(&backups),
         );
         return Err(
-            finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure)
+            finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure, true)
                 .expect_err("runtime failure helper must return an error"),
         );
     }
     if let Err(err) = reconcile_static_xray_config_and_restart(paths) {
-        let err = retain_original_error(
+        let runtime_rollback =
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults);
+        let restart_xp = runtime_rollback.is_ok();
+        let err = retain_original_error(err, runtime_rollback);
+        return Err(finish_runtime_failure(
+            paths,
+            xp_backup,
             err,
-            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults),
-        );
-        return Err(
-            finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure)
-                .expect_err("runtime failure helper must return an error"),
-        );
+            rollback_xp_on_failure,
+            restart_xp,
+        )
+        .expect_err("runtime failure helper must return an error"));
     }
     if !start_xp_service(paths) {
+        let runtime_rollback = if stop_xp_service(paths) {
+            rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults)
+        } else {
+            Err(ExitError::new(
+                8,
+                "rollback_failed: stop xp before runtime rollback failed",
+            ))
+        };
+        let restart_xp = runtime_rollback.is_ok();
         let err = retain_original_error(
             ExitError::new(
                 7,
                 "service_error: start xp after managed runtime activation failed",
             ),
-            if stop_xp_service(paths) {
-                rollback_runtime_binaries_and_services(paths, &backups, &runtime_defaults)
-            } else {
-                Err(ExitError::new(
-                    8,
-                    "rollback_failed: stop xp before runtime rollback failed",
-                ))
-            },
+            runtime_rollback,
         );
-        return Err(
-            finish_runtime_failure(paths, xp_backup, err, rollback_xp_on_failure)
-                .expect_err("runtime failure helper must return an error"),
-        );
+        return Err(finish_runtime_failure(
+            paths,
+            xp_backup,
+            err,
+            rollback_xp_on_failure,
+            restart_xp,
+        )
+        .expect_err("runtime failure helper must return an error"));
     }
     Ok(backups)
 }
@@ -125,9 +143,10 @@ fn finish_runtime_failure(
     xp_backup: &Path,
     error: ExitError,
     rollback_xp_on_failure: bool,
+    restart_xp: bool,
 ) -> Result<(), ExitError> {
     if rollback_xp_on_failure {
-        rollback_xp_after_xray_failure(paths, xp_backup, error)
+        rollback_xp_after_runtime_failure(paths, xp_backup, error, restart_xp)
     } else {
         Err(error)
     }
@@ -534,18 +553,29 @@ pub(super) fn rollback_complete_phase_binaries(
     backups: &[RuntimeBinaryBackup],
 ) -> Result<(), ExitError> {
     rollback_runtime_binaries(backups)?;
-    if !is_test_root(paths.root()) {
-        let xp_ok = restart_xp_service(paths);
+    if !service_commands_are_disabled(paths) {
+        if !stop_xp_service(paths) {
+            return Err(ExitError::new(
+                8,
+                "rollback_failed: stop xp before restored runtime activation failed",
+            ));
+        }
         let xray_ok = restart_xray_service(
             paths,
             &read_xray_systemd_unit(paths),
             &read_xray_openrc_service(paths),
         );
         let cloudflared_ok = restart_cloudflared_service(paths);
-        if !(xp_ok && xray_ok && cloudflared_ok) {
+        if !(xray_ok && cloudflared_ok) {
             return Err(ExitError::new(
                 8,
                 "rollback_failed: restored service binaries but service restart failed",
+            ));
+        }
+        if !start_xp_service(paths) {
+            return Err(ExitError::new(
+                8,
+                "rollback_failed: start xp after restored runtime activation failed",
             ));
         }
     }

@@ -876,7 +876,7 @@ Current rollout semantics:
   `status: stopped` observations. This prevents an asynchronous OpenRC transition from being
   reported as a completed upgrade.
 - During static config rewrite, `xp-ops upgrade` preserves the authoritative `XP_XRAY_API_ADDR` binding for the `api` inbound and removes the retired legacy control-plane proxy inbound when present.
-- If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable.
+- If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable. XP starts again only after the restored runtime pair is confirmed ready. If that confirmation fails, XP remains stopped and the upgrade reports `rollback_failed` for explicit operator recovery.
 
 Useful flags:
 

@@ -315,12 +315,9 @@ async fn upgrade_rejects_openrc_xp_stopping_before_runtime_activation() {
             "echo \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
             "state_dir=\"$XP_OPS_TEST_STATE_DIR\"\n",
             "case \"$1:$2\" in\n",
-            "  xp:restart) touch \"$state_dir/legacy-restart\" \"$state_dir/xp-running\" ;;\n",
+            "  xp:restart) touch \"$state_dir/xp-running\" ;;\n",
             "  xp:start) rm -f \"$state_dir/xp-stopping\"; touch \"$state_dir/xp-running\" ;;\n",
             "  xp:stop)\n",
-            "    if test -f \"$state_dir/legacy-restart\"; then\n",
-            "      touch \"$state_dir/xp-stopping\"\n",
-            "    else\n",
             "      count=0\n",
             "      if test -f \"$state_dir/xp-stop-count\"; then\n",
             "        count=$(cat \"$state_dir/xp-stop-count\")\n",
@@ -332,7 +329,7 @@ async fn upgrade_rejects_openrc_xp_stopping_before_runtime_activation() {
             "      else\n",
             "        touch \"$state_dir/xp-stopping\"\n",
             "      fi\n",
-            "    fi ;;\n",
+            "    ;;\n",
             "  xp:status)\n",
             "    if test -f \"$state_dir/xp-stopping\"; then\n",
             "      echo \" * status: stopping\"\n",
@@ -372,7 +369,7 @@ async fn upgrade_rejects_openrc_xp_stopping_before_runtime_activation() {
     let mut command = assert_cmd::Command::new(&xp_ops_copy);
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
-    command.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "10");
+    command.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "600");
     command.env("XP_OPS_TEST_MARKER", &marker);
     command.env("XP_OPS_TEST_STATE_DIR", &state_dir);
     command.env(
@@ -512,6 +509,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let mut command = assert_cmd::Command::new(&xp_ops_copy);
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+    command.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
     command.env("XP_OPS_TEST_MARKER", &marker);
     command.env("XP_OPS_TEST_XP_RUNNING", xp_running);
     command.env(
@@ -539,6 +537,17 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
             .exists()
     );
     let marker = fs::read_to_string(marker).unwrap();
+    let xp_stop = marker
+        .lines()
+        .position(|line| line == "systemctl stop xp.service")
+        .expect("managed runtime activation must stop XP");
+    assert!(
+        !marker.lines().skip(xp_stop + 1).any(|line| matches!(
+            line,
+            "systemctl restart xp.service" | "systemctl start xp.service"
+        )),
+        "XP restarted after runtime rollback failed: {marker}"
+    );
     assert_eq!(
         marker
             .lines()

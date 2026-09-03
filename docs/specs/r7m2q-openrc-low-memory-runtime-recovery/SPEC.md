@@ -36,6 +36,8 @@ Alpine/OpenRC 节点可能运行在 `256MB` 且无 swap 的小容量服务器上
   连续两次报告精确的 `status: stopped`；`stopping`、`starting`、crashed 和不可识别状态都不是
   终态。受管 OpenRC runtime restart 固定为 `stop -> stopped -> start -> started`，仅在 Xray 与
   cloudflared 都达到 ready 后恢复 `xp`，以防 XP 自愈器与升级器并发操作同一个 OpenRC service。
+  回滚遵循同一顺序；若旧 runtime pair 无法重新确认 ready，则仅恢复 XP 二进制并保持 XP 停止，交由
+  操作员显式恢复。
 - cloudflared 新增 monitor-only 语义：`XP_CLOUDFLARED_MONITOR_MODE` 控制状态探测，`XP_CLOUDFLARED_RESTART_MODE` 仅控制是否主动 restart；旧部署只设置 restart mode 时继续按该 mode 监控，保持向后兼容；显式 `XP_CLOUDFLARED_MONITOR_MODE=none` 优先表示关闭监控。
 - host-managed env backfill 默认写入 cloudflared monitor mode 为当前 init system，restart mode 为 `none`。
 

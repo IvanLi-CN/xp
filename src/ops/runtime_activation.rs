@@ -124,10 +124,33 @@ fn wait_for_service_stopped(program: &str, args: &[&str]) -> bool {
 }
 
 fn wait_for_openrc_service_state(service: &str, expected: OpenrcServiceState) -> bool {
-    let deadline = Instant::now() + service_ready_timeout();
+    wait_for_openrc_service_state_with_probe(
+        expected,
+        service_ready_timeout(),
+        SERVICE_READY_POLL_INTERVAL,
+        || openrc_service_state(service),
+    )
+}
+
+fn wait_for_openrc_service_state_with_probe<F>(
+    expected: OpenrcServiceState,
+    timeout: Duration,
+    poll_interval: Duration,
+    mut probe: F,
+) -> bool
+where
+    F: FnMut() -> OpenrcServiceState,
+{
+    let deadline = Instant::now() + timeout;
     let mut confirmations = 0;
     loop {
-        if openrc_service_state(service) == expected {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        if probe() == expected {
+            if Instant::now() >= deadline {
+                return false;
+            }
             confirmations += 1;
             if confirmations >= OPENRC_STATUS_CONFIRMATIONS {
                 return true;
@@ -138,7 +161,7 @@ fn wait_for_openrc_service_state(service: &str, expected: OpenrcServiceState) ->
         if Instant::now() >= deadline {
             return false;
         }
-        thread::sleep(SERVICE_READY_POLL_INTERVAL);
+        thread::sleep(poll_interval.min(deadline.saturating_duration_since(Instant::now())));
     }
 }
 
@@ -180,7 +203,7 @@ fn service_ready_timeout() -> Duration {
     SERVICE_READY_TIMEOUT
 }
 
-fn service_commands_are_disabled(paths: &Paths) -> bool {
+pub(crate) fn service_commands_are_disabled(paths: &Paths) -> bool {
     is_test_root(paths.root()) && !test_enable_service_restart()
 }
 
@@ -227,5 +250,21 @@ mod tests {
             Some(OpenrcServiceState::Started)
         );
         assert_eq!(parse_openrc_service_state("status: crashed\n"), None);
+    }
+
+    #[test]
+    fn requires_all_openrc_confirmations_before_the_deadline() {
+        let mut probes = 0;
+
+        assert!(!wait_for_openrc_service_state_with_probe(
+            OpenrcServiceState::Started,
+            Duration::from_millis(50),
+            Duration::from_millis(100),
+            || {
+                probes += 1;
+                OpenrcServiceState::Started
+            },
+        ));
+        assert_eq!(probes, 1);
     }
 }

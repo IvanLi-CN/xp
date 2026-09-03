@@ -9,6 +9,8 @@
   observations before changing configuration or restarting Xray/cloudflared. It restarts every
   managed OpenRC runtime as `stop -> stopped -> start -> started`, and treats `stopping` and every
   unrecognized status as nonterminal. It starts XP only after both runtime services report ready.
+  Rollback uses the same sequence and leaves XP stopped when it cannot reconfirm the previous
+  runtime pair.
 - cloudflared monitoring is controlled separately from active restarts so operators can observe Tunnel state without letting `xp` repeatedly call `rc-service cloudflared restart`.
 - Legacy configs that only set `XP_CLOUDFLARED_RESTART_MODE=openrc|systemd` still enable cloudflared monitoring through the effective monitor mode fallback; explicit `XP_CLOUDFLARED_MONITOR_MODE=none` and legacy `XP_CLOUDFLARED_RESTART_MODE=none` opt-outs remain disabled.
 

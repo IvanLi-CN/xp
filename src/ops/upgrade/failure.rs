@@ -51,44 +51,53 @@ pub(super) fn rollback_xp_ops_after_resumed_failure(
     ))
 }
 
-pub(super) fn rollback_xp_after_xray_failure(
+pub(super) fn rollback_xp_after_runtime_failure(
     paths: &Paths,
     backup: &Path,
     original_err: ExitError,
+    restart_service: bool,
 ) -> Result<(), ExitError> {
     let dest = paths.usr_local_bin_xp();
     let failed = dest.with_extension(format!("failed.{}", super::now_unix_secs()));
     if dest.exists() {
         fs::rename(&dest, &failed).map_err(|error| {
             unrestored_transaction_backup_error(format!(
-                "stash upgraded xp after xray failure: {error}; original error: {}",
+                "stash upgraded xp after runtime failure: {error}; original error: {}",
                 original_err.message
             ))
         })?;
     }
     fs::rename(backup, &dest).map_err(|error| {
         unrestored_transaction_backup_error(format!(
-            "restore xp after xray failure: {error}; original error: {}",
+            "restore xp after runtime failure: {error}; original error: {}",
             original_err.message
         ))
     })?;
     let _ = fs::remove_file(&failed);
-    if !restart_xp_service(paths) {
+    if restart_service && !restart_xp_service(paths) {
         return Err(ExitError::new(
             8,
             format!(
                 concat!(
-                    "rollback_failed: xp rollback restart failed after xray failure; ",
+                    "rollback_failed: xp rollback restart failed after runtime failure; ",
                     "original error: {}"
                 ),
                 original_err.message
             ),
         ));
     }
-    Err(ExitError::new(
-        original_err.code,
-        format!("{}; rolled back xp", original_err.message),
-    ))
+    let message = if restart_service {
+        format!("{}; rolled back xp", original_err.message)
+    } else {
+        format!(
+            concat!(
+                "{}; rolled back xp but left it stopped because managed runtime rollback did not ",
+                "confirm readiness"
+            ),
+            original_err.message
+        )
+    };
+    Err(ExitError::new(original_err.code, message))
 }
 
 pub(super) fn clear_upgrade_diagnostics(data_dir: &Path) {

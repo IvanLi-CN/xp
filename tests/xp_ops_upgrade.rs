@@ -583,7 +583,7 @@ esac\n\
         write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\n\nexit 1\n");
         write_executable(
             &bin_dir.join("rc-service"),
-            "#!/bin/sh\n\necho \"openrc $@\" >> \"$XP_OPS_TEST_MARKER\"\n[ \"$2\" = restart ]\n",
+            "#!/bin/sh\n\necho \"openrc $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
         );
 
         let xp_path = tmp.path().join("usr/local/bin/xp");
@@ -608,8 +608,8 @@ esac\n\
 
         cmd.assert().failure().code(7);
         let marker_raw = fs::read_to_string(&marker).unwrap();
-        assert!(marker_raw.contains("openrc xp restart\nopenrc xp status"));
-        assert!(!marker_raw.contains("openrc xray restart"));
+        assert!(marker_raw.contains("openrc xp stop"));
+        assert!(!marker_raw.contains("openrc xray stop"));
 
         let bytes = fs::read(&xp_path).unwrap();
         assert_eq!(bytes, b"xp-old-binary");
@@ -695,6 +695,7 @@ esac\n\
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
@@ -799,6 +800,7 @@ esac\n\
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999");
@@ -887,6 +889,7 @@ esac\n\
         let mut cmd = assert_cmd::Command::new(&dest);
         cmd.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
         cmd.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+        cmd.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
         cmd.env("XP_OPS_TEST_MARKER", &marker);
         cmd.env("PATH", prepend_path(&bin_dir));
         cmd.args(["--root", &root, "upgrade", "--repo", "o/r"]);
