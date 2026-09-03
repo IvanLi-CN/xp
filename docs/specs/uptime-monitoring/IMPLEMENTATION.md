@@ -79,6 +79,11 @@
   status endpoint 恢复 15 分钟内的 queued/running/terminal run，表单 target 或 policy
   改变时把旧证据标记为 stale，但不影响创建。
 
+## Verification
+
+- Draft Test 的幂等和同源转发测试使用 fixture catalog 提供的稳定身份，兼容
+  fixture-policy 对测试节点和 run 的确定性重写，不依赖硬编码的运行 ID。
+
 ## Deployment and migration
 
 - systemd、OpenRC 与 single-image Docker/Compose 都运行相同 binary，不需要额外
