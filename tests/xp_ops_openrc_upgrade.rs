@@ -101,11 +101,24 @@ mod linux {
         fs::create_dir_all(&bin_dir).unwrap();
         let xray_restart_count = tmp.path().join("xray-restart-count.txt");
         let xray_status_count = tmp.path().join("xray-status-count.txt");
+        let xp_running = tmp.path().join("xp-running");
         write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\n\nexit 1\n");
         write_executable(
             &bin_dir.join("rc-service"),
             &format!(
                 "#!/bin/sh\n\ncase \"$1:$2\" in\n\
+xp:restart|xp:start)\n\
+  touch \"{xp_running}\"\n\
+  exit 0\n\
+  ;;\n\
+xp:stop)\n\
+  rm -f \"{xp_running}\"\n\
+  exit 0\n\
+  ;;\n\
+xp:status)\n\
+  test -f \"{xp_running}\"\n\
+  exit $?\n\
+  ;;\n\
 xray:restart)\n\
   count=0\n\
   [ ! -f \"{restart_count}\" ] || count=$(cat \"{restart_count}\")\n\
@@ -127,6 +140,7 @@ xray:status)\n\
 esac\n",
                 restart_count = xray_restart_count.display(),
                 status_count = xray_status_count.display(),
+                xp_running = xp_running.display(),
             ),
         );
         let xp_path = tmp.path().join("usr/local/bin/xp");
