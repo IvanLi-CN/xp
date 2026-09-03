@@ -248,6 +248,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();
     let marker = tmp.path().join("marker.txt");
+    let xp_running = tmp.path().join("xp-running");
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(
@@ -255,7 +256,12 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         concat!(
             "#!/bin/sh\n",
             "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
-            "[ \"$1 $2\" = \"restart cloudflared.service\" ] && exit 1\n",
+            "case \"$1:$2:$3\" in\n",
+            "  restart:cloudflared.service:*) exit 1 ;;\n",
+            "  restart:xp.service:*|start:xp.service:*) touch \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  stop:xp.service:*) rm -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  is-active:--quiet:xp.service) test -f \"$XP_OPS_TEST_XP_RUNNING\"; exit $? ;;\n",
+            "esac\n",
             "exit 0\n",
         ),
     );
@@ -289,6 +295,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
     command.env("XP_OPS_TEST_MARKER", &marker);
+    command.env("XP_OPS_TEST_XP_RUNNING", xp_running);
     command.env(
         "PATH",
         format!(
