@@ -98,6 +98,10 @@ pub struct XpEnvWriteValues<'a> {
     pub node_name: &'a str,
     pub access_host: &'a str,
     pub api_base_url: &'a str,
+    pub cloudflare_enabled: bool,
+    pub cloudflare_account_id: Option<&'a str>,
+    pub cloudflare_zone_id: Option<&'a str>,
+    pub cloudflare_hostname: Option<&'a str>,
     pub vless_canary_bind: &'a str,
     pub vless_canary_acme_directory_url: &'a str,
     pub vless_canary_acme_contact_email: &'a str,
@@ -562,6 +566,13 @@ pub fn write_xp_env(
 
     let mut lines = retained_lines;
 
+    lines.retain(|line| {
+        !line.starts_with("XP_ENABLE_CLOUDFLARE=")
+            && !line.starts_with("XP_CLOUDFLARE_ACCOUNT_ID=")
+            && !line.starts_with("XP_CLOUDFLARE_ZONE_ID=")
+            && !line.starts_with("XP_CLOUDFLARE_HOSTNAME=")
+    });
+
     let node_name = shell_quote_single(values.node_name).map_err(|e| {
         ExitError::new(
             2,
@@ -583,6 +594,27 @@ pub fn write_xp_env(
     lines.push(format!("XP_NODE_NAME={node_name}"));
     lines.push(format!("XP_ACCESS_HOST={access_host}"));
     lines.push(format!("XP_API_BASE_URL={api_base_url}"));
+    lines.push(format!(
+        "XP_ENABLE_CLOUDFLARE={}",
+        if values.cloudflare_enabled {
+            "true"
+        } else {
+            "false"
+        }
+    ));
+    if values.cloudflare_enabled {
+        let cloudflare_account_id = quote_required_cloudflare_value(
+            values.cloudflare_account_id,
+            "XP_CLOUDFLARE_ACCOUNT_ID",
+        )?;
+        let cloudflare_zone_id =
+            quote_required_cloudflare_value(values.cloudflare_zone_id, "XP_CLOUDFLARE_ZONE_ID")?;
+        let cloudflare_hostname =
+            quote_required_cloudflare_value(values.cloudflare_hostname, "XP_CLOUDFLARE_HOSTNAME")?;
+        lines.push(format!("XP_CLOUDFLARE_ACCOUNT_ID={cloudflare_account_id}"));
+        lines.push(format!("XP_CLOUDFLARE_ZONE_ID={cloudflare_zone_id}"));
+        lines.push(format!("XP_CLOUDFLARE_HOSTNAME={cloudflare_hostname}"));
+    }
     let vless_canary_bind = shell_quote_single(values.vless_canary_bind).map_err(|e| {
         ExitError::new(
             2,
@@ -827,4 +859,21 @@ pub fn write_xp_env(
             .status();
     }
     Ok(())
+}
+
+fn quote_required_cloudflare_value(value: Option<&str>, key: &str) -> Result<String, ExitError> {
+    let value = value
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ExitError::new(
+                2,
+                format!("invalid_input: {key} is required when XP_ENABLE_CLOUDFLARE=true"),
+            )
+        })?;
+    shell_quote_single(value).map_err(|e| {
+        ExitError::new(
+            2,
+            format!("invalid_input: {key} cannot be written safely: {e}"),
+        )
+    })
 }
