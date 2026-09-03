@@ -341,6 +341,9 @@ Deployment note:
 - `xp-ops deploy` writes managed-default bootstrap inputs into `/etc/xp/xp.env` when you pass
   `--default-vless-port` + `--default-vless-server-names` and/or `--default-ss-port`; redeploying
   does not override an existing endpoint's Raft-owned port.
+- A Cloudflare-enabled host-managed deploy writes `XP_ENABLE_CLOUDFLARE=true` together with the
+  validated account ID, zone ID, and hostname into `/etc/xp/xp.env`; a later deploy replaces those
+  deployment-owned values from its validated plan.
 - `--ip-geo` explicitly writes `XP_IP_GEO_ENABLED=true`. Omitting it preserves an existing value
   and leaves a new node on XP's disabled default; deploy does not backfill existing nodes.
 - `--vless-canary-acme-contact-email` is optional but recommended when you want the VLESS canary certificate flow to be fully operator-owned.
@@ -378,7 +381,9 @@ sudo -E xp-ops deploy \
 
 Expected result:
 
-- `/etc/xp/xp.env` contains `XP_DEFAULT_VLESS_*`, `XP_DEFAULT_SS_PORT`, `XP_VLESS_CANARY_*`, and `XP_CLOUDFLARE_DDNS_*`.
+- `/etc/xp/xp.env` contains `XP_ENABLE_CLOUDFLARE`, `XP_CLOUDFLARE_ACCOUNT_ID`,
+  `XP_CLOUDFLARE_ZONE_ID`, `XP_CLOUDFLARE_HOSTNAME`, `XP_DEFAULT_VLESS_*`,
+  `XP_DEFAULT_SS_PORT`, `XP_VLESS_CANARY_*`, and `XP_CLOUDFLARE_DDNS_*`.
 - `xp`, `xray`, and optional `cloudflared` are installed and started under the host init system.
 - Post-bootstrap relay probing uses `https://<access_host[:managed_vless_port]>/generate_204` instead of the admin origin.
 
