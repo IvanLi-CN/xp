@@ -28,7 +28,7 @@ fn disabled_cloudflare_runtime_env() -> CloudflareRuntimeEnvWriteValues<'static>
         enabled: false,
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: Some(xp_test_fixtures::host_fixture553()),
     }
 }
 

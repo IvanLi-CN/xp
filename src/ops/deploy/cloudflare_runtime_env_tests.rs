@@ -25,7 +25,7 @@ fn join_cloudflare_runtime_env_replaces_stale_values_and_can_be_disabled() {
         enabled: true,
         account_id: Some("account-current"),
         zone_id: Some("zone-current"),
-        hostname: Some("node-current.example.com"),
+        hostname: Some(xp_test_fixtures::host_fixture553()),
     };
 
     fs::create_dir_all(paths.etc_xp_dir()).unwrap();
@@ -61,14 +61,17 @@ XP_CLOUDFLARE_HOSTNAME=node-stale.example.com\n"
     assert!(env.contains("XP_ENABLE_CLOUDFLARE=true"));
     assert!(env.contains("XP_CLOUDFLARE_ACCOUNT_ID='account-current'"));
     assert!(env.contains("XP_CLOUDFLARE_ZONE_ID='zone-current'"));
-    assert!(env.contains("XP_CLOUDFLARE_HOSTNAME='node-current.example.com'"));
+    assert!(env.contains(&format!(
+        "XP_CLOUDFLARE_HOSTNAME='{}'",
+        xp_test_fixtures::host_fixture553()
+    )));
     assert!(!env.contains("stale"));
 
     let disabled = CloudflareRuntimeEnvWriteValues {
         enabled: false,
         account_id: None,
         zone_id: None,
-        hostname: None,
+        hostname: Some(xp_test_fixtures::host_fixture553()),
     };
     ensure_xp_env_admin_token_hash_join(
         &paths,
