@@ -270,6 +270,31 @@ fn app_with_deferred_promotion(
     String,
     Arc<Mutex<Vec<&'static str>>>,
 ) {
+    app_with_deferred_promotion_variant(tmp, false)
+}
+
+#[allow(clippy::type_complexity)]
+fn app_with_deferred_promotion_with_stale_learner(
+    tmp: &TempDir,
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    String,
+    Arc<Mutex<Vec<&'static str>>>,
+) {
+    app_with_deferred_promotion_variant(tmp, true)
+}
+
+#[allow(clippy::type_complexity)]
+fn app_with_deferred_promotion_variant(
+    tmp: &TempDir,
+    with_stale_learner: bool,
+) -> (
+    axum::Router,
+    Arc<Mutex<JsonSnapshotStore>>,
+    String,
+    Arc<Mutex<Vec<&'static str>>>,
+) {
     let config = test_config(tmp.path().to_path_buf());
     let cluster = ClusterMetadata::init_new_cluster(
         tmp.path(),
@@ -283,17 +308,61 @@ fn app_with_deferred_promotion(
         .read_cluster_ca_key_pem(tmp.path())
         .unwrap()
         .unwrap();
-    let store = Arc::new(Mutex::new(
-        JsonSnapshotStore::load_or_init(StoreInit {
-            data_dir: config.data_dir.clone(),
-            bootstrap_node_id: Some(cluster.node_id.clone()),
-            bootstrap_node_name: config.node_name.clone(),
-            bootstrap_access_host: config.access_host.clone(),
-            bootstrap_api_base_url: config.api_base_url.clone(),
-        })
-        .unwrap(),
-    ));
+    let mut initial_store = JsonSnapshotStore::load_or_init(StoreInit {
+        data_dir: config.data_dir.clone(),
+        bootstrap_node_id: Some(cluster.node_id.clone()),
+        bootstrap_node_name: config.node_name.clone(),
+        bootstrap_access_host: config.access_host.clone(),
+        bootstrap_api_base_url: config.api_base_url.clone(),
+    })
+    .unwrap();
+    if with_stale_learner {
+        let stale_node_id = xp_test_fixtures::identifier_ulid_b().to_owned();
+        initial_store
+            .upsert_node(crate::domain::Node {
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                access_host: xp_test_fixtures::secondary_host().to_owned(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                quota_limit_bytes: 0,
+                quota_reset: crate::domain::NodeQuotaReset::default(),
+            })
+            .unwrap();
+        initial_store.state_mut().join_sessions.insert(
+            stale_node_id.clone(),
+            crate::join_session::JoinSession {
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                request_fingerprint: "stale-fingerprint".to_owned(),
+                signed_cert_pem: "stale-certificate".to_owned(),
+                token_expires_at: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
+                activation_deadline: (chrono::Utc::now() - chrono::Duration::seconds(1))
+                    .to_rfc3339(),
+                required_log_index: 0,
+                status: crate::join_session::JoinSessionStatus::Reserved,
+                terminal_at: None,
+            },
+        );
+    }
+    let store = Arc::new(Mutex::new(initial_store));
     let raft_id = raft_node_id_from_ulid(&cluster.node_id).unwrap();
+    let mut membership_nodes = std::collections::BTreeMap::from([(
+        raft_id,
+        RaftNodeMeta {
+            name: cluster.node_name.clone(),
+            api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
+            raft_endpoint: cluster.api_base_url.clone(),
+        },
+    )]);
+    if with_stale_learner {
+        membership_nodes.insert(
+            raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_b()).unwrap(),
+            RaftNodeMeta {
+                name: xp_test_fixtures::secondary_node_name().to_owned(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+            },
+        );
+    }
     let mut metrics = openraft::RaftMetrics::new_initial(raft_id);
     metrics.current_term = 1;
     metrics.state = openraft::ServerState::Leader;
@@ -302,14 +371,7 @@ fn app_with_deferred_promotion(
         None,
         openraft::Membership::new(
             vec![std::collections::BTreeSet::from([raft_id])],
-            std::collections::BTreeMap::from([(
-                raft_id,
-                RaftNodeMeta {
-                    name: cluster.node_name.clone(),
-                    api_base_url: xp_test_fixtures::url_loopback62416().to_owned(),
-                    raft_endpoint: cluster.api_base_url.clone(),
-                },
-            )]),
+            membership_nodes,
         ),
     ));
     let (_tx, rx) = watch::channel(metrics);
@@ -619,6 +681,74 @@ async fn cluster_join_keeps_the_reservation_prepared_until_metrics_observe_the_l
     assert_eq!(
         store.state().active_membership_operation().unwrap().phase,
         crate::state::MembershipOperationPhase::Prepared
+    );
+    assert!(membership_changes.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn cluster_join_allows_fresh_join_with_unrelated_stale_learner() {
+    let tmp = TempDir::new().unwrap();
+    let (app, store, join_token, membership_changes) =
+        app_with_deferred_promotion_with_stale_learner(&tmp);
+    let decoded =
+        crate::cluster_identity::JoinToken::decode_and_validate(&join_token, chrono::Utc::now())
+            .unwrap();
+    let csr = crate::cluster_identity::generate_node_keypair_and_csr(&decoded.token_id).unwrap();
+
+    let response = app
+        .oneshot(req_authed_json(
+            "POST",
+            "/api/cluster/join",
+            json!({
+                "join_token": join_token,
+                "node_name": "node-2",
+                "access_host": "example.com",
+                "api_base_url": "https://node-2.internal:8443",
+                "csr_pem": csr.csr_pem,
+            }),
+        ))
+        .await
+        .unwrap();
+
+    let response_status = response.status();
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        response_status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&response_body)
+    );
+
+    let store = store.lock().await;
+    assert!(store.get_node(&decoded.token_id).is_some());
+    assert!(
+        store
+            .get_node(xp_test_fixtures::identifier_ulid_b())
+            .is_some()
+    );
+    assert_eq!(
+        store
+            .state()
+            .join_sessions
+            .get(xp_test_fixtures::identifier_ulid_b())
+            .unwrap()
+            .status,
+        crate::join_session::JoinSessionStatus::Expired
+    );
+    assert!(
+        store
+            .state()
+            .join_sessions
+            .get(xp_test_fixtures::identifier_ulid_b())
+            .unwrap()
+            .terminal_at
+            .is_some()
+    );
+    assert_eq!(
+        store.state().active_membership_operation().unwrap().kind,
+        crate::state::MembershipOperationKind::Join
     );
     assert!(membership_changes.lock().await.is_empty());
 }

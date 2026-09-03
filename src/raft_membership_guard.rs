@@ -241,7 +241,7 @@ pub async fn require_clean_membership_for_restore_node(
         .then_some(())
         .ok_or_else(|| membership_invariant_error(&audit))
 }
-fn membership_invariant_error(audit: &MembershipAudit) -> anyhow::Error {
+pub(crate) fn membership_invariant_error(audit: &MembershipAudit) -> anyhow::Error {
     anyhow::anyhow!(
         "membership_invariant_violation: orphan_voters={:?}, duplicate_desired_members={:?}, \
          unexpected_learners={:?}, missing_desired_members={:?}",

@@ -10,9 +10,16 @@
 - `raft_membership_guard` never infers a promotion. Its periodic work audits orphan voters,
   unexpected learners, and missing desired members; it resumes only recorded RemoveNode and
   Restore operations, and prunes terminal evidence after 24 hours.
+- Fresh join uses `require_fresh_join_admission`: it retains the quorum-backed, non-joint, target
+  identity, active-operation, and voter/DesiredState checks while excluding unrelated
+  `unexpected_learners` from this one admission decision. The generic clean-membership gate remains
+  strict for delete, restore, eviction, and repair.
 - Join atomically records the Node, JoinSession, and operation before learner registration. The
   coordinator only promotes the exact recorded target after a fingerprint match; a legacy session
   cannot cause a promotion until it has passed capability-gated migration into an operation.
+- Capability-gated migration terminalizes an expired legacy `Reserved` session when its exact
+  non-voter learner is still present. It uses the additive `UpsertNode` command to write `Expired`
+  while retaining the learner and DesiredState Node; it does not issue membership removal.
 - Delete records RemoveNode intent, uses a single retain=false removal action, verifies absence,
   and does not compensate by restoring a learner or voter. A five-second incomplete delete returns
   `202` and leaves a status operation for retry.
@@ -44,6 +51,8 @@
   compatible with an old binary, which is why the capability barrier precedes the first command.
 - After the barrier, valid legacy JoinSessions become replayable Join operations. Invalid legacy
   sessions become terminal Blocked evidence; they are not inferred from member shape or promoted.
+  The one known expired-`Reserved`/existing-learner shape is terminalized as `Expired` without
+  creating a cleanup operation, so a fresh join does not inherit ownership of that learner.
 - Orphan repair first performs its existing leader-local, linearizable preview. Only the previewed
   unique orphan is excluded from the retained-voter capability probe, so a stale orphan public URL
   cannot bypass or block the capability barrier.
@@ -76,5 +85,9 @@
 - Stale learner tests cover zero-write preview, exact learner and metadata matching, stale
   fingerprint rejection, atomic JoinSession consumption, durable Restore creation, catch-up,
   promotion, terminal completion, and signed-route authentication.
+- Fresh-join HTTP coverage proves that an unrelated expired learner leaves its Node retained,
+  terminalizes only its legacy session, and does not receive a removal or promotion request. Guard
+  coverage proves that the same learner still fails the generic clean-membership gate while target
+  identity and active-operation conflicts continue to reject fresh admission.
 - Node details tests cover an accepted deletion's persisted operation id, status polling, and
   duplicate-delete disablement.
