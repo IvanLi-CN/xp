@@ -399,7 +399,8 @@ async fn draft_cluster_test_idempotency_reuses_matching_snapshot_and_rejects_con
         .unwrap();
     assert!(matches!(
         existing,
-        DraftTestCreateOutcome::Existing(run) if run.run_id == "draft-idempotent-1"
+        DraftTestCreateOutcome::Existing(run)
+            if run.run_id == xp_test_fixtures::primary_probe_run_id()
     ));
 
     let conflict = handle
