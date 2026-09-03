@@ -49,6 +49,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.service-monitors",
         "admin.service-monitor-observer-policy-v1",
         "admin.service-monitor-draft-tests-v1",
+        "admin.service-monitor-draft-tests-same-origin-v1",
         "admin.service-monitor-http-v1",
         "admin.service-monitor-tcp-v1",
         "admin.endpoint-mihomo-smux",
@@ -113,6 +114,11 @@ mod tests {
                 .contains(&"admin.endpoint-conditional-update")
         );
         assert!(response.capabilities.contains(&"admin.status-events"));
+        assert!(
+            response
+                .capabilities
+                .contains(&"admin.service-monitor-draft-tests-same-origin-v1")
+        );
         assert!(response.capabilities.contains(&"cluster.join.staged-v1"));
         assert!(
             response

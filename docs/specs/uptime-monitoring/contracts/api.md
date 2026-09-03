@@ -7,7 +7,9 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
 
 - Monitor 与 ad-hoc run ID 使用 ULID。
 - `PATCH` body 和 `DELETE` query 都必须提供 `expected_revision`。
-- 写入沿用现有 Leader/follower 转发语义。冲突响应使用稳定
+- Monitor 写入沿用现有 Leader/follower 转发语义。Draft Cluster Test 的
+  browser-facing create/status 请求始终保持同源：follower 在认证后通过签名内部
+  请求转发给协调 Leader，不能对浏览器返回跨 origin redirect。冲突响应使用稳定
   `revision_conflict` code。
 - 错误 shape 为 `{"error":{"code":string,"message":string,"details":object}}`；
   客户端只能根据 `code` 分支。
@@ -72,10 +74,26 @@ wire contract；所有时间字段均为 UTC Unix seconds，延迟为整数毫�
   `from`、`to`、`resolution`、`observer_id`、`limit`；resolution 为
   `auto`、`1m`、`5m` 或 `1h`，limit 被限制为 1 至 1,500。
 - `POST /api/admin/monitor-draft-tests`：接受 target 与 observer_policy，返回
-  `202` 的 Draft Cluster Test。创建即冻结 observer set，不创建 Monitor 或 Observation。
+  `202` 的 Draft Cluster Test。请求可带 `Idempotency-Key`；同一管理员、同一表单
+  快照的重试返回同一个 run。创建即冻结 observer set，不创建 Monitor 或 Observation。
+  follower 无法联系 Leader 时返回 `503 leader_unavailable`，不创建 run。
 - `GET /api/admin/monitor-draft-tests/:run_id`：返回临时 run 及逐 Observer 状态；
-  run 超过 15 分钟返回 `interrupted`，未知协调节点的恢复结果也必须显式为
-  `interrupted`，而不是伪造失败 Observation。
+  run 超过 15 分钟、协调节点已变化或无法恢复时返回 `200` 的 `interrupted` run，
+  而不是伪造失败 Observation。浏览器始终从其当前 origin 读取；follower 必须在服务端
+  转发到 coordinator，不能要求浏览器发现或访问 leader origin。
+
+Draft Test status has two JSON shapes. A live result includes `target`, the frozen
+`observer_policy`, `observer_node_ids`, `coordinator_node_id`, timestamps and the
+per-observer `observers` array. An unavailable or expired result is deliberately
+minimal and includes only `run_id`, `coordinator_node_id`, `state: "interrupted"`,
+`interrupted_at_unix_seconds` and `reason`; it never fabricates target or observer data.
+The forwarding-only routes `POST /api/admin/_internal/monitor-draft-tests` and
+`GET /api/admin/_internal/monitor-draft-tests/:run_id` accept only signed Mesh-v2
+member requests. Their create body contains the request, caller token fingerprint,
+the SHA-256 idempotency-key hash (when supplied), and the canonical snapshot hash;
+the bearer token and raw idempotency key are never forwarded. Ingress and coordinator
+logs include only request ID, node IDs, run ID and a bounded forward outcome; they do
+not include credentials, raw keys, target bodies or response bodies.
 
 history response 包含 `quality`（`complete`、`partial`、`local_only`）、
 `coverage_percent`、`watermark_unix_seconds`、`gaps`、`skew_seconds`、
@@ -88,6 +106,9 @@ history response 包含 `quality`（`complete`、`partial`、`local_only`）、
 - `revision_conflict`
 - `monitor_deleted`
 - `run_rate_limited`
+- `draft_test_rate_limited`
+- `idempotency_conflict`
+- `leader_unavailable`
 - `not_found`
 - `invalid_request`
 - `internal_error`
@@ -117,3 +138,6 @@ history response 包含 `quality`（`complete`、`partial`、`local_only`）、
 - `admin.service-monitor-observer-policy-v1` 表示服务端理解 observer_policy；
   `admin.service-monitor-draft-tests-v1` 表示异步 Draft Cluster Test 可用。旧服务端
   仅允许新客户端发送空 exclude（映射 legacy null）或 include ID 数组。
+- `admin.service-monitor-draft-tests-same-origin-v1` 表示 follower 可以为
+  Draft Cluster Test 提供同源的 create/status forwarding。新 Web 只有在此 capability
+  存在时启用 Draft Cluster Test；Monitor 创建不受影响。

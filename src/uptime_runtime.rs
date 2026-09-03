@@ -26,14 +26,13 @@ const MAX_REDIRECTS: usize = 3;
 const BODY_LIMIT_BYTES: usize = 64 * 1024;
 const AD_HOC_CONCURRENCY: usize = 4;
 const AD_HOC_RUNS_PER_MINUTE: u8 = 10;
-
 mod capture_gaps;
 mod draft;
 mod scheduler;
 pub use capture_gaps::PendingCaptureGap;
 pub use draft::{
     DRAFT_TEST_TTL_SECONDS, DraftClusterTest, DraftClusterTestObserver,
-    DraftClusterTestObserverUpdate, DraftClusterTestState,
+    DraftClusterTestObserverUpdate, DraftClusterTestState, DraftTestCreateOutcome,
 };
 pub(crate) use scheduler::spawn_uptime_worker;
 #[cfg(test)]
@@ -159,6 +158,7 @@ impl UptimeHandle {
                 ON uptime_draft_tests (expires_at_unix_seconds);
             ",
         )?;
+        draft::initialize_idempotency_tables(&connection)?;
         migrate_observation_idempotency(&connection)?;
         let mut runtime = UptimeRuntime {
             connection,
