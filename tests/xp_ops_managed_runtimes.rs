@@ -103,20 +103,41 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
     let local_bin = tmp.path().join("usr/local/bin");
     let initd = tmp.path().join("etc/init.d");
     let marker = tmp.path().join("marker.txt");
+    let service_state_dir = tmp.path().join("service-state");
     fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&local_bin).unwrap();
     fs::create_dir_all(&initd).unwrap();
+    fs::create_dir_all(&service_state_dir).unwrap();
     write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\nexit 1\n");
     write_executable(
         &bin_dir.join("rc-service"),
         concat!(
             "#!/bin/sh\n",
             "echo \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "state_dir=\"$XP_OPS_TEST_SERVICE_STATE_DIR\"\n",
             "case \"$1:$2\" in\n",
             "  xp:restart|xp:start) touch \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
             "  xp:stop) rm -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
-            "  xp:status) test -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
-            "  xray:restart|cloudflared:restart) test ! -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  xp:status)\n",
+            "    if test -f \"$XP_OPS_TEST_XP_RUNNING\"; then\n",
+            "      echo \" * status: started\"\n",
+            "      exit 0\n",
+            "    else\n",
+            "      echo \" * status: stopped\"\n",
+            "      exit 3\n",
+            "    fi ;;\n",
+            "  xray:stop|cloudflared:stop)\n",
+            "    test ! -f \"$XP_OPS_TEST_XP_RUNNING\" && touch \"$state_dir/$1-stopped\" ;;\n",
+            "  xray:start|cloudflared:start)\n",
+            "    test ! -f \"$XP_OPS_TEST_XP_RUNNING\" && rm -f \"$state_dir/$1-stopped\" ;;\n",
+            "  xray:status|cloudflared:status)\n",
+            "    if test -f \"$state_dir/$1-stopped\"; then\n",
+            "      echo \" * status: stopped\"\n",
+            "      exit 3\n",
+            "    else\n",
+            "      echo \" * status: started\"\n",
+            "      exit 0\n",
+            "    fi ;;\n",
             "  *) exit 0 ;;\n",
             "esac\n",
         ),
@@ -147,6 +168,7 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
     command.env("XP_OPS_TEST_MARKER", &marker);
     command.env("XP_OPS_TEST_XP_RUNNING", tmp.path().join("xp-running"));
+    command.env("XP_OPS_TEST_SERVICE_STATE_DIR", &service_state_dir);
     command.env(
         "PATH",
         format!(
@@ -175,15 +197,208 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
             })
     );
     let marker = fs::read_to_string(marker).unwrap();
-    assert!(marker.contains("rc-service xray restart"));
-    assert!(marker.contains("rc-service cloudflared restart"));
-    let action_index = |action| marker.lines().position(|line| line == action).unwrap();
+    assert!(marker.contains("rc-service xray stop"));
+    assert!(marker.contains("rc-service xray start"));
+    assert!(marker.contains("rc-service cloudflared stop"));
+    assert!(marker.contains("rc-service cloudflared start"));
+    assert!(!marker.contains("rc-service xray restart"));
+    assert!(!marker.contains("rc-service cloudflared restart"));
+    let action_indices = |action| {
+        marker
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| (line == action).then_some(index))
+            .collect::<Vec<_>>()
+    };
+    let xp_stops = action_indices("rc-service xp stop");
+    let xp_starts = action_indices("rc-service xp start");
+    assert_eq!(xp_stops.len(), 2);
+    assert_eq!(xp_starts.len(), 2);
+    let xray_stop = action_indices("rc-service xray stop")[0];
+    let xray_start = action_indices("rc-service xray start")[0];
+    let cloudflared_stop = action_indices("rc-service cloudflared stop")[0];
+    let cloudflared_start = action_indices("rc-service cloudflared start")[0];
     assert!(
-        action_index("rc-service xp restart") < action_index("rc-service xp stop")
-            && action_index("rc-service xp stop") < action_index("rc-service xray restart")
-            && action_index("rc-service xray restart")
-                < action_index("rc-service cloudflared restart")
-            && action_index("rc-service cloudflared restart") < action_index("rc-service xp start")
+        xp_stops[0] < xp_starts[0]
+            && xp_starts[0] < xp_stops[1]
+            && xp_stops[1] < xray_stop
+            && xray_stop < xray_start
+            && xray_start < cloudflared_stop
+            && cloudflared_stop < cloudflared_start
+            && cloudflared_start < xp_starts[1]
+    );
+}
+
+#[tokio::test]
+async fn upgrade_rejects_openrc_xp_stopping_before_runtime_activation() {
+    let server = MockServer::start().await;
+    let xp_asset = asset("xp");
+    let xp_ops_asset = asset("xp-ops");
+    let xray_asset = asset("xray");
+    let cloudflared_asset = asset("cloudflared");
+    let new_xp = b"xp-new-binary";
+    let new_xp_ops = fs::read(assert_cmd::cargo::cargo_bin("xp-ops")).unwrap();
+    let new_xray = b"xray-low-memory";
+    let new_cloudflared = b"cloudflared-low-memory";
+    let assets = [
+        (&xp_asset, new_xp.as_slice()),
+        (&xp_ops_asset, new_xp_ops.as_slice()),
+        (&xray_asset, new_xray.as_slice()),
+        (&cloudflared_asset, new_cloudflared.as_slice()),
+    ];
+    let release_assets = assets
+        .iter()
+        .map(|(name, _)| {
+            serde_json::json!({
+                "name": name,
+                "browser_download_url": format!("{}/download/{name}", server.uri())
+            })
+        })
+        .chain(std::iter::once(serde_json::json!({
+            "name": "checksums.txt",
+            "browser_download_url": format!("{}/download/checksums.txt", server.uri())
+        })))
+        .collect::<Vec<_>>();
+    let body = serde_json::json!({
+        "tag_name": "v0.1.999",
+        "prerelease": false,
+        "published_at": xp_test_fixtures::release_current_timestamp(),
+        "assets": release_assets
+    });
+    for release_path in [
+        "/repos/o/r/releases/latest",
+        "/repos/o/r/releases/tags/v0.1.999",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(release_path))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body.clone()))
+            .mount(&server)
+            .await;
+    }
+    for (name, bytes) in assets {
+        Mock::given(method("GET"))
+            .and(path(format!("/download/{name}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes))
+            .mount(&server)
+            .await;
+    }
+    let checksums = [
+        (&xp_asset, new_xp.as_slice()),
+        (&xp_ops_asset, new_xp_ops.as_slice()),
+        (&xray_asset, new_xray.as_slice()),
+        (&cloudflared_asset, new_cloudflared.as_slice()),
+    ]
+    .map(|(name, bytes)| format!("{}  {name}\n", sha256_hex(bytes)))
+    .concat();
+    Mock::given(method("GET"))
+        .and(path("/download/checksums.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(checksums))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_string_lossy().to_string();
+    let bin_dir = tmp.path().join("bin");
+    let local_bin = tmp.path().join("usr/local/bin");
+    let initd = tmp.path().join("etc/init.d");
+    let marker = tmp.path().join("marker.txt");
+    let state_dir = tmp.path().join("state");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&local_bin).unwrap();
+    fs::create_dir_all(&initd).unwrap();
+    fs::create_dir_all(&state_dir).unwrap();
+    write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\nexit 1\n");
+    write_executable(
+        &bin_dir.join("rc-service"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "state_dir=\"$XP_OPS_TEST_STATE_DIR\"\n",
+            "case \"$1:$2\" in\n",
+            "  xp:restart) touch \"$state_dir/xp-running\" ;;\n",
+            "  xp:start) rm -f \"$state_dir/xp-stopping\"; touch \"$state_dir/xp-running\" ;;\n",
+            "  xp:stop)\n",
+            "      count=0\n",
+            "      if test -f \"$state_dir/xp-stop-count\"; then\n",
+            "        count=$(cat \"$state_dir/xp-stop-count\")\n",
+            "      fi\n",
+            "      count=$((count + 1))\n",
+            "      echo \"$count\" > \"$state_dir/xp-stop-count\"\n",
+            "      if test \"$count\" -eq 1; then\n",
+            "        rm -f \"$state_dir/xp-running\"\n",
+            "      else\n",
+            "        touch \"$state_dir/xp-stopping\"\n",
+            "      fi\n",
+            "    ;;\n",
+            "  xp:status)\n",
+            "    if test -f \"$state_dir/xp-stopping\"; then\n",
+            "      echo \" * status: stopping\"\n",
+            "      exit 4\n",
+            "    elif test -f \"$state_dir/xp-running\"; then\n",
+            "      echo \" * status: started\"\n",
+            "      exit 0\n",
+            "    else\n",
+            "      echo \" * status: stopped\"\n",
+            "      exit 3\n",
+            "    fi ;;\n",
+            "  *) exit 0 ;;\n",
+            "esac\n",
+        ),
+    );
+    fs::write(local_bin.join("xp"), b"xp-old").unwrap();
+    fs::write(local_bin.join("xray"), b"xray-old").unwrap();
+    fs::write(local_bin.join("cloudflared"), b"cloudflared-old").unwrap();
+    fs::write(initd.join("xray"), "command_user=\"xray:xray\"\n").unwrap();
+    fs::write(
+        initd.join("cloudflared"),
+        "command_user=\"cloudflared:cloudflared\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.path().join("etc/xray")).unwrap();
+    fs::write(
+        tmp.path().join("etc/xray/config.json"),
+        "{\"policy\":{\"levels\":{\"0\":{\"statsUserUplink\":true}}}}\n",
+    )
+    .unwrap();
+    let xp_ops_copy = tmp.path().join("xp-ops-copy");
+    fs::copy(assert_cmd::cargo::cargo_bin("xp-ops"), &xp_ops_copy).unwrap();
+    let mut permissions = fs::metadata(&xp_ops_copy).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&xp_ops_copy, permissions).unwrap();
+
+    let mut command = assert_cmd::Command::new(&xp_ops_copy);
+    command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
+    command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+    command.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "600");
+    command.env("XP_OPS_TEST_MARKER", &marker);
+    command.env("XP_OPS_TEST_STATE_DIR", &state_dir);
+    command.env(
+        "PATH",
+        format!(
+            "{}:{}",
+            bin_dir.display(),
+            env::var("PATH").unwrap_or_default()
+        ),
+    );
+    command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
+    command.assert().failure().stderr(predicates::str::contains(
+        "stop xp before managed runtime activation failed",
+    ));
+
+    let marker = fs::read_to_string(marker).unwrap();
+    assert!(
+        !marker.lines().any(|line| {
+            matches!(
+                line,
+                "rc-service xray restart"
+                    | "rc-service xray stop"
+                    | "rc-service xray start"
+                    | "rc-service cloudflared restart"
+                    | "rc-service cloudflared stop"
+                    | "rc-service cloudflared start"
+            )
+        }),
+        "runtime activation ran after XP remained in the OpenRC stopping state: {marker}"
     );
 }
 
@@ -294,6 +509,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let mut command = assert_cmd::Command::new(&xp_ops_copy);
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
+    command.env("XP_OPS_TEST_SERVICE_READY_TIMEOUT_MS", "0");
     command.env("XP_OPS_TEST_MARKER", &marker);
     command.env("XP_OPS_TEST_XP_RUNNING", xp_running);
     command.env(
@@ -321,6 +537,17 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
             .exists()
     );
     let marker = fs::read_to_string(marker).unwrap();
+    let xp_stop = marker
+        .lines()
+        .position(|line| line == "systemctl stop xp.service")
+        .expect("managed runtime activation must stop XP");
+    assert!(
+        !marker.lines().skip(xp_stop + 1).any(|line| matches!(
+            line,
+            "systemctl restart xp.service" | "systemctl start xp.service"
+        )),
+        "XP restarted after runtime rollback failed: {marker}"
+    );
     assert_eq!(
         marker
             .lines()

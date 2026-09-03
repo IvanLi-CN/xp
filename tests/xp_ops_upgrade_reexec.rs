@@ -11,12 +11,66 @@ fn copy_current_xp_ops(dest: &Path) {
     fs::set_permissions(dest, permissions).unwrap();
 }
 
+fn write_executable(path: &Path, content: &str) {
+    fs::write(path, content).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+fn prepend_path(dir: &Path) -> String {
+    format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
 #[test]
 fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();
     let data_dir = tmp.path().join("data");
     let data_dir_arg = data_dir.to_string_lossy().to_string();
+    let marker = tmp.path().join("marker.txt");
+    let service_state = tmp.path().join("service-state");
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&service_state).unwrap();
+    fs::write(service_state.join("xp-running"), "").unwrap();
+    write_executable(
+        &bin_dir.join("systemctl"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "state_dir=\"$XP_OPS_TEST_SERVICE_STATE_DIR\"\n",
+            "case \"$1:$2:$3\" in\n",
+            "  stop:xp.service:*) rm -f \"$state_dir/xp-running\" ;;\n",
+            "  start:xp.service:*)\n",
+            "    test -f \"$state_dir/xray-ready\" &&\n",
+            "      test -f \"$state_dir/cloudflared-ready\" ||\n",
+            "      exit 1\n",
+            "    touch \"$state_dir/xp-running\" ;;\n",
+            "  restart:xray.service:*)\n",
+            "    test ! -f \"$state_dir/xp-running\" || exit 1\n",
+            "    touch \"$state_dir/xray-ready\" ;;\n",
+            "  restart:cloudflared.service:*)\n",
+            "    test ! -f \"$state_dir/xp-running\" || exit 1\n",
+            "    touch \"$state_dir/cloudflared-ready\" ;;\n",
+            "  is-active:--quiet:xp.service) test -f \"$state_dir/xp-running\" ;;\n",
+            "  is-active:--quiet:xray.service) test -f \"$state_dir/xray-ready\" ;;\n",
+            "  is-active:--quiet:cloudflared.service)\n",
+            "    test -f \"$state_dir/cloudflared-ready\" ;;\n",
+            "  *) exit 0 ;;\n",
+            "esac\n",
+        ),
+    );
+    fs::create_dir_all(tmp.path().join("etc/systemd/system")).unwrap();
+    fs::write(
+        tmp.path().join("etc/systemd/system/cloudflared.service"),
+        "[Service]\n",
+    )
+    .unwrap();
     let dest = tmp.path().join("xp-ops-copy");
     let backup = tmp.path().join("xp-ops-copy.bak.resume");
     copy_current_xp_ops(&dest);
@@ -66,6 +120,10 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     command
         .env("XP_OPS_TEST_LOCK", &lock_path)
         .env("XP_OPS_TEST_TARGET", &dest)
+        .env("XP_OPS_TEST_ENABLE_SERVICE", "1")
+        .env("XP_OPS_TEST_MARKER", &marker)
+        .env("XP_OPS_TEST_SERVICE_STATE_DIR", &service_state)
+        .env("PATH", prepend_path(&bin_dir))
         .env("XP_OPS_UPGRADE_RESUME_TAG", "v0.1.999")
         .env("XP_OPS_UPGRADE_RESUME_REPO", "o/r")
         .env("XP_OPS_GITHUB_REPO", "o/r")
@@ -102,4 +160,20 @@ fn complete_phase_cleanup_failure_restores_previous_xp_ops() {
     let status: serde_json::Value =
         serde_json::from_slice(&fs::read(data_dir.join("upgrade/status.json")).unwrap()).unwrap();
     assert_eq!(status["state"], "failed");
+
+    let marker = fs::read_to_string(marker).unwrap();
+    let action_index = |action| {
+        marker
+            .lines()
+            .position(|line| line == action)
+            .expect("expected rollback service action")
+    };
+    let xp_stop = action_index("systemctl stop xp.service");
+    let xray_restart = action_index("systemctl restart xray.service");
+    let cloudflared_restart = action_index("systemctl restart cloudflared.service");
+    let xp_start = action_index("systemctl start xp.service");
+    assert!(xp_stop < xray_restart);
+    assert!(xray_restart < cloudflared_restart);
+    assert!(cloudflared_restart < xp_start);
+    assert!(!marker.contains("systemctl restart xp.service"));
 }

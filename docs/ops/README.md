@@ -867,14 +867,16 @@ Current rollout semantics:
 - It upgrades `xp`, installs the checksummed release-managed Xray and cloudflared pair when
   present, then quiesces `xp` for the managed-runtime activation window. It rewrites
   `/etc/xray/config.json`, restarts Xray and cloudflared, and starts `xp` again only after both
-  runtime services are ready, before replacing `xp-ops` itself. This prevents XP's runtime
-  recovery loop from racing an OpenRC service transition.
+  runtime services are ready, before replacing `xp-ops` itself. On OpenRC, each managed restart
+  is `stop -> stopped -> start -> started`; `stopping` and every unrecognized status are
+  nonterminal. This prevents XP's runtime recovery loop from racing an OpenRC service transition.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
-  service started on two successive checks. This prevents an asynchronous OpenRC transition from
-  being reported as a completed upgrade.
+  service started on two successive checks. OpenRC stop is likewise accepted only after two exact
+  `status: stopped` observations. This prevents an asynchronous OpenRC transition from being
+  reported as a completed upgrade.
 - During static config rewrite, `xp-ops upgrade` preserves the authoritative `XP_XRAY_API_ADDR` binding for the `api` inbound and removes the retired legacy control-plane proxy inbound when present.
-- If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable.
+- If runtime installation, configuration reconciliation, or either service restart fails, `xp-ops upgrade` restores the previous runtime pair and `xp`; Xray config and a self-upgraded `xp-ops` are also restored when applicable. XP starts again only after the restored runtime pair is confirmed ready. If that confirmation fails, XP remains stopped and the upgrade reports `rollback_failed` for explicit operator recovery.
 
 Useful flags:
 

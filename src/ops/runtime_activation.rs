@@ -6,7 +6,16 @@ use std::time::{Duration, Instant};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(45);
 const SERVICE_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const OPENRC_READY_CONFIRMATIONS: u8 = 2;
+const OPENRC_STATUS_CONFIRMATIONS: u8 = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenrcServiceState {
+    Started,
+    Stopped,
+    Starting,
+    Stopping,
+    Unknown,
+}
 
 pub fn reload_systemd_units(paths: &Paths) -> bool {
     let systemd = paths.systemd_unit_dir();
@@ -51,10 +60,7 @@ fn restart_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> b
     if command_succeeds("systemctl", &["restart", systemd_unit]) {
         return wait_for_service_ready("systemctl", &["is-active", "--quiet", systemd_unit]);
     }
-    if command_succeeds("rc-service", &[openrc_service, "restart"]) {
-        return wait_for_service_ready("rc-service", &[openrc_service, "status"]);
-    }
-    false
+    restart_openrc_service(openrc_service)
 }
 
 fn start_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
@@ -64,10 +70,7 @@ fn start_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> boo
     if command_succeeds("systemctl", &["start", systemd_unit]) {
         return wait_for_service_ready("systemctl", &["is-active", "--quiet", systemd_unit]);
     }
-    if command_succeeds("rc-service", &[openrc_service, "start"]) {
-        return wait_for_service_ready("rc-service", &[openrc_service, "status"]);
-    }
-    false
+    start_openrc_service(openrc_service)
 }
 
 fn stop_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
@@ -77,24 +80,28 @@ fn stop_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool
     if command_succeeds("systemctl", &["stop", systemd_unit]) {
         return wait_for_service_stopped("systemctl", &["is-active", "--quiet", systemd_unit]);
     }
-    if command_succeeds("rc-service", &[openrc_service, "stop"]) {
-        return wait_for_service_stopped("rc-service", &[openrc_service, "status"]);
-    }
-    false
+    stop_openrc_service(openrc_service)
+}
+
+fn restart_openrc_service(service: &str) -> bool {
+    stop_openrc_service(service) && start_openrc_service(service)
+}
+
+fn start_openrc_service(service: &str) -> bool {
+    command_runs("rc-service", &[service, "start"])
+        && wait_for_openrc_service_state(service, OpenrcServiceState::Started)
+}
+
+fn stop_openrc_service(service: &str) -> bool {
+    command_runs("rc-service", &[service, "stop"])
+        && wait_for_openrc_service_state(service, OpenrcServiceState::Stopped)
 }
 
 fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
     let deadline = Instant::now() + service_ready_timeout();
-    let required_confirmations = service_status_confirmations(program);
-    let mut ready_confirmations = 0;
     loop {
         if command_succeeds(program, args) {
-            ready_confirmations += 1;
-            if ready_confirmations >= required_confirmations {
-                return true;
-            }
-        } else {
-            ready_confirmations = 0;
+            return true;
         }
         if Instant::now() >= deadline {
             return false;
@@ -105,16 +112,9 @@ fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
 
 fn wait_for_service_stopped(program: &str, args: &[&str]) -> bool {
     let deadline = Instant::now() + service_ready_timeout();
-    let required_confirmations = service_status_confirmations(program);
-    let mut stopped_confirmations = 0;
     loop {
         if !command_succeeds(program, args) {
-            stopped_confirmations += 1;
-            if stopped_confirmations >= required_confirmations {
-                return true;
-            }
-        } else {
-            stopped_confirmations = 0;
+            return true;
         }
         if Instant::now() >= deadline {
             return false;
@@ -123,12 +123,74 @@ fn wait_for_service_stopped(program: &str, args: &[&str]) -> bool {
     }
 }
 
-fn service_status_confirmations(program: &str) -> u8 {
-    if program == "rc-service" {
-        OPENRC_READY_CONFIRMATIONS
-    } else {
-        1
+fn wait_for_openrc_service_state(service: &str, expected: OpenrcServiceState) -> bool {
+    wait_for_openrc_service_state_with_probe(
+        expected,
+        service_ready_timeout(),
+        SERVICE_READY_POLL_INTERVAL,
+        || openrc_service_state(service),
+    )
+}
+
+fn wait_for_openrc_service_state_with_probe<F>(
+    expected: OpenrcServiceState,
+    timeout: Duration,
+    poll_interval: Duration,
+    mut probe: F,
+) -> bool
+where
+    F: FnMut() -> OpenrcServiceState,
+{
+    let deadline = Instant::now() + timeout;
+    let mut confirmations = 0;
+    loop {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        if probe() == expected {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            confirmations += 1;
+            if confirmations >= OPENRC_STATUS_CONFIRMATIONS {
+                return true;
+            }
+        } else {
+            confirmations = 0;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(poll_interval.min(deadline.saturating_duration_since(Instant::now())));
     }
+}
+
+fn openrc_service_state(service: &str) -> OpenrcServiceState {
+    let Ok(output) = Command::new("rc-service")
+        .args([service, "status"])
+        .output()
+    else {
+        return OpenrcServiceState::Unknown;
+    };
+
+    parse_openrc_service_state(&String::from_utf8_lossy(&output.stdout))
+        .or_else(|| parse_openrc_service_state(&String::from_utf8_lossy(&output.stderr)))
+        .unwrap_or(OpenrcServiceState::Unknown)
+}
+
+// OpenRC uses nonzero exit statuses for both terminal and transitional states.
+fn parse_openrc_service_state(output: &str) -> Option<OpenrcServiceState> {
+    output.lines().find_map(|line| {
+        let normalized = line.trim().to_ascii_lowercase();
+        let (_, state) = normalized.split_once("status:")?;
+        match state.split_whitespace().next()? {
+            "started" => Some(OpenrcServiceState::Started),
+            "stopped" => Some(OpenrcServiceState::Stopped),
+            "starting" => Some(OpenrcServiceState::Starting),
+            "stopping" => Some(OpenrcServiceState::Stopping),
+            _ => None,
+        }
+    })
 }
 
 fn service_ready_timeout() -> Duration {
@@ -141,7 +203,7 @@ fn service_ready_timeout() -> Duration {
     SERVICE_READY_TIMEOUT
 }
 
-fn service_commands_are_disabled(paths: &Paths) -> bool {
+pub(crate) fn service_commands_are_disabled(paths: &Paths) -> bool {
     is_test_root(paths.root()) && !test_enable_service_restart()
 }
 
@@ -159,4 +221,50 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .status()
         .ok()
         .is_some_and(|status| status.success())
+}
+
+fn command_runs(program: &str, args: &[&str]) -> bool {
+    Command::new(program).args(args).status().is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_openrc_stopping_as_a_distinct_nonterminal_state() {
+        assert_eq!(
+            parse_openrc_service_state(" * status: stopping\n"),
+            Some(OpenrcServiceState::Stopping)
+        );
+        assert_eq!(
+            parse_openrc_service_state(" * status: stopped\n"),
+            Some(OpenrcServiceState::Stopped)
+        );
+    }
+
+    #[test]
+    fn parses_openrc_started_and_unknown_statuses() {
+        assert_eq!(
+            parse_openrc_service_state(" * status: started\n"),
+            Some(OpenrcServiceState::Started)
+        );
+        assert_eq!(parse_openrc_service_state("status: crashed\n"), None);
+    }
+
+    #[test]
+    fn requires_all_openrc_confirmations_before_the_deadline() {
+        let mut probes = 0;
+
+        assert!(!wait_for_openrc_service_state_with_probe(
+            OpenrcServiceState::Started,
+            Duration::from_millis(50),
+            Duration::from_millis(100),
+            || {
+                probes += 1;
+                OpenrcServiceState::Started
+            },
+        ));
+        assert_eq!(probes, 1);
+    }
 }

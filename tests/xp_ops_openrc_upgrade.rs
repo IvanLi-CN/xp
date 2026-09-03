@@ -107,33 +107,47 @@ mod linux {
             &bin_dir.join("rc-service"),
             &format!(
                 "#!/bin/sh\n\ncase \"$1:$2\" in\n\
-xp:restart|xp:start)\n\
+xp:start)\n\
   touch \"{xp_running}\"\n\
-  exit 0\n\
   ;;\n\
 xp:stop)\n\
   rm -f \"{xp_running}\"\n\
-  exit 0\n\
   ;;\n\
 xp:status)\n\
-  test -f \"{xp_running}\"\n\
-  exit $?\n\
+  if test -f \"{xp_running}\"; then\n\
+    echo \" * status: started\"\n\
+    exit 0\n\
+  fi\n\
+  echo \" * status: stopped\"\n\
+  exit 3\n\
   ;;\n\
-xray:restart)\n\
+xray:stop)\n\
+  rm -f \"{restart_count}.running\"\n\
+  ;;\n\
+xray:start)\n\
   count=0\n\
   [ ! -f \"{restart_count}\" ] || count=$(cat \"{restart_count}\")\n\
   echo $((count + 1)) > \"{restart_count}\"\n\
-  exit 0\n\
+  touch \"{restart_count}.running\"\n\
   ;;\n\
 xray:status)\n\
+  if ! test -f \"{restart_count}.running\"; then\n\
+    echo \" * status: stopped\"\n\
+    exit 3\n\
+  fi\n\
   restart_count=$(cat \"{restart_count}\")\n\
   if [ \"$restart_count\" -eq 1 ]; then\n\
     count=0\n\
     [ ! -f \"{status_count}\" ] || count=$(cat \"{status_count}\")\n\
     echo $((count + 1)) > \"{status_count}\"\n\
-    [ \"$count\" -eq 0 ] && exit 0\n\
-    exit 1\n\
+    if [ \"$count\" -eq 0 ]; then\n\
+      echo \" * status: started\"\n\
+      exit 0\n\
+    fi\n\
+    echo \" * status: stopping\"\n\
+    exit 4\n\
   fi\n\
+  echo \" * status: started\"\n\
   exit 0\n\
   ;;\n\
 *) exit 0 ;;\n\
