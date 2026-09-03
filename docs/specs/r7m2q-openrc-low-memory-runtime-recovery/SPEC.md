@@ -32,6 +32,9 @@ Alpine/OpenRC 节点可能运行在 `256MB` 且无 swap 的小容量服务器上
 - xray restart timeout 默认 `20s`，避免 OpenRC 小机上 `rc-service restart` 在 5 秒内未完整收尾时被过早判失败。
 - restart 退避以 `XP_XRAY_RESTART_COOLDOWN_SECS` / `XP_CLOUDFLARED_RESTART_COOLDOWN_SECS` 为初始间隔，连续 down 时按指数增长并封顶 `300s`；探活恢复 up 后重置退避。
 - OpenRC restart 前后审计同服务 `supervise-daemon` 与精确可执行路径匹配的 worker 进程；发现重复实例时记录 warning，并只在 pidfile 能确认 active supervisor 时自动清理其他 `supervise-daemon <service>` PID；标准 host-managed 安装通过 `xp-openrc-kill-supervisor` helper 清理 root-owned supervisor 残留，避免授予 `xp` 任意 root kill 权限。
+- Host-managed `xp-ops upgrade` 在受管 runtime activation 前必须确认 `xp` 已停止。
+  仅在 Xray 与 cloudflared 都达到 ready 后恢复 `xp`，以防 XP 自愈器与升级器并发操作同一个
+  OpenRC service。
 - cloudflared 新增 monitor-only 语义：`XP_CLOUDFLARED_MONITOR_MODE` 控制状态探测，`XP_CLOUDFLARED_RESTART_MODE` 仅控制是否主动 restart；旧部署只设置 restart mode 时继续按该 mode 监控，保持向后兼容；显式 `XP_CLOUDFLARED_MONITOR_MODE=none` 优先表示关闭监控。
 - host-managed env backfill 默认写入 cloudflared monitor mode 为当前 init system，restart mode 为 `none`。
 
@@ -41,6 +44,8 @@ Alpine/OpenRC 节点可能运行在 `256MB` 且无 swap 的小容量服务器上
 - `xray` 和 `cloudflared` health 均暴露 restart attempts、last restart、next restart、backoff 和 automatic restart enabled 状态。
 - xray 连续失败后首轮 restart 不等待退避间隔；后续 restart 间隔按指数退避。
 - OpenRC 进程审计只按当前服务的 `supervise-daemon <service>` 执行自动清理；找不到 active supervisor pidfile 时只告警不清理；worker 进程仅告警，避免误伤使用同一可执行路径的 operator-managed 实例。
+- OpenRC 升级测试模拟 XP 仍运行时 runtime restart 被拒绝，
+  并验证 `xp restart -> xp stop -> xray/cloudflared restart -> xp start` 的有序交接。
 - 旧 `XP_CLOUDFLARED_RESTART_MODE=openrc|systemd` 配置在缺少 `XP_CLOUDFLARED_MONITOR_MODE` 时仍保持 cloudflared 监控。
 - 旧 `XP_CLOUDFLARED_RESTART_MODE=none` 配置在缺少 `XP_CLOUDFLARED_MONITOR_MODE` 时保持 opt-out，不由 env backfill 自动打开监控。
 - cloudflared monitor-only 模式可报告 down，但不会调用 restarter。

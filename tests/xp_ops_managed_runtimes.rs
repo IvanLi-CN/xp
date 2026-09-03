@@ -31,7 +31,7 @@ fn write_executable(path: &Path, content: &str) {
 }
 
 #[tokio::test]
-async fn upgrade_installs_release_managed_runtimes_as_one_set() {
+async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
     let server = MockServer::start().await;
     let xp_asset = asset("xp");
     let xp_ops_asset = asset("xp-ops");
@@ -109,7 +109,17 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\nexit 1\n");
     write_executable(
         &bin_dir.join("rc-service"),
-        "#!/bin/sh\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "case \"$1:$2\" in\n",
+            "  xp:restart|xp:start) touch \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  xp:stop) rm -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  xp:status) test -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  xray:restart|cloudflared:restart) test ! -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  *) exit 0 ;;\n",
+            "esac\n",
+        ),
     );
     fs::write(local_bin.join("xp"), b"xp-old").unwrap();
     fs::write(local_bin.join("xray"), b"xray-old").unwrap();
@@ -136,6 +146,7 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
     command.env("XP_OPS_TEST_MARKER", &marker);
+    command.env("XP_OPS_TEST_XP_RUNNING", tmp.path().join("xp-running"));
     command.env(
         "PATH",
         format!(
@@ -166,6 +177,14 @@ async fn upgrade_installs_release_managed_runtimes_as_one_set() {
     let marker = fs::read_to_string(marker).unwrap();
     assert!(marker.contains("rc-service xray restart"));
     assert!(marker.contains("rc-service cloudflared restart"));
+    let action_index = |action| marker.lines().position(|line| line == action).unwrap();
+    assert!(
+        action_index("rc-service xp restart") < action_index("rc-service xp stop")
+            && action_index("rc-service xp stop") < action_index("rc-service xray restart")
+            && action_index("rc-service xray restart")
+                < action_index("rc-service cloudflared restart")
+            && action_index("rc-service cloudflared restart") < action_index("rc-service xp start")
+    );
 }
 
 #[tokio::test]
@@ -229,6 +248,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_string_lossy().to_string();
     let marker = tmp.path().join("marker.txt");
+    let xp_running = tmp.path().join("xp-running");
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(
@@ -236,7 +256,12 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         concat!(
             "#!/bin/sh\n",
             "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
-            "[ \"$1 $2\" = \"restart cloudflared.service\" ] && exit 1\n",
+            "case \"$1:$2:$3\" in\n",
+            "  restart:cloudflared.service:*) exit 1 ;;\n",
+            "  restart:xp.service:*|start:xp.service:*) touch \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  stop:xp.service:*) rm -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  is-active:--quiet:xp.service) test -f \"$XP_OPS_TEST_XP_RUNNING\"; exit $? ;;\n",
+            "esac\n",
             "exit 0\n",
         ),
     );
@@ -270,6 +295,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
     command.env("XP_OPS_GITHUB_API_BASE_URL", server.uri());
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
     command.env("XP_OPS_TEST_MARKER", &marker);
+    command.env("XP_OPS_TEST_XP_RUNNING", xp_running);
     command.env(
         "PATH",
         format!(

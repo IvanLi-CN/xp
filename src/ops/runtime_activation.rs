@@ -27,6 +27,14 @@ pub fn restart_xp_service(paths: &Paths) -> bool {
     restart_service(paths, "xp.service", "xp")
 }
 
+pub fn start_xp_service(paths: &Paths) -> bool {
+    start_service(paths, "xp.service", "xp")
+}
+
+pub fn stop_xp_service(paths: &Paths) -> bool {
+    stop_service(paths, "xp.service", "xp")
+}
+
 pub fn restart_cloudflared_service(paths: &Paths) -> bool {
     let systemd_service = paths.systemd_unit_dir().join("cloudflared.service");
     let openrc_service = paths.openrc_initd_dir().join("cloudflared");
@@ -49,13 +57,35 @@ fn restart_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> b
     false
 }
 
+fn start_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
+    if service_commands_are_disabled(paths) {
+        return true;
+    }
+    if command_succeeds("systemctl", &["start", systemd_unit]) {
+        return wait_for_service_ready("systemctl", &["is-active", "--quiet", systemd_unit]);
+    }
+    if command_succeeds("rc-service", &[openrc_service, "start"]) {
+        return wait_for_service_ready("rc-service", &[openrc_service, "status"]);
+    }
+    false
+}
+
+fn stop_service(paths: &Paths, systemd_unit: &str, openrc_service: &str) -> bool {
+    if service_commands_are_disabled(paths) {
+        return true;
+    }
+    if command_succeeds("systemctl", &["stop", systemd_unit]) {
+        return wait_for_service_stopped("systemctl", &["is-active", "--quiet", systemd_unit]);
+    }
+    if command_succeeds("rc-service", &[openrc_service, "stop"]) {
+        return wait_for_service_stopped("rc-service", &[openrc_service, "status"]);
+    }
+    false
+}
+
 fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
     let deadline = Instant::now() + service_ready_timeout();
-    let required_confirmations = if program == "rc-service" {
-        OPENRC_READY_CONFIRMATIONS
-    } else {
-        1
-    };
+    let required_confirmations = service_status_confirmations(program);
     let mut ready_confirmations = 0;
     loop {
         if command_succeeds(program, args) {
@@ -70,6 +100,34 @@ fn wait_for_service_ready(program: &str, args: &[&str]) -> bool {
             return false;
         }
         thread::sleep(SERVICE_READY_POLL_INTERVAL);
+    }
+}
+
+fn wait_for_service_stopped(program: &str, args: &[&str]) -> bool {
+    let deadline = Instant::now() + service_ready_timeout();
+    let required_confirmations = service_status_confirmations(program);
+    let mut stopped_confirmations = 0;
+    loop {
+        if !command_succeeds(program, args) {
+            stopped_confirmations += 1;
+            if stopped_confirmations >= required_confirmations {
+                return true;
+            }
+        } else {
+            stopped_confirmations = 0;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(SERVICE_READY_POLL_INTERVAL);
+    }
+}
+
+fn service_status_confirmations(program: &str) -> u8 {
+    if program == "rc-service" {
+        OPENRC_READY_CONFIRMATIONS
+    } else {
+        1
     }
 }
 

@@ -864,7 +864,11 @@ sudo xp-ops upgrade --version latest
 Current rollout semantics:
 
 - `xp-ops upgrade` first locks the target release.
-- It upgrades `xp`, installs the checksummed release-managed Xray and cloudflared pair when present, rewrites `/etc/xray/config.json` to the current static baseline, and restarts both services before replacing `xp-ops` itself.
+- It upgrades `xp`, installs the checksummed release-managed Xray and cloudflared pair when
+  present, then quiesces `xp` for the managed-runtime activation window. It rewrites
+  `/etc/xray/config.json`, restarts Xray and cloudflared, and starts `xp` again only after both
+  runtime services are ready, before replacing `xp-ops` itself. This prevents XP's runtime
+  recovery loop from racing an OpenRC service transition.
 - Deferring the `xp-ops` replacement prevents a self-update from ending the locked release phase before the service binaries and managed runtimes are updated.
 - A service restart is accepted only after systemd reports the unit active or OpenRC reports the
   service started on two successive checks. This prevents an asynchronous OpenRC transition from

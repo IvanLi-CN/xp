@@ -169,6 +169,8 @@
   replication after failover.
 - A host-managed upgrade must complete the locked `xp` and managed runtime phase before
   replacing `xp-ops`; an `xp-ops` self-update must never be allowed to skip that service phase.
+  The managed runtime activation window must confirm `xp` is stopped before restarting Xray or
+  cloudflared, then start `xp` only after both runtime services are ready.
 - A successful service restart requires the selected systemd or OpenRC manager to report the
   service ready after restart; OpenRC must report ready twice successively. A zero exit status from
   an asynchronous restart command is not enough.

@@ -80,6 +80,33 @@ mod linux {
         }
     }
 
+    fn write_systemctl_with_xp_state(path: &Path, prelude: &str, fallback: &str) {
+        write_executable(
+            path,
+            &format!(
+                "#!/bin/sh\n\n\
+{prelude}\
+echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n\
+xp_running=\"${{XP_OPS_TEST_MARKER}}.xp-running\"\n\
+case \"$1:$2:$3\" in\n\
+restart:xp.service:*|start:xp.service:*)\n\
+  touch \"$xp_running\"\n\
+  exit 0\n\
+  ;;\n\
+stop:xp.service:*)\n\
+  rm -f \"$xp_running\"\n\
+  exit 0\n\
+  ;;\n\
+is-active:--quiet:xp.service)\n\
+  test -f \"$xp_running\"\n\
+  exit $?\n\
+  ;;\n\
+esac\n\
+{fallback}"
+            ),
+        );
+    }
+
     fn prepend_path(dir: &Path) -> String {
         let old = env::var("PATH").unwrap_or_default();
         format!("{}:{}", dir.display(), old)
@@ -241,12 +268,10 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
+        write_systemctl_with_xp_state(
             &bin_dir.join("systemctl"),
-            concat!(
-                "#!/bin/sh\n\n[ -z \"$T\" ] || cmp -s \"$T\" \"$E\" || exit 1\n",
-                "echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
-            ),
+            "[ -z \"$T\" ] || cmp -s \"$T\" \"$E\" || exit 1\n",
+            "exit 0\n",
         );
         write_executable(
             &bin_dir.join("rc-service"),
@@ -382,10 +407,7 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
-            &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
-        );
+        write_systemctl_with_xp_state(&bin_dir.join("systemctl"), "", "exit 0\n");
         write_executable(
             &bin_dir.join("rc-service"),
             "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
@@ -468,10 +490,7 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
-            &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
-        );
+        write_systemctl_with_xp_state(&bin_dir.join("systemctl"), "", "exit 0\n");
         write_executable(
             &bin_dir.join("rc-service"),
             "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
@@ -648,10 +667,11 @@ mod linux {
         let xray_restart_count = tmp.path().join("xray-restart-count.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
+        write_systemctl_with_xp_state(
             &bin_dir.join("systemctl"),
+            "",
             &format!(
-                "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
+                "[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxray.service)\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
                 count_file = xray_restart_count.display()
             ),
         );
@@ -748,10 +768,11 @@ mod linux {
         let xray_restart_count = tmp.path().join("xray-restart-count.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
+        write_systemctl_with_xp_state(
             &bin_dir.join("systemctl"),
+            "",
             &format!(
-                "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
+                "[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxray.service)\n  count=0\n  if [ -f \"{count_file}\" ]; then\n    count=$(cat \"{count_file}\")\n  fi\n  count=$((count + 1))\n  echo \"$count\" > \"{count_file}\"\n  if [ \"$count\" -eq 1 ]; then\n    exit 1\n  fi\n  exit 0\n  ;;\n*) exit 1 ;;\nesac\n",
                 count_file = xray_restart_count.display()
             ),
         );
@@ -846,9 +867,10 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
+        write_systemctl_with_xp_state(
             &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\n[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxp.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 0\n  ;;\nxray.service)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\n*)\n  echo \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\n  exit 1\n  ;;\nesac\n",
+            "",
+            "[ \"$1\" = is-active ] && exit 0\ncase \"$2\" in\nxray.service)\n  exit 1\n  ;;\n*)\n  exit 1\n  ;;\nesac\n",
         );
         write_executable(
             &bin_dir.join("rc-service"),
@@ -921,10 +943,7 @@ mod linux {
         let marker = tmp.path().join("marker.txt");
         let bin_dir = tmp.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(
-            &bin_dir.join("systemctl"),
-            "#!/bin/sh\n\necho \"systemctl $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 0\n",
-        );
+        write_systemctl_with_xp_state(&bin_dir.join("systemctl"), "", "exit 0\n");
         write_executable(
             &bin_dir.join("rc-service"),
             "#!/bin/sh\n\necho \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\nexit 1\n",
