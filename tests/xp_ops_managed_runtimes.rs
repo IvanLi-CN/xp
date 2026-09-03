@@ -103,20 +103,41 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
     let local_bin = tmp.path().join("usr/local/bin");
     let initd = tmp.path().join("etc/init.d");
     let marker = tmp.path().join("marker.txt");
+    let service_state_dir = tmp.path().join("service-state");
     fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&local_bin).unwrap();
     fs::create_dir_all(&initd).unwrap();
+    fs::create_dir_all(&service_state_dir).unwrap();
     write_executable(&bin_dir.join("systemctl"), "#!/bin/sh\nexit 1\n");
     write_executable(
         &bin_dir.join("rc-service"),
         concat!(
             "#!/bin/sh\n",
             "echo \"rc-service $@\" >> \"$XP_OPS_TEST_MARKER\"\n",
+            "state_dir=\"$XP_OPS_TEST_SERVICE_STATE_DIR\"\n",
             "case \"$1:$2\" in\n",
             "  xp:restart|xp:start) touch \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
             "  xp:stop) rm -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
-            "  xp:status) test -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
-            "  xray:restart|cloudflared:restart) test ! -f \"$XP_OPS_TEST_XP_RUNNING\" ;;\n",
+            "  xp:status)\n",
+            "    if test -f \"$XP_OPS_TEST_XP_RUNNING\"; then\n",
+            "      echo \" * status: started\"\n",
+            "      exit 0\n",
+            "    else\n",
+            "      echo \" * status: stopped\"\n",
+            "      exit 3\n",
+            "    fi ;;\n",
+            "  xray:stop|cloudflared:stop)\n",
+            "    test ! -f \"$XP_OPS_TEST_XP_RUNNING\" && touch \"$state_dir/$1-stopped\" ;;\n",
+            "  xray:start|cloudflared:start)\n",
+            "    test ! -f \"$XP_OPS_TEST_XP_RUNNING\" && rm -f \"$state_dir/$1-stopped\" ;;\n",
+            "  xray:status|cloudflared:status)\n",
+            "    if test -f \"$state_dir/$1-stopped\"; then\n",
+            "      echo \" * status: stopped\"\n",
+            "      exit 3\n",
+            "    else\n",
+            "      echo \" * status: started\"\n",
+            "      exit 0\n",
+            "    fi ;;\n",
             "  *) exit 0 ;;\n",
             "esac\n",
         ),
@@ -147,6 +168,7 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
     command.env("XP_OPS_TEST_ENABLE_SERVICE", "1");
     command.env("XP_OPS_TEST_MARKER", &marker);
     command.env("XP_OPS_TEST_XP_RUNNING", tmp.path().join("xp-running"));
+    command.env("XP_OPS_TEST_SERVICE_STATE_DIR", &service_state_dir);
     command.env(
         "PATH",
         format!(
@@ -175,15 +197,35 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
             })
     );
     let marker = fs::read_to_string(marker).unwrap();
-    assert!(marker.contains("rc-service xray restart"));
-    assert!(marker.contains("rc-service cloudflared restart"));
-    let action_index = |action| marker.lines().position(|line| line == action).unwrap();
+    assert!(marker.contains("rc-service xray stop"));
+    assert!(marker.contains("rc-service xray start"));
+    assert!(marker.contains("rc-service cloudflared stop"));
+    assert!(marker.contains("rc-service cloudflared start"));
+    assert!(!marker.contains("rc-service xray restart"));
+    assert!(!marker.contains("rc-service cloudflared restart"));
+    let action_indices = |action| {
+        marker
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| (line == action).then_some(index))
+            .collect::<Vec<_>>()
+    };
+    let xp_stops = action_indices("rc-service xp stop");
+    let xp_starts = action_indices("rc-service xp start");
+    assert_eq!(xp_stops.len(), 2);
+    assert_eq!(xp_starts.len(), 2);
+    let xray_stop = action_indices("rc-service xray stop")[0];
+    let xray_start = action_indices("rc-service xray start")[0];
+    let cloudflared_stop = action_indices("rc-service cloudflared stop")[0];
+    let cloudflared_start = action_indices("rc-service cloudflared start")[0];
     assert!(
-        action_index("rc-service xp restart") < action_index("rc-service xp stop")
-            && action_index("rc-service xp stop") < action_index("rc-service xray restart")
-            && action_index("rc-service xray restart")
-                < action_index("rc-service cloudflared restart")
-            && action_index("rc-service cloudflared restart") < action_index("rc-service xp start")
+        xp_stops[0] < xp_starts[0]
+            && xp_starts[0] < xp_stops[1]
+            && xp_stops[1] < xray_stop
+            && xray_stop < xray_start
+            && xray_start < cloudflared_stop
+            && cloudflared_stop < cloudflared_start
+            && cloudflared_start < xp_starts[1]
     );
 }
 

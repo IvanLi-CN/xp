@@ -172,8 +172,9 @@
   The managed runtime activation window must confirm `xp` is stopped before restarting Xray or
   cloudflared, then start `xp` only after both runtime services are ready.
 - A successful service restart requires the selected systemd or OpenRC manager to report the
-  service ready after restart; OpenRC must report ready twice successively. A zero exit status from
-  an asynchronous restart command is not enough.
+  service ready after restart; OpenRC must report ready twice successively. Managed OpenRC runtime
+  activation is `stop -> exact stopped twice -> start -> ready twice`; `stopping` and unknown
+  statuses are nonterminal. A zero exit status from an asynchronous restart command is not enough.
 - Docker Compose deployments using the official single-image runtime are first-class supported environments.
 - Cloudflare Tunnel provisioning preserves shared-Tunnel configuration outside the XP hostname.
   It reuses the existing single `cloudflared` process and validates before an atomic replacement.
