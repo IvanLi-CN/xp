@@ -156,6 +156,9 @@ Notes:
   `--default-ss-port`; `xp-ops deploy` writes those into `/etc/xp/xp.env`. These values bootstrap
   missing endpoints only. Existing or auto-adopted ports remain cluster-owned and are changed
   through the Admin UI/API.
+- A Cloudflare-enabled host-managed deploy writes `XP_ENABLE_CLOUDFLARE=true` and its validated
+  account ID, zone ID, and hostname into `/etc/xp/xp.env`. A recovery deploy converges those
+  deployment-owned values from the validated plan rather than requiring a manual env edit.
 - `--vless-canary-acme-contact-email` is the operator-controlled ACME contact for the loopback HTTPS canary and should be set on the same one-shot deploy if you want a fully reproducible certificate flow.
 - `--ip-geo` explicitly writes `XP_IP_GEO_ENABLED=true` for inbound Geo enrichment using the
   default `https://api.country.is` origin. Omitting it preserves an existing value and keeps new

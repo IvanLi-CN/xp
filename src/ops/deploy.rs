@@ -101,6 +101,51 @@ struct VlessCanaryWriteValues {
     cloudflare_zone_id: String,
 }
 
+struct CloudflareRuntimeEnvWriteValues<'a> {
+    enabled: bool,
+    account_id: Option<&'a str>,
+    zone_id: Option<&'a str>,
+    hostname: Option<&'a str>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn xp_env_write_values<'a>(
+    admin_token_hash: &'a str,
+    node_name: &'a str,
+    access_host: &'a str,
+    api_base_url: &'a str,
+    cloudflare_runtime_env: &'a CloudflareRuntimeEnvWriteValues<'a>,
+    vless_canary: &'a VlessCanaryWriteValues,
+    managed_defaults: &'a ManagedDefaultsWriteValues<'a>,
+    ip_geo_enabled: bool,
+    ddns_enabled: bool,
+    ddns_zone_id: &'a str,
+) -> crate::ops::xp_env::XpEnvWriteValues<'a> {
+    crate::ops::xp_env::XpEnvWriteValues {
+        admin_token_hash,
+        node_name,
+        access_host,
+        api_base_url,
+        cloudflare_enabled: cloudflare_runtime_env.enabled,
+        cloudflare_account_id: cloudflare_runtime_env.account_id,
+        cloudflare_zone_id: cloudflare_runtime_env.zone_id,
+        cloudflare_hostname: cloudflare_runtime_env.hostname,
+        vless_canary_bind: vless_canary.bind.as_str(),
+        vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
+        vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
+        vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
+        vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
+        default_vless_port: managed_defaults.default_vless_port.as_deref(),
+        default_vless_server_names: managed_defaults.default_vless_server_names.as_deref(),
+        default_vless_fingerprint: managed_defaults.default_vless_fingerprint.as_deref(),
+        default_ss_port: managed_defaults.default_ss_port.as_deref(),
+        ip_geo_enabled: ip_geo_enabled.then_some(true),
+        cloudflare_ddns_enabled: ddns_enabled,
+        cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
+        cloudflare_ddns_zone_id: ddns_zone_id,
+    }
+}
+
 pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitError> {
     let mode = if args.dry_run {
         Mode::DryRun
@@ -347,6 +392,21 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
     .await?;
 
     let managed_defaults = managed_defaults_write_values(&args);
+    let cloudflare_runtime_env = if let Some(cloudflare) = plan.cloudflare.as_ref() {
+        CloudflareRuntimeEnvWriteValues {
+            enabled: plan.cloudflare_enabled,
+            account_id: Some(cloudflare.account_id.as_str()),
+            zone_id: Some(cloudflare.zone_id.as_str()),
+            hostname: Some(cloudflare.hostname.as_str()),
+        }
+    } else {
+        CloudflareRuntimeEnvWriteValues {
+            enabled: false,
+            account_id: None,
+            zone_id: None,
+            hostname: None,
+        }
+    };
     let existing_env = fs::read_to_string(paths.etc_xp_env()).ok();
     let parsed_env = crate::ops::xp_env::parse_xp_env(existing_env);
     let vless_canary = resolve_vless_canary_write_values(&parsed_env, &managed_defaults);
@@ -397,6 +457,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
             plan.node_name.as_str(),
             plan.access_host.as_str(),
             plan.api_base_url.as_str(),
+            &cloudflare_runtime_env,
             plan.ddns_enabled,
             plan.ddns_zone_id.as_deref().unwrap_or_default(),
             plan.ip_geo_enabled,
@@ -501,6 +562,7 @@ pub async fn cmd_deploy(paths: Paths, mut args: DeployArgs) -> Result<(), ExitEr
                 plan.node_name.as_str(),
                 plan.access_host.as_str(),
                 plan.api_base_url.as_str(),
+                &cloudflare_runtime_env,
                 plan.ddns_enabled,
                 plan.ddns_zone_id.as_deref().unwrap_or_default(),
                 plan.ip_geo_enabled,
@@ -1932,6 +1994,7 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
     node_name: &str,
     access_host: &str,
     api_base_url: &str,
+    cloudflare_runtime_env: &CloudflareRuntimeEnvWriteValues<'_>,
     ddns_enabled: bool,
     ddns_zone_id: &str,
     ip_geo_enabled: bool,
@@ -1985,29 +2048,18 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
             mode,
             parsed.retained_lines,
             parsed.flags,
-            crate::ops::xp_env::XpEnvWriteValues {
-                admin_token_hash: raw_hash,
+            xp_env_write_values(
+                raw_hash,
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: vless_canary.bind.as_str(),
-                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: resolved_managed_defaults
-                    .default_vless_server_names
-                    .as_deref(),
-                default_vless_fingerprint: resolved_managed_defaults
-                    .default_vless_fingerprint
-                    .as_deref(),
-                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-                ip_geo_enabled: ip_geo_enabled.then_some(true),
-                cloudflare_ddns_enabled: ddns_enabled,
-                cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                cloudflare_ddns_zone_id: ddns_zone_id,
-            },
+                cloudflare_runtime_env,
+                &vless_canary,
+                &resolved_managed_defaults,
+                ip_geo_enabled,
+                ddns_enabled,
+                ddns_zone_id,
+            ),
         )?;
         return Ok(None);
     }
@@ -2020,29 +2072,18 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
             mode,
             parsed.retained_lines,
             parsed.flags,
-            crate::ops::xp_env::XpEnvWriteValues {
-                admin_token_hash: hash.as_str(),
+            xp_env_write_values(
+                hash.as_str(),
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: vless_canary.bind.as_str(),
-                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: resolved_managed_defaults
-                    .default_vless_server_names
-                    .as_deref(),
-                default_vless_fingerprint: resolved_managed_defaults
-                    .default_vless_fingerprint
-                    .as_deref(),
-                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-                ip_geo_enabled: ip_geo_enabled.then_some(true),
-                cloudflare_ddns_enabled: ddns_enabled,
-                cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                cloudflare_ddns_zone_id: ddns_zone_id,
-            },
+                cloudflare_runtime_env,
+                &vless_canary,
+                &resolved_managed_defaults,
+                ip_geo_enabled,
+                ddns_enabled,
+                ddns_zone_id,
+            ),
         )?;
         return Ok(None);
     }
@@ -2055,29 +2096,18 @@ fn ensure_xp_env_admin_token_hash_bootstrap(
         mode,
         parsed.retained_lines,
         parsed.flags,
-        crate::ops::xp_env::XpEnvWriteValues {
-            admin_token_hash: hash.as_str(),
+        xp_env_write_values(
+            hash.as_str(),
             node_name,
             access_host,
             api_base_url,
-            vless_canary_bind: vless_canary.bind.as_str(),
-            vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-            vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-            vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-            vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-            default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-            default_vless_server_names: resolved_managed_defaults
-                .default_vless_server_names
-                .as_deref(),
-            default_vless_fingerprint: resolved_managed_defaults
-                .default_vless_fingerprint
-                .as_deref(),
-            default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-            ip_geo_enabled: ip_geo_enabled.then_some(true),
-            cloudflare_ddns_enabled: ddns_enabled,
-            cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-            cloudflare_ddns_zone_id: ddns_zone_id,
-        },
+            cloudflare_runtime_env,
+            &vless_canary,
+            &resolved_managed_defaults,
+            ip_geo_enabled,
+            ddns_enabled,
+            ddns_zone_id,
+        ),
     )?;
     Ok(Some(token))
 }
@@ -2090,6 +2120,7 @@ fn ensure_xp_env_admin_token_hash_join(
     node_name: &str,
     access_host: &str,
     api_base_url: &str,
+    cloudflare_runtime_env: &CloudflareRuntimeEnvWriteValues<'_>,
     ddns_enabled: bool,
     ddns_zone_id: &str,
     ip_geo_enabled: bool,
@@ -2153,29 +2184,18 @@ fn ensure_xp_env_admin_token_hash_join(
             mode,
             parsed.retained_lines,
             parsed.flags,
-            crate::ops::xp_env::XpEnvWriteValues {
-                admin_token_hash: expected_hash,
+            xp_env_write_values(
+                expected_hash,
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: vless_canary.bind.as_str(),
-                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: resolved_managed_defaults
-                    .default_vless_server_names
-                    .as_deref(),
-                default_vless_fingerprint: resolved_managed_defaults
-                    .default_vless_fingerprint
-                    .as_deref(),
-                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-                ip_geo_enabled: ip_geo_enabled.then_some(true),
-                cloudflare_ddns_enabled: ddns_enabled,
-                cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                cloudflare_ddns_zone_id: ddns_zone_id,
-            },
+                cloudflare_runtime_env,
+                &vless_canary,
+                &resolved_managed_defaults,
+                ip_geo_enabled,
+                ddns_enabled,
+                ddns_zone_id,
+            ),
         )?;
         return Ok(());
     }
@@ -2195,29 +2215,18 @@ fn ensure_xp_env_admin_token_hash_join(
             mode,
             parsed.retained_lines,
             parsed.flags,
-            crate::ops::xp_env::XpEnvWriteValues {
-                admin_token_hash: expected_hash,
+            xp_env_write_values(
+                expected_hash,
                 node_name,
                 access_host,
                 api_base_url,
-                vless_canary_bind: vless_canary.bind.as_str(),
-                vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-                vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-                vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-                vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-                default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-                default_vless_server_names: resolved_managed_defaults
-                    .default_vless_server_names
-                    .as_deref(),
-                default_vless_fingerprint: resolved_managed_defaults
-                    .default_vless_fingerprint
-                    .as_deref(),
-                default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-                ip_geo_enabled: ip_geo_enabled.then_some(true),
-                cloudflare_ddns_enabled: ddns_enabled,
-                cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-                cloudflare_ddns_zone_id: ddns_zone_id,
-            },
+                cloudflare_runtime_env,
+                &vless_canary,
+                &resolved_managed_defaults,
+                ip_geo_enabled,
+                ddns_enabled,
+                ddns_zone_id,
+            ),
         )?;
         return Ok(());
     }
@@ -2227,29 +2236,18 @@ fn ensure_xp_env_admin_token_hash_join(
         mode,
         parsed.retained_lines,
         parsed.flags,
-        crate::ops::xp_env::XpEnvWriteValues {
-            admin_token_hash: expected_hash,
+        xp_env_write_values(
+            expected_hash,
             node_name,
             access_host,
             api_base_url,
-            vless_canary_bind: vless_canary.bind.as_str(),
-            vless_canary_acme_directory_url: vless_canary.acme_directory_url.as_str(),
-            vless_canary_acme_contact_email: vless_canary.acme_contact_email.as_str(),
-            vless_canary_cloudflare_token_file: vless_canary.cloudflare_token_file.as_str(),
-            vless_canary_cloudflare_zone_id: vless_canary.cloudflare_zone_id.as_str(),
-            default_vless_port: resolved_managed_defaults.default_vless_port.as_deref(),
-            default_vless_server_names: resolved_managed_defaults
-                .default_vless_server_names
-                .as_deref(),
-            default_vless_fingerprint: resolved_managed_defaults
-                .default_vless_fingerprint
-                .as_deref(),
-            default_ss_port: resolved_managed_defaults.default_ss_port.as_deref(),
-            ip_geo_enabled: ip_geo_enabled.then_some(true),
-            cloudflare_ddns_enabled: ddns_enabled,
-            cloudflare_ddns_token_file: crate::config::DEFAULT_CLOUDFLARE_DDNS_TOKEN_FILE,
-            cloudflare_ddns_zone_id: ddns_zone_id,
-        },
+            cloudflare_runtime_env,
+            &vless_canary,
+            &resolved_managed_defaults,
+            ip_geo_enabled,
+            ddns_enabled,
+            ddns_zone_id,
+        ),
     )?;
     Ok(())
 }
@@ -2404,6 +2402,8 @@ fn generate_admin_token() -> String {
     hex::encode(buf)
 }
 
+#[cfg(test)]
+mod cloudflare_runtime_env_tests;
 #[cfg(test)]
 mod persisted_tunnel_reuse_tests;
 #[cfg(test)]

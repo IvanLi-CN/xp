@@ -69,6 +69,9 @@ XP 集群的所有节点共享一个管理员凭据。服务端和节点磁盘�
 - 所有节点必须使用字节完全一致的 PHC；轮换会使旧管理员 Token 和由旧 PHC 签发的短期登录 Token 失效。
 - host-managed join 依次执行 Tunnel/DNS provision（不启动服务）、`xp join`、
   `/etc/xp/xp.env` 写入，再按 `xray`、`xp`、`cloudflared` 顺序启用并启动或重启，逐个确认 ready。
+  Tunnel 开启时，env 必须从同一份已验证部署计划写入
+  `XP_ENABLE_CLOUDFLARE=true` 与 account ID、zone ID、hostname；已有 metadata 的恢复部署也必须收敛
+  这组 deployment-owned 值。
 - 启用服务的 join 仅在最终 `api_base_url/health` 返回 HTTP `200` 时成功。`502`、`530`、
   超时和连接失败返回 `post_join_health_failed`，但不得删除已写入的 metadata、撤销 Raft
   成员资格或轮换管理员凭据；重试必须识别已有 metadata 并继续配置与验证，不重复执行 join。
