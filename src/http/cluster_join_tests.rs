@@ -320,7 +320,7 @@ fn app_with_deferred_promotion_variant(
         let stale_node_id = xp_test_fixtures::identifier_ulid_b().to_owned();
         initial_store
             .upsert_node(crate::domain::Node {
-                node_id: stale_node_id.clone(),
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                 node_name: xp_test_fixtures::secondary_node_name().to_owned(),
                 access_host: xp_test_fixtures::secondary_host().to_owned(),
                 api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -331,7 +331,7 @@ fn app_with_deferred_promotion_variant(
         initial_store.state_mut().join_sessions.insert(
             stale_node_id.clone(),
             crate::join_session::JoinSession {
-                node_id: stale_node_id,
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
                 request_fingerprint: "stale-fingerprint".to_owned(),
                 signed_cert_pem: "stale-certificate".to_owned(),
                 token_expires_at: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),

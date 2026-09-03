@@ -184,7 +184,7 @@ async fn fresh_join_admission_ignores_unrelated_learners_but_keeps_safety_guards
     store_guard.state_mut().nodes.clear();
     store_guard
         .upsert_node(Node {
-            node_id: voter_node_id,
+            node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
             node_name: xp_test_fixtures::primary_node_name().to_owned(),
             access_host: xp_test_fixtures::primary_host().to_owned(),
             api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
