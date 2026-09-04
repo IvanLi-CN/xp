@@ -84,8 +84,8 @@ async fn signed_stale_learner_retirement_preview_is_zero_write_and_apply_is_exac
                     target_raft_node_id,
                     RaftNodeMeta {
                         name: target.node_name.clone(),
-                        api_base_url: target.api_base_url.clone(),
-                        raft_endpoint: target.api_base_url.clone(),
+                        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
                     },
                 ),
             ]),

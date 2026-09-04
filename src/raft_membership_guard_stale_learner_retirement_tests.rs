@@ -10,7 +10,7 @@ async fn stale_learner_retirement_removes_only_the_confirmed_learner_and_cleans_
     let store = Arc::new(Mutex::new(
         JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(local_node_id.clone()),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_d().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
@@ -18,7 +18,7 @@ async fn stale_learner_retirement_removes_only_the_confirmed_learner_and_cleans_
         .unwrap(),
     ));
     let target = Node {
-        node_id: target_node_id.clone(),
+        node_id: xp_test_fixtures::identifier_ulid_e().to_owned(),
         node_name: xp_test_fixtures::secondary_node_name().to_owned(),
         access_host: xp_test_fixtures::secondary_host().to_owned(),
         api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
@@ -58,8 +58,8 @@ async fn stale_learner_retirement_removes_only_the_confirmed_learner_and_cleans_
                     target_raft_node_id,
                     NodeMeta {
                         name: target.node_name.clone(),
-                        api_base_url: target.api_base_url.clone(),
-                        raft_endpoint: target.api_base_url.clone(),
+                        api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                        raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
                     },
                 ),
             ]),
