@@ -20,9 +20,10 @@ permissive CORS or accept arbitrary operator-entered origins.
 
 - Backend Profiles are browser-local, scoped to one verified cluster, and retain a
   manually selected Primary Backend plus persisted Candidates.
-- Switching is manual. Candidate health is checked only on startup, menu opening,
-  explicit selection, and a request failure; requests are never automatically
-  replayed on another node.
+- Switching is manual. Candidate inventory is refreshed when the switcher opens or
+  the selected backend becomes unreachable; health, compatibility, CORS and
+  authentication are checked during explicit selection. Requests are never
+  automatically replayed on another node.
 - An unresolved console write blocks switching until it completes, fails, or times
   out with an explicit unknown-result state. The existing full-page node-navigation
   link remains compatibility behaviour and is not a failover mechanism.

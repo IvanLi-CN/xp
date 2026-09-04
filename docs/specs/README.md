@@ -108,7 +108,7 @@
 
 | Topic          | Lifecycle | Implementation  | Spec                           | Notes                                            |
 | -------------- | --------- | --------------- | ------------------------------ | ------------------------------------------------ |
-| Web 主后端切换 | active    | 部分完成（0/4） | `web-primary-backend-failover` | Embedded PWA manual same-cluster primary backend |
+| Web 主后端切换 | active    | 部分完成（4/4） | `web-primary-backend-failover` | Embedded PWA manual same-cluster primary backend |
 
 - `Lifecycle`: `draft|active|superseded|retired`
 - `Implementation`: 自由文本的 current truth，例如 `未开始`、`部分完成`、`已完成`

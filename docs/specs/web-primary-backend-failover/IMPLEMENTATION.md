@@ -4,7 +4,7 @@
 
 ## Current Status
 
-- Implementation: in progress
+- Implementation: complete
 - Lifecycle: active
 - Delivery: fast-track
 
@@ -13,6 +13,15 @@
 - Rust HTTP：动态浏览器 CORS middleware 与覆盖测试。
 - Web：`src/backend/` transport/profile/provider，AppShell 右上角切换器，query/SSE/offline integration。
 - Validation：Vitest、Playwright、Storybook/视觉证据及 Rust/Web quality gates。
+
+## Delivered
+
+- Rust `/api` CORS now derives exact HTTPS origins from the current node inventory and handles
+  Authorization preflight without opening static resources.
+- Web transport rewrites API and SSE requests to one verified primary origin, persists profiles by
+  cluster ID, preserves offline cache, and enforces the mutation switch barrier.
+- AppShell exposes the primary backend switcher and refreshes active queries/status events after a
+  successful manual switch; the existing full-page node handoff remains unchanged.
 
 ## References
 
