@@ -1,10 +1,14 @@
 #![cfg(target_os = "linux")]
 
+use assert_cmd::assert::OutputAssertExt;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Output;
+use std::thread;
+use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -28,6 +32,24 @@ fn write_executable(path: &Path, content: &str) {
     let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();
+}
+
+fn command_output_retrying_executable_busy(command: &mut assert_cmd::Command) -> Output {
+    const MAX_ATTEMPTS: usize = 4;
+    const RETRY_DELAY: Duration = Duration::from_millis(25);
+    const ETXTBSY: i32 = 26;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match command.output() {
+            Ok(output) => return output,
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) && attempt < MAX_ATTEMPTS => {
+                thread::sleep(RETRY_DELAY);
+            }
+            Err(error) => panic!("failed to spawn {command:?}: {error}"),
+        }
+    }
+
+    unreachable!("the final executable-busy attempt must panic")
 }
 
 #[tokio::test]
@@ -178,7 +200,9 @@ async fn upgrade_quiesces_xp_before_openrc_runtime_activation() {
         ),
     );
     command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
-    command.assert().success();
+    command_output_retrying_executable_busy(&mut command)
+        .assert()
+        .success();
 
     assert_eq!(fs::read(local_bin.join("xray")).unwrap(), new_xray);
     assert_eq!(
@@ -381,9 +405,12 @@ async fn upgrade_rejects_openrc_xp_stopping_before_runtime_activation() {
         ),
     );
     command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
-    command.assert().failure().stderr(predicates::str::contains(
-        "stop xp before managed runtime activation failed",
-    ));
+    command_output_retrying_executable_busy(&mut command)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "stop xp before managed runtime activation failed",
+        ));
 
     let marker = fs::read_to_string(marker).unwrap();
     assert!(
@@ -521,7 +548,7 @@ async fn legacy_upgrade_reloads_restored_xray_config_after_cloudflared_failure()
         ),
     );
     command.args(["--root", &root, "upgrade", "--repo", "o/r"]);
-    command
+    command_output_retrying_executable_busy(&mut command)
         .assert()
         .failure()
         .stderr(predicates::str::contains("cloudflared restart failed"));
