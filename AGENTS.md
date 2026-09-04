@@ -131,8 +131,9 @@
   release tag and local endpoint fingerprints. Missing profile capabilities degrade only their
   feature, while declared capability 404/schema failures remain regressions.
 - The embedded Web/PWA may manually select one verified same-cluster Primary Backend from the
-  AppShell header. Browser `/api/*` and SSE requests use that origin while static app-shell assets,
-  Service Worker control, and existing full-page `Open on node` navigation remain on the page origin.
+  AppShell header. Browser `/api/*` and SSE requests use that origin while static app-shell
+  assets, Service Worker control, and existing full-page `Open on node` navigation remain on the
+  page origin.
   Browser CORS allows only exact HTTPS origins from the current registered `Node.api_base_url` set;
   no wildcard, arbitrary URL, cross-cluster profile, automatic failover, or mutation replay is
   supported. A pending mutation blocks switching until terminal or a 60-second unknown timeout.

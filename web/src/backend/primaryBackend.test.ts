@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { fixtureCatalog } from "@/fixture-policy/catalog";
+
 import {
 	canonicalBackendOrigin,
 	getPrimaryBackendSnapshot,
@@ -72,17 +74,20 @@ describe("primary backend transport", () => {
 				);
 			}
 			return Promise.resolve(
-				new Response(JSON.stringify({ cluster_id: "other-cluster" }), {
-					status: 200,
-				}),
+				new Response(
+					JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture95() }),
+					{
+						status: 200,
+					},
+				),
 			);
 		}) as typeof window.fetch;
 		installPrimaryBackendTransport();
 
 		await expect(
 			verifyBackendCandidate({
-				origin: "https://node.example",
-				clusterId: "expected-cluster",
+				origin: fixtureCatalog.url.secondaryApi(),
+				clusterId: fixtureCatalog.cluster.fixture84(),
 				adminToken: "secret-token",
 			}),
 		).rejects.toThrow("different cluster");
@@ -107,9 +112,12 @@ describe("primary backend transport", () => {
 			}
 			if (request.url.endsWith("/api/cluster/info")) {
 				return Promise.resolve(
-					new Response(JSON.stringify({ cluster_id: "expected-cluster" }), {
-						status: 200,
-					}),
+					new Response(
+						JSON.stringify({ cluster_id: fixtureCatalog.cluster.fixture84() }),
+						{
+							status: 200,
+						},
+					),
 				);
 			}
 			if (request.url.endsWith("/api/capabilities")) {
@@ -124,9 +132,9 @@ describe("primary backend transport", () => {
 					JSON.stringify({
 						items: [
 							{
-								node_id: "node-b",
-								node_name: "Recovery node",
-								api_base_url: "https://node.example",
+								node_id: fixtureCatalog.identifier.nodeSecondary(),
+								node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+								api_base_url: fixtureCatalog.url.secondaryApi(),
 							},
 						],
 					}),
@@ -137,29 +145,29 @@ describe("primary backend transport", () => {
 		installPrimaryBackendTransport();
 
 		const candidate = await verifyBackendCandidate({
-			origin: "https://node.example",
-			clusterId: "expected-cluster",
+			origin: fixtureCatalog.url.secondaryApi(),
+			clusterId: fixtureCatalog.cluster.fixture84(),
 			adminToken: "secret-token",
 		});
-		expect(candidate.nodeId).toBe("node-b");
+		expect(candidate.nodeId).toBe(fixtureCatalog.identifier.nodeSecondary());
 		expect(requests.at(-1)?.authorization).toBe("Bearer secret-token");
 	});
 
 	it("removes stale nodes and falls back when the primary is removed", async () => {
-		hydratePrimaryBackendProfile("cluster-a", [
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{
-				node_id: "node-a",
-				node_name: "Primary node",
-				api_base_url: window.location.origin,
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-b",
-				node_name: "Recovery node",
-				api_base_url: "https://node.example",
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
 		const recovery = getPrimaryBackendSnapshot().candidates.find(
-			(candidate) => candidate.origin === "https://node.example",
+			(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 		);
 		if (!recovery) throw new Error("recovery candidate missing");
 		await switchPrimaryBackend({
@@ -167,21 +175,21 @@ describe("primary backend transport", () => {
 			verifiedAt: Date.now(),
 		});
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
-			"https://node.example",
+			fixtureCatalog.url.secondaryApi(),
 		);
 
-		hydratePrimaryBackendProfile("cluster-a", [
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{
-				node_id: "node-a",
-				node_name: "Primary node",
-				api_base_url: window.location.origin,
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 		]);
 		const snapshot = getPrimaryBackendSnapshot();
 		expect(snapshot.primaryOrigin).toBe(window.location.origin);
 		expect(
 			snapshot.candidates.some(
-				(candidate) => candidate.origin === "https://node.example",
+				(candidate) => candidate.origin === fixtureCatalog.url.secondaryApi(),
 			),
 		).toBe(false);
 	});
@@ -199,22 +207,22 @@ describe("primary backend transport", () => {
 		installPrimaryBackendTransport();
 		const mutation = window.fetch("/api/admin/nodes", { method: "POST" });
 		await Promise.resolve();
-		hydratePrimaryBackendProfile("cluster-a", [
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{
-				node_id: "node-a",
-				node_name: "Primary node",
-				api_base_url: window.location.origin,
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-b",
-				node_name: "Recovery node",
-				api_base_url: "https://node.example",
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
 		const resultPromise = switchPrimaryBackend({
-			origin: "https://node.example",
-			nodeId: "node-b",
-			nodeName: "Recovery node",
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
 			verifiedAt: Date.now(),
 			lastError: null,
 		});
@@ -222,7 +230,7 @@ describe("primary backend transport", () => {
 		const result = await resultPromise;
 		expect(result.timedOut).toBe(true);
 		expect(getPrimaryBackendSnapshot().primaryOrigin).toBe(
-			"https://node.example",
+			fixtureCatalog.url.secondaryApi(),
 		);
 		expect(getPrimaryBackendSnapshot().unknownMutationCount).toBe(1);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -239,22 +247,22 @@ describe("primary backend transport", () => {
 		);
 		window.fetch = fetchMock as typeof window.fetch;
 		installPrimaryBackendTransport();
-		hydratePrimaryBackendProfile("cluster-a", [
+		hydratePrimaryBackendProfile(fixtureCatalog.cluster.fixture84(), [
 			{
-				node_id: "node-a",
-				node_name: "Primary node",
-				api_base_url: window.location.origin,
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-b",
-				node_name: "Recovery node",
-				api_base_url: "https://node.example",
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
 		await switchPrimaryBackend({
-			origin: "https://node.example",
-			nodeId: "node-b",
-			nodeName: "Recovery node",
+			origin: fixtureCatalog.url.secondaryApi(),
+			nodeId: fixtureCatalog.identifier.nodeSecondary(),
+			nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
 			verifiedAt: Date.now(),
 			lastError: null,
 		});
@@ -263,7 +271,7 @@ describe("primary backend transport", () => {
 		await window.fetch("/assets/app.js");
 		expect(fetchMock.mock.calls[0]?.[0]).toBeInstanceOf(Request);
 		expect((fetchMock.mock.calls[0]?.[0] as Request).url).toBe(
-			"https://node.example/api/admin/status/events",
+			`${fixtureCatalog.url.secondaryApi()}/api/admin/status/events`,
 		);
 		expect((fetchMock.mock.calls[1]?.[0] as Request).url).toBe(
 			`${window.location.origin}/assets/app.js`,

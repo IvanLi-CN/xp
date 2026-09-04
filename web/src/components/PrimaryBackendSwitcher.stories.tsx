@@ -6,6 +6,7 @@ import {
 	getPrimaryBackendSnapshot,
 	hydratePrimaryBackendProfile,
 } from "@/backend/primaryBackend";
+import { fixtureCatalog } from "@/fixture-policy/catalog";
 
 import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 
@@ -39,16 +40,16 @@ type Story = StoryObj<typeof PrimaryBackendSwitcher>;
 
 const candidates = [
 	{
-		origin: window.location.origin,
-		nodeId: "node-a",
-		nodeName: "Primary node",
+		origin: fixtureCatalog.url.primaryApi(),
+		nodeId: fixtureCatalog.identifier.nodePrimary(),
+		nodeName: fixtureCatalog.identifier.nodeNamePrimary(),
 		verifiedAt: Date.now(),
 		lastError: null,
 	},
 	{
-		origin: "https://recovery.example",
-		nodeId: "node-b",
-		nodeName: "Recovery node",
+		origin: fixtureCatalog.url.secondaryApi(),
+		nodeId: fixtureCatalog.identifier.nodeSecondary(),
+		nodeName: fixtureCatalog.identifier.nodeNameSecondary(),
 		verifiedAt: Date.now(),
 		lastError: null,
 	},
@@ -66,14 +67,14 @@ export const Default: Story = {
 	render: (args) => {
 		hydratePrimaryBackendProfile("cluster-demo", [
 			{
-				node_id: "node-a",
-				node_name: "Primary node",
-				api_base_url: window.location.origin,
+				node_id: fixtureCatalog.identifier.nodePrimary(),
+				node_name: fixtureCatalog.identifier.nodeNamePrimary(),
+				api_base_url: fixtureCatalog.url.primaryApi(),
 			},
 			{
-				node_id: "node-b",
-				node_name: "Recovery node",
-				api_base_url: "https://recovery.example",
+				node_id: fixtureCatalog.identifier.nodeSecondary(),
+				node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+				api_base_url: fixtureCatalog.url.secondaryApi(),
 			},
 		]);
 		return (

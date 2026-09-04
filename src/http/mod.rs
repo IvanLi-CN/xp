@@ -129,7 +129,6 @@ use crate::{
     },
     xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
-
 mod browser_cors;
 mod capabilities;
 mod history_repository;

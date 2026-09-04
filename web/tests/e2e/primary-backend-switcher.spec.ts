@@ -20,19 +20,19 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 	const nodes: AdminNode[] = [
 		{
 			node_id: fixtureCatalog.identifier.nodePrimary(),
-			node_name: "Primary node",
+			node_name: fixtureCatalog.identifier.nodeNamePrimary(),
 			api_base_url: fixtureCatalog.service.fixture87(),
 			access_host: fixtureCatalog.host.fixture88(),
 			quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
-			quota_reset: { policy: "unlimited", tz_offset_minutes: null },
+			quota_reset: fixtureCatalog.quota.resetUnlimited(),
 		},
 		{
 			node_id: fixtureCatalog.identifier.nodeSecondary(),
-			node_name: "Recovery node",
-			api_base_url: recoveryOrigin,
+			node_name: fixtureCatalog.identifier.nodeNameSecondary(),
+			api_base_url: fixtureCatalog.url.secondaryApi(),
 			access_host: fixtureCatalog.host.secondary(),
 			quota_limit_bytes: fixtureCatalog.quota.limitBytes(),
-			quota_reset: { policy: "unlimited", tz_offset_minutes: null },
+			quota_reset: fixtureCatalog.quota.resetUnlimited(),
 		},
 	];
 	await setAdminToken(page);
@@ -65,7 +65,7 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 					cluster_id: fixtureCatalog.cluster.fixture84(),
 					node_id: fixtureCatalog.identifier.nodeSecondary(),
 					role: "leader",
-					leader_api_base_url: recoveryOrigin,
+					leader_api_base_url: fixtureCatalog.url.secondaryApi(),
 					term: 1,
 					xp_version: "v3.22.5",
 				}),
