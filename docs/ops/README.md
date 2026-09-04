@@ -36,6 +36,21 @@ Current support boundaries that operators must know:
 
 ## Web PWA and API compatibility
 
+The embedded Web/PWA keeps its page origin and app-shell cache unchanged, but an authenticated
+operator may select one verified same-cluster node as the browser's Primary Backend from the
+AppShell header. Browser `/api/*` and SSE requests use that selected origin; peer operations still
+use XP's existing server-side forwarding and coordination. Selection is manual and never retries a
+mutation on another node. An unresolved mutation blocks selection until it reaches a terminal result
+or a 60-second unknown timeout.
+
+Each node's browser CORS policy reads the current Raft/DesiredState node inventory and allows only
+the exact HTTPS origins represented by registered `Node.api_base_url` values. It supports the
+Authorization preflight used by the Web client, but does not allow wildcard origins, arbitrary
+operator-entered URLs, credentials cookies, or cross-cluster profiles. A node removed from the
+current inventory stops being an allowed browser origin after the next request. The existing
+full-page **Open on node** login handoff remains a compatibility navigation path and is separate
+from Primary Backend selection.
+
 The embedded admin Web app is a build-versioned PWA. A release precaches the complete HTML,
 JavaScript, CSS, font, icon, and manifest app shell under a build-specific cache name.
 The new worker waits for the operator's confirmation before activation. An interrupted install leaves
