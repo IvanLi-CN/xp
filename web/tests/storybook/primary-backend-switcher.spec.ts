@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { fixtureCatalog } from "../../src/fixture-policy/catalog";
+
 function storyUrl(storyId: string) {
 	return `/iframe.html?viewMode=story&id=${storyId}&globals=theme:dark;density:comfortable`;
 }
@@ -14,7 +16,9 @@ test("shows the verified backend list from the AppShell switcher", async ({
 
 	await expect(page.getByRole("menu")).toBeVisible();
 	await expect(
-		page.getByRole("menuitem", { name: /Recovery node/ }),
+		page.getByRole("menuitem", {
+			name: fixtureCatalog.identifier.nodeNameSecondary(),
+		}),
 	).toBeVisible();
 	await expect(
 		page.getByRole("menuitem", { name: /Current page/ }),
