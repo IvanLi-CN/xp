@@ -6,9 +6,10 @@ pub use crate::{
         types::{NodeId, raft_node_id_from_ulid},
     },
     raft_membership_guard::{
-        MembershipRemovalCleanup, begin_unreachable_voter_eviction,
+        MembershipRemovalCleanup, begin_stale_learner_retirement, begin_unreachable_voter_eviction,
         finalize_remove_node_cleanup_once, membership_revision, preview_orphan_voter_repair,
-        preview_unreachable_voter_eviction, repair_orphan_voter, resume_membership_operations_once,
+        preview_stale_learner_retirement, preview_unreachable_voter_eviction, repair_orphan_voter,
+        resume_membership_operations_once,
         stale_learner_recovery::{begin_stale_learner_recovery, preview_stale_learner_recovery},
     },
     state::{

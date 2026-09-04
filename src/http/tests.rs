@@ -28,6 +28,8 @@ mod follower_draft;
 mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
+#[path = "tests/stale_learner_retirement.rs"]
+mod stale_learner_retirement;
 #[path = "tests/status_events.rs"]
 mod status_events;
 #[path = "tests/unreachable_voter_eviction.rs"]

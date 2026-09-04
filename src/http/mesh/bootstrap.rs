@@ -41,6 +41,7 @@ mod tests {
             expected_membership: "membership".to_string(),
             phase,
             legacy: false,
+            remove_learner: false,
             delete_endpoints: false,
             expected_endpoint_ids: Vec::new(),
             expected_endpoint_tags: Vec::new(),

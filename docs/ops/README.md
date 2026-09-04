@@ -1168,6 +1168,37 @@ or `recover-single-node`. If leadership moves to the target before removal, the 
 becomes Blocked and changes no membership; investigate and start a new approved preview only after
 the target is again a non-leader.
 
+### Stale learner retirement
+
+Use this only when one exact DesiredState-mapped learner belongs to a server that has been
+permanently decommissioned. It is separate from stale-learner recovery: it never waits for
+catch-up and never promotes the learner. Run the signed local CLI on the current leader for a
+zero-write preview:
+
+```bash
+sudo xp-ops xp retire-stale-learner --api-base-url http://127.0.0.1:62416 --node-id <node-id>
+```
+
+The preview must show the intended learner, its exact endpoint IDs, and the opaque
+`expected_membership` fingerprint. Upgrade every current voter until it exposes
+`cluster.stale-learner-retirement-v1`, then apply only with the unchanged values and explicit
+endpoint confirmation:
+
+```bash
+sudo xp-ops xp retire-stale-learner --api-base-url http://127.0.0.1:62416 --node-id <node-id> \
+  --apply --expected-membership <fingerprint> --delete-endpoints \
+  --expected-endpoint-ids <id,id>
+```
+
+When the preview contains no endpoints, omit `--expected-endpoint-ids` but keep
+`--delete-endpoints`. The command accepts only a linearizable leader, a stable non-joint view, one
+unique unexpected learner, an exact Raft/DesiredState mapping, no pending JoinSession, no active
+operation, and no other membership anomaly. Apply records a durable learner-retirement RemoveNode
+operation, removes the learner with `RemoveNodes(..., false)`, verifies `absent`, then deletes its
+confirmed DesiredState Node/endpoints and queues the existing runtime/history cleanup. A changed
+fingerprint, endpoint set, role, or leader blocks the operation; do not edit Raft files or use
+`restore-stale-learner` for a server that is already gone.
+
 If quorum is permanently lost, the surviving healthy node cannot elect a leader by itself. In this
 case you can force a single-node Raft membership on the chosen surviving node to restore write
 availability. Failed or offline nodes are not kept as learners during this recovery; repair them

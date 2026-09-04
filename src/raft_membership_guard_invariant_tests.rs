@@ -81,6 +81,7 @@ fn operation(kind: MembershipOperationKind, raft_node_id: NodeId) -> MembershipO
         expected_membership: "revision".to_string(),
         phase: MembershipOperationPhase::Prepared,
         legacy: false,
+        remove_learner: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
         expected_endpoint_tags: Vec::new(),

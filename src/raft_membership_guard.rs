@@ -19,8 +19,13 @@ use crate::{
     },
 };
 
+mod remove_node_operation;
 pub(crate) mod stale_learner_recovery;
+mod stale_learner_retirement;
 mod unreachable_voter_eviction;
+pub use stale_learner_retirement::{
+    StaleLearnerRetirementPreview, begin_stale_learner_retirement, preview_stale_learner_retirement,
+};
 pub use unreachable_voter_eviction::{
     UnreachableVoterEvictionPreview, begin_unreachable_voter_eviction,
     preview_unreachable_voter_eviction,
@@ -155,6 +160,12 @@ pub async fn audit_membership(
             MembershipOperationKind::Restore if phase_allows_learner => {
                 Some(operation.raft_node_id)
             }
+            MembershipOperationKind::RemoveNode
+                if operation.remove_learner
+                    && operation.phase == MembershipOperationPhase::Prepared =>
+            {
+                Some(operation.raft_node_id)
+            }
             _ => None,
         }
     });
@@ -285,6 +296,7 @@ pub async fn repair_orphan_voter(
         expected_membership: expected_membership.to_string(),
         phase: MembershipOperationPhase::Prepared,
         legacy: false,
+        remove_learner: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
         expected_endpoint_tags: Vec::new(),
@@ -859,110 +871,12 @@ pub async fn resume_membership_operations_once(
         MembershipOperationKind::RepairOrphanVoter => {
             return resume_orphan_voter_repair_operation(&raft, &store, operation).await;
         }
-        MembershipOperationKind::RemoveNode => {}
-        _ => return Ok(()),
-    }
-    let metrics = raft.metrics().borrow().clone();
-    if !is_current_local_leader(&metrics) {
-        return Ok(());
-    }
-    let node_id = operation
-        .node_id
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("remove-node operation is missing node_id"))?;
-
-    match operation.phase {
-        MembershipOperationPhase::Prepared => {
-            let membership = metrics.membership_config.membership();
-            let is_voter = membership
-                .voter_ids()
-                .any(|member| member == operation.raft_node_id);
-            let is_member = membership.get_node(&operation.raft_node_id).is_some();
-            if metrics.id == operation.raft_node_id {
-                block_membership_operation(&raft, operation, "target became leader").await?;
-                return Ok(());
-            }
-            if !is_member {
-                let _ = transition_operation(
-                    &raft,
-                    operation,
-                    MembershipOperationPhase::MembershipRemoved,
-                    "target absent after uncertain remove-voters request",
-                )
-                .await?;
-                return Ok(());
-            }
-            if !is_voter {
-                block_membership_operation(
-                    &raft,
-                    operation,
-                    "delete target is learner; remove-voters cannot safely make it absent",
-                )
-                .await?;
-                return Ok(());
-            }
-            if let Err(error) = require_expected_membership(&raft, &operation).await {
-                block_membership_operation(&raft, operation, error.to_string()).await?;
-                return Ok(());
-            }
-            raft.change_membership(
-                openraft::ChangeMembers::RemoveVoters(BTreeSet::from([operation.raft_node_id])),
-                false,
-            )
-            .await?;
-            let after = raft.metrics().borrow().clone();
-            if after
-                .membership_config
-                .membership()
-                .get_node(&operation.raft_node_id)
-                .is_some()
-            {
-                anyhow::bail!("remove-node operation did not make target absent")
-            }
-            let _ = transition_operation(
-                &raft,
-                operation,
-                MembershipOperationPhase::MembershipRemoved,
-                "target made absent from Raft membership",
-            )
-            .await?;
+        MembershipOperationKind::RemoveNode => {
+            return remove_node_operation::resume_remove_node_operation(&raft, &store, operation)
+                .await;
         }
-        MembershipOperationPhase::MembershipRemoved => {
-            if store.lock().await.get_node(&node_id).is_none() {
-                return Ok(());
-            }
-            if let Err(error) = require_expected_membership(&raft, &operation).await {
-                block_membership_operation(&raft, operation, error.to_string()).await?;
-                return Ok(());
-            }
-            let out = raft
-                .client_write(DesiredStateCommand::DeleteNode {
-                    node_id,
-                    delete_endpoints: operation.delete_endpoints,
-                    expected_endpoint_ids: operation.expected_endpoint_ids.clone(),
-                    join_session: None,
-                })
-                .await?;
-            match out {
-                crate::raft::types::ClientResponse::Ok {
-                    result: crate::state::DesiredStateApplyResult::NodeDeleted { .. },
-                } => {}
-                crate::raft::types::ClientResponse::Ok { .. } => {
-                    anyhow::bail!("remove-node operation received unexpected desired-state result")
-                }
-                crate::raft::types::ClientResponse::Err { code, message, .. } => {
-                    block_membership_operation(
-                        &raft,
-                        operation,
-                        format!("remove-node desired-state delete rejected: {code}: {message}"),
-                    )
-                    .await?;
-                }
-            }
-        }
-        _ => {}
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 /// The periodic task resumes only an already durable lifecycle operation; it never infers a new
