@@ -43,7 +43,7 @@ test("keeps AppShell header controls separated on mobile", async ({ page }) => {
 	});
 
 	const controls = await page.evaluate(() =>
-		["Open menu", "Open primary backend", "Open status", "Open settings"].map(
+		["Open menu", "Open status", "Open settings", "Open primary backend"].map(
 			(label) => {
 				const element = document.querySelector<HTMLButtonElement>(
 					`button[aria-label="${label}"]`,

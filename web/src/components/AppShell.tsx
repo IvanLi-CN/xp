@@ -750,13 +750,6 @@ export function AppShell({
 									<span className="hidden items-center sm:inline-flex">
 										{globalReadStateIndicator}
 									</span>
-									<PrimaryBackendSwitcher
-										adminToken={adminToken}
-										clusterId={
-											clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
-										}
-										onOpened={refreshBackendCandidates}
-									/>
 									{versionIndicator}
 								</div>
 
@@ -864,6 +857,14 @@ export function AppShell({
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
+
+								<PrimaryBackendSwitcher
+									adminToken={adminToken}
+									clusterId={
+										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
+									}
+									onOpened={refreshBackendCandidates}
+								/>
 							</div>
 						</div>
 					</header>
