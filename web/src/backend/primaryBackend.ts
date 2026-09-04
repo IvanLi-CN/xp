@@ -207,17 +207,17 @@ export function installPrimaryBackendTransport() {
 				? new URL(input, getPageOrigin()).toString()
 				: input;
 		const request = new Request(normalizedInput, init);
+		const isApiRequest = isApiUrl(new URL(request.url, getPageOrigin()));
 		const isMutation =
-			isApiUrl(new URL(request.url, getPageOrigin())) &&
-			MUTATING_METHODS.has(request.method.toUpperCase());
+			isApiRequest && MUTATING_METHODS.has(request.method.toUpperCase());
 		const release = isMutation ? beginMutation() : null;
 		try {
 			const response = await nativeFetch?.(rewriteRequest(request));
 			if (!response) throw new Error("fetch is unavailable");
-			markRequestResult(response);
+			if (isApiRequest) markRequestResult(response);
 			return response;
 		} catch (error) {
-			markRequestResult(null, error);
+			if (isApiRequest) markRequestResult(null, error);
 			throw error;
 		} finally {
 			release?.();

@@ -47,6 +47,17 @@ describe("primary backend transport", () => {
 		expect(getPrimaryBackendSnapshot().pendingMutations).toBe(0);
 	});
 
+	it("does not mark the backend unavailable for static resource failures", async () => {
+		window.fetch = vi.fn(() =>
+			Promise.resolve(new Response("missing", { status: 500 })),
+		) as typeof window.fetch;
+		installPrimaryBackendTransport();
+
+		await window.fetch("/assets/broken.js");
+
+		expect(getPrimaryBackendSnapshot().state).toBe("ready");
+	});
+
 	it("does not send a token before the candidate cluster matches", async () => {
 		const requests: Array<{ url: string; authorization: string | null }> = [];
 		window.fetch = vi.fn((input, init) => {
