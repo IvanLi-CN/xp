@@ -4,6 +4,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./styles.css";
+import { PrimaryBackendProvider } from "./backend/PrimaryBackendProvider";
+import { installPrimaryBackendTransport } from "./backend/primaryBackend";
 import {
 	DocumentFallbackBoundary,
 	FrameworkErrorBoundary,
@@ -25,6 +27,7 @@ function bootstrap() {
 	}
 
 	installDocumentFallbackHandlers(rootElement);
+	installPrimaryBackendTransport();
 	installOfflineApiWriteGuard();
 	declareServiceWorkerBuild();
 
@@ -42,7 +45,9 @@ function bootstrap() {
 					>
 						<UiPrefsProvider>
 							<AppRuntimeProvider>
-								<RouterProvider router={router} />
+								<PrimaryBackendProvider>
+									<RouterProvider router={router} />
+								</PrimaryBackendProvider>
 							</AppRuntimeProvider>
 						</UiPrefsProvider>
 					</PersistQueryClientProvider>

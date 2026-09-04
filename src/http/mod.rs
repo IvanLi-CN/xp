@@ -129,7 +129,7 @@ use crate::{
     },
     xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
-
+mod browser_cors;
 mod capabilities;
 mod history_repository;
 mod join_capability;
@@ -139,9 +139,9 @@ mod node_metadata;
 mod service_monitors;
 mod version_check;
 mod web_assets;
-use capabilities::api_capabilities;
 use endpoint_requests::{CreateEndpointRequest, PatchEndpointRequest, deserialize_optional_string};
 use version_check::{VersionCheckCache, api_version_check};
+use {browser_cors::browser_cors, capabilities::api_capabilities};
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
@@ -193,7 +193,6 @@ impl ApiError {
             details: Map::new(),
         }
     }
-
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::BAD_REQUEST, message)
     }
@@ -1513,6 +1512,7 @@ pub fn build_router_with_mesh_telemetry(
     }
 
     app.layer(middleware::from_fn(redirect_follower_writes))
+        .layer(middleware::from_fn(browser_cors))
         .layer(Extension(app_state))
 }
 

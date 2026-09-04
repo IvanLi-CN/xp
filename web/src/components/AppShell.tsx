@@ -15,7 +15,10 @@ import {
 	useState,
 } from "react";
 
+import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
+import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
+import { hydratePrimaryBackendProfile } from "@/backend/primaryBackend";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -73,6 +76,7 @@ import {
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { useObjectNavigationGuard } from "./ObjectNavigationGuard";
+import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
@@ -126,6 +130,7 @@ export function AppShell({
 	const queryClient = useQueryClient();
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
+	const primaryBackend = usePrimaryBackend();
 	const [adminToken] = useState(() => readAdminToken());
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const { requestNavigation } = useObjectNavigationGuard();
@@ -173,6 +178,48 @@ export function AppShell({
 		queryKey: ["clusterInfo"],
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
+
+	const backendNodes = useQuery({
+		queryKey: ["adminNodes", adminToken],
+		enabled:
+			adminToken.length > 0 &&
+			Boolean(clusterInfo.data?.cluster_id) &&
+			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
+		queryFn: ({ signal }) => fetchAdminNodes(adminToken, signal),
+	});
+
+	const refreshBackendCandidates = useCallback(() => {
+		if (!adminToken || !primaryBackend.clusterId) return;
+		void backendNodes.refetch();
+	}, [adminToken, backendNodes.refetch, primaryBackend.clusterId]);
+
+	useEffect(() => {
+		const clusterId = clusterInfo.data?.cluster_id;
+		if (!clusterId) return;
+		hydratePrimaryBackendProfile(
+			clusterId,
+			backendNodes.isSuccess ? backendNodes.data.items : undefined,
+		);
+	}, [
+		clusterInfo.data?.cluster_id,
+		backendNodes.data?.items,
+		backendNodes.isSuccess,
+	]);
+
+	useEffect(() => {
+		if (primaryBackend.state !== "unreachable") return;
+		refreshBackendCandidates();
+	}, [primaryBackend.state, refreshBackendCandidates]);
+
+	const previousBackendGeneration = useRef(primaryBackend.generation);
+	useEffect(() => {
+		if (previousBackendGeneration.current === primaryBackend.generation) return;
+		previousBackendGeneration.current = primaryBackend.generation;
+		void (async () => {
+			await queryClient.cancelQueries();
+			await queryClient.invalidateQueries();
+		})();
+	}, [primaryBackend.generation, queryClient]);
 
 	const adminAlerts = useQuery({
 		queryKey: ["adminAlerts", adminToken],
@@ -280,6 +327,8 @@ export function AppShell({
 	);
 
 	useEffect(() => {
+		// The stream lifetime is bound to the selected backend generation.
+		void primaryBackend.generation;
 		if (adminToken.length === 0) {
 			setStatusStream({ connected: false, lastEventAtMs: null, error: null });
 			return;
@@ -360,7 +409,13 @@ export function AppShell({
 		});
 
 		return () => handle.close();
-	}, [adminToken, apiCompatibility.data, queryClient, runtime.isOnline]);
+	}, [
+		adminToken,
+		apiCompatibility.data,
+		primaryBackend.generation,
+		queryClient,
+		runtime.isOnline,
+	]);
 
 	useEffect(() => {
 		const onFocus = () => {
@@ -637,7 +692,7 @@ export function AppShell({
 					} flex-col gap-2.5 sm:gap-4`}
 				>
 					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
-						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+						<div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 sm:gap-4">
 							<div className="flex min-w-0 items-center gap-3">
 								<Button
 									variant="ghost"
@@ -690,9 +745,11 @@ export function AppShell({
 								</div>
 							</div>
 
-							<div className="flex items-center justify-end gap-2">
-								<div className="flex items-center gap-2">
-									{globalReadStateIndicator}
+							<div className="flex items-center justify-end gap-1 sm:gap-2">
+								<div className="flex items-center gap-1 sm:gap-2">
+									<span className="hidden items-center sm:inline-flex">
+										{globalReadStateIndicator}
+									</span>
 									{versionIndicator}
 								</div>
 
@@ -800,6 +857,14 @@ export function AppShell({
 										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
+
+								<PrimaryBackendSwitcher
+									adminToken={adminToken}
+									clusterId={
+										clusterInfo.data?.cluster_id ?? primaryBackend.clusterId
+									}
+									onOpened={refreshBackendCandidates}
+								/>
 							</div>
 						</div>
 					</header>

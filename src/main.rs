@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use rustls::crypto::ring;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -627,8 +627,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         mesh_telemetry,
         mesh_client,
     )
-    .layer(TraceLayer::new_for_http())
-    .layer(CorsLayer::permissive());
+    .layer(TraceLayer::new_for_http());
 
     info!(
         bind = %config.bind,

@@ -211,9 +211,7 @@ test("clears an ambiguous start error after status confirms success", async ({
 	await page.getByRole("button", { name: "Start upgrade" }).click();
 
 	await expect(page.getByText("last succeeded", { exact: true })).toBeVisible();
-	await page
-		.getByRole("heading", { name: "System status", exact: true })
-		.click();
+	await page.keyboard.press("Escape");
 	await page
 		.getByRole("button", { name: "Last upgrade completed to v3.23.2." })
 		.click();
