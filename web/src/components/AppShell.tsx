@@ -747,7 +747,9 @@ export function AppShell({
 
 							<div className="flex items-center justify-end gap-1 sm:gap-2">
 								<div className="flex items-center gap-1 sm:gap-2">
-									{globalReadStateIndicator}
+									<span className="hidden items-center sm:inline-flex">
+										{globalReadStateIndicator}
+									</span>
 									<PrimaryBackendSwitcher
 										adminToken={adminToken}
 										clusterId={
