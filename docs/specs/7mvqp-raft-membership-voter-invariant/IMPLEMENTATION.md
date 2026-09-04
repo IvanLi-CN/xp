@@ -35,6 +35,11 @@
   requires one exact unexpected learner and a dry-run membership revision, atomically consumes a
   matching learner-registered JoinSession with a Restore operation, and delegates catch-up and
   promotion to the existing Restore resumer.
+- Stale learner retirement is a separate signed, leader-local CLI/API with no Admin Web action. It
+  requires one exact DesiredState-mapped unexpected learner, an immutable endpoint snapshot, and
+  the dedicated `cluster.stale-learner-retirement-v1` capability on every current voter. It uses
+  the existing RemoveNode operation with `remove_learner=true`, issues `RemoveNodes(..., false)`,
+  verifies absence, and delegates DesiredState and runtime cleanup to the existing resumer.
 
 ## Compatibility
 
@@ -47,6 +52,9 @@
   64 KiB. An unreachable public URL is therefore not a separate rejection condition for current
   peers. A retained voter that cannot
   verify still returns `coordinated_upgrade_required` and no new command is written.
+- `cluster.stale-learner-retirement-v1` is advertised by this build. The retirement command waits
+  for every current voter to expose this capability before recording its new operation field;
+  older voters therefore cannot decode or resume a learner-retirement request.
 - An additive persisted field alone is compatible with old snapshots. The command variants are not
   compatible with an old binary, which is why the capability barrier precedes the first command.
 - After the barrier, valid legacy JoinSessions become replayable Join operations. Invalid legacy
@@ -63,6 +71,10 @@
 - Stale learner recovery never excludes its target from the retained-voter capability barrier: a
   learner is not a voter. It is compatible with an older leader after intent is recorded because
   the existing Restore resumer already owns the persisted operation kind and phases.
+- Stale learner retirement checks the dedicated capability on every current voter and does not
+  exclude the learner. Its additive `remove_learner` field defaults false for old snapshots and is
+  immutable across operation transitions; the barrier is required because older binaries cannot
+  safely execute the new `RemoveNodes` retirement branch.
 
 ## Coverage
 
@@ -85,6 +97,8 @@
 - Stale learner tests cover zero-write preview, exact learner and metadata matching, stale
   fingerprint rejection, atomic JoinSession consumption, durable Restore creation, catch-up,
   promotion, terminal completion, and signed-route authentication.
+- Stale learner retirement tests cover exact endpoint confirmation, `RemoveNodes(..., false)`,
+  absence verification, DesiredState cleanup, terminal cleanup, and signed-route authentication.
 - Fresh-join HTTP coverage proves that an unrelated expired learner leaves its Node retained,
   terminalizes only its legacy session, and does not receive a removal or promotion request. Guard
   coverage proves that the same learner still fails the generic clean-membership gate while target

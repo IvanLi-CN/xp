@@ -70,6 +70,10 @@ pub struct MembershipOperation {
     pub phase: MembershipOperationPhase,
     #[serde(default)]
     pub legacy: bool,
+    /// Distinguishes the explicit stale-learner retirement path from voter deletion while
+    /// preserving the existing RemoveNode operation schema for older snapshots.
+    #[serde(default)]
+    pub remove_learner: bool,
     #[serde(default)]
     pub delete_endpoints: bool,
     #[serde(default)]
@@ -99,6 +103,7 @@ impl MembershipOperation {
             || self.node_id != next.node_id
             || self.created_at != next.created_at
             || self.legacy != next.legacy
+            || self.remove_learner != next.remove_learner
             || self.delete_endpoints != next.delete_endpoints
             || self.expected_endpoint_ids != next.expected_endpoint_ids
             || self.expected_endpoint_tags != next.expected_endpoint_tags

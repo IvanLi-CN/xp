@@ -14,12 +14,12 @@ use crate::{
 };
 
 use super::{
-    membership_operation_gate, membership_revision, require_clean_membership_for_remove_node,
+    audit_membership, is_current_local_leader, membership_operation_gate, membership_revision,
     write_operation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnreachableVoterEvictionPreview {
+pub struct StaleLearnerRetirementPreview {
     pub node_id: String,
     pub raft_node_id: NodeId,
     pub expected_membership: String,
@@ -27,20 +27,19 @@ pub struct UnreachableVoterEvictionPreview {
     pub endpoint_tags: Vec<String>,
 }
 
-/// Preview a narrowly scoped operator eviction of a still-mapped voter. This is deliberately
-/// separate from orphan repair: the caller must prove and exclude this exact unreachable target
-/// from the retained-voter capability barrier before beginning the durable RemoveNode operation.
-pub async fn preview_unreachable_voter_eviction(
+/// Preview explicit retirement of one DesiredState-mapped learner whose server is permanently
+/// gone. This path never infers intent from the audit and never promotes the learner.
+pub async fn preview_stale_learner_retirement(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
-) -> anyhow::Result<UnreachableVoterEvictionPreview> {
+) -> anyhow::Result<StaleLearnerRetirementPreview> {
     let raft_node_id = raft_node_id_from_ulid(node_id)?;
-    require_clean_membership_for_remove_node(raft.clone(), store.clone()).await?;
+    raft.ensure_linearizable().await?;
     let metrics = raft.metrics().borrow().clone();
-    validate_unreachable_voter_eviction(&metrics, &store, node_id, raft_node_id, None).await?;
+    validate_stale_learner_retirement(&raft, &metrics, &store, node_id, raft_node_id, None).await?;
     let (endpoint_ids, endpoint_tags) = endpoint_snapshot_for_node(&store, node_id).await?;
-    Ok(UnreachableVoterEvictionPreview {
+    Ok(StaleLearnerRetirementPreview {
         node_id: node_id.to_string(),
         raft_node_id,
         expected_membership: membership_revision(&metrics)?,
@@ -49,10 +48,9 @@ pub async fn preview_unreachable_voter_eviction(
     })
 }
 
-/// Begin an explicit eviction after the caller has completed its retained-voter capability check.
-/// The normal remove-node resumer owns the subsequent Raft removal, desired-state deletion, and
-/// runtime cleanup so uncertain results keep the same recovery contract as an admin deletion.
-pub async fn begin_unreachable_voter_eviction(
+/// Persist a RemoveNode operation marked for learner retirement after the exact preview has been
+/// confirmed. The normal membership resumer then removes the learner and deletes DesiredState.
+pub async fn begin_stale_learner_retirement(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
@@ -61,14 +59,15 @@ pub async fn begin_unreachable_voter_eviction(
     expected_endpoint_ids: Vec<String>,
 ) -> anyhow::Result<MembershipOperation> {
     if !delete_endpoints {
-        anyhow::bail!("unreachable voter eviction requires endpoint cleanup confirmation")
+        anyhow::bail!("stale learner retirement requires endpoint cleanup confirmation")
     }
 
     let _guard = membership_operation_gate().lock_owned().await;
     let raft_node_id = raft_node_id_from_ulid(node_id)?;
-    require_clean_membership_for_remove_node(raft.clone(), store.clone()).await?;
+    raft.ensure_linearizable().await?;
     let metrics = raft.metrics().borrow().clone();
-    validate_unreachable_voter_eviction(
+    validate_stale_learner_retirement(
+        &raft,
         &metrics,
         &store,
         node_id,
@@ -81,7 +80,7 @@ pub async fn begin_unreachable_voter_eviction(
     if actual_endpoint_ids.iter().cloned().collect::<BTreeSet<_>>()
         != expected_endpoint_ids.iter().cloned().collect()
     {
-        anyhow::bail!("node endpoint set changed since unreachable voter eviction preview")
+        anyhow::bail!("node endpoint set changed since stale learner retirement preview")
     }
 
     let operation = MembershipOperation {
@@ -92,14 +91,14 @@ pub async fn begin_unreachable_voter_eviction(
         expected_membership: expected_membership.to_string(),
         phase: MembershipOperationPhase::Prepared,
         legacy: false,
-        remove_learner: false,
+        remove_learner: true,
         delete_endpoints,
         expected_endpoint_ids,
         expected_endpoint_tags,
         created_at: Utc::now().to_rfc3339(),
         next_retry_at: None,
         terminal_at: None,
-        evidence: Some("operator-approved unreachable voter eviction accepted".to_string()),
+        evidence: Some("operator-approved stale learner retirement accepted".to_string()),
     };
     write_operation(
         &raft,
@@ -131,52 +130,81 @@ async fn endpoint_snapshot_for_node(
     Ok(endpoints.into_iter().unzip())
 }
 
-async fn validate_unreachable_voter_eviction(
+async fn validate_stale_learner_retirement(
+    raft: &Arc<dyn RaftFacade>,
     metrics: &openraft::RaftMetrics<NodeId, NodeMeta>,
     store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
     node_id: &str,
     raft_node_id: NodeId,
     expected_membership: Option<&str>,
 ) -> anyhow::Result<()> {
-    if metrics.state != openraft::ServerState::Leader || metrics.current_leader != Some(metrics.id)
-    {
-        anyhow::bail!("unreachable voter eviction must run on the current local leader")
+    if !is_current_local_leader(metrics) {
+        anyhow::bail!("stale learner retirement must run on the current local leader")
     }
     let membership = metrics.membership_config.membership();
     if membership.get_joint_config().len() > 1 {
-        anyhow::bail!("unreachable voter eviction is forbidden during joint consensus")
+        anyhow::bail!("stale learner retirement is forbidden during joint consensus")
     }
     if metrics.id == raft_node_id {
-        anyhow::bail!("unreachable voter eviction cannot remove the current leader")
+        anyhow::bail!("stale learner retirement cannot target the current leader")
     }
-    if !membership
+    if membership
         .voter_ids()
         .any(|voter_id| voter_id == raft_node_id)
     {
-        anyhow::bail!("unreachable voter eviction target is not a current voter")
+        anyhow::bail!("stale learner retirement target is a voter")
     }
+    let raft_node = membership.get_node(&raft_node_id).ok_or_else(|| {
+        anyhow::anyhow!("stale learner retirement target is absent from membership")
+    })?;
     if let Some(expected_membership) = expected_membership
         && membership_revision(metrics)? != expected_membership
     {
         anyhow::bail!("membership revision changed since dry-run")
     }
 
-    let store = store.lock().await;
-    if store.state().active_membership_operation().is_some() {
-        anyhow::bail!("another membership operation is active")
-    }
-    if store.get_node(node_id).is_none() {
-        anyhow::bail!("unreachable voter eviction target is not represented by desired state")
-    }
-    if store
-        .state()
-        .join_sessions
-        .values()
-        .filter(|session| session.status.is_pending())
-        .filter_map(|session| raft_node_id_from_ulid(&session.node_id).ok())
-        .any(|pending_id| pending_id == raft_node_id)
     {
-        anyhow::bail!("unreachable voter eviction target has a pending join session")
+        let store = store.lock().await;
+        if store.state().active_membership_operation().is_some() {
+            anyhow::bail!("another membership operation is active")
+        }
+        let node = store.get_node(node_id).ok_or_else(|| {
+            anyhow::anyhow!("stale learner retirement target is not represented by desired state")
+        })?;
+        if raft_node_id_from_ulid(&node.node_id)? != raft_node_id {
+            anyhow::bail!("stale learner retirement target node id does not match Raft id")
+        }
+        if store
+            .state()
+            .join_sessions
+            .values()
+            .any(|session| session.status.is_pending())
+        {
+            anyhow::bail!("stale learner retirement requires no pending join session")
+        }
+        if raft_node.name != node.node_name
+            || raft_node.api_base_url != node.api_base_url
+            || raft_node.raft_endpoint != node.api_base_url
+        {
+            anyhow::bail!("stale learner retirement target metadata does not match desired state")
+        }
+    }
+
+    let audit = audit_membership(raft.clone(), store.clone()).await;
+    if !audit.orphan_voters.is_empty()
+        || !audit.duplicate_desired_members.is_empty()
+        || !audit.missing_desired_members.is_empty()
+        || audit.unexpected_learners != BTreeSet::from([raft_node_id])
+    {
+        anyhow::bail!(
+            "stale learner retirement target must be the unique unexpected learner: \
+             orphan_voters={:?}, duplicate_desired_members={:?}, unexpected_learners={:?}, \
+             missing_desired_members={:?}",
+            audit.orphan_voters,
+            audit.duplicate_desired_members,
+            audit.unexpected_learners,
+            audit.missing_desired_members,
+        )
     }
     Ok(())
 }

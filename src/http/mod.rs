@@ -32,6 +32,7 @@ mod node_delete;
 mod resource_alerts;
 mod resource_history_capacity;
 mod resource_monitoring;
+mod stale_learner_retirement;
 mod status_events;
 mod unreachable_voter_eviction;
 use mesh::{
@@ -196,15 +197,12 @@ impl ApiError {
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::BAD_REQUEST, message)
     }
-
     pub fn unprocessable_entity(message: impl Into<String>) -> Self {
         Self::new("invalid_request", StatusCode::UNPROCESSABLE_ENTITY, message)
     }
-
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new("not_found", StatusCode::NOT_FOUND, message)
     }
-
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self::new("unauthorized", StatusCode::UNAUTHORIZED, message)
     }
@@ -1104,6 +1102,7 @@ pub fn build_router_with_mesh_telemetry(
             "/_internal/raft/evict-unreachable-voter",
             post(unreachable_voter_eviction::admin_internal_evict_unreachable_voter),
         )
+        .merge(stale_learner_retirement::router())
         .route(
             "/_internal/raft/membership-operations/{operation_id}",
             get(admin_internal_get_membership_operation),
@@ -2183,6 +2182,7 @@ async fn cluster_join(
         expected_membership: expected_membership.clone(),
         phase: crate::state::MembershipOperationPhase::Prepared,
         legacy: false,
+        remove_learner: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
         expected_endpoint_tags: Vec::new(),
@@ -4356,6 +4356,7 @@ async fn admin_delete_node(
         expected_membership: expected_membership.clone(),
         phase: crate::state::MembershipOperationPhase::Prepared,
         legacy: false,
+        remove_learner: false,
         delete_endpoints: query.delete_endpoints,
         expected_endpoint_ids: expected_endpoint_ids.clone(),
         expected_endpoint_tags,

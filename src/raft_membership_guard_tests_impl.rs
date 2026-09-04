@@ -21,6 +21,9 @@ use crate::{
     state::{JsonSnapshotStore, StoreInit},
 };
 
+#[path = "raft_membership_guard_stale_learner_retirement_tests.rs"]
+mod stale_learner_retirement;
+
 #[derive(Clone)]
 struct RepairingRaft {
     inner: LocalRaft,
@@ -90,8 +93,10 @@ impl RaftFacade for RepairingRaft {
             if fail_next_membership_change.swap(false, Ordering::SeqCst) {
                 anyhow::bail!("injected membership change failure")
             }
-            let openraft::ChangeMembers::RemoveVoters(removed) = changes else {
-                anyhow::bail!("unexpected membership change")
+            let removed = match changes {
+                openraft::ChangeMembers::RemoveVoters(removed)
+                | openraft::ChangeMembers::RemoveNodes(removed) => removed,
+                _ => anyhow::bail!("unexpected membership change"),
             };
             let mut next = metrics.borrow().clone();
             let previous = next.membership_config.clone();
@@ -487,6 +492,7 @@ async fn remove_node_operation_blocks_when_its_target_becomes_leader() {
             expected_membership,
             phase: MembershipOperationPhase::Prepared,
             legacy: false,
+            remove_learner: false,
             delete_endpoints: true,
             expected_endpoint_ids: Vec::new(),
             expected_endpoint_tags: Vec::new(),
@@ -730,6 +736,7 @@ async fn remove_node_cleanup_stays_recoverable_until_runtime_and_history_cleanup
             expected_membership,
             phase: MembershipOperationPhase::MembershipRemoved,
             legacy: false,
+            remove_learner: false,
             delete_endpoints: true,
             expected_endpoint_ids: vec!["endpoint-target".to_string()],
             expected_endpoint_tags: vec!["inbound-target".to_string()],
@@ -875,6 +882,7 @@ async fn remove_node_recovery_blocks_a_legacy_stale_endpoint_snapshot() {
             expected_membership,
             phase: MembershipOperationPhase::MembershipRemoved,
             legacy: false,
+            remove_learner: false,
             delete_endpoints: true,
             expected_endpoint_ids: vec!["stale-endpoint".to_string()],
             expected_endpoint_tags: vec!["stale-inbound".to_string()],

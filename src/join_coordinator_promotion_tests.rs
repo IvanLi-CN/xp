@@ -104,6 +104,7 @@ async fn insert_join_operation(
                 .unwrap(),
             phase: MembershipOperationPhase::LearnerRegistered,
             legacy: false,
+            remove_learner: false,
             delete_endpoints: false,
             expected_endpoint_ids: Vec::new(),
             expected_endpoint_tags: Vec::new(),

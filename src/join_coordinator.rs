@@ -71,11 +71,10 @@ pub fn spawn_join_coordinator(
     })
 }
 
-/// This runs only after the caller has crossed the all-voter capability barrier and acquired the
-/// lifecycle gate. It converts one replayable legacy reservation at a time. A known expired
-/// reservation whose non-voter learner is still present is terminalized without changing Raft
-/// membership or deleting its DesiredState node; unrelated fresh joins must not inherit cleanup
-/// authority over that learner.
+/// This runs after the all-voter capability barrier and lifecycle gate. It converts replayable
+/// legacy reservations. Known expired reservations whose non-voter learner remains are terminalized
+/// without changing Raft membership or deleting DesiredState; unrelated fresh joins must not
+/// inherit cleanup authority over that learner.
 pub async fn migrate_one_legacy_join_session(
     raft: &Arc<dyn RaftFacade>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -167,6 +166,7 @@ pub async fn migrate_one_legacy_join_session(
         expected_membership: crate::raft_membership_guard::membership_revision(&metrics)?,
         phase: crate::state::MembershipOperationPhase::Prepared,
         legacy: true,
+        remove_learner: false,
         delete_endpoints: false,
         expected_endpoint_ids: Vec::new(),
         expected_endpoint_tags: Vec::new(),
@@ -608,6 +608,7 @@ mod tests {
                     .unwrap(),
                 phase: crate::state::MembershipOperationPhase::Prepared,
                 legacy: false,
+                remove_learner: false,
                 delete_endpoints: false,
                 expected_endpoint_ids: Vec::new(),
                 expected_endpoint_tags: Vec::new(),

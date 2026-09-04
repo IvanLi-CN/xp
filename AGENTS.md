@@ -145,7 +145,9 @@
   set description, never a promotable role. Every voter maps to one DesiredState Node. An unexpected
   learner or orphan voter is reported; the unexpected learner blocks only lifecycle operations that
   require a clean membership shape, never an unrelated fresh join. Neither is automatically
-  promoted, deleted, rolled back, or repaired by periodic work.
+  promoted, deleted, rolled back, or repaired by periodic work. A permanently decommissioned,
+  exactly mapped learner may be retired only through the signed leader-local `xp-ops xp retire-stale-learner` flow after every voter exposes `cluster.stale-learner-retirement-v1`;
+  it uses `RemoveNodes(..., false)` and the existing durable cleanup operation.
 - Fresh joins use a durable two-stage protocol: the leader records a Join membership operation and
   reservation, registers the learner, and returns bootstrap identity before catch-up. Fresh-join
   admission still requires a quorum-backed linearizable, non-joint membership view, an absent target

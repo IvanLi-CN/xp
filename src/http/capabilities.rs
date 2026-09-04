@@ -72,6 +72,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "node.mihomo-resource-private-cidrs-v1",
         "cluster.join.staged-v1",
         "cluster.membership-lifecycle-v1",
+        "cluster.stale-learner-retirement-v1",
         "cluster.mesh-reverse-assignment-v1",
     ];
     if crate::uptime_runtime::icmp_supported() {
@@ -124,6 +125,11 @@ mod tests {
             response
                 .capabilities
                 .contains(&"cluster.membership-lifecycle-v1")
+        );
+        assert!(
+            response
+                .capabilities
+                .contains(&"cluster.stale-learner-retirement-v1")
         );
         assert!(
             response

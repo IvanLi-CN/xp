@@ -24,12 +24,15 @@ metadata into an orphan voter without a DesiredState Node mapping.
   dry-run fingerprint and endpoint-cleanup confirmation.
 - Permit one exact, leader-local recovery of a DesiredState-mapped stale learner through the
   ordinary durable Restore lifecycle.
+- Permit one exact, leader-local retirement of a permanently decommissioned DesiredState-mapped
+  stale learner without promoting it.
 
 ## Related ADRs
 
 - [0003-unreachable-mapped-voter-eviction](../../adr/0003-unreachable-mapped-voter-eviction.md)
 - [0006-stale-learner-recovery](../../adr/0006-stale-learner-recovery.md)
 - [0010-fresh-join-admission](../../adr/0010-fresh-join-admission.md)
+- [0011-stale-learner-retirement](../../adr/0011-stale-learner-retirement.md)
 
 ## Roles and invariants
 
@@ -44,7 +47,8 @@ metadata into an orphan voter without a DesiredState Node mapping.
 - Every voter maps to one DesiredState Node. A voter without that mapping is an orphan voter.
 - A learner is eligible for automatic promotion only when it is the exact target of the active
   operation during its recorded learner phase. An unexpected learner remains observable incident
-  state and is not a promotion or deletion signal.
+  state and is not a promotion or deletion signal. If its server is permanently decommissioned,
+  an operator may explicitly retire that exact learner through the separate retirement lifecycle.
 - A DesiredState Node without a Raft member is valid only for the target of a recorded removal
   after membership has become absent.
 - Operations advance monotonically through `prepared`, learner/voter/removal phases, and a terminal
@@ -88,6 +92,11 @@ metadata into an orphan voter without a DesiredState Node mapping.
   remains a separate operator decision. Expiry of a recorded active Join operation keeps its
   existing owned-learner cleanup contract.
 
+- Stale learner retirement additionally requires every current voter to expose the dedicated signed
+  capability `cluster.stale-learner-retirement-v1`. This barrier is distinct from recovery because
+  the retirement operation uses the `RemoveNodes` learner-removal branch; upgrade voters one at a
+  time while retaining quorum before applying it.
+
 ## Stale learner recovery
 
 - This is an operator-only exception for one existing learner with one exact DesiredState Node
@@ -118,6 +127,34 @@ sudo xp-ops xp restore-stale-learner --api-base-url http://127.0.0.1:62416 --nod
   `voter_promoted` and `completed`. A changed membership revision, learner loss, or failed
   precondition remains a terminal blocked operation; Direct/Public service and the existing voters
   remain available.
+
+## Stale learner retirement
+
+- This is an operator-only path for one exact DesiredState-mapped learner whose server is known to
+  have been permanently decommissioned. It has no Admin Web action, never waits for catch-up, and
+  never promotes the learner to voter.
+- Run only against the current leader's local API endpoint:
+
+```bash
+sudo xp-ops xp retire-stale-learner --api-base-url http://127.0.0.1:62416 --node-id <node-id>
+sudo xp-ops xp retire-stale-learner --api-base-url http://127.0.0.1:62416 --node-id <node-id> \
+  --apply --expected-membership <fingerprint> --delete-endpoints \
+  --expected-endpoint-ids <id,id>
+```
+
+- The dry-run writes nothing and returns the exact learner, endpoint snapshot, and membership
+  fingerprint. Apply requires that fingerprint, an explicit endpoint-cleanup confirmation, and the
+  exact endpoint ID set.
+- The target must be the unique unexpected learner and its Raft metadata must exactly match its
+  DesiredState Node. The current leader, a voter or absent target, joint consensus, any active
+  operation, pending JoinSession, metadata drift, or another abnormal membership shape rejects the
+  request.
+- Every current voter must expose the dedicated signed capability
+  `cluster.stale-learner-retirement-v1`. Apply records a durable `RemoveNode` operation marked for
+  learner retirement, issues exactly `RemoveNodes({target}, false)`, verifies `absent`, and then
+  deletes the confirmed DesiredState Node/endpoints through the existing cleanup lifecycle. A
+  changed fingerprint, endpoint set, leader, or target role blocks without guessing or editing Raft
+  files.
 
 ## Unreachable mapped voter eviction
 
@@ -187,6 +224,10 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - `POST /api/admin/_internal/raft/restore-stale-learner` accepts signed internal-auth requests.
   Dry-run returns `{ dry_run, node_id, raft_node_id, expected_membership }`; apply requires
   `expected_membership` and returns the durable Restore operation.
+- `POST /api/admin/_internal/raft/retire-stale-learner` accepts signed internal-auth requests.
+  Dry-run returns `{ dry_run, node_id, raft_node_id, expected_membership, endpoints }`; apply
+  requires `expected_membership`, `delete_endpoints=true`, the exact `expected_endpoint_ids`, and
+  returns the durable learner-retirement RemoveNode operation.
 - `GET /api/admin/membership-operations/{operation_id}` is read-only admin status.
 - `xp-ops xp membership-operation status --api-base-url <local-url> --operation-id <uuid>` reads
   that status through local signed internal authentication.
@@ -215,6 +256,10 @@ sudo xp-ops xp repair-orphan-voter --api-base-url http://127.0.0.1:62416 --raft-
 - A successful stale learner recovery consumes a matching learner-registered JoinSession, reaches
   a voter-only membership view, and leaves no active operation. An unreachable learner must time
   out without unbounded retries or a speculative promotion.
+- A stale learner with a permanently decommissioned server is retired only after a zero-write
+  preview and the dedicated voter capability barrier. Successful retirement reaches `absent`,
+  deletes its DesiredState Node and confirmed endpoints, leaves no active operation after cleanup,
+  and never promotes or waits for the learner.
 - Delete returns `204` when completed within five seconds; otherwise it returns `202` with an
   operation id and status URL. The Web resumes polling the same operation after refresh and only
   refreshes inventory after a terminal completion.
