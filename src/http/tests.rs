@@ -22,6 +22,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 #[path = "tests/admin_auth_tests.rs"]
 mod admin_auth_tests;
+#[path = "tests/browser_cors.rs"]
+mod browser_cors_routes;
 #[path = "tests/follower_draft.rs"]
 mod follower_draft;
 #[path = "tests/history_repository.rs"]
