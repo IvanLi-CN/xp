@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 import { fixtureCatalog } from "../../src/fixture-policy/catalog";
 import { apiCapabilitiesFixture } from "./apiCapabilities";
@@ -11,6 +11,36 @@ function corsHeaders(origin: string) {
 		"Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
 		Vary: "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
 	};
+}
+
+function documentCsp(connectOrigin: string) {
+	return [
+		"default-src 'self'",
+		"base-uri 'self'",
+		"object-src 'none'",
+		"frame-ancestors 'none'",
+		`connect-src 'self'${connectOrigin ? ` ${connectOrigin}` : ""}`,
+		"img-src 'self' data: blob:",
+		"script-src 'self' 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline'",
+		"font-src 'self'",
+	].join("; ");
+}
+
+async function injectDocumentCsp(page: Page, connectOrigin: string) {
+	const appOrigin = new URL(
+		process.env.E2E_BASE_URL ?? "http://127.0.0.1:60080",
+	).origin;
+	await page.route(`${appOrigin}/`, async (route) => {
+		const response = await route.fetch();
+		await route.fulfill({
+			response,
+			headers: {
+				...response.headers(),
+				"content-security-policy": documentCsp(connectOrigin),
+			},
+		});
+	});
 }
 
 test("switches API and SSE traffic to a verified recovery origin", async ({
@@ -37,6 +67,7 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 	];
 	await setAdminToken(page);
 	await setupApiMocks(page, { nodes, mockStatusEvents: false });
+	await injectDocumentCsp(page, recoveryOrigin);
 
 	await page.route(`${recoveryOrigin}/**`, async (route) => {
 		const request = route.request();
@@ -146,4 +177,30 @@ test("switches API and SSE traffic to a verified recovery origin", async ({
 			),
 		)
 		.toBe(true);
+});
+
+test("blocks an unlisted recovery origin at the document CSP", async ({
+	page,
+}) => {
+	const recoveryOrigin = fixtureCatalog.url.secondaryApi();
+	await page.route(`${recoveryOrigin}/api/health`, async (route) => {
+		await route.fulfill({
+			status: 200,
+			headers: corsHeaders(new URL(page.url()).origin),
+			contentType: "application/json",
+			body: JSON.stringify({ status: "ok" }),
+		});
+	});
+	await injectDocumentCsp(page, "");
+	await page.goto("/");
+
+	const result = await page.evaluate(async (origin) => {
+		try {
+			await fetch(`${origin}/api/health`);
+			return "ok";
+		} catch (error) {
+			return String(error);
+		}
+	}, recoveryOrigin);
+	expect(result).toContain("TypeError");
 });

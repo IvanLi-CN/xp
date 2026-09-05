@@ -1513,6 +1513,7 @@ pub fn build_router_with_mesh_telemetry(
 
     app.layer(middleware::from_fn(redirect_follower_writes))
         .layer(middleware::from_fn(browser_cors))
+        .layer(middleware::from_fn(embedded_ui::document_csp))
         .layer(Extension(app_state))
 }
 
@@ -8407,18 +8408,6 @@ async fn admin_internal_get_alerts(
 async fn fallback_not_found() -> ApiError {
     ApiError::not_found("not found")
 }
-
-const CSP_HEADER_VALUE: &str = concat!(
-    "default-src 'self'; ",
-    "base-uri 'self'; ",
-    "object-src 'none'; ",
-    "frame-ancestors 'none'; ",
-    "connect-src 'self'; ",
-    "img-src 'self' data: blob:; ",
-    "script-src 'self'; ",
-    "style-src 'self' 'unsafe-inline'; ",
-    "font-src 'self';"
-);
 
 #[derive(Debug, Deserialize)]
 struct SubscriptionQuery {

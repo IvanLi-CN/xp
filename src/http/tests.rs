@@ -909,7 +909,40 @@ async fn set_bootstrap_node_access_host(store: &Arc<Mutex<JsonSnapshotStore>>, a
 #[tokio::test]
 async fn ui_serves_index_at_root_and_embedded_assets() {
     let tmp = TempDir::new().unwrap();
-    let app = app(&tmp);
+    let (app, store) = app_with(&tmp, ReconcileHandle::noop());
+    {
+        let mut store = store.lock().await;
+        let state = store.state_mut();
+        state
+            .nodes
+            .values_mut()
+            .next()
+            .expect("expected a bootstrap node")
+            .api_base_url = xp_test_fixtures::primary_api_url().to_string();
+        state.nodes.insert(
+            xp_test_fixtures::secondary_node_id().to_string(),
+            Node {
+                node_id: xp_test_fixtures::secondary_node_id().to_string(),
+                node_name: xp_test_fixtures::secondary_node_name().to_string(),
+                access_host: xp_test_fixtures::secondary_host().to_string(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        state.nodes.insert(
+            xp_test_fixtures::node_id_fixture560().to_string(),
+            Node {
+                node_id: xp_test_fixtures::node_id_fixture560().to_string(),
+                node_name: xp_test_fixtures::node_name_fixture86().to_string(),
+                access_host: xp_test_fixtures::host_fixture88().to_string(),
+                api_base_url: xp_test_fixtures::url_tcp_origin_fixture_test443().to_string(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            },
+        );
+        store.save().unwrap();
+    }
 
     let res = app.clone().oneshot(req("GET", "/")).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -921,7 +954,16 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
         .unwrap()
         .to_string();
     assert!(content_type.starts_with("text/html"));
-    assert!(res.headers().contains_key("content-security-policy"));
+    let csp = res
+        .headers()
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("connect-src 'self'"));
+    assert!(csp.contains(xp_test_fixtures::primary_api_url()));
+    assert!(csp.contains(xp_test_fixtures::secondary_api_url()));
+    assert!(!csp.contains(xp_test_fixtures::url_tcp_origin_fixture_test443()));
 
     let html = body_text(res).await;
     let assets = extract_asset_paths_from_index_html(&html);
@@ -943,6 +985,14 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
             assert_eq!(content_type, "text/css; charset=utf-8");
         }
     }
+
+    let service_worker = app.clone().oneshot(req("GET", "/sw.js")).await.unwrap();
+    assert!(
+        service_worker
+            .headers()
+            .get("content-security-policy")
+            .is_none()
+    );
 }
 
 #[tokio::test]

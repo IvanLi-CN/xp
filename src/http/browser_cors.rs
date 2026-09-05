@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use axum::{
     body::Body,
     extract::Extension,
@@ -12,7 +14,7 @@ use super::AppState;
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Authorization, Content-Type, Accept";
 
-fn canonical_https_origin(value: &str) -> Option<String> {
+pub(super) fn canonical_https_origin(value: &str) -> Option<String> {
     let url = Url::parse(value).ok()?;
     if url.scheme() != "https"
         || (url.path() != "" && url.path() != "/")
@@ -41,12 +43,33 @@ fn is_api_path(path: &str) -> bool {
     path == "/api" || path.starts_with("/api/")
 }
 
-async fn origin_is_registered(state: &AppState, origin: &str) -> bool {
-    let store = state.store.lock().await;
-    store
-        .list_nodes()
+fn canonical_registered_origins<'a, I>(values: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    values
         .into_iter()
-        .any(|node| canonical_https_origin(&node.api_base_url).as_deref() == Some(origin))
+        .filter_map(canonical_https_origin)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub(super) async fn registered_browser_origins(state: &AppState) -> Vec<String> {
+    let store = state.store.lock().await;
+    canonical_registered_origins(
+        store
+            .list_nodes()
+            .iter()
+            .map(|node| node.api_base_url.as_str()),
+    )
+}
+
+async fn origin_is_registered(state: &AppState, origin: &str) -> bool {
+    registered_browser_origins(state)
+        .await
+        .iter()
+        .any(|registered| registered == origin)
 }
 
 fn append_cors_headers(response: &mut Response, origin: &str) {
@@ -112,7 +135,7 @@ pub(super) async fn browser_cors(
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_https_origin;
+    use super::{canonical_https_origin, canonical_registered_origins};
 
     #[test]
     fn canonicalizes_only_https_origins() {
@@ -128,5 +151,22 @@ mod tests {
         assert_eq!(canonical_https_origin("https://example.com/api"), None);
         assert_eq!(canonical_https_origin("https://example.com?x=1"), None);
         assert_eq!(canonical_https_origin("null"), None);
+    }
+
+    #[test]
+    fn canonicalizes_registered_origins_with_deduplication() {
+        assert_eq!(
+            canonical_registered_origins([
+                "https://B.example/",
+                "http://insecure.example",
+                "https://a.example:443",
+                "https://b.example",
+                "https://a.example/path",
+            ]),
+            vec![
+                "https://a.example".to_string(),
+                "https://b.example".to_string()
+            ]
+        );
     }
 }

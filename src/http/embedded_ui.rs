@@ -2,13 +2,14 @@ use std::io::Read;
 
 use axum::{
     body::Body,
-    extract::{Path, Request},
+    extract::{Extension, Path, Request},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::Next,
     response::{IntoResponse, Response},
 };
 use flate2::read::GzDecoder;
 
-use super::{CSP_HEADER_VALUE, web_assets};
+use super::{AppState, browser_cors::registered_browser_origins, web_assets};
 
 const EMBEDDED_IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const EMBEDDED_NO_CACHE_CONTROL: &str = "no-cache";
@@ -44,6 +45,19 @@ const SERVICE_WORKER_CACHE_POLICY: EmbeddedCachePolicy = EmbeddedCachePolicy {
     pragma: Some("no-cache"),
 };
 
+const CSP_PREFIX: &str = concat!(
+    "default-src 'self'; ",
+    "base-uri 'self'; ",
+    "object-src 'none'; ",
+    "frame-ancestors 'none'; "
+);
+const CSP_SUFFIX: &str = concat!(
+    "; img-src 'self' data: blob:; ",
+    "script-src 'self'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "font-src 'self';"
+);
+
 fn embedded_content_type(path: &str) -> &'static str {
     match std::path::Path::new(path)
         .extension()
@@ -68,7 +82,6 @@ fn embedded_bytes_response(
     asset: web_assets::EmbeddedAsset,
     content_type: &'static str,
     cache_policy: EmbeddedCachePolicy,
-    csp: bool,
     accepts_gzip: bool,
 ) -> Response {
     let mut headers = HeaderMap::new();
@@ -112,13 +125,45 @@ fn embedded_bytes_response(
     if asset.gzip {
         headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
     }
-    if csp {
-        headers.insert(
+    (headers, body).into_response()
+}
+
+fn content_security_policy(origins: &[String]) -> String {
+    let mut value =
+        String::with_capacity(CSP_PREFIX.len() + CSP_SUFFIX.len() + "connect-src 'self';".len());
+    value.push_str(CSP_PREFIX);
+    value.push_str("connect-src 'self'");
+    for origin in origins {
+        value.push(' ');
+        value.push_str(origin);
+    }
+    value.push_str(CSP_SUFFIX);
+    value
+}
+
+pub(super) async fn document_csp(
+    Extension(state): Extension<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let is_html = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"));
+    if !is_html {
+        return response;
+    }
+
+    let origins = registered_browser_origins(&state).await;
+    if let Ok(value) = HeaderValue::from_str(&content_security_policy(&origins)) {
+        response.headers_mut().insert(
             header::HeaderName::from_static("content-security-policy"),
-            HeaderValue::from_static(CSP_HEADER_VALUE),
+            value,
         );
     }
-    (headers, body).into_response()
+    response
 }
 
 fn client_accepts_gzip(headers: &HeaderMap) -> bool {
@@ -153,7 +198,6 @@ fn embedded_index_response(accepts_gzip: bool) -> Response {
         index,
         "text/html; charset=utf-8",
         EMBEDDED_NO_CACHE_POLICY,
-        true,
         accepts_gzip,
     )
 }
@@ -167,7 +211,6 @@ pub async fn embedded_asset(Path(path): Path<String>, headers: HeaderMap) -> Res
         asset,
         embedded_content_type(&key),
         EMBEDDED_IMMUTABLE_CACHE_POLICY,
-        false,
         client_accepts_gzip(&headers),
     )
 }
@@ -195,7 +238,6 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
             bytes,
             embedded_content_type(path),
             cache_policy,
-            path == "index.html",
             accepts_gzip,
         );
     }
@@ -207,7 +249,7 @@ pub async fn embedded_spa_fallback(req: Request<Body>) -> Response {
 mod tests {
     use std::io::Read;
 
-    use super::{client_accepts_gzip, embedded_spa_fallback};
+    use super::{client_accepts_gzip, content_security_policy, embedded_spa_fallback};
     use axum::{
         body::Body,
         http::{HeaderMap, HeaderValue, Method, StatusCode, header},
@@ -290,5 +332,17 @@ mod tests {
             HeaderValue::from_static("gzip;q=0, *;q=1"),
         );
         assert!(!client_accepts_gzip(&headers));
+    }
+
+    #[test]
+    fn document_csp_contains_only_exact_registered_origins() {
+        let value = content_security_policy(&[
+            "https://a.example".to_string(),
+            "https://b.example:8443".to_string(),
+        ]);
+        assert!(value.contains("connect-src 'self' https://a.example https://b.example:8443;"));
+        assert!(!value.contains("connect-src https:"));
+        assert!(!value.contains("*.example"));
+        assert!(content_security_policy(&[]).contains("connect-src 'self';"));
     }
 }
