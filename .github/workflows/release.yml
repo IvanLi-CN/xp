@@ -2,7 +2,7 @@ name: release
 
 on:
   workflow_run:
-    workflows: ["ci"]
+    workflows: [ci]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -15,17 +15,12 @@ on:
         description: Release increment for the approved backfill
         required: true
         type: choice
-        options:
-          - patch
-          - minor
-          - major
+        options: [patch, minor, major]
       channel:
         description: Release channel
         required: true
         type: choice
-        options:
-          - stable
-          - prerelease
+        options: [stable, prerelease]
       expected_version:
         description: Exact computed version required before tagging
         required: true
@@ -43,44 +38,37 @@ permissions:
   pull-requests: read
 
 env:
-  RELEASE_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.workflow_run.head_sha }}
+  RELEASE_HEAD_SHA: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
+    github.event.workflow_run.head_sha }}
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.head_sha || github.event.workflow_run.head_sha }}
+  group: >-
+    release-${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
+    github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     if: >-
-      (github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.intent.outputs.should_release }}
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.intent.outputs.is_prerelease }}
+      tag_name: ${{ steps.release-tag.outputs.tag_name }}
+      image_tags: ${{ steps.image.outputs.tags }}
     steps:
       - name: resolve release head sha
-        id: release-head
-        shell: bash
         run: |
-          set -euo pipefail
-          target_sha="${RELEASE_HEAD_SHA}"
-          if [[ ! "${target_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Invalid head_sha: ${target_sha}" >&2
-            exit 1
-          fi
-          echo "release_head_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
-          echo "RELEASE_REQUESTED_SHA=${target_sha}"
-          echo "RELEASE_TARGET_SHA=${target_sha}"
-
+          [[ "${RELEASE_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
       - name: checkout release automation
-        uses: actions/checkout@v7
-        with:
-          ref: main
-          fetch-depth: 0
-
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: main, fetch-depth: 0}
       - name: determine release intent
         id: intent
-        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
@@ -89,335 +77,136 @@ jobs:
           RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
           EXPECTED_VERSION: ${{ inputs.expected_version || '' }}
           RELEASE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || '' }}
-        run: bash ./.github/scripts/release-intent.sh
-
+        run: bash .github/scripts/release-intent.sh
       - name: verify target workflow readiness
         if: steps.intent.outputs.should_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_HEAD_SHA: ${{ env.RELEASE_HEAD_SHA }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python3 ./.github/scripts/release_readiness.py
-
+        run: python3 .github/scripts/release_readiness.py
       - name: summary (release intent)
         if: always()
-        env:
-          TRIGGER: ${{ github.event_name }}
-          TARGET_SHA: ${{ env.RELEASE_HEAD_SHA }}
-          PR_NUMBER: ${{ steps.intent.outputs.pr_number }}
-          PR_URL: ${{ steps.intent.outputs.pr_url }}
-          INTENT_SOURCE: ${{ steps.intent.outputs.intent_source }}
-          INTENT_TYPE: ${{ steps.intent.outputs.release_intent_type }}
-          RELEASE_CHANNEL: ${{ steps.intent.outputs.release_channel }}
-          INTENT_LABEL: ${{ steps.intent.outputs.release_intent_label }}
-          IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
-          SHOULD_RELEASE: ${{ steps.intent.outputs.should_release }}
-          BUMP_LEVEL: ${{ steps.intent.outputs.bump_level }}
-          INTENT_REASON: ${{ steps.intent.outputs.reason }}
-          BACKFILL_REASON: ${{ steps.intent.outputs.backfill_reason }}
-          EXPECTED_VERSION: ${{ steps.intent.outputs.expected_version }}
-        shell: bash
         run: |
-          set -euo pipefail
           {
-            printf '%s\n' '### Release intent'
-            printf '%s\n' "- trigger: ${TRIGGER}"
-            printf '%s\n' "- head_sha: ${TARGET_SHA}"
-            printf '%s\n' "- pr: #${PR_NUMBER} (${PR_URL})"
-            printf '%s\n' "- source: ${INTENT_SOURCE}"
-            printf '%s\n' "- type: ${INTENT_TYPE}"
-            printf '%s\n' "- channel: ${RELEASE_CHANNEL}"
-            printf '%s\n' "- intent_label: ${INTENT_LABEL}"
-            printf '%s\n' "- is_prerelease: ${IS_PRERELEASE}"
-            printf '%s\n' "- should_release: ${SHOULD_RELEASE}"
-            printf '%s\n' "- bump_level: ${BUMP_LEVEL}"
-            printf '%s\n' "- reason: ${INTENT_REASON}"
-            printf '%s\n' "- backfill_reason: ${BACKFILL_REASON}"
-            printf '%s\n' "- expected_version: ${EXPECTED_VERSION}"
+            echo '### Release intent'
+            echo "- head_sha: ${RELEASE_HEAD_SHA}"
+            echo "- should_release: ${{ steps.intent.outputs.should_release }}"
+            echo "- source: ${{ steps.intent.outputs.intent_source }}"
+            echo "- reason: ${{ steps.intent.outputs.reason }}"
           } >> "${GITHUB_STEP_SUMMARY}"
-
       - name: skip release (intent says no)
         if: steps.intent.outputs.should_release != 'true'
-        # Quote as YAML scalar (plain scalars cannot contain ': ').
         run: 'echo "skip release: intent says no"'
-
       - name: compute version
         id: version
-        shell: bash
         if: steps.intent.outputs.should_release == 'true'
         env:
           BUMP_LEVEL: ${{ steps.intent.outputs.bump_level }}
           IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
-        run: |
-          set -euo pipefail
-          chmod +x .github/scripts/compute-version.sh
-          .github/scripts/compute-version.sh
-
+        run: .github/scripts/compute-version.sh
       - name: verify expected backfill version
         if: >-
           steps.intent.outputs.should_release == 'true' &&
           github.event_name == 'workflow_dispatch'
-        env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
-          COMPUTED_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [[ "${COMPUTED_VERSION}" != "${EXPECTED_VERSION}" ]]; then
-            echo "expected_version mismatch" >&2
-            echo "expected=${EXPECTED_VERSION} computed=${COMPUTED_VERSION}" >&2
-            exit 1
-          fi
-          echo "expected_version verified: ${COMPUTED_VERSION}"
-
+        run: test "${{ steps.version.outputs.version }}" = "${{ inputs.expected_version }}"
       - name: prepare docker image tags
         id: image
         if: steps.intent.outputs.should_release == 'true'
-        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
           IS_PRERELEASE: ${{ steps.intent.outputs.is_prerelease }}
         run: |
-          set -euo pipefail
-          owner_lc="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner_lc}/xp"
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/xp"
           {
-            echo "image=${image}"
             echo "tags<<EOF"
             echo "${image}:v${VERSION}"
             echo "${image}:${VERSION}"
-            if [[ "${IS_PRERELEASE}" != "true" ]]; then
-              echo "${image}:latest"
-            fi
-            echo "EOF"
+            [[ "${IS_PRERELEASE}" == true ]] || echo "${image}:latest"
+            echo EOF
           } >> "${GITHUB_OUTPUT}"
-
-      - name: configure git user
-        if: steps.intent.outputs.should_release == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
       - name: create and push tag (if missing)
         id: release-tag
         if: steps.intent.outputs.should_release == 'true'
-        shell: bash
         run: |
-          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           version="${{ steps.version.outputs.version }}"
-          preferred_tag="v${version}"
-          legacy_tag="${version}"
-          target_sha="$(git rev-parse "${RELEASE_HEAD_SHA}^{commit}")"
-          selected_tag=""
-
-          echo "target version: ${version}"
-
-          if git rev-parse -q --verify "refs/tags/${preferred_tag}" >/dev/null; then
-            existing_tag_sha="$(git rev-list -n 1 "${preferred_tag}^{commit}")"
-            if [[ "${existing_tag_sha}" == "${target_sha}" ]]; then
-              selected_tag="${preferred_tag}"
-            else
-              echo "tag ${preferred_tag} already exists on ${existing_tag_sha}, expected ${target_sha}" >&2
-              exit 1
+          preferred="v${version}"
+          legacy="${version}"
+          target="$(git rev-parse "${RELEASE_HEAD_SHA}^{commit}")"; selected=
+          for candidate in "$preferred" "$legacy"; do
+            if git rev-parse -q --verify "refs/tags/$candidate" >/dev/null; then
+              test "$(git rev-list -n 1 "$candidate^{commit}")" = "$target"
+              selected="$candidate"; break
             fi
-          elif git rev-parse -q --verify "refs/tags/${legacy_tag}" >/dev/null; then
-            existing_tag_sha="$(git rev-list -n 1 "${legacy_tag}^{commit}")"
-            if [[ "${existing_tag_sha}" == "${target_sha}" ]]; then
-              selected_tag="${legacy_tag}"
-            else
-              echo "tag ${legacy_tag} already exists on ${existing_tag_sha}, expected ${target_sha}" >&2
-              exit 1
-            fi
-          else
-            git tag -a "${preferred_tag}" -m "${preferred_tag}" "${target_sha}"
-            git push origin "${preferred_tag}"
-            selected_tag="${preferred_tag}"
+          done
+          if [[ -z "$selected" ]]; then
+            git tag -a "$preferred" -m "$preferred" "$target"
+            git push origin "$preferred"
+            selected="$preferred"
           fi
-
-          echo "selected tag: ${selected_tag}"
-          echo "tag_name=${selected_tag}" >> "${GITHUB_OUTPUT}"
-
+          echo "tag_name=$selected" >> "${GITHUB_OUTPUT}"
       - name: preserve release automation Dockerfile
         if: steps.intent.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .release-automation
-          cp Dockerfile .release-automation/Dockerfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: "release-automation-${{ github.run_id }}", path: Dockerfile}
 
-      - name: checkout release target tree
-        if: steps.intent.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git checkout --progress --force "${RELEASE_HEAD_SHA}"
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    uses: ./.github/workflows/release-build.yml
+    with:
+      target_sha: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.head_sha ||
+        github.event.workflow_run.head_sha }}
+      build_version: ${{ needs.prepare.outputs.version }}
+      artifact_prefix: release-${{ github.run_id }}
+      cache_scope: release
 
-      - name: setup rust
-        if: steps.intent.outputs.should_release == 'true'
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: 1.96.0
-          components: rustfmt, clippy
-
-      - name: rustfmt
-        if: steps.intent.outputs.should_release == 'true'
-        env:
-          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
-        run: cargo fmt --check
-
-      - name: setup bun
-        if: steps.intent.outputs.should_release == 'true'
-        uses: oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: build embedded web assets
-        if: steps.intent.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd web
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: clippy
-        if: steps.intent.outputs.should_release == 'true'
-        env:
-          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
-        run: cargo clippy -- -D warnings
-
-      - name: test
-        if: steps.intent.outputs.should_release == 'true'
-        env:
-          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
-        run: cargo test
-
-      - name: install cross
-        if: steps.intent.outputs.should_release == 'true'
-        uses: taiki-e/install-action@v2.82.5
-        with:
-          tool: cross
-
-      - name: setup go
-        if: steps.intent.outputs.should_release == 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.5
-
-      - name: build low-memory managed runtimes
-        if: steps.intent.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          xray_commit=d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
-          cloudflared_commit=3a2b45c2a511fcdd81b68c190938e4ffadbea5dc
-          cloudflared_version=2026.7.3
-          cloudflared_build_time=2026-07-23T00:00:00Z
-
-          git clone --filter=blob:none https://github.com/XTLS/Xray-core.git /tmp/xray-core
-          git -C /tmp/xray-core checkout --detach "${xray_commit}"
-          git clone --filter=blob:none \
-            https://github.com/cloudflare/cloudflared.git /tmp/cloudflared
-          git -C /tmp/cloudflared checkout --detach "${cloudflared_commit}"
-
-          mkdir -p release
-          for target in amd64:x86_64 arm64:aarch64; do
-            goarch="${target%%:*}"
-            suffix="${target##*:}"
-            (
-              cd /tmp/xray-core
-              CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build \
-                -trimpath -gcflags=all=-l -ldflags='-s -w -buildid=' \
-                -o "${GITHUB_WORKSPACE}/release/xray-linux-${suffix}" ./main
-            )
-            (
-              cd /tmp/cloudflared
-              cloudflared_ldflags=(
-                -s -w -buildid=
-                "-X main.Version=${cloudflared_version}"
-                "-X main.BuildTime=${cloudflared_build_time}"
-                "-X github.com/cloudflare/cloudflared/metrics.Runtime=virtual"
-              )
-              CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build \
-                -mod=vendor -trimpath -gcflags=all=-l \
-                -ldflags="${cloudflared_ldflags[*]}" \
-                -o "${GITHUB_WORKSPACE}/release/cloudflared-linux-${suffix}" \
-                ./cmd/cloudflared
-            )
-          done
-
-      - name: build assets (linux musl)
-        if: steps.intent.outputs.should_release == 'true'
-        shell: bash
-        env:
-          XP_EFFECTIVE_VERSION: ${{ steps.version.outputs.version }}
-          XP_BUILD_VERSION: ${{ steps.version.outputs.version }}
-          CROSS_CONTAINER_OPTS: -e XP_BUILD_VERSION=${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p release
-
-          # NOTE: Use separate CARGO_TARGET_DIR per target to avoid reusing host build-script
-          # binaries across different cross images (glibc version mismatch).
-          export CARGO_TARGET_DIR=target/cross-x86_64-unknown-linux-musl
-          cross build --release --locked --target x86_64-unknown-linux-musl --bin xp
-          cross build --release --locked --target x86_64-unknown-linux-musl --bin xp-ops
-          cp "${CARGO_TARGET_DIR}/x86_64-unknown-linux-musl/release/xp" release/xp-linux-x86_64
-          cp "${CARGO_TARGET_DIR}/x86_64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-x86_64
-
-          export CARGO_TARGET_DIR=target/cross-aarch64-unknown-linux-musl
-          cross build --release --locked --target aarch64-unknown-linux-musl --bin xp
-          cross build --release --locked --target aarch64-unknown-linux-musl --bin xp-ops
-          cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp" release/xp-linux-aarch64
-          cp "${CARGO_TARGET_DIR}/aarch64-unknown-linux-musl/release/xp-ops" release/xp-ops-linux-aarch64
-
-          cd release
-          sha256sum -- *-linux-* > checksums.txt
-
-      - name: setup qemu
-        if: steps.intent.outputs.should_release == 'true'
-        uses: docker/setup-qemu-action@v4.1.0
-
-      - name: setup buildx
-        if: steps.intent.outputs.should_release == 'true'
-        uses: docker/setup-buildx-action@v4.1.0
-
-      - name: login ghcr
-        if: steps.intent.outputs.should_release == 'true'
-        uses: docker/login-action@v4.2.0
+  publish-image:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.RELEASE_HEAD_SHA }}"}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {name: "release-automation-${{ github.run_id }}", path: .release-automation}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
+      - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: publish ghcr image
-        if: steps.intent.outputs.should_release == 'true'
-        timeout-minutes: 60
-        uses: docker/build-push-action@v7.2.0
-        env:
-          # Work around docker/build-push-action post-build hangs introduced by the
-          # new build record export path in v6.17+.
-          # Upstream: https://github.com/docker/build-push-action/issues/1388
-          DOCKER_BUILD_EXPORT_LEGACY: true
+      - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        env: {DOCKER_BUILD_EXPORT_LEGACY: true}
         with:
           context: .
-          file: ./.release-automation/Dockerfile
+          file: .release-automation/Dockerfile
           target: runtime-from-prebuilt
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.image.outputs.tags }}
-          build-args: |
-            XP_BUILD_VERSION=${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ needs.prepare.outputs.image_tags }}
+          build-args: XP_BUILD_VERSION=${{ needs.prepare.outputs.version }}
+          cache-from: type=gha,scope=release-runtime
+          cache-to: type=gha,mode=max,scope=release-runtime
 
-      - name: create release
-        if: steps.intent.outputs.should_release == 'true'
-        uses: ncipollo/release-action@v1.21.0
+  publish-release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
+      - run: cd release && sha256sum -- *-linux-* > checksums.txt && sha256sum --check checksums.txt
+      - uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
         with:
-          tag: ${{ steps.release-tag.outputs.tag_name }}
-          name: ${{ steps.release-tag.outputs.tag_name }}
-          prerelease: ${{ steps.intent.outputs.is_prerelease }}
+          tag: ${{ needs.prepare.outputs.tag_name }}
+          name: ${{ needs.prepare.outputs.tag_name }}
+          prerelease: ${{ needs.prepare.outputs.is_prerelease }}
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true

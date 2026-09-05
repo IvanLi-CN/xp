@@ -1,0 +1,79 @@
+name: ci-performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact 40-character commit SHA to measure
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [[ "${{ inputs.target_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_SHA}" = "${{ inputs.target_sha }}"
+
+  cold:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix: {sample: [1, 2, 3]}
+    name: cold-${{ matrix.sample }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      target_sha: ${{ inputs.target_sha }}
+      cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
+      cache_phase: cold
+      sample: ${{ matrix.sample }}
+
+  warm:
+    needs: cold
+    strategy:
+      fail-fast: false
+      matrix: {sample: [1, 2, 3]}
+    name: warm-${{ matrix.sample }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      target_sha: ${{ inputs.target_sha }}
+      cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
+      cache_phase: warm
+      sample: ${{ matrix.sample }}
+
+  assert:
+    needs: warm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ inputs.target_sha }}"}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {pattern: "cache-receipt-*", path: cache-receipts}
+      - name: collect job timings
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+          gh api --paginate "${jobs_url}" \
+            --jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
+      - name: assert performance
+        run: |
+          python3 .github/scripts/performance_assert.py \
+            --kind ci --jobs jobs.json --run run.json \
+            --receipts cache-receipts \
+            --output ci-performance.json
+      - name: write summary
+        run: |
+          {
+            echo '### CI performance acceptance'
+            echo '```json'
+            cat ci-performance.json
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: "ci-performance-${{ github.run_id }}", path: ci-performance.json}

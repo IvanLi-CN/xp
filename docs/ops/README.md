@@ -1044,6 +1044,34 @@ commit changes a workflow file, the Actions `GITHUB_TOKEN` cannot create its tag
 push the exact annotated tag with a credential that has workflow scope, after which the workflow's
 idempotent tag step reuses it.
 
+### CI and release performance acceptance
+
+Performance acceptance is explicit and SHA-bound; ordinary main runs are not accumulated into an
+informal moving average. Dispatch `ci-performance` from the exact commit under test and pass the
+same full 40-character SHA as `target_sha`. It runs three isolated cold/warm pairs. Each pair has a
+unique cache namespace, requires cold misses and warm hits, and fails when the maximum parallel-job
+duration exceeds 420 seconds cold or 300 seconds warm.
+
+Dispatch `release-performance` the same way to exercise the reusable release build graph without
+creating a tag, package version, GitHub Release, or deployment. It uses a synthetic
+`0.0.0-perf.<run-id>` version, assembles but does not push the image, and enforces 120 seconds for
+Web, 600 seconds per musl architecture, 180 seconds per managed-runtime architecture, 300 seconds
+for image assembly, and 900 seconds for the composed critical path.
+
+Both workflows publish machine-readable JSON. Durations use GitHub Job `started_at` and
+`completed_at`; queue delay is not part of the execution limits. Missing jobs, failed jobs,
+incomplete timestamps, SHA mismatches, and malformed cache receipts fail closed.
+
+```text
+sha="$(git rev-parse HEAD)"
+ref="$(git branch --show-current)"
+gh workflow run ci-performance.yml --ref "$ref" -f target_sha="$sha"
+gh workflow run release-performance.yml --ref "$ref" -f target_sha="$sha"
+```
+
+For failures, download the `ci-performance-*` or `release-performance-*` JSON artifact. CI cache
+diagnostics are retained as `cache-receipt-*` artifacts in the same run.
+
 ### Release-ready checklist: host-managed systemd node with Tunnel/DDNS
 
 Ideal post-release path:

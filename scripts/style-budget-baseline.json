@@ -1,15 +1,7 @@
 {
-  ".github/workflows/ci.yml": {
-    "long_line_count": 5,
-    "max_line_length": 130
-  },
   ".github/workflows/notify-release-failure.yml": {
     "long_line_count": 7,
     "max_line_length": 141
-  },
-  ".github/workflows/release.yml": {
-    "long_line_count": 6,
-    "max_line_length": 124
   },
   "AGENTS.md": {
     "long_line_count": 10,

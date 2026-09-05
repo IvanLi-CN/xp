@@ -3,7 +3,11 @@
 > 当前有效规范以本文为准；实现覆盖与当前状态见 `./IMPLEMENTATION.md`，
 > 关键演进原因见 `./HISTORY.md`。
 
-## 背景 / 问题陈述
+## Related ADRs
+
+- [ADR 0001](../../adr/0001-merge-time-release-intent.md)
+
+## Context and Scope
 
 发布 workflow 过去读取合并后 PR 的当前标签，并只等待 `ci`。
 标签在合并后可以变化，且 `fixture-policy` 与 `xray-e2e` 可能尚未完成，
@@ -34,7 +38,14 @@
 
 - 版本算法本身、镜像构建内容、部署运行时和 Cloudflare 行为。
 
-## 需求（Requirements）
+## Requirements
+
+- **REQ-INTENT**: 发布流程必须以 merge-time PR 事件、精确目标 SHA readiness 和显式
+  Manual Backfill 输入决定是否发布，并在证据不完整时 fail closed。
+- **REQ-BUILD**: 正式 Release 必须通过共享构建图并行产生目标 SHA 的 Web、musl 和
+  managed-runtime 产物，只允许发布同一 run-scoped artifact prefix 的完整产物集。
+- **REQ-PERFORMANCE**: 性能验收必须锁定 workflow SHA 与 `target_sha`，只使用已完成
+  Job 的执行时间，具有读权限且不得创建 tag、镜像版本或 GitHub Release。
 
 ### MUST
 
@@ -64,6 +75,10 @@
 - 人工路径：验证目标是 `origin/main` 的已合并提交，使用显式输入计算版本。
   expected version 不匹配时在 tag 前失败；同目标已有正确 tag 时允许重试。
 - docs/skip 意图只记录 skip，不创建 tag、GitHub Release 或 GHCR 产物。
+- `release-build` 按目标 SHA 构建 Web、两个 musl 架构和两个低内存运行时架构，并以
+  artifact 将产物交给发布 Job；Release 不重复已由 readiness 覆盖的格式、lint 和测试。
+- `release-performance` 复用同一构建图，但只有读权限，使用非发布版本且不 push
+  镜像；不得创建 tag、GHCR package version 或 GitHub Release。
 
 ### Edge cases / errors
 
@@ -81,12 +96,22 @@
   it is the explicit Manual Backfill entry point.
 - `release intent outputs`: internal workflow output, modified; consumed by the
   release and notifier jobs for source, type, channel, and target context.
+- `release-build workflow_call`: internal build interface with exact `target_sha`,
+  `build_version`, `artifact_prefix`, and `cache_scope` inputs.
+- `release-performance dispatch`: internal measurement interface with exact `target_sha` input.
 
 ### 契约文档（按 Kind 拆分）
 
 - `None`。
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- **VER-INTENT** covers: REQ-INTENT. `test-release-governance.py` 与
+  `test-compute-version.sh` 验证事件重放、readiness、backfill 和版本边界。
+- **VER-BUILD** covers: REQ-BUILD. workflow contract tests、artifact checksums 和正式
+  Release required checks 验证共享构建图与完整产物集。
+- **VER-PERFORMANCE** covers: REQ-PERFORMANCE. `test-ci-performance.py` 和
+  `release-performance` JSON 验证权限、SHA、Job 时间戳、阈值与无发布副作用。
 
 - Given a PR whose labels change after merge, When release resolves its target,
   Then only labels replayed through the merge event affect the result.
@@ -94,6 +119,11 @@
   non-success, or for another SHA, Then no tag or artifact is published.
 - Given a Manual Backfill, When computed version differs from expected_version,
   Then the workflow fails before tag creation.
+- Given a release performance dispatch, When the SHA, required Job, timestamp, or artifact is
+  missing, Then measurement fails closed without publishing.
+- Given a completed performance build, Then Web is at most 120 seconds, each musl build is at most
+  600 seconds, each managed-runtime build is at most 180 seconds, image assembly is at most 300
+  seconds, and the composed critical path is at most 900 seconds.
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -114,13 +144,6 @@
 - 精确 SHA readiness 与 Manual Backfill expected-version guard 可独立验证。
 - 治理 PR 合并后，目标 SHA 的 stable Release、checksums 和 GHCR 镜像完成验证。
 
-## 验收清单（Acceptance checklist）
-
-- [ ] 合并时意图与 type/channel 门禁已明确。
-- [ ] 精确 SHA readiness、失败分类和超时行为已明确。
-- [ ] Manual Backfill 输入、版本校验和幂等 tag 行为已明确。
-- [ ] 历史 PR 不改写且不新增自有意图记录已明确。
-
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
 ### Testing
@@ -137,12 +160,6 @@
 - Shell syntax, Python unittest, dprint, workflow required checks, and code review must pass.
 
 ## Visual Evidence
-
-PR: none
-
-## Related PRs
-
-- #267 — Reality Mesh Reverse Relay target requiring corrective release.
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

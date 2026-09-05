@@ -1,0 +1,138 @@
+name: release-build
+
+on:
+  workflow_call:
+    inputs:
+      target_sha: {required: true, type: string}
+      build_version: {required: true, type: string}
+      artifact_prefix: {required: true, type: string}
+      cache_scope: {required: true, type: string}
+
+permissions:
+  contents: read
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ inputs.target_sha }}"}
+      - run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.bun/install/cache
+          key: >-
+            ${{ runner.os }}-release-web-${{ inputs.cache_scope }}-${{
+            hashFiles('web/bun.lock') }}
+      - name: build web
+        env: {XP_WEB_BUILD_ID: "${{ inputs.build_version }}"}
+        run: cd web && bun install --frozen-lockfile && bun run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: "web-${{ inputs.artifact_prefix }}", path: web/dist}
+
+  build-musl:
+    needs: build-web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: x86_64
+            target: x86_64-unknown-linux-musl
+          - suffix: aarch64
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ inputs.target_sha }}"}
+      - run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {name: "web-${{ inputs.artifact_prefix }}", path: web/dist}
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with: {toolchain: 1.96.0}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/cross-${{ matrix.target }}
+          key: >-
+            ${{ runner.os }}-release-musl-${{ matrix.target }}-${{
+            inputs.cache_scope }}-${{ inputs.target_sha }}
+          restore-keys: >-
+            ${{ runner.os }}-release-musl-${{ matrix.target }}-${{
+            inputs.cache_scope }}-
+      - uses: taiki-e/install-action@bffeee26d4db9be238a4ea78d8826604ebcb594d
+        with: {tool: cross}
+      - name: build musl assets
+        env:
+          XP_BUILD_VERSION: ${{ inputs.build_version }}
+          CROSS_CONTAINER_OPTS: -e XP_BUILD_VERSION=${{ inputs.build_version }}
+          CARGO_TARGET_DIR: target/cross-${{ matrix.target }}
+        run: |
+          cross build --release --locked --target "${{ matrix.target }}" --bin xp --bin xp-ops
+          mkdir release
+          source_dir="${CARGO_TARGET_DIR}/${{ matrix.target }}/release"
+          cp "${source_dir}/xp" "release/xp-linux-${{ matrix.suffix }}"
+          cp "${source_dir}/xp-ops" "release/xp-ops-linux-${{ matrix.suffix }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: "musl-${{ inputs.artifact_prefix }}-${{ matrix.suffix }}", path: release}
+
+  build-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: x86_64
+            goarch: amd64
+          - suffix: aarch64
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ inputs.target_sha }}"}
+      - run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with: {go-version: 1.26.5}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: >-
+            ${{ runner.os }}-release-go-${{ matrix.goarch }}-${{
+            inputs.cache_scope }}-d2758a0-3a2b45c
+      - name: build low-memory managed runtimes
+        env: {GOARCH: "${{ matrix.goarch }}", SUFFIX: "${{ matrix.suffix }}"}
+        run: |
+          git clone --filter=blob:none https://github.com/XTLS/Xray-core.git /tmp/xray-core
+          git -C /tmp/xray-core checkout --detach d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+          git clone --filter=blob:none \
+            https://github.com/cloudflare/cloudflared.git /tmp/cloudflared
+          git -C /tmp/cloudflared checkout --detach 3a2b45c2a511fcdd81b68c190938e4ffadbea5dc
+          mkdir release
+          (
+            cd /tmp/xray-core
+            CGO_ENABLED=0 GOOS=linux go build -trimpath -gcflags=all=-l \
+              -ldflags='-s -w -buildid=' \
+              -o "${GITHUB_WORKSPACE}/release/xray-linux-${SUFFIX}" ./main
+          )
+          cloudflared_ldflags=(
+            -s -w -buildid=
+            '-X main.Version=2026.7.3'
+            '-X main.BuildTime=2026-07-23T00:00:00Z'
+            '-X github.com/cloudflare/cloudflared/metrics.Runtime=virtual'
+          )
+          (
+            cd /tmp/cloudflared
+            CGO_ENABLED=0 GOOS=linux go build -mod=vendor -trimpath \
+              -gcflags=all=-l -ldflags="${cloudflared_ldflags[*]}" \
+              -o "${GITHUB_WORKSPACE}/release/cloudflared-linux-${SUFFIX}" \
+              ./cmd/cloudflared
+          )
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: "runtime-${{ inputs.artifact_prefix }}-${{ matrix.suffix }}", path: release}

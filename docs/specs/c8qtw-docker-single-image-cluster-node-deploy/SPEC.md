@@ -1,12 +1,16 @@
 # 单 Docker 镜像集群节点部署（#c8qtw)
 
+## Related ADRs
+
+- [ADR 0001](../../adr/0001-merge-time-release-intent.md)
+
 ## 状态
 
 - Status: 已完成
 - Created: 2026-04-23
 - Last: 2026-08-04
 
-## 背景 / 问题陈述
+## Context and Scope
 
 - 仓库此前只有 `scripts/dev/subscription-3node-compose/` 下的本地回归容器资产，不构成正式生产部署路径。
 - 现有宿主机运维路径以 `xp + xray + cloudflared` 的 systemd/OpenRC 托管为主，而 Docker 用户需要一个单镜像、单 entrypoint、可复用现有 Cloudflare Tunnel 逻辑的节点运行模型。
@@ -46,7 +50,14 @@
 - 容器外部的日志/监控系统集成。
 - Cloudflare Access / WAF / Access policy 的自动化配置。
 
-## 需求（Requirements）
+## Requirements
+
+- **REQ-CONTAINER**: 官方单镜像必须包含 XP、xp-ops、Web、Xray 和 cloudflared，使用
+  `xp-ops container run` 统一实现 bootstrap/join、持久化与子进程监管合同。
+- **REQ-IMAGE-DELIVERY**: CI 必须验证 Docker smoke；正式 Release 必须从同一目标 SHA
+  的完整 checksummed 预构建产物集发布 amd64/arm64 GHCR 镜像。
+- **REQ-IMAGE-PERFORMANCE**: 固定 SHA 的 CI/Release 性能 workflow 必须验证 Docker
+  cache 和 cache-only 多架构组装，且不得执行生产发布写入。
 
 ### MUST
 
@@ -67,6 +78,10 @@
   endpoint 的端口由集群状态持有。
 - runtime 镜像入口固定为 `tini -- xp-ops container run`。
 - release 工作流必须发布 `linux/amd64` 与 `linux/arm64` 的 GHCR 镜像；稳定版发布 `vX.Y.Z`、`X.Y.Z`、`latest`，预发布不推 `latest`。
+- CI Docker smoke build 必须使用 BuildKit cache，并在固定 SHA 性能验收中提供隔离的
+  cold/warm cache receipt；warm CI 关键路径不得超过 300 秒。
+- Release 多架构镜像只消费同一目标 SHA、同一 run-scoped prefix 的八个预构建二进制，
+  并在发布前验证 `checksums.txt`。
 
 ### SHOULD
 
@@ -135,7 +150,14 @@
 - `/etc/cloudflared`：`config.yml` 与 `<tunnel-id>.json`
 - `/etc/xp-ops/cloudflare_tunnel`：Tunnel settings 持久化
 
-## 验收标准（Acceptance Criteria）
+## Verification
+
+- **VER-CONTAINER** covers: REQ-CONTAINER. Rust 单元测试、entrypoint dry-run、Compose
+  smoke 和容器健康检查验证 bootstrap、join、reconcile 与进程监管。
+- **VER-IMAGE-DELIVERY** covers: REQ-IMAGE-DELIVERY. CI Docker Job、artifact checksum 和
+  正式 Release required checks 验证双架构镜像及 tags。
+- **VER-IMAGE-PERFORMANCE** covers: REQ-IMAGE-PERFORMANCE. `test-ci-performance.py`、
+  `ci-performance` 与 `release-performance` JSON 验证 cache receipt、阈值和只读权限。
 
 - Given 正式 `Dockerfile` 构建完成，When 运行容器，Then 镜像内嵌真实前端资源，不再依赖占位 `web/dist/index.html`。
 - Given 空数据卷与 bootstrap 环境变量，When 容器首次启动，Then 只执行一次 `xp init`；重启后不重复初始化。
@@ -153,6 +175,8 @@
   endpoint，后续启动会按 env 重新创建。
 - Given PR CI 运行，When Docker job 执行，Then 镜像 smoke build 通过且默认 entrypoint dry-run 合同通过。
 - Given release 工作流成功，When 版本被发布，Then GHCR 产出 amd64/arm64 镜像与约定 tag。
+- Given `release-performance` 运行，When 多架构镜像完成 cache-only 组装，Then 不产生
+  GHCR/tag/Release 写入且 assembly Job 不超过 300 秒。
 - Given 操作者只参考 README 与 ops 文档，When 按 Compose 示例部署 bootstrap / join 节点，Then 能明确知道所需 env、secret、volume 与 Cloudflare 前提。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
@@ -186,11 +210,11 @@
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
-- [x] M1: 建立 spec，冻结单镜像 / Tunnel / GHCR / 卷契约
-- [x] M2: 实现 `xp-ops container run` 与 Cloudflare container runtime 复用
-- [x] M3: 交付正式 Dockerfile 与 Compose 示例
-- [x] M4: 扩展 CI / release 到 Docker smoke + GHCR 多架构发布
-- [x] M5: 同步 README / ops 文档并收口到 merge-ready PR
+- M1: 建立 spec，冻结单镜像 / Tunnel / GHCR / 卷契约。
+- M2: 实现 `xp-ops container run` 与 Cloudflare container runtime 复用。
+- M3: 交付正式 Dockerfile 与 Compose 示例。
+- M4: 扩展 CI / Release 到 Docker smoke + GHCR 多架构发布。
+- M5: 同步 README / ops 文档。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

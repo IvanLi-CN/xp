@@ -3,235 +3,270 @@ name: ci
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_call:
+    inputs:
+      target_sha: {required: false, type: string}
+      cache_namespace: {required: false, type: string}
+      cache_phase: {required: false, type: string}
+      sample: {required: false, type: string}
+
+env:
+  TARGET_SHA: ${{ inputs.target_sha || github.sha }}
+  CACHE_NAMESPACE: ${{ inputs.cache_namespace || 'ci' }}
+  CACHE_PHASE: ${{ inputs.cache_phase || 'normal' }}
+  PERF_SAMPLE: ${{ inputs.sample || 'normal' }}
 
 jobs:
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
-
-      - name: release version backfill regression
-        shell: bash
-        run: ./.github/scripts/test-compute-version.sh
-
-      - name: release intent and readiness regression
-        shell: bash
-        run: python3 ./.github/scripts/test-release-governance.py
-
-      - name: release failure notifier workflow contract
-        shell: bash
-        run: python3 ./.github/scripts/test-notify-release-failure.py
-
-      - name: release notifier YAML contract
-        shell: bash
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - name: verify target sha
         run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with: {toolchain: 1.96.0, components: "rustfmt, clippy"}
+      - name: restore rust cache
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('Cargo.lock') }}
+      - run: cargo fmt --check
+      - run: python3 scripts/check-style-budget.py
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - name: build embedded web assets
+        run: cd web && bun install --frozen-lockfile && bun run build
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" rust \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/rust.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-rust
+          path: cache-receipt/rust.json
+
+  rust-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - name: verify target sha
+        run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - name: repository contract tests
+        run: |
+          ./.github/scripts/test-compute-version.sh
+          python3 ./.github/scripts/test-release-governance.py
+          python3 ./.github/scripts/test-notify-release-failure.py
+          python3 ./.github/scripts/test-ci-performance.py
           ruby - <<'RUBY'
           require "yaml"
-          YAML.load_file(".github/workflows/notify-release-failure.yml")
-          YAML.load_file(".github/workflows/ci.yml")
+          Dir[".github/workflows/*.yml"].sort.each do |workflow|
+            YAML.load_file(workflow)
+          end
           RUBY
-
-      - name: setup rust
-        uses: dtolnay/rust-toolchain@v1
+          ./.github/scripts/test-mihomo-fixture.sh
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with: {toolchain: 1.96.0}
+      - name: restore rust contract cache
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          toolchain: 1.96.0
-          components: rustfmt, clippy
-
-      - name: rustfmt
-        run: cargo fmt --check
-
-      - name: style budget
-        run: python3 scripts/check-style-budget.py
-
-      - name: Mihomo subscription fixture
-        shell: bash
-        run: ./.github/scripts/test-mihomo-fixture.sh
-
-      - name: setup bun
-        uses: oven-sh/setup-bun@v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: "contract: xp-ops builds without web/dist"
-        shell: bash
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: >-
+            ${{ runner.os }}-rust-contracts-${{ env.CACHE_NAMESPACE }}-${{
+            hashFiles('Cargo.lock') }}
+      - name: contract xp-ops builds without web/dist
         run: |
-          set -euo pipefail
           rm -rf web/dist
-
           cargo check --locked --bin xp-ops
-
-          if cargo check --locked --bin xp >/tmp/xp-missing-web-dist.log 2>&1; then
-            echo "expected cargo check --bin xp to fail when web/dist is missing" >&2
-            cat /tmp/xp-missing-web-dist.log >&2
-            exit 1
-          fi
-
-          if ! grep -Fq "missing web/dist/index.html; run \`cd web && bun run build\`" /tmp/xp-missing-web-dist.log; then
-            echo "expected compile-time missing web/dist/index.html error message" >&2
-            cat /tmp/xp-missing-web-dist.log >&2
-            exit 1
-          fi
-
-      - name: build embedded web assets
-        shell: bash
+          if cargo check --locked --bin xp >/tmp/xp-missing-web-dist.log 2>&1; then exit 1; fi
+          grep -Fq \
+            "missing web/dist/index.html; run \`cd web && bun run build\`" \
+            /tmp/xp-missing-web-dist.log
+      - name: xp-ops dry-run contracts
+        env: {CLOUDFLARE_API_TOKEN: dummy}
         run: |
-          set -euo pipefail
-          cd web
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: clippy
-        run: cargo clippy -- -D warnings
-
-      - name: test
-        run: cargo test
-
-      - name: xp-ops dry-run contracts (distro matrix)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: dummy
-        run: |
-          set -euo pipefail
-
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-
+          tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
           for distro in arch debian alpine; do
-            echo "== xp-ops dry-run: ${distro} =="
-
-            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" install --only cloudflared --dry-run
-            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" install --only xray --dry-run
-            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" init --init-system auto --dry-run
-
-            XP_OPS_DISTRO="${distro}" cargo run --quiet --bin xp-ops -- --root "$tmp/$distro" cloudflare provision \
-              --account-id acc \
-              --zone-id zone \
-              --hostname app.example.com \
-              --origin-url http://127.0.0.1:62416 \
-              --dry-run \
-              --no-enable
+            XP_OPS_DISTRO="$distro" cargo run --quiet --bin xp-ops -- \
+              --root "$tmp/$distro" install --only cloudflared --dry-run
+            XP_OPS_DISTRO="$distro" cargo run --quiet --bin xp-ops -- \
+              --root "$tmp/$distro" install --only xray --dry-run
+            XP_OPS_DISTRO="$distro" cargo run --quiet --bin xp-ops -- \
+              --root "$tmp/$distro" init --init-system auto --dry-run
+            XP_OPS_DISTRO="$distro" cargo run --quiet --bin xp-ops -- \
+              --root "$tmp/$distro" cloudflare provision \
+              --account-id acc --zone-id zone --hostname app.example.com \
+              --origin-url http://127.0.0.1:62416 --dry-run --no-enable
           done
-
-      - name: xp-ops container dry-run contract
-        shell: bash
-        run: |
-          set -euo pipefail
-
           XP_NODE_NAME=node-1 \
-          XP_API_BASE_URL=https://node-1.example.com \
-          XP_ADMIN_TOKEN=0123456789abcdef0123456789abcdef \
-          cargo run --quiet --bin xp-ops -- container run --dry-run
+            XP_API_BASE_URL=https://node-1.example.com \
+            XP_ADMIN_TOKEN=0123456789abcdef0123456789abcdef \
+            cargo run --quiet --bin xp-ops -- container run --dry-run
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" rust-contracts \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/rust-contracts.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-rust-contracts
+          path: cache-receipt/rust-contracts.json
 
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
-
-      - name: setup bun
-        uses: oven-sh/setup-bun@v2.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          bun-version-file: .bun-version
-
-      - name: install
-        run: bun install --frozen-lockfile
-
-      - name: dprint check
-        run: bunx --no-install dprint check
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-docs-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bunx --no-install dprint check
 
   web:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
+    timeout-minutes: 15
+    defaults: {run: {working-directory: web}}
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}", fetch-depth: 0}
+      - run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+        working-directory: .
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - name: restore web cache
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          fetch-depth: 0
-
-      - name: setup bun
-        uses: oven-sh/setup-bun@v2.2.0
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-web-${{ env.CACHE_NAMESPACE }}-${{ hashFiles('web/bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bunx --no-install playwright install --with-deps chromium
+      - run: bun run test:e2e
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        working-directory: .
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" web \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/web.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          bun-version-file: .bun-version
-
-      - name: install
-        run: bun install --frozen-lockfile
-
-      - name: lint
-        run: bun run lint
-
-      - name: typecheck
-        run: bun run typecheck
-
-      - name: unit tests
-        run: bun run test
-
-      - name: install playwright chromium
-        run: bunx --no-install playwright install --with-deps chromium
-
-      - name: e2e tests
-        run: bun run test:e2e
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-web
+          path: cache-receipt/web.json
 
   storybook:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
+    timeout-minutes: 20
+    defaults: {run: {working-directory: web}}
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
-
-      - name: setup bun
-        uses: oven-sh/setup-bun@v2.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+        working-directory: .
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version-file: .bun-version}
+      - name: restore storybook cache
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          bun-version-file: .bun-version
-
-      - name: install
-        run: bun install --frozen-lockfile
-
-      - name: install playwright chromium
-        run: bunx --no-install playwright install --with-deps chromium
-
-      - name: storybook + test-storybook
-        shell: bash
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/ms-playwright
+          key: >-
+            ${{ runner.os }}-storybook-${{ env.CACHE_NAMESPACE }}-${{
+            hashFiles('web/bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bunx --no-install playwright install --with-deps chromium
+      - name: storybook and test-storybook
         run: |
-          set -euo pipefail
-
-          bun run storybook &
-          SB_PID=$!
-
-          cleanup() {
-            kill "$SB_PID" >/dev/null 2>&1 || true
-            wait "$SB_PID" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          for _ in {1..60}; do
-            if curl -fsS "http://127.0.0.1:60081/" >/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-
-          curl -fsS "http://127.0.0.1:60081/" >/dev/null
+          bun run storybook & SB_PID=$!
+          trap 'kill "$SB_PID" >/dev/null 2>&1 || true; wait "$SB_PID" >/dev/null 2>&1 || true' EXIT
+          for _ in {1..60}; do curl -fsS http://127.0.0.1:60081/ >/dev/null && break; sleep 2; done
+          curl -fsS http://127.0.0.1:60081/ >/dev/null
           bun run test-storybook
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        working-directory: .
+        run: |
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" storybook \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/storybook.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-storybook
+          path: cache-receipt/storybook.json
 
   docker-smoke:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
+    timeout-minutes: 15
+    permissions: {contents: read, packages: read}
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
-
-      - name: docker build
-        run: docker build --build-arg XP_BUILD_VERSION=ci-smoke -t xp:smoke .
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: "${{ env.TARGET_SHA }}"}
+      - run: |
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+          test "${GITHUB_SHA}" = "${TARGET_SHA}"
+      - name: restore docker cache receipt
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ci-docker-cache-marker
+          key: ${{ runner.os }}-docker-${{ env.CACHE_NAMESPACE }}
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+      - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          load: true
+          tags: xp:smoke
+          build-args: XP_BUILD_VERSION=ci-smoke
+          cache-from: type=gha,scope=${{ env.CACHE_NAMESPACE }}-docker
+          cache-to: type=gha,mode=max,scope=${{ env.CACHE_NAMESPACE }}-docker
       - name: default entrypoint bootstrap dry-run
         run: |
           docker run --rm \
@@ -239,3 +274,17 @@ jobs:
             -e XP_API_BASE_URL=https://node-1.example.com \
             -e XP_ADMIN_TOKEN=0123456789abcdef0123456789abcdef \
             xp:smoke --dry-run
+      - name: cache receipt
+        if: env.CACHE_PHASE != 'normal'
+        run: |
+          mkdir -p .ci-docker-cache-marker
+          touch .ci-docker-cache-marker/ready
+          .github/scripts/write-cache-receipt.sh \
+            "${PERF_SAMPLE}" "${CACHE_PHASE}" docker-smoke \
+            "${{ steps.cache.outputs.cache-hit == 'true' }}" \
+            cache-receipt/docker-smoke.json
+      - if: env.CACHE_PHASE != 'normal'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cache-receipt-${{ env.CACHE_PHASE }}-${{ env.PERF_SAMPLE }}-docker-smoke
+          path: cache-receipt/docker-smoke.json

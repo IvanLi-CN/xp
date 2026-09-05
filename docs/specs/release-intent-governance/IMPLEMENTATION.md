@@ -16,6 +16,12 @@
   diagnostics.
 - `workflow_dispatch` requires explicit release type, channel, expected version, and reason.
 - PR label gating reads the current label API, while automatic intent remains merge-event-only.
+- `release-build.yml` runs Web, architecture-specific musl, and managed-runtime builds as parallel
+  jobs and transfers run-scoped artifacts to the publisher.
+- `release-performance.yml` reuses that graph with read-only permissions and machine-readable
+  duration assertions; image assembly uses `push=false` and cache-only output.
+- Formal Release relies on exact-SHA readiness instead of repeating format, lint, and tests before
+  artifact compilation.
 
 ## Delivery Evidence
 
@@ -35,6 +41,9 @@
 ## Related Changes
 
 - `.github/workflows/release.yml`
+- `.github/workflows/release-build.yml`
+- `.github/workflows/release-performance.yml`
+- `.github/scripts/performance_assert.py`
 - `.github/workflows/label-gate.yml`
 - `.github/scripts/release_intent.py`
 - `.github/scripts/release_readiness.py`
