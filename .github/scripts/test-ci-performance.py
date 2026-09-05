@@ -89,6 +89,18 @@ class ReleasePerformanceTests(unittest.TestCase):
         with self.assertRaises(performance.PerformanceError):
             performance.assert_release(jobs)
 
+    def test_release_critical_path_includes_runtime_branch(self):
+        jobs = [
+            job("build / build-web", 10),
+            job("build / build-musl (x86_64, target)", 10),
+            job("build / build-musl (aarch64, target)", 10),
+            job("build / build-runtime (x86_64, amd64)", 120),
+            job("build / build-runtime (aarch64, arm64)", 120),
+            job("assemble", 10),
+        ]
+        result = performance.assert_release(jobs)
+        self.assertEqual(result["critical_path_seconds"], 130)
+
 
 class WorkflowContractTests(unittest.TestCase):
     def test_performance_workflows_are_manual_and_read_only(self):
@@ -111,11 +123,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('(\"cold\", 420)', assertions)
         self.assertIn('(\"warm\", 300)', assertions)
 
+        ci = (workflows / "ci.yml").read_text()
+        self.assertIn("path: .buildx-cache", ci)
+        self.assertIn("cache-from:", ci)
+        self.assertIn("type=local,src=.buildx-cache", ci)
+        self.assertNotIn("docker-cache-marker", ci)
+
     def test_release_and_measurement_share_the_build_workflow(self):
         workflows = Path(__file__).parents[1] / "workflows"
         release = (workflows / "release.yml").read_text()
         measurement = (workflows / "release-performance.yml").read_text()
         self.assertIn("uses: ./.github/workflows/release-build.yml", release)
+        self.assertIn("needs: [prepare, build, publish-image]", release)
         self.assertIn("uses: ./.github/workflows/release-build.yml", measurement)
         self.assertIn("push: false", measurement)
         self.assertNotIn("ncipollo/release-action", measurement)

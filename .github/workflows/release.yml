@@ -196,7 +196,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=release-runtime
 
   publish-release:
-    needs: [prepare, build]
+    needs: [prepare, build, publish-image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

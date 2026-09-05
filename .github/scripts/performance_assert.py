@@ -116,7 +116,9 @@ def assert_release(jobs: list[dict[str, Any]]) -> dict[str, Any]:
     for name, limit in limits.items():
         if seconds[name] > limit:
             raise PerformanceError(f"{name} {seconds[name]:.1f}s exceeds {limit}s")
-    critical = seconds["web"] + max(seconds["musl-x86_64"], seconds["musl-aarch64"]) + seconds["assemble"]
+    web_musl = seconds["web"] + max(seconds["musl-x86_64"], seconds["musl-aarch64"])
+    runtime = max(seconds["runtime-x86_64"], seconds["runtime-aarch64"])
+    critical = max(web_musl, runtime) + seconds["assemble"]
     if critical > 900:
         raise PerformanceError(f"release critical path {critical:.1f}s exceeds 900s")
     return {"kind": "release", "seconds": seconds, "critical_path_seconds": critical, "status": "pass"}
