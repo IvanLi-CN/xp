@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+	reloadAfterServiceWorkerUpdate,
 	requestServiceWorkerUpdateCheck,
 	startServiceWorkerUpdatePolling,
 } from "./serviceWorkerUpdates";
@@ -66,5 +67,57 @@ describe("serviceWorkerUpdates", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(update).toHaveBeenCalledTimes(1);
 		stop();
+	});
+
+	it("reloads immediately when the update prompt has become stale", async () => {
+		const updateServiceWorker = vi.fn().mockResolvedValue(undefined);
+		const reload = vi.fn();
+
+		await expect(
+			reloadAfterServiceWorkerUpdate(updateServiceWorker, {
+				registration: { active: null, waiting: null },
+				reload,
+			}),
+		).resolves.toBe("reloaded");
+
+		expect(updateServiceWorker).not.toHaveBeenCalled();
+		expect(reload).toHaveBeenCalledOnce();
+	});
+
+	it("waits for a waiting worker to activate before reloading", async () => {
+		const waitingWorker = {
+			state: "installed",
+		} as ServiceWorker;
+		let active: ServiceWorker | null = null;
+		let waiting: ServiceWorker | null = waitingWorker;
+		const updateServiceWorker = vi.fn().mockImplementation(async () => {
+			setTimeout(() => {
+				waiting = null;
+				active = waitingWorker;
+				Object.assign(waitingWorker, { state: "activated" });
+			}, 100);
+		});
+		const reload = vi.fn();
+
+		const result = reloadAfterServiceWorkerUpdate(updateServiceWorker, {
+			registration: {
+				get active() {
+					return active;
+				},
+				get waiting() {
+					return waiting;
+				},
+			},
+			reload,
+			pollIntervalMs: 50,
+			timeoutMs: 1_000,
+		});
+
+		expect(reload).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(100);
+		await expect(result).resolves.toBe("reloaded");
+
+		expect(updateServiceWorker).toHaveBeenCalledWith(true);
+		expect(reload).toHaveBeenCalledOnce();
 	});
 });
