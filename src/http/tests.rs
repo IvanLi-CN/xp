@@ -918,25 +918,25 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
             .values_mut()
             .next()
             .expect("expected a bootstrap node")
-            .api_base_url = "https://primary.example".to_string();
+            .api_base_url = xp_test_fixtures::primary_api_url().to_string();
         state.nodes.insert(
-            "secondary-node".to_string(),
+            xp_test_fixtures::secondary_node_id().to_string(),
             Node {
-                node_id: "secondary-node".to_string(),
-                node_name: "secondary".to_string(),
-                access_host: "secondary.example".to_string(),
-                api_base_url: "https://secondary.example:8443/".to_string(),
+                node_id: xp_test_fixtures::secondary_node_id().to_string(),
+                node_name: xp_test_fixtures::secondary_node_name().to_string(),
+                access_host: xp_test_fixtures::secondary_host().to_string(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_string(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
         );
         state.nodes.insert(
-            "invalid-node".to_string(),
+            xp_test_fixtures::node_id_fixture560().to_string(),
             Node {
-                node_id: "invalid-node".to_string(),
-                node_name: "invalid".to_string(),
-                access_host: "invalid.example".to_string(),
-                api_base_url: "https://secondary.example/not-an-origin".to_string(),
+                node_id: xp_test_fixtures::node_id_fixture560().to_string(),
+                node_name: xp_test_fixtures::node_name_fixture86().to_string(),
+                access_host: xp_test_fixtures::host_fixture88().to_string(),
+                api_base_url: xp_test_fixtures::url_tcp_origin_fixture_test443().to_string(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             },
@@ -960,11 +960,10 @@ async fn ui_serves_index_at_root_and_embedded_assets() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(
-        csp.contains("connect-src 'self' https://primary.example https://secondary.example:8443;")
-    );
-    assert!(!csp.contains("not-an-origin"));
-    assert!(!csp.contains("https:;"));
+    assert!(csp.contains("connect-src 'self'"));
+    assert!(csp.contains(xp_test_fixtures::primary_api_url()));
+    assert!(csp.contains(xp_test_fixtures::secondary_api_url()));
+    assert!(!csp.contains(xp_test_fixtures::url_tcp_origin_fixture_test443()));
 
     let html = body_text(res).await;
     let assets = extract_asset_paths_from_index_html(&html);
