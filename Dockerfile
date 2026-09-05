@@ -43,6 +43,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   && cp /app/target/release/xp-ops /out/xp-ops
 
 FROM builder-base AS builder-ci
+ENV CARGO_INCREMENTAL=0 \
+  CARGO_PROFILE_DEV_DEBUG=0
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
