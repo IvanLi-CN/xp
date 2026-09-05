@@ -18,7 +18,9 @@ _Avoid_: arbitrary URL, failover URL, endpoint
 
 **Origin Allowlist**:
 The exact HTTPS origins of the current cluster's registered Nodes that an XP node
-accepts as browser origins for cross-origin console requests.
+accepts as browser origins for cross-origin console requests. Embedded HTML uses
+the same current set for its `connect-src` CSP directive, so browser policy and
+server CORS cannot drift apart.
 _Avoid_: permissive CORS, wildcard CORS, browser trust list
 
 **Backend Profile**:

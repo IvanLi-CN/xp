@@ -35,6 +35,12 @@ coordination, and changes to PWA app-shell caching or installation scope.
   return `Vary` for `Origin`, `Access-Control-Request-Method`, and
   `Access-Control-Request-Headers`. Static resources MUST NOT receive this
   browser CORS surface.
+- **REQ-DOCUMENT-CSP**: Embedded `index.html` and SPA fallback HTML MUST set
+  `connect-src` to `'self'` plus the current registered Nodes' exact canonical
+  HTTPS origins. The directive MUST be generated from the same origin policy as
+  browser CORS, excluding invalid or removed-node metadata. Assets and
+  `sw.js` MUST retain their existing response headers and MUST NOT receive this
+  dynamic document policy.
 - **REQ-CANDIDATE**: A candidate MUST come only from the current page origin
   or an authenticated current-cluster node inventory. Before a credentialed
   probe, the browser MUST verify public health, matching `cluster_id`, an
@@ -64,6 +70,13 @@ coordination, and changes to PWA app-shell caching or installation scope.
   `cargo test http::tests::browser_cors_routes::reads_registered_origins_for_api_only`
   verify registered-origin preflight/actual requests, unknown origins, static
   resource isolation, and immediate rejection after node removal.
+- **VER-DOCUMENT-CSP** covers: REQ-DOCUMENT-CSP. `cargo test http::embedded_ui`
+  and `cargo test http::tests::ui_serves_index_at_root_and_embedded_assets`
+  verify exact origin normalization, invalid-origin exclusion, and the absence
+  of the dynamic header on assets and `sw.js`. The controlled
+  `primary-backend-switcher` browser test verifies that a listed origin is
+  reachable when CSP and CORS agree and that an unlisted origin is blocked by
+  the document policy.
 - **VER-CANDIDATE** covers: REQ-CANDIDATE. The command
   `cd web && bun run test -- src/backend/primaryBackend.test.ts` verifies
   health/cluster/compatibility ordering, the credential gate, inventory

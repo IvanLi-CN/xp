@@ -5,7 +5,9 @@ browser profile sends its API and status-stream requests to one manually selecte
 verified same-cluster Node origin, while XP continues to perform peer coordination
 and forwarding server-side. Every XP node accepts cross-origin console requests only
 from the exact HTTPS origins of current registered Nodes; it does not retain
-permissive CORS or accept arbitrary operator-entered origins.
+permissive CORS or accept arbitrary operator-entered origins. The embedded document
+must advertise that same exact origin set in `connect-src`; otherwise the browser can
+block a valid CORS request before it reaches the network.
 
 ## Considered Options
 
