@@ -182,6 +182,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
             self.assertIn(f"      {input_name}:", workflow)
         self.assertIn("release_readiness.py", workflow)
         self.assertIn("verify expected backfill version", workflow)
+        self.assertIn("uses: ./.github/workflows/release-build.yml", workflow)
+        self.assertNotIn("cargo clippy", workflow)
+        self.assertNotIn("cargo test", workflow)
 
     def test_label_gate_requires_unique_type_and_channel(self) -> None:
         workflow = (Path(__file__).parents[1] / "workflows" / "label-gate.yml").read_text()

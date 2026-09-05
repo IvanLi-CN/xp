@@ -7,6 +7,8 @@
 - 采用 GitHub PR Issue events 截断到 merged event 的重放结果作为正常发布意图。
 - 采用显式 Manual Backfill 输入修复历史发布，不修改历史 PR 标签，不创建自有记录。
 - 发布 readiness 从单一 `ci` 扩展为目标 SHA 的 `ci`、`fixture-policy`、`xray-e2e` 三条 main push workflow。
+- Release 构建从单 Job 串行编译演进为 reusable workflow 的架构矩阵；readiness 已证明
+  的验证不再重复执行，并增加无发布副作用的固定 SHA 性能验收入口。
 
 ## Key Reasons / Replacements
 

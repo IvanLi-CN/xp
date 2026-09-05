@@ -17,7 +17,7 @@ COPY web/ ./web/
 WORKDIR /app/web
 RUN bun run build
 
-FROM rust:1.91.0-bookworm AS builder
+FROM rust:1.91.0-bookworm AS builder-base
 ARG XP_BUILD_VERSION=dev
 ENV XP_BUILD_VERSION=${XP_BUILD_VERSION}
 WORKDIR /app
@@ -33,6 +33,7 @@ COPY tests ./tests
 COPY test-fixtures ./test-fixtures
 COPY --from=web-builder /app/web/dist ./web/dist
 
+FROM builder-base AS builder
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
   --mount=type=cache,target=/app/target \
@@ -40,6 +41,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   && cargo build --release --locked --bin xp --bin xp-ops \
   && cp /app/target/release/xp /out/xp \
   && cp /app/target/release/xp-ops /out/xp-ops
+
+FROM builder-base AS builder-ci
+ENV CARGO_INCREMENTAL=0 \
+  CARGO_PROFILE_DEV_DEBUG=0
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  --mount=type=cache,target=/usr/local/cargo/git \
+  --mount=type=cache,target=/app/target \
+  mkdir -p /out \
+  && cargo build --locked --bin xp --bin xp-ops \
+  && cp /app/target/debug/xp /out/xp \
+  && cp /app/target/debug/xp-ops /out/xp-ops
 
 FROM ghcr.io/xtls/xray-core:${XRAY_DOCKER_TAG} AS xray
 
@@ -71,6 +83,10 @@ FROM runtime-base AS runtime-from-source
 COPY --from=builder /out/xp /usr/local/bin/xp
 COPY --from=builder /out/xp-ops /usr/local/bin/xp-ops
 
+FROM runtime-base AS runtime-from-ci
+COPY --from=builder-ci /out/xp /usr/local/bin/xp
+COPY --from=builder-ci /out/xp-ops /usr/local/bin/xp-ops
+
 FROM runtime-base AS runtime-from-prebuilt
 ARG TARGETARCH
 RUN --mount=type=bind,source=release,target=/tmp/release,ro \
@@ -87,3 +103,5 @@ RUN --mount=type=bind,source=release,target=/tmp/release,ro \
   chmod 0755 /usr/local/bin/xp /usr/local/bin/xp-ops /usr/local/bin/xray /usr/bin/cloudflared
 
 FROM runtime-from-source AS runtime
+
+FROM runtime-from-ci AS runtime-ci

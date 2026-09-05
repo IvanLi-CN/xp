@@ -459,6 +459,16 @@ async fn internal_restore_existing_node_starts_durable_lifecycle_operation() {
     assert_eq!(body["phase"], "prepared");
 
     let restored_raft_id = raft_node_id_from_ulid(&restored.node_id).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if calls.add_learners.lock().await.len() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("restore coordinator should add the learner");
     let add_learners = calls.add_learners.lock().await;
     assert_eq!(add_learners.len(), 1);
     assert_eq!(add_learners[0].0, restored_raft_id);
