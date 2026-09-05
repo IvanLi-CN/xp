@@ -66,7 +66,10 @@ def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dic
         for phase, limit in (("cold", 420), ("warm", 300)):
             durations = {}
             for component in components:
-                job = find_one(jobs, rf"{phase}-{sample} / {re.escape(component)}")
+                job = find_one(
+                    jobs,
+                    rf"sample-{sample} / {phase} / {re.escape(component)}",
+                )
                 durations[component] = duration(job)
             critical = max(durations.values())
             if critical > limit:

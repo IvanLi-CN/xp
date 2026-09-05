@@ -37,9 +37,16 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertIn('gh api --paginate "${jobs_url}" | jq -s', workflow)
             self.assertNotIn("--jq -s", workflow)
 
+    def test_ci_samples_run_as_serial_cold_warm_pairs(self):
+        workflows = SCRIPT_DIR.parent / "workflows"
+        parent = (workflows / "ci-performance.yml").read_text()
+        sample = (workflows / "ci-performance-sample.yml").read_text()
+        self.assertIn("max-parallel: 1", parent)
+        self.assertIn("needs: cold", sample)
+
     def valid_jobs(self):
         components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
-        return [job(f"{phase}-{sample} / {component}") for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
+        return [job(f"sample-{sample} / {phase} / {component}") for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
     def valid_receipts(self):
         components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
@@ -123,9 +130,11 @@ class WorkflowContractTests(unittest.TestCase):
     def test_ci_declares_three_cold_warm_samples_and_hard_limits(self):
         workflows = Path(__file__).parents[1] / "workflows"
         text = (workflows / "ci-performance.yml").read_text()
-        self.assertEqual(text.count('sample: ["1", "2", "3"]'), 2)
-        self.assertIn("cache_phase: cold", text)
-        self.assertIn("cache_phase: warm", text)
+        self.assertEqual(text.count('sample: ["1", "2", "3"]'), 1)
+        self.assertIn("max-parallel: 1", text)
+        sample = (workflows / "ci-performance-sample.yml").read_text()
+        self.assertIn("cache_phase: cold", sample)
+        self.assertIn("cache_phase: warm", sample)
         assertions = (SCRIPT_DIR / "performance_assert.py").read_text()
         self.assertIn('(\"cold\", 420)', assertions)
         self.assertIn('(\"warm\", 300)', assertions)

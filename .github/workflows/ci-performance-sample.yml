@@ -1,0 +1,25 @@
+name: ci-performance-sample
+
+on:
+  workflow_call:
+    inputs:
+      target_sha: {required: true, type: string}
+      sample: {required: true, type: string}
+
+jobs:
+  cold:
+    uses: ./.github/workflows/ci.yml
+    with:
+      target_sha: ${{ inputs.target_sha }}
+      cache_namespace: perf-${{ github.run_id }}-${{ inputs.sample }}
+      cache_phase: cold
+      sample: ${{ inputs.sample }}
+
+  warm:
+    needs: cold
+    uses: ./.github/workflows/ci.yml
+    with:
+      target_sha: ${{ inputs.target_sha }}
+      cache_namespace: perf-${{ github.run_id }}-${{ inputs.sample }}
+      cache_phase: warm
+      sample: ${{ inputs.sample }}

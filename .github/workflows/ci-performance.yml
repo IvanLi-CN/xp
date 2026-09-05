@@ -7,6 +7,7 @@ on:
       - .github/scripts/write-cache-receipt.sh
       - .github/workflows/ci.yml
       - .github/workflows/ci-performance.yml
+      - .github/workflows/ci-performance-sample.yml
   workflow_dispatch:
     inputs:
       target_sha:
@@ -28,34 +29,20 @@ jobs:
           [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
           test "${GITHUB_SHA}" = "${target_sha}"
 
-  cold:
+  sample:
     needs: verify
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix: {sample: ["1", "2", "3"]}
-    name: cold-${{ matrix.sample }}
-    uses: ./.github/workflows/ci.yml
+    name: sample-${{ matrix.sample }}
+    uses: ./.github/workflows/ci-performance-sample.yml
     with:
       target_sha: ${{ inputs.target_sha || github.sha }}
-      cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
-      cache_phase: cold
-      sample: ${{ matrix.sample }}
-
-  warm:
-    needs: cold
-    strategy:
-      fail-fast: false
-      matrix: {sample: ["1", "2", "3"]}
-    name: warm-${{ matrix.sample }}
-    uses: ./.github/workflows/ci.yml
-    with:
-      target_sha: ${{ inputs.target_sha || github.sha }}
-      cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
-      cache_phase: warm
       sample: ${{ matrix.sample }}
 
   assert:
-    needs: warm
+    needs: sample
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
