@@ -24,6 +24,9 @@
   结果（含键盘关闭）时清除 start mutation，避免已被状态轮询确认的 network/5xx 错误重新显示。
 - Service Worker 注册完成后先执行一次 `registration.update()`，再开始既有周期轮询；因此已运行旧
   bundle 的标签无需等待首个轮询周期即可发现 waiting worker，但仍保留显式 Reload 确认。
+- 显式 Reload 会处理提示与 waiting worker 脱离的 stale 状态；正常更新会等待同一个 worker
+  进入 `active/activated` 后再刷新。构建入口的 JS 与 CSS 同时携带 `xp-build`，避免页面声明
+  ownership 前的首个样式请求从错误构建或恢复响应中取资源。
 - 当受控公开导航发现 active app-shell 缺少 metadata 或预缓存资源时，Worker 保留原 cache，完整验证同一 build 的
   staged recovery cache 后从其交付登录入口；Playwright 覆盖该完整启动前故障，防止 raw 504 cache-miss 页面再次阻断登录。
 

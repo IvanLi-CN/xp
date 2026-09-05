@@ -1,7 +1,10 @@
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { useEffect, useRef } from "react";
 
-import { startServiceWorkerUpdatePolling } from "../offline/serviceWorkerUpdates";
+import {
+	reloadAfterServiceWorkerUpdate,
+	startServiceWorkerUpdatePolling,
+} from "../offline/serviceWorkerUpdates";
 import { PwaUpdateNotice } from "./PwaUpdateNotice";
 
 export function PwaStatusPrompt() {
@@ -46,7 +49,7 @@ export function PwaStatusPrompt() {
 				setNeedRefresh(false);
 			}}
 			onReload={() => {
-				void updateServiceWorker(true);
+				void reloadAfterServiceWorkerUpdate(updateServiceWorker);
 			}}
 		/>
 	);

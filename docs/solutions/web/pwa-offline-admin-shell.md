@@ -66,6 +66,12 @@ too coarse to reason about. If none are persisted, offline warm-load never becom
   only after all owners have disappeared. Navigation can use the active build,
   but a controlled page's JS/CSS/font/icon requests must stay on its declared
   build; a cache miss is a recovery signal, never permission to mix builds.
+- Carry the build hint on both the entry script and entry stylesheet. The CSS
+  request can race the inline ownership declaration, so leaving it unhinted can
+  produce a false cache-miss/recovery response and an unstyled page. On explicit
+  update, wait for the confirmed waiting worker itself to become active before
+  reloading; if the prompt is stale and no worker is waiting, perform a normal
+  reload instead of sending a no-op skip-waiting message.
 - Treat a legacy Workbox controller as a one-time migration state, not as a normal update. After a
   complete XP app shell is verified, probe undeclared live clients for at most one second. Only when
   the exact same-scope `workbox-precache-v2-<scope>` exists and no client can declare a valid XP
