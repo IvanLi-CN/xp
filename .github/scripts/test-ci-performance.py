@@ -31,11 +31,11 @@ def job(name: str, seconds: int = 60, conclusion: str = "success") -> dict[str, 
 
 class CiPerformanceTests(unittest.TestCase):
     def valid_jobs(self):
-        components = ("rust", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
+        components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
         return [job(f"{phase}-{sample} / {component}") for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
     def valid_receipts(self):
-        components = ("rust", "rust-contracts", "web", "storybook", "docker-smoke")
+        components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
         return [{"sample": str(sample), "phase": phase, "component": component, "cache_hit": phase == "warm"} for sample in range(1, 4) for phase in ("cold", "warm") for component in components]
 
     def test_ci_accepts_three_exact_cold_warm_pairs(self):

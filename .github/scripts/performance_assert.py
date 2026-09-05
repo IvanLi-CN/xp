@@ -58,8 +58,8 @@ def workflow_queue_seconds(payload: dict[str, Any]) -> float:
 
 
 def assert_ci(jobs: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dict[str, Any]:
-    components = ("rust", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
-    cache_components = ("rust", "rust-contracts", "web", "storybook", "docker-smoke")
+    components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
+    cache_components = ("rust", "rust-clippy", "rust-contracts", "web", "storybook", "docker-smoke")
     samples: dict[str, Any] = {}
     for sample in range(1, 4):
         phase_seconds: dict[str, float] = {}
