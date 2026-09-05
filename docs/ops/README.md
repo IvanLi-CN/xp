@@ -1072,6 +1072,11 @@ gh workflow run release-performance.yml --ref "$ref" -f target_sha="$sha"
 For failures, download the `ci-performance-*` or `release-performance-*` JSON artifact. CI cache
 diagnostics are retained as `cache-receipt-*` artifacts in the same run.
 
+A pull request that changes a performance workflow or its shared build/assertion inputs runs the
+same acceptance automatically against GitHub's exact PR merge SHA. This self-test makes a new
+workflow verifiable before it first reaches the default branch; ordinary product PRs do not trigger
+the expensive performance matrix.
+
 ### Release-ready checklist: host-managed systemd node with Tunnel/DDNS
 
 Ideal post-release path:

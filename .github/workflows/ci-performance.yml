@@ -1,6 +1,12 @@
 name: ci-performance
 
 on:
+  pull_request:
+    paths:
+      - .github/scripts/performance_assert.py
+      - .github/scripts/write-cache-receipt.sh
+      - .github/workflows/ci.yml
+      - .github/workflows/ci-performance.yml
   workflow_dispatch:
     inputs:
       target_sha:
@@ -17,8 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          [[ "${{ inputs.target_sha }}" =~ ^[0-9a-f]{40}$ ]]
-          test "${GITHUB_SHA}" = "${{ inputs.target_sha }}"
+          target_sha="${{ inputs.target_sha || github.sha }}"
+          [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_SHA}" = "${target_sha}"
 
   cold:
     needs: verify
@@ -28,7 +35,7 @@ jobs:
     name: cold-${{ matrix.sample }}
     uses: ./.github/workflows/ci.yml
     with:
-      target_sha: ${{ inputs.target_sha }}
+      target_sha: ${{ inputs.target_sha || github.sha }}
       cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
       cache_phase: cold
       sample: ${{ matrix.sample }}
@@ -41,7 +48,7 @@ jobs:
     name: warm-${{ matrix.sample }}
     uses: ./.github/workflows/ci.yml
     with:
-      target_sha: ${{ inputs.target_sha }}
+      target_sha: ${{ inputs.target_sha || github.sha }}
       cache_namespace: perf-${{ github.run_id }}-${{ matrix.sample }}
       cache_phase: warm
       sample: ${{ matrix.sample }}
@@ -51,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "cache-receipt-*", path: cache-receipts}
       - name: collect job timings

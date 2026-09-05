@@ -96,6 +96,7 @@ class WorkflowContractTests(unittest.TestCase):
         for name in ("ci-performance.yml", "release-performance.yml"):
             text = (workflows / name).read_text()
             self.assertIn("workflow_dispatch:", text)
+            self.assertIn("pull_request:", text)
             self.assertIn("contents: read", text)
             self.assertNotIn("contents: write", text)
             self.assertNotIn("packages: write", text)

@@ -1,6 +1,12 @@
 name: release-performance
 
 on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .github/scripts/performance_assert.py
+      - .github/workflows/release-build.yml
+      - .github/workflows/release-performance.yml
   workflow_dispatch:
     inputs:
       target_sha:
@@ -17,14 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          [[ "${{ inputs.target_sha }}" =~ ^[0-9a-f]{40}$ ]]
-          test "${GITHUB_SHA}" = "${{ inputs.target_sha }}"
+          target_sha="${{ inputs.target_sha || github.sha }}"
+          [[ "${target_sha}" =~ ^[0-9a-f]{40}$ ]]
+          test "${GITHUB_SHA}" = "${target_sha}"
 
   build:
     needs: verify
     uses: ./.github/workflows/release-build.yml
     with:
-      target_sha: ${{ inputs.target_sha }}
+      target_sha: ${{ inputs.target_sha || github.sha }}
       build_version: 0.0.0-perf.${{ github.run_id }}
       artifact_prefix: perf-${{ github.run_id }}
       cache_scope: release
@@ -35,7 +42,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.sha }}"}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: "*-${{ github.run_id }}-*", path: release, merge-multiple: true}
       - name: verify asset manifest
@@ -65,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: {ref: "${{ inputs.target_sha }}"}
+        with: {ref: "${{ inputs.target_sha || github.sha }}"}
       - name: collect and assert timings
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
