@@ -30,6 +30,13 @@ def job(name: str, seconds: int = 60, conclusion: str = "success") -> dict[str, 
 
 
 class CiPerformanceTests(unittest.TestCase):
+    def test_workflows_stream_paginated_jobs_into_jq(self):
+        workflows = SCRIPT_DIR.parent / "workflows"
+        for name in ("ci-performance.yml", "release-performance.yml"):
+            workflow = (workflows / name).read_text()
+            self.assertIn('gh api --paginate "${jobs_url}" | jq -s', workflow)
+            self.assertNotIn("--jq -s", workflow)
+
     def valid_jobs(self):
         components = ("rust", "rust-clippy", "rust-contracts", "docs", "web", "storybook", "docker-smoke")
         return [job(f"{phase}-{sample} / {component}") for sample in range(1, 4) for phase in ("cold", "warm") for component in components]

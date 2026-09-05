@@ -66,8 +66,7 @@ jobs:
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           jobs_url="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
-          gh api --paginate "${jobs_url}" \
-            --jq -s '{jobs: map(.jobs[]) }' > jobs.json
+          gh api --paginate "${jobs_url}" | jq -s '{jobs: map(.jobs[]) }' > jobs.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > run.json
       - name: assert performance
         run: |
