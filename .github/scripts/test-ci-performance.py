@@ -104,7 +104,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_ci_declares_three_cold_warm_samples_and_hard_limits(self):
         workflows = Path(__file__).parents[1] / "workflows"
         text = (workflows / "ci-performance.yml").read_text()
-        self.assertIn("sample: [1, 2, 3]", text)
+        self.assertEqual(text.count('sample: ["1", "2", "3"]'), 2)
         self.assertIn("cache_phase: cold", text)
         self.assertIn("cache_phase: warm", text)
         assertions = (SCRIPT_DIR / "performance_assert.py").read_text()
