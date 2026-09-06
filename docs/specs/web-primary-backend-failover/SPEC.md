@@ -3,6 +3,7 @@
 ## Related ADRs
 
 - [ADR 0011](../../adr/0011-cross-origin-primary-backend-for-embedded-pwa.md)
+- [ADR 0012](../../adr/0012-edgeone-static-web-console.md)
 
 ## Context and Scope
 
@@ -18,17 +19,21 @@ and profile store, candidate verification, the AppShell header selector, query
 and SSE refresh behavior, the mutation switch barrier, controlled UI tests,
 and operator-facing deployment documentation.
 
-The scope excludes an independent static Web deployment, cross-origin cookies,
-automatic failover, arbitrary URL entry, background polling, request replay,
-multi-cluster profiles, changes to server-side node forwarding/Raft
-coordination, and changes to PWA app-shell caching or installation scope.
+The scope excludes cross-origin cookies, automatic failover, arbitrary URL entry,
+background polling, request replay, multi-cluster profiles, changes to server-side
+node forwarding/Raft coordination, and changes to PWA app-shell caching or
+installation scope. Independent static Web deployment is defined separately by
+ADR 0012 and does not alter this embedded-PWA contract.
 
 ## Requirements
 
 - **REQ-CORS**: Each node MUST derive its browser CORS allowlist at request
   time from the current registered `Node.api_base_url` set. It MUST allow only
-  the exact canonical HTTPS origin of a registered node and MUST reject
-  unknown, non-HTTPS, path-bearing, query-bearing, or removed-node origins.
+  the exact canonical HTTPS origin of a registered node, except for exact Static
+  Web Console origins admitted by the separate Static Console-Compatible Node
+  contract in ADR 0012. It MUST reject unknown, non-HTTPS, path-bearing,
+  query-bearing, or removed-node origins. The Static Console exception MUST NOT
+  be inferred from Node metadata or permit a wildcard origin.
 - **REQ-CORS-PREFLIGHT**: `/api` preflight responses MUST support the actual
   `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` methods and the
   `Authorization`, `Content-Type`, and `Accept` request headers. They MUST

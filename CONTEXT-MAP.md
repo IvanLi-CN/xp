@@ -3,6 +3,8 @@
 ## Contexts
 
 - [XP Release](./CONTEXT.md) — determines which merged change becomes an XP release.
+- [XP Web Console](./web/CONTEXT.md) — defines browser-console trust, static delivery,
+  and backend-selection language.
 - [Cluster History Repositories](./docs/specs/cluster-history-repositories/CONTEXT.md) —
   preserves and reconciles long-term cluster history.
 - [Managed Host Operations](./docs/ops/CONTEXT.md) — defines the host-managed runtime
@@ -21,6 +23,8 @@
 
 - **Cluster History Repositories -> XP Release**: repository behavior is delivered
   as a release target.
+- **XP Web Console -> XP Release**: console app-shell and runtime-policy behavior
+  are delivered under the release contract.
 - **Managed Host Operations -> XP Release**: host-managed runtime contracts constrain
   the installation and upgrade behavior of release artifacts.
 - **Service Monitoring -> Cluster History Repositories**: Service Monitoring authors
