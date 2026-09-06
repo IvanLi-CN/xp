@@ -131,6 +131,7 @@ use crate::{
 };
 mod browser_cors;
 mod capabilities;
+mod console_runtime_policy;
 mod history_repository;
 mod join_capability;
 mod join_protocol;
@@ -1190,6 +1191,10 @@ pub fn build_router_with_mesh_telemetry(
         )
         .route("/cluster/join-tokens", post(admin_create_join_token))
         .route("/config", get(admin_get_config))
+        .route(
+            "/console/runtime-policy",
+            get(console_runtime_policy::get_runtime_policy),
+        )
         .route(
             "/mihomo/resource-policy",
             get(admin_get_mihomo_resource_policy).put(admin_put_mihomo_resource_policy),

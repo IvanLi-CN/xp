@@ -13,6 +13,7 @@ use super::AppState;
 
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Authorization, Content-Type, Accept";
+pub(super) const STATIC_CONSOLE_ORIGIN: &str = "https://xp.ivanli.cc";
 
 pub(super) fn canonical_https_origin(value: &str) -> Option<String> {
     let url = Url::parse(value).ok()?;
@@ -66,6 +67,9 @@ pub(super) async fn registered_browser_origins(state: &AppState) -> Vec<String> 
 }
 
 async fn origin_is_registered(state: &AppState, origin: &str) -> bool {
+    if origin == STATIC_CONSOLE_ORIGIN {
+        return true;
+    }
     registered_browser_origins(state)
         .await
         .iter()
