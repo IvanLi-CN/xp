@@ -31,7 +31,6 @@ export function useStaticRuntimePolicy(args: {
 		const appliedPolicyId = readAppliedRuntimePolicyId();
 		if (appliedPolicyId === args.policy.policy_id) return;
 		writeAppliedRuntimePolicyId(args.policy.policy_id);
-		if (appliedPolicyId) return;
 		void navigator.serviceWorker.ready
 			.then(() => window.location.reload())
 			.catch(() => undefined);
