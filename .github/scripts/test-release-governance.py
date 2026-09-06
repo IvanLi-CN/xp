@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -217,6 +218,26 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("edgeone@1.6.33 makers deploy", workflow)
         self.assertNotIn("git push", workflow)
         self.assertNotIn("docker", workflow)
+
+    def test_edgeone_static_shell_headers_apply_to_rewrites(self) -> None:
+        config = json.loads((Path(__file__).parents[2] / "edgeone.json").read_text())
+        header_rules = {rule["source"]: rule["headers"] for rule in config["headers"]}
+        shell_headers = header_rules["/*"]
+        header_values = {
+            header["key"]: header["value"]
+            for header in shell_headers
+        }
+
+        self.assertIn("no-store", header_values["Cache-Control"])
+        self.assertEqual(
+            [header["key"] for header in shell_headers].count("Content-Security-Policy"),
+            1,
+        )
+        self.assertIn(
+            "connect-src 'self' https://101-xp.ivanli.cc",
+            header_values["Content-Security-Policy"],
+        )
+        self.assertIn("immutable", header_rules["/assets/*"][0]["value"])
 
 
 if __name__ == "__main__":
