@@ -9,6 +9,19 @@ export function serializeInlineScriptString(value: string): string {
 		.replace(/\u2029/g, "\\u2029");
 }
 
+export function buildDeclarationScriptSource(buildId: string): string {
+	return [
+		inlineBootstrapFallback(buildId),
+		`window.__XP_WEB_BUILD_ID__=${serializeInlineScriptString(buildId)};`,
+		"if (navigator.serviceWorker?.controller) {",
+		"navigator.serviceWorker.controller.postMessage({",
+		'type: "XP_DECLARE_BUILD",',
+		"buildId: window.__XP_WEB_BUILD_ID__",
+		"});",
+		"}",
+	].join("");
+}
+
 function buildHint(buildId: string): string {
 	return `xp-build=${encodeURIComponent(buildId)}`;
 }
@@ -21,18 +34,7 @@ export function transformIndexHtmlWithInlineBuildDeclaration(
 	html: string,
 	buildId: string,
 ): string {
-	const declaration = [
-		"<script>",
-		inlineBootstrapFallback(buildId),
-		`window.__XP_WEB_BUILD_ID__=${serializeInlineScriptString(buildId)};`,
-		"if (navigator.serviceWorker?.controller) {",
-		"navigator.serviceWorker.controller.postMessage({",
-		'type: "XP_DECLARE_BUILD",',
-		"buildId: window.__XP_WEB_BUILD_ID__",
-		"});",
-		"}",
-		"</script>",
-	].join("");
+	const declaration = `<script>${buildDeclarationScriptSource(buildId)}</script>`;
 	return html
 		.replace(/src="([^\"]+\.(?:js|tsx))"/, (_match, url: string) => {
 			return `src="${withBuildHint(url, buildId)}"`;
@@ -45,4 +47,23 @@ export function transformIndexHtmlWithInlineBuildDeclaration(
 			);
 		})
 		.replace("<head>", `<head>${declaration}`);
+}
+
+export function transformIndexHtmlWithExternalBuildDeclaration(
+	html: string,
+	buildId: string,
+	declarationUrl: string,
+): string {
+	return html
+		.replace(/src="([^\"]+\.(?:js|tsx))"/, (_match, url: string) => {
+			return `src="${withBuildHint(url, buildId)}"`;
+		})
+		.replace(/<link\b[^>]*>/g, (tag) => {
+			if (!/\brel="stylesheet"/.test(tag)) return tag;
+			return tag.replace(
+				/href="([^\"]+\.css(?:\?[^\"]*)?)"/,
+				(_match, url: string) => `href="${withBuildHint(url, buildId)}"`,
+			);
+		})
+		.replace("<head>", `<head><script src="${declarationUrl}" defer></script>`);
 }

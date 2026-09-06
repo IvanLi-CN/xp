@@ -30,8 +30,47 @@ jobs:
       - name: build web
         env: {XP_WEB_BUILD_ID: "${{ inputs.build_version }}"}
         run: cd web && bun install --frozen-lockfile && bun run build
+      - name: package static web release
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+          WEB_BUILD_ID: ${{ inputs.build_version }}
+        run: |
+          set -euo pipefail
+          cp edgeone.json web/dist/edgeone.json
+          test -f web/dist/index.html
+          test -f web/dist/sw.js
+          mkdir -p web-release
+          archive="web-release/xp-web-${WEB_BUILD_ID}-${TARGET_SHA}.tar.gz"
+          tar -C web/dist -czf "${archive}" .
+          sha256sum "${archive}" > "${archive}.sha256"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          build_id = os.environ["WEB_BUILD_ID"]
+          target_sha = os.environ["TARGET_SHA"]
+          archive = f"xp-web-{build_id}-{target_sha}.tar.gz"
+          Path("web-release/xp-web-manifest.json").write_text(
+              json.dumps(
+                  {
+                      "artifact": archive,
+                      "target_sha": target_sha,
+                      "web_build_id": build_id,
+                      "api_compatibility_window": ["3.22", "3.21", "3.20"],
+                  },
+                  sort_keys=True,
+                  indent=2,
+              )
+              + "\n"
+          )
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: "web-${{ inputs.artifact_prefix }}", path: web/dist}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "web-release-${{ inputs.artifact_prefix }}"
+          path: web-release
 
   build-musl:
     needs: build-web

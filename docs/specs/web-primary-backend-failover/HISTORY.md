@@ -7,6 +7,9 @@
 - 采用嵌入式 PWA 的单主后端手动切换，暂不引入独立静态部署。
 - 采用当前注册节点的精确 origin allowlist，避免任意 URL 和跨集群 token 泄露。
 - 保留既有全页节点导航作为兼容路径，不将其改造成浏览器直连多节点控制面。
+- 独立静态 Web 采用 EdgeOne Makers `xp-web` 直接上传；发布先通过 `xp.ivanli.cc` 的公开静态门禁，
+  再发布镜像与 GitHub Release。运行时节点 origin 通过受保护的 runtime-policy 和逐客户端
+  Service Worker 导航 CSP 授权，不引入匿名拓扑发现、Edge Function 或 API 代理。
 
 ## Compatibility
 

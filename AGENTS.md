@@ -137,6 +137,14 @@
   Browser CORS allows only exact HTTPS origins from the current registered `Node.api_base_url` set;
   no wildcard, arbitrary URL, cross-cluster profile, automatic failover, or mutation replay is
   supported. A pending mutation blocks switching until terminal or a 60-second unknown timeout.
+- The independent static Web console is published to EdgeOne Makers project `xp-web` at
+  `https://xp.ivanli.cc` from the exact same-SHA `web/dist` archive used by the release. Its initial
+  CSP allows only `https://101-xp.ivanli.cc`; after Bearer-authenticated
+  `GET /api/admin/console/runtime-policy`, a per-client Service Worker grant rewrites only the next
+  navigation's exact `connect-src`. No Edge Function, KV, static policy JSON, anonymous topology
+  discovery, or API proxy is supported. The release workflow must pass the public five-minute static
+  smoke gate before publishing image or GitHub Release artifacts; the protected static rollback
+  workflow accepts only checksum-valid archives in the `3.22/3.21/3.20` compatibility window.
 - Host-managed `systemd` deployments with provider NAT / DDNS / Tunnel in front of the node are first-class supported environments.
 - An owner-approved private Docker follower may omit the managed-default VLESS/REALITY endpoint.
   It remains a voter and must expose its registered private `api_base_url` to the serving voters

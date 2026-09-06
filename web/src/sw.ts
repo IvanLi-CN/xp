@@ -10,6 +10,12 @@ import {
 	selectBuildForRequest,
 	selectWorkerInstallMode,
 } from "./offline/pwaBuildPolicy";
+import {
+	type RuntimePolicyGrant,
+	type ServiceWorkerMessage,
+	applyRuntimePolicyGrant,
+	parseRuntimePolicyGrant,
+} from "./offline/runtimePolicyWorker";
 
 declare const self: ServiceWorkerGlobalScope & {
 	__WB_MANIFEST: Array<{ url: string; revision?: string }>;
@@ -35,16 +41,6 @@ type LiveClientOwnership = {
 	validXpOwnerCount: number;
 	isComplete: boolean;
 };
-
-type ServiceWorkerMessage =
-	| { type: "SKIP_WAITING" }
-	| { type: "XP_DECLARE_BUILD"; buildId: string }
-	| { type: "XP_RELEASE_BUILD" }
-	| {
-			type: "XP_REQUEST_CACHE_RECOVERY";
-			buildId: string | "active";
-			requestId?: string;
-	  };
 
 type BuildMetadata = {
 	buildId: string;
@@ -79,6 +75,11 @@ const BUILD_METADATA_URL = new URL(
 	self.registration.scope,
 ).href;
 const pendingNavigationBuilds = new Map<string, string>();
+const runtimePolicyGrants = new Map<string, RuntimePolicyGrant>();
+let pendingRuntimePolicyGrant: {
+	grant: RuntimePolicyGrant;
+	createdAt: number;
+} | null = null;
 let cacheMutation: Promise<unknown> = Promise.resolve();
 
 type DeadlineResult<T> = { completed: true; value: T } | { completed: false };
@@ -469,6 +470,19 @@ async function probeLiveClientOwnership(): Promise<LiveClientOwnership> {
 	}
 }
 
+function rewriteNavigationResponse(
+	response: Response,
+	clientId: string | null,
+): Response {
+	if (!clientId) return response;
+	const grant = runtimePolicyGrants.get(clientId);
+	if (!grant) return response;
+	const rewritten = applyRuntimePolicyGrant(response, grant);
+	if (rewritten) return rewritten;
+	runtimePolicyGrants.delete(clientId);
+	return response;
+}
+
 async function reconcileOwnership(): Promise<string[]> {
 	const ownership = await inspectLiveClientOwnership();
 	const { windows, owners } = ownership;
@@ -495,6 +509,18 @@ async function reconcileOwnership(): Promise<string[]> {
 	}
 	for (const clientId of pendingNavigationBuilds.keys()) {
 		if (!liveClientIds.has(clientId)) pendingNavigationBuilds.delete(clientId);
+	}
+	for (const [clientId, grant] of runtimePolicyGrants) {
+		if (!liveClientIds.has(clientId) || grant.expiresAt <= Date.now()) {
+			runtimePolicyGrants.delete(clientId);
+		}
+	}
+	if (
+		pendingRuntimePolicyGrant &&
+		(pendingRuntimePolicyGrant.grant.expiresAt <= Date.now() ||
+			Date.now() - pendingRuntimePolicyGrant.createdAt > 15_000)
+	) {
+		pendingRuntimePolicyGrant = null;
 	}
 
 	if (ownership.undeclaredClients.length > 0) return [];
@@ -735,6 +761,19 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	assetUrl.search = "";
 	const requestKind = event.request.mode === "navigate" ? "navigate" : "asset";
 	const requestClientId = event.clientId || event.resultingClientId || null;
+	if (
+		requestKind === "navigate" &&
+		!event.clientId &&
+		event.resultingClientId &&
+		pendingRuntimePolicyGrant &&
+		Date.now() - pendingRuntimePolicyGrant.createdAt <= 15_000
+	) {
+		runtimePolicyGrants.set(
+			event.resultingClientId,
+			pendingRuntimePolicyGrant.grant,
+		);
+		pendingRuntimePolicyGrant = null;
+	}
 	if (requestKind === "navigate") {
 		if (event.clientId) pendingNavigationBuilds.set(event.clientId, BUILD_ID);
 		if (event.resultingClientId) {
@@ -805,7 +844,11 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	}
 	const cache = await caches.open(selectedBuildCache.cacheName);
 	const response = await cache.match(responseUrl, { ignoreSearch: true });
-	if (response) return response;
+	if (response) {
+		return requestKind === "navigate"
+			? rewriteNavigationResponse(response, requestClientId)
+			: response;
+	}
 
 	await respondToClient(event.clientId || null, {
 		type: "XP_CACHE_MISS",
@@ -915,7 +958,25 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 					remainingOwners,
 				);
 				pendingNavigationBuilds.delete(clientId);
+				runtimePolicyGrants.delete(clientId);
+				pendingRuntimePolicyGrant = null;
 				await reconcileOwnership();
+				return;
+			}
+			if (message?.type === "XP_SET_RUNTIME_POLICY" && clientId) {
+				const grant = parseRuntimePolicyGrant(message.policy);
+				if (grant) {
+					runtimePolicyGrants.set(clientId, grant);
+					pendingRuntimePolicyGrant = { grant, createdAt: Date.now() };
+				} else {
+					runtimePolicyGrants.delete(clientId);
+					pendingRuntimePolicyGrant = null;
+				}
+				return;
+			}
+			if (message?.type === "XP_CLEAR_RUNTIME_POLICY" && clientId) {
+				runtimePolicyGrants.delete(clientId);
+				pendingRuntimePolicyGrant = null;
 				return;
 			}
 			if (message?.type === "XP_REQUEST_CACHE_RECOVERY") {

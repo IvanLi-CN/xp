@@ -17,8 +17,12 @@ import {
 
 import { fetchAdminNodes } from "@/api/adminNodes";
 import { startAdminStatusEvents } from "@/api/adminStatusEvents";
+import { fetchRuntimePolicy } from "@/api/runtimePolicy";
 import { usePrimaryBackend } from "@/backend/PrimaryBackendProvider";
-import { hydratePrimaryBackendProfile } from "@/backend/primaryBackend";
+import {
+	hydratePrimaryBackendProfile,
+	isStaticWebConsole,
+} from "@/backend/primaryBackend";
 import { Badge } from "@/components/ui/badge";
 import {
 	CommandDialog,
@@ -65,9 +69,13 @@ import {
 } from "../api/useApiCompatibility";
 import { fetchVersionCheck } from "../api/versionCheck";
 import { useAppRuntime } from "../offline/appRuntime";
+import { clearAppliedRuntimePolicyId } from "../offline/runtimePolicySession";
+import { clearServiceWorkerRuntimePolicy } from "../offline/serviceWorkerPolicy";
 import { requestServiceWorkerUpdateCheck } from "../offline/serviceWorkerUpdates";
 import { classifyUpgradeStartError } from "../offline/upgradeObservation";
 import { shouldRefreshAfterUpgradeTransition } from "../offline/upgradeRefreshPolicy";
+import { useRuntimePolicyExpiry } from "../offline/useRuntimePolicyExpiry";
+import { useStaticRuntimePolicy } from "../offline/useStaticRuntimePolicy";
 import { useUpgradeObservation } from "../offline/useUpgradeObservation";
 import {
 	type AppNavigationGroup,
@@ -131,16 +139,11 @@ export function AppShell({
 	const runtime = useAppRuntime();
 	const prefs = useUiPrefs();
 	const primaryBackend = usePrimaryBackend();
+	const staticConsole = isStaticWebConsole();
 	const [adminToken] = useState(() => readAdminToken());
 	const apiCompatibility = useApiCompatibility(adminToken, runtime.isOnline);
 	const { requestNavigation } = useObjectNavigationGuard();
 	const compatibility = apiCompatibility.data ?? null;
-	const compatibilityError =
-		apiCompatibility.isError && compatibility === null
-			? formatApiError(apiCompatibility.error)
-			: !runtime.isOnline && compatibility === null
-				? "API compatibility is unavailable while offline."
-				: null;
 	const alertsCapabilityAvailable =
 		apiCompatibility.data?.kind === "compatible" &&
 		apiCompatibility.data.isFeatureAvailable("admin.alerts");
@@ -179,9 +182,34 @@ export function AppShell({
 		queryFn: ({ signal }) => fetchClusterInfo(signal),
 	});
 
+	const runtimePolicy = useQuery({
+		queryKey: ["runtimePolicy", adminToken, primaryBackend.clusterId],
+		enabled:
+			staticConsole &&
+			adminToken.length > 0 &&
+			runtime.isOnline &&
+			Boolean(primaryBackend.clusterId),
+		queryFn: ({ signal }) => fetchRuntimePolicy(adminToken, signal),
+		staleTime: 4 * 60 * 1000,
+		retry: false,
+	});
+
+	const compatibilityError =
+		staticConsole &&
+		adminToken.length > 0 &&
+		runtimePolicy.isError &&
+		!runtimePolicy.data
+			? "Static console runtime policy is unavailable."
+			: apiCompatibility.isError && compatibility === null
+				? formatApiError(apiCompatibility.error)
+				: !runtime.isOnline && compatibility === null
+					? "API compatibility is unavailable while offline."
+					: null;
+
 	const backendNodes = useQuery({
 		queryKey: ["adminNodes", adminToken],
 		enabled:
+			!staticConsole &&
 			adminToken.length > 0 &&
 			Boolean(clusterInfo.data?.cluster_id) &&
 			clusterInfo.data?.cluster_id === primaryBackend.clusterId,
@@ -190,8 +218,15 @@ export function AppShell({
 
 	const refreshBackendCandidates = useCallback(() => {
 		if (!adminToken || !primaryBackend.clusterId) return;
-		void backendNodes.refetch();
-	}, [adminToken, backendNodes.refetch, primaryBackend.clusterId]);
+		if (staticConsole) void runtimePolicy.refetch();
+		else void backendNodes.refetch();
+	}, [
+		adminToken,
+		backendNodes.refetch,
+		primaryBackend.clusterId,
+		runtimePolicy.refetch,
+		staticConsole,
+	]);
 
 	useEffect(() => {
 		const clusterId = clusterInfo.data?.cluster_id;
@@ -205,6 +240,18 @@ export function AppShell({
 		backendNodes.data?.items,
 		backendNodes.isSuccess,
 	]);
+
+	useStaticRuntimePolicy({
+		enabled: staticConsole,
+		clusterId: clusterInfo.data?.cluster_id,
+		policy: runtimePolicy.data,
+	});
+
+	useRuntimePolicyExpiry({
+		enabled: staticConsole && Boolean(runtimePolicy.data),
+		clusterId: clusterInfo.data?.cluster_id,
+		expiresAt: runtimePolicy.data?.expires_at,
+	});
 
 	useEffect(() => {
 		if (primaryBackend.state !== "unreachable") return;
@@ -673,7 +720,13 @@ export function AppShell({
 			adminToken={adminToken}
 			compatibility={compatibility}
 			compatibilityError={compatibilityError}
-			compatibilityPending={apiCompatibility.isFetching}
+			compatibilityPending={
+				apiCompatibility.isFetching ||
+				(staticConsole &&
+					adminToken.length > 0 &&
+					!runtimePolicy.data &&
+					!runtimePolicy.isError)
+			}
 			groups={effectiveNavGroups}
 			localNodeId={clusterInfo.data?.node_id ?? null}
 			pathname={pathname}
@@ -848,6 +901,8 @@ export function AppShell({
 										<DropdownMenuItem
 											className="text-destructive focus:text-destructive"
 											onSelect={() => {
+												clearServiceWorkerRuntimePolicy();
+												clearAppliedRuntimePolicyId();
 												clearAdminToken();
 												navigate({ to: "/login" });
 											}}

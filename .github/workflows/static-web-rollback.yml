@@ -1,0 +1,91 @@
+name: static-web-rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag containing the verified Web archive
+        required: true
+        type: string
+      reason:
+        description: Short non-sensitive reason for the static Web rollback
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EDGEONE_MAKERS_PROJECT: ${{ vars.EDGEONE_MAKERS_PROJECT }}
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: main}
+      - name: verify EdgeOne deployment prerequisites
+        run: |
+          set -euo pipefail
+          test -n "${EDGEONE_MAKERS_PROJECT}"
+          test "${EDGEONE_MAKERS_PROJECT}" = "xp-web"
+          test -n "${EDGEONE_API_TOKEN}"
+          test -n "${{ inputs.reason }}"
+      - name: download and verify Web release archive
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p web-release
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'xp-web-manifest.json' \
+            --pattern 'xp-web-*.tar.gz' \
+            --pattern 'xp-web-*.tar.gz.sha256' \
+            --dir web-release \
+            --clobber
+          manifest="web-release/xp-web-manifest.json"
+          test -f "${manifest}"
+          python3 - "${manifest}" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(Path(sys.argv[1]).read_text())
+          build_id = manifest.get("web_build_id")
+          target_sha = manifest.get("target_sha")
+          archive = manifest.get("artifact")
+          supported = r"3\.(20|21|22)\.[0-9A-Za-z.-]+"
+          if not isinstance(build_id, str) or not re.fullmatch(supported, build_id):
+              raise SystemExit("Web archive is outside the supported API compatibility window")
+          if not isinstance(target_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", target_sha):
+              raise SystemExit("Web archive target SHA is invalid")
+          if not isinstance(archive, str) or Path(archive).name != archive:
+              raise SystemExit("Web archive manifest path is invalid")
+          Path("web-release/.verified-build-id").write_text(build_id)
+          Path("web-release/.verified-archive").write_text(archive)
+          PY
+          archive="web-release/$(cat web-release/.verified-archive)"
+          test -f "${archive}"
+          test -f "${archive}.sha256"
+          sha256sum --check "${archive}.sha256"
+      - name: deploy verified archive to EdgeOne Makers
+        run: |
+          set -euo pipefail
+          rm -rf web-deploy
+          mkdir web-deploy
+          tar -xzf "web-release/$(cat web-release/.verified-archive)" -C web-deploy
+          npx --yes edgeone@1.6.33 makers deploy ./web-deploy \
+            -n "${EDGEONE_MAKERS_PROJECT}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production
+      - name: verify public static Web rollback
+        run: |
+          python3 .github/scripts/static_web_smoke.py \
+            --url https://xp.ivanli.cc/ \
+            --build-id "$(cat web-release/.verified-build-id)" \
+            --bootstrap-origin https://101-xp.ivanli.cc \
+            --timeout-seconds 300

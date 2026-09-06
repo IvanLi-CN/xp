@@ -61,6 +61,20 @@ Web Console Backend Candidates. A legacy Node remains available through its
 node-hosted console, but the Static Web Console neither probes nor selects it.
 _Avoid_: inferred compatibility, legacy CORS fallback, anonymous capability check
 
+**Static Web Release Gate**:
+The public-only verification that must succeed after an EdgeOne production upload and before the
+same XP release may publish images or GitHub Release assets. It checks the expected build marker,
+bootstrap-only initial CSP, SPA fallback, hashed-asset caching, and non-cacheable `sw.js` within
+five minutes.
+_Avoid_: API health probe, Edge Function check, deployment-history assumption
+
+**Runtime Policy Endpoint**:
+The administrator-authenticated `GET /api/admin/console/runtime-policy` response that lists only
+canonical HTTPS API origins whose nodes passed the signed `web.static-console-v1` capability check.
+It is short-lived and client-scoped through the Service Worker; it is not an anonymous configuration
+file or a topology API.
+_Avoid_: public node list, static JSON config, failover proxy
+
 ## Backend Selection
 
 **Primary Backend**:
