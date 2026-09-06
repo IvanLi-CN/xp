@@ -41,6 +41,8 @@ type NativeFetch = typeof window.fetch;
 
 const STORAGE_KEY = "xp-primary-backend-profiles";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+export const STATIC_WEB_ORIGIN = "https://xp.ivanli.cc";
+export const STATIC_BOOTSTRAP_ORIGIN = "https://101-xp.ivanli.cc";
 const listeners = new Set<(snapshot: PrimaryBackendSnapshot) => void>();
 const mutationWaiters = new Set<(timedOut: boolean) => void>();
 
@@ -51,7 +53,12 @@ function getPageOrigin(): string {
 	return typeof window === "undefined" ? "" : window.location.origin;
 }
 
+export function isStaticWebConsole(): boolean {
+	return getPageOrigin() === STATIC_WEB_ORIGIN;
+}
+
 function readStoredProfiles(): StoredProfiles {
+	if (isStaticWebConsole()) return {};
 	if (typeof window === "undefined") return {};
 	try {
 		const value = window.localStorage.getItem(STORAGE_KEY);
@@ -70,7 +77,9 @@ function readInitialState(): PrimaryBackendSnapshot {
 		: undefined;
 	return {
 		clusterId: stored.activeClusterId ?? null,
-		primaryOrigin: getPageOrigin(),
+		primaryOrigin: isStaticWebConsole()
+			? STATIC_BOOTSTRAP_ORIGIN
+			: getPageOrigin(),
 		candidates: active?.candidates ?? [],
 		generation: 0,
 		state: "ready",
@@ -81,9 +90,10 @@ function readInitialState(): PrimaryBackendSnapshot {
 }
 
 let state: PrimaryBackendSnapshot = readInitialState();
+let staticAllowedOrigins = new Set<string>();
 
 function writeStoredProfiles(value: StoredProfiles) {
-	if (typeof window === "undefined") return;
+	if (isStaticWebConsole() || typeof window === "undefined") return;
 	try {
 		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
 	} catch {
@@ -234,6 +244,9 @@ export function resetPrimaryBackendTransportForTests() {
 	listeners.clear();
 	mutationWaiters.clear();
 	state = readInitialState();
+	staticAllowedOrigins = isStaticWebConsole()
+		? new Set<string>([STATIC_BOOTSTRAP_ORIGIN])
+		: new Set<string>();
 }
 
 export function getPrimaryBackendSnapshot(): PrimaryBackendSnapshot {
@@ -261,6 +274,13 @@ export function hydratePrimaryBackendProfile(
 		api_base_url: string;
 	}>,
 ) {
+	if (isStaticWebConsole()) {
+		hydrateStaticRuntimePolicy(
+			clusterId,
+			(nodes ?? []).map((node) => node.api_base_url),
+		);
+		return;
+	}
 	const stored = readStoredProfiles();
 	const storedProfile = stored.profiles?.[clusterId];
 	const candidatesByOrigin = new Map<string, BackendCandidate>();
@@ -315,6 +335,55 @@ export function hydratePrimaryBackendProfile(
 	notify();
 }
 
+export function hydrateStaticRuntimePolicy(
+	clusterId: string,
+	origins: readonly string[],
+) {
+	const candidatesByOrigin = new Map<string, BackendCandidate>();
+	const bootstrapOrigin = canonicalBackendOrigin(STATIC_BOOTSTRAP_ORIGIN);
+	if (bootstrapOrigin) {
+		candidatesByOrigin.set(bootstrapOrigin, {
+			origin: bootstrapOrigin,
+			nodeId: "bootstrap",
+			nodeName: "Bootstrap backend",
+			verifiedAt: Date.now(),
+			lastError: null,
+		});
+	}
+	staticAllowedOrigins = bootstrapOrigin
+		? new Set<string>([bootstrapOrigin])
+		: new Set<string>();
+	for (const rawOrigin of origins) {
+		const origin = canonicalBackendOrigin(rawOrigin);
+		if (!origin) continue;
+		staticAllowedOrigins.add(origin);
+		const existing = candidatesByOrigin.get(origin);
+		candidatesByOrigin.set(origin, {
+			origin,
+			nodeId: existing?.nodeId ?? origin,
+			nodeName: existing?.nodeName ?? "Verified backend",
+			verifiedAt: existing?.verifiedAt ?? Date.now(),
+			lastError: null,
+		});
+	}
+	const currentOrigin = canonicalBackendOrigin(state.primaryOrigin);
+	const nextPrimary =
+		(currentOrigin && candidatesByOrigin.has(currentOrigin)
+			? currentOrigin
+			: bootstrapOrigin) ?? getPageOrigin();
+	const changed =
+		state.clusterId !== clusterId || state.primaryOrigin !== nextPrimary;
+	state = {
+		...state,
+		clusterId,
+		primaryOrigin: nextPrimary,
+		candidates: [...candidatesByOrigin.values()],
+		generation: changed ? state.generation + 1 : state.generation,
+		state: "ready",
+	};
+	notify();
+}
+
 function directFetch(input: RequestInfo | URL, init?: RequestInit) {
 	const fetcher =
 		nativeFetch ??
@@ -353,6 +422,9 @@ export async function verifyBackendCandidate(args: {
 }): Promise<BackendCandidate> {
 	const origin = canonicalBackendOrigin(args.origin);
 	if (!origin) throw new Error("Backend origin must be an HTTPS origin.");
+	if (isStaticWebConsole() && !staticAllowedOrigins.has(origin)) {
+		throw new Error("Backend is not present in the active runtime policy.");
+	}
 	const health = await directJson(
 		origin,
 		"/api/health",

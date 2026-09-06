@@ -73,6 +73,34 @@ capability disables only the affected UI feature; an endpoint or schema failure 
 is an API regression and must be investigated as such. PWA build IDs and API release profiles are
 independent and must not be manually aligned.
 
+### Independent static Web console
+
+The independent console is published at `https://xp.ivanli.cc` from the exact `web/dist` artifact
+produced for an XP release. The EdgeOne Makers project is `xp-web`; the repository's
+`edgeone.json` owns SPA fallback, security headers, bootstrap-only initial CSP, and cache rules.
+The owner must bind and verify the custom domain, CNAME/ICP prerequisites, the
+`EDGEONE_MAKERS_PROJECT=xp-web` repository variable, and the `EDGEONE_API_TOKEN` secret before
+enabling release automation. The workflow uses the pinned `edgeone@1.6.33` CLI and never creates a
+Makers project or changes DNS.
+
+`https://101-xp.ivanli.cc` is the only origin in the initial document CSP. After administrator
+authentication, a Static Console-Compatible node serves `GET /api/admin/console/runtime-policy`.
+The response is Bearer-protected, expires after ten minutes, and contains only the policy identity,
+cluster identity, timestamps, and canonical HTTPS `api_origins` for nodes that passed the signed
+`web.static-console-v1` capability probe. The static Web client does not call `/api/admin/nodes` to
+discover candidates. It sends the policy to the Service Worker for that client only; the worker
+rewrites `connect-src` on the next cached-document navigation and never proxies API requests.
+
+The release path is deliberately ordered `build -> static EdgeOne deploy -> public static smoke -> image -> GitHub Release`. The five-minute smoke check uses only public static GETs and verifies the
+target build ID, bootstrap-only CSP, SPA deep-route fallback, immutable hashed assets, and no-store
+`sw.js`; it never calls an XP API. A failed deploy or smoke check prevents image and release assets
+from publishing. The same workflow artifact is reused on retry, and the successful release retains
+the Web archive, checksum, and manifest. `static-web-rollback.yml` is a protected manual workflow:
+it accepts only a checksum-valid archive whose manifest remains in the `3.22/3.21/3.20` API window,
+deploys it to `xp-web`, and repeats the same public gate. It does not create tags, publish images, or
+modify Nodes. Docker/Compose continues to use host-side image replacement and is not a Web automatic
+upgrade target.
+
 ## Minimal runtime assumptions
 
 Host-managed mode assumptions:

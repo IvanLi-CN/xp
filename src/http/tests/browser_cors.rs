@@ -35,6 +35,23 @@ async fn reads_registered_origins_for_api_only() {
             .and_then(|value| value.to_str().ok()),
         Some(registered_origin),
     );
+
+    let static_preflight = Request::builder()
+        .method(Method::OPTIONS)
+        .uri("/api/health")
+        .header(header::ORIGIN, "https://xp.ivanli.cc")
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(static_preflight).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("https://xp.ivanli.cc"),
+    );
     assert_eq!(
         response
             .headers()

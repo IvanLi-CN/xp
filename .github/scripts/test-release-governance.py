@@ -192,6 +192,32 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("exactly one release type label", workflow)
         self.assertIn("exactly one release channel label", workflow)
 
+    def test_static_web_gate_precedes_image_and_release(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "release.yml").read_text()
+        self.assertIn("publish-static-web:", workflow)
+        self.assertIn("needs: [prepare, build]", workflow)
+        self.assertIn("needs: [prepare, build, publish-static-web]", workflow)
+        self.assertIn("needs: [prepare, build, publish-static-web, publish-image]", workflow)
+        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertIn("static_web_smoke.py", workflow)
+        self.assertIn("test \"${EDGEONE_MAKERS_PROJECT}\" = \"xp-web\"", workflow)
+
+    def test_web_archive_has_manifest_and_is_built_from_target_sha(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "release-build.yml").read_text()
+        self.assertIn("package static web release", workflow)
+        self.assertIn("xp-web-manifest.json", workflow)
+        self.assertIn("sha256sum \"${archive}\"", workflow)
+        self.assertIn("target_sha", workflow)
+
+    def test_static_web_rollback_is_release_only(self) -> None:
+        workflow = (Path(__file__).parents[1] / "workflows" / "static-web-rollback.yml").read_text()
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("gh release download", workflow)
+        self.assertIn("supported API compatibility window", workflow)
+        self.assertIn("edgeone@1.6.33 makers deploy", workflow)
+        self.assertNotIn("git push", workflow)
+        self.assertNotIn("docker", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

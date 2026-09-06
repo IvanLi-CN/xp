@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { transformIndexHtmlWithInlineBuildDeclaration } from "./runtime/inlineBuildDeclaration";
+import {
+	buildDeclarationScriptSource,
+	transformIndexHtmlWithExternalBuildDeclaration,
+	transformIndexHtmlWithInlineBuildDeclaration,
+} from "./runtime/inlineBuildDeclaration";
 
 describe("Vite inline build declaration", () => {
 	it("keeps adversarial build IDs inside the transformed script", () => {
@@ -42,5 +46,21 @@ describe("Vite inline build declaration", () => {
 		);
 
 		expect(html).toContain('href="/assets/index.css?theme=dark&xp-build=next"');
+	});
+
+	it("uses a same-origin external declaration asset for strict CSP", () => {
+		const html = transformIndexHtmlWithExternalBuildDeclaration(
+			'<html><head></head><body><script type="module" src="/src/main.tsx"></script></body></html>',
+			"2026.09.05-build",
+			"/assets/build-declaration-abc123.js",
+		);
+
+		expect(html).toContain(
+			'<script src="/assets/build-declaration-abc123.js" defer></script>',
+		);
+		expect(html).not.toContain("<script>\n");
+		expect(buildDeclarationScriptSource("fixture-build")).toContain(
+			"window.__XP_WEB_BUILD_ID__",
+		);
 	});
 });

@@ -7,7 +7,10 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-import { transformIndexHtmlWithInlineBuildDeclaration } from "./src/runtime/inlineBuildDeclaration";
+import {
+	buildDeclarationScriptSource,
+	transformIndexHtmlWithExternalBuildDeclaration,
+} from "./src/runtime/inlineBuildDeclaration";
 
 const packageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, "./package.json"), "utf8"),
@@ -59,6 +62,12 @@ export default defineConfig(({ mode }) => {
 	const backend = env.VITE_BACKEND_PROXY ?? "http://127.0.0.1:62416";
 	const buildId = resolveBuildId();
 	const swUpdateIntervalMs = resolveSwUpdateIntervalMs();
+	const buildDeclarationSource = buildDeclarationScriptSource(buildId);
+	const buildDeclarationHash = createHash("sha256")
+		.update(buildDeclarationSource)
+		.digest("hex")
+		.slice(0, 12);
+	const buildDeclarationFileName = `assets/build-declaration-${buildDeclarationHash}.js`;
 
 	return {
 		define: {
@@ -70,10 +79,21 @@ export default defineConfig(({ mode }) => {
 			react(),
 			tailwindcss(),
 			{
-				name: "xp-inline-build-declaration",
+				name: "xp-external-build-declaration",
 				transformIndexHtml(html, context) {
 					if (context.path.endsWith("/iframe.html")) return html;
-					return transformIndexHtmlWithInlineBuildDeclaration(html, buildId);
+					return transformIndexHtmlWithExternalBuildDeclaration(
+						html,
+						buildId,
+						`/${buildDeclarationFileName}`,
+					);
+				},
+				generateBundle() {
+					this.emitFile({
+						type: "asset",
+						fileName: buildDeclarationFileName,
+						source: buildDeclarationSource,
+					});
 				},
 				configurePreviewServer(server) {
 					if (process.env.E2E_USE_PREVIEW !== "1") return;

@@ -1902,6 +1902,37 @@ async fn cluster_info_is_single_node_leader_and_ids_present() {
 }
 
 #[tokio::test]
+async fn runtime_policy_requires_admin_auth_and_returns_only_canonical_origins() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(&tmp);
+
+    let unauthorized = app
+        .clone()
+        .oneshot(req("GET", "/api/admin/console/runtime-policy"))
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(req_authed("GET", "/api/admin/console/runtime-policy"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert!(body["policy_id"].as_str().unwrap().starts_with("rcp-"));
+    assert!(body["cluster_id"].as_str().is_some());
+    assert!(body["issued_at"].as_str().is_some());
+    assert!(body["expires_at"].as_str().is_some());
+    assert_eq!(body["api_origins"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["api_origins"][0],
+        xp_test_fixtures::url_loopback62416()
+    );
+    assert!(body.get("node_name").is_none());
+    assert!(body.get("access_host").is_none());
+}
+
+#[tokio::test]
 async fn join_token_endpoint_returns_decodable_token() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(&tmp);

@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+pub(super) const STATIC_CONSOLE_CAPABILITY: &str = "web.static-console-v1";
+
 #[derive(Debug, Serialize)]
 pub(super) struct ApiCapabilitiesResponse {
-    release_tag: String,
-    capabilities: Vec<&'static str>,
-    fingerprint: BTreeMap<&'static str, Vec<&'static str>>,
+    pub(super) release_tag: String,
+    pub(super) capabilities: Vec<&'static str>,
+    pub(super) fingerprint: BTreeMap<&'static str, Vec<&'static str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) reverse_mesh: Option<ReverseMeshReadiness>,
 }
@@ -39,6 +41,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
     fingerprint.insert("/api/admin/status/events", vec!["hello", "snapshot"]);
 
     let mut capabilities = vec![
+        STATIC_CONSOLE_CAPABILITY,
         "api.health",
         "api.cluster-info",
         "admin.nodes",
@@ -89,7 +92,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
 
 #[cfg(test)]
 mod tests {
-    use super::api_capabilities;
+    use super::{STATIC_CONSOLE_CAPABILITY, api_capabilities};
 
     #[tokio::test]
     async fn exposes_stable_capability_ids_and_release_tag() {
@@ -99,6 +102,7 @@ mod tests {
             format!("v{}", crate::version::VERSION)
         );
         assert!(response.capabilities.contains(&"api.health"));
+        assert!(response.capabilities.contains(&STATIC_CONSOLE_CAPABILITY));
         assert!(
             response
                 .capabilities

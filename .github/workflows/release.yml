@@ -164,8 +164,70 @@ jobs:
       artifact_prefix: release-${{ github.run_id }}
       cache_scope: release
 
-  publish-image:
+  publish-static-web:
     needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EDGEONE_MAKERS_PROJECT: ${{ vars.EDGEONE_MAKERS_PROJECT }}
+      EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: main}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: "web-release-release-${{ github.run_id }}"
+          path: web-release
+      - name: verify EdgeOne deployment prerequisites
+        run: |
+          set -euo pipefail
+          test -n "${EDGEONE_MAKERS_PROJECT}"
+          test "${EDGEONE_MAKERS_PROJECT}" = "xp-web"
+          test -n "${EDGEONE_API_TOKEN}"
+      - name: verify Web archive
+        env:
+          TARGET_SHA: ${{ env.RELEASE_HEAD_SHA }}
+          WEB_BUILD_ID: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest="web-release/xp-web-manifest.json"
+          archive="web-release/xp-web-${WEB_BUILD_ID}-${TARGET_SHA}.tar.gz"
+          test -f "${manifest}"
+          test -f "${archive}"
+          sha256sum --check "${archive}.sha256"
+          python3 - "${manifest}" "${TARGET_SHA}" "${WEB_BUILD_ID}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(Path(sys.argv[1]).read_text())
+          if manifest.get("target_sha") != sys.argv[2]:
+              raise SystemExit("Web archive target SHA mismatch")
+          if manifest.get("web_build_id") != sys.argv[3]:
+              raise SystemExit("Web archive build ID mismatch")
+          PY
+      - name: deploy Web to EdgeOne Makers
+        run: |
+          set -euo pipefail
+          mkdir -p web-deploy
+          version="${{ needs.prepare.outputs.version }}"
+          target_sha="${{ env.RELEASE_HEAD_SHA }}"
+          archive="web-release/xp-web-${version}-${target_sha}.tar.gz"
+          tar -xzf "${archive}" -C web-deploy
+          npx --yes edgeone@1.6.33 makers deploy ./web-deploy \
+            -n "${EDGEONE_MAKERS_PROJECT}" \
+            -t "${EDGEONE_API_TOKEN}" \
+            -e production
+      - name: verify public static Web deployment
+        run: |
+          python3 .github/scripts/static_web_smoke.py \
+            --url https://xp.ivanli.cc/ \
+            --build-id "${{ needs.prepare.outputs.version }}" \
+            --bootstrap-origin https://101-xp.ivanli.cc \
+            --timeout-seconds 300
+
+  publish-image:
+    needs: [prepare, build, publish-static-web]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -196,7 +258,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=release-runtime
 
   publish-release:
-    needs: [prepare, build, publish-image]
+    needs: [prepare, build, publish-static-web, publish-image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093

@@ -22,6 +22,15 @@
   cluster ID, preserves offline cache, and enforces the mutation switch barrier.
 - AppShell exposes the primary backend switcher and refreshes active queries/status events after a
   successful manual switch; the existing full-page node handoff remains unchanged.
+- Static Web mode uses `https://101-xp.ivanli.cc` as its bootstrap origin and never reads the
+  authenticated node inventory. The Bearer-protected runtime-policy route supplies only canonical
+  compatible API origins; a ten-minute policy grant is held in memory by the Service Worker per
+  controlled client and rewrites only the next navigation's `connect-src`.
+- Vite emits the build declaration and document-fallback handler as a content-hashed external asset.
+  The release build packages `web/dist` with `edgeone.json`, a same-SHA manifest, and checksum
+  before
+  the static EdgeOne deployment gate. The image and GitHub Release jobs depend on the public static
+  smoke gate; the protected static rollback workflow reuses only verified release archives.
 
 ## References
 
