@@ -191,6 +191,8 @@ export function AppShell({
 			Boolean(primaryBackend.clusterId),
 		queryFn: ({ signal }) => fetchRuntimePolicy(adminToken, signal),
 		staleTime: 4 * 60 * 1000,
+		refetchInterval: 4 * 60 * 1000,
+		refetchIntervalInBackground: true,
 		retry: false,
 	});
 

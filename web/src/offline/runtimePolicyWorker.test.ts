@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { fixtureCatalog } from "../fixture-policy/catalog";
 import {
 	applyRuntimePolicyGrant,
 	parseRuntimePolicyGrant,
@@ -10,27 +11,27 @@ describe("runtime policy worker contract", () => {
 		const grant = parseRuntimePolicyGrant(
 			{
 				policy_id: "rcp-1",
-				cluster_id: "cluster-1",
-				expires_at: "2099-01-01T00:10:00Z",
+				cluster_id: fixtureCatalog.cluster.fixture84(),
+				expires_at: fixtureCatalog.timestamp.releaseHttp(),
 				api_origins: ["https://node.example/"],
 			},
 			0,
 		);
 		expect(grant).toEqual({
 			policyId: "rcp-1",
-			clusterId: "cluster-1",
-			expiresAt: Date.parse("2099-01-01T00:10:00Z"),
+			clusterId: fixtureCatalog.cluster.fixture84(),
+			expiresAt: Date.parse(fixtureCatalog.timestamp.releaseHttp()),
 			apiOrigins: ["https://node.example"],
 		});
 		expect(
 			parseRuntimePolicyGrant(
 				{
 					policy_id: "rcp-1",
-					cluster_id: "cluster-1",
-					expires_at: "2020-01-01T00:10:00Z",
+					cluster_id: fixtureCatalog.cluster.fixture84(),
+					expires_at: fixtureCatalog.timestamp.earlier(),
 					api_origins: ["https://node.example"],
 				},
-				Date.parse("2021-01-01T00:00:00Z"),
+				Date.parse(fixtureCatalog.timestamp.baseline()),
 			),
 		).toBeNull();
 	});
@@ -44,7 +45,7 @@ describe("runtime policy worker contract", () => {
 		});
 		const rewritten = applyRuntimePolicyGrant(response, {
 			policyId: "rcp-1",
-			clusterId: "cluster-1",
+			clusterId: fixtureCatalog.cluster.fixture84(),
 			expiresAt: Date.now() + 60_000,
 			apiOrigins: ["https://node.example"],
 		});

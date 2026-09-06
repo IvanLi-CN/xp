@@ -76,10 +76,6 @@ const BUILD_METADATA_URL = new URL(
 ).href;
 const pendingNavigationBuilds = new Map<string, string>();
 const runtimePolicyGrants = new Map<string, RuntimePolicyGrant>();
-let pendingRuntimePolicyGrant: {
-	grant: RuntimePolicyGrant;
-	createdAt: number;
-} | null = null;
 let cacheMutation: Promise<unknown> = Promise.resolve();
 
 type DeadlineResult<T> = { completed: true; value: T } | { completed: false };
@@ -515,14 +511,6 @@ async function reconcileOwnership(): Promise<string[]> {
 			runtimePolicyGrants.delete(clientId);
 		}
 	}
-	if (
-		pendingRuntimePolicyGrant &&
-		(pendingRuntimePolicyGrant.grant.expiresAt <= Date.now() ||
-			Date.now() - pendingRuntimePolicyGrant.createdAt > 15_000)
-	) {
-		pendingRuntimePolicyGrant = null;
-	}
-
 	if (ownership.undeclaredClients.length > 0) return [];
 
 	const deleted = await cleanupUnownedBuildCaches(owners, retiredBuilds);
@@ -761,19 +749,6 @@ async function handleStaticRequest(event: FetchEvent): Promise<Response> {
 	assetUrl.search = "";
 	const requestKind = event.request.mode === "navigate" ? "navigate" : "asset";
 	const requestClientId = event.clientId || event.resultingClientId || null;
-	if (
-		requestKind === "navigate" &&
-		!event.clientId &&
-		event.resultingClientId &&
-		pendingRuntimePolicyGrant &&
-		Date.now() - pendingRuntimePolicyGrant.createdAt <= 15_000
-	) {
-		runtimePolicyGrants.set(
-			event.resultingClientId,
-			pendingRuntimePolicyGrant.grant,
-		);
-		pendingRuntimePolicyGrant = null;
-	}
 	if (requestKind === "navigate") {
 		if (event.clientId) pendingNavigationBuilds.set(event.clientId, BUILD_ID);
 		if (event.resultingClientId) {
@@ -959,7 +934,6 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 				);
 				pendingNavigationBuilds.delete(clientId);
 				runtimePolicyGrants.delete(clientId);
-				pendingRuntimePolicyGrant = null;
 				await reconcileOwnership();
 				return;
 			}
@@ -967,16 +941,13 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 				const grant = parseRuntimePolicyGrant(message.policy);
 				if (grant) {
 					runtimePolicyGrants.set(clientId, grant);
-					pendingRuntimePolicyGrant = { grant, createdAt: Date.now() };
 				} else {
 					runtimePolicyGrants.delete(clientId);
-					pendingRuntimePolicyGrant = null;
 				}
 				return;
 			}
 			if (message?.type === "XP_CLEAR_RUNTIME_POLICY" && clientId) {
 				runtimePolicyGrants.delete(clientId);
-				pendingRuntimePolicyGrant = null;
 				return;
 			}
 			if (message?.type === "XP_REQUEST_CACHE_RECOVERY") {

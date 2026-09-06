@@ -15,7 +15,11 @@ def fetch(url: str) -> tuple[int, dict[str, str], bytes]:
     request = Request(url, headers={"Cache-Control": "no-cache", "Accept": "*/*"})
     with urlopen(request, timeout=10) as response:
         body = response.read()
-        return response.status, {key.lower(): value for key, value in response.headers.items()}, body
+        headers: dict[str, str] = {}
+        for key in set(response.headers.keys()):
+            values = response.headers.get_all(key) or []
+            headers[key.lower()] = "; ".join(values)
+        return response.status, headers, body
 
 
 def assert_static_contract(
