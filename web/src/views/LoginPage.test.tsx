@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UiPrefsProvider } from "../components/UiPrefs";
@@ -8,6 +8,7 @@ import { LoginPage } from "./LoginPage";
 const mocks = vi.hoisted(() => ({
 	navigate: vi.fn(),
 	verifyAdminToken: vi.fn(),
+	isStaticWebConsole: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", async () => {
@@ -20,6 +21,10 @@ vi.mock("@tanstack/react-router", async () => {
 
 vi.mock("../api/adminAuth", () => ({
 	verifyAdminToken: mocks.verifyAdminToken,
+}));
+
+vi.mock("../backend/primaryBackend", () => ({
+	isStaticWebConsole: mocks.isStaticWebConsole,
 }));
 
 describe("<LoginPage />", () => {
@@ -45,6 +50,8 @@ describe("<LoginPage />", () => {
 		}
 		mocks.navigate.mockReset();
 		mocks.verifyAdminToken.mockReset();
+		mocks.isStaticWebConsole.mockReset();
+		mocks.isStaticWebConsole.mockReturnValue(false);
 		window.history.pushState(
 			{},
 			"",
@@ -77,6 +84,37 @@ describe("<LoginPage />", () => {
 		expect(mocks.navigate).toHaveBeenCalledWith({
 			href: "/nodes?view=table#history",
 		});
+	});
+
+	it("shows compatibility pending without storing an unverified static-console token", async () => {
+		window.history.pushState({}, "", "/login");
+		mocks.isStaticWebConsole.mockReturnValue(true);
+		mocks.verifyAdminToken.mockRejectedValue(new TypeError("Failed to fetch"));
+
+		render(
+			<UiPrefsProvider>
+				<LoginPage />
+			</UiPrefsProvider>,
+		);
+
+		fireEvent.change(screen.getByLabelText("Token"), {
+			target: { value: "unverified-token" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save & Continue" }));
+
+		await waitFor(() => {
+			expect(
+				screen.getByText("Bootstrap compatibility pending."),
+			).toBeInTheDocument();
+		});
+
+		expect(
+			screen.getByText("Token is not saved until verification succeeds."),
+		).toBeInTheDocument();
+		expect(screen.queryByText("No token set.")).not.toBeInTheDocument();
+		expect(screen.queryByText("Failed to fetch")).not.toBeInTheDocument();
+		expect(localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)).toBeNull();
+		expect(screen.getByLabelText("Token")).toHaveValue("unverified-token");
 	});
 
 	it("falls back to root for invalid redirect targets", async () => {

@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
+import { isStaticWebConsole } from "../backend/primaryBackend";
 import { Button } from "../components/Button";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
@@ -24,6 +25,7 @@ import {
 import { Input } from "../components/ui/input";
 import { parseAdminTokenInput } from "../utils/adminToken";
 import { sanitizeRedirectPath } from "../utils/navigation";
+import { LoginBootstrapCompatibilityPending } from "./LoginBootstrapCompatibilityPending";
 
 function formatError(err: unknown): string {
 	if (isBackendApiError(err)) {
@@ -57,6 +59,8 @@ export function LoginPage() {
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
 	const [isVerifying, setIsVerifying] = useState(false);
 	const [serverError, setServerError] = useState<string | null>(null);
+	const [bootstrapCompatibilityPending, setBootstrapCompatibilityPending] =
+		useState(false);
 	const redirectTarget = useMemo(() => {
 		const params = new URLSearchParams(window.location.search);
 		return sanitizeRedirectPath(params.get("redirect"));
@@ -67,6 +71,8 @@ export function LoginPage() {
 			token: storedToken,
 		},
 	});
+	const draftToken = form.watch("token");
+	const hasUnverifiedToken = tokenLength === 0 && draftToken.length > 0;
 
 	const submitToken = useCallback(
 		async (rawToken: string) => {
@@ -78,6 +84,7 @@ export function LoginPage() {
 
 			setIsVerifying(true);
 			setServerError(null);
+			setBootstrapCompatibilityPending(false);
 			try {
 				await verifyAdminToken(parsed.token);
 				writeAdminToken(parsed.token);
@@ -85,7 +92,11 @@ export function LoginPage() {
 				form.reset({ token: parsed.token });
 				navigate({ href: redirectTarget });
 			} catch (err) {
-				setServerError(formatError(err));
+				if (isStaticWebConsole() && err instanceof TypeError) {
+					setBootstrapCompatibilityPending(true);
+				} else {
+					setServerError(formatError(err));
+				}
 			} finally {
 				setIsVerifying(false);
 			}
@@ -160,6 +171,7 @@ export function LoginPage() {
 												className="font-mono"
 												onChange={(event) => {
 													setServerError(null);
+													setBootstrapCompatibilityPending(false);
 													field.onChange(event);
 												}}
 											/>
@@ -169,20 +181,26 @@ export function LoginPage() {
 								)}
 							/>
 
-							{tokenLength === 0 ? (
+							{tokenLength > 0 ? (
+								<p className="text-sm text-muted-foreground">
+									Token stored (length {tokenLength}).
+								</p>
+							) : hasUnverifiedToken ? (
+								<p className="text-sm text-muted-foreground">
+									Token is not saved until verification succeeds.
+								</p>
+							) : (
 								<div className="xp-alert xp-alert-warning px-4 py-3">
 									<p className="font-medium">No token set.</p>
 									<p className="mt-1 text-muted-foreground">
 										Ask an administrator for a token or a temporary login link.
 									</p>
 								</div>
-							) : (
-								<p className="text-sm text-muted-foreground">
-									Token stored (length {tokenLength}).
-								</p>
 							)}
 
-							{serverError ? (
+							{bootstrapCompatibilityPending ? (
+								<LoginBootstrapCompatibilityPending />
+							) : serverError ? (
 								<div className="xp-alert xp-alert-error px-4 py-3">
 									{serverError}
 								</div>
@@ -195,6 +213,7 @@ export function LoginPage() {
 										clearAdminToken();
 										setTokenLength(0);
 										setServerError(null);
+										setBootstrapCompatibilityPending(false);
 										form.reset({ token: "" });
 									}}
 								>
