@@ -53,7 +53,13 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-export function LoginPage() {
+type LoginPageProps = {
+	staticConsole?: boolean;
+};
+
+export function LoginPage({
+	staticConsole = isStaticWebConsole(),
+}: LoginPageProps) {
 	const navigate = useNavigate();
 	const storedToken = useMemo(() => readAdminToken(), []);
 	const [tokenLength, setTokenLength] = useState(storedToken.length);
@@ -92,7 +98,7 @@ export function LoginPage() {
 				form.reset({ token: parsed.token });
 				navigate({ href: redirectTarget });
 			} catch (err) {
-				if (isStaticWebConsole() && err instanceof TypeError) {
+				if (staticConsole && err instanceof TypeError) {
 					setBootstrapCompatibilityPending(true);
 				} else {
 					setServerError(formatError(err));
@@ -101,7 +107,7 @@ export function LoginPage() {
 				setIsVerifying(false);
 			}
 		},
-		[form, navigate, redirectTarget],
+		[form, navigate, redirectTarget, staticConsole],
 	);
 
 	useEffect(() => {
