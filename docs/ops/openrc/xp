@@ -3,9 +3,12 @@
 name="xp"
 description="xp (Xray cluster manager)"
 
-command="/usr/local/bin/xp"
-command_args="run"
+command="/bin/sh"
+command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'"
 command_user="xp:xp"
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
 
 # If you enable `XP_XRAY_RESTART_MODE=openrc`, `xp` may request `rc-service xray restart`
 # when it detects xray is down. The first restart is prompt; repeated failures use exponential

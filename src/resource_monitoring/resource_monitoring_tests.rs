@@ -167,6 +167,62 @@ fn alert_policy_emits_one_open_and_one_recovery_transition() {
 }
 
 #[test]
+fn xp_pss_budget_alerts_at_fixed_warning_and_critical_thresholds() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = ResourceState {
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        reader: LinuxResourceReader::with_runtime_targets(
+            directory.path().to_path_buf(),
+            ManagedRuntimeTargets::default(),
+        ),
+        collector: CollectorState::default(),
+        samples: VecDeque::new(),
+        current: None,
+        rollup: RollupAccumulator::new(),
+        alert_progress: HashMap::new(),
+        pending_gap: None,
+    };
+    let mut rollup = ResourceRollup {
+        node_id: "node-a".to_owned(),
+        bucket_start_unix_seconds: 60,
+        expected_samples: 1,
+        captured_samples: 1,
+        capability: Capability::Supported,
+        values: BTreeMap::new(),
+    };
+    rollup.values.insert(
+        "xp.pss_bytes".to_owned(),
+        RollupValue {
+            min: Some(28.0 * 1024.0 * 1024.0),
+            mean: Some(28.0 * 1024.0 * 1024.0),
+            max: Some(28.0 * 1024.0 * 1024.0),
+            last: Some(28.0 * 1024.0 * 1024.0),
+            counter_delta: None,
+            capability: Capability::Supported,
+        },
+    );
+    let policy = ResourcePolicy::default();
+    let actions = state.evaluate_alerts(&rollup, &policy);
+    assert!(matches!(
+        actions.as_slice(),
+        [ResourceAlertAction::Open(alert)]
+            if alert.metric == "pss_bytes" && alert.severity == "warning"
+    ));
+    rollup.values.get_mut("xp.pss_bytes").unwrap().max = Some(32.0 * 1024.0 * 1024.0);
+    let actions = state.evaluate_alerts(&rollup, &policy);
+    assert!(matches!(
+        actions.as_slice(),
+        [ResourceAlertAction::Open(alert)]
+            if alert.metric == "pss_bytes" && alert.severity == "critical"
+    ));
+    rollup.values.get_mut("xp.pss_bytes").unwrap().max = Some(20.0 * 1024.0 * 1024.0);
+    assert!(matches!(
+        state.evaluate_alerts(&rollup, &policy).as_slice(),
+        [ResourceAlertAction::Recover(id)] if id == "node-a:xp.pss_bytes"
+    ));
+}
+
+#[test]
 fn raft_policy_command_is_revisioned_and_validated() {
     let mut state = crate::state::PersistedState::empty();
     let mut policy = ResourcePolicy {

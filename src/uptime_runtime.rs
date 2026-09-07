@@ -100,7 +100,7 @@ impl UptimeHandle {
         connection.execute_batch(
             "
             PRAGMA journal_mode = WAL;
-            PRAGMA foreign_keys = ON;
+            PRAGMA foreign_keys = ON; PRAGMA cache_size = -512;
             CREATE TABLE IF NOT EXISTS uptime_observations (
                 id TEXT PRIMARY KEY,
                 monitor_id TEXT NOT NULL,

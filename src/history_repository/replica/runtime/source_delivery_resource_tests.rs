@@ -53,6 +53,22 @@ fn process_rss_bytes() -> u64 {
 }
 
 #[cfg(target_os = "linux")]
+fn process_pss_bytes() -> u64 {
+    fs::read_to_string("/proc/self/smaps_rollup")
+        .expect("read process smaps_rollup")
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Pss:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .expect("parse process PSS")
+        .saturating_mul(1024)
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
     if std::env::var_os(RESOURCE_BENCHMARK_CHILD).is_none() {
@@ -76,7 +92,7 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
     let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
         .expect("open history database");
     let identity = serde_json::to_vec(&super::identity()).expect("serialize source identity");
-    let wire = vec![0_u8; 128];
+    let wire = vec![0_u8; 27 * 1024];
     let transaction = connection
         .unchecked_transaction()
         .expect("begin backlog transaction");
@@ -100,7 +116,8 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
         .execute(
             "UPDATE source_delivery_journal_state
              SET pending_segments = 20_000, pending_bytes = ?1,
-                 epoch_high_water = 1, order_repair_completed = 1
+                 epoch_high_water = 1, order_repair_completed = 1,
+                 capacity_suspended = 1
              WHERE singleton = 1",
             [wire.len() as i64 * 20_000],
         )
@@ -125,9 +142,11 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
             .expect("settle page");
     }
     let baseline_rss = process_rss_bytes();
+    let baseline_pss = process_pss_bytes();
     let mut cpu_percentages = Vec::with_capacity(5);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
+    let mut max_pss_bytes = baseline_pss;
 
     for _ in 0..5 {
         let started = Instant::now();
@@ -143,7 +162,12 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
                 .expect("read bounded source page");
             match page {
                 crate::state::history_storage::SourceDeliveryJournalPage::Ready(rows) => {
-                    assert_eq!(rows.len(), 256)
+                    assert_eq!(rows.len(), 37);
+                    let page_wire_limit =
+                        crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES;
+                    assert!(
+                        rows.iter().map(|row| row.wire.len()).sum::<usize>() <= page_wire_limit
+                    );
                 }
                 crate::state::history_storage::SourceDeliveryJournalPage::Repairing => {
                     panic!("current backlog must not be repairing")
@@ -161,13 +185,14 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
         cpu_percentages.push(cpu_percent);
         max_read_bytes = max_read_bytes.max(process_read_bytes().saturating_sub(read_before));
         max_rss_delta = max_rss_delta.max(process_rss_bytes().saturating_sub(baseline_rss));
+        max_pss_bytes = max_pss_bytes.max(process_pss_bytes());
     }
 
     cpu_percentages.sort_by(f64::total_cmp);
     let cpu_p95 = *cpu_percentages.last().expect("resource samples");
     println!(
         "source_journal_resource cpu_p95_percent={cpu_p95:.2} max_read_bytes={max_read_bytes} \
-         max_rss_delta={max_rss_delta}"
+         max_rss_delta={max_rss_delta} max_pss_bytes={max_pss_bytes}"
     );
     assert!(
         cpu_p95 <= 9.0,
@@ -180,5 +205,9 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
     assert!(
         max_rss_delta <= 2 * 1024 * 1024,
         "source journal RSS delta {max_rss_delta} exceeds 2 MiB"
+    );
+    assert!(
+        max_pss_bytes < 32 * 1024 * 1024,
+        "source journal PSS {max_pss_bytes} is not below 32 MiB"
     );
 }

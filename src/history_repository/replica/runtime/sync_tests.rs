@@ -15,11 +15,12 @@ use crate::{
     },
 };
 
-#[path = "source_delivery_tests.rs"]
-mod source_delivery_tests;
-
+#[path = "source_delivery_capacity_tests.rs"]
+mod source_delivery_capacity_tests;
 #[path = "source_delivery_order_repair_tests.rs"]
 mod source_delivery_order_repair_tests;
+#[path = "source_delivery_tests.rs"]
+mod source_delivery_tests;
 
 #[path = "source_delivery_collector_tests.rs"]
 mod source_delivery_collector_tests;

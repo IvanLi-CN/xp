@@ -61,7 +61,7 @@ describe("RepositoryStatusSummary", () => {
 		expect(screen.queryByText("0 gaps")).not.toBeInTheDocument();
 	});
 
-	it("shows journal order repair while preserving the backlog count", () => {
+	it("shows the journal capacity guard while preserving the backlog count", () => {
 		render(
 			<RepositoryStatusSummary
 				status={{
@@ -100,7 +100,7 @@ describe("RepositoryStatusSummary", () => {
 								last_deep_verification_unix_seconds: null,
 								last_dynamic_relay_attempt_unix_seconds: null,
 								source_delivery: {
-									state: "journal_order_repairing",
+									state: "journal_capacity_guard",
 									pending_segments: 20_000,
 									pending_bytes: 128 * 1024 * 1024,
 								},
@@ -111,7 +111,7 @@ describe("RepositoryStatusSummary", () => {
 			/>,
 		);
 
-		expect(screen.getByText(/source journal order repair/)).toBeVisible();
+		expect(screen.getByText(/source journal capacity guard/)).toBeVisible();
 		expect(screen.getByText(/20000 segments/)).toBeVisible();
 	});
 

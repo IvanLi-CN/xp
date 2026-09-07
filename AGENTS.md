@@ -60,6 +60,14 @@
   OpenRC supervisor PID files and direct children, or the official container entrypoint's private
   PID/start-time identity file. It never enumerates arbitrary processes, starts a helper, or
   treats XP-internal canary work as a separate process. Upgrades preserve the Resource Store.
+- XP source-delivery history is a durable SQLite outbox with a fixed 128 MiB or 20,000-segment cap.
+  At 80% either dimension it persists `capacity_suspended`, reports `journal_capacity_guard`, and
+  stops source capture without advancing the cursor or deleting unacknowledged rows; ACK drain
+  clears the marker only below 60% on both dimensions. Replay pages are limited to 256 segments and
+  1 MiB
+  wire data. The Resource Alert path reports fixed XP PSS warning/critical thresholds at 28/32 MiB
+  for one minute and never restarts XP. Generated OpenRC XP services use `supervise-daemon`,
+  `respawn_delay=2`, and `respawn_max=0`; systemd and container supervision remain unchanged.
 - Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
   `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
   listener. A durable assignment does not itself keep a target Xray initiating outbound installed:

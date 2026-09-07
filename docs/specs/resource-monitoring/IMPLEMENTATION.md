@@ -32,6 +32,8 @@ limit/current，不能把宿主机内存总量伪装成容器值。旧节点通�
 - Resource history payload 使用固定 metric code 的紧凑 wire 格式，按 resolution 执行
   2 KiB/1 KiB/768 B 预算；source delivery journal 仅在实际投递确认后清理资源 pending
   行，并保留 32 MiB/10000 项上限。
+- XP `pss_bytes` 由本地 evaluator 使用固定 28 MiB warning、32 MiB critical 与 1 分钟
+  streak 生成既有 Resource Alert transition；它不写入 Resource Policy，也不负责重启进程。
 - admin/internal current、recent、history、policy 路由；签名 Mesh fan-out 的
   partial/unreachable 返回；history 查询按 `resource_metrics.v1` schema 过滤并消费有界
   分页；admin.alerts 资源告警扩展。

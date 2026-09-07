@@ -27,7 +27,8 @@ Current support boundaries that operators must know:
   official single-image containers report `resource_domain=cgroup`, and older or unsupported nodes
   remain available with `admin.resource-monitoring=unsupported`. Missing `/proc`, cgroup, PSS, or
   I/O fields report capability reason codes; no root daemon, shell, external `ping`, PID scan, or
-  automatic restart is introduced.
+  automatic restart is introduced. The existing alert stream additionally reports XP process PSS
+  at fixed 28 MiB warning / 32 MiB critical thresholds after one minute; alerts never restart XP.
 - Feature delivery must not be container-only. Runtime contracts such as managed-default endpoint reconcile, VLESS HTTPS canary fallback, Mihomo relay URL generation, and upgrade-time auto-adoption must behave the same way once a node is running, regardless of whether the node is host-managed or container-managed.
 - Managed-default endpoint ports are cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` only bootstrap a missing endpoint; changing or
@@ -782,7 +783,11 @@ Notes:
 - `history.sqlite3` is the local repository replica database. SQLite uses WAL and bounded
   checkpoints with incremental page release; XP never runs an unbounded `VACUUM` in the service
   path. Persistent low disk space or a repository quota stops new history writes while Raft and
-  normal control-plane operations remain available. Operators can inspect member capacity,
+  normal control-plane operations remain available. The source-delivery outbox is additionally
+  bounded at 128 MiB or 20,000 segments; at 80% either limit source capture pauses with durable
+  `journal_capacity_guard`, retaining every unacknowledged row and resuming oldest-first once both
+  limits are below 60%. Each replay page is capped at 256 segments and 1 MiB of wire data. Operators
+  can inspect member capacity,
   coverage, watermarks, gaps, clock skew and `complete` / `partial` / `local_only` query quality
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
@@ -858,7 +863,9 @@ Suggested workflow:
 1. Copy scripts to `/etc/init.d/` and make executable.
 2. (Optional) Configure environment variables via OpenRC's `/etc/conf.d/<service>` mechanism.
    Keep `XP_DATA_DIR` writable by the `xp` service user so the repository SQLite database survives
-   restart.
+   restart. The generated `xp` service uses `supervise-daemon` with a two-second respawn delay and
+   unlimited respawns, so an XP crash is recovered by OpenRC without changing systemd or container
+   behavior.
 3. Add to default runlevel and start:
 
 ```

@@ -69,7 +69,10 @@
   journal; the journal is replayed oldest-first after restart and released incrementally only after
   a continuous acknowledgement. Transport failures and legacy queue pressure remain recoverable
   backlog, never a permanent gap. The source enters `source_storage_guard` rather than advancing a
-  cursor when the existing 256 MiB filesystem guard is reached.
+  cursor when the existing 256 MiB filesystem guard is reached. The SQLite outbox also enforces a
+  fixed 128 MiB or 20,000-segment cap with a durable `capacity_suspended` marker: at 80% either
+  dimension it reports `journal_capacity_guard`, rejects new source rows before the transaction
+  writes, and resumes only after both dimensions fall below 60%; no unacknowledged row is deleted.
   `path_health.v1` reads a bounded telemetry source view directly from runtime state: rotating
   through at most 16 peers, with each peer's latest one-minute bucket, rather than cloning complete
   local 24-hour telemetry series. It bounds copied strings and latency samples before adding each
@@ -83,7 +86,8 @@
   and epoch high-water statistics plus the last successful acknowledgement path/time. The
   order-repair cursor and completion marker are initialized idempotently in the schema transaction
   without decoding payloads; a journal with no legacy rows is marked complete in constant time
-  after the initialization aggregate.
+  after the initialization aggregate. Replay pages contain at most 256 segments and 1 MiB of wire
+  data, so a large backlog cannot inflate the XP process working set.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary

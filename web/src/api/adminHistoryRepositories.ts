@@ -39,6 +39,7 @@ export const HistoryRepositoryRuntimeSchema = z.object({
 				"backlogged",
 				"journal_order_repairing",
 				"source_storage_guard",
+				"journal_capacity_guard",
 				"journal_unavailable",
 			]),
 			pending_segments: z.number(),

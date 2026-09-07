@@ -60,8 +60,11 @@ const meta = {
 	tags: ["autodocs", "coverage-ui"],
 	decorators: [
 		(Story) => (
-			<div className="p-12">
-				<div className="rounded border border-border bg-slate-800 p-6">
+			<div
+				data-visual-evidence-surface
+				className="bg-slate-800 p-12 text-slate-100"
+			>
+				<div data-visual-evidence-target>
 					<Story />
 				</div>
 			</div>
@@ -133,6 +136,29 @@ export const SourceJournalOrderRepairing: Story = {
 								state: "journal_order_repairing",
 								pending_segments: 20_000,
 								pending_bytes: 128 * 1024 * 1024,
+								oldest_pending_age_seconds: 600,
+							},
+						}
+					: undefined,
+			})),
+		},
+	},
+};
+
+export const SourceJournalCapacityGuard: Story = {
+	args: {
+		status: {
+			...healthy,
+			items: healthy.items.map((item) => ({
+				...item,
+				runtime: item.runtime
+					? {
+							...item.runtime,
+							source_delivery: {
+								state: "journal_capacity_guard",
+								pending_segments: 20_000,
+								pending_bytes: 128 * 1024 * 1024,
+								oldest_pending_cursor: "node-a/4/runtime/3993",
 								oldest_pending_age_seconds: 600,
 							},
 						}

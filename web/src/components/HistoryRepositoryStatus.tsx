@@ -42,6 +42,9 @@ function runtimeAvailability(runtime?: HistoryRepositoryRuntime): string {
 	if (runtime.source_delivery?.state === "source_storage_guard") {
 		return "source capture paused";
 	}
+	if (runtime.source_delivery?.state === "journal_capacity_guard") {
+		return "source journal capacity guard";
+	}
 	if (runtime.source_delivery?.state === "journal_unavailable") {
 		return "source journal unavailable";
 	}
@@ -142,7 +145,8 @@ export function RepositoryMemberStatus(props: {
 							<dd>{timestamp(member.ready_at)}</dd>
 						</div>
 						{runtime?.source_delivery?.state === "backlogged" ||
-						runtime?.source_delivery?.state === "journal_order_repairing" ? (
+						runtime?.source_delivery?.state === "journal_order_repairing" ||
+						runtime?.source_delivery?.state === "journal_capacity_guard" ? (
 							<div className="min-w-0 sm:col-span-2">
 								<dt className="text-muted-foreground">Source backlog</dt>
 								<dd>

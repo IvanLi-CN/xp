@@ -22,6 +22,20 @@ fn observation(slot: u64) -> Observation {
     }
 }
 
+#[tokio::test]
+async fn sqlite_runtime_cache_size_is_bounded() {
+    let temporary = TempDir::new().unwrap();
+    let handle = UptimeHandle::load(temporary.path()).unwrap();
+    let runtime = handle.inner.lock().await;
+    assert_eq!(
+        runtime
+            .connection
+            .query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        -512
+    );
+}
+
 #[test]
 fn tcp_connect_timeout_never_exceeds_the_shared_total_deadline() {
     assert_eq!(

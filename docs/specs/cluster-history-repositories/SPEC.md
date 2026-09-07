@@ -122,11 +122,17 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - source 在 SQLite delivery journal 中持久化未确认的已签名 segment，并在 collector 确认后增量
   释放空间。若文件系统可用空间低于既有 256 MiB 安全护栏，source 停止新的仓库采集并报告
   `source_storage_guard`；不得前推 cursor、伪造确认或改变普通节点的数据保留策略。
+- source delivery journal 另有不可配置的 `128 MiB` 或 `20,000` 段 hard cap。达到任一项的
+  80% 即持久化 `capacity_suspended` 并报告 `journal_capacity_guard`，停止新的 source capture
+  但保留全部未 ACK 行；只有 segment 与 byte 均低于 60% 才清除暂停位。容量预检在追加事务
+  写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
+  journal delivery order oldest-first 连续投递。
 - delivery journal 状态读取必须通过 SQLite 聚合条数与总字节数，并且只读取排序后的单条最老
   segment；状态/API 查询的进程内存不得随 durable backlog 大小增长。
 - delivery journal 的周期性状态、epoch 恢复和固定页读取必须使用持久化统计状态与匹配投递顺序的
-  SQLite 索引；除一次性旧库迁移外，不得扫描或反序列化整个 backlog。每轮读取最多 256 条，
-  其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload 字节数增长。
+  SQLite 索引；除一次性旧库迁移外，不得扫描或反序列化整个 backlog。每轮读取最多 256 条且
+  返回 wire 总量最多 1 MiB，其 CPU、磁盘读取和进程内存成本不得随 backlog 条数或 payload
+  字节数增长。
 - 旧库中缺少投递顺序元数据的 segment 必须通过 `source_delivery_journal_state` 的持久主键游标
   分页校正；每个 60 秒 source collection cycle 最多提交一页 256 条，校正失败时游标不前进，
   重启从最后一次提交的位置继续。状态查询不得隐式执行校正；校正期间继续持久化新 segment，
@@ -190,6 +196,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   The shared testbox measures CPU, database reads and RSS for at least 20,000 rows or 128 MiB;
   deterministic Rust tests cover an unreachable Collector and recovery. Direct/Public and
   cluster-control-plane availability are verified separately by the production canary gate.
+- The actual-XP resource gate runs the release `xp run` candidate and baseline inside a dedicated
+  Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
+  `smaps_rollup`, and requires every candidate PSS sample to remain below 32 MiB.
 
 ## Resource and Quality Constraints
 

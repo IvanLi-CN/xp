@@ -6,6 +6,7 @@ use std::{path::PathBuf, time::Duration};
 use mesh_transport_resource_support::{ResourceRun, run_resource_workload};
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(15 * 60);
+const XP_TOTAL_PSS_LIMIT_KIB: u64 = 32 * 1024;
 const XP_ANON_PSS_LIMIT_KIB: u64 = 18_432;
 const XP_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const STACK_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
@@ -41,6 +42,12 @@ fn assert_resource_budget(baseline: &ResourceRun, candidate: &ResourceRun, durat
         assert!(run.xp_peak_anon_pss_kib <= run.xp_peak_pss_kib);
         assert!(run.xp_peak_file_pss_kib <= run.xp_peak_pss_kib);
     }
+    assert!(
+        candidate.xp_peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
+        "candidate XP peak PSS {} KiB is not below {} KiB",
+        candidate.xp_peak_pss_kib,
+        XP_TOTAL_PSS_LIMIT_KIB
+    );
     assert!(
         candidate.xp_peak_anon_pss_kib <= XP_ANON_PSS_LIMIT_KIB,
         "candidate XP peak anonymous PSS {} KiB exceeds {} KiB",

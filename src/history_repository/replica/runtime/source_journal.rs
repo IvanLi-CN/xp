@@ -6,6 +6,25 @@ use crate::state::history_storage::{
 use super::*;
 
 impl RepositoryReplicaRuntime {
+    pub(super) fn ensure_source_delivery_capacity(
+        &self,
+        defer_journal: bool,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if defer_journal || !self.storage.is_sqlite() {
+            return Ok(());
+        }
+        if self
+            .storage
+            .source_delivery_journal_capacity_suspended()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "source delivery journal capacity guard".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn hydrate_source_delivery_journal(
         &mut self,
     ) -> Result<bool, RepositoryRuntimeError> {
@@ -119,6 +138,7 @@ impl RepositoryReplicaRuntime {
                 last_acknowledged_at: None,
                 last_delivery_path: None,
                 order_repairing: false,
+                capacity_suspended: false,
             }
         };
         let oldest_pending_age_seconds = summary
@@ -141,6 +161,8 @@ impl RepositoryReplicaRuntime {
             "journal_unavailable"
         } else if filesystem_available_bytes < 256 * 1024 * 1024 {
             "source_storage_guard"
+        } else if summary.capacity_suspended {
+            "journal_capacity_guard"
         } else if summary.order_repairing {
             "journal_order_repairing"
         } else if summary.pending_segments == 0 {

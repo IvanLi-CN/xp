@@ -43,7 +43,8 @@ root 常驻服务来解决可观测性问题。
 
 - Windows、macOS 或任意 Docker host 全局资源的主动采集。
 - 任意挂载点、块设备、PID 或容器的枚举；只采集 root 与 `XP_DATA_DIR`，并按文件系统 identity 去重。
-- 未经显式 role override 的单进程资源阈值；不同规格节点不能由 XP 自动调参。
+- 未经显式 role override 的单进程资源阈值；不同规格节点不能由 XP 自动调参。固定 XP
+  PSS safety budget 是例外：`28 MiB` warning、`32 MiB` critical，均持续一个分钟 rollup。
 - 外部告警投递、自动扩缩容、自动故障恢复或通用仪表盘构建器。
 
 ## Related ADRs
@@ -122,6 +123,8 @@ root 常驻服务来解决可观测性问题。
 - 默认 Domain 可用内存：`<=10%` 持续 10 分钟为 warning，`<=5%` 持续 5 分钟为 critical。
 - root/`XP_DATA_DIR` 空间或 inode 使用率 `>=85%` 为 warning，`>=95%` 为 critical。
 - 可读的 I/O wait `>=20%` 持续 10 分钟为 warning。Resource Capture Suspension 是 warning。
+- XP role 的 `pss_bytes` rollup 最大值 `>=28 MiB` 持续 1 分钟为 warning，`>=32 MiB` 持续
+  1 分钟为 critical；该 safety alert 不进入 Resource Policy 写入面，也不得触发自动重启。
 - 每角色资源阈值默认关闭，只有存在 cgroup limit 或管理员显式 role override 时才可启用。
 - 告警仅在进入、升级、恢复时发生状态转换，以避免每个样本重复创建。活动告警通过扩展后的 `admin.alerts` 与现有状态 SSE 可见；恢复事件保留在 Resource Store
   的有界本地状态中。
@@ -244,6 +247,9 @@ root 常驻服务来解决可观测性问题。
   fan-out partial、Raft policy revision 与旧节点 capability。
 - Shared testbox：在 256 MiB/no-swap Linux 节点上执行 systemd、OpenRC、单镜像容器路径；连续 15 分钟验证：采样器 p95 wall
   time 不超过 250 ms、稳态 RSS 增量不超过 1 MiB、CPU 不超过一个 CPU 核的 0.5%、每节点每分钟最多一次 Resource Store commit。
+- XP PSS safety gate：以实际 release `xp run` 进程置于 `MemoryMax=128M`、`MemorySwapMax=0`
+  的 Linux cgroup，连续采样 `/proc/<pid>/smaps_rollup`，所有样本必须严格低于 32 MiB；该
+  gate 不通过时不得以 allocator 替换或自动重启绕过。
 - 长时间测试：至少一个 Resource History Stream 到达 32 MiB journal、Repository quota 边界和恢复 drain，
   验证控制面与现有采集不受影响。
 
