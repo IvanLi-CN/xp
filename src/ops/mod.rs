@@ -24,6 +24,9 @@ mod runtime_activation;
 #[cfg(test)]
 #[path = "init_runtime_defaults_tests.rs"]
 mod runtime_defaults_tests;
+#[cfg(test)]
+#[path = "init_runtime_defaults_xray_migration_tests.rs"]
+mod runtime_defaults_xray_migration_tests;
 mod status;
 mod tui;
 mod upgrade;

@@ -1,13 +1,13 @@
 # 完整托管栈 64 MiB 内存预算 (#nmgq8)
 
-## 背景
+## Context and Scope
 
 小型节点需要在 `xp + xray + cloudflared + canary` 全部运行时保持低于 64 MiB
 进程 PSS。生产诊断确认两个独立风险：高参数 Argon2 会在每次管理员鉴权时临时
 分配 64 MiB；长期运行的 Go 进程会保留已归还堆页。连接数量本身不是已观察到的
 主要占用。
 
-## 目标与非目标
+### 目标与非目标
 
 - 在 100 条并发 VLESS、持续 50 Mbps、一次管理页并发请求和 24 小时 soak 下，
   总 PSS 峰值不超过 65,536 KiB。
@@ -16,14 +16,24 @@
 - 不把内核、page cache 或节点其他进程计入本规格，也不新增不受约束的通用 metrics 平台；固定范围的
   [Resource Monitoring](../resource-monitoring/SPEC.md) 另有独立的采样、容量和权限合同。
 
-## 运行时契约
+## Requirements
+
+- **REQ-MANAGED-STACK-AUTH**: 管理员认证必须保持低内存、JWT-first 和有界验证语义。
+- **REQ-MANAGED-STACK-RUNTIME**: systemd、OpenRC 和官方容器必须使用一致的托管
+  runtime 默认值，并保留显式 operator override。
+- **REQ-MANAGED-STACK-BUDGET**: 托管栈必须使用有界 PSS 观测，并以完整栈预算、OOM、
+  意外重启和采样完整性作为发布门禁。
+- **REQ-MANAGED-STACK-DEPLOYMENT**: host-managed 和容器升级必须原子激活受控运行时，
+  在失败时恢复已知可用的服务组合。
 
 - 管理员 Token 默认 Argon2id profile 为 `m=4096,t=3,p=1`；新明文至少 32 字节。
 - 新写入或导入的 PHC 必须匹配该 profile；旧高内存 PHC 只能在迁移前识别，
   不得继续写入。
 - JWT 形态凭据先走 JWT 校验，不得先执行 Argon2；原始 Token 校验使用单 worker
   和有界等待，饱和时返回 `429` 与 `Retry-After`。
-- Xray 默认 `GOMEMLIMIT=16MiB`、`GOGC=50`，level-0 `bufferSize=0`。
+- Xray 默认 `GOMEMLIMIT=32MiB`、`GOGC=100`，level-0 `bufferSize=0`；升级仅迁移
+  XP 生成或未修改官方 systemd 示例中的 `GOMEMLIMIT=16MiB`、`GOGC=50` 默认值，显式
+  operator override 保持不变。
 - cloudflared 默认 `GOMEMLIMIT=12MiB`、`GOGC=50`、`--protocol http2`，并关闭管理诊断采集；
   `XP_CLOUDFLARED_PROTOCOL` 可覆盖传输协议；托管服务定义变更后必须 reload 并重启，
   使新传输协议立即生效。
@@ -31,7 +41,7 @@
   cloudflared；宿主升级和官方容器镜像必须使用同一组带 checksum 的资产。
 - operator 已有显式 override 优先；升级只 backfill 缺失值或 XP 生成的旧默认值。
 
-## 观测与预算
+### 观测与预算
 
 - 每秒从目标进程树的 `/proc/<pid>/smaps_rollup` 读取 `Pss`；旧内核缺失该文件时汇总
   `/proc/<pid>/smaps` 的 `Pss` 条目，记录角色、版本、
@@ -43,7 +53,7 @@
   `+1 MiB`、XP CPU-seconds 相对基线 `+5%` 的回归门禁。通过该门禁只证明连接复用没有引入
   显著资源回归，不等价于本规格的 64 MiB 完整托管栈门禁通过。
 
-## 部署与回滚
+### 部署与回滚
 
 - host-managed unit/service 和容器 supervisor 都必须显式注入对应 Go runtime env。
 - host-managed 升级把 Xray 与 cloudflared 视为成对资产；缺失一项、checksum
@@ -60,7 +70,17 @@
 - 每步验证 quorum、节点可达、Xray、Tunnel 和新 Token；失败即停止后续节点并
   恢复已变更配置。
 
-## 验收
+## Verification
+
+- **VER-MANAGED-STACK-AUTH** covers: REQ-MANAGED-STACK-AUTH. Rust 认证测试覆盖
+  低内存 PHC、JWT-first 与有界原始 Token 验证。
+- **VER-MANAGED-STACK-RUNTIME** covers: REQ-MANAGED-STACK-RUNTIME. Rust runtime-default
+  测试覆盖 systemd、OpenRC 与容器默认值、显式 override、XP 生成旧默认及官方 systemd
+  示例的 backfill。
+- **VER-MANAGED-STACK-BUDGET** covers: REQ-MANAGED-STACK-BUDGET. PSS sampler、共享测试机
+  load profile 与生产 soak 验证完整栈预算、采样完整性和重启语义。
+- **VER-MANAGED-STACK-DEPLOYMENT** covers: REQ-MANAGED-STACK-DEPLOYMENT. Rust 升级测试覆盖
+  成对 runtime 资产、service manager ready 确认与回滚路径。
 
 - Rust 与 Web 全量质量门禁通过。
 - 三种部署形态覆盖默认值、override、升级 backfill 与回滚测试。
@@ -68,13 +88,15 @@
 - 四个生产节点版本和 PHC 指纹一致，旧 Token 失败，新 Token 成功，并完成
   24 小时脱敏 PSS 观察。
 
-## Visual Evidence
+## Related ADRs
 
-PR: none
+None
+
+## Visual Evidence
 
 本规格的变更仅涉及运行时配置、鉴权状态和部署路径，没有可独立验收的界面效果。
 
-## 参考
+## References
 
 - `docs/specs/r7m2q-openrc-low-memory-runtime-recovery/SPEC.md`
 - `docs/specs/38wmj-cluster-node-onboarding/SPEC.md`

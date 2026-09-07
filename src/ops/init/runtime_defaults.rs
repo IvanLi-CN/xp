@@ -5,13 +5,42 @@ use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
 const MANAGED_MARKER: &str = "# Managed by xp-ops; use a separate drop-in for overrides";
+const DOCUMENTED_SYSTEMD_XRAY_UNIT: &str = concat!(
+    "[Unit]\n",
+    "Description=xray (local proxy runtime)\n",
+    "After=network.target\n\n",
+    "[Service]\n",
+    "Type=simple\n\n",
+    "# Run as a non-root user by default.\n",
+    "# Create this user/group (example): useradd --system --home /var/lib/xray ",
+    "--shell /usr/sbin/nologin xray\n",
+    "User=xray\n",
+    "Group=xray\n",
+    "Environment=GOMEMLIMIT=32MiB\n",
+    "Environment=GOGC=100\n\n",
+    "ExecStart=/usr/local/bin/xray run -c /etc/xray/config.json\n\n",
+    "# `xp` expects `xray` to be supervised by the init system and to recover on crashes/OOM.\n",
+    "# Keep a non-zero `RestartSec` to avoid tight restart loops in crash-loop scenarios.\n",
+    "Restart=on-failure\n",
+    "RestartSec=2s\n\n",
+    "# Config is expected at /etc/xray/config.json ",
+    "(aligns with scripts/e2e/docker-compose.xray.yml).\n",
+    "WorkingDirectory=/var/lib/xray\n\n",
+    "NoNewPrivileges=true\n",
+    "PrivateTmp=true\n\n",
+    "[Install]\n",
+    "WantedBy=multi-user.target\n",
+);
 
 pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitError> {
     let systemd = paths.systemd_unit_dir();
     for (service, defaults) in [
         (
             "xray",
-            &[("GOMEMLIMIT", "16MiB", None), ("GOGC", "50", None)][..],
+            &[
+                ("GOMEMLIMIT", "32MiB", Some("16MiB")),
+                ("GOGC", "100", Some("50")),
+            ][..],
         ),
         (
             "cloudflared",
@@ -27,10 +56,12 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         if !unit.exists() {
             continue;
         }
-        let migrate_legacy_cloudflared_limit = service == "cloudflared"
-            && is_generated_legacy_systemd_cloudflared_unit(
-                &fs::read_to_string(&unit).map_err(filesystem_error)?,
-            );
+        let unit_raw = fs::read_to_string(&unit).map_err(filesystem_error)?;
+        let migrate_legacy_default = match service {
+            "xray" => is_generated_legacy_systemd_xray_unit(&unit_raw),
+            "cloudflared" => is_generated_legacy_systemd_cloudflared_unit(&unit_raw),
+            _ => false,
+        };
         if service == "cloudflared" {
             backfill_systemd_cloudflared_protocol(&unit)?;
         }
@@ -51,27 +82,31 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
         let sources = systemd_environment_sources(paths, &unit, &managed)?;
         let mut content = format!("[Service]\n{MANAGED_MARKER}\n");
         for (key, value, legacy_default) in defaults {
-            if should_backfill_systemd_value(
-                &sources,
-                key,
-                *legacy_default,
-                migrate_legacy_cloudflared_limit,
-            ) {
+            if should_backfill_systemd_value(&sources, key, *legacy_default, migrate_legacy_default)
+            {
                 content.push_str(&format!("Environment={key}={value}\n"));
             }
         }
         write_string_if_changed(&managed, &content).map_err(filesystem_error)?;
     }
 
-    for (path, limit) in [
-        (paths.openrc_initd_dir().join("xray"), "16MiB"),
-        (paths.openrc_initd_dir().join("cloudflared"), "12MiB"),
+    for (path, limit, gogc) in [
+        (paths.openrc_initd_dir().join("xray"), "32MiB", "100"),
+        (paths.openrc_initd_dir().join("cloudflared"), "12MiB", "50"),
     ] {
         if !path.exists() {
             continue;
         }
         let raw = fs::read_to_string(&path).map_err(filesystem_error)?;
         let mut updated = raw.clone();
+        if path.file_name() == Some(OsStr::new("xray"))
+            && is_generated_legacy_openrc_xray_script(&raw)
+        {
+            updated = updated.replace(
+                "export GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\"\nexport GOGC=\"${GOGC:-50}\"",
+                "export GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\"\nexport GOGC=\"${GOGC:-100}\"",
+            );
+        }
         if path.file_name() == Some(OsStr::new("cloudflared")) {
             if is_generated_legacy_openrc_cloudflared_script(&raw) {
                 updated = updated.replacen(
@@ -87,7 +122,7 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
             value.push_str(&format!("export GOMEMLIMIT=\"${{GOMEMLIMIT:-{limit}}}\"\n"));
         }
         if !updated.contains("GOGC") {
-            value.push_str("export GOGC=\"${GOGC:-50}\"\n");
+            value.push_str(&format!("export GOGC=\"${{GOGC:-{gogc}}}\"\n"));
         }
         if path.file_name() == Some(OsStr::new("cloudflared"))
             && !updated.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS")
@@ -123,6 +158,64 @@ pub fn backfill_low_memory_runtime_defaults(paths: &Paths) -> Result<(), ExitErr
     crate::ops::ingress_guard::refresh_xray_service_assets(paths)?;
     backfill_provider_cloudflared_wrapper(paths)?;
     Ok(())
+}
+
+fn is_generated_legacy_systemd_xray_unit(raw: &str) -> bool {
+    const MARKER: &str = "# Managed by xp-ops ingress-guard service boundary\n";
+    let Some(work_dir) = raw
+        .lines()
+        .find_map(|line| line.strip_prefix("WorkingDirectory="))
+        .map(PathBuf::from)
+    else {
+        return false;
+    };
+    let normalized = raw.replace(
+        "Environment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+        "Environment=GOMEMLIMIT=32MiB\nEnvironment=GOGC=100\n",
+    );
+    if normalized == raw {
+        return false;
+    }
+    if normalized == DOCUMENTED_SYSTEMD_XRAY_UNIT {
+        return true;
+    }
+    let direct = crate::ops::ingress_guard::render_systemd_xray_unit(&work_dir, None);
+    [
+        direct.clone(),
+        crate::ops::ingress_guard::render_systemd_xray_unit(
+            &work_dir,
+            Some(crate::ops::ingress_guard::GuardMode::Enforced),
+        ),
+        crate::ops::ingress_guard::render_systemd_xray_unit(
+            &work_dir,
+            Some(crate::ops::ingress_guard::GuardMode::Observe),
+        ),
+        direct.replacen(MARKER, "", 1),
+    ]
+    .contains(&normalized)
+}
+
+fn is_generated_legacy_openrc_xray_script(raw: &str) -> bool {
+    const MARKER: &str = "# Managed by xp-ops ingress-guard service boundary\n";
+    let normalized = raw.replace(
+        "export GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\"\nexport GOGC=\"${GOGC:-50}\"\n",
+        "export GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\"\nexport GOGC=\"${GOGC:-100}\"\n",
+    );
+    if normalized == raw {
+        return false;
+    }
+    let direct = crate::ops::ingress_guard::render_openrc_xray_script(None);
+    [
+        direct.clone(),
+        crate::ops::ingress_guard::render_openrc_xray_script(Some(
+            crate::ops::ingress_guard::GuardMode::Enforced,
+        )),
+        crate::ops::ingress_guard::render_openrc_xray_script(Some(
+            crate::ops::ingress_guard::GuardMode::Observe,
+        )),
+        direct.replacen(MARKER, "", 1),
+    ]
+    .contains(&normalized)
 }
 
 fn lower_priority_systemd_drop_in_exists(paths: &Paths, service: &str, name: &str) -> bool {
@@ -318,7 +411,12 @@ fn is_generated_systemd_drop_in(service: &str, raw: &str) -> bool {
     }
 
     let allowed = match service {
-        "xray" => &[("GOMEMLIMIT", "16MiB"), ("GOGC", "50")][..],
+        "xray" => &[
+            ("GOMEMLIMIT", "16MiB"),
+            ("GOGC", "50"),
+            ("GOMEMLIMIT", "32MiB"),
+            ("GOGC", "100"),
+        ][..],
         "cloudflared" => &[
             ("GOMEMLIMIT", "12MiB"),
             ("GOMEMLIMIT", "8MiB"),

@@ -870,6 +870,12 @@ sudo rc-service xp start
 
 ### Cloudflare Tunnel transport
 
+Managed Xray defaults to `GOMEMLIMIT=32MiB`, `GOGC=100`, and level-0
+`bufferSize=0`. Upgrades migrate the former `16MiB` / `50` pair only in
+recognizable XP-generated services, the unmodified documented systemd unit,
+and managed drop-ins; separate operator unit files, drop-ins, and OpenRC
+configuration remain overrides.
+
 Managed cloudflared services default to `--protocol http2`. This avoids
 startup stalls on networks that block outbound QUIC/7844. Override only when
 the local network has verified QUIC support:
