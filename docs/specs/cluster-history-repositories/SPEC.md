@@ -228,6 +228,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 页面级状态证据来自当前 Web 应用的 `/ui-demo/system-status` 真实路由，截图中的 History repositories 区域由生产
 `SystemStatusSurface` 渲染；Storybook 不作为该页面证据来源。
 
+- `capture_scope=browser-viewport`
+- `requested_viewport=1280x900`
+
 ![Repository syncing status](./assets/repository-status-syncing.png)
 
 ![Repository status on mobile](./assets/repository-status-mobile.png)
