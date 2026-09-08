@@ -101,10 +101,12 @@ impl RepositoryReplicaRuntime {
         match result {
             Ok(value) => Ok(value),
             Err(error) => {
-                if self.uses_sqlite_history() {
+                let message = error.to_string();
+                if self.uses_sqlite_history() && message != "source delivery journal capacity guard"
+                {
                     self.storage_degraded = true;
                 }
-                Err(RepositoryRuntimeError::Storage(error.to_string()))
+                Err(RepositoryRuntimeError::Storage(message))
             }
         }
     }

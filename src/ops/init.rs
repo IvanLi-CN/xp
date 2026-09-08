@@ -653,8 +653,9 @@ description="xp (Xray cluster manager)"
 command="/bin/sh"
 command_args="-c 'set -a; [ -f /etc/xp/xp.env ] && . /etc/xp/xp.env; set +a; exec /usr/local/bin/xp run --data-dir /var/lib/xp/data'"
 command_user="xp:xp"
-command_background="yes"
-pidfile="/run/xp.pid"
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
 
 depend() {
   need net
@@ -959,6 +960,16 @@ mod tests {
         assert!(script.contains("supervisor=supervise-daemon"));
         assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\""));
         assert!(script.contains("GOGC=\"${GOGC:-50}\""));
+        assert!(!script.contains("command_background="));
+        assert!(!script.contains("pidfile="));
+    }
+
+    #[test]
+    fn openrc_xp_script_respawns_without_background_pidfile() {
+        let script = openrc_xp_script();
+        assert!(script.contains("supervisor=supervise-daemon"));
+        assert!(script.contains("respawn_delay=2"));
+        assert!(script.contains("respawn_max=0"));
         assert!(!script.contains("command_background="));
         assert!(!script.contains("pidfile="));
     }

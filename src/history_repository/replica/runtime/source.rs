@@ -6,7 +6,6 @@ use crate::state::{
 };
 
 use super::*;
-
 #[path = "source_journal.rs"]
 mod source_journal;
 
@@ -343,6 +342,7 @@ impl RepositoryReplicaRuntime {
                     HistoryWriteAvailability::DegradedLowSpace,
                 ));
             }
+            self.ensure_source_delivery_capacity(options.defer_journal)?;
         }
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
         for record in records {

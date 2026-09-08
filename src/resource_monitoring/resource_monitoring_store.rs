@@ -48,6 +48,7 @@ impl ResourceStore {
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         let connection = Connection::open(data_dir.join("resource_metrics.sqlite3"))?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "cache_size", -512_i64)?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS resource_rollups (\n\
                 bucket INTEGER PRIMARY KEY,\n\
@@ -495,7 +496,16 @@ mod tests {
     #[test]
     fn sqlite_migration_is_idempotent() {
         let directory = tempfile::tempdir().unwrap();
-        let _ = ResourceStore::open(directory.path()).unwrap();
+        let store = ResourceStore::open(directory.path()).unwrap();
+        assert_eq!(
+            store
+                .connection
+                .as_ref()
+                .unwrap()
+                .query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            -512
+        );
         let _ = ResourceStore::open(directory.path()).unwrap();
         assert!(directory.path().join("resource_metrics.sqlite3").exists());
     }

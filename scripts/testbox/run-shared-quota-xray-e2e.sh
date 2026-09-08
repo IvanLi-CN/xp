@@ -401,14 +401,30 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     exit 1
   fi
   xray_pid="$(docker inspect -f '{{.State.Pid}}' "$xray_container")"
-  echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid)"
-  XP_MESH_RESOURCE_MODE=shared-testbox \
-    XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
-    XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
-    XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
-    XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
-    CARGO_TARGET_DIR="$candidate_resource_target" \
-    cargo test --release --test mesh_transport_resource_e2e -- --ignored --nocapture
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    echo "missing systemd-run; cannot enforce the 128 MiB/no-swap XP resource gate" >&2
+    exit 2
+  fi
+  CARGO_TARGET_DIR="$candidate_resource_target" \
+    cargo test --release --test mesh_transport_resource_e2e --no-run
+  resource_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
+    -name 'mesh_transport_resource_e2e-*' -perm -111 | sort | head -n 1)"
+  if [ -z "$resource_test_bin" ]; then
+    echo "resource workload test binary was not built" >&2
+    exit 1
+  fi
+  memory_scope="codex-${COMPOSE_PROJECT}-xp-memory"
+  echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid, memory=128MiB, swap=0)"
+  systemd-run --user --scope --unit="$memory_scope" \
+    -p MemoryMax=128M -p MemorySwapMax=0 \
+    env \
+      XP_MESH_RESOURCE_MODE=shared-testbox \
+      XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
+      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+      XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
+      XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
+      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+      "$resource_test_bin" --ignored --nocapture
 fi
 REMOTE
 

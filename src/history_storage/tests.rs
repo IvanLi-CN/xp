@@ -195,12 +195,14 @@ fn configures_wal_bounded_checkpoint_and_incremental_vacuum() {
     let journal_mode = sqlite_text_pragma(&storage, "journal_mode");
     let auto_vacuum = sqlite_pragma(&storage, "auto_vacuum");
     let auto_checkpoint = sqlite_pragma(&storage, "wal_autocheckpoint");
+    let cache_size = sqlite_pragma(&storage, "cache_size");
     let pages_after_shrink = sqlite_pragma(&storage, "page_count");
     let free_pages = sqlite_pragma(&storage, "freelist_count");
 
     assert_eq!(journal_mode, "wal");
     assert_eq!(auto_vacuum, 2);
     assert_eq!(auto_checkpoint, 64);
+    assert_eq!(cache_size, -1024);
     assert!(pages_after_shrink <= pages_before_shrink);
     assert!(free_pages < 64);
 }

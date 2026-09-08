@@ -3,6 +3,11 @@ import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { SystemStatusSurface } from "@/views/SystemStatusPage";
 
+import { createDemoState } from "./fixtures";
+import { createDemoHistoryRepositoriesStatus } from "./historyRepositoryFixtures";
+
+const demoRepositoryState = createDemoState("normal");
+
 const demoNavigation = [
 	["Dashboard", "tabler:layout-dashboard"],
 	["System status", "tabler:activity-heartbeat"],
@@ -191,6 +196,9 @@ export function DemoSystemStatusPage({
 	return (
 		<SystemStatusSurface
 			status={status}
+			repositoryStatus={createDemoHistoryRepositoriesStatus(
+				demoRepositoryState.nodes,
+			)}
 			showMeshTransportReuse
 			components={[
 				{ component: "xp", status: "up" },

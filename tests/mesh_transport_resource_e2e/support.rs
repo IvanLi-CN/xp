@@ -403,6 +403,36 @@ fn read_pss(pid: u32) -> Option<PssSample> {
     })
 }
 
+fn assert_expected_memory_scope(pid: u32) {
+    if std::env::var_os("XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT").is_none() {
+        return;
+    }
+    let cgroup_contents = fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .expect("read XP cgroup membership")
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .expect("read unified XP cgroup membership")
+        .trim_start_matches('/')
+        .to_owned();
+    let cgroup_dir = Path::new("/sys/fs/cgroup").join(cgroup_contents);
+    let memory_max = fs::read_to_string(cgroup_dir.join("memory.max"))
+        .expect("read XP memory.max")
+        .trim()
+        .to_owned();
+    let memory_swap_max = fs::read_to_string(cgroup_dir.join("memory.swap.max"))
+        .expect("read XP memory.swap.max")
+        .trim()
+        .to_owned();
+    assert_eq!(
+        memory_max, "134217728",
+        "XP workload must use a 128 MiB cgroup"
+    );
+    assert_eq!(
+        memory_swap_max, "0",
+        "XP workload must disable swap in its cgroup"
+    );
+}
+
 fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
     let fields = stat
@@ -455,6 +485,7 @@ pub async fn run_resource_workload(
     let mut child = spawn_xp(binary, temp.path(), bind_port, label);
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
+    assert_expected_memory_scope(pid);
     let cpu_started = read_cpu_ticks(pid);
     let mut xp_peak_pss_kib = 0;
     let mut xp_peak_anon_pss_kib = 0;

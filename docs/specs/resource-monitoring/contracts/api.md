@@ -122,6 +122,9 @@
 ```
 
 - `type` 还可为 `resource_capture_suspended`。已有 alert type 与 consumers 保持兼容。
+- `resource_threshold` 的 `scope= xp`、`metric=pss_bytes` 是固定 safety alert：XP rollup
+  最大 PSS 达到 28 MiB/32 MiB 持续一分钟分别产生 warning/critical；它不代表可写入
+  Resource Policy 的阈值，也不触发自动重启。
 - 现有 admin status SSE 增加 `resource_alert_opened`、`resource_alert_escalated` 与
   `resource_alert_recovered`。事件只表达状态转换，不能携带 15 秒原始 series。
 - alert 只在管理面可见，不包含 webhook、email、IM 或自动修复命令。

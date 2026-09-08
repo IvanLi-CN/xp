@@ -159,6 +159,15 @@ compose exec -T openrc rc-service xp restart
 assert_follower systemd
 assert_follower openrc
 
+# Prove that supervise-daemon owns XP recovery after an abrupt process death.
+openrc_xp_pid="$(compose exec -T openrc sh -c "ps | awk '\$0 ~ /xp run --data-dir/ {print \$1; exit}'" | tr -d '\r')"
+test -n "$openrc_xp_pid"
+compose exec -T openrc kill -KILL "$openrc_xp_pid"
+wait_for "OpenRC XP SIGKILL respawn" assert_follower openrc
+sleep 1
+wait_for "OpenRC XP successive ready health" assert_follower openrc
+assert_follower openrc
+
 leader_nodes="$(compose exec -T leader curl -fsS -H 'Authorization: Bearer testbox-admin-token-0123456789abcdef' http://127.0.0.1:62416/api/admin/nodes)"
 printf '%s' "$leader_nodes" | python3 -c 'import json,sys; names={item["node_name"] for item in json.load(sys.stdin)["items"]}; assert {"leader","systemd","openrc"} <= names, names'
 
@@ -168,6 +177,7 @@ printf '%s\n' \
   "deploy=official-xp-ops" \
   "nodes=leader,systemd,openrc" \
   "roles=systemd:follower,openrc:follower" \
-  "restart_identity=preserved" > "$RECEIPT_PATH"
+  "restart_identity=preserved" \
+  "openrc_xp_sigkill_respawn=verified" > "$RECEIPT_PATH"
 
 echo "host-managed fresh join passed: systemd and OpenRC deployed through xp-ops"

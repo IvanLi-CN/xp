@@ -322,6 +322,7 @@ fn source_delivery_journal_state_migration_is_idempotent_for_legacy_schema() {
             .iter()
             .any(|column| column == "order_repair_completed")
     );
+    assert!(columns.iter().any(|column| column == "capacity_suspended"));
     assert!(
         storage
             .source_delivery_journal_summary()
@@ -439,7 +440,11 @@ fn source_delivery_journal_backlog_work_is_bounded() {
         .expect("read bounded journal page");
     match page {
         crate::state::history_storage::SourceDeliveryJournalPage::Ready(rows) => {
-            assert_eq!(rows.len(), 256);
+            assert_eq!(rows.len(), 146);
+            assert!(
+                rows.iter().map(|row| row.wire.len()).sum::<usize>()
+                    <= crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+            );
         }
         crate::state::history_storage::SourceDeliveryJournalPage::Repairing => {
             panic!("current journal rows must not enter order repair")

@@ -1,5 +1,8 @@
 use super::*;
 
+const XP_PSS_WARNING_BYTES: f64 = 28.0 * 1024.0 * 1024.0;
+const XP_PSS_CRITICAL_BYTES: f64 = 32.0 * 1024.0 * 1024.0;
+
 #[derive(Debug, Default)]
 pub(super) struct AlertProgress {
     pub(super) severity: Option<String>,
@@ -115,6 +118,27 @@ impl ResourceState {
             }
         }
         for role in ResourceRole::ALL {
+            if role == ResourceRole::Xp
+                && let Some(value) = rollup
+                    .values
+                    .get("xp.pss_bytes")
+                    .and_then(|value| value.max)
+            {
+                push_threshold_action_scoped(
+                    &mut self.alert_progress,
+                    &mut actions,
+                    rollup,
+                    role.as_str(),
+                    "pss_bytes",
+                    value,
+                    ThresholdConfig {
+                        warning: XP_PSS_WARNING_BYTES,
+                        warning_minutes: 1,
+                        critical: XP_PSS_CRITICAL_BYTES,
+                        critical_minutes: 1,
+                    },
+                );
+            }
             if !policy.role_overrides.contains_key(&role) {
                 continue;
             }

@@ -31,9 +31,11 @@ pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
     RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
 };
+#[allow(unused_imports)]
 pub(crate) use source_journal::{
-    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
-    SourceDeliveryJournalSummary,
+    SOURCE_DELIVERY_JOURNAL_MAX_BYTES, SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS,
+    SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES, SourceDeliveryJournalPage,
+    SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
 };
 
 const SQLITE_FILE: &str = "history.sqlite3";
@@ -444,6 +446,9 @@ fn configure_runtime(connection: &Connection) -> Result<()> {
         .map_err(sqlite_error)?;
     connection
         .pragma_update(None, "wal_autocheckpoint", CHECKPOINT_PAGES)
+        .map_err(sqlite_error)?;
+    connection
+        .pragma_update(None, "cache_size", -1024_i64)
         .map_err(sqlite_error)?;
     Ok(())
 }
