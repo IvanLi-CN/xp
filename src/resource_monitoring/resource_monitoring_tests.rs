@@ -183,7 +183,7 @@ fn xp_pss_budget_alerts_at_fixed_warning_and_critical_thresholds() {
         pending_gap: None,
     };
     let mut rollup = ResourceRollup {
-        node_id: "node-a".to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
         bucket_start_unix_seconds: 60,
         expected_samples: 1,
         captured_samples: 1,
@@ -216,9 +216,10 @@ fn xp_pss_budget_alerts_at_fixed_warning_and_critical_thresholds() {
             if alert.metric == "pss_bytes" && alert.severity == "critical"
     ));
     rollup.values.get_mut("xp.pss_bytes").unwrap().max = Some(20.0 * 1024.0 * 1024.0);
+    let expected_alert_id = format!("{}:xp.pss_bytes", xp_test_fixtures::primary_node_id());
     assert!(matches!(
         state.evaluate_alerts(&rollup, &policy).as_slice(),
-        [ResourceAlertAction::Recover(id)] if id == "node-a:xp.pss_bytes"
+        [ResourceAlertAction::Recover(id)] if id == &expected_alert_id
     ));
 }
 
