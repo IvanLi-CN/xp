@@ -224,7 +224,7 @@ impl HistoryStorage {
         control_payload: &[u8],
     ) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "source delivery journal requires SQLite".to_owned(),
             ));
@@ -250,7 +250,7 @@ impl HistoryStorage {
             return Ok(());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "source delivery journal requires SQLite".to_owned(),
             ));
@@ -270,7 +270,7 @@ impl HistoryStorage {
     #[cfg(test)]
     pub(crate) fn source_delivery_journal(&self) -> Result<Vec<SourceDeliveryJournalRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
         let order_repair_completed = connection
@@ -304,7 +304,7 @@ impl HistoryStorage {
 
     pub(crate) fn source_delivery_journal_summary(&self) -> Result<SourceDeliveryJournalSummary> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(SourceDeliveryJournalSummary {
                 pending_segments: 0,
                 pending_bytes: 0,
@@ -364,7 +364,7 @@ impl HistoryStorage {
 
     pub(crate) fn source_delivery_journal_capacity_suspended(&self) -> Result<bool> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(false);
         };
         connection
@@ -383,7 +383,7 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<SourceDeliveryJournalPage> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(SourceDeliveryJournalPage::Ready(Vec::new()));
         };
         let order_repair_completed = connection
@@ -451,7 +451,7 @@ impl HistoryStorage {
         &self,
     ) -> Result<SourceDeliveryJournalRepairProgress> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(SourceDeliveryJournalRepairProgress {
                 processed: 0,
                 completed: true,
@@ -566,7 +566,7 @@ impl HistoryStorage {
 
     pub(crate) fn source_delivery_journal_max_epoch(&self) -> Result<Option<u64>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(None);
         };
         connection
@@ -596,7 +596,7 @@ impl HistoryStorage {
             return Ok(());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "source delivery journal requires SQLite".to_owned(),
             ));

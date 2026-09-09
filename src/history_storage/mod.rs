@@ -48,6 +48,7 @@ use startup::{
 };
 use startup::{
     is_external_repository_startup_failure, open_sqlite, repository_history_is_external,
+    sqlite_connection,
 };
 
 const SQLITE_FILE: &str = "history.sqlite3";
@@ -265,7 +266,7 @@ impl HistoryStorage {
     #[cfg(test)]
     pub(crate) fn set_query_only_for_test(&self, enabled: bool) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "query-only test hook requires SQLite".to_owned(),
             ));
@@ -862,7 +863,7 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
     let Backend::Sqlite(connection) = backend else {
         return;
     };
-    if repository_history_is_external(connection) {
+    if repository_history_is_external(connection).unwrap_or(true) {
         warn!(
             history_storage_mode = "sqlite_degraded",
             "keeping SQLite active because repository history cannot use JSON fallback"

@@ -146,6 +146,20 @@ fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
             .repository_history_segment_metadata_page(None, 1)
             .is_err()
     );
+    assert!(restarted.repository_history_record_count().is_err());
+    assert!(restarted.source_delivery_journal_summary().is_err());
+    assert!(
+        restarted
+            .source_delivery_journal_capacity_suspended()
+            .is_err()
+    );
+    assert!(restarted.source_delivery_journal_page(1).is_err());
+    assert!(
+        restarted
+            .repair_source_delivery_journal_order_page()
+            .is_err()
+    );
+    assert!(restarted.source_delivery_journal_max_epoch().is_err());
     assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
 }
 
