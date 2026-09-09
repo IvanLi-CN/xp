@@ -41,11 +41,14 @@ pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES, SourceDeliveryJournalPage,
     SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
 };
+pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
 use startup::{
     fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
 };
-use startup::{open_sqlite, repository_history_is_external};
+use startup::{
+    is_external_repository_startup_failure, open_sqlite, repository_history_is_external,
+};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -79,7 +82,7 @@ impl HistorySource {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct HistoryStorageError(String);
 
 const REPOSITORY_HISTORY_EXPORT_LEASE_SECONDS: u64 = 15 * 60;
@@ -116,12 +119,7 @@ impl std::fmt::Debug for HistoryStorage {
 pub(crate) enum Backend {
     Sqlite(Connection),
     Json,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum HistoryStorageMode {
-    Sqlite,
-    DegradedJson,
+    Unavailable(HistoryStorageError),
 }
 
 impl HistoryStorage {
@@ -159,6 +157,7 @@ impl HistoryStorage {
                 }
             },
             Backend::Json => read_json(source_path(&self.data_dir, key)),
+            Backend::Unavailable(error) => Err(error.clone()),
         }
     }
 
@@ -183,6 +182,7 @@ impl HistoryStorage {
                 }
             },
             Backend::Json => write_json(source_path(&self.data_dir, key), payload),
+            Backend::Unavailable(error) => Err(error.clone()),
         }
     }
 
@@ -194,6 +194,7 @@ impl HistoryStorage {
         match &*self.lock_backend() {
             Backend::Sqlite(_) => HistoryStorageMode::Sqlite,
             Backend::Json => HistoryStorageMode::DegradedJson,
+            Backend::Unavailable(_) => HistoryStorageMode::Unavailable,
         }
     }
 
@@ -346,6 +347,15 @@ fn shared_backend(data_dir: &Path) -> Arc<Mutex<Backend>> {
     } else {
         match open_sqlite(data_dir) {
             Ok(connection) => Backend::Sqlite(connection),
+            Err(error) if is_external_repository_startup_failure(&error) => {
+                warn!(
+                    error = %error,
+                    path = %data_dir.join(SQLITE_FILE).display(),
+                    history_storage_mode = "unavailable",
+                    "external repository history startup preparation failed; refusing JSON fallback"
+                );
+                Backend::Unavailable(error)
+            }
             Err(error) => {
                 warn!(
                     error = %error,

@@ -1,5 +1,15 @@
 use super::*;
 
+const EXTERNAL_REPOSITORY_STARTUP_FAILURE: &str =
+    "external repository history startup preparation failed: ";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HistoryStorageMode {
+    Sqlite,
+    DegradedJson,
+    Unavailable,
+}
+
 pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
     fs::create_dir_all(data_dir).map_err(io_error)?;
     let db_path = data_dir.join(SQLITE_FILE);
@@ -12,10 +22,13 @@ pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
                 warn!(
                     error = %error,
                     path = %db_path.display(),
-                    history_storage_mode = "sqlite_degraded",
-                    "keeping existing SQLite repository history after startup preparation failure"
+                    history_storage_mode = "unavailable",
+                    "preserving external SQLite repository history after startup \
+                     preparation failure"
                 );
-                return Ok(connection);
+                return Err(HistoryStorageError(format!(
+                    "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}{error}"
+                )));
             }
             return Err(error);
         }
@@ -27,6 +40,10 @@ pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
     configure_runtime(&connection)?;
     ensure_schema(&mut connection)?;
     Ok(connection)
+}
+
+pub(super) fn is_external_repository_startup_failure(error: &HistoryStorageError) -> bool {
+    error.0.starts_with(EXTERNAL_REPOSITORY_STARTUP_FAILURE)
 }
 
 pub(super) fn repository_history_is_external(connection: &Connection) -> bool {

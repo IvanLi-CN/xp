@@ -14,6 +14,10 @@ RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
 MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
 if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+  if [ "$RUN_MESH_RESOURCE" != "1" ]; then
+    echo "XP_MESH_RESOURCE_SUMMARY_ONLY=1 requires XP_RUN_MESH_RESOURCE=1" >&2
+    exit 2
+  fi
   ONLY_MESH_RESOURCE=1
 fi
 # Compare resource changes with the checked-out development baseline. Older hard-coded
@@ -92,7 +96,7 @@ rsync -az --delete \
   --exclude 'web/node_modules/' \
   "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
 
-if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
   ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RESOURCE_BASELINE'"
   git -C "$REPO_ROOT" archive "$MESH_RESOURCE_BASELINE_SHA" \

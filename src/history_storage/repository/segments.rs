@@ -15,10 +15,14 @@ impl HistoryStorage {
             return Ok(());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Err(HistoryStorageError(
-                "repository history row storage requires SQLite".to_owned(),
-            ));
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => {
+                return Err(HistoryStorageError(
+                    "repository history row storage requires SQLite".to_owned(),
+                ));
+            }
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for row in rows {
@@ -36,8 +40,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         segment_page(
             connection,
@@ -54,8 +60,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentMetadataRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         segment_page(
             connection,
@@ -74,8 +82,10 @@ impl HistoryStorage {
             return Ok(Vec::new());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
@@ -100,8 +110,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = if let Some(after_id) = after_id {

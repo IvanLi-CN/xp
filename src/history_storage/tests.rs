@@ -124,7 +124,7 @@ fn external_repository_history_prevents_lossy_json_fallback() {
 }
 
 #[test]
-fn external_repository_history_keeps_sqlite_when_keyset_index_upgrade_fails() {
+fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
     let temporary = tempfile::tempdir().unwrap();
     {
         let storage = HistoryStorage::open(temporary.path());
@@ -139,10 +139,12 @@ fn external_repository_history_keeps_sqlite_when_keyset_index_upgrade_fails() {
     fail_next_segment_keyset_index_for_test();
     let restarted = HistoryStorage::open(temporary.path());
 
-    assert!(restarted.is_sqlite());
-    assert_eq!(
-        restarted.read(REPOSITORY_REPLICA_KEY).unwrap(),
-        Some(br#"{"external_history":true,"checkpoint":"durable"}"#.to_vec())
+    assert_eq!(restarted.mode(), HistoryStorageMode::Unavailable);
+    assert!(restarted.read(REPOSITORY_REPLICA_KEY).is_err());
+    assert!(
+        restarted
+            .repository_history_segment_metadata_page(None, 1)
+            .is_err()
     );
     assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
 }

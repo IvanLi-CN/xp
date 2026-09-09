@@ -64,6 +64,9 @@
   because its summary request times out, upgrade the serving repository first and let the next
   five-minute direct-path retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
+  If startup cannot create the additive summary keyset index for an external-history database,
+  XP leaves that database untouched, exposes history storage as unavailable, and rejects history
+  reads and writes rather than selecting a potentially stale JSON fallback.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source
