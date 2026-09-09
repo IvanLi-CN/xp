@@ -46,10 +46,7 @@ pub(crate) use startup::HistoryStorageMode;
 use startup::{
     fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
 };
-use startup::{
-    is_external_repository_startup_failure, open_sqlite, repository_history_is_external,
-    sqlite_connection,
-};
+use startup::{open_backend, repository_history_is_external, sqlite_connection};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -188,7 +185,7 @@ impl HistoryStorage {
     }
 
     pub(crate) fn is_sqlite(&self) -> bool {
-        self.mode() == HistoryStorageMode::Sqlite
+        self.mode() != HistoryStorageMode::DegradedJson
     }
 
     pub(crate) fn mode(&self) -> HistoryStorageMode {
@@ -343,31 +340,7 @@ fn shared_backend(data_dir: &Path) -> Arc<Mutex<Backend>> {
         return backend;
     }
 
-    let backend = if json_fallback_path(data_dir).exists() {
-        Backend::Json
-    } else {
-        match open_sqlite(data_dir) {
-            Ok(connection) => Backend::Sqlite(connection),
-            Err(error) if is_external_repository_startup_failure(&error) => {
-                warn!(
-                    error = %error,
-                    path = %data_dir.join(SQLITE_FILE).display(),
-                    history_storage_mode = "unavailable",
-                    "external repository history startup preparation failed; refusing JSON fallback"
-                );
-                Backend::Unavailable(error)
-            }
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    path = %data_dir.join(SQLITE_FILE).display(),
-                    history_storage_mode = "degraded_json",
-                    "history storage degraded; continuing with JSON snapshots"
-                );
-                Backend::Json
-            }
-        }
-    };
+    let backend = open_backend(data_dir);
     let backend = Arc::new(Mutex::new(backend));
     registry.insert(data_dir.to_path_buf(), Arc::downgrade(&backend));
     backend

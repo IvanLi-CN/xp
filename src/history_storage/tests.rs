@@ -140,6 +140,7 @@ fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
     let restarted = HistoryStorage::open(temporary.path());
 
     assert_eq!(restarted.mode(), HistoryStorageMode::Unavailable);
+    assert!(restarted.is_sqlite());
     assert!(restarted.read(REPOSITORY_REPLICA_KEY).is_err());
     assert!(
         restarted
@@ -161,6 +162,36 @@ fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
     );
     assert!(restarted.source_delivery_journal_max_epoch().is_err());
     assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
+fn existing_history_sqlite_open_failure_fails_closed() {
+    let temporary = tempfile::tempdir().unwrap();
+    fs::write(temporary.path().join(SQLITE_FILE), b"not a sqlite database").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.read(STATE_KEY).is_err());
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
+fn existing_history_sqlite_takes_precedence_over_stale_json_fallback_marker() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(REPOSITORY_REPLICA_KEY, br#"{"external_history":true}"#)
+            .unwrap();
+        storage.write(STATE_KEY, b"durable").unwrap();
+    }
+    fs::write(temporary.path().join(JSON_FALLBACK_FILE), b"stale\n").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Sqlite);
+    assert_eq!(storage.read(STATE_KEY).unwrap(), Some(b"durable".to_vec()));
 }
 
 #[test]

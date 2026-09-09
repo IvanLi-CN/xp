@@ -1,6 +1,6 @@
 use super::*;
 
-const EXTERNAL_REPOSITORY_STARTUP_FAILURE: &str =
+pub(super) const EXTERNAL_REPOSITORY_STARTUP_FAILURE: &str =
     "external repository history startup preparation failed: ";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,36 +18,132 @@ pub(super) fn sqlite_connection(backend: &mut Backend) -> Result<Option<&mut Con
     }
 }
 
-pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
-    fs::create_dir_all(data_dir).map_err(io_error)?;
+pub(super) fn open_backend(data_dir: &Path) -> Backend {
     let db_path = data_dir.join(SQLITE_FILE);
-    if db_path.exists() {
-        let mut connection = Connection::open(&db_path).map_err(sqlite_error)?;
-        if let Err(error) =
-            configure_runtime(&connection).and_then(|()| ensure_schema(&mut connection))
-        {
-            match repository_history_is_external(&connection) {
-                Ok(true) | Err(_) => {
+    match fs::metadata(&db_path) {
+        Ok(metadata) => match open_sqlite(data_dir) {
+            Ok(connection) => match repository_history_is_external(&connection) {
+                Ok(true) => Backend::Sqlite(connection),
+                Ok(false) if json_fallback_path(data_dir).exists() => Backend::Json,
+                Ok(false) => Backend::Sqlite(connection),
+                Err(error) => {
+                    let marker_error = format!("cannot inspect repository history marker: {error}");
+                    let error = HistoryStorageError(format!(
+                        "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}{marker_error}"
+                    ));
                     warn!(
                         error = %error,
                         path = %db_path.display(),
                         history_storage_mode = "unavailable",
-                        "preserving external SQLite repository history after startup \
-                         preparation failure"
+                        "cannot inspect repository history marker; refusing JSON fallback"
                     );
-                    return Err(HistoryStorageError(format!(
-                        "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}{error}"
-                    )));
+                    Backend::Unavailable(error)
                 }
-                Ok(false) => {}
+            },
+            Err(error) if metadata.is_file() => {
+                let error = if is_external_repository_startup_failure(&error) {
+                    error
+                } else {
+                    HistoryStorageError(format!("{EXTERNAL_REPOSITORY_STARTUP_FAILURE}{error}"))
+                };
+                warn!(
+                    error = %error,
+                    path = %db_path.display(),
+                    history_storage_mode = "unavailable",
+                    "existing history SQLite failed startup preparation; refusing JSON fallback"
+                );
+                Backend::Unavailable(error)
             }
-            return Err(error);
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    path = %db_path.display(),
+                    history_storage_mode = "degraded_json",
+                    "history storage degraded; continuing with JSON snapshots"
+                );
+                Backend::Json
+            }
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if json_fallback_path(data_dir).exists() {
+                Backend::Json
+            } else {
+                match open_sqlite(data_dir) {
+                    Ok(connection) => Backend::Sqlite(connection),
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            path = %db_path.display(),
+                            history_storage_mode = "degraded_json",
+                            "history storage degraded; continuing with JSON snapshots"
+                        );
+                        Backend::Json
+                    }
+                }
+            }
         }
-        return Ok(connection);
+        Err(error) => {
+            let error = HistoryStorageError(format!(
+                "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}cannot inspect existing history SQLite: {}",
+                io_error(error)
+            ));
+            warn!(
+                error = %error,
+                path = %db_path.display(),
+                history_storage_mode = "unavailable",
+                "cannot inspect existing history SQLite; refusing JSON fallback"
+            );
+            Backend::Unavailable(error)
+        }
+    }
+}
+
+pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
+    fs::create_dir_all(data_dir).map_err(io_error)?;
+    let db_path = data_dir.join(SQLITE_FILE);
+    match fs::metadata(&db_path) {
+        Ok(metadata) if metadata.is_file() => {
+            let mut connection = Connection::open(&db_path).map_err(|error| {
+                HistoryStorageError(format!(
+                    "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}cannot open existing history SQLite: {}",
+                    sqlite_error(error)
+                ))
+            })?;
+            if let Err(error) =
+                configure_runtime(&connection).and_then(|()| ensure_schema(&mut connection))
+            {
+                warn!(
+                    error = %error,
+                    path = %db_path.display(),
+                    history_storage_mode = "unavailable",
+                    "preserving existing SQLite repository history after startup \
+                     preparation failure"
+                );
+                return Err(HistoryStorageError(format!(
+                    "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}{error}"
+                )));
+            }
+            return Ok(connection);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            migrate_json_snapshots(data_dir, &db_path)?;
+            let mut connection = Connection::open(db_path).map_err(sqlite_error)?;
+            configure_runtime(&connection)?;
+            ensure_schema(&mut connection)?;
+            return Ok(connection);
+        }
+        Err(error) => {
+            return Err(HistoryStorageError(format!(
+                "{EXTERNAL_REPOSITORY_STARTUP_FAILURE}cannot inspect existing history SQLite: {}",
+                io_error(error)
+            )));
+        }
     }
 
-    migrate_json_snapshots(data_dir, &db_path)?;
-    let mut connection = Connection::open(db_path).map_err(sqlite_error)?;
+    // A non-file path (for example, a directory left by a failed migration) is not a durable
+    // SQLite database. Let the normal JSON degradation path handle that legacy collision.
+    let mut connection = Connection::open(&db_path).map_err(sqlite_error)?;
     configure_runtime(&connection)?;
     ensure_schema(&mut connection)?;
     Ok(connection)
