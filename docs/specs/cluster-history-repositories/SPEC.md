@@ -203,6 +203,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - The actual-XP resource gate runs the release `xp run` candidate and baseline inside a dedicated
   Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
   `smaps_rollup`, and requires every candidate PSS sample to remain below 32 MiB.
+- The summary-specific resource gate runs `xp_repository_summary_memory_e2e` in the same
+  128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
+  `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode isolates this gate from the 50-peer comparison.
 
 ## Resource and Quality Constraints
 

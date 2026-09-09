@@ -103,6 +103,9 @@
   A delivery-order expression index serves tombstone-priority pages without a temporary sort.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
+  The summary memory regression uses the shared testbox's summary-only mode to start the release
+  `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
+  and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
   Receivers require the complete pinned identity: repository senders must match their current
