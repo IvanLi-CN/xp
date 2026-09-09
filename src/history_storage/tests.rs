@@ -165,6 +165,23 @@ fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
 }
 
 #[test]
+fn published_history_sqlite_failure_fails_closed_instead_of_falling_back_to_json() {
+    let temporary = tempfile::tempdir().unwrap();
+    let legacy_path = temporary.path().join("history/repository_replica.json");
+    fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    fs::write(&legacy_path, br#"{"external_history":true}"#).unwrap();
+
+    fail_next_post_publish_history_storage_failure_for_test();
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.is_sqlite());
+    assert!(storage.read(REPOSITORY_REPLICA_KEY).is_err());
+    assert!(temporary.path().join(SQLITE_FILE).is_file());
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
 fn existing_history_sqlite_open_failure_fails_closed() {
     let temporary = tempfile::tempdir().unwrap();
     fs::write(temporary.path().join(SQLITE_FILE), b"not a sqlite database").unwrap();

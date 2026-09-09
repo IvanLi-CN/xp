@@ -44,6 +44,7 @@ pub(crate) use source_journal::{
 pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
 use startup::{
+    fail_next_post_publish_history_storage_failure_for_test,
     fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
 };
 use startup::{open_backend, repository_history_is_external, sqlite_connection};

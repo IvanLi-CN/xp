@@ -71,6 +71,20 @@ pub(super) fn open_backend(data_dir: &Path) -> Backend {
             } else {
                 match open_sqlite(data_dir) {
                     Ok(connection) => Backend::Sqlite(connection),
+                    Err(error)
+                        if is_external_repository_startup_failure(&error)
+                            && matches!(fs::metadata(&db_path), Ok(metadata)
+                                if metadata.is_file()) =>
+                    {
+                        warn!(
+                            error = %error,
+                            path = %db_path.display(),
+                            history_storage_mode = "unavailable",
+                            "published history SQLite failed startup preparation; refusing JSON \
+                             fallback"
+                        );
+                        Backend::Unavailable(error)
+                    }
                     Err(error) => {
                         warn!(
                             error = %error,
@@ -128,6 +142,12 @@ pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
                 return open_sqlite(data_dir);
             }
             migrate_json_snapshots(data_dir, &db_path)?;
+            #[cfg(test)]
+            if take_post_publish_history_storage_failure_for_test() {
+                return Err(external_startup_error(HistoryStorageError(
+                    "injected post-publish history storage preparation failure".to_owned(),
+                )));
+            }
             let mut connection = Connection::open(db_path)
                 .map_err(|error| external_startup_error(sqlite_error(error)))?;
             configure_runtime(&connection).map_err(external_startup_error)?;
@@ -207,6 +227,8 @@ pub(super) fn repository_history_is_external(connection: &Connection) -> Result<
 thread_local! {
     static FAIL_NEXT_SEGMENT_KEYSET_INDEX: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    static FAIL_NEXT_POST_PUBLISH_HISTORY_STORAGE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -217,4 +239,14 @@ pub(super) fn fail_next_segment_keyset_index_for_test() {
 #[cfg(test)]
 pub(super) fn take_segment_keyset_index_failure_for_test() -> bool {
     FAIL_NEXT_SEGMENT_KEYSET_INDEX.with(|failure| failure.replace(false))
+}
+
+#[cfg(test)]
+pub(super) fn fail_next_post_publish_history_storage_failure_for_test() {
+    FAIL_NEXT_POST_PUBLISH_HISTORY_STORAGE.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+fn take_post_publish_history_storage_failure_for_test() -> bool {
+    FAIL_NEXT_POST_PUBLISH_HISTORY_STORAGE.with(|failure| failure.replace(false))
 }
