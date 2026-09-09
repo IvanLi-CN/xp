@@ -162,6 +162,24 @@ impl RepositoryReplicaRuntime {
         Ok(segments)
     }
 
+    pub(crate) fn stored_segment_metadata_page(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<super::StoredSegmentMetadata>, RepositoryRuntimeError> {
+        self.storage
+            .repository_history_segment_metadata_page(after_id, limit)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+            .into_iter()
+            .map(|row| {
+                Ok(super::StoredSegmentMetadata {
+                    id: row.id,
+                    contains_tombstone: row.contains_tombstone,
+                })
+            })
+            .collect()
+    }
+
     pub(crate) fn stored_segments_by_ids(
         &self,
         ids: &[String],

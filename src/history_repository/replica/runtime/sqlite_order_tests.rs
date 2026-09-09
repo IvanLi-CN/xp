@@ -1,5 +1,8 @@
 use ed25519_dalek::SigningKey;
 
+#[cfg(target_os = "linux")]
+use std::{fs, process::Command};
+
 use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
@@ -7,7 +10,7 @@ use crate::{
         HistoryStorage,
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
     },
-    state::history_storage::Backend,
+    state::history_storage::{Backend, RepositoryHistorySegmentRow},
 };
 
 fn identity(signing_key: &SigningKey) -> RepositoryNodeIdentity {
@@ -89,6 +92,127 @@ fn sqlite_summary_keeps_tombstones_first_across_keyset_pages() {
         .expect("ordinary summary page");
     assert_eq!(second.segment_ids, ["000-ordinary"]);
     assert!(second.next_segment_id.is_none());
+}
+
+#[test]
+fn sqlite_summary_reads_metadata_only() {
+    let temporary = tempfile::tempdir().expect("SQLite temporary directory");
+    let runtime =
+        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
+    let rows = (0..257_u64)
+        .map(|sequence| RepositoryHistorySegmentRow {
+            id: format!("segment-{sequence:03}"),
+            closed_at_unix_seconds: sequence,
+            contains_tombstone: false,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: sequence,
+            payload: b"not-json".to_vec(),
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_segments(&rows)
+        .expect("store metadata rows");
+
+    let summary = runtime
+        .replication_summary_after(None, false)
+        .expect("summary must not decode segment payloads");
+    assert_eq!(summary.segment_ids.len(), 256);
+    assert_eq!(summary.next_segment_id.as_deref(), Some("r:segment-255"));
+}
+
+#[cfg(target_os = "linux")]
+const SUMMARY_RESOURCE_BENCHMARK_CHILD: &str = "XP_REPOSITORY_SUMMARY_RESOURCE_BENCHMARK_CHILD";
+
+#[cfg(target_os = "linux")]
+const SUMMARY_RESOURCE_BENCHMARK_TEST: &str = concat!(
+    "state::history_repository::replica::runtime::sqlite_order_tests::",
+    "repository_summary_resource_budget"
+);
+
+#[cfg(target_os = "linux")]
+fn process_pss_bytes() -> u64 {
+    fs::read_to_string("/proc/self/smaps_rollup")
+        .expect("read process PSS")
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Pss:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .expect("parse process PSS")
+        .saturating_mul(1024)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repository_summary_resource_budget() {
+    if std::env::var_os(SUMMARY_RESOURCE_BENCHMARK_CHILD).is_none() {
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args(["--exact", SUMMARY_RESOURCE_BENCHMARK_TEST, "--nocapture"])
+            .env(SUMMARY_RESOURCE_BENCHMARK_CHILD, "1")
+            .output()
+            .expect("run isolated repository summary resource benchmark");
+        assert!(
+            output.status.success(),
+            "isolated repository summary resource benchmark failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let temporary = tempfile::tempdir().expect("SQLite temporary directory");
+    let storage = HistoryStorage::open(temporary.path());
+    drop(storage);
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin segment backlog transaction");
+    let payload = vec![0_u8; 256 * 1024];
+    for sequence in 0..257_u64 {
+        transaction
+            .execute(
+                "INSERT INTO repository_history_segments
+                     (id, closed_at, contains_tombstone, source_node_id, source_epoch,
+                      stream, first_sequence, payload)
+                 VALUES (?1, ?2, 0, 'node-a', 1, 'runtime', ?2, ?3)",
+                rusqlite::params![
+                    format!("resource-segment-{sequence:03}"),
+                    sequence,
+                    &payload
+                ],
+            )
+            .expect("insert repository segment");
+    }
+    transaction.commit().expect("commit segment backlog");
+    drop(connection);
+
+    let runtime =
+        RepositoryReplicaRuntime::load(HistoryStorage::open(temporary.path())).expect("runtime");
+    for _ in 0..3 {
+        runtime
+            .replication_summary_after(None, false)
+            .expect("warm repository summary");
+    }
+    let baseline_pss = process_pss_bytes();
+    let mut max_pss = baseline_pss;
+    for _ in 0..5 {
+        runtime
+            .replication_summary_after(None, false)
+            .expect("read bounded repository summary");
+        max_pss = max_pss.max(process_pss_bytes());
+    }
+    println!("repository_summary_resource max_pss_bytes={max_pss}");
+    assert!(
+        max_pss < 32 * 1024 * 1024,
+        "repository summary PSS {max_pss} is not below 32 MiB"
+    );
 }
 
 #[test]

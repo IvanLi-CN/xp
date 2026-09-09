@@ -73,6 +73,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   查询必须为 `partial`。
 - tombstone 必须先于受影响记录同步并阻止复活；同一 epoch 同一 sequence 出现两个有效不同 payload
   时隔离旧流并轮换 epoch。
+- repository summary 分页只投影 SQLite segment 的 `id` 与 tombstone phase metadata，用于生成
+  segment IDs 和 continuation cursor；summary 不得读取或反序列化 payload。需要 wire 内容的
+  repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
+  语义保持不变。
 
 ### Source delivery journal
 

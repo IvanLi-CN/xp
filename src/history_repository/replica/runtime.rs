@@ -320,6 +320,12 @@ pub(crate) struct StoredSegment {
     wire: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct StoredSegmentMetadata {
+    id: String,
+    contains_tombstone: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum RelaySegmentCursor {

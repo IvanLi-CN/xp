@@ -29,7 +29,8 @@ mod source_journal;
 #[allow(unused_imports)]
 pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
-    RepositoryHistorySegmentRow, RepositoryHistoryTombstone, RepositoryReplicaMutation,
+    RepositoryHistorySegmentMetadataRow, RepositoryHistorySegmentRow, RepositoryHistoryTombstone,
+    RepositoryReplicaMutation,
 };
 #[allow(unused_imports)]
 pub(crate) use source_journal::{

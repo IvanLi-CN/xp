@@ -57,6 +57,13 @@
   offered to a collector; status reports `journal_order_repairing` with the durable backlog count.
   The repair preserves each signed payload and does not rebuild the database or run a full
   `VACUUM`.
+- Repository summary pages use a metadata-only SQLite projection of `id` and tombstone phase.
+  They do not load or deserialize segment payloads merely to enumerate IDs or advance the
+  continuation cursor. Repair and backfill retain the separate full-payload path, so existing
+  signed rows and the summary wire shape remain unchanged. When a peer is stuck in `syncing`
+  because its summary request times out, upgrade the serving repository first and let the next
+  five-minute direct-path retry resume the persisted catch-up; do not restart the source or
+  delete its backlog as a recovery shortcut.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source

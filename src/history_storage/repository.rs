@@ -78,6 +78,12 @@ pub(crate) struct RepositoryHistorySegmentRow {
     pub(crate) payload: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RepositoryHistorySegmentMetadataRow {
+    pub(crate) id: String,
+    pub(crate) contains_tombstone: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RepositoryCommitOutcome {
     pub(crate) maintenance_degraded: bool,
