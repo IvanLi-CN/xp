@@ -50,6 +50,8 @@
   Summary continuation resolves its opaque segment ID to the durable five-column keyset and seeks
   the additive `repository_history_segments_sync_order_v2` SQLite index; an existing database
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
+  An external-history database whose startup index creation fails remains SQLite-backed and returns
+  the storage failure; it never falls back to a potentially stale JSON snapshot.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Service Monitoring persists each node's bounded capture journal in

@@ -13,6 +13,9 @@ TESTBOX="${TESTBOX:-codex-testbox}"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
 MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
+if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+  ONLY_MESH_RESOURCE=1
+fi
 # Compare resource changes with the checked-out development baseline. Older hard-coded
 # Mesh baselines can no longer exercise the current signed control-plane protocol.
 MESH_RESOURCE_BASELINE_SHA="${XP_MESH_RESOURCE_BASELINE_SHA:-origin/main}"

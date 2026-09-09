@@ -105,7 +105,9 @@
   persistent ordering columns, then binds a row-value range directly; it does not use a nullable
   cursor predicate or a scalar cursor subquery that prevents the SQLite planner from seeking.
   Existing databases create the v2 index idempotently without deleting the legacy index or
-  rewriting signed segment payloads.
+  rewriting signed segment payloads. If that startup creation fails for an existing external
+  history database, the process retains SQLite and propagates the storage error instead of
+  selecting the JSON fallback.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
   The summary memory regression uses the shared testbox's summary-only mode to start the release

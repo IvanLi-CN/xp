@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 mod segments;
+#[cfg(test)]
+pub(crate) use segments::segment_phase_sql;
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.

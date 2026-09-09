@@ -124,6 +124,30 @@ fn external_repository_history_prevents_lossy_json_fallback() {
 }
 
 #[test]
+fn external_repository_history_keeps_sqlite_when_keyset_index_upgrade_fails() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(
+                REPOSITORY_REPLICA_KEY,
+                br#"{"external_history":true,"checkpoint":"durable"}"#,
+            )
+            .unwrap();
+    }
+
+    fail_next_segment_keyset_index_for_test();
+    let restarted = HistoryStorage::open(temporary.path());
+
+    assert!(restarted.is_sqlite());
+    assert_eq!(
+        restarted.read(REPOSITORY_REPLICA_KEY).unwrap(),
+        Some(br#"{"external_history":true,"checkpoint":"durable"}"#.to_vec())
+    );
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
 fn restart_uses_the_committed_migration_instead_of_reimporting_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("state.json");
@@ -308,11 +332,10 @@ fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
         panic!("test storage should use SQLite");
     };
 
-    let first_page_plan = query_plan(
+    let first_page_plan = query_plan_with_params(
         connection,
-        "SELECT id, contains_tombstone FROM repository_history_segments
-             WHERE contains_tombstone = 0
-             ORDER BY source_node_id, source_epoch, stream, first_sequence, id LIMIT 1",
+        &segment_phase_sql("id, contains_tombstone", false),
+        rusqlite::params![false, 1_i64],
     );
     assert!(
         first_page_plan
@@ -325,13 +348,18 @@ fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
             .any(|detail| detail.contains("USE TEMP B-TREE"))
     );
 
-    let cursor_page_plan = query_plan(
+    let cursor_page_plan = query_plan_with_params(
         connection,
-        "SELECT id, contains_tombstone FROM repository_history_segments
-             WHERE contains_tombstone = 0
-               AND (source_node_id, source_epoch, stream, first_sequence, id)
-                   > ('node-a', 7, 'runtime', 10, 'segment-10')
-             ORDER BY source_node_id, source_epoch, stream, first_sequence, id LIMIT 1",
+        &segment_phase_sql("id, contains_tombstone", true),
+        rusqlite::params![
+            false,
+            "node-a",
+            7_i64,
+            "runtime",
+            10_i64,
+            "segment-10",
+            1_i64
+        ],
     );
     assert!(
         cursor_page_plan
@@ -397,10 +425,18 @@ fn sqlite_text_pragma(storage: &HistoryStorage, pragma: &str) -> String {
 }
 
 fn query_plan(connection: &rusqlite::Connection, query: &str) -> Vec<String> {
+    query_plan_with_params(connection, query, [])
+}
+
+fn query_plan_with_params<P: rusqlite::Params>(
+    connection: &rusqlite::Connection,
+    query: &str,
+    params: P,
+) -> Vec<String> {
     connection
         .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
         .unwrap()
-        .query_map([], |row| row.get(3))
+        .query_map(params, |row| row.get(3))
         .unwrap()
         .collect::<std::result::Result<Vec<String>, _>>()
         .unwrap()

@@ -211,16 +211,7 @@ where
         else {
             return Ok(Vec::new());
         };
-        let sql = format!(
-            "SELECT {projection}
-             FROM repository_history_segments
-             WHERE contains_tombstone = ?1
-               AND (source_node_id, source_epoch, stream, first_sequence, id)
-                   > (?2, ?3, ?4, ?5, ?6)
-             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
-                      id ASC
-             LIMIT ?7"
-        );
+        let sql = segment_phase_sql(projection, true);
         let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
         let rows = statement
             .query_map(
@@ -241,20 +232,37 @@ where
             .map_err(sqlite_error);
     }
 
-    let sql = format!(
-        "SELECT {projection}
-         FROM repository_history_segments
-         WHERE contains_tombstone = ?1
-         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
-                  id ASC
-         LIMIT ?2"
-    );
+    let sql = segment_phase_sql(projection, false);
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
     let rows = statement
         .query_map(params![tombstones, limit], &mut row_mapper)
         .map_err(sqlite_error)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)
+}
+
+pub(crate) fn segment_phase_sql(projection: &str, continuation: bool) -> String {
+    if continuation {
+        return format!(
+            "SELECT {projection}
+             FROM repository_history_segments
+             WHERE contains_tombstone = ?1
+               AND (source_node_id, source_epoch, stream, first_sequence, id)
+                   > (?2, ?3, ?4, ?5, ?6)
+             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                      id ASC
+             LIMIT ?7"
+        );
+    }
+
+    format!(
+        "SELECT {projection}
+         FROM repository_history_segments
+         WHERE contains_tombstone = ?1
+         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                  id ASC
+         LIMIT ?2"
+    )
 }
 
 fn metadata_segment_row(

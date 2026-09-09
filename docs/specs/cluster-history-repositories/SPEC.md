@@ -81,6 +81,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只
   幂等新增该索引，保留旧索引和所有 signed segment payload。
+- 既有 external-history SQLite 在该索引的启动期创建失败时必须保持 SQLite 保护边界并向调用方
+  返回错误；不得退回可能陈旧的 JSON snapshot 或推进任何持久 checkpoint。
 
 ### Source delivery journal
 

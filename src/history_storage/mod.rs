@@ -26,6 +26,9 @@ pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 
 mod repository;
 mod source_journal;
+mod startup;
+#[cfg(test)]
+use repository::segment_phase_sql;
 #[allow(unused_imports)]
 pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
@@ -38,6 +41,11 @@ pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES, SourceDeliveryJournalPage,
     SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
 };
+#[cfg(test)]
+use startup::{
+    fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
+};
+use startup::{open_sqlite, repository_history_is_external};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -375,23 +383,6 @@ fn json_fallback_path(data_dir: &Path) -> PathBuf {
     data_dir.join(JSON_FALLBACK_FILE)
 }
 
-fn open_sqlite(data_dir: &Path) -> Result<Connection> {
-    fs::create_dir_all(data_dir).map_err(io_error)?;
-    let db_path = data_dir.join(SQLITE_FILE);
-    if db_path.exists() {
-        let mut connection = Connection::open(&db_path).map_err(sqlite_error)?;
-        configure_runtime(&connection)?;
-        ensure_schema(&mut connection)?;
-        return Ok(connection);
-    }
-
-    migrate_json_snapshots(data_dir, &db_path)?;
-    let mut connection = Connection::open(db_path).map_err(sqlite_error)?;
-    configure_runtime(&connection)?;
-    ensure_schema(&mut connection)?;
-    Ok(connection)
-}
-
 fn migrate_json_snapshots(data_dir: &Path, db_path: &Path) -> Result<()> {
     let staging_path = data_dir.join(SQLITE_STAGING_FILE);
     if staging_path.exists() {
@@ -596,8 +587,18 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
              CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
                ON repository_history_segments
                   (contains_tombstone DESC, source_node_id ASC, source_epoch ASC, stream ASC,
-                   first_sequence ASC, id ASC);
-             CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order_v2
+                   first_sequence ASC, id ASC);",
+        )
+        .map_err(sqlite_error)?;
+    #[cfg(test)]
+    if take_segment_keyset_index_failure_for_test() {
+        return Err(HistoryStorageError(
+            "injected repository segment keyset index failure".to_owned(),
+        ));
+    }
+    connection
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order_v2
                ON repository_history_segments
                   (contains_tombstone ASC, source_node_id ASC, source_epoch ASC, stream ASC,
                    first_sequence ASC, id ASC);",
@@ -881,19 +882,6 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
         warn!(error = %error, "record persistent JSON history fallback");
     }
     *backend = Backend::Json;
-}
-
-fn repository_history_is_external(connection: &Connection) -> bool {
-    read_sqlite(connection, REPOSITORY_REPLICA_KEY)
-        .ok()
-        .flatten()
-        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
-        .and_then(|snapshot| {
-            snapshot
-                .get("external_history")
-                .and_then(serde_json::Value::as_bool)
-        })
-        .unwrap_or(false)
 }
 
 fn source_path(data_dir: &Path, key: &str) -> PathBuf {
