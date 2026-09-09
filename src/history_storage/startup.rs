@@ -71,11 +71,7 @@ pub(super) fn open_backend(data_dir: &Path) -> Backend {
             } else {
                 match open_sqlite(data_dir) {
                     Ok(connection) => Backend::Sqlite(connection),
-                    Err(error)
-                        if is_external_repository_startup_failure(&error)
-                            && matches!(fs::metadata(&db_path), Ok(metadata)
-                                if metadata.is_file()) =>
-                    {
+                    Err(error) if is_external_repository_startup_failure(&error) => {
                         warn!(
                             error = %error,
                             path = %db_path.display(),
@@ -137,9 +133,18 @@ pub(super) fn open_sqlite(data_dir: &Path) -> Result<Connection> {
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let _migration_lock = MigrationLock::acquire(data_dir)?;
-            if fs::metadata(&db_path).is_ok() {
-                drop(_migration_lock);
-                return open_sqlite(data_dir);
+            match fs::metadata(&db_path) {
+                Ok(_) => {
+                    drop(_migration_lock);
+                    return open_sqlite(data_dir);
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(external_startup_error(HistoryStorageError(format!(
+                        "cannot inspect history SQLite after acquiring migration lock: {}",
+                        io_error(error)
+                    ))));
+                }
             }
             migrate_json_snapshots(data_dir, &db_path)?;
             #[cfg(test)]
