@@ -195,6 +195,17 @@ fn existing_history_sqlite_takes_precedence_over_stale_json_fallback_marker() {
 }
 
 #[test]
+fn sqlite_fallback_stays_sqlite_when_marker_cannot_be_persisted() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    fs::create_dir(temporary.path().join(JSON_FALLBACK_FILE)).unwrap();
+    set_query_only(&storage);
+
+    assert!(storage.write(STATE_KEY, b"cannot-fallback").is_err());
+    assert_eq!(storage.mode(), HistoryStorageMode::Sqlite);
+}
+
+#[test]
 fn restart_uses_the_committed_migration_instead_of_reimporting_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("state.json");

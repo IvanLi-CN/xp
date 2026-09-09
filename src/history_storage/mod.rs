@@ -832,16 +832,20 @@ fn finish_post_commit_maintenance(result: Result<()>) -> bool {
     false
 }
 
-fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
+fn switch_to_json(backend: &mut Backend, data_dir: &Path) -> bool {
     let Backend::Sqlite(connection) = backend else {
-        return;
+        return false;
     };
     if repository_history_is_external(connection).unwrap_or(true) {
         warn!(
             history_storage_mode = "sqlite_degraded",
             "keeping SQLite active because repository history cannot use JSON fallback"
         );
-        return;
+        return false;
+    }
+    if let Err(error) = clear_json_fallback_marker(data_dir) {
+        warn!(error = %error, "cannot clear stale JSON history fallback marker");
+        return false;
     }
     for source in SOURCES {
         match read_sqlite(connection, source.key) {
@@ -852,20 +856,26 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
                         key = source.key,
                         "restore JSON snapshot after SQLite failure"
                     );
+                    return false;
                 }
             }
             Ok(None) => {}
-            Err(error) => warn!(
-                error = %error,
-                key = source.key,
-                "read SQLite snapshot while restoring JSON fallback"
-            ),
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    key = source.key,
+                    "read SQLite snapshot while restoring JSON fallback"
+                );
+                return false;
+            }
         }
     }
     if let Err(error) = mark_json_fallback(data_dir) {
         warn!(error = %error, "record persistent JSON history fallback");
+        return false;
     }
     *backend = Backend::Json;
+    true
 }
 
 fn source_path(data_dir: &Path, key: &str) -> PathBuf {
@@ -903,6 +913,14 @@ fn write_json(path: PathBuf, payload: &[u8]) -> Result<()> {
 
 fn mark_json_fallback(data_dir: &Path) -> Result<()> {
     write_atomic_file(&json_fallback_path(data_dir), b"json-fallback\n")
+}
+
+fn clear_json_fallback_marker(data_dir: &Path) -> Result<()> {
+    match fs::remove_file(json_fallback_path(data_dir)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(error)),
+    }
 }
 
 fn write_atomic_file(path: &Path, payload: &[u8]) -> Result<()> {
