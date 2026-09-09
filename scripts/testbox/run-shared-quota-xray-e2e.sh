@@ -36,6 +36,16 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; then
+  echo "testbox requires a clean worktree; commit or discard local changes first" >&2
+  exit 2
+fi
+GIT_SHA_FULL="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
+trap 'rm -f "$SOURCE_ARCHIVE"' EXIT
+git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
+SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
+
 if [ ! -f "$REPO_ROOT/web/dist/index.html" ]; then
   echo "missing $REPO_ROOT/web/dist/index.html; run 'cd web && bun run build' locally" >&2
   exit 2
@@ -50,7 +60,7 @@ PY
 )"
 
 # 2) Per-run identifiers.
-GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+GIT_SHA="${GIT_SHA_FULL:0:12}"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
@@ -86,15 +96,15 @@ CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
+git_commit=$GIT_SHA_FULL
+source_archive_sha256=$SOURCE_ARCHIVE_SHA
 TXT
 
-# 4) Sync repo to remote run dir.
-rsync -az --delete \
-  --exclude '.git/' \
-  --exclude 'node_modules/' \
-  --exclude 'target/' \
-  --exclude 'web/node_modules/' \
-  "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
+# 4) Sync the immutable tracked tree, then overlay the generated Web shell.
+rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
+ssh -o BatchMode=yes "$TESTBOX" \
+  "test \"\$(sha256sum '$REMOTE_RUN/source.tar' | awk '{print \$1}')\" = '$SOURCE_ARCHIVE_SHA' && tar -xf '$REMOTE_RUN/source.tar' -C '$REMOTE_RUN' && rm -f '$REMOTE_RUN/source.tar'"
+rsync -az --delete "$REPO_ROOT/web/dist/" "$TESTBOX:$REMOTE_RUN/web/dist/"
 
 if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
