@@ -436,21 +436,39 @@ impl RepositoryReplicaRuntime {
         deep_verification: bool,
     ) -> Result<RepositoryReplicaSummary, RepositoryRuntimeError> {
         self.require_legacy_segment_cursor_index()?;
-        let mut segments = self.stored_segments_page(
-            after_segment_id,
-            super::REPLICATION_SEGMENT_PAGE_SIZE.saturating_add(1),
-        )?;
+        let page_limit = super::REPLICATION_SEGMENT_PAGE_SIZE.saturating_add(1);
+        let mut segments: Vec<SummarySegment> = if self.uses_sqlite_history() {
+            self.stored_segment_metadata_page(after_segment_id, page_limit)?
+                .into_iter()
+                .map(|segment| SummarySegment {
+                    cursor: summary_segment_cursor(segment.contains_tombstone, &segment.id),
+                    id: segment.id,
+                })
+                .collect()
+        } else {
+            self.stored_segments_page(after_segment_id, page_limit)?
+                .into_iter()
+                .map(|segment| SummarySegment {
+                    cursor: segment_sync_cursor(&segment),
+                    id: segment.id,
+                })
+                .collect()
+        };
         let has_next_page = segments.len() > super::REPLICATION_SEGMENT_PAGE_SIZE;
         segments.truncate(super::REPLICATION_SEGMENT_PAGE_SIZE);
         let next_segment_id = if has_next_page {
-            Some(segment_sync_cursor(
-                segments.last().expect("nonempty page had an extra segment"),
-            ))
+            Some(
+                segments
+                    .last()
+                    .expect("nonempty page had an extra segment")
+                    .cursor
+                    .clone(),
+            )
         } else {
             None
         };
         Ok(RepositoryReplicaSummary {
-            segment_ids: segments.iter().map(|segment| segment.id.clone()).collect(),
+            segment_ids: segments.into_iter().map(|segment| segment.id).collect(),
             partitions: if deep_verification && after_segment_id.is_none() {
                 self.retained_partition_summaries()?
             } else {
@@ -715,6 +733,11 @@ impl RepositoryReplicaRuntime {
     }
 }
 
+struct SummarySegment {
+    id: String,
+    cursor: String,
+}
+
 fn accumulate_record_partitions<'a>(
     summaries: &mut BTreeMap<(String, u64, String, u32), RepositoryPartitionSummary>,
     records: impl IntoIterator<Item = &'a super::StoredRecord>,
@@ -783,6 +806,11 @@ fn segment_sync_cursor(segment: &super::StoredSegment) -> String {
         't'
     };
     format!("{phase}:{}", segment.id)
+}
+
+fn summary_segment_cursor(contains_tombstone: bool, id: &str) -> String {
+    let phase = if contains_tombstone { 't' } else { 'r' };
+    format!("{phase}:{id}")
 }
 
 fn record_partition_summary(

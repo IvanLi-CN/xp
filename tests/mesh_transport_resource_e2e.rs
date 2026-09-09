@@ -1,9 +1,11 @@
 #[path = "mesh_transport_resource_e2e/support.rs"]
 mod mesh_transport_resource_support;
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
-use mesh_transport_resource_support::{ResourceRun, run_resource_workload};
+use mesh_transport_resource_support::{
+    ResourceRun, run_repository_summary_resource_workload, run_resource_workload,
+};
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(15 * 60);
 const XP_TOTAL_PSS_LIMIT_KIB: u64 = 32 * 1024;
@@ -11,6 +13,11 @@ const XP_ANON_PSS_LIMIT_KIB: u64 = 18_432;
 const XP_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const STACK_PSS_DELTA_LIMIT_KIB: u64 = 1_024;
 const RESOURCE_CPU_PERCENT_ONE_CORE: f64 = 0.5;
+
+fn resource_workload_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 fn required_path(name: &str) -> PathBuf {
     std::env::var_os(name)
@@ -183,6 +190,7 @@ async fn fifty_peer_mesh_transport_meets_connection_and_resource_budgets() {
     if std::env::var("XP_MESH_RESOURCE_MODE").ok().as_deref() != Some("shared-testbox") {
         return;
     }
+    let _workload_guard = resource_workload_lock().lock().await;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let duration = workload_duration();
     let support_pids = mesh_transport_resource_support::support_pids_from_env();
@@ -211,4 +219,21 @@ async fn fifty_peer_mesh_transport_meets_connection_and_resource_budgets() {
     println!("mesh_resource_baseline={baseline:?}");
     println!("mesh_resource_candidate={candidate:?}");
     assert_resource_budget(&baseline, &candidate, duration);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn xp_repository_summary_memory_e2e() {
+    if std::env::var("XP_MESH_RESOURCE_MODE").ok().as_deref() != Some("shared-testbox") {
+        return;
+    }
+    let _workload_guard = resource_workload_lock().lock().await;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let candidate_path = required_path("XP_MESH_RESOURCE_CANDIDATE_BIN");
+    let peak_pss_kib = run_repository_summary_resource_workload(&candidate_path).await;
+    println!("repository_summary_resource_candidate_peak_pss_kib={peak_pss_kib}");
+    assert!(
+        peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
+        "candidate XP summary peak PSS {peak_pss_kib} KiB is not below {XP_TOTAL_PSS_LIMIT_KIB} KiB"
+    );
 }

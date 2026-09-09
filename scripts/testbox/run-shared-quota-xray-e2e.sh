@@ -12,6 +12,7 @@ set -euo pipefail
 TESTBOX="${TESTBOX:-codex-testbox}"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
+MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
 # Compare resource changes with the checked-out development baseline. Older hard-coded
 # Mesh baselines can no longer exercise the current signed control-plane protocol.
 MESH_RESOURCE_BASELINE_SHA="${XP_MESH_RESOURCE_BASELINE_SHA:-origin/main}"
@@ -67,6 +68,7 @@ REMOTE_RESOURCE_BASELINE_B64="$(printf '%s' "$REMOTE_RESOURCE_BASELINE" | base64
 RUN_MESH_RESOURCE_B64="$(printf '%s' "$RUN_MESH_RESOURCE" | base64 | tr -d '\n')"
 ONLY_MESH_RESOURCE_B64="$(printf '%s' "$ONLY_MESH_RESOURCE" | base64 | tr -d '\n')"
 MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900}" | base64 | tr -d '\n')"
+MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -97,7 +99,7 @@ fi
 
 # 5) Run on testbox.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' bash -s" <<'REMOTE'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' bash -s" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
@@ -107,6 +109,7 @@ REMOTE_RESOURCE_BASELINE="$(printf '%s' "${REMOTE_RESOURCE_BASELINE_B64:?}" | ba
 RUN_MESH_RESOURCE="$(printf '%s' "${RUN_MESH_RESOURCE_B64:?}" | base64 -d)"
 ONLY_MESH_RESOURCE="$(printf '%s' "${ONLY_MESH_RESOURCE_B64:?}" | base64 -d)"
 MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64 -d)"
+MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
 
 cleanup() {
   set +e
@@ -390,9 +393,11 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   baseline_resource_target="$REMOTE_RUN/target-resource-baseline"
   CARGO_TARGET_DIR="$candidate_resource_target" cargo build --release --bin xp
   cp "$candidate_resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
-  CARGO_TARGET_DIR="$baseline_resource_target" \
-    cargo build --release --bin xp --manifest-path "$REMOTE_RESOURCE_BASELINE/Cargo.toml"
-  cp "$baseline_resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
+  if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
+    CARGO_TARGET_DIR="$baseline_resource_target" \
+      cargo build --release --bin xp --manifest-path "$REMOTE_RESOURCE_BASELINE/Cargo.toml"
+    cp "$baseline_resource_target/release/xp" "$REMOTE_RUN/xp-resource-baseline"
+  fi
   xray_container="$(docker ps -q \
     --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=xray")"
@@ -414,17 +419,29 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     exit 1
   fi
   memory_scope="codex-${COMPOSE_PROJECT}-xp-memory"
-  echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid, memory=128MiB, swap=0)"
-  systemd-run --user --scope --unit="$memory_scope" \
-    -p MemoryMax=128M -p MemorySwapMax=0 \
-    env \
-      XP_MESH_RESOURCE_MODE=shared-testbox \
-      XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
-      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
-      XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
-      XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
-      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
-      "$resource_test_bin" --ignored --nocapture
+  if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+    echo "running repository summary resource workload (memory=128MiB, swap=0)"
+    systemd-run --user --scope --unit="$memory_scope" \
+      -p MemoryMax=128M -p MemorySwapMax=0 \
+      env \
+        XP_MESH_RESOURCE_MODE=shared-testbox \
+        XP_MESH_RESOURCE_SUMMARY_ONLY=1 \
+        XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+        XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+        "$resource_test_bin" xp_repository_summary_memory_e2e --ignored --nocapture
+  else
+    echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid, memory=128MiB, swap=0)"
+    systemd-run --user --scope --unit="$memory_scope" \
+      -p MemoryMax=128M -p MemorySwapMax=0 \
+      env \
+        XP_MESH_RESOURCE_MODE=shared-testbox \
+        XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
+        XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+        XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
+        XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
+        XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+        "$resource_test_bin" --ignored --nocapture
+  fi
 fi
 REMOTE
 

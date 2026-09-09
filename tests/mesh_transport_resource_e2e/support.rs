@@ -18,6 +18,7 @@ use axum::{
     response::Response,
     routing::any,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::sleep};
 use xp::{
@@ -363,6 +364,136 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> Chil
         .stderr(Stdio::from(stderr))
         .spawn()
         .expect("spawn XP resource candidate")
+}
+
+fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
+    let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
+        .expect("open summary resource database");
+    connection
+        .pragma_update(None, "cache_size", -1024_i64)
+        .expect("limit summary resource SQLite cache");
+    connection
+        .pragma_update(None, "wal_autocheckpoint", 100_i64)
+        .expect("limit summary resource WAL checkpoint");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin summary resource transaction");
+    for sequence in 0..257_u64 {
+        transaction
+            .execute(
+                "INSERT INTO repository_history_segments
+                     (id, closed_at, contains_tombstone, source_node_id, source_epoch,
+                      stream, first_sequence, payload)
+                 VALUES (?1, ?2, 0, 'summary-source', 1, 'runtime', ?2, zeroblob(?3))",
+                rusqlite::params![format!("{sequence:064x}"), sequence, 192 * 1024 - 1024],
+            )
+            .expect("insert summary resource segment");
+    }
+
+    let state_payload = transaction
+        .query_row(
+            "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",
+            [],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .expect("read initialized state snapshot");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&state_payload).expect("decode initialized state snapshot");
+    let key = URL_SAFE_NO_PAD.encode([1_u8; 32]);
+    let relay_key = URL_SAFE_NO_PAD.encode([2_u8; 32]);
+    state["repository_membership"] = serde_json::json!({
+        "members": [{
+            "identity": {
+                "node_id": cluster.node_id.clone(),
+                "ed25519_public_key": key,
+                "x25519_relay_public_key": relay_key
+            },
+            "lifecycle": "syncing",
+            "replica_converged": false,
+            "capacity": {
+                "quota_bytes": 10_u64 * 1024 * 1024 * 1024,
+                "used_bytes": 0,
+                "filesystem_available_bytes": u64::MAX
+            }
+        }]
+    });
+    let state_payload = serde_json::to_vec(&state).expect("encode summary resource state");
+    transaction
+        .execute(
+            "UPDATE history_snapshots SET payload = ?1 WHERE key = 'persistent_state'",
+            rusqlite::params![state_payload],
+        )
+        .expect("write summary resource state");
+    transaction
+        .commit()
+        .expect("commit summary resource fixtures");
+}
+
+pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
+    let temp = tempfile::tempdir().expect("summary resource data directory");
+    let bind_port = reserve_local_port();
+    run_init(binary, temp.path(), bind_port);
+    let cluster = ClusterMetadata::load(temp.path()).expect("load summary resource cluster");
+    prepare_summary_storage(temp.path(), &cluster);
+    let log_path = temp.path().join("summary.log");
+    let mut child = spawn_xp(binary, temp.path(), bind_port, "summary");
+    wait_for_xp(&mut child, bind_port, &log_path).await;
+    let pid = child.id();
+    assert_expected_memory_scope(pid);
+
+    let ca_pem = cluster
+        .read_cluster_ca_pem(temp.path())
+        .expect("read summary resource CA");
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(temp.path())
+        .expect("read summary resource CA key")
+        .expect("summary resource private CA key");
+    let uri: axum::http::Uri = "/api/admin/_internal/history-repository/summary"
+        .parse()
+        .expect("summary resource URI");
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("summary resource HTTP client");
+    let mut max_pss_kib = 0;
+    for _ in 0..5 {
+        let context = xp::internal_auth::RequestContext::now(
+            xp::internal_auth::InternalRoute::MeshV2,
+            &cluster.cluster_id,
+            &cluster.node_id,
+            &cluster.node_id,
+            xp::id::new_ulid_string(),
+        );
+        let mut headers = axum::http::HeaderMap::new();
+        xp::internal_auth::sign_request_v2(
+            &ca_key_pem,
+            &ca_pem,
+            &axum::http::Method::GET,
+            &uri,
+            None,
+            &[],
+            &context,
+            &mut headers,
+        )
+        .expect("sign summary resource request");
+        let mut request = client.get(format!("http://127.0.0.1:{bind_port}{uri}"));
+        for (name, value) in &headers {
+            request = request.header(name.as_str(), value.to_str().expect("signed header value"));
+        }
+        let response = request.send().await.expect("summary resource response");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let summary: serde_json::Value = response.json().await.expect("decode summary response");
+        assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
+        assert!(
+            summary["next_segment_id"]
+                .as_str()
+                .is_some_and(|cursor| { cursor.starts_with("r:") })
+        );
+        max_pss_kib = max_pss_kib.max(read_pss(pid).expect("read summary XP PSS").total_kib);
+        sleep(Duration::from_secs(1)).await;
+    }
+    stop_child(&mut child).await;
+    max_pss_kib
 }
 
 async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {

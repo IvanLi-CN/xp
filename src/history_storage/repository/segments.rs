@@ -1,5 +1,10 @@
 use super::*;
 
+const FULL_SEGMENT_PROJECTION: &str = concat!(
+    "id, closed_at, contains_tombstone, source_node_id, source_epoch, ",
+    "stream, first_sequence, payload",
+);
+
 impl HistoryStorage {
     #[allow(dead_code)]
     pub(crate) fn upsert_repository_history_segments(
@@ -34,16 +39,31 @@ impl HistoryStorage {
         let Backend::Sqlite(connection) = &mut *backend else {
             return Ok(Vec::new());
         };
-        let (tombstones, after_id) = match after_id {
-            Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..])),
-            Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..])),
-            Some(_) | None => (true, None),
+        segment_page(
+            connection,
+            after_id,
+            limit,
+            FULL_SEGMENT_PROJECTION,
+            segment_row,
+        )
+    }
+
+    pub(crate) fn repository_history_segment_metadata_page(
+        &self,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<RepositoryHistorySegmentMetadataRow>> {
+        let mut backend = self.lock_backend();
+        let Backend::Sqlite(connection) = &mut *backend else {
+            return Ok(Vec::new());
         };
-        let mut rows = segment_phase(connection, tombstones, after_id, limit)?;
-        if tombstones && rows.len() < limit {
-            rows.extend(segment_phase(connection, false, None, limit - rows.len())?);
-        }
-        Ok(rows)
+        segment_page(
+            connection,
+            after_id,
+            limit,
+            "id, contains_tombstone",
+            metadata_segment_row,
+        )
     }
 
     pub(crate) fn repository_history_segments_by_ids(
@@ -121,31 +141,70 @@ impl HistoryStorage {
     }
 }
 
-fn segment_phase(
+fn segment_page<T, F>(
+    connection: &Connection,
+    after_id: Option<&str>,
+    limit: usize,
+    projection: &str,
+    mut row_mapper: F,
+) -> Result<Vec<T>>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+{
+    let (tombstones, after_id) = match after_id {
+        Some(cursor) if cursor.starts_with("t:") => (true, Some(&cursor[2..])),
+        Some(cursor) if cursor.starts_with("r:") => (false, Some(&cursor[2..])),
+        Some(_) | None => (true, None),
+    };
+    let mut rows = segment_phase_with_row(
+        connection,
+        tombstones,
+        after_id,
+        limit,
+        projection,
+        &mut row_mapper,
+    )?;
+    if tombstones && rows.len() < limit {
+        rows.extend(segment_phase_with_row(
+            connection,
+            false,
+            None,
+            limit - rows.len(),
+            projection,
+            &mut row_mapper,
+        )?);
+    }
+    Ok(rows)
+}
+
+fn segment_phase_with_row<T, F>(
     connection: &Connection,
     tombstones: bool,
     after_id: Option<&str>,
     limit: usize,
-) -> Result<Vec<RepositoryHistorySegmentRow>> {
-    let mut statement = connection
-        .prepare(
-            "SELECT id, closed_at, contains_tombstone, source_node_id, source_epoch, stream,
-                    first_sequence, payload
-             FROM repository_history_segments
-             WHERE contains_tombstone = ?1
-               AND (
-                    ?2 IS NULL
-                    OR (source_node_id, source_epoch, stream, first_sequence, id) > (
-                        SELECT source_node_id, source_epoch, stream, first_sequence, id
-                        FROM repository_history_segments
-                        WHERE id = ?2
-                    )
-               )
-             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
-                      id ASC
-             LIMIT ?3",
-        )
-        .map_err(sqlite_error)?;
+    projection: &str,
+    mut row_mapper: F,
+) -> Result<Vec<T>>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+{
+    let sql = format!(
+        "SELECT {projection}
+         FROM repository_history_segments
+         WHERE contains_tombstone = ?1
+           AND (
+                ?2 IS NULL
+                OR (source_node_id, source_epoch, stream, first_sequence, id) > (
+                    SELECT source_node_id, source_epoch, stream, first_sequence, id
+                    FROM repository_history_segments
+                    WHERE id = ?2
+                )
+           )
+         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                  id ASC
+         LIMIT ?3"
+    );
+    let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
     let rows = statement
         .query_map(
             params![
@@ -153,11 +212,20 @@ fn segment_phase(
                 after_id,
                 i64::try_from(limit).unwrap_or(i64::MAX)
             ],
-            segment_row,
+            &mut row_mapper,
         )
         .map_err(sqlite_error)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)
+}
+
+fn metadata_segment_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<RepositoryHistorySegmentMetadataRow> {
+    Ok(RepositoryHistorySegmentMetadataRow {
+        id: row.get(0)?,
+        contains_tombstone: row.get(1)?,
+    })
 }
 
 fn segment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepositoryHistorySegmentRow> {

@@ -57,6 +57,13 @@
   offered to a collector; status reports `journal_order_repairing` with the durable backlog count.
   The repair preserves each signed payload and does not rebuild the database or run a full
   `VACUUM`.
+- Repository summary pages use a metadata-only SQLite projection of `id` and tombstone phase.
+  They do not load or deserialize segment payloads merely to enumerate IDs or advance the
+  continuation cursor. Repair and backfill retain the separate full-payload path, so existing
+  signed rows and the summary wire shape remain unchanged. When a peer is stuck in `syncing`
+  because its summary request times out, upgrade the serving repository first and let the next
+  five-minute direct-path retry resume the persisted catch-up; do not restart the source or
+  delete its backlog as a recovery shortcut.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
   repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source
@@ -96,6 +103,9 @@
   A delivery-order expression index serves tombstone-priority pages without a temporary sort.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
+  The summary memory regression uses the shared testbox's summary-only mode to start the release
+  `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
+  and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
   Receivers require the complete pinned identity: repository senders must match their current
