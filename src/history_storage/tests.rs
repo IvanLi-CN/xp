@@ -206,6 +206,23 @@ fn sqlite_fallback_stays_sqlite_when_marker_cannot_be_persisted() {
 }
 
 #[test]
+fn malformed_external_history_marker_fails_closed() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(REPOSITORY_REPLICA_KEY, br#"{"external_history":"yes"}"#)
+            .unwrap();
+    }
+    fs::write(temporary.path().join(JSON_FALLBACK_FILE), b"stale\n").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.read(REPOSITORY_REPLICA_KEY).is_err());
+}
+
+#[test]
 fn restart_uses_the_committed_migration_instead_of_reimporting_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("state.json");
