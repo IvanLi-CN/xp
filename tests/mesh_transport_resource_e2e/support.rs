@@ -482,21 +482,35 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         }
         let sampling = Arc::new(AtomicBool::new(true));
         let sampled_peak_pss_kib = Arc::new(AtomicU64::new(0));
+        let sample_count = Arc::new(AtomicUsize::new(0));
+        let sampler_started = Arc::new(AtomicBool::new(false));
         let sampler_sampling = Arc::clone(&sampling);
         let sampler_peak = Arc::clone(&sampled_peak_pss_kib);
+        let sampler_count = Arc::clone(&sample_count);
+        let sampler_ready = Arc::clone(&sampler_started);
         let sampler = tokio::spawn(async move {
+            if let Some(sample) = read_pss(pid) {
+                sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                sampler_count.fetch_add(1, Ordering::Relaxed);
+            }
+            sampler_ready.store(true, Ordering::Release);
             while sampler_sampling.load(Ordering::Relaxed) {
                 if let Some(sample) = read_pss(pid) {
                     sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                    sampler_count.fetch_add(1, Ordering::Relaxed);
                 }
                 sleep(Duration::from_millis(10)).await;
             }
         });
+        while !sampler_started.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
         let response = request.send().await.expect("summary resource response");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let summary: serde_json::Value = response.json().await.expect("decode summary response");
         sampling.store(false, Ordering::Relaxed);
         sampler.await.expect("summary PSS sampler");
+        assert!(sample_count.load(Ordering::Relaxed) > 0);
         assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
         assert!(
             summary["next_segment_id"]

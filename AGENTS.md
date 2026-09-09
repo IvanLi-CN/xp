@@ -52,9 +52,9 @@
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
   An external-history database whose startup index creation fails preserves its durable rows on
   disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
-  The 128 MiB/no-swap actual-XP summary resource run is a required operator-run release-candidate
-  gate before rollout; GitHub CI and release publication do not provide or replace shared-testbox
-  capacity evidence.
+  The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
+  candidate gate before rollout; the runner binds the clean commit and generated Web shell by
+  SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Service Monitoring persists each node's bounded capture journal in
