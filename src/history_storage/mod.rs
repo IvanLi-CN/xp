@@ -26,6 +26,9 @@ pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
 
 mod repository;
 mod source_journal;
+mod startup;
+#[cfg(test)]
+use repository::segment_phase_sql;
 #[allow(unused_imports)]
 pub(crate) use repository::{
     RepositoryHistoryCompactionCursor, RepositoryHistoryCoverage, RepositoryHistoryRecordRow,
@@ -38,6 +41,13 @@ pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES, SourceDeliveryJournalPage,
     SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
 };
+pub(crate) use startup::HistoryStorageMode;
+#[cfg(test)]
+use startup::{
+    fail_next_post_publish_history_storage_failure_for_test,
+    fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
+};
+use startup::{open_backend, repository_history_is_external, sqlite_connection};
 
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
@@ -71,7 +81,7 @@ impl HistorySource {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct HistoryStorageError(String);
 
 const REPOSITORY_HISTORY_EXPORT_LEASE_SECONDS: u64 = 15 * 60;
@@ -108,12 +118,7 @@ impl std::fmt::Debug for HistoryStorage {
 pub(crate) enum Backend {
     Sqlite(Connection),
     Json,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum HistoryStorageMode {
-    Sqlite,
-    DegradedJson,
+    Unavailable(HistoryStorageError),
 }
 
 impl HistoryStorage {
@@ -151,6 +156,7 @@ impl HistoryStorage {
                 }
             },
             Backend::Json => read_json(source_path(&self.data_dir, key)),
+            Backend::Unavailable(error) => Err(error.clone()),
         }
     }
 
@@ -175,17 +181,19 @@ impl HistoryStorage {
                 }
             },
             Backend::Json => write_json(source_path(&self.data_dir, key), payload),
+            Backend::Unavailable(error) => Err(error.clone()),
         }
     }
 
     pub(crate) fn is_sqlite(&self) -> bool {
-        self.mode() == HistoryStorageMode::Sqlite
+        self.mode() != HistoryStorageMode::DegradedJson
     }
 
     pub(crate) fn mode(&self) -> HistoryStorageMode {
         match &*self.lock_backend() {
             Backend::Sqlite(_) => HistoryStorageMode::Sqlite,
             Backend::Json => HistoryStorageMode::DegradedJson,
+            Backend::Unavailable(_) => HistoryStorageMode::Unavailable,
         }
     }
 
@@ -256,7 +264,7 @@ impl HistoryStorage {
     #[cfg(test)]
     pub(crate) fn set_query_only_for_test(&self, enabled: bool) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "query-only test hook requires SQLite".to_owned(),
             ));
@@ -333,22 +341,7 @@ fn shared_backend(data_dir: &Path) -> Arc<Mutex<Backend>> {
         return backend;
     }
 
-    let backend = if json_fallback_path(data_dir).exists() {
-        Backend::Json
-    } else {
-        match open_sqlite(data_dir) {
-            Ok(connection) => Backend::Sqlite(connection),
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    path = %data_dir.join(SQLITE_FILE).display(),
-                    history_storage_mode = "degraded_json",
-                    "history storage degraded; continuing with JSON snapshots"
-                );
-                Backend::Json
-            }
-        }
-    };
+    let backend = open_backend(data_dir);
     let backend = Arc::new(Mutex::new(backend));
     registry.insert(data_dir.to_path_buf(), Arc::downgrade(&backend));
     backend
@@ -373,23 +366,6 @@ fn normalize_data_dir(data_dir: &Path) -> PathBuf {
 
 fn json_fallback_path(data_dir: &Path) -> PathBuf {
     data_dir.join(JSON_FALLBACK_FILE)
-}
-
-fn open_sqlite(data_dir: &Path) -> Result<Connection> {
-    fs::create_dir_all(data_dir).map_err(io_error)?;
-    let db_path = data_dir.join(SQLITE_FILE);
-    if db_path.exists() {
-        let mut connection = Connection::open(&db_path).map_err(sqlite_error)?;
-        configure_runtime(&connection)?;
-        ensure_schema(&mut connection)?;
-        return Ok(connection);
-    }
-
-    migrate_json_snapshots(data_dir, &db_path)?;
-    let mut connection = Connection::open(db_path).map_err(sqlite_error)?;
-    configure_runtime(&connection)?;
-    ensure_schema(&mut connection)?;
-    Ok(connection)
 }
 
 fn migrate_json_snapshots(data_dir: &Path, db_path: &Path) -> Result<()> {
@@ -596,6 +572,20 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
              CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
                ON repository_history_segments
                   (contains_tombstone DESC, source_node_id ASC, source_epoch ASC, stream ASC,
+                   first_sequence ASC, id ASC);",
+        )
+        .map_err(sqlite_error)?;
+    #[cfg(test)]
+    if take_segment_keyset_index_failure_for_test() {
+        return Err(HistoryStorageError(
+            "injected repository segment keyset index failure".to_owned(),
+        ));
+    }
+    connection
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order_v2
+               ON repository_history_segments
+                  (contains_tombstone ASC, source_node_id ASC, source_epoch ASC, stream ASC,
                    first_sequence ASC, id ASC);",
         )
         .map_err(sqlite_error)
@@ -843,16 +833,20 @@ fn finish_post_commit_maintenance(result: Result<()>) -> bool {
     false
 }
 
-fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
+fn switch_to_json(backend: &mut Backend, data_dir: &Path) -> bool {
     let Backend::Sqlite(connection) = backend else {
-        return;
+        return false;
     };
-    if repository_history_is_external(connection) {
+    if repository_history_is_external(connection).unwrap_or(true) {
         warn!(
             history_storage_mode = "sqlite_degraded",
             "keeping SQLite active because repository history cannot use JSON fallback"
         );
-        return;
+        return false;
+    }
+    if let Err(error) = clear_json_fallback_marker(data_dir) {
+        warn!(error = %error, "cannot clear stale JSON history fallback marker");
+        return false;
     }
     for source in SOURCES {
         match read_sqlite(connection, source.key) {
@@ -863,33 +857,26 @@ fn switch_to_json(backend: &mut Backend, data_dir: &Path) {
                         key = source.key,
                         "restore JSON snapshot after SQLite failure"
                     );
+                    return false;
                 }
             }
             Ok(None) => {}
-            Err(error) => warn!(
-                error = %error,
-                key = source.key,
-                "read SQLite snapshot while restoring JSON fallback"
-            ),
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    key = source.key,
+                    "read SQLite snapshot while restoring JSON fallback"
+                );
+                return false;
+            }
         }
     }
     if let Err(error) = mark_json_fallback(data_dir) {
         warn!(error = %error, "record persistent JSON history fallback");
+        return false;
     }
     *backend = Backend::Json;
-}
-
-fn repository_history_is_external(connection: &Connection) -> bool {
-    read_sqlite(connection, REPOSITORY_REPLICA_KEY)
-        .ok()
-        .flatten()
-        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
-        .and_then(|snapshot| {
-            snapshot
-                .get("external_history")
-                .and_then(serde_json::Value::as_bool)
-        })
-        .unwrap_or(false)
+    true
 }
 
 fn source_path(data_dir: &Path, key: &str) -> PathBuf {
@@ -927,6 +914,14 @@ fn write_json(path: PathBuf, payload: &[u8]) -> Result<()> {
 
 fn mark_json_fallback(data_dir: &Path) -> Result<()> {
     write_atomic_file(&json_fallback_path(data_dir), b"json-fallback\n")
+}
+
+fn clear_json_fallback_marker(data_dir: &Path) -> Result<()> {
+    match fs::remove_file(json_fallback_path(data_dir)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(error)),
+    }
 }
 
 fn write_atomic_file(path: &Path, payload: &[u8]) -> Result<()> {

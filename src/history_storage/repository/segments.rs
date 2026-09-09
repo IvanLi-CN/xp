@@ -15,10 +15,14 @@ impl HistoryStorage {
             return Ok(());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Err(HistoryStorageError(
-                "repository history row storage requires SQLite".to_owned(),
-            ));
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => {
+                return Err(HistoryStorageError(
+                    "repository history row storage requires SQLite".to_owned(),
+                ));
+            }
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for row in rows {
@@ -36,8 +40,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         segment_page(
             connection,
@@ -54,8 +60,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentMetadataRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         segment_page(
             connection,
@@ -74,8 +82,10 @@ impl HistoryStorage {
             return Ok(Vec::new());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
@@ -100,8 +110,10 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistorySegmentRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
-            return Ok(Vec::new());
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(Vec::new()),
         };
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = if let Some(after_id) = after_id {
@@ -188,35 +200,81 @@ fn segment_phase_with_row<T, F>(
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 {
-    let sql = format!(
-        "SELECT {projection}
-         FROM repository_history_segments
-         WHERE contains_tombstone = ?1
-           AND (
-                ?2 IS NULL
-                OR (source_node_id, source_epoch, stream, first_sequence, id) > (
-                    SELECT source_node_id, source_epoch, stream, first_sequence, id
-                    FROM repository_history_segments
-                    WHERE id = ?2
-                )
-           )
-         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
-                  id ASC
-         LIMIT ?3"
-    );
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    if let Some(after_id) = after_id {
+        let Some((source_node_id, source_epoch, stream, first_sequence, id)) = connection
+            .query_row(
+                "SELECT source_node_id, source_epoch, stream, first_sequence, id
+                 FROM repository_history_segments
+                 WHERE id = ?1",
+                [after_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        else {
+            return Ok(Vec::new());
+        };
+        let sql = segment_phase_sql(projection, true);
+        let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    tombstones,
+                    source_node_id,
+                    source_epoch,
+                    stream,
+                    first_sequence,
+                    id,
+                    limit
+                ],
+                &mut row_mapper,
+            )
+            .map_err(sqlite_error)?;
+        return rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error);
+    }
+
+    let sql = segment_phase_sql(projection, false);
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
     let rows = statement
-        .query_map(
-            params![
-                tombstones,
-                after_id,
-                i64::try_from(limit).unwrap_or(i64::MAX)
-            ],
-            &mut row_mapper,
-        )
+        .query_map(params![tombstones, limit], &mut row_mapper)
         .map_err(sqlite_error)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)
+}
+
+pub(crate) fn segment_phase_sql(projection: &str, continuation: bool) -> String {
+    if continuation {
+        return format!(
+            "SELECT {projection}
+             FROM repository_history_segments
+             WHERE contains_tombstone = ?1
+               AND (source_node_id, source_epoch, stream, first_sequence, id)
+                   > (?2, ?3, ?4, ?5, ?6)
+             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                      id ASC
+             LIMIT ?7"
+        );
+    }
+
+    format!(
+        "SELECT {projection}
+         FROM repository_history_segments
+         WHERE contains_tombstone = ?1
+         ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                  id ASC
+         LIMIT ?2"
+    )
 }
 
 fn metadata_segment_row(

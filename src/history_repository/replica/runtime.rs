@@ -626,14 +626,14 @@ impl RepositoryReplicaRuntime {
             self.storage_degraded,
             self.snapshot.capacity.filesystem_available_bytes(),
         )?;
+        let storage_mode = match self.storage.mode() {
+            crate::state::history_storage::HistoryStorageMode::Unavailable => "unavailable",
+            _ if self.storage_degraded => "sqlite_degraded",
+            crate::state::history_storage::HistoryStorageMode::Sqlite => "sqlite",
+            crate::state::history_storage::HistoryStorageMode::DegradedJson => "degraded_json",
+        };
         Ok(RepositoryRuntimeStatus {
-            storage_mode: if self.storage_degraded {
-                "sqlite_degraded".to_owned()
-            } else if self.storage.is_sqlite() {
-                "sqlite".to_owned()
-            } else {
-                "degraded_json".to_owned()
-            },
+            storage_mode: storage_mode.to_owned(),
             capacity: self.snapshot.capacity.clone(),
             record_count: if self.uses_sqlite_history() {
                 self.storage

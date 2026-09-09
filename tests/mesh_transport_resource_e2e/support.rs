@@ -5,7 +5,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -480,16 +480,56 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         for (name, value) in &headers {
             request = request.header(name.as_str(), value.to_str().expect("signed header value"));
         }
+        let sampling = Arc::new(AtomicBool::new(true));
+        let sampled_peak_pss_kib = Arc::new(AtomicU64::new(0));
+        let sample_count = Arc::new(AtomicUsize::new(0));
+        let sampler_started = Arc::new(AtomicBool::new(false));
+        let request_active = Arc::new(AtomicBool::new(false));
+        let in_flight_sample_count = Arc::new(AtomicUsize::new(0));
+        let sampler_sampling = Arc::clone(&sampling);
+        let sampler_peak = Arc::clone(&sampled_peak_pss_kib);
+        let sampler_count = Arc::clone(&sample_count);
+        let sampler_ready = Arc::clone(&sampler_started);
+        let sampler_request_active = Arc::clone(&request_active);
+        let sampler_in_flight_count = Arc::clone(&in_flight_sample_count);
+        let sampler = tokio::spawn(async move {
+            if let Some(sample) = read_pss(pid) {
+                sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                sampler_count.fetch_add(1, Ordering::Relaxed);
+            }
+            sampler_ready.store(true, Ordering::Release);
+            while sampler_sampling.load(Ordering::Relaxed) {
+                if let Some(sample) = read_pss(pid) {
+                    sampler_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+                    sampler_count.fetch_add(1, Ordering::Relaxed);
+                    if sampler_request_active.load(Ordering::Acquire) {
+                        sampler_in_flight_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+        while !sampler_started.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+        request_active.store(true, Ordering::Release);
         let response = request.send().await.expect("summary resource response");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let summary: serde_json::Value = response.json().await.expect("decode summary response");
+        request_active.store(false, Ordering::Release);
+        sampling.store(false, Ordering::Relaxed);
+        sampler.await.expect("summary PSS sampler");
+        assert!(sample_count.load(Ordering::Relaxed) > 0);
+        assert!(in_flight_sample_count.load(Ordering::Relaxed) > 0);
         assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
         assert!(
             summary["next_segment_id"]
                 .as_str()
                 .is_some_and(|cursor| { cursor.starts_with("r:") })
         );
-        max_pss_kib = max_pss_kib.max(read_pss(pid).expect("read summary XP PSS").total_kib);
+        max_pss_kib = max_pss_kib
+            .max(sampled_peak_pss_kib.load(Ordering::Relaxed))
+            .max(read_pss(pid).expect("read summary XP PSS").total_kib);
         sleep(Duration::from_secs(1)).await;
     }
     stop_child(&mut child).await;

@@ -47,6 +47,14 @@
   each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
   sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then the
   Raft-assigned Reality Mesh Reverse relay, and only then the in-memory encrypted dynamic relay.
+  Summary continuation resolves its opaque segment ID to the durable five-column keyset and seeks
+  the additive `repository_history_segments_sync_order_v2` SQLite index; an existing database
+  creates that index idempotently at startup without replacing the legacy index or signed payloads.
+  An external-history database whose startup index creation fails preserves its durable rows on
+  disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
+  The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
+  candidate gate before rollout; the runner binds the clean commit and generated Web shell by
+  SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Service Monitoring persists each node's bounded capture journal in

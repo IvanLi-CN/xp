@@ -124,6 +124,122 @@ fn external_repository_history_prevents_lossy_json_fallback() {
 }
 
 #[test]
+fn external_repository_history_fails_closed_when_keyset_index_upgrade_fails() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(
+                REPOSITORY_REPLICA_KEY,
+                br#"{"external_history":true,"checkpoint":"durable"}"#,
+            )
+            .unwrap();
+    }
+
+    fail_next_segment_keyset_index_for_test();
+    let restarted = HistoryStorage::open(temporary.path());
+
+    assert_eq!(restarted.mode(), HistoryStorageMode::Unavailable);
+    assert!(restarted.is_sqlite());
+    assert!(restarted.read(REPOSITORY_REPLICA_KEY).is_err());
+    assert!(
+        restarted
+            .repository_history_segment_metadata_page(None, 1)
+            .is_err()
+    );
+    assert!(restarted.repository_history_record_count().is_err());
+    assert!(restarted.source_delivery_journal_summary().is_err());
+    assert!(
+        restarted
+            .source_delivery_journal_capacity_suspended()
+            .is_err()
+    );
+    assert!(restarted.source_delivery_journal_page(1).is_err());
+    assert!(
+        restarted
+            .repair_source_delivery_journal_order_page()
+            .is_err()
+    );
+    assert!(restarted.source_delivery_journal_max_epoch().is_err());
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
+fn published_history_sqlite_failure_fails_closed_instead_of_falling_back_to_json() {
+    let temporary = tempfile::tempdir().unwrap();
+    let legacy_path = temporary.path().join("history/repository_replica.json");
+    fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    fs::write(&legacy_path, br#"{"external_history":true}"#).unwrap();
+
+    fail_next_post_publish_history_storage_failure_for_test();
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.is_sqlite());
+    assert!(storage.read(REPOSITORY_REPLICA_KEY).is_err());
+    assert!(temporary.path().join(SQLITE_FILE).is_file());
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
+fn existing_history_sqlite_open_failure_fails_closed() {
+    let temporary = tempfile::tempdir().unwrap();
+    fs::write(temporary.path().join(SQLITE_FILE), b"not a sqlite database").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.read(STATE_KEY).is_err());
+    assert!(!temporary.path().join(JSON_FALLBACK_FILE).exists());
+}
+
+#[test]
+fn existing_history_sqlite_takes_precedence_over_stale_json_fallback_marker() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(REPOSITORY_REPLICA_KEY, br#"{"external_history":true}"#)
+            .unwrap();
+        storage.write(STATE_KEY, b"durable").unwrap();
+    }
+    fs::write(temporary.path().join(JSON_FALLBACK_FILE), b"stale\n").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Sqlite);
+    assert_eq!(storage.read(STATE_KEY).unwrap(), Some(b"durable".to_vec()));
+}
+
+#[test]
+fn sqlite_fallback_stays_sqlite_when_marker_cannot_be_persisted() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    fs::create_dir(temporary.path().join(JSON_FALLBACK_FILE)).unwrap();
+    set_query_only(&storage);
+
+    assert!(storage.write(STATE_KEY, b"cannot-fallback").is_err());
+    assert_eq!(storage.mode(), HistoryStorageMode::Sqlite);
+}
+
+#[test]
+fn malformed_external_history_marker_fails_closed() {
+    let temporary = tempfile::tempdir().unwrap();
+    {
+        let storage = HistoryStorage::open(temporary.path());
+        storage
+            .write(REPOSITORY_REPLICA_KEY, br#"{"external_history":"yes"}"#)
+            .unwrap();
+    }
+    fs::write(temporary.path().join(JSON_FALLBACK_FILE), b"stale\n").unwrap();
+
+    let storage = HistoryStorage::open(temporary.path());
+
+    assert_eq!(storage.mode(), HistoryStorageMode::Unavailable);
+    assert!(storage.read(REPOSITORY_REPLICA_KEY).is_err());
+}
+
+#[test]
 fn restart_uses_the_committed_migration_instead_of_reimporting_json() {
     let temporary = tempfile::tempdir().unwrap();
     let legacy_path = temporary.path().join("state.json");
@@ -300,6 +416,59 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
+fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let backend = storage.lock_backend();
+    let Backend::Sqlite(connection) = &*backend else {
+        panic!("test storage should use SQLite");
+    };
+
+    let first_page_plan = query_plan_with_params(
+        connection,
+        &segment_phase_sql("id, contains_tombstone", false),
+        rusqlite::params![false, 1_i64],
+    );
+    assert!(
+        first_page_plan
+            .iter()
+            .any(|detail| detail.contains("repository_history_segments_sync_order_v2"))
+    );
+    assert!(
+        !first_page_plan
+            .iter()
+            .any(|detail| detail.contains("USE TEMP B-TREE"))
+    );
+
+    let cursor_page_plan = query_plan_with_params(
+        connection,
+        &segment_phase_sql("id, contains_tombstone", true),
+        rusqlite::params![
+            false,
+            "node-a",
+            7_i64,
+            "runtime",
+            10_i64,
+            "segment-10",
+            1_i64
+        ],
+    );
+    assert!(
+        cursor_page_plan
+            .iter()
+            .any(|detail| detail.contains("repository_history_segments_sync_order_v2"))
+    );
+    assert!(cursor_page_plan.iter().any(|detail| {
+        detail.contains("(source_node_id,source_epoch,stream,first_sequence,id)>(?,?,?,?,?)")
+    }));
+    assert!(
+        !cursor_page_plan
+            .iter()
+            .any(|detail| detail.contains("USE TEMP B-TREE"))
+    );
+}
+
+#[test]
 fn repository_history_export_leases_are_expired_and_bounded() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());
@@ -348,10 +517,18 @@ fn sqlite_text_pragma(storage: &HistoryStorage, pragma: &str) -> String {
 }
 
 fn query_plan(connection: &rusqlite::Connection, query: &str) -> Vec<String> {
+    query_plan_with_params(connection, query, [])
+}
+
+fn query_plan_with_params<P: rusqlite::Params>(
+    connection: &rusqlite::Connection,
+    query: &str,
+    params: P,
+) -> Vec<String> {
     connection
         .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
         .unwrap()
-        .query_map([], |row| row.get(3))
+        .query_map(params, |row| row.get(3))
         .unwrap()
         .collect::<std::result::Result<Vec<String>, _>>()
         .unwrap()

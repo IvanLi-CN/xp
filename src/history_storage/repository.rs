@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 mod segments;
+#[cfg(test)]
+pub(crate) use segments::segment_phase_sql;
 /// A repository-history row is deliberately stored outside the control snapshot.
 /// The metadata columns keep retention and paged queries in SQLite rather than loading the
 /// two-year repository window into the replica process.
@@ -116,7 +118,7 @@ impl HistoryStorage {
     ) -> Result<u64> {
         let key = repository_source_epoch_meta_key(cluster_id, node_id);
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(initial_epoch.max(1));
         };
         let previous = read_meta_i64(connection, &key)?.and_then(|value| u64::try_from(value).ok());
@@ -142,7 +144,7 @@ impl HistoryStorage {
     ) -> Result<()> {
         let key = repository_source_epoch_meta_key(cluster_id, node_id);
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         let stored_epoch = i64::try_from(epoch)
@@ -162,7 +164,7 @@ impl HistoryStorage {
 
     pub(crate) fn repository_history_used_bytes(&self) -> Result<u64> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(0);
         };
         let page_count = connection
@@ -189,7 +191,7 @@ impl HistoryStorage {
             return Ok(());
         }
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "repository history row storage requires SQLite".to_owned(),
             ));
@@ -261,7 +263,7 @@ impl HistoryStorage {
             .fail_maintenance_after_commit
             .load(std::sync::atomic::Ordering::Relaxed);
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "repository replica mutation requires SQLite".to_owned(),
             ));
@@ -300,7 +302,7 @@ impl HistoryStorage {
         retained: &[RepositoryHistoryRecordRow],
     ) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
                 "repository history row storage requires SQLite".to_owned(),
             ));
@@ -383,7 +385,7 @@ impl HistoryStorage {
         tombstone: &RepositoryHistoryTombstone,
     ) -> Result<usize> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(0);
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -398,7 +400,7 @@ impl HistoryStorage {
         tombstone: &RepositoryHistoryTombstone,
     ) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         connection
@@ -451,7 +453,7 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
         let mut statement = connection
@@ -495,7 +497,7 @@ impl HistoryStorage {
         limit: usize,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
         let after = after.cloned().unwrap_or(RepositoryHistoryCompactionCursor {
@@ -552,7 +554,7 @@ impl HistoryStorage {
         received_at_cutoff_unix_seconds: u64,
     ) -> Result<Vec<RepositoryHistoryRecordRow>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
         let after = after.cloned().unwrap_or(RepositoryHistoryCompactionCursor {
@@ -616,7 +618,7 @@ impl HistoryStorage {
         repair_cache_cutoff_unix_seconds: u64,
     ) -> Result<Option<RepositoryHistoryExportWatermarks>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(None);
         };
         let received_at_cutoff = connection
@@ -680,7 +682,7 @@ impl HistoryStorage {
         now_unix_seconds: u64,
     ) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -734,7 +736,7 @@ impl HistoryStorage {
 
     pub(crate) fn finish_repository_history_export(&self, session_id: &str) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         connection
@@ -751,7 +753,7 @@ impl HistoryStorage {
         now_unix_seconds: u64,
     ) -> Result<bool> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(false);
         };
         connection
@@ -775,7 +777,7 @@ impl HistoryStorage {
         now_unix_seconds: u64,
     ) -> Result<bool> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(false);
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -803,7 +805,7 @@ impl HistoryStorage {
         subject_node_id: Option<&str>,
     ) -> Result<Option<super::RepositoryHistoryCoverage>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(None);
         };
         connection
@@ -843,7 +845,7 @@ impl HistoryStorage {
         end_unix_seconds: u64,
     ) -> Result<Option<(u64, u64)>> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(None);
         };
         connection
@@ -884,7 +886,7 @@ impl HistoryStorage {
         segment_closed_at_unix_seconds: u64,
     ) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -907,7 +909,7 @@ impl HistoryStorage {
 
     pub(crate) fn clear_repository_history(&self) -> Result<()> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(());
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
@@ -923,7 +925,7 @@ impl HistoryStorage {
 
     fn repository_history_count(&self, table: &str) -> Result<usize> {
         let mut backend = self.lock_backend();
-        let Backend::Sqlite(connection) = &mut *backend else {
+        let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(0);
         };
         connection

@@ -13,6 +13,13 @@ TESTBOX="${TESTBOX:-codex-testbox}"
 RUN_MESH_RESOURCE="${XP_RUN_MESH_RESOURCE:-0}"
 ONLY_MESH_RESOURCE="${XP_E2E_ONLY_MESH_RESOURCE:-0}"
 MESH_RESOURCE_SUMMARY_ONLY="${XP_MESH_RESOURCE_SUMMARY_ONLY:-0}"
+if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+  if [ "$RUN_MESH_RESOURCE" != "1" ]; then
+    echo "XP_MESH_RESOURCE_SUMMARY_ONLY=1 requires XP_RUN_MESH_RESOURCE=1" >&2
+    exit 2
+  fi
+  ONLY_MESH_RESOURCE=1
+fi
 # Compare resource changes with the checked-out development baseline. Older hard-coded
 # Mesh baselines can no longer exercise the current signed control-plane protocol.
 MESH_RESOURCE_BASELINE_SHA="${XP_MESH_RESOURCE_BASELINE_SHA:-origin/main}"
@@ -29,10 +36,22 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; then
+  echo "testbox requires a clean worktree; commit or discard local changes first" >&2
+  exit 2
+fi
+GIT_SHA_FULL="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 if [ ! -f "$REPO_ROOT/web/dist/index.html" ]; then
   echo "missing $REPO_ROOT/web/dist/index.html; run 'cd web && bun run build' locally" >&2
   exit 2
 fi
+SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
+WEB_DIST_ARCHIVE="$(mktemp -t xp-testbox-web-dist.XXXXXX.tar)"
+trap 'rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"' EXIT
+git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
+SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
+tar -C "$REPO_ROOT/web/dist" -cf "$WEB_DIST_ARCHIVE" .
+WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
@@ -43,7 +62,7 @@ PY
 )"
 
 # 2) Per-run identifiers.
-GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+GIT_SHA="${GIT_SHA_FULL:0:12}"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
@@ -69,6 +88,7 @@ RUN_MESH_RESOURCE_B64="$(printf '%s' "$RUN_MESH_RESOURCE" | base64 | tr -d '\n')
 ONLY_MESH_RESOURCE_B64="$(printf '%s' "$ONLY_MESH_RESOURCE" | base64 | tr -d '\n')"
 MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900}" | base64 | tr -d '\n')"
 MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | base64 | tr -d '\n')"
+GIT_SHA_FULL_B64="$(printf '%s' "$GIT_SHA_FULL" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
@@ -79,17 +99,20 @@ CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
 local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
+git_commit=$GIT_SHA_FULL
+source_archive_sha256=$SOURCE_ARCHIVE_SHA
+web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
 TXT
 
-# 4) Sync repo to remote run dir.
-rsync -az --delete \
-  --exclude '.git/' \
-  --exclude 'node_modules/' \
-  --exclude 'target/' \
-  --exclude 'web/node_modules/' \
-  "$REPO_ROOT/" "$TESTBOX:$REMOTE_RUN/"
+# 4) Sync the immutable tracked tree, then overlay the generated Web shell.
+rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
+ssh -o BatchMode=yes "$TESTBOX" \
+  "test \"\$(sha256sum '$REMOTE_RUN/source.tar' | awk '{print \$1}')\" = '$SOURCE_ARCHIVE_SHA' && tar -xf '$REMOTE_RUN/source.tar' -C '$REMOTE_RUN' && rm -f '$REMOTE_RUN/source.tar'"
+rsync -a "$WEB_DIST_ARCHIVE" "$TESTBOX:$REMOTE_RUN/web-dist.tar"
+ssh -o BatchMode=yes "$TESTBOX" \
+  "test \"\$(sha256sum '$REMOTE_RUN/web-dist.tar' | awk '{print \$1}')\" = '$WEB_DIST_ARCHIVE_SHA' && mkdir -p '$REMOTE_RUN/web/dist' && tar -xf '$REMOTE_RUN/web-dist.tar' -C '$REMOTE_RUN/web/dist' && rm -f '$REMOTE_RUN/web-dist.tar'"
 
-if [ "$RUN_MESH_RESOURCE" = "1" ]; then
+if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
   ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RESOURCE_BASELINE'"
   git -C "$REPO_ROOT" archive "$MESH_RESOURCE_BASELINE_SHA" \
@@ -99,7 +122,7 @@ fi
 
 # 5) Run on testbox.
 ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' bash -s" <<'REMOTE'
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' bash -s" <<'REMOTE'
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
@@ -110,6 +133,7 @@ RUN_MESH_RESOURCE="$(printf '%s' "${RUN_MESH_RESOURCE_B64:?}" | base64 -d)"
 ONLY_MESH_RESOURCE="$(printf '%s' "${ONLY_MESH_RESOURCE_B64:?}" | base64 -d)"
 MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64 -d)"
 MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
+GIT_SHA_FULL="$(printf '%s' "${GIT_SHA_FULL_B64:?}" | base64 -d)"
 
 cleanup() {
   set +e
@@ -375,8 +399,10 @@ cd "$REMOTE_RUN"
 export RUST_TEST_THREADS=1
 export XP_E2E_XRAY_MODE=external
 export XP_E2E_XRAY_API_ADDR="127.0.0.1:$XP_E2E_XRAY_API_PORT"
-XP_E2E_MIHOMO_BIN="$("$REMOTE_RUN/scripts/e2e/install-mihomo-v1.19.29.sh")"
-export XP_E2E_MIHOMO_BIN
+if [ "$ONLY_MESH_RESOURCE" != "1" ] || [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
+  XP_E2E_MIHOMO_BIN="$("$REMOTE_RUN/scripts/e2e/install-mihomo-v1.19.29.sh")"
+  export XP_E2E_MIHOMO_BIN
+fi
 
 if [ "$ONLY_MESH_RESOURCE" != "1" ]; then
   cargo test --test xray_e2e -- --ignored
@@ -391,7 +417,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   cp -a "$REMOTE_RUN/web/dist" "$REMOTE_RESOURCE_BASELINE/web/dist"
   candidate_resource_target="$REMOTE_RUN/target-resource-candidate"
   baseline_resource_target="$REMOTE_RUN/target-resource-baseline"
-  CARGO_TARGET_DIR="$candidate_resource_target" cargo build --release --bin xp
+  XP_BUILD_VERSION="$GIT_SHA_FULL" CARGO_TARGET_DIR="$candidate_resource_target" cargo build --release --bin xp
   cp "$candidate_resource_target/release/xp" "$REMOTE_RUN/xp-resource-candidate"
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
     CARGO_TARGET_DIR="$baseline_resource_target" \
