@@ -375,8 +375,10 @@ cd "$REMOTE_RUN"
 export RUST_TEST_THREADS=1
 export XP_E2E_XRAY_MODE=external
 export XP_E2E_XRAY_API_ADDR="127.0.0.1:$XP_E2E_XRAY_API_PORT"
-XP_E2E_MIHOMO_BIN="$("$REMOTE_RUN/scripts/e2e/install-mihomo-v1.19.29.sh")"
-export XP_E2E_MIHOMO_BIN
+if [ "$ONLY_MESH_RESOURCE" != "1" ] || [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
+  XP_E2E_MIHOMO_BIN="$("$REMOTE_RUN/scripts/e2e/install-mihomo-v1.19.29.sh")"
+  export XP_E2E_MIHOMO_BIN
+fi
 
 if [ "$ONLY_MESH_RESOURCE" != "1" ]; then
   cargo test --test xray_e2e -- --ignored

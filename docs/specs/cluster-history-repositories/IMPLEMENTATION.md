@@ -100,7 +100,12 @@
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
   is the evidence for listener and control-plane availability. Any failed window stops rollout
   and preserves the journal for rollback.
-  A delivery-order expression index serves tombstone-priority pages without a temporary sort.
+  The additive `repository_history_segments_sync_order_v2` index serves tombstone-priority
+  summary pages without a temporary sort. Continuation first resolves its opaque ID to the five
+  persistent ordering columns, then binds a row-value range directly; it does not use a nullable
+  cursor predicate or a scalar cursor subquery that prevents the SQLite planner from seeking.
+  Existing databases create the v2 index idempotently without deleting the legacy index or
+  rewriting signed segment payloads.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
   the entire journal.
   The summary memory regression uses the shared testbox's summary-only mode to start the release

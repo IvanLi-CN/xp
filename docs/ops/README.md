@@ -808,6 +808,11 @@ Notes:
   timeout, roll out the serving repository first, then observe the next five-minute direct-path
   retry so its durable checkpoint can resume. Do not restart the source, run `VACUUM`, clear the
   database, or delete unacknowledged backlog as a workaround.
+  The serving release creates the additive `repository_history_segments_sync_order_v2` keyset
+  index on startup for existing databases. It preserves the legacy index and every segment payload;
+  let normal XP startup finish this one-time creation, then verify health before observing the next
+  retry. Do not manually rebuild indexes as a substitute for the release, because summary
+  continuation also requires the release's direct five-column keyset seek.
   The release validation path `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the
   signed summary endpoint against 257 near-limit segments in a 128 MiB/no-swap cgroup and records
   the candidate XP `smaps_rollup` PSS peak before any rollout decision.

@@ -596,6 +596,10 @@ fn ensure_repository_history_segment_columns(connection: &Connection) -> Result<
              CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order
                ON repository_history_segments
                   (contains_tombstone DESC, source_node_id ASC, source_epoch ASC, stream ASC,
+                   first_sequence ASC, id ASC);
+             CREATE INDEX IF NOT EXISTS repository_history_segments_sync_order_v2
+               ON repository_history_segments
+                  (contains_tombstone ASC, source_node_id ASC, source_epoch ASC, stream ASC,
                    first_sequence ASC, id ASC);",
         )
         .map_err(sqlite_error)

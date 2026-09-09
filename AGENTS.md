@@ -47,6 +47,9 @@
   each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
   sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then the
   Raft-assigned Reality Mesh Reverse relay, and only then the in-memory encrypted dynamic relay.
+  Summary continuation resolves its opaque segment ID to the durable five-column keyset and seeks
+  the additive `repository_history_segments_sync_order_v2` SQLite index; an existing database
+  creates that index idempotently at startup without replacing the legacy index or signed payloads.
   Reverse uses XP-owned loopback `127.0.0.1:10086` with authenticated TCP-only SOCKS and does
   not add a public listener. No static Mesh proxy environment or compatibility path exists.
 - Service Monitoring persists each node's bounded capture journal in

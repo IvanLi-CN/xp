@@ -300,6 +300,55 @@ fn repository_keyset_indexes_avoid_a_full_sort_for_compaction_and_export() {
 }
 
 #[test]
+fn repository_segment_summary_keyset_index_supports_cursor_seeks() {
+    let temporary = tempfile::tempdir().unwrap();
+    let storage = HistoryStorage::open(temporary.path());
+    let backend = storage.lock_backend();
+    let Backend::Sqlite(connection) = &*backend else {
+        panic!("test storage should use SQLite");
+    };
+
+    let first_page_plan = query_plan(
+        connection,
+        "SELECT id, contains_tombstone FROM repository_history_segments
+             WHERE contains_tombstone = 0
+             ORDER BY source_node_id, source_epoch, stream, first_sequence, id LIMIT 1",
+    );
+    assert!(
+        first_page_plan
+            .iter()
+            .any(|detail| detail.contains("repository_history_segments_sync_order_v2"))
+    );
+    assert!(
+        !first_page_plan
+            .iter()
+            .any(|detail| detail.contains("USE TEMP B-TREE"))
+    );
+
+    let cursor_page_plan = query_plan(
+        connection,
+        "SELECT id, contains_tombstone FROM repository_history_segments
+             WHERE contains_tombstone = 0
+               AND (source_node_id, source_epoch, stream, first_sequence, id)
+                   > ('node-a', 7, 'runtime', 10, 'segment-10')
+             ORDER BY source_node_id, source_epoch, stream, first_sequence, id LIMIT 1",
+    );
+    assert!(
+        cursor_page_plan
+            .iter()
+            .any(|detail| detail.contains("repository_history_segments_sync_order_v2"))
+    );
+    assert!(cursor_page_plan.iter().any(|detail| {
+        detail.contains("(source_node_id,source_epoch,stream,first_sequence,id)>(?,?,?,?,?)")
+    }));
+    assert!(
+        !cursor_page_plan
+            .iter()
+            .any(|detail| detail.contains("USE TEMP B-TREE"))
+    );
+}
+
+#[test]
 fn repository_history_export_leases_are_expired_and_bounded() {
     let temporary = tempfile::tempdir().unwrap();
     let storage = HistoryStorage::open(temporary.path());

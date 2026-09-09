@@ -188,32 +188,70 @@ fn segment_phase_with_row<T, F>(
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
 {
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    if let Some(after_id) = after_id {
+        let Some((source_node_id, source_epoch, stream, first_sequence, id)) = connection
+            .query_row(
+                "SELECT source_node_id, source_epoch, stream, first_sequence, id
+                 FROM repository_history_segments
+                 WHERE id = ?1",
+                [after_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        else {
+            return Ok(Vec::new());
+        };
+        let sql = format!(
+            "SELECT {projection}
+             FROM repository_history_segments
+             WHERE contains_tombstone = ?1
+               AND (source_node_id, source_epoch, stream, first_sequence, id)
+                   > (?2, ?3, ?4, ?5, ?6)
+             ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
+                      id ASC
+             LIMIT ?7"
+        );
+        let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    tombstones,
+                    source_node_id,
+                    source_epoch,
+                    stream,
+                    first_sequence,
+                    id,
+                    limit
+                ],
+                &mut row_mapper,
+            )
+            .map_err(sqlite_error)?;
+        return rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(sqlite_error);
+    }
+
     let sql = format!(
         "SELECT {projection}
          FROM repository_history_segments
          WHERE contains_tombstone = ?1
-           AND (
-                ?2 IS NULL
-                OR (source_node_id, source_epoch, stream, first_sequence, id) > (
-                    SELECT source_node_id, source_epoch, stream, first_sequence, id
-                    FROM repository_history_segments
-                    WHERE id = ?2
-                )
-           )
          ORDER BY source_node_id ASC, source_epoch ASC, stream ASC, first_sequence ASC,
                   id ASC
-         LIMIT ?3"
+         LIMIT ?2"
     );
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
     let rows = statement
-        .query_map(
-            params![
-                tombstones,
-                after_id,
-                i64::try_from(limit).unwrap_or(i64::MAX)
-            ],
-            &mut row_mapper,
-        )
+        .query_map(params![tombstones, limit], &mut row_mapper)
         .map_err(sqlite_error)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(sqlite_error)
