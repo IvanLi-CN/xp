@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="471" height="224" viewBox="0 0 471 224" role="img" aria-labelledby="title description" shape-rendering="geometricPrecision">
+  <title id="title">XP horizontal logo lockup inverse</title>
+  <desc id="description">The approved bicolor XP mark with its proportionally balanced product wordmark for dark surfaces.</desc>
+  <defs>
+    <line id="radial-link" x1="512" y1="313" x2="512" y2="417" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <line id="outer-link" x1="587.344" y1="269.5" x2="684.339" y2="325.5" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <circle id="outer-node" cx="512" cy="226" r="62" fill="currentColor"/>
+    <g id="xp-approved-bicolor-mark">
+      <g color="#4CB1AB">
+        <use href="#outer-link"/><use href="#outer-link" transform="rotate(60 512 512)"/><use href="#outer-link" transform="rotate(120 512 512)"/><use href="#outer-link" transform="rotate(180 512 512)"/><use href="#outer-link" transform="rotate(240 512 512)"/><use href="#outer-link" transform="rotate(300 512 512)"/>
+        <use href="#radial-link"/><use href="#radial-link" transform="rotate(60 512 512)"/><use href="#radial-link" transform="rotate(120 512 512)"/><use href="#radial-link" transform="rotate(180 512 512)"/><use href="#radial-link" transform="rotate(240 512 512)"/><use href="#radial-link" transform="rotate(300 512 512)"/>
+        <use href="#outer-node"/><use href="#outer-node" transform="rotate(60 512 512)"/><use href="#outer-node" transform="rotate(120 512 512)"/><use href="#outer-node" transform="rotate(180 512 512)"/><use href="#outer-node" transform="rotate(240 512 512)"/><use href="#outer-node" transform="rotate(300 512 512)"/>
+      </g>
+      <circle cx="512" cy="512" r="70" fill="#72CCA3"/>
+    </g>
+    <g id="xp-wordmark" fill="#F8FBFA" fill-rule="evenodd">
+      <path d="M0 0H50L102 70L154 0H204L132 100L204 200H154L102 130L50 200H0L72 100Z"/>
+      <path d="M240 0H332C390 0 430 32 430 80S390 160 332 160H292V200H240ZM292 48V112H331C361 112 380 100 380 80S361 48 331 48Z"/>
+    </g>
+  </defs>
+  <g transform="translate(-364 -88)">
+    <use href="#xp-approved-bicolor-mark" transform="translate(318.8 52.529) scale(0.287356)"/>
+    <use href="#xp-wordmark" transform="translate(595.5 150) scale(0.53)"/>
+  </g>
+</svg>
