@@ -99,6 +99,9 @@
   race. When both direct paths fail, an hourly-jittered relay carries compressed encrypted,
   frame-budgeted pending-source pages through an eligible cluster member without storing history
   at the relay.
+  A target returns the signed source-delivery receipt once the segment is durable. Tombstone
+  acknowledgement fanout to other repositories is best-effort and logged for retry; a transient
+  fanout failure never converts an already persisted source delivery into a 5xx response.
   The SQLite source delivery journal maintains transactionally updated pending-count, pending-byte
   and epoch high-water statistics plus the last successful acknowledgement path/time. The
   order-repair cursor and completion marker are initialized idempotently in the schema transaction

@@ -190,6 +190,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
   Raft 和 join 仍可用。
+- Given source segment 已在目标 repository 持久化，When tombstone ACK fanout 暂时失败，Then
+  目标仍返回签名 receipt，fanout 记录并重试，不把已落盘投递转换成 5xx。
 - VER-JOURNAL-BOUNDED covers: REQ-JOURNAL-BOUNDED and REQ-JOURNAL-RESOURCE.
   A 128 MiB backlog has no full wire decode or temporary sort; each cycle reads one fixed page,
   while the isolated journal run does not exercise the Direct/Public or cluster control-plane

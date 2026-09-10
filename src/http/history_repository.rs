@@ -245,13 +245,18 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             true,
         )
         .map_err(repository_error)?;
-    worker::propagate_tombstone_acknowledgements(
+    // The segment is durable and the receipt is the source's authoritative ACK. Fanout to
+    // other repositories is best-effort; a transient callback failure must not turn a persisted
+    // delivery into a 5xx that pins the source outbox on the same tombstone forever.
+    if let Err(error) = worker::propagate_tombstone_acknowledgements(
         &state,
         &ready_repository_ids,
         receipt.tombstone_acknowledgements().to_vec(),
     )
     .await
-    .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    {
+        tracing::warn!(error = %error, "history tombstone acknowledgement fanout deferred");
+    }
     Ok(Json(receipt))
 }
 
