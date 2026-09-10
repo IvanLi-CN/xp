@@ -70,6 +70,7 @@
   without making an HTTP request deserialize the retained payload window. The worker does not mark
   daily deep verification successful for such a response. Ordered appends update a completed cache;
   late rows, tombstone deletion, and retention replacement reset it for another bounded rebuild.
+  A malformed row defers cache progress while allowing ordinary segment/gap replication to continue.
   If startup cannot create the additive summary keyset index for an external-history database,
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.

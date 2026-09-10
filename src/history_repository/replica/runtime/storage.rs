@@ -99,10 +99,20 @@ impl RepositoryReplicaRuntime {
             return Ok(true);
         };
         let last_cursor = RepositoryHistoryCompactionCursor::from(last_row);
-        let records = rows
+        let records = match rows
             .into_iter()
             .map(StoredRecord::from_sqlite_row)
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "history partition summary rebuild deferred after malformed row"
+                );
+                return Ok(false);
+            }
+        };
         let mut summaries = self.partition_summary_map();
         super::sync::accumulate_record_partitions(&mut summaries, records.iter())?;
         self.snapshot.partition_summaries = summaries.into_values().collect();

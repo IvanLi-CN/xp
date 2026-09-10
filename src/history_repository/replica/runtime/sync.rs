@@ -503,6 +503,7 @@ impl RepositoryReplicaRuntime {
             == canonical_gaps(remote.gaps.iter().cloned());
         let partitions_converged = !deep_verification
             || !remote.partitions_included
+            || !self.partition_summaries_ready()
             || self.retained_partition_summaries()? == remote.partitions;
         // The remote summary is keyset-paged. Its page is complete only when every advertised
         // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
@@ -514,7 +515,7 @@ impl RepositoryReplicaRuntime {
         &self,
         remote: &RepositoryReplicaSummary,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if !remote.partitions_included {
+        if !remote.partitions_included || !self.partition_summaries_ready() {
             return Ok(true);
         }
         Ok(self.retained_partition_summaries()? == remote.partitions)

@@ -388,7 +388,73 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                 rusqlite::params![format!("{sequence:064x}"), sequence, 192 * 1024 - 1024],
             )
             .expect("insert summary resource segment");
+
+        let record_payload = serde_json::to_vec(&serde_json::json!({
+            "observed_at_unix_seconds": sequence,
+            "received_at_unix_seconds": sequence,
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "sequence": sequence,
+            "subject_node_id": "summary-subject",
+            "observer_node_id": "summary-source",
+            "schema_id": "runtime.v1",
+            "schema_version": 1,
+            "record_key": vec![0_u8; 96 * 1024],
+            "payload": [],
+            "tombstone": false,
+        }))
+        .expect("encode summary resource record");
+        transaction
+            .execute(
+                "INSERT INTO repository_history_records
+                     (source_node_id, source_epoch, stream, sequence, subject_node_id,
+                      observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                      observed_start, observed_end, received_at, aggregate_complete,
+                      aggregate_start, aggregate_end, payload)
+                 VALUES ('summary-source', 1, 'runtime', ?1, 'summary-subject',
+                         'summary-source', 'runtime.v1', 1, ?2, 0, ?1, ?1, ?1,
+                         1, NULL, NULL, ?3)",
+                rusqlite::params![
+                    sequence,
+                    format!("record-{sequence}").into_bytes(),
+                    record_payload
+                ],
+            )
+            .expect("insert summary resource record");
     }
+
+    let replica_snapshot = serde_json::json!({
+        "external_history": true,
+        "legacy_segment_cursor_index_complete": true,
+        "partition_summaries": [{
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "partition": 0,
+            "first_sequence": 0,
+            "last_sequence": 256,
+            "hash": vec![0_u8; 32],
+            "record_count": 257,
+        }],
+        "partition_summary_cursor": {
+            "observed_start_unix_seconds": 256,
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "sequence": 256,
+        },
+        "partition_summaries_complete": true,
+    });
+    let replica_payload =
+        serde_json::to_vec(&replica_snapshot).expect("encode summary resource replica snapshot");
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO history_snapshots (key, payload, updated_at)
+             VALUES ('repository_replica', ?1, 0)",
+            rusqlite::params![replica_payload],
+        )
+        .expect("write summary resource replica snapshot");
 
     let state_payload = transaction
         .query_row(
@@ -448,9 +514,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         .read_cluster_ca_key_pem(temp.path())
         .expect("read summary resource CA key")
         .expect("summary resource private CA key");
-    let uri: axum::http::Uri = "/api/admin/_internal/history-repository/summary"
-        .parse()
-        .expect("summary resource URI");
+    let uri: axum::http::Uri =
+        "/api/admin/_internal/history-repository/summary?deep_verification=true"
+            .parse()
+            .expect("summary resource URI");
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
@@ -522,6 +589,11 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         assert!(sample_count.load(Ordering::Relaxed) > 0);
         assert!(in_flight_sample_count.load(Ordering::Relaxed) > 0);
         assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
+        assert_eq!(summary["partitions_included"], serde_json::json!(true));
+        assert_eq!(
+            summary["partitions"][0]["record_count"],
+            serde_json::json!(257)
+        );
         assert!(
             summary["next_segment_id"]
                 .as_str()

@@ -3,17 +3,91 @@ use ed25519_dalek::SigningKey;
 #[cfg(target_os = "linux")]
 use std::{fs, process::Command};
 
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredRecord, StoredSegment};
+use super::{
+    RepositoryPartitionSummary, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredRecord,
+    StoredSegment,
+};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
     state::history_repository::{
         HistoryStorage,
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
     },
-    state::history_storage::{Backend, RepositoryHistorySegmentRow},
+    state::history_storage::{Backend, RepositoryHistoryRecordRow, RepositoryHistorySegmentRow},
 };
 
 use super::tests::load;
+
+#[test]
+fn malformed_sqlite_summary_row_does_not_block_replication_preparation() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime
+        .storage
+        .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence: 0,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"key".to_vec(),
+            tombstone: false,
+            observed_start_unix_seconds: 10,
+            observed_end_unix_seconds: 10,
+            received_at_unix_seconds: 10,
+            aggregate_complete: Some(true),
+            aggregate_start_unix_seconds: None,
+            aggregate_end_unix_seconds: None,
+            payload: b"not a stored record".to_vec(),
+        }])
+        .expect("seed malformed payload");
+    runtime.snapshot.partition_summaries_complete = false;
+
+    runtime
+        .prepare_for_replication(100)
+        .expect("malformed summary row is deferred");
+    assert!(!runtime.partition_summaries_ready());
+    assert!(runtime.replication_summary().is_ok());
+}
+
+#[test]
+fn incomplete_sqlite_partition_summary_does_not_trigger_tiered_backfill() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime.snapshot.partition_summaries_complete = false;
+    let mut remote = runtime
+        .replication_summary_after(None, true)
+        .expect("remote deep summary");
+    remote.partitions_included = true;
+    remote.partitions = vec![RepositoryPartitionSummary {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        partition: 0,
+        first_sequence: 0,
+        last_sequence: 0,
+        hash: [9; 32],
+        record_count: 1,
+    }];
+
+    assert!(
+        !runtime
+            .requires_repair(&remote, true)
+            .expect("incomplete local cache is not a mismatch")
+    );
+    assert!(
+        runtime
+            .retained_partitions_converged(&remote)
+            .expect("incomplete local cache defers comparison")
+    );
+}
 
 fn identity(signing_key: &SigningKey) -> RepositoryNodeIdentity {
     RepositoryNodeIdentity::new(

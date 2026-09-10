@@ -813,6 +813,8 @@ Notes:
   ordinary catch-up still proceed, but the worker must not close the daily deep-verification window.
   Wait for the serving repository's normal maintenance/retry cycles until the cache reports the
   partitions again; an omitted partition list is not an empty history and must not trigger a reset.
+  A malformed retained row may defer the partition cache; ordinary segment/gap catch-up continues
+  and operators must repair the serving repository's durable row through the normal recovery path.
   The serving release creates the additive `repository_history_segments_sync_order_v2` keyset
   index on startup for existing databases. It preserves the legacy index and every segment payload;
   let normal XP startup finish this one-time creation, then verify health before observing the next

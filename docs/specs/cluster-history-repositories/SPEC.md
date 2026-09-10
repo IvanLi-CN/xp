@@ -83,6 +83,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   `partitions_included=false`，不得读取或反序列化 payload 来响应 summary，也不得因此把
   peer 判定为 deep-verification 成功。缓存完成后才恢复原有 partition JSON；有序新记录可增量
   更新，迟到记录、tombstone 或 retention 改写会使缓存失效并从磁盘重新建立，不删除或改写历史行。
+  单行 payload 损坏只会延后该缓存重建，不能阻塞 segment/gap 同步或使历史服务停止。
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只
   幂等新增该索引，保留旧索引和所有 signed segment payload。
