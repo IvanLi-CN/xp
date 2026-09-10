@@ -30,6 +30,8 @@ mod follower_draft;
 mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
+#[path = "tests/platform_assets.rs"]
+mod platform_assets;
 #[path = "tests/stale_learner_retirement.rs"]
 mod stale_learner_retirement;
 #[path = "tests/status_events.rs"]
@@ -1002,11 +1004,15 @@ async fn ui_serves_favicon_and_manifest() {
 
     let cases = [
         ("/favicon.ico", "image/x-icon"),
+        ("/xp-logo-bicolor.svg", "image/svg+xml"),
+        ("/safari-pinned-tab.svg", "image/svg+xml"),
         ("/favicon-16x16.png", "image/png"),
         ("/favicon-32x32.png", "image/png"),
         ("/apple-touch-icon.png", "image/png"),
         ("/android-chrome-192x192.png", "image/png"),
         ("/android-chrome-512x512.png", "image/png"),
+        ("/android-chrome-192x192-maskable.png", "image/png"),
+        ("/android-chrome-512x512-maskable.png", "image/png"),
         ("/xp-mark.png", "image/png"),
         (
             "/site.webmanifest",

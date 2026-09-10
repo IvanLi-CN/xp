@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" shape-rendering="geometricPrecision">
+  <title>XP approved mark - maskable bicolor app icon</title>
+  <desc>Full teal background with the approved bicolor network mark scaled into the maskable safe area.</desc>
+  <rect width="1024" height="1024" fill="#4CB1AB"/>
+  <g transform="translate(102.4 102.4) scale(0.8)">
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" transform="rotate(60 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" transform="rotate(120 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" transform="rotate(180 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" transform="rotate(240 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="587.344" y1="269.5" x2="684.339" y2="325.5" transform="rotate(300 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" transform="rotate(60 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" transform="rotate(120 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" transform="rotate(180 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" transform="rotate(240 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <line x1="512" y1="313" x2="512" y2="417" transform="rotate(300 512 512)" stroke="#FFFFFF" stroke-linecap="round" stroke-width="20"/>
+    <circle cx="512" cy="226" r="62" fill="#FFFFFF"/>
+    <circle cx="512" cy="226" r="62" transform="rotate(60 512 512)" fill="#FFFFFF"/>
+    <circle cx="512" cy="226" r="62" transform="rotate(120 512 512)" fill="#FFFFFF"/>
+    <circle cx="512" cy="226" r="62" transform="rotate(180 512 512)" fill="#FFFFFF"/>
+    <circle cx="512" cy="226" r="62" transform="rotate(240 512 512)" fill="#FFFFFF"/>
+    <circle cx="512" cy="226" r="62" transform="rotate(300 512 512)" fill="#FFFFFF"/>
+    <circle cx="512" cy="512" r="70" fill="#72CCA3" stroke="#FFFFFF" stroke-width="12"/>
+  </g>
+</svg>
