@@ -76,15 +76,12 @@ impl Cursor {
     pub(crate) fn source_node_id(&self) -> &str {
         &self.source_node_id
     }
-
     pub(crate) fn source_epoch(&self) -> u64 {
         self.source_epoch
     }
-
     pub(crate) fn stream(&self) -> &str {
         &self.stream
     }
-
     pub(crate) fn sequence(&self) -> u64 {
         self.sequence
     }
@@ -768,7 +765,9 @@ impl SegmentReceiver {
                         actual: first.sequence,
                     });
                 }
-                if segment.canonical.previous_segment_hash != Some(progress.last_segment_hash) {
+                if progress.hash_chain_verified
+                    && segment.canonical.previous_segment_hash != Some(progress.last_segment_hash)
+                {
                     return Err(ProtocolError::HashChainMismatch);
                 }
             }
@@ -828,6 +827,7 @@ impl SegmentReceiver {
                 epoch: first.source_epoch,
                 last_sequence: segment.canonical.last_cursor.sequence,
                 last_segment_hash: segment_hash,
+                hash_chain_verified: true,
                 recent_segments,
             },
         );
@@ -864,6 +864,7 @@ impl SegmentReceiver {
             return Ok(false);
         }
         progress.last_sequence = last_missing;
+        progress.hash_chain_verified = false;
         Ok(true)
     }
 
@@ -927,9 +928,14 @@ struct StreamProgress {
     epoch: u64,
     last_sequence: u64,
     last_segment_hash: [u8; 32],
+    #[serde(default = "default_hash_chain_verified")]
+    hash_chain_verified: bool,
     recent_segments: VecDeque<SegmentHashRange>,
 }
 
+fn default_hash_chain_verified() -> bool {
+    true
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct SegmentHashRange {
     first_sequence: u64,
