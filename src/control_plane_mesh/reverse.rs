@@ -76,10 +76,20 @@ pub(super) fn attach_reverse_slot(
     extensions.extend(std::mem::take(&mut parts.extensions));
     parts.extensions = extensions;
     let body = body.into_data_stream();
-    let guarded_body = futures_util::stream::unfold((body, permit), |(mut body, permit)| async {
-        let item = body.next().await?;
-        Some((item, (body, permit)))
-    });
+    let guarded_body =
+        futures_util::stream::unfold((body, Some(permit)), |(mut body, mut permit)| async move {
+            match body.next().await {
+                Some(Ok(item)) => Some((Ok(item), (body, permit))),
+                Some(Err(error)) => {
+                    drop(permit.take());
+                    Some((Err(error), (body, permit)))
+                }
+                None => {
+                    drop(permit.take());
+                    None
+                }
+            }
+        });
     let response =
         axum::http::Response::from_parts(parts, reqwest::Body::wrap_stream(guarded_body));
     reqwest::Response::from(response)

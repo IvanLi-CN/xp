@@ -657,6 +657,56 @@ async fn reverse_slot_is_held_until_response_body_stream_finishes() {
 }
 
 #[tokio::test]
+async fn reverse_slot_is_released_when_response_body_stream_errors() {
+    let circuits = PeerCircuitBreakers::default();
+    let rendezvous = "rendezvous-response-error";
+    let mut control_slots = Vec::new();
+    for _ in 0..(super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
+        - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS)
+    {
+        control_slots.push(
+            circuits
+                .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Control)
+                .await
+                .expect("control slot within the non-health budget"),
+        );
+    }
+    let health_slot = circuits
+        .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+        .await
+        .expect("health slot available for response error test");
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(StatusCode::OK)
+            .body(reqwest::Body::wrap_stream(futures_util::stream::iter([
+                Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
+                Err(std::io::Error::other("synthetic body failure")),
+            ])))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_reverse_slot(response, health_slot);
+    let mut body_stream = response.bytes_stream();
+    assert_eq!(
+        body_stream
+            .next()
+            .await
+            .expect("response data")
+            .expect("first response data is valid"),
+        bytes::Bytes::from_static(b"partial")
+    );
+    assert!(body_stream.next().await.expect("response error").is_err());
+    assert!(
+        circuits
+            .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+            .await
+            .is_ok(),
+        "response body errors must release the in-flight slot immediately"
+    );
+    drop(body_stream);
+    drop(control_slots);
+}
+
+#[tokio::test]
 async fn reverse_slot_response_preserves_the_original_url() {
     let circuits = PeerCircuitBreakers::default();
     let rendezvous = "rendezvous-response-url";
