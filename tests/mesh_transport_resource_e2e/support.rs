@@ -344,6 +344,33 @@ struct XpProcess {
     pid: u32,
 }
 
+impl Drop for XpProcess {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        if let Some(unit) = self.unit.as_deref() {
+            let _ = Command::new("systemctl")
+                .args(["--user", "stop", unit])
+                .status();
+        } else {
+            unsafe {
+                let _ = libc::kill(self.child.id() as libc::pid_t, libc::SIGINT);
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                Err(_) => break,
+            }
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl XpProcess {
     fn id(&self) -> u32 {
         self.pid
