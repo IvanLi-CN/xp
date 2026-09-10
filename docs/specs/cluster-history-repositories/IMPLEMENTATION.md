@@ -64,6 +64,9 @@
   because its summary request times out, upgrade the serving repository first and let the next
   five-minute direct-path retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
+- When a serving repository confirms an expired permanent sequence gap, the receiver advances
+  its cursor without inventing the skipped segment hash. The first segment after that range
+  establishes a new hash-chain head, and subsequent segments resume ordinary continuity checks.
 - A repair page may race the seven-day minute-tier segment cache: a segment advertised by summary
   can be pruned before repair reads its payload. The serving repository returns those requested IDs
   in `unavailable_segment_ids`; the syncing peer removes only that explicit set from its bounded

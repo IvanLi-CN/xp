@@ -64,6 +64,10 @@ five-minute stability window completes. An agreed permanent gap does not block
 ready status, but it keeps replica convergence false and every affected query
 partial.
 
+After a declared permanent gap, the first segment after the missing range is
+accepted as a new hash-chain head because the skipped segment hash is unknown;
+the following segments must continue from that newly accepted hash as usual.
+
 A Source writes every unacknowledged signed segment to its SQLite delivery
 journal before attempting transfer, and removes it only after its Collector
 acknowledges the continuous watermark. The journal uses Zstandard level 1 when

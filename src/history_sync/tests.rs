@@ -204,6 +204,38 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
 }
 
 #[test]
+fn receiver_accepts_the_first_segment_after_a_declared_gap() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    let initial = signed_segment(&key, 0, vec![record(b"a", false)], None);
+    receiver
+        .accept(&initial, &identity)
+        .expect("initial segment");
+
+    let next_cursor = Cursor::new("node-a", 7, "runtime", 3).expect("valid cursor");
+    assert!(
+        receiver
+            .advance_declared_sequence_gap(&next_cursor, 1, 2)
+            .expect("declared gap advances the cursor")
+    );
+
+    let after_gap = signed_segment(&key, 3, vec![record(b"b", false)], Some([42; 32]));
+    receiver
+        .accept(&after_gap, &identity)
+        .expect("first segment after a declared gap");
+    let following = signed_segment(
+        &key,
+        4,
+        vec![record(b"c", false)],
+        Some(after_gap.segment_hash().expect("segment hash")),
+    );
+    receiver
+        .accept(&following, &identity)
+        .expect("hash chain resumes after the gap");
+}
+
+#[test]
 fn receiver_rotates_to_a_new_epoch_and_reports_a_gap() {
     let key = signing_key();
     let identity = identity(&key);
