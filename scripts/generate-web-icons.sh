@@ -1,11 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
-# Generate favicon / PWA icons for the web UI from the canonical source PNG.
+# Generate favicon / PWA icons and the inline web mark from canonical source PNGs.
 # This script is a developer tool (assets are committed); CI/build does not depend on ImageMagick.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IN="${1:-$ROOT/web/assets-src/xp-icon-source.png}"
+ICON_IN="${1:-$ROOT/web/assets-src/xp-icon-source.png}"
+MARK_IN="${2:-$ROOT/web/assets-src/xp-mark-source.png}"
 OUTDIR="$ROOT/web/public"
 
 if ! command -v magick >/dev/null 2>&1; then
@@ -13,8 +14,13 @@ if ! command -v magick >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f "$IN" ]; then
-  echo "error: missing source icon at: $IN" >&2
+if [ ! -f "$ICON_IN" ]; then
+  echo "error: missing source icon at: $ICON_IN" >&2
+  exit 1
+fi
+
+if [ ! -f "$MARK_IN" ]; then
+  echo "error: missing source mark at: $MARK_IN" >&2
   exit 1
 fi
 
@@ -33,17 +39,16 @@ CANONICAL="$TMP/canonical.png"
 
 # Build an alpha mask that keeps the icon body while removing the low-saturation gray background
 # (and the bottom-right sparkle). Then fill "holes" caused by white strokes/nodes.
-magick "$IN" -colorspace HSB -channel G -separate +channel -blur 0x2 -threshold 10% "$MASK0"
+magick "$ICON_IN" -colorspace HSB -channel G -separate +channel -blur 0x2 -threshold 10% "$MASK0"
 magick "$MASK0" -fill white -draw "color 0,0 floodfill" "$FLOOD"
 magick "$FLOOD" -negate "$FLOOD_INV"
 magick "$MASK0" "$FLOOD_INV" -compose lighten -composite "$MASK"
 
 # Apply the mask as alpha; keep original RGB as-is for maximum fidelity.
-magick "$IN" "$MASK" -alpha off -compose copyopacity -composite "$MARK1024"
+magick "$ICON_IN" "$MASK" -alpha off -compose copyopacity -composite "$MARK1024"
 
-# Make a canonical square mark with reasonable padding.
-# The source image has large gray margins; after background removal those become transparent and
-# would make the icon too small at favicon/header sizes. We trim and then re-extent to 1024^2.
+# Make a canonical square icon with reasonable padding. Trim any source margin before
+# re-extending to a stable 1024^2 canvas for the generated platform icons.
 magick "$MARK1024" -trim +repage "$TRIMMED"
 magick "$TRIMMED" -resize 960x960 -gravity center -background none -extent 1024x1024 "$CANONICAL"
 
@@ -54,6 +59,8 @@ magick "$CANONICAL" -resize 32x32 "$OUTDIR/favicon-32x32.png"
 magick "$CANONICAL" -resize 180x180 "$OUTDIR/apple-touch-icon.png"
 magick "$CANONICAL" -resize 192x192 "$OUTDIR/android-chrome-192x192.png"
 magick "$CANONICAL" -resize 512x512 "$OUTDIR/android-chrome-512x512.png"
-magick "$CANONICAL" -resize 256x256 "$OUTDIR/xp-mark.png"
+# The inline mark has its own transparent source so the hexagonal app icon does
+# not leak into the product header and login surfaces.
+magick "$MARK_IN" -background none -trim +repage -resize 960x960 -gravity center -background none -extent 1024x1024 -resize 256x256 "$OUTDIR/xp-mark.png"
 
 echo "generated icons into: $OUTDIR" >&2

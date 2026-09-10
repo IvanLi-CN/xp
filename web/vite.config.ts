@@ -218,7 +218,7 @@ export default defineConfig(({ mode }) => {
 					scope: "/",
 					display: "standalone",
 					background_color: "#ffffff",
-					theme_color: "#00A9C7",
+					theme_color: "#4CB1AB",
 					icons: [
 						{
 							src: "/android-chrome-192x192.png",
