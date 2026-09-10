@@ -64,6 +64,11 @@
   because its summary request times out, upgrade the serving repository first and let the next
   five-minute direct-path retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
+- A repair page may race the seven-day minute-tier segment cache: a segment advertised by summary
+  can be pruned before repair reads its payload. The serving repository returns those requested IDs
+  in `unavailable_segment_ids`; the syncing peer removes only that explicit set from its bounded
+  checkpoint and continues at the saved cursor. This preserves the source outbox and all locally
+  durable history while preventing an expired repair page from pinning the member in `syncing`.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

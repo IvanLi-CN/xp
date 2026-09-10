@@ -241,11 +241,11 @@ fn relay_repair_pages_by_frame_budget_and_advances_through_large_backlog() {
     }
     assert_eq!(delivered, 4);
 }
-
 #[test]
 fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
     let invalid_batch = RepositoryRepairBatch {
         segments: Vec::new(),
+        unavailable_segment_ids: Vec::new(),
         gaps: vec![RepositoryReplicaGap {
             source_node_id: "node-a".to_owned(),
             source_epoch: 7,

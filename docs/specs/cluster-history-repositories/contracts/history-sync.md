@@ -41,6 +41,16 @@ affected records and remain until every current ready repository acknowledges
 them plus the tombstone horizon. Anti-entropy exchanges partition summaries,
 repairs ranges first, then drills down.
 
+The bounded repair response contains `segments`, `gaps`, and the additive
+`unavailable_segment_ids` field. The latter lists only requested 64-character
+hex segment IDs that the serving repository no longer retains under the
+unchanged retention policy, such as when a summary/repair request crosses the
+seven-day minute-tier boundary. It is limited to 64 IDs, must be unique, and
+does not carry payload or acknowledgement meaning. A syncing peer may remove
+only the exact IDs it requested and received in this field; duplicate, unknown,
+malformed, or out-of-page IDs fail closed. Older responses that omit the field
+are interpreted as an empty list, preserving wire compatibility.
+
 A temporary transport failure, exhausted retry schedule, or full bounded outbox
 creates Recoverable Backlog, never a permanent gap. A Source or any ready
 repository that retains the original cursor range may repair it. A permanent

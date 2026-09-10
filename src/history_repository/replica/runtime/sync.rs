@@ -64,6 +64,8 @@ pub(crate) struct RepositoryReplicaSegment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RepositoryRepairBatch {
     pub(crate) segments: Vec<RepositoryReplicaSegment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) unavailable_segment_ids: Vec<String>,
     #[serde(default)]
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
 }
@@ -77,15 +79,21 @@ impl RepositoryRepairBatch {
     pub(crate) fn frame_sized_relay_payload(
         self,
     ) -> Result<RelayRepairPayload, RepositoryRuntimeError> {
-        if self.segments.len() > MAX_REPAIR_SEGMENTS || self.gaps.len() > MAX_REPAIR_GAPS {
+        if self.segments.len() > MAX_REPAIR_SEGMENTS
+            || self.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
+            || self.gaps.len() > MAX_REPAIR_GAPS
+        {
             return Err(ReplicaError::RepairLimitExceeded.into());
         }
+        validate_unavailable_segment_ids(&self.unavailable_segment_ids)?;
         validate_replica_gaps(&self.gaps)?;
 
         let gaps = self.gaps;
+        let unavailable_segment_ids = self.unavailable_segment_ids;
         let mut selected = Vec::new();
         let mut bytes = encode_relay_repair_batch(&RepositoryRepairBatch {
             segments: Vec::new(),
+            unavailable_segment_ids: unavailable_segment_ids.clone(),
             gaps: gaps.clone(),
         })?;
         if bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
@@ -102,6 +110,7 @@ impl RepositoryRepairBatch {
             candidate.push(segment);
             let candidate_batch = RepositoryRepairBatch {
                 segments: candidate,
+                unavailable_segment_ids: unavailable_segment_ids.clone(),
                 gaps: gaps.clone(),
             };
             let candidate_bytes = encode_relay_repair_batch(&candidate_batch)?;
@@ -119,6 +128,7 @@ impl RepositoryRepairBatch {
         Ok(RelayRepairPayload {
             batch: RepositoryRepairBatch {
                 segments: selected,
+                unavailable_segment_ids,
                 gaps,
             },
             bytes,
@@ -154,9 +164,13 @@ impl RepositoryRepairBatch {
         let batch = serde_json::from_slice::<Self>(&decoded).map_err(|_| {
             RepositoryRuntimeError::Storage("relay payload is malformed".to_owned())
         })?;
-        if batch.segments.len() > MAX_REPAIR_SEGMENTS || batch.gaps.len() > MAX_REPAIR_GAPS {
+        if batch.segments.len() > MAX_REPAIR_SEGMENTS
+            || batch.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
+            || batch.gaps.len() > MAX_REPAIR_GAPS
+        {
             return Err(ReplicaError::RepairLimitExceeded.into());
         }
+        validate_unavailable_segment_ids(&batch.unavailable_segment_ids)?;
         validate_replica_gaps(&batch.gaps)?;
         Ok(batch)
     }
@@ -558,6 +572,15 @@ impl RepositoryReplicaRuntime {
             .into_iter()
             .map(|segment| Ok((repair_segment_order(&segment)?, segment)))
             .collect::<Result<Vec<_>, RepositoryRuntimeError>>()?;
+        let stored_ids = stored_segments
+            .iter()
+            .map(|(_, segment)| segment.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let unavailable_segment_ids = requested_segment_ids
+            .iter()
+            .filter(|id| !stored_ids.contains(id.as_str()))
+            .cloned()
+            .collect::<BTreeSet<_>>();
         stored_segments.sort_by(|(left, _), (right, _)| left.cmp(right));
         let mut response_bytes = 0usize;
         let mut segments = Vec::new();
@@ -577,6 +600,7 @@ impl RepositoryReplicaRuntime {
         }
         Ok(RepositoryRepairBatch {
             segments,
+            unavailable_segment_ids: unavailable_segment_ids.into_iter().collect(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
         })
     }
@@ -614,6 +638,7 @@ impl RepositoryReplicaRuntime {
                     wire: segment.wire,
                 })
                 .collect(),
+            unavailable_segment_ids: Vec::new(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
         }
         .frame_sized_relay_payload()?;
@@ -908,6 +933,21 @@ fn validate_replica_gaps(gaps: &[RepositoryReplicaGap]) -> Result<(), Repository
             || gap.first_sequence > gap.last_sequence
             || gap.start_unix_seconds > gap.end_unix_seconds
     }) {
+        return Err(ReplicaError::InvalidRange.into());
+    }
+    Ok(())
+}
+
+fn validate_unavailable_segment_ids(ids: &[String]) -> Result<(), RepositoryRuntimeError> {
+    if ids.len() > MAX_REPAIR_SEGMENTS {
+        return Err(ReplicaError::RepairLimitExceeded.into());
+    }
+    let unique = ids.iter().collect::<BTreeSet<_>>();
+    if unique.len() != ids.len()
+        || ids
+            .iter()
+            .any(|id| id.len() != 64 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
         return Err(ReplicaError::InvalidRange.into());
     }
     Ok(())

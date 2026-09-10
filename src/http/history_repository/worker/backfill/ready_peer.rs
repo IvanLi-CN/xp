@@ -184,12 +184,22 @@ async fn repair_ready_peer_catch_up_page(
     )
     .await?;
     let mut remaining = pending;
-    super::super::remove_delivered_repair_segment_ids(
+    if repair.segments.is_empty() {
+        if repair.unavailable_segment_ids.is_empty() {
+            anyhow::bail!("repository repair response did not advance the requested segment set");
+        }
+    } else {
+        super::super::remove_delivered_repair_segment_ids(
+            &mut remaining,
+            repair
+                .segments
+                .iter()
+                .map(|segment| segment.wire.as_slice()),
+        )?;
+    }
+    super::super::remove_unavailable_repair_segment_ids(
         &mut remaining,
-        repair
-            .segments
-            .iter()
-            .map(|segment| segment.wire.as_slice()),
+        &repair.unavailable_segment_ids,
     )?;
     for segment in repair.segments {
         if !super::super::super::identity_is_pinned_for_node(state, &segment.identity)

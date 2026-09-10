@@ -217,6 +217,44 @@ fn truncated_repair_response_leaves_only_undelivered_segments_pending() {
 }
 
 #[test]
+fn unavailable_repair_segments_are_removed_from_a_pending_page() {
+    let first_id = "a".repeat(64);
+    let second_id = "b".repeat(64);
+    let third_id = "c".repeat(64);
+    let mut pending = [first_id.clone(), second_id.clone(), third_id.clone()]
+        .into_iter()
+        .collect();
+
+    remove_unavailable_repair_segment_ids(&mut pending, &[second_id])
+        .expect("unavailable segment response advances pending ids");
+
+    assert_eq!(
+        pending.into_iter().collect::<Vec<_>>(),
+        vec![first_id, third_id]
+    );
+}
+
+#[test]
+fn a_repair_page_with_only_unavailable_segments_advances() {
+    let first_id = "a".repeat(64);
+    let second_id = "b".repeat(64);
+    let mut pending = [first_id.clone(), second_id.clone()].into_iter().collect();
+
+    remove_unavailable_repair_segment_ids(&mut pending, &[first_id, second_id])
+        .expect("expired page advances pending ids");
+
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn unavailable_repair_response_cannot_drop_an_unknown_segment() {
+    let pending_id = "a".repeat(64);
+    let mut pending = [pending_id].into_iter().collect();
+
+    assert!(remove_unavailable_repair_segment_ids(&mut pending, &["b".repeat(64)]).is_err());
+}
+
+#[test]
 fn source_deletion_producer_queues_the_independent_tombstone_before_matching_history() {
     let historical_key = b"node-history:node:node-a:daily-traffic:2026-08-14".to_vec();
     let records = source_records_with_deletions(
