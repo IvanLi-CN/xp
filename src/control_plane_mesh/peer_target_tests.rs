@@ -1,10 +1,16 @@
 use super::*;
 use axum::{Router, extract::State, http::StatusCode, routing::post};
+use futures_util::{StreamExt, future::join_all};
+use reqwest::ResponseBuilderExt;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tokio::{task::JoinHandle, time::sleep};
+use tokio::{
+    sync::{Notify, Semaphore},
+    task::JoinHandle,
+    time::sleep,
+};
 
 async fn count_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
     requests.fetch_add(1, Ordering::SeqCst);
@@ -53,6 +59,61 @@ async fn spawn_stalling_reverse_relay() -> (String, Arc<AtomicUsize>, JoinHandle
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{address}"), requests, task)
+}
+
+#[derive(Clone)]
+struct PeakStallState {
+    active: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+    entered: Arc<Notify>,
+    release: Arc<Semaphore>,
+}
+
+async fn peak_stalling_reverse_relay(State(state): State<PeakStallState>) -> StatusCode {
+    let active = state.active.fetch_add(1, Ordering::SeqCst) + 1;
+    state.peak.fetch_max(active, Ordering::SeqCst);
+    state.entered.notify_waiters();
+    let _release = state
+        .release
+        .acquire()
+        .await
+        .expect("peak stall release semaphore remains open");
+    state.active.fetch_sub(1, Ordering::SeqCst);
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+async fn spawn_peak_stalling_reverse_relay() -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<Notify>,
+    Arc<Semaphore>,
+    JoinHandle<()>,
+) {
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Semaphore::new(0));
+    let app = Router::new()
+        .route(
+            "/api/admin/_internal/mesh/reverse-relay",
+            post(peak_stalling_reverse_relay),
+        )
+        .with_state(PeakStallState {
+            active,
+            peak: peak.clone(),
+            entered: entered.clone(),
+            release: release.clone(),
+        });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("peak stall reverse relay listener");
+    let address = listener
+        .local_addr()
+        .expect("peak stall reverse relay address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), peak, entered, release, task)
 }
 
 fn reverse_request() -> MeshRequest {
@@ -379,4 +440,239 @@ async fn reverse_health_probe_warms_primary_and_standby() {
     assert_eq!(standby_requests.load(Ordering::SeqCst), 1);
     primary_task.abort();
     standby_task.abort();
+}
+
+#[tokio::test]
+async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
+    let (rendezvous_base_url, peak, entered, release, relay_task) =
+        spawn_peak_stalling_reverse_relay().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let assignment = reverse_assignment();
+    let rendezvous = secondary_reverse_target(None, rendezvous_base_url);
+    let peer = primary_reverse_target(None, "http://127.0.0.1:1".to_string());
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(rendezvous, None, assignment),
+        )
+        .await;
+
+    let budget = super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
+        - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS;
+    let responses_task = tokio::spawn({
+        let client = client.clone();
+        let peer = peer.clone();
+        let ca_key_pem = ca.key_pem.clone();
+        let ca_cert_pem = ca.cert_pem.clone();
+        async move {
+            join_all((0..32).map(|index| {
+                let client = client.clone();
+                let peer = peer.clone();
+                let ca_key_pem = ca_key_pem.clone();
+                let ca_cert_pem = ca_cert_pem.clone();
+                async move {
+                    let mut request = reverse_request();
+                    request.request_id = format!("reverse-concurrency-{index}");
+                    client
+                        .send_peer_reverse_request(&peer, request, &ca_key_pem, &ca_cert_pem)
+                        .await
+                }
+            }))
+            .await
+        }
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let notified = entered.notified();
+            if peak.load(Ordering::SeqCst) >= budget {
+                break;
+            }
+            notified.await;
+        }
+    })
+    .await
+    .expect("reverse relay must exercise the full admission budget");
+    release.add_permits(budget);
+    let responses = tokio::time::timeout(Duration::from_secs(2), responses_task)
+        .await
+        .expect("reverse relay admission must fail fast when the budget is full")
+        .expect("reverse relay request task must finish");
+
+    assert!(
+        peak.load(Ordering::SeqCst) == budget,
+        "reverse relay did not exercise the full per-rendezvous budget: {}",
+        peak.load(Ordering::SeqCst)
+    );
+    assert!(responses.iter().all(Result::is_err));
+    let admission_rejections = responses
+        .iter()
+        .filter(|response| match response {
+            Err(MeshRequestError::Reverse(message)) => {
+                message.contains("reverse relay concurrency limit reached")
+            }
+            _ => false,
+        })
+        .count();
+    assert_eq!(
+        admission_rejections,
+        32 - budget,
+        "requests beyond the budget must be rejected before opening a relay"
+    );
+    let mut follow_up = reverse_request();
+    follow_up.request_id = "reverse-concurrency-follow-up".to_string();
+    release.add_permits(1);
+    let follow_up_result = client
+        .send_peer_reverse_request(&peer, follow_up, &ca.key_pem, &ca.cert_pem)
+        .await;
+    assert!(!matches!(
+        follow_up_result,
+        Err(MeshRequestError::Reverse(message))
+            if message.contains("reverse relay concurrency limit reached")
+    ));
+    relay_task.abort();
+}
+
+#[tokio::test]
+async fn reverse_health_keeps_a_reserved_rendezvous_slot() {
+    let circuits = PeerCircuitBreakers::default();
+    let mut control_slots = Vec::new();
+    for _ in 0..(super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
+        - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS)
+    {
+        control_slots.push(
+            circuits
+                .try_reverse_slot(
+                    "rendezvous-health-reservation",
+                    super::reverse::ReverseRequestClass::Control,
+                )
+                .await
+                .expect("control slot within the non-health budget"),
+        );
+    }
+    assert!(
+        circuits
+            .try_reverse_slot(
+                "rendezvous-health-reservation",
+                super::reverse::ReverseRequestClass::Control,
+            )
+            .await
+            .is_err()
+    );
+    let health_slot = circuits
+        .try_reverse_slot(
+            "rendezvous-health-reservation",
+            super::reverse::ReverseRequestClass::Health,
+        )
+        .await
+        .expect("health must retain the reserved slot");
+    drop(health_slot);
+    drop(control_slots);
+}
+
+#[tokio::test]
+async fn reverse_health_reservation_is_atomic_under_concurrent_control_admission() {
+    let circuits = PeerCircuitBreakers::default();
+    let rendezvous = "rendezvous-health-race";
+    let mut control_slots = Vec::new();
+    for _ in 0..(super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
+        - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS
+        - 1)
+    {
+        control_slots.push(
+            circuits
+                .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Control)
+                .await
+                .expect("control slot within the non-health budget"),
+        );
+    }
+    let (first, second) = tokio::join!(
+        circuits.try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Control),
+        circuits.try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Control),
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    let health_slot = circuits
+        .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+        .await
+        .expect("health must retain the final reserved slot");
+    drop(health_slot);
+    drop(first);
+    drop(second);
+    drop(control_slots);
+}
+
+#[tokio::test]
+async fn reverse_slot_is_held_until_response_body_stream_finishes() {
+    let circuits = PeerCircuitBreakers::default();
+    let rendezvous = "rendezvous-response-lifecycle";
+    let mut control_slots = Vec::new();
+    for _ in 0..(super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
+        - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS)
+    {
+        control_slots.push(
+            circuits
+                .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Control)
+                .await
+                .expect("control slot within the non-health budget"),
+        );
+    }
+    let health_slot = circuits
+        .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+        .await
+        .expect("health slot available for response lifecycle test");
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(StatusCode::OK)
+            .body(reqwest::Body::from("response-body"))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_reverse_slot(response, health_slot);
+    assert!(
+        circuits
+            .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+            .await
+            .is_err(),
+        "response body must retain the in-flight slot"
+    );
+    let mut body_stream = response.bytes_stream();
+    assert_eq!(
+        body_stream
+            .next()
+            .await
+            .expect("response data")
+            .expect("response data is valid"),
+        bytes::Bytes::from_static(b"response-body")
+    );
+    assert!(body_stream.next().await.is_none());
+    assert!(
+        circuits
+            .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+            .await
+            .is_ok(),
+        "response body completion must release the in-flight slot"
+    );
+    drop(control_slots);
+}
+
+#[tokio::test]
+async fn reverse_slot_response_preserves_the_original_url() {
+    let circuits = PeerCircuitBreakers::default();
+    let rendezvous = "rendezvous-response-url";
+    let permit = circuits
+        .try_reverse_slot(rendezvous, super::reverse::ReverseRequestClass::Health)
+        .await
+        .expect("health slot available for response URL test");
+    let original_url = reqwest::Url::parse("https://rendezvous.example/relay").expect("URL");
+    let response = reqwest::Response::from(
+        axum::http::Response::builder()
+            .url(original_url.clone())
+            .status(StatusCode::OK)
+            .body(reqwest::Body::from("response-body"))
+            .expect("synthetic response"),
+    );
+    let response = super::reverse::attach_reverse_slot(response, permit);
+    assert_eq!(response.url(), &original_url);
+    drop(response);
 }

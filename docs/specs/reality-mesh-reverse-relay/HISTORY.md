@@ -29,6 +29,10 @@
   `XP_REVERSE_MESH_ENABLED=false` 是不改 Raft 的本地 fail-closed 回退。
 - Xray route reconcile 以 `ListRule` 的当前 tag 集合为幂等依据；仅对同一 desired tag 的
   `app/router: duplicate ruleTag` 保留兼容 fallback。
+- Reverse outer request 对每个 Rendezvous 在进程共享控制面 client 上采用固定 8 并发上限，
+  并在超限时快速失败，其中保留一个 health slot，且 permit 绑定 guarded response body/stream
+  生命周期，以阻断失联节点的重试风暴放大 Xray underlay；上限共享于 client clone 且不提供
+  环境变量覆盖。
 
 ## Supersession
 
