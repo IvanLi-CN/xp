@@ -12,8 +12,12 @@ use crate::{
     state::history_repository::{
         HistoryStorage,
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+        replica::RepositoryRetentionPolicy,
     },
-    state::history_storage::{Backend, RepositoryHistoryRecordRow, RepositoryHistorySegmentRow},
+    state::history_storage::{
+        Backend, RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
+        RepositoryHistorySegmentRow,
+    },
 };
 
 use super::tests::load;
@@ -244,6 +248,61 @@ fn sqlite_partition_summary_cache_survives_restart_and_invalidates_on_late_recor
         .replication_summary_after(None, true)
         .expect("summary while rebuilding");
     assert!(!pending.partitions_included);
+}
+
+#[test]
+fn sqlite_retention_persists_summary_invalidation_before_committed_rewrite() {
+    let temporary = tempfile::tempdir().expect("SQLite temporary directory");
+    let storage = HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    let row = StoredRecord {
+        observed_at_unix_seconds: 10,
+        received_at_unix_seconds: 10,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence: 0,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"key".to_vec(),
+        payload: b"payload".to_vec(),
+        tombstone: false,
+    };
+    let row = row.sqlite_row().expect("SQLite row");
+    storage
+        .upsert_repository_history_records(std::slice::from_ref(&row))
+        .expect("seed history row");
+    runtime.snapshot.partition_summaries = vec![RepositoryPartitionSummary {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        partition: 0,
+        first_sequence: 0,
+        last_sequence: 0,
+        hash: [7; 32],
+        record_count: 1,
+    }];
+    runtime.snapshot.partition_summary_cursor = Some(RepositoryHistoryCompactionCursor::from(&row));
+    runtime.snapshot.partition_summaries_complete = true;
+    runtime
+        .persist_control_state()
+        .expect("persist ready cache");
+
+    storage.set_history_rewrite_maintenance_failure_for_test(true);
+    let now = 10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2;
+    assert!(runtime.prune_sqlite_retention(now).is_err());
+    assert!(!runtime.partition_summaries_ready());
+
+    drop(runtime);
+    let restored = RepositoryReplicaRuntime::load(storage).expect("reload runtime");
+    assert!(
+        !restored.partition_summaries_ready(),
+        "a committed rewrite must never restart with a stale complete cache"
+    );
 }
 
 #[test]

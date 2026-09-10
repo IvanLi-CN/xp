@@ -56,6 +56,7 @@ use backfill::{
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
+use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
     repository_direct_request, repository_mesh_request,
@@ -177,11 +178,13 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                             work,
                         )?;
                 } else if work.is_deep_verification() {
+                    clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
                 }
             }
             Err(error) => {
                 if work.is_deep_verification() {
+                    clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
                 }
                 tracing::debug!(

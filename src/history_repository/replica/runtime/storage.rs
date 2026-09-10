@@ -29,6 +29,7 @@ impl RepositoryReplicaRuntime {
             self.snapshot.partition_summaries.clear();
             self.snapshot.partition_summary_cursor = None;
             self.snapshot.partition_summaries_complete = false;
+            self.snapshot.deep_verified_peer_ids.clear();
         }
     }
 
@@ -529,6 +530,13 @@ impl RepositoryReplicaRuntime {
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
         let history_changed = !removed_rows.is_empty();
+        // Make the cache invalidation durable before SQLite is changed. If the process exits
+        // after the row rewrite but before the final control snapshot, startup must rebuild the
+        // summary instead of trusting a cache for the pre-compaction contents.
+        if history_changed {
+            self.reset_partition_summary_cache();
+            self.persist_control_state()?;
+        }
         if !rows.is_empty() {
             let result = self
                 .storage
@@ -570,9 +578,6 @@ impl RepositoryReplicaRuntime {
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
         );
         self.finish_storage_write(result)?;
-        if history_changed {
-            self.reset_partition_summary_cache();
-        }
         self.persist_control_state()
     }
 

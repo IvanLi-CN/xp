@@ -51,6 +51,18 @@ pub(crate) async fn all_cluster_peers(state: &AppState) -> Vec<MeshPeerTarget> {
         .collect()
 }
 
+pub(super) async fn clear_peer_deep_verification(
+    state: &AppState,
+    peer_repository_id: &str,
+) -> anyhow::Result<()> {
+    state
+        .repository_replica
+        .lock()
+        .await
+        .clear_direct_peer_deep_verification(peer_repository_id)?;
+    Ok(())
+}
+
 pub(crate) async fn eligible_mesh_relay_peers(state: &AppState) -> Vec<MeshPeerTarget> {
     all_cluster_peers(state)
         .await

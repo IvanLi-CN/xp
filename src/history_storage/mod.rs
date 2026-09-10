@@ -103,6 +103,8 @@ pub(crate) struct HistoryStorage {
     backend: Arc<Mutex<Backend>>,
     #[cfg(test)]
     fail_maintenance_after_commit: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    fail_history_rewrite_maintenance: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for HistoryStorage {
@@ -130,6 +132,8 @@ impl HistoryStorage {
             backend,
             #[cfg(test)]
             fail_maintenance_after_commit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_history_rewrite_maintenance: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         storage.cleanup_expired_backups_at(SystemTime::now());
         storage
@@ -277,6 +281,12 @@ impl HistoryStorage {
     #[cfg(test)]
     pub(crate) fn set_maintenance_failure_for_test(&self, enabled: bool) {
         self.fail_maintenance_after_commit
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_history_rewrite_maintenance_failure_for_test(&self, enabled: bool) {
+        self.fail_history_rewrite_maintenance
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 }

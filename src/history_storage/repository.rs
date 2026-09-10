@@ -377,7 +377,20 @@ impl HistoryStorage {
                 .map_err(sqlite_error)?;
         }
         transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
+        #[cfg(test)]
+        let maintenance_result = if self
+            .fail_history_rewrite_maintenance
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            Err(HistoryStorageError(
+                "injected history rewrite maintenance failure".to_owned(),
+            ))
+        } else {
+            maintain_sqlite(connection)
+        };
+        #[cfg(not(test))]
+        let maintenance_result = maintain_sqlite(connection);
+        maintenance_result
     }
 
     #[allow(dead_code)]

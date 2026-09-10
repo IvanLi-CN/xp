@@ -314,6 +314,10 @@ impl RepositoryReplicaRuntime {
         if !work.is_deep_verification() {
             return Ok(false);
         }
+        if !self.partition_summaries_ready() {
+            self.clear_direct_peer_deep_verification(peer_repository_id)?;
+            return Ok(false);
+        }
         let required = ready_repositories
             .iter()
             .filter(|repository_id| repository_id.as_str() != local_repository_id)
@@ -333,6 +337,20 @@ impl RepositoryReplicaRuntime {
         let complete = required.is_subset(&self.snapshot.deep_verified_peer_ids);
         self.persist_control_state()?;
         Ok(complete)
+    }
+
+    pub(crate) fn clear_direct_peer_deep_verification(
+        &mut self,
+        peer_repository_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if self
+            .snapshot
+            .deep_verified_peer_ids
+            .remove(peer_repository_id)
+        {
+            self.persist_control_state()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn collects_source(
