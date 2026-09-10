@@ -3,6 +3,27 @@ use super::*;
 const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
 
 impl RepositoryReplicaRuntime {
+    fn partition_summary_map(
+        &self,
+    ) -> BTreeMap<(String, u64, String, u32), super::RepositoryPartitionSummary> {
+        self.snapshot
+            .partition_summaries
+            .iter()
+            .cloned()
+            .map(|summary| {
+                (
+                    (
+                        summary.source_node_id.clone(),
+                        summary.source_epoch,
+                        summary.stream.clone(),
+                        summary.partition,
+                    ),
+                    summary,
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn reset_partition_summary_cache(&mut self) {
         if self.uses_sqlite_history() {
             self.snapshot.partition_summaries.clear();
@@ -50,23 +71,7 @@ impl RepositoryReplicaRuntime {
             self.reset_partition_summary_cache();
             return Ok(());
         }
-        let mut summaries = self
-            .snapshot
-            .partition_summaries
-            .iter()
-            .cloned()
-            .map(|summary| {
-                (
-                    (
-                        summary.source_node_id.clone(),
-                        summary.source_epoch,
-                        summary.stream.clone(),
-                        summary.partition,
-                    ),
-                    summary,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let mut summaries = self.partition_summary_map();
         super::sync::accumulate_record_partitions(&mut summaries, [record])?;
         self.snapshot.partition_summaries = summaries.into_values().collect();
         self.snapshot.partition_summary_cursor = Some(incoming);
@@ -89,7 +94,6 @@ impl RepositoryReplicaRuntime {
             )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let Some(last_row) = rows.last() else {
-            self.snapshot.partition_summary_cursor = None;
             self.snapshot.partition_summaries_complete = true;
             self.persist_control_state()?;
             return Ok(true);
@@ -99,23 +103,7 @@ impl RepositoryReplicaRuntime {
             .into_iter()
             .map(StoredRecord::from_sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
-        let mut summaries = self
-            .snapshot
-            .partition_summaries
-            .iter()
-            .cloned()
-            .map(|summary| {
-                (
-                    (
-                        summary.source_node_id.clone(),
-                        summary.source_epoch,
-                        summary.stream.clone(),
-                        summary.partition,
-                    ),
-                    summary,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let mut summaries = self.partition_summary_map();
         super::sync::accumulate_record_partitions(&mut summaries, records.iter())?;
         self.snapshot.partition_summaries = summaries.into_values().collect();
         self.snapshot.partition_summary_cursor = Some(last_cursor);
@@ -214,6 +202,10 @@ impl RepositoryReplicaRuntime {
 
     pub(crate) fn uses_sqlite_history(&self) -> bool {
         self.snapshot.external_history && self.storage.is_sqlite()
+    }
+
+    pub(crate) fn partition_summaries_ready(&self) -> bool {
+        !self.uses_sqlite_history() || self.snapshot.partition_summaries_complete
     }
 
     pub(super) fn finish_storage_write<T, E: std::fmt::Display>(

@@ -373,6 +373,9 @@ impl RepositoryReplicaRuntime {
                 &sync_record,
             );
             if self.uses_sqlite_history() {
+                if !stored.tombstone {
+                    self.update_partition_summary_for_record(&stored)?;
+                }
                 mutation.records.push(stored.sqlite_row()?);
             } else {
                 self.snapshot.records.push(stored);

@@ -3,7 +3,7 @@ use ed25519_dalek::SigningKey;
 #[cfg(target_os = "linux")]
 use std::{fs, process::Command};
 
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment};
+use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredRecord, StoredSegment};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
     state::history_repository::{
@@ -12,6 +12,8 @@ use crate::{
     },
     state::history_storage::{Backend, RepositoryHistorySegmentRow},
 };
+
+use super::tests::load;
 
 fn identity(signing_key: &SigningKey) -> RepositoryNodeIdentity {
     RepositoryNodeIdentity::new(
@@ -92,6 +94,82 @@ fn sqlite_summary_keeps_tombstones_first_across_keyset_pages() {
         .expect("ordinary summary page");
     assert_eq!(second.segment_ids, ["000-ordinary"]);
     assert!(second.next_segment_id.is_none());
+}
+
+#[test]
+fn sqlite_partition_summary_cache_survives_restart_and_invalidates_on_late_record() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    let rows = (0..2_u64)
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: 10 + sequence,
+                received_at_unix_seconds: 10 + sequence,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: sequence.to_be_bytes().to_vec(),
+                payload: format!("payload-{sequence}").into_bytes(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed history rows");
+    runtime.snapshot.partition_summaries_complete = false;
+    runtime
+        .prepare_for_replication(100)
+        .expect("rebuild history page");
+    runtime
+        .prepare_for_replication(100)
+        .expect("finish history summary rebuild");
+    assert!(runtime.partition_summaries_ready());
+    runtime
+        .persist_control_state()
+        .expect("persist cache state");
+
+    let mut restored = load(temporary.path());
+    assert!(restored.partition_summaries_ready());
+    let summary = restored
+        .replication_summary_after(None, true)
+        .expect("restored deep summary");
+    assert!(summary.partitions_included);
+    assert_eq!(summary.partitions[0].record_count, 2);
+
+    let late = StoredRecord {
+        observed_at_unix_seconds: 9,
+        received_at_unix_seconds: 9,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        sequence: 99,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"late".to_vec(),
+        payload: b"late-payload".to_vec(),
+        tombstone: false,
+    };
+    restored
+        .update_partition_summary_for_record(&late)
+        .expect("invalidate stale cache");
+    assert!(!restored.partition_summaries_ready());
+    let pending = restored
+        .replication_summary_after(None, true)
+        .expect("summary while rebuilding");
+    assert!(!pending.partitions_included);
 }
 
 #[test]

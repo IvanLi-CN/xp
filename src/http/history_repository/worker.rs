@@ -152,7 +152,15 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     let mut synchronized = false;
     let mut deep_verification_succeeded =
-        work.is_deep_verification() && selected_peer_ids.is_empty();
+        if work.is_deep_verification() && selected_peer_ids.is_empty() {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .partition_summaries_ready()
+        } else {
+            false
+        };
     for peer in peers_to_replicate {
         match replicate_peer(state, peer, &ready_repository_ids, now, work, true).await {
             Ok(directly_converged) => {
