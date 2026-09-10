@@ -15,6 +15,24 @@ import {
 const packageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, "./package.json"), "utf8"),
 ) as { version: string };
+const iconAssets = JSON.parse(
+	fs.readFileSync(
+		path.resolve(__dirname, "./assets-src/icon-assets.json"),
+		"utf8",
+	),
+) as {
+	version: string;
+	favicon: string;
+	favicon16: string;
+	favicon32: string;
+	appleTouch: string;
+	regular192: string;
+	regular512: string;
+	maskable192: string;
+	maskable512: string;
+	bicolorSvg: string;
+	pinnedTabSvg: string;
+};
 
 function resolveBuildId() {
 	const explicit = process.env.XP_WEB_BUILD_ID?.trim();
@@ -205,14 +223,16 @@ export default defineConfig(({ mode }) => {
 				srcDir: "src",
 				filename: "sw.ts",
 				includeAssets: [
-					"favicon.ico",
-					"xp-logo-bicolor.svg",
-					"safari-pinned-tab.svg",
-					"favicon-16x16.png",
-					"favicon-32x32.png",
-					"apple-touch-icon.png",
-					"android-chrome-192x192-maskable.png",
-					"android-chrome-512x512-maskable.png",
+					iconAssets.favicon,
+					iconAssets.bicolorSvg,
+					iconAssets.pinnedTabSvg,
+					iconAssets.favicon16,
+					iconAssets.favicon32,
+					iconAssets.appleTouch,
+					iconAssets.regular192,
+					iconAssets.regular512,
+					iconAssets.maskable192,
+					iconAssets.maskable512,
 					"xp-mark.png",
 				],
 				manifest: {
@@ -225,25 +245,25 @@ export default defineConfig(({ mode }) => {
 					theme_color: "#4CB1AB",
 					icons: [
 						{
-							src: "/android-chrome-192x192.png",
+							src: `/${iconAssets.regular192}`,
 							sizes: "192x192",
 							type: "image/png",
 							purpose: "any",
 						},
 						{
-							src: "/android-chrome-512x512.png",
+							src: `/${iconAssets.regular512}`,
 							sizes: "512x512",
 							type: "image/png",
 							purpose: "any",
 						},
 						{
-							src: "/android-chrome-192x192-maskable.png",
+							src: `/${iconAssets.maskable192}`,
 							sizes: "192x192",
 							type: "image/png",
 							purpose: "maskable",
 						},
 						{
-							src: "/android-chrome-512x512-maskable.png",
+							src: `/${iconAssets.maskable512}`,
 							sizes: "512x512",
 							type: "image/png",
 							purpose: "maskable",
@@ -251,7 +271,7 @@ export default defineConfig(({ mode }) => {
 					],
 				},
 				injectManifest: {
-					globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webmanifest}"],
+					globPatterns: ["**/*.{js,css,html,woff2,webmanifest}"],
 					maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
 					sourcemap: true,
 				},

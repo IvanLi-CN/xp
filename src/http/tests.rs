@@ -30,6 +30,8 @@ mod follower_draft;
 mod history_repository;
 mod managed_vless_create;
 mod mihomo_smux;
+#[path = "tests/platform_assets.rs"]
+mod platform_assets;
 #[path = "tests/stale_learner_retirement.rs"]
 mod stale_learner_retirement;
 #[path = "tests/status_events.rs"]
