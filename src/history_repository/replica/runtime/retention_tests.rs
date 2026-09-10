@@ -151,7 +151,7 @@ fn sqlite_retention_restarts_after_post_commit_maintenance_failure_without_dupli
         .saturating_add(1);
     let count = RETENTION_COMPACTION_PAGE_SIZE + RETENTION_COMPACTION_BUCKET_LOOKAHEAD + 32;
     let storage = HistoryStorage::open(temporary.path());
-    let mut runtime = load(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
     let rows = (0..u64::try_from(count).expect("count"))
         .map(|sequence| {
             StoredRecord {
@@ -181,6 +181,7 @@ fn sqlite_retention_restarts_after_post_commit_maintenance_failure_without_dupli
     runtime
         .prepare_for_replication(now)
         .expect("rewrite remains committed when maintenance is deferred");
+    assert!(runtime.storage_degraded);
     assert!(runtime.snapshot.retention_compaction_cursor.is_some());
     assert!(runtime.snapshot.retention_compaction_continuation.is_some());
     drop(runtime);
