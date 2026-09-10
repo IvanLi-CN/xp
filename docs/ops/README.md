@@ -818,6 +818,10 @@ Notes:
   only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
   indicates the serving node is pre-fix and must be upgraded; never clear the checkpoint or source
   outbox manually.
+  A retained repair segment may belong to a node that has since been retired from cluster
+  membership. Replay validates that identity against the deterministic cluster material and
+  accepts the signed historical row; live source delivery remains limited to current pinned
+  members. Do not remove the retained row or recreate the retired node to unblock catch-up.
   Deep verification partition data is rebuilt separately from the durable SQLite rows in bounded
   keyset pages. During that rebuild, `partitions_included=false` is expected: segment IDs, gaps, and
   ordinary catch-up still proceed, but the worker must not close the daily deep-verification window.

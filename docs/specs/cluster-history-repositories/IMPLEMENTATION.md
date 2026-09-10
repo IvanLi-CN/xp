@@ -135,10 +135,11 @@
   and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
-  Receivers require the complete pinned identity: repository senders must match their current
+  Live receivers require the complete pinned identity: repository senders must match their current
   Raft member identity, while ordinary cluster-node sources use the same server-derived pinned
-  identity. Repair and relay batches apply the identical identity check before signature
-  verification.
+  identity. History replay from an already-serving repository also accepts a retired source node
+  when its identity exactly matches the deterministic cluster-derived identity; repair and relay
+  batches still reject substituted public keys before signature verification.
 - Replica, retention and query selection: ready repositories run bounded five-minute repair and
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,
