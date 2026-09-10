@@ -745,7 +745,7 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn local_source_backpressure_gaps(
         &mut self,
         source_node_id: &str,
-    ) -> Result<Vec<RepositoryReplicaGap>, RepositoryRuntimeError> {
+    ) -> Vec<RepositoryReplicaGap> {
         const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
         let keys = self
             .snapshot
@@ -756,7 +756,7 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         if keys.is_empty() {
             self.snapshot.local_source.backpressure_gap_cursor = None;
-            return Ok(Vec::new());
+            return Vec::new();
         }
         let start = self
             .snapshot
@@ -790,26 +790,10 @@ impl RepositoryReplicaRuntime {
                     })
             })
             .collect();
-        self.persist_control_state()?;
-        Ok(gaps)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn local_source_backpressure_gaps_for_test(
-        &mut self,
-        source_node_id: &str,
-    ) -> Vec<RepositoryReplicaGap> {
-        self.local_source_backpressure_gaps(source_node_id)
-            .expect("build gap page")
-    }
-
-    #[cfg(test)]
-    pub(crate) fn local_source_has_no_backpressure_gaps_for_test(
-        &mut self,
-        source_node_id: &str,
-    ) -> bool {
-        self.local_source_backpressure_gaps_for_test(source_node_id)
-            .is_empty()
+        // The normal delivery outcome persists this cursor with the control snapshot after the
+        // source journal page has been accepted or left queued, keeping cursor advancement tied to
+        // the existing delivery checkpoint instead of creating a second write boundary.
+        gaps
     }
 
     pub(crate) fn local_source_tombstones_fully_acknowledged(
