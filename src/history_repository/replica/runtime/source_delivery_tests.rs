@@ -1,5 +1,6 @@
 use super::super::StoredRecord;
 use super::*;
+use crate::state::history_repository::replica::RepositoryReplicaSegment;
 use sha2::Sha256;
 
 #[test]
@@ -207,6 +208,56 @@ fn source_delivery_journal_state_tracks_upserts_and_ack_path() {
         .expect("summarize repeated acknowledgement");
     assert_eq!(summary.last_acknowledged_at, Some(200));
     assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
+}
+
+#[test]
+fn source_delivery_batch_ack_removes_page_in_one_checkpoint() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    for sequence in 0..3_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "runtime.v1",
+                    1,
+                    format!("runtime:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue source segment");
+    }
+
+    let rows = crate::state::history_repository::HistoryStorage::open(temporary.path())
+        .source_delivery_journal()
+        .expect("read journal");
+    let page = rows
+        .iter()
+        .map(|row| RepositoryReplicaSegment {
+            identity: row.identity.clone(),
+            wire: row.wire.clone(),
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .acknowledge_local_source_segments_via(&page, 200, "direct")
+        .expect("acknowledge source page");
+
+    let summary = crate::state::history_repository::HistoryStorage::open(temporary.path())
+        .source_delivery_journal_summary()
+        .expect("summarize acknowledged page");
+    assert_eq!(summary.pending_segments, 0);
+    assert_eq!(summary.pending_bytes, 0);
+    assert_eq!(summary.last_acknowledged_at, Some(200));
+    assert_eq!(summary.last_delivery_path.as_deref(), Some("direct"));
+    assert!(runtime.local_source_pending_segments().is_empty());
 }
 
 #[test]
@@ -935,11 +986,9 @@ fn migration_fallback_preserves_legacy_source_delivery_pending_rows() {
         )
         .expect("write legacy snapshot");
     drop(runtime);
-
     let reloaded = RepositoryReplicaRuntime::load(storage.clone()).expect("fallback load");
     drop(reloaded);
     drop(storage);
-
     let fallback_storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     let restored = RepositoryReplicaRuntime::load(fallback_storage).expect("reload JSON fallback");
     let front = restored

@@ -82,7 +82,6 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
         }
     });
 }
-
 async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
     let Ok((ready_repository_ids, peers)) = ready_repository_peers(state).await else {
@@ -234,6 +233,7 @@ async fn publish_local_history_segment(
     ready_repository_ids: &[String],
     peers: &[MeshPeerTarget],
     now: u64,
+    capture_live: bool,
 ) -> anyhow::Result<bool> {
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
@@ -241,11 +241,12 @@ async fn publish_local_history_segment(
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
     let mut source_batch = source_records(state, now).await?;
-    let capture_paused = state
-        .repository_replica
-        .lock()
-        .await
-        .source_delivery_capture_paused()?;
+    let capture_paused = !capture_live
+        || state
+            .repository_replica
+            .lock()
+            .await
+            .source_delivery_capture_paused()?;
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         let segments = if capture_paused {
@@ -300,6 +301,7 @@ async fn publish_local_history_segment(
     let mut delivery_succeeded = true;
     let mut transport_failed = false;
     let mut tombstone_acknowledgements = Vec::new();
+    let mut delivered_segments = Vec::new();
     if segments.is_empty() {
         (delivery_succeeded, transport_failed) =
             super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
@@ -316,12 +318,9 @@ async fn publish_local_history_segment(
                     error = %error,
                     "local history source segment remains queued for retry"
                 );
+                break;
             } else {
-                state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .acknowledge_local_source_segment_via(&segment.wire, now, "local")?;
+                delivered_segments.push(segment.clone());
             }
         } else {
             let body = serde_json::to_vec(&RepositorySyncRequest::with_wire(
@@ -341,11 +340,7 @@ async fn publish_local_history_segment(
                 Ok(receipt) => {
                     tombstone_acknowledgements
                         .extend(receipt.tombstone_acknowledgements().iter().cloned());
-                    state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .acknowledge_local_source_segment_via(&segment.wire, now, "direct")?;
+                    delivered_segments.push(segment.clone());
                 }
                 Err(error) => {
                     transport_failed |= error.is_transport();
@@ -355,9 +350,22 @@ async fn publish_local_history_segment(
                         error = %error,
                         "history source segment remains queued for retry"
                     );
+                    break;
                 }
             }
         }
+    }
+    if !delivered_segments.is_empty() {
+        let delivery_path = if selected_repository_id == state.cluster.node_id {
+            "local"
+        } else {
+            "direct"
+        };
+        state
+            .repository_replica
+            .lock()
+            .await
+            .acknowledge_local_source_segments_via(&delivered_segments, now, delivery_path)?;
     }
     if !tombstone_acknowledgements.is_empty() {
         state
@@ -428,7 +436,6 @@ async fn publish_local_history_segment(
     }
     Ok(delivery_succeeded && !transport_failed)
 }
-
 async fn relay_local_source_segments(
     state: &AppState,
     target: &MeshPeerTarget,
@@ -477,16 +484,13 @@ async fn relay_local_source_segments(
         body,
     )
     .await?;
-    for segment in payload.batch.segments {
-        state
-            .repository_replica
-            .lock()
-            .await
-            .acknowledge_local_source_segment_via(&segment.wire, now, "dynamic_relay")?;
-    }
+    state
+        .repository_replica
+        .lock()
+        .await
+        .acknowledge_local_source_segments_via(&payload.batch.segments, now, "dynamic_relay")?;
     Ok(())
 }
-
 async fn receive_local_source_segment(
     state: &AppState,
     segment: &RepositoryReplicaSegment,
@@ -520,7 +524,6 @@ async fn receive_local_source_segment(
     }
     Ok(())
 }
-
 async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
     let capacity = state
         .repository_replica
@@ -558,7 +561,6 @@ async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::R
     .map_err(|_| anyhow::anyhow!("write local history repository capacity to Raft"))?;
     Ok(())
 }
-
 async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyhow::Result<()> {
     repair_legacy_tombstone_metadata(state, now).await?;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
@@ -603,11 +605,9 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
         }
     }
 }
-
 fn should_run_initial_catch_up(catch_up_completed: bool) -> bool {
     !catch_up_completed
 }
-
 async fn apply_local_catch_up_result(
     state: &AppState,
     node_id: &RepositoryNodeId,
