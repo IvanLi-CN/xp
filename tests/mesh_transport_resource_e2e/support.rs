@@ -378,20 +378,28 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let transaction = connection
         .unchecked_transaction()
         .expect("begin summary resource transaction");
+    let now_unix_seconds = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+    let first_observed = now_unix_seconds.saturating_sub(60);
     for sequence in 0..257_u64 {
+        let observed = first_observed.saturating_add(sequence);
         transaction
             .execute(
                 "INSERT INTO repository_history_segments
                      (id, closed_at, contains_tombstone, source_node_id, source_epoch,
                       stream, first_sequence, payload)
-                 VALUES (?1, ?2, 0, 'summary-source', 1, 'runtime', ?2, zeroblob(?3))",
-                rusqlite::params![format!("{sequence:064x}"), sequence, 192 * 1024 - 1024],
+                 VALUES (?1, ?2, 0, 'summary-source', 1, 'runtime', ?3, zeroblob(?4))",
+                rusqlite::params![
+                    format!("{sequence:064x}"),
+                    observed,
+                    sequence,
+                    192 * 1024 - 1024
+                ],
             )
             .expect("insert summary resource segment");
 
         let record_payload = serde_json::to_vec(&serde_json::json!({
-            "observed_at_unix_seconds": sequence,
-            "received_at_unix_seconds": sequence,
+            "observed_at_unix_seconds": observed,
+            "received_at_unix_seconds": observed,
             "source_node_id": "summary-source",
             "source_epoch": 1,
             "stream": "runtime",
@@ -413,11 +421,12 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                       observed_start, observed_end, received_at, aggregate_complete,
                       aggregate_start, aggregate_end, payload)
                  VALUES ('summary-source', 1, 'runtime', ?1, 'summary-subject',
-                         'summary-source', 'runtime.v1', 1, ?2, 0, ?1, ?1, ?1,
-                         1, NULL, NULL, ?3)",
+                         'summary-source', 'runtime.v1', 1, ?2, 0, ?3, ?3, ?3,
+                         1, NULL, NULL, ?4)",
                 rusqlite::params![
                     sequence,
                     format!("record-{sequence}").into_bytes(),
+                    observed,
                     record_payload
                 ],
             )
@@ -438,7 +447,7 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             "record_count": 257,
         }],
         "partition_summary_cursor": {
-            "observed_start_unix_seconds": 256,
+            "observed_start_unix_seconds": first_observed + 256,
             "source_node_id": "summary-source",
             "source_epoch": 1,
             "stream": "runtime",
