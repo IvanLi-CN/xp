@@ -25,7 +25,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
-use tokio::time::MissedTickBehavior;
 const REPOSITORY_REPLICATION_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
@@ -39,6 +38,7 @@ mod deep_repair;
 mod direct;
 mod legacy_segment_index;
 mod ready_peers;
+mod repair;
 mod source;
 mod source_records;
 #[cfg(test)]
@@ -62,6 +62,7 @@ pub(super) use direct::{
     repository_direct_request, repository_mesh_request,
 };
 pub(super) use ready_peers::ready_repository_peers;
+use repair::remove_unavailable_repair_segment_ids;
 use source::{
     local_repository_lifecycle, repair_legacy_tombstone_metadata, should_attempt_source_relay,
     should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
@@ -73,7 +74,7 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     source::spawn_local_source_worker(state.clone());
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(REPOSITORY_REPLICATION_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
             if let Err(error) = replicate_ready_repositories(&state).await {
@@ -454,6 +455,7 @@ async fn relay_local_source_segments(
         }
         RepositoryRepairBatch {
             segments: runtime.local_source_pending_segments(),
+            unavailable_segment_ids: Vec::new(),
             gaps: runtime.local_source_backpressure_gaps(source_node_id),
         }
         .frame_sized_relay_payload()?

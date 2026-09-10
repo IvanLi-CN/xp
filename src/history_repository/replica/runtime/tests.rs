@@ -121,6 +121,19 @@ fn two_repositories_repair_a_partition_to_the_same_segment_set() {
 }
 
 #[test]
+fn repair_batch_reports_requested_segments_that_are_no_longer_retained() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let unavailable_id = "a".repeat(64);
+    let batch = runtime
+        .repair_batch(std::slice::from_ref(&unavailable_id))
+        .expect("repair batch");
+
+    assert!(batch.segments.is_empty());
+    assert_eq!(batch.unavailable_segment_ids, vec![unavailable_id]);
+}
+
+#[test]
 fn sqlite_replication_summary_keyset_pages_every_segment_beyond_the_first_256() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

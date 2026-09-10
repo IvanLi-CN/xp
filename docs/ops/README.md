@@ -813,6 +813,11 @@ Notes:
   timeout, roll out the serving repository first, then observe the next five-minute direct-path
   retry so its durable checkpoint can resume. Do not restart the source, run `VACUUM`, clear the
   database, or delete unacknowledged backlog as a workaround.
+  A repair request can cross the seven-day minute-tier cache boundary. The serving response then
+  lists the explicitly expired request IDs as `unavailable_segment_ids`; the syncing peer skips
+  only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
+  indicates the serving node is pre-fix and must be upgraded; never clear the checkpoint or source
+  outbox manually.
   Deep verification partition data is rebuilt separately from the durable SQLite rows in bounded
   keyset pages. During that rebuild, `partitions_included=false` is expected: segment IDs, gaps, and
   ordinary catch-up still proceed, but the worker must not close the daily deep-verification window.

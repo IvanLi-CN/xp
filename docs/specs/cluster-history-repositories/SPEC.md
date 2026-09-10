@@ -78,6 +78,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
   语义保持不变。continuation 先由 opaque segment ID 解析五个持久排序键，再以行值范围继续
   seek；不得以 nullable cursor 或子查询包裹该范围，导致 SQLite 从 phase 起点重扫。
+- repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
+  不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
+  状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。
 - deep verification 的 retained partition summary 使用控制快照中的持久缓存，并由后台按
   SQLite keyset 有界重建；缓存未完成时 summary 保持 segment/gap 可用并返回
   `partitions_included=false`，不得读取或反序列化 payload 来响应 summary，也不得因此把
