@@ -37,9 +37,7 @@ fn disjoint_backpressure_ranges_remain_independent() {
     runtime.record_local_source_backpressure_gap("runtime", 8, 8, 100);
     runtime.record_local_source_backpressure_gap("runtime", 10, 10, 120);
 
-    let gaps = runtime
-        .local_source_backpressure_gaps("node-a")
-        .expect("build gap page");
+    let gaps = runtime.local_source_backpressure_gaps("node-a");
     assert_eq!(gaps.len(), 2);
     assert_eq!(gaps[0].stream, "runtime");
     assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (8, 8));
@@ -58,13 +56,12 @@ fn backpressure_gap_requests_rotate_across_the_repair_limit() {
         runtime.record_local_source_backpressure_gap("runtime", sequence, sequence, sequence);
     }
 
-    let first_page = runtime
-        .local_source_backpressure_gaps("node-a")
-        .expect("build first gap page");
+    let first_page = runtime.local_source_backpressure_gaps("node-a");
+    runtime
+        .persist_control_state()
+        .expect("persist first gap cursor");
     let mut restarted = RepositoryReplicaRuntime::load(storage).expect("reload runtime");
-    let second_page = restarted
-        .local_source_backpressure_gaps("node-a")
-        .expect("build second gap page");
+    let second_page = restarted.local_source_backpressure_gaps("node-a");
     assert_eq!(first_page.len(), 64);
     assert_eq!(second_page.len(), 64);
     let all_sequences = first_page

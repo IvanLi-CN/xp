@@ -685,7 +685,7 @@ fn a_delayed_stream_preserves_other_streams_without_declaring_a_permanent_gap() 
         .collect::<Vec<_>>();
     assert!(streams.contains(&"runtime".to_owned()));
     assert!(streams.contains(&"traffic".to_owned()));
-    let gaps = runtime.local_source_backpressure_gaps_for_test("node-a");
+    let gaps = runtime.local_source_backpressure_gaps("node-a");
     assert!(gaps.is_empty());
     assert_eq!(runtime.local_source_next_sequence("runtime"), Some(9));
 }

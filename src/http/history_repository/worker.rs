@@ -266,7 +266,7 @@ async fn publish_local_history_segment(
                 ready_repository_ids,
             )?
         };
-        let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id)?;
+        let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id);
         (segments, gaps)
     };
     if !capture_paused {
@@ -456,7 +456,7 @@ async fn relay_local_source_segments(
         RepositoryRepairBatch {
             segments: runtime.local_source_pending_segments(),
             unavailable_segment_ids: Vec::new(),
-            gaps: runtime.local_source_backpressure_gaps(source_node_id)?,
+            gaps: runtime.local_source_backpressure_gaps(source_node_id),
         }
         .frame_sized_relay_payload()?
     };

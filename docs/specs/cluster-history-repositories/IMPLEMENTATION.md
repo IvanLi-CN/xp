@@ -98,6 +98,9 @@
   fixed 128 MiB or 20,000-segment cap with a durable `capacity_suspended` marker: at 80% either
   dimension it reports `journal_capacity_guard`, rejects new source rows before the transaction
   writes, and resumes only after both dimensions fall below 60%; no unacknowledged row is deleted.
+  Backpressure ranges retained in snapshots from the pre-journal queue implementation remain
+  recoverable and are replayed through the persisted gap-page cursor; the current SQLite capacity
+  guard rejects capture before allocating a source cursor and therefore creates no new such range.
   `path_health.v1` reads a bounded telemetry source view directly from runtime state: rotating
   through at most 16 peers, with each peer's latest one-minute bucket, rather than cloning complete
   local 24-hour telemetry series. It bounds copied strings and latency samples before adding each
