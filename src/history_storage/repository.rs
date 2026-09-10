@@ -297,11 +297,18 @@ impl HistoryStorage {
         })
     }
 
-    pub(crate) fn replace_repository_history_records(
+    pub(crate) fn replace_repository_history_records_and_prune(
         &self,
         removed: &[RepositoryHistoryRecordRow],
         retained: &[RepositoryHistoryRecordRow],
-    ) -> Result<()> {
+        record_end_unix_seconds: u64,
+        segment_closed_at_unix_seconds: u64,
+        control_payload: &[u8],
+    ) -> Result<RepositoryCommitOutcome> {
+        #[cfg(test)]
+        let fail_maintenance = self
+            .fail_history_rewrite_maintenance
+            .load(std::sync::atomic::Ordering::Relaxed);
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Err(HistoryStorageError(
@@ -309,79 +316,24 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for row in removed {
-            transaction
-                .execute(
-                    "DELETE FROM repository_history_records
-                     WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
-                       AND sequence = ?4",
-                    params![
-                        row.source_node_id,
-                        durable_i64(row.source_epoch, "source epoch")?,
-                        row.stream,
-                        durable_i64(row.sequence, "sequence")?,
-                    ],
-                )
-                .map_err(sqlite_error)?;
-        }
-        for row in retained {
-            transaction
-                .execute(
-                    "
-                    INSERT INTO repository_history_records (
-                        source_node_id, source_epoch, stream, sequence, subject_node_id,
-                        observer_node_id, schema_id, schema_version, record_key, is_tombstone,
-                        observed_start, observed_end, received_at, aggregate_complete,
-                        aggregate_start, aggregate_end, payload
-                    ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
-                    )
-                    ON CONFLICT(source_node_id, source_epoch, stream, sequence) DO UPDATE SET
-                        subject_node_id = excluded.subject_node_id,
-                        observer_node_id = excluded.observer_node_id,
-                        schema_id = excluded.schema_id,
-                        schema_version = excluded.schema_version,
-                        record_key = excluded.record_key,
-                        is_tombstone = excluded.is_tombstone,
-                        observed_start = excluded.observed_start,
-                        observed_end = excluded.observed_end,
-                        received_at = excluded.received_at,
-                        aggregate_complete = excluded.aggregate_complete,
-                        aggregate_start = excluded.aggregate_start,
-                        aggregate_end = excluded.aggregate_end,
-                        payload = excluded.payload
-                    ",
-                    params![
-                        row.source_node_id,
-                        durable_i64(row.source_epoch, "source epoch")?,
-                        row.stream,
-                        durable_i64(row.sequence, "sequence")?,
-                        row.subject_node_id,
-                        row.observer_node_id,
-                        row.schema_id,
-                        i64::from(row.schema_version),
-                        row.record_key,
-                        row.tombstone,
-                        i64::try_from(row.observed_start_unix_seconds).unwrap_or(i64::MAX),
-                        i64::try_from(row.observed_end_unix_seconds).unwrap_or(i64::MAX),
-                        i64::try_from(row.received_at_unix_seconds).unwrap_or(i64::MAX),
-                        row.aggregate_complete,
-                        row.aggregate_start_unix_seconds
-                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                        row.aggregate_end_unix_seconds
-                            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                        row.payload,
-                    ],
-                )
-                .map_err(sqlite_error)?;
-        }
+        replace_repository_history_records_in_transaction(&transaction, removed, retained)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_history_records
+                 WHERE observed_end < ?1 AND is_tombstone = 0",
+                [i64::try_from(record_end_unix_seconds).unwrap_or(i64::MAX)],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "DELETE FROM repository_history_segments WHERE closed_at < ?1",
+                [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
+            )
+            .map_err(sqlite_error)?;
+        write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;
         #[cfg(test)]
-        let maintenance_result = if self
-            .fail_history_rewrite_maintenance
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        let maintenance_result = if fail_maintenance {
             Err(HistoryStorageError(
                 "injected history rewrite maintenance failure".to_owned(),
             ))
@@ -390,7 +342,9 @@ impl HistoryStorage {
         };
         #[cfg(not(test))]
         let maintenance_result = maintain_sqlite(connection);
-        maintenance_result
+        Ok(RepositoryCommitOutcome {
+            maintenance_degraded: finish_post_commit_maintenance(maintenance_result),
+        })
     }
 
     #[allow(dead_code)]
@@ -894,33 +848,6 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
-    pub(crate) fn delete_repository_history_before(
-        &self,
-        record_end_unix_seconds: u64,
-        segment_closed_at_unix_seconds: u64,
-    ) -> Result<()> {
-        let mut backend = self.lock_backend();
-        let Some(connection) = sqlite_connection(&mut backend)? else {
-            return Ok(());
-        };
-        let transaction = connection.transaction().map_err(sqlite_error)?;
-        transaction
-            .execute(
-                "DELETE FROM repository_history_records
-                 WHERE observed_end < ?1 AND is_tombstone = 0",
-                [i64::try_from(record_end_unix_seconds).unwrap_or(i64::MAX)],
-            )
-            .map_err(sqlite_error)?;
-        transaction
-            .execute(
-                "DELETE FROM repository_history_segments WHERE closed_at < ?1",
-                [i64::try_from(segment_closed_at_unix_seconds).unwrap_or(i64::MAX)],
-            )
-            .map_err(sqlite_error)?;
-        transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
-    }
-
     pub(crate) fn clear_repository_history(&self) -> Result<()> {
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
@@ -949,4 +876,30 @@ impl HistoryStorage {
             .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
             .map_err(sqlite_error)
     }
+}
+
+fn replace_repository_history_records_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    removed: &[RepositoryHistoryRecordRow],
+    retained: &[RepositoryHistoryRecordRow],
+) -> Result<()> {
+    for row in removed {
+        transaction
+            .execute(
+                "DELETE FROM repository_history_records
+                 WHERE source_node_id = ?1 AND source_epoch = ?2 AND stream = ?3
+                   AND sequence = ?4",
+                params![
+                    row.source_node_id,
+                    durable_i64(row.source_epoch, "source epoch")?,
+                    row.stream,
+                    durable_i64(row.sequence, "sequence")?,
+                ],
+            )
+            .map_err(sqlite_error)?;
+    }
+    for row in retained {
+        super::upsert_repository_history_record(transaction, row)?;
+    }
+    Ok(())
 }

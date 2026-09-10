@@ -338,14 +338,47 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     store.save().expect("persist resource state");
 }
 
-fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> Child {
+struct XpProcess {
+    child: Child,
+    unit: Option<String>,
+    pid: u32,
+}
+
+impl XpProcess {
+    fn id(&self) -> u32 {
+        self.pid
+    }
+}
+
+fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
     let log_path = data_dir.join(format!("{label}.log"));
     let stdout = File::create(&log_path).expect("create XP resource log");
     let stderr = stdout.try_clone().expect("clone XP resource log");
     let admin_hash =
         xp::admin_token::hash_admin_token_argon2id("mesh-resource-test-token-0000000000000000")
             .expect("hash test admin token");
-    Command::new(binary)
+    let child_cgroup = std::env::var_os("XP_MESH_RESOURCE_CHILD_CGROUP").is_some();
+    let unit = child_cgroup.then(|| format!("codex-xp-resource-{label}-{}", std::process::id()));
+    let mut command = if child_cgroup {
+        let mut command = Command::new("systemd-run");
+        command.args([
+            "--user",
+            "--scope",
+            "--collect",
+            "--unit",
+            unit.as_deref().expect("XP resource systemd unit"),
+            "-p",
+            "MemoryMax=128M",
+            "-p",
+            "MemorySwapMax=0",
+            "--",
+        ]);
+        command.arg(binary);
+        command
+    } else {
+        Command::new(binary)
+    };
+    command
         .args([
             "--data-dir",
             data_dir.to_str().expect("UTF-8 data dir"),
@@ -363,6 +396,11 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> Chil
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
+        .map(|child| XpProcess {
+            pid: child.id(),
+            child,
+            unit,
+        })
         .expect("spawn XP resource candidate")
 }
 
@@ -617,10 +655,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     max_pss_kib
 }
 
-async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {
+async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Some(status) = child.try_wait().expect("poll XP child") {
+        if let Some(status) = child.child.try_wait().expect("poll XP child") {
             let log = fs::read_to_string(log_path).unwrap_or_default();
             panic!("XP exited before readiness with {status}:\n{log}");
         }
@@ -628,6 +666,24 @@ async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {
             .await
             .is_ok()
         {
+            child.pid = child
+                .unit
+                .as_deref()
+                .and_then(|unit| {
+                    Command::new("systemctl")
+                        .args(["--user", "show", unit, "--property=MainPID", "--value"])
+                        .output()
+                        .ok()
+                })
+                .and_then(|output| {
+                    String::from_utf8(output.stdout)
+                        .ok()?
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                })
+                .filter(|pid| *pid > 0)
+                .unwrap_or_else(|| child.child.id());
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for XP");
@@ -698,19 +754,25 @@ fn read_cpu_ticks(pid: u32) -> u64 {
     user + system
 }
 
-async fn stop_child(child: &mut Child) {
-    unsafe {
-        libc::kill(child.id() as libc::pid_t, libc::SIGINT);
+async fn stop_child(child: &mut XpProcess) {
+    if let Some(unit) = child.unit.as_deref() {
+        let _ = Command::new("systemctl")
+            .args(["--user", "stop", unit])
+            .status();
+    } else {
+        unsafe {
+            libc::kill(child.child.id() as libc::pid_t, libc::SIGINT);
+        }
     }
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if child.try_wait().expect("poll stopped XP").is_some() {
+        if child.child.try_wait().expect("poll stopped XP").is_some() {
             return;
         }
         sleep(Duration::from_millis(50)).await;
     }
-    child.kill().expect("kill XP after grace period");
-    let _ = child.wait();
+    child.child.kill().expect("kill XP after grace period");
+    let _ = child.child.wait();
 }
 
 pub fn support_pids_from_env() -> Vec<u32> {
@@ -745,7 +807,7 @@ pub async fn run_resource_workload(
     let mut stack_peak_pss_kib = 0;
     let deadline = Instant::now() + duration;
     while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().expect("poll XP workload") {
+        if let Some(status) = child.child.try_wait().expect("poll XP workload") {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             panic!("XP exited during {label} workload with {status}:\n{log}");
         }

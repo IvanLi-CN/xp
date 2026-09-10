@@ -463,6 +463,21 @@ impl RepositoryReplicaRuntime {
             return self.persist_control_state();
         }
         let mut rows = fetched_rows.clone();
+        let mut decoded_rows = match rows
+            .iter()
+            .cloned()
+            .map(StoredRecord::from_sqlite_row)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "history retention deferred after malformed row"
+                );
+                return Ok(());
+            }
+        };
         let mut has_more = rows.len()
             == RETENTION_COMPACTION_PAGE_SIZE.saturating_add(RETENTION_COMPACTION_BUCKET_LOOKAHEAD);
         if rows.len() > RETENTION_COMPACTION_PAGE_SIZE {
@@ -470,16 +485,15 @@ impl RepositoryReplicaRuntime {
                 .last()
                 .expect("nonempty retention lookahead page")
                 .observed_start_unix_seconds;
-            let closed_prefix_len = rows
+            let closed_prefix_len = decoded_rows
                 .iter()
-                .rposition(|row| {
-                    let record = StoredRecord::from_sqlite_row(row.clone())
-                        .expect("SQLite compaction row was previously validated");
-                    retention::compaction_bucket_end(&record, now_unix_seconds)
+                .rposition(|record| {
+                    retention::compaction_bucket_end(record, now_unix_seconds)
                         .is_none_or(|bucket_end| bucket_end < page_boundary)
                 })
                 .map_or(0, |index| index + 1);
             rows.truncate(closed_prefix_len);
+            decoded_rows.truncate(closed_prefix_len);
         }
         has_more |= rows.len() < fetched_row_count;
         // A page can contain many retention buckets sharing one timestamp. Process that bounded
@@ -488,6 +502,11 @@ impl RepositoryReplicaRuntime {
         if rows.is_empty() && !fetched_rows.is_empty() {
             rows = fetched_rows.clone();
             has_more = true;
+            decoded_rows = rows
+                .iter()
+                .cloned()
+                .map(StoredRecord::from_sqlite_row)
+                .collect::<Result<Vec<_>, _>>()?;
         }
         if rows.is_empty() {
             // No closed bucket fits in this bounded lookahead. Retain the cursor and wait for
@@ -495,7 +514,7 @@ impl RepositoryReplicaRuntime {
             // bucket into memory.
             return Ok(());
         }
-        let continuation = self.snapshot.retention_compaction_continuation.take();
+        let continuation = self.snapshot.retention_compaction_continuation.clone();
         let continuation_aggregates = continuation
             .map(|continuation| {
                 if continuation.aggregates.is_empty() {
@@ -512,11 +531,7 @@ impl RepositoryReplicaRuntime {
                 .map(StoredRecord::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        let mut records = rows
-            .iter()
-            .cloned()
-            .map(StoredRecord::from_sqlite_row)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut records = decoded_rows;
         records.extend(continuation_aggregates);
         let should_continue = rows.len() == fetched_row_count && has_more;
         retention::prune_records(
@@ -529,56 +544,70 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
-        let history_changed = !removed_rows.is_empty();
-        // Make the cache invalidation durable before SQLite is changed. If the process exits
-        // after the row rewrite but before the final control snapshot, startup must rebuild the
-        // summary instead of trusting a cache for the pre-compaction contents.
-        if history_changed {
-            self.reset_partition_summary_cache();
-            self.persist_control_state()?;
-        }
-        if !rows.is_empty() {
-            let result = self
-                .storage
-                .replace_repository_history_records(&removed_rows, &retained);
-            self.finish_storage_write(result)?;
-        }
-        self.snapshot.retention_compaction_cursor =
-            if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
-                None
-            } else {
-                rows.last().map(RetentionCompactionCursor::from)
-            };
-        if should_continue {
+        let next_retention_cursor = if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
+            None
+        } else {
+            rows.last().map(RetentionCompactionCursor::from)
+        };
+        let next_retention_continuation = if should_continue {
             let boundary = rows
                 .last()
                 .cloned()
                 .map(StoredRecord::from_sqlite_row)
                 .transpose()?;
-            self.snapshot.retention_compaction_continuation =
-                Some(RetentionCompactionContinuation {
-                    aggregates: records
-                        .iter()
-                        .filter(|aggregate| {
-                            boundary.as_ref().is_some_and(|boundary| {
-                                retention::compaction_bucket_reaches(
-                                    aggregate,
-                                    boundary.observed_at_unix_seconds,
-                                    now_unix_seconds,
-                                )
-                            })
+            Some(RetentionCompactionContinuation {
+                aggregates: records
+                    .iter()
+                    .filter(|aggregate| {
+                        boundary.as_ref().is_some_and(|boundary| {
+                            retention::compaction_bucket_reaches(
+                                aggregate,
+                                boundary.observed_at_unix_seconds,
+                                now_unix_seconds,
+                            )
                         })
-                        .cloned()
-                        .collect(),
-                    aggregate: None,
-                });
+                    })
+                    .cloned()
+                    .collect(),
+                aggregate: None,
+            })
+        } else {
+            None
+        };
+        let previous_snapshot = self.snapshot.clone();
+        if !removed_rows.is_empty() {
+            self.reset_partition_summary_cache();
         }
-        let result = self.storage.delete_repository_history_before(
+        self.snapshot.retention_compaction_cursor = next_retention_cursor;
+        self.snapshot.retention_compaction_continuation = next_retention_continuation;
+        let control_payload = match serde_json::to_vec(&self.snapshot_for_persistence()) {
+            Ok(bytes) if bytes.len() <= super::MAX_RUNTIME_STATE_BYTES => bytes,
+            Ok(_) => {
+                self.snapshot = previous_snapshot;
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                return Err(RepositoryRuntimeError::Storage(error.to_string()));
+            }
+        };
+        let result = self.storage.replace_repository_history_records_and_prune(
+            &removed_rows,
+            &retained,
             now_unix_seconds.saturating_sub(policy.max_age_seconds()),
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
+            &control_payload,
         );
-        self.finish_storage_write(result)?;
-        self.persist_control_state()
+        match result {
+            Ok(outcome) => {
+                self.storage_degraded |= outcome.maintenance_degraded;
+                Ok(())
+            }
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                self.finish_storage_write::<(), _>(Err(error))
+            }
+        }
     }
 
     pub(crate) fn repository_coverage(

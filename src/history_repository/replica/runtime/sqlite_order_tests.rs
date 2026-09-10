@@ -4,8 +4,8 @@ use ed25519_dalek::SigningKey;
 use std::{fs, process::Command};
 
 use super::{
-    RepositoryPartitionSummary, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredRecord,
-    StoredSegment,
+    RepositoryPartitionSummary, RepositoryReplicaRuntime, RepositoryRuntimeError,
+    RetentionCompactionContinuation, StoredRecord, StoredSegment,
 };
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
@@ -53,7 +53,9 @@ fn malformed_sqlite_summary_row_does_not_block_replication_preparation() {
     runtime.snapshot.partition_summaries_complete = false;
 
     runtime
-        .prepare_for_replication(100)
+        .prepare_for_replication(
+            10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2,
+        )
         .expect("malformed summary row is deferred");
     assert!(!runtime.partition_summaries_ready());
     assert!(runtime.replication_summary().is_ok());
@@ -251,7 +253,7 @@ fn sqlite_partition_summary_cache_survives_restart_and_invalidates_on_late_recor
 }
 
 #[test]
-fn sqlite_retention_persists_summary_invalidation_before_committed_rewrite() {
+fn sqlite_retention_commits_summary_invalidation_with_rewrite() {
     let temporary = tempfile::tempdir().expect("SQLite temporary directory");
     let storage = HistoryStorage::open(temporary.path());
     let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
@@ -272,6 +274,11 @@ fn sqlite_retention_persists_summary_invalidation_before_committed_rewrite() {
         payload: b"payload".to_vec(),
         tombstone: false,
     };
+    let continuation_record = StoredRecord {
+        sequence: 1,
+        record_key: b"continuation".to_vec(),
+        ..row.clone()
+    };
     let row = row.sqlite_row().expect("SQLite row");
     storage
         .upsert_repository_history_records(std::slice::from_ref(&row))
@@ -288,13 +295,19 @@ fn sqlite_retention_persists_summary_invalidation_before_committed_rewrite() {
     }];
     runtime.snapshot.partition_summary_cursor = Some(RepositoryHistoryCompactionCursor::from(&row));
     runtime.snapshot.partition_summaries_complete = true;
+    runtime.snapshot.retention_compaction_continuation = Some(RetentionCompactionContinuation {
+        aggregates: vec![continuation_record],
+        aggregate: None,
+    });
     runtime
         .persist_control_state()
         .expect("persist ready cache");
 
     storage.set_history_rewrite_maintenance_failure_for_test(true);
     let now = 10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2;
-    assert!(runtime.prune_sqlite_retention(now).is_err());
+    runtime
+        .prune_sqlite_retention(now)
+        .expect("post-commit maintenance is degraded but rewrite is committed");
     assert!(!runtime.partition_summaries_ready());
 
     drop(runtime);
@@ -302,6 +315,13 @@ fn sqlite_retention_persists_summary_invalidation_before_committed_rewrite() {
     assert!(
         !restored.partition_summaries_ready(),
         "a committed rewrite must never restart with a stale complete cache"
+    );
+    assert!(
+        restored
+            .snapshot
+            .retention_compaction_continuation
+            .is_none(),
+        "the atomically committed page has no unfinished continuation"
     );
 }
 
