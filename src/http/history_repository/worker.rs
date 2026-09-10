@@ -43,7 +43,6 @@ mod source;
 mod source_records;
 #[cfg(test)]
 mod tests;
-mod tombstone_ack;
 #[cfg(test)]
 pub(super) use backfill::{
     HistoricalBackfillCollector, HistoricalBackfillSortKey, peer_backfill_stream_for_record,
@@ -69,9 +68,6 @@ use source::{
     source_record_with_key_for_subject,
 };
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
-pub(super) use tombstone_ack::{
-    propagate_tombstone_acknowledgements, schedule_tombstone_acknowledgement_fanout,
-};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
     source::spawn_local_source_worker(state.clone());
@@ -250,8 +246,6 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .source_delivery_capture_paused()?;
-    // Replay pages only drain the durable journal. Avoid rebuilding the live source payload for
-    // each page, which adds unnecessary SQLite reads and temporary allocations to every cycle.
     let mut source_batch = if capture_paused {
         SourceRecordBatch::empty()
     } else {
@@ -522,11 +516,12 @@ async fn receive_local_source_segment(
             &state.cluster.node_id,
         )?
     };
-    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?) {
-        schedule_tombstone_acknowledgement_fanout(
-            state,
-            ready_repository_ids.to_vec(),
-            receipt.tombstone_acknowledgements().to_vec(),
+    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
+        && !receipt.tombstone_acknowledgements().is_empty()
+    {
+        tracing::debug!(
+            count = receipt.tombstone_acknowledgements().len(),
+            "history tombstone acknowledgement fanout deferred to replication worker"
         );
     }
     Ok(())
@@ -969,9 +964,35 @@ async fn replicate_peer(
         }
         after_segment_id = Some(next);
     }
-    // The keyset traversal defines a bounded remote snapshot. Once every advertised segment
-    // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
-    // source for exact equality is not a valid convergence condition: ordinary sources append
-    // continuously, while the peer independently performs the symmetric pull.
     Ok(deep_verification_available)
+}
+
+pub(super) async fn propagate_tombstone_acknowledgements(
+    state: &AppState,
+    _ready_repository_ids: &[String],
+    acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
+) -> anyhow::Result<()> {
+    if acknowledgements.is_empty() {
+        return Ok(());
+    }
+    let peers = all_cluster_peers(state).await;
+    let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
+    let mut first_delivery_error = None::<anyhow::Error>;
+    for peer in peers
+        .iter()
+        .filter(|peer| peer.node_id != state.cluster.node_id)
+    {
+        if let Err(error) = repository_direct_request::<serde_json::Value>(
+            state,
+            peer,
+            Method::POST,
+            "/api/admin/_internal/history-repository/tombstone-ack",
+            body.clone(),
+        )
+        .await
+        {
+            first_delivery_error.get_or_insert(error.into());
+        }
+    }
+    first_delivery_error.map_or(Ok(()), Err)
 }
