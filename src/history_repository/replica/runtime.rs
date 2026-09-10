@@ -173,6 +173,18 @@ pub(crate) struct LocalQueryMetadata {
     clock_skew_seconds: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RepositoryPartitionSummary {
+    pub(crate) source_node_id: String,
+    pub(crate) source_epoch: u64,
+    pub(crate) stream: String,
+    pub(crate) partition: u32,
+    pub(crate) first_sequence: u64,
+    pub(crate) last_sequence: u64,
+    pub(crate) hash: [u8; 32],
+    pub(crate) record_count: u64,
+}
+
 impl LocalQueryMetadata {
     pub(crate) fn current_window(now_unix_seconds: u64) -> Self {
         Self {
@@ -248,6 +260,12 @@ pub(crate) struct RepositoryReplicaSnapshot {
     retention_compaction_cursor: Option<RetentionCompactionCursor>,
     #[serde(default)]
     retention_compaction_continuation: Option<RetentionCompactionContinuation>,
+    #[serde(default)]
+    partition_summaries: Vec<RepositoryPartitionSummary>,
+    #[serde(default)]
+    partition_summary_cursor: Option<RepositoryHistoryCompactionCursor>,
+    #[serde(default)]
+    partition_summaries_complete: bool,
 }
 
 impl Default for RepositoryReplicaSnapshot {
@@ -282,6 +300,9 @@ impl Default for RepositoryReplicaSnapshot {
             initial_peer_backfills: BTreeMap::new(),
             retention_compaction_cursor: None,
             retention_compaction_continuation: None,
+            partition_summaries: Vec::new(),
+            partition_summary_cursor: None,
+            partition_summaries_complete: false,
         }
     }
 }
@@ -472,6 +493,17 @@ impl RepositoryReplicaRuntime {
                 error = %error,
                 "repository history migration failed; continuing with JSON history"
             );
+        }
+        if runtime.uses_sqlite_history()
+            && runtime
+                .storage
+                .repository_history_record_count()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+                == 0
+        {
+            runtime.snapshot.partition_summaries.clear();
+            runtime.snapshot.partition_summary_cursor = None;
+            runtime.snapshot.partition_summaries_complete = true;
         }
         runtime.hydrate_source_delivery_journal()?;
         Ok(runtime)

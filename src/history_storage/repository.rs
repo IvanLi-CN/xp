@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 mod segments;
+mod summary;
 #[cfg(test)]
 pub(crate) use segments::segment_phase_sql;
 /// A repository-history row is deliberately stored outside the control snapshot.

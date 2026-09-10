@@ -11,8 +11,8 @@ use crate::history_sync::{
 };
 
 use super::{
-    RelaySegmentCursor, RepositoryReplicaRuntime, RepositoryRuntimeError,
-    RepositoryTombstoneAcknowledgement, StoredGap,
+    RelaySegmentCursor, RepositoryPartitionSummary, RepositoryReplicaRuntime,
+    RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
 };
 use crate::state::history_repository::replica::{
     AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaRecordKey, ReplicaWork,
@@ -39,18 +39,6 @@ pub(crate) struct RepositoryReplicaSummary {
     pub(crate) partitions_included: bool,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
     pub(crate) last_verified_unix_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct RepositoryPartitionSummary {
-    source_node_id: String,
-    source_epoch: u64,
-    stream: String,
-    partition: u32,
-    first_sequence: u64,
-    last_sequence: u64,
-    hash: [u8; 32],
-    record_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +196,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         now_unix_seconds: u64,
     ) -> Result<(), RepositoryRuntimeError> {
+        self.advance_partition_summary_rebuild_page()?;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.prune_retention(now_unix_seconds)
     }
@@ -469,12 +458,17 @@ impl RepositoryReplicaRuntime {
         };
         Ok(RepositoryReplicaSummary {
             segment_ids: segments.into_iter().map(|segment| segment.id).collect(),
-            partitions: if deep_verification && after_segment_id.is_none() {
+            partitions: if deep_verification
+                && after_segment_id.is_none()
+                && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete)
+            {
                 self.retained_partition_summaries()?
             } else {
                 Vec::new()
             },
-            partitions_included: deep_verification && after_segment_id.is_none(),
+            partitions_included: deep_verification
+                && after_segment_id.is_none()
+                && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete),
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
             next_segment_id,
@@ -698,37 +692,31 @@ impl RepositoryReplicaRuntime {
     fn retained_partition_summaries(
         &self,
     ) -> Result<Vec<RepositoryPartitionSummary>, RepositoryRuntimeError> {
-        let mut summaries = BTreeMap::new();
         if self.uses_sqlite_history() {
-            let mut offset = 0;
-            loop {
-                let page = self.sqlite_records(None, None, None, offset, 1_000)?;
-                let page_len = page.len();
-                accumulate_record_partitions(&mut summaries, page.iter())?;
-                if page_len < 1_000 {
-                    break;
-                }
-                offset += page_len;
-            }
-        } else {
-            let mut records = self
-                .snapshot
-                .records
-                .iter()
-                .filter(|record| !record.tombstone)
-                .cloned()
-                .collect::<Vec<_>>();
-            records.sort_by_key(|record| {
-                (
-                    record.observed_at_unix_seconds,
-                    record.source_node_id.clone(),
-                    record.source_epoch,
-                    record.stream.clone(),
-                    record.sequence,
-                )
+            return Ok(if self.snapshot.partition_summaries_complete {
+                self.snapshot.partition_summaries.clone()
+            } else {
+                Vec::new()
             });
-            accumulate_record_partitions(&mut summaries, records.iter())?;
         }
+        let mut summaries = BTreeMap::new();
+        let mut records = self
+            .snapshot
+            .records
+            .iter()
+            .filter(|record| !record.tombstone)
+            .cloned()
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| {
+            (
+                record.observed_at_unix_seconds,
+                record.source_node_id.clone(),
+                record.source_epoch,
+                record.stream.clone(),
+                record.sequence,
+            )
+        });
+        accumulate_record_partitions(&mut summaries, records.iter())?;
         Ok(summaries.into_values().collect())
     }
 }
@@ -738,7 +726,7 @@ struct SummarySegment {
     cursor: String,
 }
 
-fn accumulate_record_partitions<'a>(
+pub(super) fn accumulate_record_partitions<'a>(
     summaries: &mut BTreeMap<(String, u64, String, u32), RepositoryPartitionSummary>,
     records: impl IntoIterator<Item = &'a super::StoredRecord>,
 ) -> Result<(), RepositoryRuntimeError> {
@@ -813,7 +801,7 @@ fn summary_segment_cursor(contains_tombstone: bool, id: &str) -> String {
     format!("{phase}:{id}")
 }
 
-fn record_partition_summary(
+pub(super) fn record_partition_summary(
     record: &super::StoredRecord,
 ) -> Result<RepositoryPartitionSummary, RepositoryRuntimeError> {
     use sha2::Digest as _;
@@ -844,7 +832,7 @@ fn record_partition_summary(
     })
 }
 
-fn combine_partition_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
+pub(super) fn combine_partition_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     use sha2::Digest as _;
 
     let mut hasher = sha2::Sha256::new();

@@ -311,6 +311,7 @@ impl RepositoryReplicaRuntime {
                     record,
                 );
                 if self.uses_sqlite_history() {
+                    self.reset_partition_summary_cache();
                     mutation.records.push(stored.sqlite_row()?);
                 } else {
                     self.snapshot.records.push(stored);
@@ -328,6 +329,7 @@ impl RepositoryReplicaRuntime {
                 record,
             );
             if self.uses_sqlite_history() {
+                self.update_partition_summary_for_record(&stored)?;
                 mutation.records.push(stored.sqlite_row()?);
             } else {
                 self.snapshot.records.push(stored);
@@ -400,6 +402,7 @@ impl RepositoryReplicaRuntime {
         let (schema_id, schema_version) = key.schema();
         let prefix = key.record_key().ends_with(b":");
         if self.uses_sqlite_history() {
+            self.reset_partition_summary_cache();
             mutation.tombstones.push(RepositoryHistoryTombstone {
                 source_node_id: key.source_node_id().to_owned(),
                 source_epoch: key.source_epoch(),

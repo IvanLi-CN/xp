@@ -815,6 +815,7 @@ async fn replicate_peer(
     propagate_acknowledgements: bool,
 ) -> anyhow::Result<bool> {
     let mut after_segment_id = None::<String>;
+    let mut deep_verification_available = !work.is_deep_verification();
     loop {
         let path = after_segment_id.as_ref().map_or_else(
             || {
@@ -829,6 +830,9 @@ async fn replicate_peer(
         );
         let remote_summary: RepositoryReplicaSummary =
             repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await?;
+        if work.is_deep_verification() && after_segment_id.is_none() {
+            deep_verification_available = remote_summary.partitions_included;
+        }
         let requires_repair = {
             let runtime = state.repository_replica.lock().await;
             runtime.requires_repair(&remote_summary, work.is_deep_verification())?
@@ -949,7 +953,7 @@ async fn replicate_peer(
     // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
     // source for exact equality is not a valid convergence condition: ordinary sources append
     // continuously, while the peer independently performs the symmetric pull.
-    Ok(true)
+    Ok(deep_verification_available)
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(
