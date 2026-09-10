@@ -1,4 +1,20 @@
 use super::*;
+use futures_util::StreamExt;
+use http_body_util::BodyExt as _;
+use reqwest::ResponseBuilderExt;
+use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+pub(crate) const REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS: usize = 8;
+pub(super) const REVERSE_HEALTH_RESERVED_SLOTS: usize = 1;
+pub(super) type ReverseInFlight =
+    Arc<tokio::sync::Mutex<std::collections::BTreeMap<String, Arc<Semaphore>>>>;
+
+#[derive(Clone, Copy)]
+pub(super) enum ReverseRequestClass {
+    Control,
+    Health,
+}
 
 pub(super) fn reverse_authority(route: &ReverseRelayRoute, peer: &MeshPeerTarget) -> String {
     crate::reverse_mesh::derive_reverse_authority(
@@ -16,7 +32,100 @@ pub(super) struct LocalReverseRelay {
     pub(super) base_url: String,
 }
 
+impl PeerCircuitBreakers {
+    pub(super) async fn try_reverse_slot(
+        &self,
+        rendezvous_node_id: &str,
+        class: ReverseRequestClass,
+    ) -> Result<OwnedSemaphorePermit, MeshRequestError> {
+        let mut limits = self.reverse_in_flight.lock().await;
+        let semaphore = limits
+            .entry(rendezvous_node_id.to_owned())
+            .or_insert_with(|| Arc::new(Semaphore::new(REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS)))
+            .clone();
+        if matches!(class, ReverseRequestClass::Control)
+            && semaphore.available_permits() <= REVERSE_HEALTH_RESERVED_SLOTS
+        {
+            return Err(MeshRequestError::Reverse(format!(
+                "reverse relay concurrency limit reached for rendezvous {rendezvous_node_id}"
+            )));
+        }
+        semaphore.clone().try_acquire_owned().map_err(|_| {
+            MeshRequestError::Reverse(format!(
+                "reverse relay concurrency limit reached for rendezvous {rendezvous_node_id}"
+            ))
+        })
+    }
+}
+
+pub(super) fn attach_reverse_slot(
+    response: reqwest::Response,
+    permit: OwnedSemaphorePermit,
+) -> reqwest::Response {
+    let response_url = response.url().clone();
+    let response: axum::http::Response<reqwest::Body> = response.into();
+    let (mut parts, body) = response.into_parts();
+    let url_extensions = axum::http::Response::builder()
+        .url(response_url)
+        .body(())
+        .expect("response URL extension builder")
+        .into_parts()
+        .0
+        .extensions;
+    let mut extensions = url_extensions;
+    extensions.extend(std::mem::take(&mut parts.extensions));
+    parts.extensions = extensions;
+    let body = body.into_data_stream();
+    let guarded_body =
+        futures_util::stream::unfold((body, Some(permit)), |(mut body, mut permit)| async move {
+            match body.next().await {
+                Some(Ok(item)) => Some((Ok(item), (body, permit))),
+                Some(Err(error)) => {
+                    drop(permit.take());
+                    Some((Err(error), (body, permit)))
+                }
+                None => {
+                    drop(permit.take());
+                    None
+                }
+            }
+        });
+    let response =
+        axum::http::Response::from_parts(parts, reqwest::Body::wrap_stream(guarded_body));
+    reqwest::Response::from(response)
+}
+
 impl MeshAwareHttpClient {
+    pub(super) async fn record_reverse_sample(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        request: &MeshRequest,
+        route: &ReverseRelayRoute,
+    ) {
+        if let Some(telemetry) = &self.telemetry {
+            let _ = telemetry
+                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
+                    peer_id: peer.node_id.clone(),
+                    peer_name: peer.node_name.clone(),
+                    rendezvous: route.rendezvous.node_id.clone(),
+                    rendezvous_role: route.role.as_str().to_string(),
+                    primary_rendezvous: route.assignment.primary_node_id.clone(),
+                    standby_rendezvous: route.assignment.standby_node_id.clone(),
+                    generation: route.assignment.generation,
+                    sample: telemetry_sample(
+                        TelemetryPath::Mesh,
+                        true,
+                        started.elapsed(),
+                        true,
+                        request.updates_active_path,
+                        None,
+                    ),
+                })
+                .await;
+        }
+    }
+
     /// Uses the local XP API as the portal when this process is the assigned Rendezvous.
     pub fn with_local_reverse_relay(
         mut self,
@@ -77,6 +186,7 @@ impl MeshAwareHttpClient {
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
                     budget,
+                    ReverseRequestClass::Health,
                 )
                 .await
             {
@@ -123,6 +233,7 @@ impl MeshAwareHttpClient {
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             route_budget(request.total_budget),
+            ReverseRequestClass::Health,
         )
         .await
         .map(|_| ())
@@ -172,6 +283,7 @@ impl MeshAwareHttpClient {
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
                     budget,
+                    ReverseRequestClass::Control,
                 )
                 .await
             {

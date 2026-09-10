@@ -46,6 +46,12 @@
 - Reverse route reconciliation now reads existing Xray rule tags before adding desired routes.
   The only duplicate-response compatibility branch accepts `app/router: duplicate ruleTag` for
   the exact desired tag.
+- Reverse outer requests now use a fixed eight-request in-flight budget per Rendezvous on the
+  process's shared control-plane client. Ordinary requests may use seven slots while one remains
+  available to signed health probes; the budget is shared by cloned Mesh clients, rejects excess
+  requests before opening a new underlay stream, and binds its permit to a guarded response
+  body/stream until that stream is consumed or dropped. Direct/Public fallback, assignments, and
+  Link leases are unchanged.
 - Fresh-join bootstrap links use the domain-separated `ReverseRole::Bootstrap` tag/UUID/origin
   while the durable join operation is active. Both Rendezvous and the learner switch to the
   formal Primary/Standby derivation only after the operation reaches a terminal phase; stale

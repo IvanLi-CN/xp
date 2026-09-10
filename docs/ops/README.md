@@ -116,8 +116,13 @@ Host-managed mode assumptions:
   password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
   A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
   120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
-  bounded backoff. Repository synchronization keeps both direct paths and follows the same
-  Reverse-before-dynamic-relay order.
+  bounded backoff. XP also admits at most eight concurrent Reverse outer requests per Rendezvous
+  across all cloned clients; ordinary requests use at most seven so one slot remains for signed
+  health probes. Excess requests fail before opening another underlay stream and follow the
+  existing fallback/error policy. The slot remains held while the response body/stream is live.
+  This is a fixed safety limit with no node-local override.
+  Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-
+  relay order.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.

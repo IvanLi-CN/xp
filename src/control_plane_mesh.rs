@@ -55,6 +55,7 @@ struct PeerCircuit {
 #[derive(Clone, Default)]
 pub struct PeerCircuitBreakers {
     peers: Arc<Mutex<BTreeMap<String, PeerCircuit>>>,
+    reverse_in_flight: reverse::ReverseInFlight,
 }
 
 impl PeerCircuitBreakers {
@@ -587,6 +588,11 @@ impl MeshAwareHttpClient {
             && let Some(reverse_route) =
                 self.reverse_routes.read().await.get(&peer.node_id).cloned()
         {
+            let reverse_class = if request.route == InternalRoute::HealthV2 {
+                reverse::ReverseRequestClass::Health
+            } else {
+                reverse::ReverseRequestClass::Control
+            };
             for candidate in reverse_route.candidates() {
                 let elapsed = started.elapsed();
                 let reverse_budget = route_budget(request.total_budget)
@@ -602,6 +608,7 @@ impl MeshAwareHttpClient {
                         cluster_ca_key_pem,
                         cluster_ca_cert_pem,
                         reverse_budget,
+                        reverse_class,
                     )
                     .await
                 {
@@ -767,6 +774,7 @@ impl MeshAwareHttpClient {
         Ok(response)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_reverse_relay(
         &self,
         peer: &MeshPeerTarget,
@@ -775,6 +783,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         budget: Duration,
+        class: reverse::ReverseRequestClass,
     ) -> Result<reqwest::Response, MeshRequestError> {
         if route.assignment.target_node_id != peer.node_id
             || !route
@@ -787,6 +796,10 @@ impl MeshAwareHttpClient {
                 "invalid reverse assignment or recursive route".to_string(),
             ));
         }
+        let reverse_slot = self
+            .circuits
+            .try_reverse_slot(&route.rendezvous.node_id, class)
+            .await?;
         request
             .path_and_query
             .parse::<axum::http::Uri>()
@@ -950,36 +963,7 @@ impl MeshAwareHttpClient {
             response.status().as_u16(),
             inner_ack,
         )?;
-        Ok(response)
-    }
-    async fn record_reverse_sample(
-        &self,
-        peer: &MeshPeerTarget,
-        started: Instant,
-        request: &MeshRequest,
-        route: &ReverseRelayRoute,
-    ) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
-                    peer_id: peer.node_id.clone(),
-                    peer_name: peer.node_name.clone(),
-                    rendezvous: route.rendezvous.node_id.clone(),
-                    rendezvous_role: route.role.as_str().to_string(),
-                    primary_rendezvous: route.assignment.primary_node_id.clone(),
-                    standby_rendezvous: route.assignment.standby_node_id.clone(),
-                    generation: route.assignment.generation,
-                    sample: telemetry_sample(
-                        TelemetryPath::Mesh,
-                        true,
-                        started.elapsed(),
-                        true,
-                        request.updates_active_path,
-                        None,
-                    ),
-                })
-                .await;
-        }
+        Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }
     async fn record_mesh_transport_failure(
         &self,
