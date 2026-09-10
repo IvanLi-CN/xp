@@ -45,6 +45,24 @@ fn disjoint_backpressure_ranges_remain_independent() {
 }
 
 #[test]
+fn backpressure_gap_requests_are_bounded_to_the_repair_limit() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::empty(storage);
+    runtime.snapshot.local_source.epoch = 7;
+
+    for index in 0..65 {
+        let sequence = index * 2 + 1;
+        runtime.record_local_source_backpressure_gap("runtime", sequence, sequence, sequence);
+    }
+
+    let gaps = runtime.local_source_backpressure_gaps("node-a");
+    assert_eq!(gaps.len(), 64);
+    assert_eq!(gaps[0].first_sequence, 1);
+    assert_eq!(gaps[63].first_sequence, 127);
+}
+
+#[test]
 fn failed_sqlite_control_write_reports_read_only_degradation() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());

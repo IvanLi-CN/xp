@@ -12,9 +12,7 @@ pub(super) fn source_gaps_match_identity(
     source_node_id: &str,
 ) -> bool {
     gaps.len() <= MAX_REPAIR_REQUEST_IDS
-        && gaps
-            .iter()
-            .all(|gap| gap.source_node_id == source_node_id && gap.permanent)
+        && gaps.iter().all(|gap| gap.source_node_id == source_node_id)
 }
 
 pub(in crate::http) async fn admin_internal_receive_history_repository_gaps(
@@ -85,5 +83,49 @@ pub(super) async fn deliver_source_gaps(
     {
         Ok(_) => Ok((true, false)),
         Err(error) => Ok((false, error.is_transport())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_gaps_match_identity;
+    use crate::state::history_repository::replica::RepositoryReplicaGap;
+
+    fn gap(source_node_id: &str, permanent: bool) -> RepositoryReplicaGap {
+        RepositoryReplicaGap {
+            source_node_id: source_node_id.to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            last_sequence: 2,
+            start_unix_seconds: 1,
+            end_unix_seconds: 2,
+            permanent,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn source_gap_validation_accepts_recoverable_gaps_from_the_authenticated_source() {
+        assert!(source_gaps_match_identity(
+            &[gap("source-a", false)],
+            "source-a"
+        ));
+        assert!(source_gaps_match_identity(
+            &[gap("source-a", true)],
+            "source-a"
+        ));
+    }
+
+    #[test]
+    fn source_gap_validation_rejects_foreign_or_oversized_batches() {
+        assert!(!source_gaps_match_identity(
+            &[gap("source-b", false)],
+            "source-a"
+        ));
+        let gaps = (0..=super::MAX_REPAIR_REQUEST_IDS)
+            .map(|_| gap("source-a", false))
+            .collect::<Vec<_>>();
+        assert!(!source_gaps_match_identity(&gaps, "source-a"));
     }
 }

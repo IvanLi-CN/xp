@@ -58,6 +58,13 @@ gap is valid only after the original range has expired under the unchanged
 source-retention policy and neither the Source nor any ready repository can
 supply it.
 
+Internal source-delivery requests authenticate and pin the declared source
+identity before applying gap metadata. Recoverable and permanent gaps from that
+authenticated source are both accepted, while gaps naming another source or
+exceeding the bounded 64-item request limit are rejected. The `permanent` flag
+continues to control only whether the receiver may advance past an expired
+range; it does not gate delivery of recoverable backlog.
+
 A syncing repository enters ready only after its durable catch-up checkpoints
 cover the bounded known union, no Recoverable Backlog remains, and the existing
 five-minute stability window completes. An agreed permanent gap does not block

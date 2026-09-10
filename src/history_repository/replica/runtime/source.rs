@@ -743,10 +743,12 @@ impl RepositoryReplicaRuntime {
         &self,
         source_node_id: &str,
     ) -> Vec<RepositoryReplicaGap> {
+        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
         self.snapshot
             .local_source
             .backpressure_gaps
             .iter()
+            .take(MAX_SOURCE_GAPS_PER_REQUEST)
             .map(|(key, gap)| RepositoryReplicaGap {
                 source_node_id: source_node_id.to_owned(),
                 source_epoch: gap.source_epoch,
