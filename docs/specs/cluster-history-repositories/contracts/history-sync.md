@@ -63,7 +63,10 @@ identity before applying gap metadata. Recoverable and permanent gaps from that
 authenticated source are both accepted, while gaps naming another source or
 exceeding the bounded 64-item request limit are rejected. The `permanent` flag
 continues to control only whether the receiver may advance past an expired
-range; it does not gate delivery of recoverable backlog.
+range; it does not gate delivery of recoverable backlog. When more than 64
+recoverable ranges are retained, the source persists a page cursor and rotates
+through the full set across delivery cycles, so the request bound never drops a
+range permanently.
 
 A syncing repository enters ready only after its durable catch-up checkpoints
 cover the bounded known union, no Recoverable Backlog remains, and the existing
