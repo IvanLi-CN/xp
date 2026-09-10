@@ -104,7 +104,9 @@
   order-repair cursor and completion marker are initialized idempotently in the schema transaction
   without decoding payloads; a journal with no legacy rows is marked complete in constant time
   after the initialization aggregate. Replay pages contain at most 256 segments and 1 MiB of wire
-  data, so a large backlog cannot inflate the XP process working set.
+  data, so a large backlog cannot inflate the XP process working set. A capacity-suspended source
+  skips only new capture and continues replaying existing rows; each source worker cycle processes
+  at most eight successful replay pages and stops immediately on a failed page.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary

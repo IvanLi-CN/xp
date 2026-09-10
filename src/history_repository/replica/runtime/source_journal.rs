@@ -6,6 +6,57 @@ use crate::state::history_storage::{
 use super::*;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn local_source_pending_segments_page(&self) -> Vec<RepositoryReplicaSegment> {
+        const MAX_SEGMENTS: usize = 256;
+        const MAX_WIRE_BYTES: usize = 1024 * 1024;
+        let mut streams = self
+            .snapshot
+            .local_source
+            .streams
+            .iter()
+            .collect::<Vec<_>>();
+        // Tombstones remain ahead of live streams so a deletion cannot be overtaken by a later
+        // record that resurrects the same key.
+        streams.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
+        let mut page = Vec::new();
+        let mut wire_bytes = 0_usize;
+        'streams: for (_, state) in streams {
+            for pending in &state.pending {
+                if page.len() == MAX_SEGMENTS {
+                    break 'streams;
+                }
+                let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
+                if next_wire_bytes > MAX_WIRE_BYTES {
+                    break 'streams;
+                }
+                wire_bytes = next_wire_bytes;
+                page.push(RepositoryReplicaSegment {
+                    identity: pending.identity.clone(),
+                    wire: pending.wire.clone(),
+                });
+            }
+        }
+        page
+    }
+
+    pub(crate) fn source_delivery_capture_paused(&self) -> Result<bool, RepositoryRuntimeError> {
+        if !self.storage.is_sqlite() {
+            return Ok(false);
+        }
+        if self
+            .storage
+            .source_delivery_journal_capacity_suspended()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
+        {
+            return Ok(true);
+        }
+        let available = self
+            .storage
+            .available_bytes()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        Ok(available < 256 * 1024 * 1024)
+    }
+
     pub(super) fn ensure_source_delivery_capacity(
         &self,
         defer_journal: bool,

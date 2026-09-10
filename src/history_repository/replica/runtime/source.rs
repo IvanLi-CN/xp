@@ -332,18 +332,6 @@ impl RepositoryReplicaRuntime {
         let journal_ready = self.hydrate_source_delivery_journal()?;
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
-        if self.storage.is_sqlite() {
-            let available = self
-                .storage
-                .available_bytes()
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-            if available < 256 * 1024 * 1024 {
-                return Err(RepositoryRuntimeError::WriteStopped(
-                    HistoryWriteAvailability::DegradedLowSpace,
-                ));
-            }
-            self.ensure_source_delivery_capacity(options.defer_journal)?;
-        }
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
         for record in records {
             if record.is_tombstone()
@@ -373,6 +361,18 @@ impl RepositoryReplicaRuntime {
             } else {
                 Vec::new()
             });
+        }
+        if self.storage.is_sqlite() {
+            let available = self
+                .storage
+                .available_bytes()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if available < 256 * 1024 * 1024 {
+                return Err(RepositoryRuntimeError::WriteStopped(
+                    HistoryWriteAvailability::DegradedLowSpace,
+                ));
+            }
+            self.ensure_source_delivery_capacity(options.defer_journal)?;
         }
         if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
             return Err(RepositoryRuntimeError::Storage(
