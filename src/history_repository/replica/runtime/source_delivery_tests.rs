@@ -82,7 +82,7 @@ fn source_backlog_does_not_become_a_permanent_gap_when_delivery_is_delayed() {
             .expect("queue delayed source segment");
     }
 
-    assert!(runtime.local_source_backpressure_gaps("node-a").is_empty());
+    assert!(runtime.local_source_has_no_backpressure_gaps_for_test("node-a"));
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     assert_eq!(storage.source_delivery_journal().unwrap().len(), 9);
     assert_eq!(runtime.local_source_next_sequence("runtime"), Some(9));

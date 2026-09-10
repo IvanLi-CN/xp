@@ -27,6 +27,8 @@ pub(super) struct LocalSourceState {
     primary_failure_repository_id: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     backpressure_gaps: BTreeMap<String, LocalSourceGap>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backpressure_gap_cursor: Option<String>,
     /// Durable marker-to-cursor mapping. Tombstones use their own stream, so their sequence
     /// cannot be reconstructed from the affected schema's live cursor.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -66,6 +68,7 @@ impl LocalSourceState {
         }
         self.streams.clear();
         self.backpressure_gaps.clear();
+        self.backpressure_gap_cursor = None;
         self.deletion_marker_keys.clear();
         self.primary_failure_cycles = 0;
         self.standby_success_cycles = 0;
@@ -740,25 +743,73 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn local_source_backpressure_gaps(
-        &self,
+        &mut self,
         source_node_id: &str,
-    ) -> Vec<RepositoryReplicaGap> {
-        self.snapshot
+    ) -> Result<Vec<RepositoryReplicaGap>, RepositoryRuntimeError> {
+        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+        let keys = self
+            .snapshot
             .local_source
             .backpressure_gaps
-            .iter()
-            .map(|(key, gap)| RepositoryReplicaGap {
-                source_node_id: source_node_id.to_owned(),
-                source_epoch: gap.source_epoch,
-                stream: backpressure_gap_stream(key).to_owned(),
-                first_sequence: gap.first_sequence,
-                last_sequence: gap.last_sequence,
-                start_unix_seconds: gap.start_unix_seconds,
-                end_unix_seconds: gap.end_unix_seconds,
-                permanent: false,
-                reason: None,
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        if keys.is_empty() {
+            self.snapshot.local_source.backpressure_gap_cursor = None;
+            return Ok(Vec::new());
+        }
+        let start = self
+            .snapshot
+            .local_source
+            .backpressure_gap_cursor
+            .as_ref()
+            .and_then(|cursor| keys.iter().position(|key| key == cursor))
+            .map_or(0, |index| (index + 1) % keys.len());
+        let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
+        let selected_keys = (0..page_len)
+            .map(|offset| keys[(start + offset) % keys.len()].clone())
+            .collect::<Vec<_>>();
+        self.snapshot.local_source.backpressure_gap_cursor = selected_keys.last().cloned();
+        let gaps = selected_keys
+            .into_iter()
+            .filter_map(|key| {
+                self.snapshot
+                    .local_source
+                    .backpressure_gaps
+                    .get(&key)
+                    .map(|gap| RepositoryReplicaGap {
+                        source_node_id: source_node_id.to_owned(),
+                        source_epoch: gap.source_epoch,
+                        stream: backpressure_gap_stream(&key).to_owned(),
+                        first_sequence: gap.first_sequence,
+                        last_sequence: gap.last_sequence,
+                        start_unix_seconds: gap.start_unix_seconds,
+                        end_unix_seconds: gap.end_unix_seconds,
+                        permanent: false,
+                        reason: None,
+                    })
             })
-            .collect()
+            .collect();
+        self.persist_control_state()?;
+        Ok(gaps)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_source_backpressure_gaps_for_test(
+        &mut self,
+        source_node_id: &str,
+    ) -> Vec<RepositoryReplicaGap> {
+        self.local_source_backpressure_gaps(source_node_id)
+            .expect("build gap page")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_source_has_no_backpressure_gaps_for_test(
+        &mut self,
+        source_node_id: &str,
+    ) -> bool {
+        self.local_source_backpressure_gaps_for_test(source_node_id)
+            .is_empty()
     }
 
     pub(crate) fn local_source_tombstones_fully_acknowledged(

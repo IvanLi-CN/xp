@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
 
@@ -37,11 +37,43 @@ fn disjoint_backpressure_ranges_remain_independent() {
     runtime.record_local_source_backpressure_gap("runtime", 8, 8, 100);
     runtime.record_local_source_backpressure_gap("runtime", 10, 10, 120);
 
-    let gaps = runtime.local_source_backpressure_gaps("node-a");
+    let gaps = runtime
+        .local_source_backpressure_gaps("node-a")
+        .expect("build gap page");
     assert_eq!(gaps.len(), 2);
     assert_eq!(gaps[0].stream, "runtime");
     assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (8, 8));
     assert_eq!((gaps[1].first_sequence, gaps[1].last_sequence), (10, 10));
+}
+
+#[test]
+fn backpressure_gap_requests_rotate_across_the_repair_limit() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::empty(storage.clone());
+    runtime.snapshot.local_source.epoch = 7;
+
+    for index in 0..65 {
+        let sequence = index * 2 + 1;
+        runtime.record_local_source_backpressure_gap("runtime", sequence, sequence, sequence);
+    }
+
+    let first_page = runtime
+        .local_source_backpressure_gaps("node-a")
+        .expect("build first gap page");
+    let mut restarted = RepositoryReplicaRuntime::load(storage).expect("reload runtime");
+    let second_page = restarted
+        .local_source_backpressure_gaps("node-a")
+        .expect("build second gap page");
+    assert_eq!(first_page.len(), 64);
+    assert_eq!(second_page.len(), 64);
+    let all_sequences = first_page
+        .iter()
+        .chain(&second_page)
+        .map(|gap| gap.first_sequence)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(all_sequences.len(), 65);
+    assert!(all_sequences.contains(&129));
 }
 
 #[test]
