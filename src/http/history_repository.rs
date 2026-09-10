@@ -567,8 +567,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     }
     let mut acknowledgements = Vec::new();
     for segment in batch.segments {
-        // The frame authenticates the forwarding repository; the segment authenticates its source.
-        if !identity_is_pinned_for_node(&state, &segment.identity).await? {
+        let valid_identity = if source_is_ready_repository {
+            identity_is_valid_for_history_replay(&state, &segment.identity).await?
+        } else {
+            identity_is_pinned_for_node(&state, &segment.identity).await?
+        };
+        if !valid_identity {
             return Err(ApiError::unauthorized(
                 "relayed repository segment identity is not pinned",
             ));
