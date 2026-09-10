@@ -202,7 +202,7 @@ async fn repair_ready_peer_catch_up_page(
         &repair.unavailable_segment_ids,
     )?;
     for segment in repair.segments {
-        if !super::super::super::identity_is_pinned_for_node(state, &segment.identity)
+        if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
             .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
         {

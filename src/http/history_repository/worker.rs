@@ -898,7 +898,7 @@ async fn replicate_peer(
                         )?;
                     }
                     for segment in repair.segments {
-                        if !super::identity_is_pinned_for_node(state, &segment.identity)
+                        if !super::identity_is_valid_for_history_replay(state, &segment.identity)
                             .await
                             .map_err(|_| {
                                 anyhow::anyhow!("check repository repair segment identity")

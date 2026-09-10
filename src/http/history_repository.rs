@@ -308,6 +308,30 @@ pub(super) async fn identity_is_pinned_for_node(
     Ok(&expected == identity)
 }
 
+/// Historical repository rows can outlive the cluster member that originally produced them.
+/// Replay still verifies the deterministic cluster identity, but it must not require the source
+/// to remain in the current membership map. Live source delivery keeps the stricter pinned check.
+pub(super) async fn identity_is_valid_for_history_replay(
+    state: &AppState,
+    identity: &RepositoryNodeIdentity,
+) -> Result<bool, ApiError> {
+    let node_id = identity.node_id().clone();
+    let configured_identity = {
+        let store = state.store.lock().await;
+        store
+            .state()
+            .repository_membership
+            .as_ref()
+            .and_then(|membership| membership.repository(&node_id))
+            .map(|member| member.identity().clone())
+    };
+    let expected = match configured_identity {
+        Some(identity) => identity,
+        None => derived_repository_identity(state, node_id)?,
+    };
+    Ok(&expected == identity)
+}
+
 fn relay_frame_matches_source(
     frame: &crate::history_sync::RelayFrame,
     source_keypair: crate::history_sync::RelayKeypair,
@@ -543,8 +567,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
     }
     let mut acknowledgements = Vec::new();
     for segment in batch.segments {
-        // The frame authenticates the forwarding repository; the segment authenticates its source.
-        if !identity_is_pinned_for_node(&state, &segment.identity).await? {
+        let valid_identity = if source_is_ready_repository {
+            identity_is_valid_for_history_replay(&state, &segment.identity).await?
+        } else {
+            identity_is_pinned_for_node(&state, &segment.identity).await?
+        };
+        if !valid_identity {
             return Err(ApiError::unauthorized(
                 "relayed repository segment identity is not pinned",
             ));

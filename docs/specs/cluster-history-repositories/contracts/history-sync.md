@@ -84,7 +84,8 @@ Administrators cannot write lifecycle, convergence, capacity or identity fields.
 Every source node derives the same pinned identity from cluster material; an ordinary source may
 send only its own identity, while a repository sender must exactly match its current Raft member
 identity. Receivers reject a same-node-id segment with substituted public keys before accepting
-or forwarding it.
+or forwarding it. A history replay from an already-serving repository may cover a retired source
+node, but only when its identity exactly matches the deterministic cluster-derived identity.
 
 `subject_node_id` scopes records and coverage to one node for the existing
 runtime, traffic, connection, and IP views. `page_size` and `page_cursor` remain
