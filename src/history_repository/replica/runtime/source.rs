@@ -332,18 +332,6 @@ impl RepositoryReplicaRuntime {
         let journal_ready = self.hydrate_source_delivery_journal()?;
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
-        if self.storage.is_sqlite() {
-            let available = self
-                .storage
-                .available_bytes()
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-            if available < 256 * 1024 * 1024 {
-                return Err(RepositoryRuntimeError::WriteStopped(
-                    HistoryWriteAvailability::DegradedLowSpace,
-                ));
-            }
-            self.ensure_source_delivery_capacity(options.defer_journal)?;
-        }
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
         for record in records {
             if record.is_tombstone()
@@ -373,6 +361,18 @@ impl RepositoryReplicaRuntime {
             } else {
                 Vec::new()
             });
+        }
+        if self.storage.is_sqlite() {
+            let available = self
+                .storage
+                .available_bytes()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if available < 256 * 1024 * 1024 {
+                return Err(RepositoryRuntimeError::WriteStopped(
+                    HistoryWriteAvailability::DegradedLowSpace,
+                ));
+            }
+            self.ensure_source_delivery_capacity(options.defer_journal)?;
         }
         if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
             return Err(RepositoryRuntimeError::Storage(
@@ -526,57 +526,6 @@ impl RepositoryReplicaRuntime {
             .next())
     }
 
-    pub(crate) fn acknowledge_local_source_segment(
-        &mut self,
-        delivered_wire: &[u8],
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(delivered_wire, None, None)
-    }
-
-    pub(crate) fn acknowledge_local_source_segment_via(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: u64,
-        delivery_path: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(
-            delivered_wire,
-            Some(acknowledged_at_unix_seconds),
-            Some(delivery_path),
-        )
-    }
-
-    fn acknowledge_local_source_segment_inner(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: Option<u64>,
-        delivery_path: Option<&str>,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let previous_snapshot = self.snapshot.clone();
-        if self.remove_local_source_pending_segment(delivered_wire)? {
-            if let Err(error) = self.persist_control_state() {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            if self.storage.is_sqlite() {
-                if let Err(error) = self
-                    .storage
-                    .acknowledge_source_delivery_journal(
-                        &[hex::encode(Sha256::digest(delivered_wire))],
-                        acknowledged_at_unix_seconds,
-                        delivery_path,
-                    )
-                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-                {
-                    self.snapshot = previous_snapshot;
-                    return Err(error);
-                }
-                self.hydrate_source_delivery_journal()?;
-            }
-        }
-        Ok(())
-    }
-
     /// Persist acknowledgement and the local historical-export cursor together. Replaying an
     /// already accepted segment is safe after a crash; moving only one of these checkpoints is
     /// not, because a new source sequence would otherwise be assigned to the same history row.
@@ -715,7 +664,7 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
-    fn remove_local_source_pending_segment(
+    pub(super) fn remove_local_source_pending_segment(
         &mut self,
         delivered_wire: &[u8],
     ) -> Result<bool, RepositoryRuntimeError> {

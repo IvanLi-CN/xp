@@ -3,6 +3,30 @@ use super::*;
 const MAX_PATH_HEALTH_SOURCE_PEERS: usize = 16;
 const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 
+pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
+    const MAX_PAGES_PER_CYCLE: usize = 4;
+    let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+    let Ok((ready_repository_ids, peers)) = super::ready_repository_peers(state).await else {
+        return Ok(());
+    };
+    let mut capture_live = true;
+    for _ in 0..MAX_PAGES_PER_CYCLE {
+        if !super::publish_local_history_segment(
+            state,
+            &ready_repository_ids,
+            &peers,
+            now,
+            capture_live,
+        )
+        .await?
+        {
+            break;
+        }
+        capture_live = false;
+    }
+    Ok(())
+}
+
 pub(super) struct SourceRecordBatch {
     records: Option<Vec<SyncRecord>>,
     pub(super) deletion_markers: Vec<crate::node_history::RepositoryHistoryDeletionMarker>,

@@ -28,7 +28,8 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
             if let Err(error) = super::advance_local_repository_lifecycle(&state, now).await {
                 tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
             }
-            if let Err(error) = super::publish_local_history_segments(&state).await {
+            if let Err(error) = super::source_records::publish_local_history_segments(&state).await
+            {
                 tracing::debug!(error = %error, "history source collection cycle skipped");
             }
         }
