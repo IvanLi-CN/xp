@@ -67,7 +67,7 @@ use source::{
     should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
     source_record_with_key_for_subject,
 };
-use source_records::{source_records, source_records_with_deletions};
+use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
     legacy_segment_index::spawn(state.clone());
     source::spawn_local_source_worker(state.clone());
@@ -240,13 +240,17 @@ async fn publish_local_history_segment(
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
-    let mut source_batch = source_records(state, now).await?;
     let capture_paused = !capture_live
         || state
             .repository_replica
             .lock()
             .await
             .source_delivery_capture_paused()?;
+    let mut source_batch = if capture_paused {
+        SourceRecordBatch::empty()
+    } else {
+        source_records(state, now).await?
+    };
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         let segments = if capture_paused {
@@ -515,12 +519,10 @@ async fn receive_local_source_segment(
     if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
         && !receipt.tombstone_acknowledgements().is_empty()
     {
-        propagate_tombstone_acknowledgements(
-            state,
-            ready_repository_ids,
-            receipt.tombstone_acknowledgements().to_vec(),
-        )
-        .await?;
+        tracing::debug!(
+            count = receipt.tombstone_acknowledgements().len(),
+            "history tombstone acknowledgement fanout deferred to replication worker"
+        );
     }
     Ok(())
 }
@@ -962,10 +964,6 @@ async fn replicate_peer(
         }
         after_segment_id = Some(next);
     }
-    // The keyset traversal defines a bounded remote snapshot. Once every advertised segment
-    // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
-    // source for exact equality is not a valid convergence condition: ordinary sources append
-    // continuously, while the peer independently performs the symmetric pull.
     Ok(deep_verification_available)
 }
 

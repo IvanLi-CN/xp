@@ -37,6 +37,17 @@ pub(super) struct SourceRecordBatch {
 }
 
 impl SourceRecordBatch {
+    pub(super) fn empty() -> Self {
+        Self {
+            records: Some(Vec::new()),
+            deletion_markers: Vec::new(),
+            uptime_observation_ids: Vec::new(),
+            uptime_capture_gap_ids: Vec::new(),
+            resource_rollup_buckets: Vec::new(),
+            resource_gap_ids: Vec::new(),
+        }
+    }
+
     pub(super) fn take_records(&mut self) -> Vec<SyncRecord> {
         self.records.take().unwrap_or_default()
     }
