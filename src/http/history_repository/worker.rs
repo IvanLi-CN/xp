@@ -95,7 +95,6 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     {
         return Ok(());
     }
-
     let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
@@ -137,7 +136,6 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     if !work.is_anti_entropy() {
         return Ok(());
     }
-
     let selected_peer_ids = state
         .repository_replica
         .lock()
@@ -231,43 +229,47 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     }
     Ok(())
 }
-async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
-    let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-    let Ok((ready_repository_ids, peers)) = ready_repository_peers(state).await else {
-        return Ok(());
-    };
-    publish_local_history_segment(state, &ready_repository_ids, &peers, now).await
-}
 async fn publish_local_history_segment(
     state: &AppState,
     ready_repository_ids: &[String],
     peers: &[MeshPeerTarget],
     now: u64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
     let mut source_batch = source_records(state, now).await?;
+    let capture_paused = state
+        .repository_replica
+        .lock()
+        .await
+        .source_delivery_capture_paused()?;
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
-        let segments = runtime.queue_local_source_segments_for_repositories(
-            &state.cluster.cluster_id,
-            identity.clone(),
-            &signing_key,
-            source_batch.take_records(),
-            now,
-            ready_repository_ids,
-        )?;
+        let segments = if capture_paused {
+            runtime.local_source_pending_segments_page()
+        } else {
+            runtime.queue_local_source_segments_for_repositories(
+                &state.cluster.cluster_id,
+                identity.clone(),
+                &signing_key,
+                source_batch.take_records(),
+                now,
+                ready_repository_ids,
+            )?
+        };
         let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id);
         (segments, gaps)
     };
-    source_batch
-        .mark_uptime_observations_enqueued(state)
-        .await?;
+    if !capture_paused {
+        source_batch
+            .mark_uptime_observations_enqueued(state)
+            .await?;
+    }
     if segments.is_empty() && gaps.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let assignment = rendezvous_collectors(&state.cluster.node_id, ready_repository_ids)?;
     let primary_repository_id = assignment.primary().to_owned();
@@ -293,7 +295,7 @@ async fn publish_local_history_segment(
             repository = selected_repository_id,
             "selected history repository is unreachable"
         );
-        return Ok(());
+        return Ok(false);
     };
     let mut delivery_succeeded = true;
     let mut transport_failed = false;
@@ -404,7 +406,7 @@ async fn publish_local_history_segment(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
         )?;
-    if delivery_succeeded && !transport_failed && acknowledgements_replicated {
+    if !capture_paused && delivery_succeeded && !transport_failed && acknowledgements_replicated {
         source_batch.mark_resources_enqueued(state);
     }
     if delivery_succeeded
@@ -424,7 +426,7 @@ async fn publish_local_history_segment(
             .await
             .complete_local_source_tombstones(&source_batch.deletion_markers)?;
     }
-    Ok(())
+    Ok(delivery_succeeded && !transport_failed)
 }
 
 async fn relay_local_source_segments(
