@@ -78,6 +78,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
   语义保持不变。continuation 先由 opaque segment ID 解析五个持久排序键，再以行值范围继续
   seek；不得以 nullable cursor 或子查询包裹该范围，导致 SQLite 从 phase 起点重扫。
+- deep verification 的 retained partition summary 使用控制快照中的持久缓存，并由后台按
+  SQLite keyset 有界重建；缓存未完成时 summary 保持 segment/gap 可用并返回
+  `partitions_included=false`，不得读取或反序列化 payload 来响应 summary，也不得因此把
+  peer 判定为 deep-verification 成功。缓存完成后才恢复原有 partition JSON；有序新记录可增量
+  更新，迟到记录、tombstone 或 retention 改写会使缓存失效并从磁盘重新建立，不删除或改写历史行。
+  单行 payload 损坏只会延后该缓存重建，不能阻塞 segment/gap 同步或使历史服务停止。
 - segment summary 使用 `repository_history_segments_sync_order_v2` 覆盖索引
   `(contains_tombstone, source_node_id, source_epoch, stream, first_sequence, id)`；既有库只
   幂等新增该索引，保留旧索引和所有 signed segment payload。

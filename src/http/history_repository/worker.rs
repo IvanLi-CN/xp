@@ -56,6 +56,7 @@ use backfill::{
 #[cfg(test)]
 use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
+use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
     repository_direct_request, repository_mesh_request,
@@ -152,7 +153,15 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     let mut synchronized = false;
     let mut deep_verification_succeeded =
-        work.is_deep_verification() && selected_peer_ids.is_empty();
+        if work.is_deep_verification() && selected_peer_ids.is_empty() {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .partition_summaries_ready()
+        } else {
+            false
+        };
     for peer in peers_to_replicate {
         match replicate_peer(state, peer, &ready_repository_ids, now, work, true).await {
             Ok(directly_converged) => {
@@ -169,11 +178,13 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                             work,
                         )?;
                 } else if work.is_deep_verification() {
+                    clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
                 }
             }
             Err(error) => {
                 if work.is_deep_verification() {
+                    clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
                 }
                 tracing::debug!(
@@ -815,6 +826,7 @@ async fn replicate_peer(
     propagate_acknowledgements: bool,
 ) -> anyhow::Result<bool> {
     let mut after_segment_id = None::<String>;
+    let mut deep_verification_available = !work.is_deep_verification();
     loop {
         let path = after_segment_id.as_ref().map_or_else(
             || {
@@ -829,6 +841,9 @@ async fn replicate_peer(
         );
         let remote_summary: RepositoryReplicaSummary =
             repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await?;
+        if work.is_deep_verification() && after_segment_id.is_none() {
+            deep_verification_available = remote_summary.partitions_included;
+        }
         let requires_repair = {
             let runtime = state.repository_replica.lock().await;
             runtime.requires_repair(&remote_summary, work.is_deep_verification())?
@@ -949,7 +964,7 @@ async fn replicate_peer(
     // and gap has been applied, this replica is caught up to that snapshot. Re-querying a live
     // source for exact equality is not a valid convergence condition: ordinary sources append
     // continuously, while the peer independently performs the symmetric pull.
-    Ok(true)
+    Ok(deep_verification_available)
 }
 
 pub(super) async fn propagate_tombstone_acknowledgements(

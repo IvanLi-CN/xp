@@ -142,6 +142,77 @@ fn sqlite_retention_preserves_interleaved_subject_buckets_across_pages() {
 }
 
 #[test]
+fn sqlite_retention_restarts_after_post_commit_maintenance_failure_without_duplicate_aggregate() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let policy = super::super::RepositoryRetentionPolicy::default();
+    let observed_at = 20_000_u64;
+    let now = observed_at
+        .saturating_add(policy.minute_retention_seconds())
+        .saturating_add(1);
+    let count = RETENTION_COMPACTION_PAGE_SIZE + RETENTION_COMPACTION_BUCKET_LOOKAHEAD + 32;
+    let storage = HistoryStorage::open(temporary.path());
+    let mut runtime = load(temporary.path());
+    let rows = (0..u64::try_from(count).expect("count"))
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: observed_at,
+                received_at_unix_seconds: now,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: format!("restart-{sequence}").into_bytes(),
+                payload: b"sample".to_vec(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite row")
+        })
+        .collect::<Vec<_>>();
+    storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed dense bucket");
+
+    storage.set_history_rewrite_maintenance_failure_for_test(true);
+    runtime
+        .prepare_for_replication(now)
+        .expect("rewrite remains committed when maintenance is deferred");
+    assert!(runtime.snapshot.retention_compaction_cursor.is_some());
+    assert!(runtime.snapshot.retention_compaction_continuation.is_some());
+    drop(runtime);
+
+    storage.set_history_rewrite_maintenance_failure_for_test(false);
+    let mut restored = load(temporary.path());
+    while restored.snapshot.retention_compaction_cursor.is_some()
+        || restored
+            .snapshot
+            .retention_compaction_continuation
+            .is_some()
+    {
+        restored
+            .prepare_for_replication(now)
+            .expect("drain retained continuation after restart");
+    }
+    let records = restored
+        .sqlite_records(None, None, None, 0, 8)
+        .expect("read compacted records");
+    let total = records
+        .iter()
+        .map(|record| {
+            serde_json::from_slice::<serde_json::Value>(&record.payload).expect("aggregate payload")
+                ["record_count"]
+                .as_u64()
+                .expect("aggregate count")
+        })
+        .sum::<u64>();
+    assert_eq!(total, u64::try_from(count).expect("count"));
+}
+
+#[test]
 fn late_history_record_discards_an_unfinished_sqlite_compaction_continuation() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let policy = super::super::RepositoryRetentionPolicy::default();

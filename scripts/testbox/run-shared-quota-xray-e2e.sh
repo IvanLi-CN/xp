@@ -444,29 +444,26 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     echo "resource workload test binary was not built" >&2
     exit 1
   fi
-  memory_scope="codex-${COMPOSE_PROJECT}-xp-memory"
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
-    echo "running repository summary resource workload (memory=128MiB, swap=0)"
-    systemd-run --user --scope --unit="$memory_scope" \
-      -p MemoryMax=128M -p MemorySwapMax=0 \
-      env \
-        XP_MESH_RESOURCE_MODE=shared-testbox \
-        XP_MESH_RESOURCE_SUMMARY_ONLY=1 \
-        XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
-        XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
-        "$resource_test_bin" xp_repository_summary_memory_e2e --ignored --nocapture
+    echo "running repository summary resource workload (XP memory=128MiB, swap=0)"
+    env \
+      XP_MESH_RESOURCE_MODE=shared-testbox \
+      XP_MESH_RESOURCE_SUMMARY_ONLY=1 \
+      XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+      "$resource_test_bin" xp_repository_summary_memory_e2e --ignored --nocapture
   else
-    echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid, memory=128MiB, swap=0)"
-    systemd-run --user --scope --unit="$memory_scope" \
-      -p MemoryMax=128M -p MemorySwapMax=0 \
-      env \
-        XP_MESH_RESOURCE_MODE=shared-testbox \
-        XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
-        XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
-        XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
-        XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
-        XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
-        "$resource_test_bin" --ignored --nocapture
+    echo "running 50-peer resource workload for ${MESH_RESOURCE_DURATION}s (xray_pid=$xray_pid, XP memory=128MiB, swap=0)"
+    env \
+      XP_MESH_RESOURCE_MODE=shared-testbox \
+      XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
+      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+      XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
+      XP_MESH_RESOURCE_DURATION_SECS="$MESH_RESOURCE_DURATION" \
+      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+      "$resource_test_bin" --ignored --nocapture
   fi
 fi
 REMOTE

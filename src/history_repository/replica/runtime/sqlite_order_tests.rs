@@ -3,15 +3,97 @@ use ed25519_dalek::SigningKey;
 #[cfg(target_os = "linux")]
 use std::{fs, process::Command};
 
-use super::{RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment};
+use super::{
+    RepositoryPartitionSummary, RepositoryReplicaRuntime, RepositoryRuntimeError,
+    RetentionCompactionContinuation, StoredRecord, StoredSegment,
+};
 use crate::{
     history_sync::{CanonicalSegment, Cursor, SignedSegment, SyncRecord},
     state::history_repository::{
         HistoryStorage,
         identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
+        replica::RepositoryRetentionPolicy,
     },
-    state::history_storage::{Backend, RepositoryHistorySegmentRow},
+    state::history_storage::{
+        Backend, RepositoryHistoryCompactionCursor, RepositoryHistoryRecordRow,
+        RepositoryHistorySegmentRow,
+    },
 };
+
+use super::tests::load;
+
+#[test]
+fn malformed_sqlite_summary_row_does_not_block_replication_preparation() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime
+        .storage
+        .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence: 0,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"key".to_vec(),
+            tombstone: false,
+            observed_start_unix_seconds: 10,
+            observed_end_unix_seconds: 10,
+            received_at_unix_seconds: 10,
+            aggregate_complete: Some(true),
+            aggregate_start_unix_seconds: None,
+            aggregate_end_unix_seconds: None,
+            payload: b"not a stored record".to_vec(),
+        }])
+        .expect("seed malformed payload");
+    runtime.snapshot.partition_summaries_complete = false;
+
+    runtime
+        .prepare_for_replication(
+            10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2,
+        )
+        .expect("malformed summary row is deferred");
+    assert!(!runtime.partition_summaries_ready());
+    assert!(runtime.replication_summary().is_ok());
+}
+
+#[test]
+fn incomplete_sqlite_partition_summary_does_not_trigger_tiered_backfill() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime.snapshot.partition_summaries_complete = false;
+    let mut remote = runtime
+        .replication_summary_after(None, true)
+        .expect("remote deep summary");
+    remote.partitions_included = true;
+    remote.partitions = vec![RepositoryPartitionSummary {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        partition: 0,
+        first_sequence: 0,
+        last_sequence: 0,
+        hash: [9; 32],
+        record_count: 1,
+    }];
+
+    assert!(
+        !runtime
+            .requires_repair(&remote, true)
+            .expect("incomplete local cache is not a mismatch")
+    );
+    assert!(
+        runtime
+            .retained_partitions_converged(&remote)
+            .expect("incomplete local cache defers comparison")
+    );
+}
 
 fn identity(signing_key: &SigningKey) -> RepositoryNodeIdentity {
     RepositoryNodeIdentity::new(
@@ -92,6 +174,155 @@ fn sqlite_summary_keeps_tombstones_first_across_keyset_pages() {
         .expect("ordinary summary page");
     assert_eq!(second.segment_ids, ["000-ordinary"]);
     assert!(second.next_segment_id.is_none());
+}
+
+#[test]
+fn sqlite_partition_summary_cache_survives_restart_and_invalidates_on_late_record() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    let rows = (0..2_u64)
+        .map(|sequence| {
+            StoredRecord {
+                observed_at_unix_seconds: 10 + sequence,
+                received_at_unix_seconds: 10 + sequence,
+                source_node_id: "node-a".to_owned(),
+                source_epoch: 7,
+                stream: "runtime".to_owned(),
+                sequence,
+                subject_node_id: "subject-a".to_owned(),
+                observer_node_id: "node-a".to_owned(),
+                schema_id: "runtime.v1".to_owned(),
+                schema_version: 1,
+                record_key: sequence.to_be_bytes().to_vec(),
+                payload: format!("payload-{sequence}").into_bytes(),
+                tombstone: false,
+            }
+            .sqlite_row()
+            .expect("SQLite history row")
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed history rows");
+    runtime.snapshot.partition_summaries_complete = false;
+    runtime
+        .prepare_for_replication(100)
+        .expect("rebuild history page");
+    runtime
+        .prepare_for_replication(100)
+        .expect("finish history summary rebuild");
+    assert!(runtime.partition_summaries_ready());
+    runtime
+        .persist_control_state()
+        .expect("persist cache state");
+
+    let mut restored = load(temporary.path());
+    assert!(restored.partition_summaries_ready());
+    let summary = restored
+        .replication_summary_after(None, true)
+        .expect("restored deep summary");
+    assert!(summary.partitions_included);
+    assert_eq!(summary.partitions[0].record_count, 2);
+
+    let late = StoredRecord {
+        observed_at_unix_seconds: 9,
+        received_at_unix_seconds: 9,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        sequence: 99,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"late".to_vec(),
+        payload: b"late-payload".to_vec(),
+        tombstone: false,
+    };
+    restored
+        .update_partition_summary_for_record(&late)
+        .expect("invalidate stale cache");
+    assert!(!restored.partition_summaries_ready());
+    let pending = restored
+        .replication_summary_after(None, true)
+        .expect("summary while rebuilding");
+    assert!(!pending.partitions_included);
+}
+
+#[test]
+fn sqlite_retention_commits_summary_invalidation_with_rewrite() {
+    let temporary = tempfile::tempdir().expect("SQLite temporary directory");
+    let storage = HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    let row = StoredRecord {
+        observed_at_unix_seconds: 10,
+        received_at_unix_seconds: 10,
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence: 0,
+        subject_node_id: "subject-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: b"key".to_vec(),
+        payload: b"payload".to_vec(),
+        tombstone: false,
+    };
+    let continuation_record = StoredRecord {
+        sequence: 1,
+        record_key: b"continuation".to_vec(),
+        ..row.clone()
+    };
+    let row = row.sqlite_row().expect("SQLite row");
+    storage
+        .upsert_repository_history_records(std::slice::from_ref(&row))
+        .expect("seed history row");
+    runtime.snapshot.partition_summaries = vec![RepositoryPartitionSummary {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        partition: 0,
+        first_sequence: 0,
+        last_sequence: 0,
+        hash: [7; 32],
+        record_count: 1,
+    }];
+    runtime.snapshot.partition_summary_cursor = Some(RepositoryHistoryCompactionCursor::from(&row));
+    runtime.snapshot.partition_summaries_complete = true;
+    runtime.snapshot.retention_compaction_continuation = Some(RetentionCompactionContinuation {
+        aggregates: vec![continuation_record],
+        aggregate: None,
+    });
+    runtime
+        .persist_control_state()
+        .expect("persist ready cache");
+
+    storage.set_history_rewrite_maintenance_failure_for_test(true);
+    let now = 10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2;
+    runtime
+        .prune_sqlite_retention(now)
+        .expect("post-commit maintenance is degraded but rewrite is committed");
+    assert!(!runtime.partition_summaries_ready());
+
+    drop(runtime);
+    let restored = RepositoryReplicaRuntime::load(storage).expect("reload runtime");
+    assert!(
+        !restored.partition_summaries_ready(),
+        "a committed rewrite must never restart with a stale complete cache"
+    );
+    assert!(
+        restored
+            .snapshot
+            .retention_compaction_continuation
+            .is_none(),
+        "the atomically committed page has no unfinished continuation"
+    );
 }
 
 #[test]

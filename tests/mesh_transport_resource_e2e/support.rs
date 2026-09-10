@@ -338,14 +338,47 @@ fn prepare_peer_state(data_dir: &Path, cluster: &ClusterMetadata, fleet: &PeerFl
     store.save().expect("persist resource state");
 }
 
-fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> Child {
+struct XpProcess {
+    child: Child,
+    unit: Option<String>,
+    pid: u32,
+}
+
+impl XpProcess {
+    fn id(&self) -> u32 {
+        self.pid
+    }
+}
+
+fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
     let log_path = data_dir.join(format!("{label}.log"));
     let stdout = File::create(&log_path).expect("create XP resource log");
     let stderr = stdout.try_clone().expect("clone XP resource log");
     let admin_hash =
         xp::admin_token::hash_admin_token_argon2id("mesh-resource-test-token-0000000000000000")
             .expect("hash test admin token");
-    Command::new(binary)
+    let child_cgroup = std::env::var_os("XP_MESH_RESOURCE_CHILD_CGROUP").is_some();
+    let unit = child_cgroup.then(|| format!("codex-xp-resource-{label}-{}", std::process::id()));
+    let mut command = if child_cgroup {
+        let mut command = Command::new("systemd-run");
+        command.args([
+            "--user",
+            "--scope",
+            "--collect",
+            "--unit",
+            unit.as_deref().expect("XP resource systemd unit"),
+            "-p",
+            "MemoryMax=128M",
+            "-p",
+            "MemorySwapMax=0",
+            "--",
+        ]);
+        command.arg(binary);
+        command
+    } else {
+        Command::new(binary)
+    };
+    command
         .args([
             "--data-dir",
             data_dir.to_str().expect("UTF-8 data dir"),
@@ -363,6 +396,11 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> Chil
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
+        .map(|child| XpProcess {
+            pid: child.id(),
+            child,
+            unit,
+        })
         .expect("spawn XP resource candidate")
 }
 
@@ -378,17 +416,92 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let transaction = connection
         .unchecked_transaction()
         .expect("begin summary resource transaction");
+    let now_unix_seconds = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
+    let first_observed = now_unix_seconds.saturating_sub(60);
     for sequence in 0..257_u64 {
+        let observed = first_observed.saturating_add(sequence);
         transaction
             .execute(
                 "INSERT INTO repository_history_segments
                      (id, closed_at, contains_tombstone, source_node_id, source_epoch,
                       stream, first_sequence, payload)
-                 VALUES (?1, ?2, 0, 'summary-source', 1, 'runtime', ?2, zeroblob(?3))",
-                rusqlite::params![format!("{sequence:064x}"), sequence, 192 * 1024 - 1024],
+                 VALUES (?1, ?2, 0, 'summary-source', 1, 'runtime', ?3, zeroblob(?4))",
+                rusqlite::params![
+                    format!("{sequence:064x}"),
+                    observed,
+                    sequence,
+                    192 * 1024 - 1024
+                ],
             )
             .expect("insert summary resource segment");
+
+        let record_payload = serde_json::to_vec(&serde_json::json!({
+            "observed_at_unix_seconds": observed,
+            "received_at_unix_seconds": observed,
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "sequence": sequence,
+            "subject_node_id": "summary-subject",
+            "observer_node_id": "summary-source",
+            "schema_id": "runtime.v1",
+            "schema_version": 1,
+            "record_key": vec![0_u8; 96 * 1024],
+            "payload": [],
+            "tombstone": false,
+        }))
+        .expect("encode summary resource record");
+        transaction
+            .execute(
+                "INSERT INTO repository_history_records
+                     (source_node_id, source_epoch, stream, sequence, subject_node_id,
+                      observer_node_id, schema_id, schema_version, record_key, is_tombstone,
+                      observed_start, observed_end, received_at, aggregate_complete,
+                      aggregate_start, aggregate_end, payload)
+                 VALUES ('summary-source', 1, 'runtime', ?1, 'summary-subject',
+                         'summary-source', 'runtime.v1', 1, ?2, 0, ?3, ?3, ?3,
+                         1, NULL, NULL, ?4)",
+                rusqlite::params![
+                    sequence,
+                    format!("record-{sequence}").into_bytes(),
+                    observed,
+                    record_payload
+                ],
+            )
+            .expect("insert summary resource record");
     }
+
+    let replica_snapshot = serde_json::json!({
+        "external_history": true,
+        "legacy_segment_cursor_index_complete": true,
+        "partition_summaries": [{
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "partition": 0,
+            "first_sequence": 0,
+            "last_sequence": 256,
+            "hash": vec![0_u8; 32],
+            "record_count": 257,
+        }],
+        "partition_summary_cursor": {
+            "observed_start_unix_seconds": first_observed + 256,
+            "source_node_id": "summary-source",
+            "source_epoch": 1,
+            "stream": "runtime",
+            "sequence": 256,
+        },
+        "partition_summaries_complete": true,
+    });
+    let replica_payload =
+        serde_json::to_vec(&replica_snapshot).expect("encode summary resource replica snapshot");
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO history_snapshots (key, payload, updated_at)
+             VALUES ('repository_replica', ?1, 0)",
+            rusqlite::params![replica_payload],
+        )
+        .expect("write summary resource replica snapshot");
 
     let state_payload = transaction
         .query_row(
@@ -448,9 +561,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         .read_cluster_ca_key_pem(temp.path())
         .expect("read summary resource CA key")
         .expect("summary resource private CA key");
-    let uri: axum::http::Uri = "/api/admin/_internal/history-repository/summary"
-        .parse()
-        .expect("summary resource URI");
+    let uri: axum::http::Uri =
+        "/api/admin/_internal/history-repository/summary?deep_verification=true"
+            .parse()
+            .expect("summary resource URI");
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
@@ -522,6 +636,11 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         assert!(sample_count.load(Ordering::Relaxed) > 0);
         assert!(in_flight_sample_count.load(Ordering::Relaxed) > 0);
         assert_eq!(summary["segment_ids"].as_array().map(Vec::len), Some(256));
+        assert_eq!(summary["partitions_included"], serde_json::json!(true));
+        assert_eq!(
+            summary["partitions"][0]["record_count"],
+            serde_json::json!(257)
+        );
         assert!(
             summary["next_segment_id"]
                 .as_str()
@@ -536,10 +655,10 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
     max_pss_kib
 }
 
-async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {
+async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Some(status) = child.try_wait().expect("poll XP child") {
+        if let Some(status) = child.child.try_wait().expect("poll XP child") {
             let log = fs::read_to_string(log_path).unwrap_or_default();
             panic!("XP exited before readiness with {status}:\n{log}");
         }
@@ -547,6 +666,24 @@ async fn wait_for_xp(child: &mut Child, bind_port: u16, log_path: &Path) {
             .await
             .is_ok()
         {
+            child.pid = child
+                .unit
+                .as_deref()
+                .and_then(|unit| {
+                    Command::new("systemctl")
+                        .args(["--user", "show", unit, "--property=MainPID", "--value"])
+                        .output()
+                        .ok()
+                })
+                .and_then(|output| {
+                    String::from_utf8(output.stdout)
+                        .ok()?
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                })
+                .filter(|pid| *pid > 0)
+                .unwrap_or_else(|| child.child.id());
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for XP");
@@ -617,19 +754,25 @@ fn read_cpu_ticks(pid: u32) -> u64 {
     user + system
 }
 
-async fn stop_child(child: &mut Child) {
-    unsafe {
-        libc::kill(child.id() as libc::pid_t, libc::SIGINT);
+async fn stop_child(child: &mut XpProcess) {
+    if let Some(unit) = child.unit.as_deref() {
+        let _ = Command::new("systemctl")
+            .args(["--user", "stop", unit])
+            .status();
+    } else {
+        unsafe {
+            libc::kill(child.child.id() as libc::pid_t, libc::SIGINT);
+        }
     }
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if child.try_wait().expect("poll stopped XP").is_some() {
+        if child.child.try_wait().expect("poll stopped XP").is_some() {
             return;
         }
         sleep(Duration::from_millis(50)).await;
     }
-    child.kill().expect("kill XP after grace period");
-    let _ = child.wait();
+    child.child.kill().expect("kill XP after grace period");
+    let _ = child.child.wait();
 }
 
 pub fn support_pids_from_env() -> Vec<u32> {
@@ -664,7 +807,7 @@ pub async fn run_resource_workload(
     let mut stack_peak_pss_kib = 0;
     let deadline = Instant::now() + duration;
     while Instant::now() < deadline {
-        if let Some(status) = child.try_wait().expect("poll XP workload") {
+        if let Some(status) = child.child.try_wait().expect("poll XP workload") {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             panic!("XP exited during {label} workload with {status}:\n{log}");
         }

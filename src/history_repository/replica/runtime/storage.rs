@@ -1,6 +1,127 @@
 use super::*;
 
+const PARTITION_SUMMARY_REBUILD_PAGE_SIZE: usize = 32;
+
 impl RepositoryReplicaRuntime {
+    fn partition_summary_map(
+        &self,
+    ) -> BTreeMap<(String, u64, String, u32), super::RepositoryPartitionSummary> {
+        self.snapshot
+            .partition_summaries
+            .iter()
+            .cloned()
+            .map(|summary| {
+                (
+                    (
+                        summary.source_node_id.clone(),
+                        summary.source_epoch,
+                        summary.stream.clone(),
+                        summary.partition,
+                    ),
+                    summary,
+                )
+            })
+            .collect()
+    }
+
+    pub(super) fn reset_partition_summary_cache(&mut self) {
+        if self.uses_sqlite_history() {
+            self.snapshot.partition_summaries.clear();
+            self.snapshot.partition_summary_cursor = None;
+            self.snapshot.partition_summaries_complete = false;
+            self.snapshot.deep_verified_peer_ids.clear();
+        }
+    }
+
+    pub(super) fn update_partition_summary_for_record(
+        &mut self,
+        record: &StoredRecord,
+    ) -> Result<(), RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() {
+            return Ok(());
+        }
+        let incoming = RepositoryHistoryCompactionCursor {
+            observed_start_unix_seconds: record.observed_at_unix_seconds,
+            source_node_id: record.source_node_id.clone(),
+            source_epoch: record.source_epoch,
+            stream: record.stream.clone(),
+            sequence: record.sequence,
+        };
+        if !self.snapshot.partition_summaries_complete {
+            if self
+                .snapshot
+                .partition_summary_cursor
+                .as_ref()
+                .is_some_and(|cursor| {
+                    partition_summary_cursor_order(&incoming)
+                        <= partition_summary_cursor_order(cursor)
+                })
+            {
+                self.reset_partition_summary_cache();
+            }
+            return Ok(());
+        }
+        if self
+            .snapshot
+            .partition_summary_cursor
+            .as_ref()
+            .is_some_and(|cursor| {
+                partition_summary_cursor_order(&incoming) <= partition_summary_cursor_order(cursor)
+            })
+        {
+            self.reset_partition_summary_cache();
+            return Ok(());
+        }
+        let mut summaries = self.partition_summary_map();
+        super::sync::accumulate_record_partitions(&mut summaries, [record])?;
+        self.snapshot.partition_summaries = summaries.into_values().collect();
+        self.snapshot.partition_summary_cursor = Some(incoming);
+        Ok(())
+    }
+
+    /// Rebuild the retained partition summary from bounded SQLite pages. The HTTP summary path
+    /// never calls this method, so a slow or malformed historical payload cannot block it.
+    pub(crate) fn advance_partition_summary_rebuild_page(
+        &mut self,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        if !self.uses_sqlite_history() || self.snapshot.partition_summaries_complete {
+            return Ok(true);
+        }
+        let rows = self
+            .storage
+            .repository_history_records_for_partition_summary(
+                self.snapshot.partition_summary_cursor.as_ref(),
+                PARTITION_SUMMARY_REBUILD_PAGE_SIZE,
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let Some(last_row) = rows.last() else {
+            self.snapshot.partition_summaries_complete = true;
+            self.persist_control_state()?;
+            return Ok(true);
+        };
+        let last_cursor = RepositoryHistoryCompactionCursor::from(last_row);
+        let records = match rows
+            .into_iter()
+            .map(StoredRecord::from_sqlite_row)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "history partition summary rebuild deferred after malformed row"
+                );
+                return Ok(false);
+            }
+        };
+        let mut summaries = self.partition_summary_map();
+        super::sync::accumulate_record_partitions(&mut summaries, records.iter())?;
+        self.snapshot.partition_summaries = summaries.into_values().collect();
+        self.snapshot.partition_summary_cursor = Some(last_cursor);
+        self.persist_control_state()?;
+        Ok(false)
+    }
+
     /// Migrate one bounded page of legacy segments after startup. The control snapshot advances
     /// only after the corresponding SQLite rows commit, so an interrupted page is safe to replay.
     pub(crate) fn migrate_legacy_segment_cursor_index_page(
@@ -92,6 +213,10 @@ impl RepositoryReplicaRuntime {
 
     pub(crate) fn uses_sqlite_history(&self) -> bool {
         self.snapshot.external_history && self.storage.is_sqlite()
+    }
+
+    pub(crate) fn partition_summaries_ready(&self) -> bool {
+        !self.uses_sqlite_history() || self.snapshot.partition_summaries_complete
     }
 
     pub(super) fn finish_storage_write<T, E: std::fmt::Display>(
@@ -338,6 +463,21 @@ impl RepositoryReplicaRuntime {
             return self.persist_control_state();
         }
         let mut rows = fetched_rows.clone();
+        let mut decoded_rows = match rows
+            .iter()
+            .cloned()
+            .map(StoredRecord::from_sqlite_row)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "history retention deferred after malformed row"
+                );
+                return Ok(());
+            }
+        };
         let mut has_more = rows.len()
             == RETENTION_COMPACTION_PAGE_SIZE.saturating_add(RETENTION_COMPACTION_BUCKET_LOOKAHEAD);
         if rows.len() > RETENTION_COMPACTION_PAGE_SIZE {
@@ -345,16 +485,15 @@ impl RepositoryReplicaRuntime {
                 .last()
                 .expect("nonempty retention lookahead page")
                 .observed_start_unix_seconds;
-            let closed_prefix_len = rows
+            let closed_prefix_len = decoded_rows
                 .iter()
-                .rposition(|row| {
-                    let record = StoredRecord::from_sqlite_row(row.clone())
-                        .expect("SQLite compaction row was previously validated");
-                    retention::compaction_bucket_end(&record, now_unix_seconds)
+                .rposition(|record| {
+                    retention::compaction_bucket_end(record, now_unix_seconds)
                         .is_none_or(|bucket_end| bucket_end < page_boundary)
                 })
                 .map_or(0, |index| index + 1);
             rows.truncate(closed_prefix_len);
+            decoded_rows.truncate(closed_prefix_len);
         }
         has_more |= rows.len() < fetched_row_count;
         // A page can contain many retention buckets sharing one timestamp. Process that bounded
@@ -363,6 +502,11 @@ impl RepositoryReplicaRuntime {
         if rows.is_empty() && !fetched_rows.is_empty() {
             rows = fetched_rows.clone();
             has_more = true;
+            decoded_rows = rows
+                .iter()
+                .cloned()
+                .map(StoredRecord::from_sqlite_row)
+                .collect::<Result<Vec<_>, _>>()?;
         }
         if rows.is_empty() {
             // No closed bucket fits in this bounded lookahead. Retain the cursor and wait for
@@ -370,7 +514,7 @@ impl RepositoryReplicaRuntime {
             // bucket into memory.
             return Ok(());
         }
-        let continuation = self.snapshot.retention_compaction_continuation.take();
+        let continuation = self.snapshot.retention_compaction_continuation.clone();
         let continuation_aggregates = continuation
             .map(|continuation| {
                 if continuation.aggregates.is_empty() {
@@ -387,11 +531,7 @@ impl RepositoryReplicaRuntime {
                 .map(StoredRecord::sqlite_row)
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        let mut records = rows
-            .iter()
-            .cloned()
-            .map(StoredRecord::from_sqlite_row)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut records = decoded_rows;
         records.extend(continuation_aggregates);
         let should_continue = rows.len() == fetched_row_count && has_more;
         retention::prune_records(
@@ -404,48 +544,70 @@ impl RepositoryReplicaRuntime {
             .iter()
             .map(StoredRecord::sqlite_row)
             .collect::<Result<Vec<_>, _>>()?;
-        if !rows.is_empty() {
-            let result = self
-                .storage
-                .replace_repository_history_records(&removed_rows, &retained);
-            self.finish_storage_write(result)?;
-        }
-        self.snapshot.retention_compaction_cursor =
-            if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
-                None
-            } else {
-                rows.last().map(RetentionCompactionCursor::from)
-            };
-        if should_continue {
+        let next_retention_cursor = if !has_more && rows.len() < RETENTION_COMPACTION_PAGE_SIZE {
+            None
+        } else {
+            rows.last().map(RetentionCompactionCursor::from)
+        };
+        let next_retention_continuation = if should_continue {
             let boundary = rows
                 .last()
                 .cloned()
                 .map(StoredRecord::from_sqlite_row)
                 .transpose()?;
-            self.snapshot.retention_compaction_continuation =
-                Some(RetentionCompactionContinuation {
-                    aggregates: records
-                        .iter()
-                        .filter(|aggregate| {
-                            boundary.as_ref().is_some_and(|boundary| {
-                                retention::compaction_bucket_reaches(
-                                    aggregate,
-                                    boundary.observed_at_unix_seconds,
-                                    now_unix_seconds,
-                                )
-                            })
+            Some(RetentionCompactionContinuation {
+                aggregates: records
+                    .iter()
+                    .filter(|aggregate| {
+                        boundary.as_ref().is_some_and(|boundary| {
+                            retention::compaction_bucket_reaches(
+                                aggregate,
+                                boundary.observed_at_unix_seconds,
+                                now_unix_seconds,
+                            )
                         })
-                        .cloned()
-                        .collect(),
-                    aggregate: None,
-                });
+                    })
+                    .cloned()
+                    .collect(),
+                aggregate: None,
+            })
+        } else {
+            None
+        };
+        let previous_snapshot = self.snapshot.clone();
+        if !removed_rows.is_empty() {
+            self.reset_partition_summary_cache();
         }
-        let result = self.storage.delete_repository_history_before(
+        self.snapshot.retention_compaction_cursor = next_retention_cursor;
+        self.snapshot.retention_compaction_continuation = next_retention_continuation;
+        let control_payload = match serde_json::to_vec(&self.snapshot_for_persistence()) {
+            Ok(bytes) if bytes.len() <= super::MAX_RUNTIME_STATE_BYTES => bytes,
+            Ok(_) => {
+                self.snapshot = previous_snapshot;
+                return Err(RepositoryRuntimeError::StateLimitExceeded);
+            }
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                return Err(RepositoryRuntimeError::Storage(error.to_string()));
+            }
+        };
+        let result = self.storage.replace_repository_history_records_and_prune(
+            &removed_rows,
+            &retained,
             now_unix_seconds.saturating_sub(policy.max_age_seconds()),
             now_unix_seconds.saturating_sub(policy.minute_retention_seconds()),
+            &control_payload,
         );
-        self.finish_storage_write(result)?;
-        self.persist_control_state()
+        match result {
+            Ok(outcome) => {
+                self.storage_degraded |= outcome.maintenance_degraded;
+                Ok(())
+            }
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                self.finish_storage_write::<(), _>(Err(error))
+            }
+        }
     }
 
     pub(crate) fn repository_coverage(
@@ -528,6 +690,18 @@ impl RepositoryReplicaRuntime {
             .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
     }
+}
+
+fn partition_summary_cursor_order(
+    cursor: &RepositoryHistoryCompactionCursor,
+) -> (u64, &str, u64, &str, u64) {
+    (
+        cursor.observed_start_unix_seconds,
+        cursor.source_node_id.as_str(),
+        cursor.source_epoch,
+        cursor.stream.as_str(),
+        cursor.sequence,
+    )
 }
 
 fn segment_sync_cursor_parts(cursor: Option<&str>) -> (bool, &str) {

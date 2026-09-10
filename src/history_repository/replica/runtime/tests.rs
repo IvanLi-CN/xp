@@ -211,6 +211,93 @@ fn daily_deep_verification_summarizes_source_stream_ranges() {
 }
 
 #[test]
+fn sqlite_deep_summary_does_not_decode_history_payload_before_cache_is_ready() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime
+        .storage
+        .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence: 0,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"key".to_vec(),
+            tombstone: false,
+            observed_start_unix_seconds: 10,
+            observed_end_unix_seconds: 10,
+            received_at_unix_seconds: 10,
+            aggregate_complete: Some(true),
+            aggregate_start_unix_seconds: None,
+            aggregate_end_unix_seconds: None,
+            payload: b"this is deliberately not a StoredRecord".to_vec(),
+        }])
+        .expect("seed malformed payload");
+    runtime.snapshot.partition_summaries_complete = false;
+
+    let summary = runtime
+        .replication_summary()
+        .expect("summary remains available while cache rebuild is pending");
+    assert!(summary.partitions.is_empty());
+    assert!(!summary.partitions_included);
+}
+
+#[test]
+fn sqlite_deep_summary_rebuilds_partition_cache_in_bounded_pages() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    let rows = (0..33_u64)
+        .map(|sequence| StoredRecord {
+            observed_at_unix_seconds: 10 + sequence,
+            received_at_unix_seconds: 10 + sequence,
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: sequence.to_be_bytes().to_vec(),
+            payload: format!("payload-{sequence}").into_bytes(),
+            tombstone: false,
+        })
+        .map(|record| record.sqlite_row().expect("SQLite row"))
+        .collect::<Vec<_>>();
+    runtime
+        .storage
+        .upsert_repository_history_records(&rows)
+        .expect("seed history rows");
+    runtime.snapshot.partition_summaries_complete = false;
+
+    runtime
+        .prepare_for_replication(100)
+        .expect("rebuild first page");
+    assert!(!runtime.snapshot.partition_summaries_complete);
+    runtime
+        .prepare_for_replication(100)
+        .expect("rebuild second page");
+    assert!(!runtime.snapshot.partition_summaries_complete);
+    runtime
+        .prepare_for_replication(100)
+        .expect("finish partition summary rebuild");
+    assert!(runtime.snapshot.partition_summaries_complete);
+
+    let summary = runtime
+        .replication_summary_after(None, true)
+        .expect("summary with rebuilt partitions");
+    assert!(summary.partitions_included);
+    assert_eq!(summary.partitions[0].record_count, 33);
+}
+
+#[test]
 fn tombstone_expiry_waits_for_every_ready_repository_after_restart() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

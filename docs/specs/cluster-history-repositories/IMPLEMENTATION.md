@@ -64,6 +64,13 @@
   because its summary request times out, upgrade the serving repository first and let the next
   five-minute direct-path retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
+- Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
+  from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
+  returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available
+  without making an HTTP request deserialize the retained payload window. The worker does not mark
+  daily deep verification successful for such a response. Ordered appends update a completed cache;
+  late rows, tombstone deletion, and retention replacement reset it for another bounded rebuild.
+  A malformed row defers cache progress while allowing ordinary segment/gap replication to continue.
   If startup cannot create the additive summary keyset index for an external-history database,
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.
