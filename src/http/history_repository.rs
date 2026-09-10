@@ -245,13 +245,14 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             true,
         )
         .map_err(repository_error)?;
-    worker::propagate_tombstone_acknowledgements(
+    // The segment is durable and the receipt is the source's authoritative ACK. Fanout to
+    // other repositories is best-effort and runs after the receipt response; a transient
+    // callback failure must not pin the source outbox on the same tombstone forever.
+    worker::schedule_tombstone_acknowledgement_fanout(
         &state,
-        &ready_repository_ids,
+        ready_repository_ids,
         receipt.tombstone_acknowledgements().to_vec(),
-    )
-    .await
-    .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    );
     Ok(Json(receipt))
 }
 
@@ -568,9 +569,11 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
         .await
         .merge_replica_gaps(&batch.gaps)
         .map_err(repository_error)?;
-    worker::propagate_tombstone_acknowledgements(&state, &ready_repository_ids, acknowledgements)
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    worker::schedule_tombstone_acknowledgement_fanout(
+        &state,
+        ready_repository_ids,
+        acknowledgements,
+    );
     Ok(Json(serde_json::json!({})))
 }
 
