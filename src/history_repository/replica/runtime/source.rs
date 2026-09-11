@@ -742,63 +742,6 @@ impl RepositoryReplicaRuntime {
             .map(|state| state.next_sequence)
     }
 
-    pub(crate) fn local_source_backpressure_gaps(
-        &mut self,
-        source_node_id: &str,
-    ) -> Vec<RepositoryReplicaGap> {
-        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
-        let keys = self
-            .snapshot
-            .local_source
-            .backpressure_gaps
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        if keys.is_empty() {
-            self.snapshot.local_source.backpressure_gap_cursor = None;
-            return Vec::new();
-        }
-        let start = self
-            .snapshot
-            .local_source
-            .backpressure_gap_cursor
-            .as_ref()
-            .and_then(|cursor| keys.iter().position(|key| key == cursor))
-            .map_or(0, |index| (index + 1) % keys.len());
-        let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
-        let selected_keys = (0..page_len)
-            .map(|offset| keys[(start + offset) % keys.len()].clone())
-            .collect::<Vec<_>>();
-        self.snapshot.local_source.backpressure_gap_cursor = selected_keys.last().cloned();
-        let gaps = selected_keys
-            .into_iter()
-            .filter_map(|key| {
-                self.snapshot
-                    .local_source
-                    .backpressure_gaps
-                    .get(&key)
-                    .map(|gap| RepositoryReplicaGap {
-                        source_node_id: source_node_id.to_owned(),
-                        source_epoch: gap.source_epoch,
-                        stream: backpressure_gap_stream(&key).to_owned(),
-                        first_sequence: gap.first_sequence,
-                        last_sequence: gap.last_sequence,
-                        start_unix_seconds: gap.start_unix_seconds,
-                        end_unix_seconds: gap.end_unix_seconds,
-                        // Backpressure advances the source cursor without retaining the skipped
-                        // records. The range is therefore irrecoverable; mark it permanent so a
-                        // receiver can safely resume the signed chain at the next durable segment.
-                        permanent: true,
-                        reason: None,
-                    })
-            })
-            .collect();
-        // The normal delivery outcome persists this cursor with the control snapshot after the
-        // source journal page has been accepted or left queued, keeping cursor advancement tied to
-        // the existing delivery checkpoint instead of creating a second write boundary.
-        gaps
-    }
-
     pub(crate) fn local_source_tombstones_fully_acknowledged(
         &self,
         _source_node_id: &str,

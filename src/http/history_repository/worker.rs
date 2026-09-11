@@ -266,7 +266,7 @@ async fn publish_local_history_segment(
                 ready_repository_ids,
             )?
         };
-        let gaps = runtime.local_source_backpressure_gaps(&state.cluster.node_id);
+        let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
         (segments, gaps)
     };
     if !capture_paused {
@@ -453,10 +453,12 @@ async fn relay_local_source_segments(
         if !runtime.begin_source_dynamic_relay_attempt(&state.cluster.cluster_id, now)? {
             return Err(anyhow::anyhow!("source dynamic relay attempt is not due"));
         }
+        let segments = runtime.local_source_pending_segments();
+        let gaps = runtime.local_source_gaps_for_segments(source_node_id, &segments);
         RepositoryRepairBatch {
-            segments: runtime.local_source_pending_segments(),
+            segments,
             unavailable_segment_ids: Vec::new(),
-            gaps: runtime.local_source_backpressure_gaps(source_node_id),
+            gaps,
         }
         .frame_sized_relay_payload()?
     };
@@ -695,7 +697,6 @@ async fn update_local_replica_convergence(
     .map_err(|_| anyhow::anyhow!("write local history repository convergence to Raft"))?;
     Ok(())
 }
-
 async fn known_history_source_node_ids(state: &AppState) -> Vec<String> {
     const MAX_KNOWN_HISTORY_SOURCES: usize = 4_096;
 
@@ -708,7 +709,6 @@ async fn known_history_source_node_ids(state: &AppState) -> Vec<String> {
         .cloned()
         .collect()
 }
-
 fn completed_replication_work(work: ReplicaWork, deep_verification_succeeded: bool) -> ReplicaWork {
     if work.is_deep_verification() && !deep_verification_succeeded {
         ReplicaWork::AntiEntropy
