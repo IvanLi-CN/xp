@@ -126,6 +126,10 @@
   data, so a large backlog cannot inflate the XP process working set. A capacity-suspended source
   skips only new capture and continues replaying existing rows; each source worker cycle processes
   at most four successful replay pages and stops immediately on a failed page.
+  When a bounded source page has pending segments, the gap page first includes any permanent gap
+  whose end sequence immediately precedes a segment on that page, then fills the remaining slots
+  from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while
+  preventing a pending segment from being rejected indefinitely behind gap-page rotation.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary
