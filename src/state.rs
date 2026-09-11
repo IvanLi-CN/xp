@@ -2598,12 +2598,16 @@ impl DesiredStateCommand {
                 expected_generation,
             } => {
                 let current = state.reverse_mesh_assignments.get(target_node_id);
-                if expected_generation
-                    .is_some_and(|expected| current.map(|item| item.generation) != Some(expected))
-                {
-                    return Err(StoreError::Migration {
-                        message: "reverse mesh assignment deletion CAS failed".to_string(),
-                    });
+                if reverse_assignment::deletion_cas_is_stale_replay(
+                    current.map(|item| item.generation),
+                    expected_generation,
+                    state
+                        .reverse_mesh_generation_counters
+                        .get(target_node_id)
+                        .copied()
+                        .unwrap_or_default(),
+                )? {
+                    return Ok(DesiredStateApplyResult::Applied);
                 }
                 state.reverse_mesh_assignments.remove(target_node_id);
                 Ok(DesiredStateApplyResult::Applied)
