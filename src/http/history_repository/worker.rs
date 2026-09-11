@@ -63,6 +63,8 @@ pub(super) use direct::{
 };
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;
+#[cfg(test)]
+pub(super) use source::should_fanout_tombstone_acknowledgements;
 use source::{
     receive_local_source_segment, repair_legacy_tombstone_metadata, should_attempt_source_relay,
     source_record, source_record_with_key, source_record_with_key_for_subject,

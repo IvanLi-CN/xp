@@ -63,7 +63,7 @@ pub(super) async fn repair_legacy_tombstone_metadata(
     Ok(())
 }
 
-pub(super) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
+pub(crate) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
     lifecycle == RepositoryLifecycle::Ready
 }
 

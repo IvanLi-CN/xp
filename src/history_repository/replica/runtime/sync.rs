@@ -699,6 +699,14 @@ impl RepositoryReplicaRuntime {
         &mut self,
         remote_gaps: &[RepositoryReplicaGap],
     ) -> Result<(), RepositoryRuntimeError> {
+        self.merge_replica_gaps_in_memory(remote_gaps)?;
+        self.persist_control_state()
+    }
+
+    pub(crate) fn merge_replica_gaps_in_memory(
+        &mut self,
+        remote_gaps: &[RepositoryReplicaGap],
+    ) -> Result<(), RepositoryRuntimeError> {
         validate_replica_gaps(remote_gaps)?;
         let incoming = canonical_gaps(remote_gaps.iter().cloned());
         let mut merged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary));
@@ -709,7 +717,7 @@ impl RepositoryReplicaRuntime {
             merged = prioritize_full_ledger(merged, &incoming, MAX_REPAIR_GAPS);
         }
         self.snapshot.gaps = merged.into_iter().map(stored_gap).collect();
-        self.persist_control_state()
+        Ok(())
     }
 
     pub(crate) fn acknowledge_tombstones(

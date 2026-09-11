@@ -570,7 +570,8 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .merge_replica_gaps(&batch.gaps)
             .map_err(repository_error)?;
     }
-    for segment in batch.segments {
+    let relay_gaps = batch.gaps;
+    for (index, segment) in batch.segments.into_iter().enumerate() {
         let valid_identity = if source_is_ready_repository {
             identity_is_valid_for_history_replay(&state, &segment.identity).await?
         } else {
@@ -589,7 +590,7 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,
-                &batch.gaps,
+                if index == 0 { &relay_gaps } else { &[] },
                 u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
                 &ready_repository_ids,
                 &state.cluster.node_id,
