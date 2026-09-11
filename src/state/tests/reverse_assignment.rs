@@ -132,3 +132,30 @@ fn reverse_assignment_replay_of_deleted_same_generation_is_a_noop() {
         Some(&4)
     );
 }
+
+#[test]
+fn reverse_assignment_deletion_replay_after_snapshot_is_a_noop() {
+    let mut state = PersistedState::empty();
+    let target = xp_test_fixtures::primary_node_id().to_owned();
+    state
+        .reverse_mesh_generation_counters
+        .insert(target.clone(), 4);
+
+    DesiredStateCommand::DeleteReverseMeshAssignment {
+        target_node_id: target.clone(),
+        expected_generation: Some(4),
+    }
+    .apply(&mut state)
+    .expect("deletion already reflected in snapshot should be idempotent");
+
+    assert!(!state.reverse_mesh_assignments.contains_key(&target));
+}
+
+#[test]
+fn reverse_assignment_deletion_does_not_hide_a_newer_assignment() {
+    let result =
+        crate::state::reverse_assignment::deletion_cas_is_stale_replay(Some(5), &Some(4), 5)
+            .expect_err("deletion must not remove a newer assignment");
+
+    assert!(result.to_string().contains("deletion CAS failed"));
+}

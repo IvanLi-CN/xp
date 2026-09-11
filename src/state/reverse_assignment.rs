@@ -50,3 +50,23 @@ pub(super) fn generation_cas_is_stale_replay(
         message: "reverse mesh assignment generation CAS failed".to_string(),
     })
 }
+
+pub(super) fn deletion_cas_is_stale_replay(
+    current_generation: Option<u64>,
+    expected_generation: &Option<u64>,
+    generation_floor: u64,
+) -> Result<bool, StoreError> {
+    let Some(expected_generation) = expected_generation else {
+        return Ok(false);
+    };
+    match current_generation {
+        Some(current) if current == *expected_generation => Ok(false),
+        Some(_) => Err(StoreError::Migration {
+            message: "reverse mesh assignment deletion CAS failed".to_string(),
+        }),
+        None if generation_floor >= *expected_generation => Ok(true),
+        None => Err(StoreError::Migration {
+            message: "reverse mesh assignment deletion CAS failed".to_string(),
+        }),
+    }
+}
