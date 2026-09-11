@@ -204,6 +204,36 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
 }
 
 #[test]
+fn receiver_accepts_a_stale_replay_after_the_recent_hash_window_is_evicted() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    let mut previous_hash = None;
+    let mut first = None;
+    for sequence in 0..40 {
+        let segment = signed_segment(
+            &key,
+            sequence,
+            vec![record(format!("record-{sequence}").as_bytes(), false)],
+            previous_hash,
+        );
+        previous_hash = Some(segment.segment_hash().expect("segment hash"));
+        if sequence == 0 {
+            first = Some(segment.clone());
+        }
+        receiver
+            .accept(&segment, &identity)
+            .expect("segment accepted");
+    }
+
+    let first = first.expect("first segment");
+    assert!(matches!(
+        receiver.accept(&first, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
+}
+
+#[test]
 fn receiver_accepts_the_first_segment_after_a_declared_gap() {
     let key = signing_key();
     let identity = identity(&key);
