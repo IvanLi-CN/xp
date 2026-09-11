@@ -12,6 +12,7 @@ use super::{encoding, proto};
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
 
 mod checkpoint;
+mod replay;
 pub(crate) use checkpoint::SegmentReceiverCheckpoint;
 
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 1_000;
@@ -156,27 +157,21 @@ impl SyncRecord {
     pub(crate) fn is_tombstone(&self) -> bool {
         self.tombstone
     }
-
     pub(crate) fn subject_node_id(&self) -> &str {
         &self.subject_node_id
     }
-
     pub(crate) fn observer_node_id(&self) -> &str {
         &self.observer_node_id
     }
-
     pub(crate) fn schema(&self) -> (&str, u32) {
         (&self.schema_id, self.schema_version)
     }
-
     pub(crate) fn record_key(&self) -> &[u8] {
         &self.record_key
     }
-
     pub(crate) fn payload_bytes(&self) -> &[u8] {
         &self.payload
     }
-
     fn validate(&self) -> Result<(), ProtocolError> {
         validate_identifier("subject node id", &self.subject_node_id)?;
         validate_identifier("observer node id", &self.observer_node_id)?;
@@ -738,6 +733,11 @@ impl SegmentReceiver {
                                 watermark: progress.watermark(first)?,
                             },
                         });
+                    }
+                    if let Some(acceptance) =
+                        replay::stale_replay_acceptance(progress, segment, first)?
+                    {
+                        return Ok(acceptance);
                     }
                     let next_epoch =
                         progress
