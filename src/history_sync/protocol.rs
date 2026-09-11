@@ -10,7 +10,6 @@ use sha2::{Digest as _, Sha256};
 
 use super::{encoding, proto};
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
-
 mod checkpoint;
 mod replay;
 pub(crate) use checkpoint::SegmentReceiverCheckpoint;
@@ -41,7 +40,6 @@ fn validate_identifier(kind: &'static str, value: &str) -> Result<(), ProtocolEr
     }
     Ok(())
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Cursor {
     source_node_id: String,
@@ -49,7 +47,6 @@ pub(crate) struct Cursor {
     stream: String,
     sequence: u64,
 }
-
 impl Cursor {
     pub(crate) fn new(
         source_node_id: impl Into<String>,
@@ -121,7 +118,6 @@ impl Cursor {
         )
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyncRecord {
     subject_node_id: String,
@@ -132,7 +128,6 @@ pub(crate) struct SyncRecord {
     payload: Vec<u8>,
     tombstone: bool,
 }
-
 impl SyncRecord {
     pub(crate) fn new(
         subject_node_id: impl Into<String>,
@@ -219,7 +214,6 @@ pub(crate) fn prioritize_tombstones(records: Vec<SyncRecord>) -> Vec<SyncRecord>
         records.into_iter().partition(SyncRecord::is_tombstone);
     tombstones.into_iter().chain(remaining).collect()
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CanonicalSegment {
     cluster_id: String,
@@ -231,7 +225,6 @@ pub(crate) struct CanonicalSegment {
     opened_at_unix_seconds: u64,
     closed_at_unix_seconds: u64,
 }
-
 impl CanonicalSegment {
     pub(crate) fn new(
         cluster_id: impl Into<String>,
@@ -301,7 +294,6 @@ impl CanonicalSegment {
     pub(crate) fn closed_at_unix_seconds(&self) -> u64 {
         self.closed_at_unix_seconds
     }
-
     fn validate(&self) -> Result<(), ProtocolError> {
         validate_identifier("cluster id", &self.cluster_id)?;
         if self.records.is_empty() {
@@ -494,7 +486,6 @@ pub(crate) struct EncodedResponse {
     wire: Vec<u8>,
     canonical_len: usize,
 }
-
 impl EncodedResponse {
     pub(crate) fn encode(canonical: Vec<u8>) -> Result<Self, ProtocolError> {
         let canonical_len = canonical.len();
@@ -531,10 +522,8 @@ impl EncodedResponse {
         encoding::decode(self.encoding, &self.wire, self.canonical_len)
     }
 }
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchemaCatalog(BTreeSet<(String, u32)>);
-
 impl SchemaCatalog {
     pub(crate) fn new(schemas: impl IntoIterator<Item = (String, u32)>) -> Self {
         Self(schemas.into_iter().collect())
@@ -545,24 +534,20 @@ impl SchemaCatalog {
             .contains(&(record.schema_id.clone(), record.schema_version))
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Acknowledgement {
     watermark: Cursor,
 }
-
 impl Acknowledgement {
     pub(crate) fn watermark(&self) -> &Cursor {
         &self.watermark
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CursorGap {
     requested: Cursor,
     earliest_available: Cursor,
 }
-
 impl CursorGap {
     pub(crate) fn requested(&self) -> &Cursor {
         &self.requested
@@ -572,13 +557,11 @@ impl CursorGap {
         &self.earliest_available
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CursorAvailability {
     Available,
     Expired(CursorGap),
 }
-
 pub(crate) fn cursor_availability(
     requested: Cursor,
     earliest_available: Cursor,
@@ -598,7 +581,6 @@ pub(crate) fn cursor_availability(
         Ok(CursorAvailability::Available)
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Acceptance {
     Accepted {
@@ -610,7 +592,6 @@ pub(crate) enum Acceptance {
         acknowledgement: Acknowledgement,
     },
 }
-
 impl Acceptance {
     pub(crate) fn unknown_schema_records(&self) -> usize {
         match self {
@@ -679,6 +660,7 @@ impl SegmentReceiver {
         let mut gap = None;
         let mut rotates_epoch = false;
         let mut hash_chain_verified = true;
+        let mut previous_hash_verified = true;
         if let Some(progress) = self.streams.get(&stream_key) {
             if first.source_epoch > progress.epoch {
                 let expected_epoch = progress.epoch.saturating_add(1);
@@ -709,7 +691,17 @@ impl SegmentReceiver {
             }
             if !rotates_epoch {
                 hash_chain_verified = progress.hash_chain_verified;
+                previous_hash_verified = progress.previous_hash_verified();
                 if first.sequence <= progress.last_sequence {
+                    if self.retained_anchor_mode
+                        && segment.canonical.last_cursor.sequence <= progress.last_sequence
+                    {
+                        return Ok(Acceptance::Duplicate {
+                            acknowledgement: Acknowledgement {
+                                watermark: progress.watermark(first)?,
+                            },
+                        });
+                    }
                     if let Some(acceptance) =
                         replay::stale_replay_acceptance(progress, segment, first)?
                     {
@@ -760,7 +752,7 @@ impl SegmentReceiver {
                         actual: first.sequence,
                     });
                 }
-                if progress.hash_chain_verified
+                if progress.previous_hash_verified()
                     && segment.canonical.previous_segment_hash != Some(progress.last_segment_hash)
                 {
                     return Err(ProtocolError::HashChainMismatch);
@@ -774,6 +766,7 @@ impl SegmentReceiver {
             // predecessor hash still authenticates the segment, but the predecessor itself is
             // unavailable locally, so the chain must remain marked unverified until a new epoch.
             hash_chain_verified = false;
+            previous_hash_verified = true;
         }
         let records = segment.canonical.records();
         let unknown_schema_records = records
@@ -804,6 +797,11 @@ impl SegmentReceiver {
         if unknown_schema_records > 0 {
             self.forwardable_unknown_segments.push(segment.clone());
         }
+        if !rotates_epoch && !previous_hash_verified {
+            // A declared gap invalidates only the first predecessor. The accepted segment
+            // establishes the predecessor hash required by all following segments.
+            previous_hash_verified = true;
+        }
         let mut recent_segments = if rotates_epoch {
             VecDeque::new()
         } else {
@@ -827,6 +825,7 @@ impl SegmentReceiver {
                 last_sequence: segment.canonical.last_cursor.sequence,
                 last_segment_hash: segment_hash,
                 hash_chain_verified,
+                previous_hash_verified: Some(previous_hash_verified),
                 recent_segments,
             },
         );
@@ -871,6 +870,7 @@ impl SegmentReceiver {
         }
         progress.last_sequence = last_missing;
         progress.hash_chain_verified = false;
+        progress.previous_hash_verified = Some(false);
         Ok(true)
     }
     pub(crate) fn is_tombstoned(&self, cursor: &Cursor, record: &SyncRecord) -> bool {
@@ -921,7 +921,6 @@ impl TombstoneKey {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StreamProgress {
     epoch: u64,
@@ -929,9 +928,10 @@ struct StreamProgress {
     last_segment_hash: [u8; 32],
     #[serde(default = "default_hash_chain_verified")]
     hash_chain_verified: bool,
+    #[serde(default)]
+    previous_hash_verified: Option<bool>,
     recent_segments: VecDeque<SegmentHashRange>,
 }
-
 fn default_hash_chain_verified() -> bool {
     true
 }
@@ -941,13 +941,15 @@ struct SegmentHashRange {
     last_sequence: u64,
     hash: [u8; 32],
 }
-
 impl StreamProgress {
+    fn previous_hash_verified(&self) -> bool {
+        self.previous_hash_verified
+            .unwrap_or(self.hash_chain_verified)
+    }
     fn watermark(&self, cursor: &Cursor) -> Result<Cursor, ProtocolError> {
         cursor.with_sequence(self.last_sequence)
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProtocolError {
     InvalidSegment(&'static str),
@@ -976,13 +978,11 @@ pub(crate) enum ProtocolError {
     CheckpointLimit,
     EncodingDecision,
 }
-
 impl fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "history sync protocol error: {self:?}")
     }
 }
-
 impl std::error::Error for ProtocolError {}
 
 fn hash_records(records: &[SyncRecord]) -> [u8; 32] {
