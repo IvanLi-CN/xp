@@ -1,4 +1,5 @@
 use crate::history_sync::SyncRecord;
+use crate::state::history_repository::replica::{RepositoryReplicaGap, RepositoryReplicaSegment};
 use crate::state::history_repository::{control::RepositoryLifecycle, identity::RepositoryNodeId};
 
 use super::super::AppState;
@@ -62,8 +63,38 @@ pub(super) async fn repair_legacy_tombstone_metadata(
     Ok(())
 }
 
-pub(super) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
+pub(crate) fn should_fanout_tombstone_acknowledgements(lifecycle: RepositoryLifecycle) -> bool {
     lifecycle == RepositoryLifecycle::Ready
+}
+
+pub(super) async fn receive_local_source_segment(
+    state: &AppState,
+    segment: &RepositoryReplicaSegment,
+    gaps: &[RepositoryReplicaGap],
+    ready_repository_ids: &[String],
+    now: u64,
+) -> anyhow::Result<()> {
+    let receipt = {
+        let mut runtime = state.repository_replica.lock().await;
+        runtime.receive_wire_from_repository_with_gaps(
+            &state.cluster.cluster_id,
+            &segment.identity,
+            &segment.wire,
+            gaps,
+            now,
+            ready_repository_ids,
+            &state.cluster.node_id,
+        )?
+    };
+    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
+        && !receipt.tombstone_acknowledgements().is_empty()
+    {
+        tracing::debug!(
+            count = receipt.tombstone_acknowledgements().len(),
+            "history tombstone acknowledgement fanout deferred to replication worker"
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn source_record(

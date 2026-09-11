@@ -68,6 +68,11 @@ recoverable ranges are retained, the source persists a page cursor and rotates
 through the full set across delivery cycles, so the request bound never drops a
 range permanently.
 
+Repository summaries also carry an additive `history_truncated` marker when the
+sender has observed more gap evidence than the bounded ledger can retain. Peers
+must preserve that marker and keep affected queries partial; absence of the
+field is interpreted as `false` for older summaries.
+
 A syncing repository enters ready only after its durable catch-up checkpoints
 cover the bounded known union, no Recoverable Backlog remains, and the existing
 five-minute stability window completes. An agreed permanent gap does not block

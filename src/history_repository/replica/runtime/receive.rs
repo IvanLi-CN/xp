@@ -65,6 +65,8 @@ struct RepositoryWireRequest<'a> {
     ready_repositories: &'a [String],
     local_repository_id: &'a str,
     allow_retained_anchor: bool,
+    rollback_snapshot: Option<RepositoryReplicaSnapshot>,
+    discard_gap_evidence_on_error: bool,
 }
 
 impl RepositoryReplicaRuntime {
@@ -102,7 +104,59 @@ impl RepositoryReplicaRuntime {
             ready_repositories,
             local_repository_id,
             allow_retained_anchor: false,
+            rollback_snapshot: None,
+            discard_gap_evidence_on_error: false,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_wire_from_repository_with_gaps(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: &[RepositoryReplicaGap],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.rebuild_if_stale(now_unix_seconds)?;
+        let previous_snapshot = self.snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
+        if let Err(error) = self.merge_replica_gaps_in_memory(gaps) {
+            self.snapshot = previous_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+            return Err(error);
+        }
+        let result = self.receive_wire_from_repository_inner(RepositoryWireRequest {
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_anchor: false,
+            rollback_snapshot: Some(previous_snapshot.clone()),
+            discard_gap_evidence_on_error: true,
+        });
+        match result {
+            Ok(receipt) => Ok(receipt),
+            Err(error) => {
+                if !matches!(
+                    &error,
+                    RepositoryRuntimeError::Protocol(
+                        ProtocolError::SequenceGap { .. }
+                            | ProtocolError::EpochGap { .. }
+                            | ProtocolError::ForkDetected { .. }
+                    )
+                ) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones =
+                        TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                }
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn receive_initial_backfill_wire_from_repository(
@@ -122,7 +176,59 @@ impl RepositoryReplicaRuntime {
             ready_repositories,
             local_repository_id,
             allow_retained_anchor: true,
+            rollback_snapshot: None,
+            discard_gap_evidence_on_error: false,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_initial_backfill_wire_from_repository_with_gaps(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: &[RepositoryReplicaGap],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.rebuild_if_stale(now_unix_seconds)?;
+        let previous_snapshot = self.snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
+        if let Err(error) = self.merge_replica_gaps_in_memory(gaps) {
+            self.snapshot = previous_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+            return Err(error);
+        }
+        let result = self.receive_wire_from_repository_inner(RepositoryWireRequest {
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_anchor: true,
+            rollback_snapshot: Some(previous_snapshot.clone()),
+            discard_gap_evidence_on_error: true,
+        });
+        match result {
+            Ok(receipt) => Ok(receipt),
+            Err(error) => {
+                if !matches!(
+                    &error,
+                    RepositoryRuntimeError::Protocol(
+                        ProtocolError::SequenceGap { .. }
+                            | ProtocolError::EpochGap { .. }
+                            | ProtocolError::ForkDetected { .. }
+                    )
+                ) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones =
+                        TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                }
+                Err(error)
+            }
+        }
     }
 
     fn receive_wire_from_repository_inner(
@@ -137,6 +243,8 @@ impl RepositoryReplicaRuntime {
             ready_repositories,
             local_repository_id,
             allow_retained_anchor,
+            rollback_snapshot,
+            discard_gap_evidence_on_error,
         } = request;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.refresh_capacity()?;
@@ -152,7 +260,7 @@ impl RepositoryReplicaRuntime {
             .as_ref()
             .expect("receiver initialized")
             .checkpoint()?;
-        let previous_snapshot = self.snapshot.clone();
+        let previous_snapshot = rollback_snapshot.unwrap_or_else(|| self.snapshot.clone());
         let first_cursor = segment.canonical().first_cursor();
         let last_cursor = segment.canonical().last_cursor();
         if self.snapshot.gaps.iter().any(|gap| {
@@ -206,13 +314,25 @@ impl RepositoryReplicaRuntime {
                         | ProtocolError::EpochGap { .. }
                         | ProtocolError::ForkDetected { .. }
                 );
-                if let ProtocolError::SequenceGap { expected, actual } = error {
-                    self.record_sequence_gap(segment.canonical(), expected, actual);
-                } else if records_gap {
-                    self.record_gap(segment.canonical(), true);
-                }
-                if records_gap || expired_tombstones {
-                    self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
+                if discard_gap_evidence_on_error {
+                    self.restore(&previous_receiver, previous_snapshot.clone())?;
+                    if let ProtocolError::SequenceGap { expected, actual } = error {
+                        self.record_sequence_gap(segment.canonical(), expected, actual);
+                    } else if records_gap {
+                        self.record_gap(segment.canonical(), true);
+                    }
+                    if records_gap {
+                        self.persist_control_state()?;
+                    }
+                } else {
+                    if let ProtocolError::SequenceGap { expected, actual } = error {
+                        self.record_sequence_gap(segment.canonical(), expected, actual);
+                    } else if records_gap {
+                        self.record_gap(segment.canonical(), true);
+                    }
+                    if records_gap || expired_tombstones {
+                        self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
+                    }
                 }
                 return Err(error.into());
             }
@@ -267,7 +387,10 @@ impl RepositoryReplicaRuntime {
         self.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
         // Retention is a separate, retryable maintenance pass. It must never make a just-accepted
         // segment half durable with its control checkpoint.
-        self.prune_retention(now_unix_seconds)?;
+        if let Err(error) = self.prune_retention(now_unix_seconds) {
+            self.storage_degraded = true;
+            tracing::warn!(error = %error, "history retention maintenance deferred after receive");
+        }
         Ok(sync_receipt(
             acceptance,
             availability,

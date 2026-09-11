@@ -63,6 +63,16 @@ fn backpressure_gap_requests_rotate_across_the_repair_limit() {
     }
 
     let first_page = runtime.local_source_backpressure_gaps("node-a");
+    assert!(
+        runtime
+            .snapshot
+            .local_source
+            .backpressure_gap_cursor
+            .is_none()
+    );
+    runtime
+        .commit_local_source_gap_page(&first_page)
+        .expect("commit first gap page");
     runtime
         .persist_control_state()
         .expect("persist first gap cursor");
@@ -77,6 +87,34 @@ fn backpressure_gap_requests_rotate_across_the_repair_limit() {
         .collect::<BTreeSet<_>>();
     assert_eq!(all_sequences.len(), 65);
     assert!(all_sequences.contains(&129));
+}
+
+#[test]
+fn failed_gap_delivery_does_not_advance_the_page_cursor() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::empty(storage);
+    runtime.snapshot.local_source.epoch = 7;
+    for index in 0..65 {
+        let sequence = index * 2 + 1;
+        runtime.record_local_source_backpressure_gap("runtime", sequence, sequence, sequence);
+    }
+
+    let first_page = runtime.local_source_backpressure_gaps("node-a");
+    assert_eq!(first_page.len(), 64);
+    assert!(
+        runtime
+            .snapshot
+            .local_source
+            .backpressure_gap_cursor
+            .is_none()
+    );
+    runtime
+        .commit_local_source_gap_page(&first_page)
+        .expect("commit delivered gap page");
+    let second_page = runtime.local_source_backpressure_gaps("node-a");
+    assert_eq!(second_page.len(), 64);
+    assert!(second_page.iter().any(|gap| gap.first_sequence == 129));
 }
 
 #[test]

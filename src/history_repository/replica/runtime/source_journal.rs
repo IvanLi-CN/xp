@@ -72,7 +72,6 @@ impl RepositoryReplicaRuntime {
                 selected_keys.push(key.clone());
             }
         }
-        self.snapshot.local_source.backpressure_gap_cursor = selected_keys.last().cloned();
         selected_keys
             .into_iter()
             .filter_map(|key| {
@@ -93,6 +92,34 @@ impl RepositoryReplicaRuntime {
                     })
             })
             .collect()
+    }
+
+    pub(crate) fn commit_local_source_gap_page(
+        &mut self,
+        gaps: &[RepositoryReplicaGap],
+    ) -> Result<(), RepositoryRuntimeError> {
+        let mut committed_key = None;
+        for gap in gaps {
+            if let Some((key, _)) =
+                self.snapshot
+                    .local_source
+                    .backpressure_gaps
+                    .iter()
+                    .find(|(key, candidate)| {
+                        super::backpressure_gap_stream(key) == gap.stream
+                            && candidate.source_epoch == gap.source_epoch
+                            && candidate.first_sequence == gap.first_sequence
+                            && candidate.last_sequence == gap.last_sequence
+                    })
+            {
+                committed_key = Some(key.clone());
+            }
+        }
+        if let Some(key) = committed_key {
+            self.snapshot.local_source.backpressure_gap_cursor = Some(key);
+            self.persist_control_state()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn acknowledge_local_source_segment(
