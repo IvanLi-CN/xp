@@ -175,7 +175,7 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
     let key = signing_key();
     let identity = identity(&key);
     let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
-    let initial = signed_segment(&key, 10, vec![record(b"a", false)], None);
+    let initial = signed_segment(&key, 0, vec![record(b"a", false)], None);
     let accepted = receiver.accept(&initial, &identity).expect("first segment");
     assert_eq!(
         accepted.acknowledgement().watermark(),
@@ -191,7 +191,7 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
     assert_eq!(
         receiver.accept(&gap, &identity),
         Err(ProtocolError::SequenceGap {
-            expected: 11,
+            expected: 1,
             actual: 12,
         })
     );
@@ -242,6 +242,11 @@ fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verifi
     let mut ordinary_receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
     assert_eq!(
         ordinary_receiver.accept(&anchor, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
+    let unanchored = signed_segment(&key, 3, vec![record(b"unanchored", false)], None);
+    assert_eq!(
+        ordinary_receiver.accept(&unanchored, &identity),
         Err(ProtocolError::HashChainMismatch)
     );
 

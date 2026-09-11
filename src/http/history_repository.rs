@@ -566,6 +566,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
         ));
     }
     let mut acknowledgements = Vec::new();
+    state
+        .repository_replica
+        .lock()
+        .await
+        .merge_replica_gaps(&batch.gaps)
+        .map_err(repository_error)?;
     for segment in batch.segments {
         let valid_identity = if source_is_ready_repository {
             identity_is_valid_for_history_replay(&state, &segment.identity).await?
@@ -592,12 +598,6 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .map_err(repository_error)?;
         acknowledgements.extend(receipt.tombstone_acknowledgements().iter().cloned());
     }
-    state
-        .repository_replica
-        .lock()
-        .await
-        .merge_replica_gaps(&batch.gaps)
-        .map_err(repository_error)?;
     if !acknowledgements.is_empty() {
         tracing::debug!(
             count = acknowledgements.len(),

@@ -201,6 +201,11 @@ async fn repair_ready_peer_catch_up_page(
         &mut remaining,
         &repair.unavailable_segment_ids,
     )?;
+    state
+        .repository_replica
+        .lock()
+        .await
+        .merge_replica_gaps(&repair.gaps)?;
     for segment in repair.segments {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
@@ -221,11 +226,6 @@ async fn repair_ready_peer_catch_up_page(
                 &state.cluster.node_id,
             )?;
     }
-    state
-        .repository_replica
-        .lock()
-        .await
-        .merge_replica_gaps(&repair.gaps)?;
     let page_complete = remaining.is_empty();
     let summary_cursor = page_complete
         .then(|| checkpoint.summary_pending_next_cursor.clone())

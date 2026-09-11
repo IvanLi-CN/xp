@@ -21,6 +21,7 @@ pub(crate) const MAX_RESPONSE_WIRE_BYTES: usize = 256 * 1024;
 const MAX_SEGMENT_DURATION_SECONDS: u64 = 60;
 const MAX_UNKNOWN_FORWARD_SEGMENTS: usize =
     MAX_RESPONSE_CANONICAL_BYTES / MAX_CANONICAL_SEGMENT_BYTES;
+// Keep one complete repair page replayable across a checkpoint restart.
 const MAX_RECENT_SEGMENTS_PER_STREAM: usize = 64;
 
 fn validate_identifier(kind: &'static str, value: &str) -> Result<(), ProtocolError> {
@@ -749,8 +750,8 @@ impl SegmentReceiver {
                     return Err(ProtocolError::HashChainMismatch);
                 }
             }
-        } else if segment.canonical.previous_segment_hash.is_some() {
-            if !self.retained_anchor_mode || first.sequence == 0 {
+        } else if first.sequence != 0 {
+            if !self.retained_anchor_mode || segment.canonical.previous_segment_hash.is_none() {
                 return Err(ProtocolError::HashChainMismatch);
             }
             // A ready repository may retain only the tail of a source stream. The signed
