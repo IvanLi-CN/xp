@@ -334,10 +334,10 @@ fn receiver_verifies_signatures_hash_chain_and_isolates_valid_forks() {
         Err(ProtocolError::ForkDetected { next_epoch: 8 })
     );
     assert!(receiver.is_quarantined(valid_fork.canonical().first_cursor()));
-    assert_eq!(
+    assert!(matches!(
         receiver.accept(&first, &identity),
-        Err(ProtocolError::Quarantined)
-    );
+        Ok(Acceptance::Duplicate { .. })
+    ));
     let replacement = CanonicalSegment::new(
         "cluster-a",
         Cursor::new("node-a", 8, "runtime", 0).unwrap(),
@@ -362,6 +362,82 @@ fn receiver_verifies_signatures_hash_chain_and_isolates_valid_forks() {
     .sign(&key)
     .unwrap();
     assert!(receiver.accept(&continued, &identity).is_ok());
+}
+
+#[test]
+fn receiver_accepts_a_complete_stale_replay_after_a_stream_was_quarantined() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::default());
+    let initial = signed_segment(&key, 0, vec![record(b"a", false)], None);
+    receiver
+        .accept(&initial, &identity)
+        .expect("initial segment");
+    let second = signed_segment(
+        &key,
+        1,
+        vec![record(b"b", false)],
+        Some(initial.segment_hash().unwrap()),
+    );
+    receiver.accept(&second, &identity).expect("second segment");
+    let third = signed_segment(
+        &key,
+        2,
+        vec![record(b"c", false)],
+        Some(second.segment_hash().unwrap()),
+    );
+    receiver.accept(&third, &identity).expect("third segment");
+
+    let fork = signed_segment(&key, 2, vec![record(b"fork", false)], Some([7; 32]));
+    assert_eq!(
+        receiver.accept(&fork, &identity),
+        Err(ProtocolError::ForkDetected { next_epoch: 8 })
+    );
+    assert!(receiver.is_quarantined(fork.canonical().first_cursor()));
+
+    let checkpoint = receiver.checkpoint().expect("quarantined checkpoint");
+    let mut receiver =
+        SegmentReceiver::from_checkpoint("cluster-a", SchemaCatalog::default(), checkpoint)
+            .expect("restore quarantined checkpoint");
+    assert!(matches!(
+        receiver.accept(&initial, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
+    assert!(matches!(
+        receiver.accept(&third, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
+    let continuation = signed_segment(
+        &key,
+        3,
+        vec![record(b"d", false)],
+        Some(third.segment_hash().unwrap()),
+    );
+    assert!(receiver.accept(&continuation, &identity).is_ok());
+    assert!(!receiver.is_quarantined(continuation.canonical().first_cursor()));
+}
+
+#[test]
+fn receiver_does_not_treat_a_replay_as_duplicate_after_a_declared_gap() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut receiver = receiver(SchemaCatalog::default());
+    let initial = signed_segment(&key, 0, vec![record(b"a", false)], None);
+    receiver
+        .accept(&initial, &identity)
+        .expect("initial segment");
+    let next_cursor = Cursor::new("node-a", 7, "runtime", 3).expect("valid cursor");
+    assert!(
+        receiver
+            .advance_declared_sequence_gap(&next_cursor, 1, 2)
+            .expect("declared gap advances the cursor")
+    );
+
+    let late = signed_segment(&key, 1, vec![record(b"late", false)], None);
+    assert!(!matches!(
+        receiver.accept(&late, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
 }
 
 #[test]

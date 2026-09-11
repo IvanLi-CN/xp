@@ -658,7 +658,6 @@ pub(crate) struct SegmentReceiver {
     quarantined_streams: BTreeMap<StreamKey, u64>,
     forwardable_unknown_segments: Vec<SignedSegment>,
 }
-
 impl SegmentReceiver {
     pub(crate) fn for_cluster(
         expected_cluster_id: impl Into<String>,
@@ -673,7 +672,6 @@ impl SegmentReceiver {
             forwardable_unknown_segments: Vec::new(),
         }
     }
-
     pub(crate) fn accept(
         &mut self,
         segment: &SignedSegment,
@@ -685,11 +683,6 @@ impl SegmentReceiver {
         }
         let first = segment.canonical.first_cursor();
         let stream_key = first.stream_key();
-        if self.quarantined_streams.contains_key(&stream_key)
-            && first.source_epoch == self.streams[&stream_key].epoch
-        {
-            return Err(ProtocolError::Quarantined);
-        }
         let segment_hash = segment.segment_hash()?;
         let mut gap = None;
         let mut rotates_epoch = false;
@@ -723,6 +716,11 @@ impl SegmentReceiver {
             }
             if !rotates_epoch {
                 if first.sequence <= progress.last_sequence {
+                    if let Some(acceptance) =
+                        replay::stale_replay_acceptance(progress, segment, first)?
+                    {
+                        return Ok(acceptance);
+                    }
                     if progress.recent_segments.iter().any(|known| {
                         known.first_sequence == first.sequence
                             && known.last_sequence == segment.canonical.last_cursor.sequence
@@ -734,10 +732,8 @@ impl SegmentReceiver {
                             },
                         });
                     }
-                    if let Some(acceptance) =
-                        replay::stale_replay_acceptance(progress, segment, first)?
-                    {
-                        return Ok(acceptance);
+                    if self.quarantined_streams.contains_key(&stream_key) {
+                        return Err(ProtocolError::Quarantined);
                     }
                     let next_epoch =
                         progress
@@ -754,6 +750,11 @@ impl SegmentReceiver {
                     )?;
                     self.quarantined_streams.insert(stream_key, next_epoch);
                     return Err(ProtocolError::ForkDetected { next_epoch });
+                }
+                if self.quarantined_streams.contains_key(&stream_key)
+                    && !replay::is_quarantined_continuation(progress, segment, first)?
+                {
+                    return Err(ProtocolError::Quarantined);
                 }
                 let expected = progress
                     .last_sequence
@@ -831,9 +832,7 @@ impl SegmentReceiver {
                 recent_segments,
             },
         );
-        if rotates_epoch {
-            self.quarantined_streams.remove(&first.stream_key());
-        }
+        self.quarantined_streams.remove(&first.stream_key());
         Ok(Acceptance::Accepted {
             acknowledgement: Acknowledgement {
                 watermark: segment.canonical.last_cursor.clone(),
@@ -972,6 +971,7 @@ pub(crate) enum ProtocolError {
     HashChainMismatch,
     ForkDetected { next_epoch: u64 },
     Quarantined,
+    PermanentGap,
     ResurrectionPrevented,
     CheckpointLimit,
     EncodingDecision,
