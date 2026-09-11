@@ -142,8 +142,18 @@ impl RepositoryReplicaRuntime {
         match result {
             Ok(receipt) => Ok(receipt),
             Err(error) => {
-                self.snapshot = previous_snapshot;
-                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                if !matches!(
+                    &error,
+                    RepositoryRuntimeError::Protocol(
+                        ProtocolError::SequenceGap { .. }
+                            | ProtocolError::EpochGap { .. }
+                            | ProtocolError::ForkDetected { .. }
+                    )
+                ) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones =
+                        TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                }
                 Err(error)
             }
         }
@@ -204,8 +214,18 @@ impl RepositoryReplicaRuntime {
         match result {
             Ok(receipt) => Ok(receipt),
             Err(error) => {
-                self.snapshot = previous_snapshot;
-                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                if !matches!(
+                    &error,
+                    RepositoryRuntimeError::Protocol(
+                        ProtocolError::SequenceGap { .. }
+                            | ProtocolError::EpochGap { .. }
+                            | ProtocolError::ForkDetected { .. }
+                    )
+                ) {
+                    self.snapshot = previous_snapshot;
+                    self.tombstones =
+                        TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                }
                 Err(error)
             }
         }
@@ -294,17 +314,23 @@ impl RepositoryReplicaRuntime {
                         | ProtocolError::EpochGap { .. }
                         | ProtocolError::ForkDetected { .. }
                 );
-                if !discard_gap_evidence_on_error {
+                if discard_gap_evidence_on_error {
+                    self.restore(&previous_receiver, previous_snapshot.clone())?;
                     if let ProtocolError::SequenceGap { expected, actual } = error {
                         self.record_sequence_gap(segment.canonical(), expected, actual);
                     } else if records_gap {
                         self.record_gap(segment.canonical(), true);
                     }
-                }
-                if records_gap || expired_tombstones {
-                    if discard_gap_evidence_on_error {
-                        self.restore(&previous_receiver, previous_snapshot.clone())?;
-                    } else {
+                    if records_gap {
+                        self.persist_control_state()?;
+                    }
+                } else {
+                    if let ProtocolError::SequenceGap { expected, actual } = error {
+                        self.record_sequence_gap(segment.canonical(), expected, actual);
+                    } else if records_gap {
+                        self.record_gap(segment.canonical(), true);
+                    }
+                    if records_gap || expired_tombstones {
                         self.persist_or_restore(&previous_receiver, &previous_snapshot)?;
                     }
                 }
@@ -361,7 +387,10 @@ impl RepositoryReplicaRuntime {
         self.persist_or_restore_with_mutation(&previous_receiver, &previous_snapshot, mutation)?;
         // Retention is a separate, retryable maintenance pass. It must never make a just-accepted
         // segment half durable with its control checkpoint.
-        self.prune_retention(now_unix_seconds)?;
+        if let Err(error) = self.prune_retention(now_unix_seconds) {
+            self.storage_degraded = true;
+            tracing::warn!(error = %error, "history retention maintenance deferred after receive");
+        }
         Ok(sync_receipt(
             acceptance,
             availability,

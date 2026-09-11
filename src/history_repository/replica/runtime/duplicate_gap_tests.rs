@@ -300,6 +300,21 @@ fn truncated_gap_marker_propagates_to_peer_and_keeps_queries_partial() {
         response.plan().completeness(),
         crate::state::history_repository::query::Completeness::Partial
     );
+
+    drop(receiver);
+    let restarted = load(receiver_temporary.path());
+    assert!(restarted.snapshot.history_truncated);
+    let restarted_response = restarted
+        .query(
+            "repository-a",
+            HistoryQuery::new(10, 11, 10).expect("query"),
+            LocalQueryMetadata::current_window(12),
+        )
+        .expect("restarted partial query");
+    assert_eq!(
+        restarted_response.plan().completeness(),
+        crate::state::history_repository::query::Completeness::Partial
+    );
 }
 
 #[test]
@@ -472,6 +487,122 @@ fn receive_with_gaps_rolls_back_gap_evidence_when_segment_is_invalid() {
     assert!(runtime.snapshot.gaps.is_empty());
     let restored = load(temporary.path());
     assert!(restored.snapshot.gaps.is_empty());
+}
+
+#[test]
+fn receive_with_gaps_keeps_a_newly_detected_sequence_gap() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let first_hash = first.segment_hash().expect("first segment hash");
+    let wire = segment(
+        &key,
+        2,
+        vec![record(b"out-of-order", false)],
+        Some(first_hash),
+    )
+    .wire_bytes()
+    .expect("segment wire");
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            1,
+        )
+        .expect("first segment");
+
+    assert!(matches!(
+        runtime.receive_wire_from_repository_with_gaps(
+            "cluster-a",
+            &identity,
+            &wire,
+            &[],
+            2,
+            &["local".to_owned()],
+            "local",
+        ),
+        Err(RepositoryRuntimeError::Protocol(
+            ProtocolError::SequenceGap { .. }
+        ))
+    ));
+    assert_eq!(runtime.snapshot.gaps.len(), 1);
+    assert_eq!(runtime.snapshot.gaps[0].first_sequence, 1);
+    assert_eq!(runtime.snapshot.gaps[0].last_sequence, 1);
+    let restored = load(temporary.path());
+    assert_eq!(restored.snapshot.gaps.len(), 1);
+}
+
+#[test]
+fn receive_with_gaps_rolls_back_external_evidence_on_sqlite_commit_failure() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let first_hash = first.segment_hash().expect("first segment hash");
+    let second = segment(&key, 1, vec![record(b"second", false)], Some(first_hash));
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::load(storage.clone()).expect("runtime");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            1,
+        )
+        .expect("first segment");
+    let external_gap = RepositoryReplicaGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_sequence: 9,
+        last_sequence: 9,
+        start_unix_seconds: 1,
+        end_unix_seconds: 1,
+        permanent: false,
+        reason: None,
+    };
+    storage
+        .set_query_only_for_test(true)
+        .expect("enable SQLite write failure");
+
+    let error = runtime
+        .receive_wire_from_repository_with_gaps(
+            "cluster-a",
+            &identity,
+            &second.wire_bytes().expect("second wire"),
+            std::slice::from_ref(&external_gap),
+            2,
+            &["local".to_owned()],
+            "local",
+        )
+        .expect_err("query-only SQLite must reject the atomic commit");
+    assert!(matches!(error, RepositoryRuntimeError::Storage(_)));
+    assert!(runtime.snapshot.gaps.is_empty());
+    assert_eq!(
+        runtime.receiver.as_ref().unwrap().continuous_watermarks()[0].sequence(),
+        0
+    );
+    assert_eq!(storage.repository_history_record_count().expect("count"), 1);
+
+    storage
+        .set_query_only_for_test(false)
+        .expect("disable SQLite write failure");
+    let restored = load(temporary.path());
+    assert!(restored.snapshot.gaps.is_empty());
+    assert_eq!(
+        restored.receiver.as_ref().unwrap().continuous_watermarks()[0].sequence(),
+        0
+    );
+    assert_eq!(
+        restored
+            .storage
+            .repository_history_record_count()
+            .expect("reloaded count"),
+        1
+    );
 }
 
 #[test]
