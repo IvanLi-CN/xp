@@ -21,7 +21,7 @@ pub(crate) const MAX_RESPONSE_WIRE_BYTES: usize = 256 * 1024;
 const MAX_SEGMENT_DURATION_SECONDS: u64 = 60;
 const MAX_UNKNOWN_FORWARD_SEGMENTS: usize =
     MAX_RESPONSE_CANONICAL_BYTES / MAX_CANONICAL_SEGMENT_BYTES;
-const MAX_RECENT_SEGMENTS_PER_STREAM: usize = MAX_UNKNOWN_FORWARD_SEGMENTS;
+const MAX_RECENT_SEGMENTS_PER_STREAM: usize = 64;
 
 fn validate_identifier(kind: &'static str, value: &str) -> Result<(), ProtocolError> {
     if value.trim().is_empty() {
@@ -693,15 +693,6 @@ impl SegmentReceiver {
                 hash_chain_verified = progress.hash_chain_verified;
                 previous_hash_verified = progress.previous_hash_verified();
                 if first.sequence <= progress.last_sequence {
-                    if self.retained_anchor_mode
-                        && segment.canonical.last_cursor.sequence <= progress.last_sequence
-                    {
-                        return Ok(Acceptance::Duplicate {
-                            acknowledgement: Acknowledgement {
-                                watermark: progress.watermark(first)?,
-                            },
-                        });
-                    }
                     if let Some(acceptance) =
                         replay::stale_replay_acceptance(progress, segment, first)?
                     {

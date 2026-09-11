@@ -255,7 +255,7 @@ fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verifi
         receiver.accept(&wrong, &identity),
         Err(ProtocolError::HashChainMismatch)
     );
-    for sequence in 4..40 {
+    for sequence in 4..=70 {
         let segment = signed_segment(
             &key,
             sequence,
@@ -275,7 +275,7 @@ fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verifi
 }
 
 #[test]
-fn receiver_replays_an_initial_backfill_anchor_after_the_recent_window_is_evicted() {
+fn receiver_replays_an_initial_backfill_page_after_checkpoint_restart() {
     let key = signing_key();
     let identity = identity(&key);
     let anchor = signed_segment(&key, 3, vec![record(b"anchor", false)], Some([42; 32]));
@@ -284,7 +284,7 @@ fn receiver_replays_an_initial_backfill_anchor_after_the_recent_window_is_evicte
         .accept_retained_anchor(&anchor, &identity)
         .expect("initial backfill anchor");
     let mut previous_hash = anchor.segment_hash().expect("anchor hash");
-    for sequence in 4..=12 {
+    for sequence in 4..=66 {
         let segment = signed_segment(
             &key,
             sequence,
@@ -298,9 +298,15 @@ fn receiver_replays_an_initial_backfill_anchor_after_the_recent_window_is_evicte
     }
 
     assert!(matches!(
-        receiver.accept_retained_anchor(&anchor, &identity),
+        receiver.accept(&anchor, &identity),
         Ok(Acceptance::Duplicate { .. })
     ));
+
+    let fork = signed_segment(&key, 3, vec![record(b"fork", false)], Some([42; 32]));
+    assert_eq!(
+        receiver.accept(&fork, &identity),
+        Err(ProtocolError::ForkDetected { next_epoch: 8 })
+    );
 }
 
 #[test]
