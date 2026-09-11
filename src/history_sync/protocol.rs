@@ -750,8 +750,11 @@ impl SegmentReceiver {
                     return Err(ProtocolError::HashChainMismatch);
                 }
             }
-        } else if first.sequence != 0 {
-            if !self.retained_anchor_mode || segment.canonical.previous_segment_hash.is_none() {
+        } else if first.sequence != 0 || segment.canonical.previous_segment_hash.is_some() {
+            if !self.retained_anchor_mode
+                || first.sequence == 0
+                || segment.canonical.previous_segment_hash.is_none()
+            {
                 return Err(ProtocolError::HashChainMismatch);
             }
             // A ready repository may retain only the tail of a source stream. The signed

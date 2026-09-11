@@ -249,6 +249,12 @@ fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verifi
         ordinary_receiver.accept(&unanchored, &identity),
         Err(ProtocolError::HashChainMismatch)
     );
+    let zero_with_predecessor =
+        signed_segment(&key, 0, vec![record(b"zero", false)], Some([0; 32]));
+    assert_eq!(
+        ordinary_receiver.accept(&zero_with_predecessor, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
 
     let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
     receiver
@@ -302,6 +308,13 @@ fn receiver_replays_an_initial_backfill_page_after_checkpoint_restart() {
             .expect("contiguous retained tail segment");
     }
 
+    let checkpoint = receiver.checkpoint().expect("checkpoint");
+    let mut receiver = SegmentReceiver::from_checkpoint(
+        "cluster-a",
+        SchemaCatalog::new([("runtime.v1".to_owned(), 1)]),
+        checkpoint,
+    )
+    .expect("restore checkpoint");
     assert!(matches!(
         receiver.accept(&anchor, &identity),
         Ok(Acceptance::Duplicate { .. })
