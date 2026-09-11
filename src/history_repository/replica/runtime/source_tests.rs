@@ -42,6 +42,7 @@ fn disjoint_backpressure_ranges_remain_independent() {
     assert_eq!(gaps[0].stream, "runtime");
     assert_eq!((gaps[0].first_sequence, gaps[0].last_sequence), (8, 8));
     assert_eq!((gaps[1].first_sequence, gaps[1].last_sequence), (10, 10));
+    assert!(gaps.iter().all(|gap| gap.permanent));
 }
 
 #[test]
