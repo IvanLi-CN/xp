@@ -175,7 +175,7 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
     let key = signing_key();
     let identity = identity(&key);
     let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
-    let initial = signed_segment(&key, 10, vec![record(b"a", false)], None);
+    let initial = signed_segment(&key, 0, vec![record(b"a", false)], None);
     let accepted = receiver.accept(&initial, &identity).expect("first segment");
     assert_eq!(
         accepted.acknowledgement().watermark(),
@@ -191,7 +191,7 @@ fn receiver_rejects_cursor_gaps_without_advancing_acknowledgement() {
     assert_eq!(
         receiver.accept(&gap, &identity),
         Err(ProtocolError::SequenceGap {
-            expected: 11,
+            expected: 1,
             actual: 12,
         })
     );
@@ -231,6 +231,100 @@ fn receiver_accepts_a_stale_replay_after_the_recent_hash_window_is_evicted() {
         receiver.accept(&first, &identity),
         Ok(Acceptance::Duplicate { .. })
     ));
+}
+
+#[test]
+fn receiver_accepts_an_explicit_retained_anchor_without_marking_the_chain_verified() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let anchor = signed_segment(&key, 3, vec![record(b"anchor", false)], Some([42; 32]));
+
+    let mut ordinary_receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    assert_eq!(
+        ordinary_receiver.accept(&anchor, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
+    let unanchored = signed_segment(&key, 3, vec![record(b"unanchored", false)], None);
+    assert_eq!(
+        ordinary_receiver.accept(&unanchored, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
+    let zero_with_predecessor =
+        signed_segment(&key, 0, vec![record(b"zero", false)], Some([0; 32]));
+    assert_eq!(
+        ordinary_receiver.accept(&zero_with_predecessor, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
+
+    let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    receiver
+        .accept_retained_anchor(&anchor, &identity)
+        .expect("initial backfill may accept a retained tail segment");
+    let mut previous_hash = anchor.segment_hash().expect("anchor hash");
+    let wrong = signed_segment(&key, 4, vec![record(b"wrong", false)], Some([0; 32]));
+    assert_eq!(
+        receiver.accept(&wrong, &identity),
+        Err(ProtocolError::HashChainMismatch)
+    );
+    for sequence in 4..=70 {
+        let segment = signed_segment(
+            &key,
+            sequence,
+            vec![record(format!("record-{sequence}").as_bytes(), false)],
+            Some(previous_hash),
+        );
+        previous_hash = segment.segment_hash().expect("segment hash");
+        receiver
+            .accept(&segment, &identity)
+            .expect("contiguous retained tail segment");
+    }
+
+    assert!(!matches!(
+        receiver.accept(&anchor, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
+}
+
+#[test]
+fn receiver_replays_an_initial_backfill_page_after_checkpoint_restart() {
+    let key = signing_key();
+    let identity = identity(&key);
+    let anchor = signed_segment(&key, 3, vec![record(b"anchor", false)], Some([42; 32]));
+    let mut receiver = receiver(SchemaCatalog::new([("runtime.v1".to_owned(), 1)]));
+    receiver
+        .accept_retained_anchor(&anchor, &identity)
+        .expect("initial backfill anchor");
+    let mut previous_hash = anchor.segment_hash().expect("anchor hash");
+    for sequence in 4..=66 {
+        let segment = signed_segment(
+            &key,
+            sequence,
+            vec![record(format!("record-{sequence}").as_bytes(), false)],
+            Some(previous_hash),
+        );
+        previous_hash = segment.segment_hash().expect("segment hash");
+        receiver
+            .accept(&segment, &identity)
+            .expect("contiguous retained tail segment");
+    }
+
+    let checkpoint = receiver.checkpoint().expect("checkpoint");
+    let mut receiver = SegmentReceiver::from_checkpoint(
+        "cluster-a",
+        SchemaCatalog::new([("runtime.v1".to_owned(), 1)]),
+        checkpoint,
+    )
+    .expect("restore checkpoint");
+    assert!(matches!(
+        receiver.accept(&anchor, &identity),
+        Ok(Acceptance::Duplicate { .. })
+    ));
+
+    let fork = signed_segment(&key, 3, vec![record(b"fork", false)], Some([42; 32]));
+    assert_eq!(
+        receiver.accept(&fork, &identity),
+        Err(ProtocolError::ForkDetected { next_epoch: 8 })
+    );
 }
 
 #[test]

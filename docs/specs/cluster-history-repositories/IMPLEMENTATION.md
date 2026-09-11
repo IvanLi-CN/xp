@@ -72,6 +72,11 @@
   in `unavailable_segment_ids`; the syncing peer removes only that explicit set from its bounded
   checkpoint and continues at the saved cursor. This preserves the source outbox and all locally
   durable history while preventing an expired repair page from pinning the member in `syncing`.
+- A ready peer's retained segment cache can also begin a source stream at a nonzero sequence when
+  its predecessor has already expired. The initial summary-repair path accepts that signed frame
+  as an unanchored retained tail and keeps `hash_chain_verified=false`; it then requires strict
+  contiguous sequence/hash links for the remaining page. Ordinary source and anti-entropy receipt
+  keeps rejecting the same frame, so the relaxed boundary cannot bypass live fork protection.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

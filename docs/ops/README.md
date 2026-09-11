@@ -818,6 +818,11 @@ Notes:
   only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
   indicates the serving node is pre-fix and must be upgraded; never clear the checkpoint or source
   outbox manually.
+  A retained segment may be the first locally available frame for a source stream and therefore
+  have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
+  initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
+  every following frame to be contiguous. Live source delivery and ordinary anti-entropy still
+  reject an unanchored first frame; do not bypass that boundary by editing the checkpoint.
   A retained repair segment may belong to a node that has since been retired from cluster
   membership. Replay validates that identity against the deterministic cluster material and
   accepts the signed historical row; live source delivery remains limited to current pinned

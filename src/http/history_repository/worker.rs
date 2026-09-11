@@ -897,6 +897,11 @@ async fn replicate_peer(
                                 .map(|segment| segment.wire.as_slice()),
                         )?;
                     }
+                    state
+                        .repository_replica
+                        .lock()
+                        .await
+                        .merge_replica_gaps(&repair.gaps)?;
                     for segment in repair.segments {
                         if !super::identity_is_valid_for_history_replay(state, &segment.identity)
                             .await
@@ -921,11 +926,6 @@ async fn replicate_peer(
                         acknowledgements
                             .extend(receipt.tombstone_acknowledgements().iter().cloned());
                     }
-                    state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .merge_replica_gaps(&repair.gaps)?;
                 }
             }
             if propagate_acknowledgements {
