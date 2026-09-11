@@ -19,6 +19,9 @@ use crate::state::history_repository::replica::{
     rendezvous_collectors,
 };
 
+mod gap_ledger;
+use gap_ledger::{canonical_gaps, same_gap_range};
+
 const MAX_REPAIR_SEGMENTS: usize = 64;
 const MAX_REPAIR_GAPS: usize = 64;
 const MAX_RELAY_BATCH_DECODED_BYTES: usize = 1024 * 1024;
@@ -686,12 +689,45 @@ impl RepositoryReplicaRuntime {
         remote_gaps: &[RepositoryReplicaGap],
     ) -> Result<(), RepositoryRuntimeError> {
         validate_replica_gaps(remote_gaps)?;
+        let incoming = canonical_gaps(remote_gaps.iter().cloned());
         let mut merged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary));
-        merged.extend(canonical_gaps(remote_gaps.iter().cloned()));
+        merged.extend(incoming.iter().cloned());
         let mut merged = canonical_gaps(merged);
         if merged.len() > MAX_REPAIR_GAPS {
             self.snapshot.history_truncated = true;
-            merged.truncate(MAX_REPAIR_GAPS);
+            // Preserve incoming permanent evidence first, then existing permanent evidence,
+            // before using remaining slots for recoverable ranges. This keeps permanent gaps from
+            // being evicted by a full request while retaining the source's repair predecessor.
+            let is_incoming = |gap: &RepositoryReplicaGap| {
+                incoming
+                    .iter()
+                    .any(|candidate| same_gap_range(candidate, gap))
+            };
+            let mut prioritized = merged
+                .iter()
+                .filter(|gap| gap.permanent && is_incoming(gap))
+                .cloned()
+                .collect::<Vec<_>>();
+            prioritized.extend(
+                merged
+                    .iter()
+                    .filter(|gap| gap.permanent && !is_incoming(gap))
+                    .cloned(),
+            );
+            prioritized.extend(
+                merged
+                    .iter()
+                    .filter(|gap| !gap.permanent && is_incoming(gap))
+                    .cloned(),
+            );
+            prioritized.extend(
+                merged
+                    .iter()
+                    .filter(|gap| !gap.permanent && !is_incoming(gap))
+                    .cloned(),
+            );
+            prioritized.truncate(MAX_REPAIR_GAPS);
+            merged = prioritized;
         }
         self.snapshot.gaps = merged.into_iter().map(stored_gap).collect();
         self.persist_control_state()
@@ -951,23 +987,4 @@ fn validate_unavailable_segment_ids(ids: &[String]) -> Result<(), RepositoryRunt
         return Err(ReplicaError::InvalidRange.into());
     }
     Ok(())
-}
-
-fn canonical_gaps(
-    gaps: impl IntoIterator<Item = RepositoryReplicaGap>,
-) -> Vec<RepositoryReplicaGap> {
-    let mut gaps = gaps.into_iter().collect::<Vec<_>>();
-    gaps.sort_by_key(|gap| {
-        (
-            gap.source_node_id.clone(),
-            gap.source_epoch,
-            gap.stream.clone(),
-            gap.first_sequence,
-            gap.last_sequence,
-            gap.permanent,
-            gap.reason.clone(),
-        )
-    });
-    gaps.dedup();
-    gaps
 }

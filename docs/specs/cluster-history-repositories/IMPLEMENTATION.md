@@ -130,6 +130,11 @@
   whose end sequence immediately precedes a segment on that page, then fills the remaining slots
   from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while
   preventing a pending segment from being rejected indefinitely behind gap-page rotation.
+  The receiver canonicalizes duplicate evidence for one source range, with permanent evidence taking
+  precedence. When its 64-entry ledger is full, incoming permanent ranges come first, followed by
+  existing permanent evidence, then incoming recoverable ranges and older recoverable evidence. This
+  keeps permanent gaps from being evicted by recoverable evidence while retaining the source's
+  repair predecessor.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary

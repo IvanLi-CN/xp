@@ -128,6 +128,111 @@ fn late_segment_does_not_clear_a_permanent_gap_as_a_duplicate() {
 }
 
 #[test]
+fn incoming_gaps_are_deduplicated_and_preserved_over_a_full_local_ledger() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let mut runtime = load(temporary.path());
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let first_hash = first.segment_hash().expect("first segment hash");
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first segment wire"),
+            1,
+        )
+        .expect("seed receiver watermark");
+    let local = (0..64_u64)
+        .map(|sequence| RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: format!("stream-{sequence:02}"),
+            first_sequence: sequence,
+            last_sequence: sequence,
+            start_unix_seconds: 1,
+            end_unix_seconds: 1,
+            permanent: sequence == 0,
+            reason: None,
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .merge_replica_gaps(&local)
+        .expect("seed local gap ledger");
+
+    let required = RepositoryReplicaGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_sequence: 1,
+        last_sequence: 2,
+        start_unix_seconds: 2,
+        end_unix_seconds: 2,
+        permanent: true,
+        reason: None,
+    };
+    let transient = RepositoryReplicaGap {
+        permanent: false,
+        ..required.clone()
+    };
+    let recoverable = RepositoryReplicaGap {
+        stream: "recoverable".to_owned(),
+        first_sequence: 100,
+        last_sequence: 100,
+        permanent: false,
+        ..required.clone()
+    };
+    runtime
+        .merge_replica_gaps(&[transient, required.clone(), recoverable.clone()])
+        .expect("merge authenticated source gaps");
+
+    assert_eq!(runtime.snapshot.gaps.len(), 64);
+    assert_eq!(
+        runtime
+            .snapshot
+            .gaps
+            .iter()
+            .filter(|gap| {
+                gap.source_node_id == required.source_node_id
+                    && gap.source_epoch == required.source_epoch
+                    && gap.stream == required.stream
+                    && gap.first_sequence == required.first_sequence
+                    && gap.last_sequence == required.last_sequence
+            })
+            .count(),
+        1
+    );
+    assert!(runtime.snapshot.gaps.iter().any(|gap| {
+        gap.stream == required.stream
+            && gap.first_sequence == required.first_sequence
+            && gap.last_sequence == required.last_sequence
+            && gap.permanent
+    }));
+    assert!(
+        runtime
+            .snapshot
+            .gaps
+            .iter()
+            .any(|gap| { gap.stream == "stream-00" && gap.first_sequence == 0 && gap.permanent })
+    );
+    assert!(runtime.snapshot.gaps.iter().any(|gap| {
+        gap.stream == recoverable.stream
+            && gap.first_sequence == recoverable.first_sequence
+            && !gap.permanent
+    }));
+
+    let resumed = segment(&key, 3, vec![record(b"resumed", false)], Some(first_hash));
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &resumed.wire_bytes().expect("resumed segment wire"),
+            2,
+        )
+        .expect("segment after the preserved source gap");
+}
+
+#[test]
 fn deep_verification_keeps_a_local_only_gap_incomplete() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
