@@ -99,10 +99,23 @@ impl RepositoryReplicaRuntime {
             .expect("receiver initialized")
             .checkpoint()?;
         let previous_snapshot = self.snapshot.clone();
+        let first_cursor = segment.canonical().first_cursor();
+        let last_cursor = segment.canonical().last_cursor();
+        if self.snapshot.gaps.iter().any(|gap| {
+            gap.permanent
+                && gap.source_node_id == first_cursor.source_node_id()
+                && gap.source_epoch == first_cursor.source_epoch()
+                && gap.stream == first_cursor.stream()
+                && first_cursor.sequence() <= gap.last_sequence
+                && last_cursor.sequence() >= gap.first_sequence
+        }) {
+            return Err(RepositoryRuntimeError::Protocol(
+                ProtocolError::PermanentGap,
+            ));
+        }
         self.tombstones
             .reconcile_ready_repositories(ready_repositories)?;
         let expired_tombstones = self.expire_tombstones(now_unix_seconds)?;
-        let first_cursor = segment.canonical().first_cursor();
         if let Some(gap) = self.snapshot.gaps.iter().find(|gap| {
             gap.permanent
                 && gap.source_node_id == first_cursor.source_node_id()

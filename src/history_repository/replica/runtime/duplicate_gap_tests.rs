@@ -77,6 +77,57 @@ fn duplicate_repair_segment_clears_a_gap_reintroduced_by_a_peer() {
 }
 
 #[test]
+fn late_segment_does_not_clear_a_permanent_gap_as_a_duplicate() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"one", false)], None);
+    let first_hash = first.segment_hash().expect("hash");
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("wire"),
+            11,
+        )
+        .expect("first segment");
+    runtime.snapshot.gaps.push(StoredGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_sequence: 1,
+        last_sequence: 2,
+        start_unix_seconds: 0,
+        end_unix_seconds: 11,
+        permanent: true,
+        reason: Some("test".to_owned()),
+    });
+    let resumed = segment(&key, 3, vec![record(b"three", false)], Some(first_hash));
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &resumed.wire_bytes().expect("wire"),
+            12,
+        )
+        .expect("segment after permanent gap");
+    let late = segment(&key, 1, vec![record(b"late", false)], None);
+    assert!(matches!(
+        runtime.receive_wire(
+            "cluster-a",
+            &identity,
+            &late.wire_bytes().expect("wire"),
+            13
+        ),
+        Err(RepositoryRuntimeError::Protocol(
+            ProtocolError::PermanentGap
+        ))
+    ));
+    assert!(runtime.snapshot.gaps.iter().any(|gap| gap.permanent));
+}
+
+#[test]
 fn deep_verification_keeps_a_local_only_gap_incomplete() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
