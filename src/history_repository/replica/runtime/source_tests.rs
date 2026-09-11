@@ -1,6 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
+use crate::history_sync::SyncRecord;
+use crate::state::history_repository::identity::{
+    Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
+};
+use ed25519_dalek::SigningKey;
 
 #[test]
 fn stale_repository_rebuild_rotates_the_durable_source_epoch_before_resetting_sequences() {
@@ -72,6 +77,58 @@ fn backpressure_gap_requests_rotate_across_the_repair_limit() {
         .collect::<BTreeSet<_>>();
     assert_eq!(all_sequences.len(), 65);
     assert!(all_sequences.contains(&129));
+}
+
+#[test]
+fn backpressure_gap_page_prioritizes_the_gap_before_the_pending_segment() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::empty(storage);
+    runtime.snapshot.local_source.epoch = 7;
+    runtime.snapshot.local_source.streams.insert(
+        "runtime".to_owned(),
+        LocalSourceStreamState {
+            next_sequence: 130,
+            ..LocalSourceStreamState::default()
+        },
+    );
+    runtime.record_local_source_backpressure_gap("runtime", 120, 129, 100);
+    for index in 0..64 {
+        let sequence = index * 2 + 1_000;
+        runtime.record_local_source_backpressure_gap("runtime", sequence, sequence, 100);
+    }
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+    let pending = runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            identity,
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                b"runtime:130".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            100,
+        )
+        .expect("queue segment")
+        .expect("pending segment");
+
+    let gaps = runtime.local_source_gaps_for_segments("node-a", &[pending]);
+    assert_eq!(gaps.len(), 64);
+    assert!(
+        gaps.iter()
+            .any(|gap| (gap.first_sequence, gap.last_sequence) == (120, 129))
+    );
 }
 
 #[test]

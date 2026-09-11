@@ -111,6 +111,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   真实确认的 segment，未确认 payload、cursor 与 epoch high-water 不得被前推或改写。
 - `REQ-JOURNAL-COLLECTOR`: Collector 暂时不可达是正常输入，只形成可恢复 backlog，不得伪造成功或产生无界
   并发重试；Collector 恢复后必须按固定页继续投递并只删除有效 ACK 所列 segment。
+- `REQ-JOURNAL-GAP-ORDER`: source delivery 发送 pending segment 时，bounded gap page 必须优先包含
+  该页首段直接前置的 permanent gap，再以持久化 gap cursor 填充剩余名额；页面仍最多 64 个 gap，
+  不得推进 gap cursor、source cursor 或 ACK 边界之外的任何数据。这保证 gap 轮转不会长期阻塞
+  已落盘 segment 的连续投递。
 - `REQ-JOURNAL-RESOURCE`: 对至少 20,000 条或 128 MiB durable backlog，5 秒 CPU 采样 p95 不超过 9%，
   每个 60 秒周期数据库读取不超过 4 MiB，RSS 增量不超过 2 MiB，且 Direct/Public 与集群控制面保持可用。
 

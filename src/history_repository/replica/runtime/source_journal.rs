@@ -2,10 +2,99 @@ use crate::history_sync::SignedSegment;
 use crate::state::history_storage::{
     SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
 };
+use std::collections::BTreeSet;
 
 use super::*;
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn local_source_backpressure_gaps(
+        &mut self,
+        source_node_id: &str,
+    ) -> Vec<RepositoryReplicaGap> {
+        self.local_source_gaps_for_segments(source_node_id, &[])
+    }
+
+    pub(crate) fn local_source_gaps_for_segments(
+        &mut self,
+        source_node_id: &str,
+        pending_segments: &[RepositoryReplicaSegment],
+    ) -> Vec<RepositoryReplicaGap> {
+        const MAX_SOURCE_GAPS_PER_REQUEST: usize = 64;
+        let keys = self
+            .snapshot
+            .local_source
+            .backpressure_gaps
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        if keys.is_empty() {
+            self.snapshot.local_source.backpressure_gap_cursor = None;
+            return Vec::new();
+        }
+        // Keep the gap immediately before each pending segment in the bounded page so a receiver
+        // can advance its signed chain without waiting for a full rotation of the gap cursor.
+        let required_keys = pending_segments
+            .iter()
+            .filter_map(|segment| {
+                let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+                let cursor = signed.canonical().first_cursor();
+                self.snapshot
+                    .local_source
+                    .backpressure_gaps
+                    .iter()
+                    .find(|(key, gap)| {
+                        super::backpressure_gap_stream(key) == cursor.stream()
+                            && gap.source_epoch == cursor.source_epoch()
+                            && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                    })
+                    .map(|(key, _)| key.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let start = self
+            .snapshot
+            .local_source
+            .backpressure_gap_cursor
+            .as_ref()
+            .and_then(|cursor| keys.iter().position(|key| key == cursor))
+            .map_or(0, |index| (index + 1) % keys.len());
+        let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
+        let mut selected_keys = required_keys
+            .into_iter()
+            .filter(|key| keys.binary_search(key).is_ok())
+            .take(page_len)
+            .collect::<Vec<_>>();
+        for offset in 0..keys.len() {
+            if selected_keys.len() >= page_len {
+                break;
+            }
+            let key = &keys[(start + offset) % keys.len()];
+            if !selected_keys.iter().any(|selected| selected == key) {
+                selected_keys.push(key.clone());
+            }
+        }
+        self.snapshot.local_source.backpressure_gap_cursor = selected_keys.last().cloned();
+        selected_keys
+            .into_iter()
+            .filter_map(|key| {
+                self.snapshot
+                    .local_source
+                    .backpressure_gaps
+                    .get(&key)
+                    .map(|gap| RepositoryReplicaGap {
+                        source_node_id: source_node_id.to_owned(),
+                        source_epoch: gap.source_epoch,
+                        stream: super::backpressure_gap_stream(&key).to_owned(),
+                        first_sequence: gap.first_sequence,
+                        last_sequence: gap.last_sequence,
+                        start_unix_seconds: gap.start_unix_seconds,
+                        end_unix_seconds: gap.end_unix_seconds,
+                        permanent: true,
+                        reason: None,
+                    })
+            })
+            .collect()
+    }
+
     pub(crate) fn acknowledge_local_source_segment(
         &mut self,
         delivered_wire: &[u8],

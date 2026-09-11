@@ -813,6 +813,11 @@ Notes:
   timeout, roll out the serving repository first, then observe the next five-minute direct-path
   retry so its durable checkpoint can resume. Do not restart the source, run `VACUUM`, clear the
   database, or delete unacknowledged backlog as a workaround.
+  If a source delivery backlog is unchanged while the serving peer reports a sequence gap, inspect
+  the oldest pending segment and its permanent predecessor gap. The serving release must be active
+  before retrying; its bounded gap page prioritizes that predecessor before rotating the remainder.
+  and the normal retry then resumes contiguous ACKs. Do not edit the checkpoint, clear the journal,
+  or delete unacknowledged rows.
   A repair request can cross the seven-day minute-tier cache boundary. The serving response then
   lists the explicitly expired request IDs as `unavailable_segment_ids`; the syncing peer skips
   only those IDs and resumes the saved summary cursor. An unchanged pending set after a release
