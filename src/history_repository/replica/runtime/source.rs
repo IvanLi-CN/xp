@@ -785,7 +785,10 @@ impl RepositoryReplicaRuntime {
                         last_sequence: gap.last_sequence,
                         start_unix_seconds: gap.start_unix_seconds,
                         end_unix_seconds: gap.end_unix_seconds,
-                        permanent: false,
+                        // Backpressure advances the source cursor without retaining the skipped
+                        // records. The range is therefore irrecoverable; mark it permanent so a
+                        // receiver can safely resume the signed chain at the next durable segment.
+                        permanent: true,
                         reason: None,
                     })
             })
