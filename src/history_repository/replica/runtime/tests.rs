@@ -80,6 +80,36 @@ pub(super) fn load(path: &std::path::Path) -> RepositoryReplicaRuntime {
 }
 
 #[test]
+fn initial_backfill_accepts_a_retained_segment_without_a_local_predecessor() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let anchor = segment(&key, 3, vec![record(b"retained", false)], Some([42; 32]));
+    let wire = anchor.wire_bytes().expect("wire");
+    let mut runtime = load(temporary.path());
+
+    runtime
+        .receive_initial_backfill_wire_from_repository(
+            "cluster-a",
+            &identity,
+            &wire,
+            11,
+            &["repository-a".to_owned()],
+            "repository-a",
+        )
+        .expect("initial backfill anchor");
+
+    assert_eq!(
+        runtime
+            .replication_summary()
+            .expect("summary")
+            .segment_ids
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn two_repositories_repair_a_partition_to_the_same_segment_set() {
     let first_repository = tempfile::tempdir().expect("first repository");
     let second_repository = tempfile::tempdir().expect("second repository");

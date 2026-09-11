@@ -380,7 +380,6 @@ impl CanonicalSegment {
             records_hash: self.records_hash.to_vec(),
         }
     }
-
     fn from_proto(segment: proto::Segment) -> Result<(Self, [u8; 64]), ProtocolError> {
         let signature: [u8; 64] = segment
             .signature
@@ -422,13 +421,11 @@ impl CanonicalSegment {
         Ok((canonical, signature))
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignedSegment {
     canonical: CanonicalSegment,
     signature: [u8; 64],
 }
-
 impl SignedSegment {
     pub(crate) fn verify(&self, verifying_key: &VerifyingKey) -> Result<(), ProtocolError> {
         let bytes = self.canonical.canonical_bytes()?;
@@ -436,11 +433,9 @@ impl SignedSegment {
             .verify_strict(&bytes, &Signature::from_bytes(&self.signature))
             .map_err(|_| ProtocolError::InvalidSignature)
     }
-
     pub(crate) fn canonical(&self) -> &CanonicalSegment {
         &self.canonical
     }
-
     pub(crate) fn verify_identity(
         &self,
         identity: &RepositoryNodeIdentity,
@@ -452,7 +447,6 @@ impl SignedSegment {
             .map_err(|_| ProtocolError::InvalidSigningKey)?;
         self.verify(&verifying_key)
     }
-
     pub(crate) fn segment_hash(&self) -> Result<[u8; 32], ProtocolError> {
         let canonical = self.canonical.canonical_bytes()?;
         let mut hash = Sha256::new();
@@ -460,7 +454,6 @@ impl SignedSegment {
         hash.update(self.signature);
         Ok(hash.finalize().into())
     }
-
     pub(crate) fn wire_bytes(&self) -> Result<Vec<u8>, ProtocolError> {
         let wire = self.proto_with_signature().encode_to_vec();
         if wire.len() > MAX_RESPONSE_WIRE_BYTES {
@@ -468,7 +461,6 @@ impl SignedSegment {
         }
         Ok(wire)
     }
-
     pub(crate) fn from_wire(wire: &[u8]) -> Result<Self, ProtocolError> {
         if wire.len() > MAX_RESPONSE_WIRE_BYTES {
             return Err(ProtocolError::WireLimit { actual: wire.len() });
@@ -484,14 +476,12 @@ impl SignedSegment {
         }
         Ok(signed)
     }
-
     fn proto_with_signature(&self) -> proto::Segment {
         let mut segment = self.canonical.proto_without_signature();
         segment.signature = self.signature.to_vec();
         segment
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PayloadEncoding {
     Identity,
@@ -657,6 +647,7 @@ pub(crate) struct SegmentReceiver {
     tombstones: BTreeSet<TombstoneKey>,
     quarantined_streams: BTreeMap<StreamKey, u64>,
     forwardable_unknown_segments: Vec<SignedSegment>,
+    retained_anchor_mode: bool,
 }
 impl SegmentReceiver {
     pub(crate) fn for_cluster(
@@ -670,6 +661,7 @@ impl SegmentReceiver {
             tombstones: BTreeSet::new(),
             quarantined_streams: BTreeMap::new(),
             forwardable_unknown_segments: Vec::new(),
+            retained_anchor_mode: false,
         }
     }
     pub(crate) fn accept(
@@ -686,6 +678,7 @@ impl SegmentReceiver {
         let segment_hash = segment.segment_hash()?;
         let mut gap = None;
         let mut rotates_epoch = false;
+        let mut hash_chain_verified = true;
         if let Some(progress) = self.streams.get(&stream_key) {
             if first.source_epoch > progress.epoch {
                 let expected_epoch = progress.epoch.saturating_add(1);
@@ -715,6 +708,7 @@ impl SegmentReceiver {
                 });
             }
             if !rotates_epoch {
+                hash_chain_verified = progress.hash_chain_verified;
                 if first.sequence <= progress.last_sequence {
                     if let Some(acceptance) =
                         replay::stale_replay_acceptance(progress, segment, first)?
@@ -773,9 +767,14 @@ impl SegmentReceiver {
                 }
             }
         } else if segment.canonical.previous_segment_hash.is_some() {
-            return Err(ProtocolError::HashChainMismatch);
+            if !self.retained_anchor_mode || first.sequence == 0 {
+                return Err(ProtocolError::HashChainMismatch);
+            }
+            // A ready repository may retain only the tail of a source stream. The signed
+            // predecessor hash still authenticates the segment, but the predecessor itself is
+            // unavailable locally, so the chain must remain marked unverified until a new epoch.
+            hash_chain_verified = false;
         }
-
         let records = segment.canonical.records();
         let unknown_schema_records = records
             .iter()
@@ -802,7 +801,6 @@ impl SegmentReceiver {
             return Err(ProtocolError::ResurrectionPrevented);
         }
         self.tombstones.extend(tombstone_keys);
-
         if unknown_schema_records > 0 {
             self.forwardable_unknown_segments.push(segment.clone());
         }
@@ -828,7 +826,7 @@ impl SegmentReceiver {
                 epoch: first.source_epoch,
                 last_sequence: segment.canonical.last_cursor.sequence,
                 last_segment_hash: segment_hash,
-                hash_chain_verified: true,
+                hash_chain_verified,
                 recent_segments,
             },
         );
@@ -841,7 +839,16 @@ impl SegmentReceiver {
             unknown_schema_records,
         })
     }
-
+    pub(crate) fn accept_retained_anchor(
+        &mut self,
+        segment: &SignedSegment,
+        identity: &RepositoryNodeIdentity,
+    ) -> Result<Acceptance, ProtocolError> {
+        self.retained_anchor_mode = true;
+        let result = self.accept(segment, identity);
+        self.retained_anchor_mode = false;
+        result
+    }
     pub(crate) fn advance_declared_sequence_gap(
         &mut self,
         next: &Cursor,
@@ -866,15 +873,12 @@ impl SegmentReceiver {
         progress.hash_chain_verified = false;
         Ok(true)
     }
-
     pub(crate) fn is_tombstoned(&self, cursor: &Cursor, record: &SyncRecord) -> bool {
         self.tombstones.contains(&TombstoneKey::new(cursor, record))
     }
-
     pub(crate) fn is_quarantined(&self, cursor: &Cursor) -> bool {
         self.quarantined_streams.contains_key(&cursor.stream_key())
     }
-
     pub(crate) fn continuous_watermark(
         &self,
         cursor: &Cursor,
@@ -885,18 +889,15 @@ impl SegmentReceiver {
             .map(|progress| progress.watermark(cursor))
             .transpose()
     }
-
     pub(crate) fn forwardable_unknown_segments(&self) -> &[SignedSegment] {
         &self.forwardable_unknown_segments
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 struct StreamKey {
     source_node_id: String,
     stream: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 struct TombstoneKey {
     stream: StreamKey,
@@ -907,7 +908,6 @@ struct TombstoneKey {
     observer_node_id: String,
     record_key: Vec<u8>,
 }
-
 impl TombstoneKey {
     fn new(cursor: &Cursor, record: &SyncRecord) -> Self {
         Self {

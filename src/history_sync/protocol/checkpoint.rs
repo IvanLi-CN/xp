@@ -115,6 +115,7 @@ impl SegmentReceiver {
             tombstones: checkpoint.tombstones,
             quarantined_streams,
             forwardable_unknown_segments,
+            retained_anchor_mode: false,
         })
     }
 

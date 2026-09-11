@@ -212,7 +212,7 @@ async fn repair_ready_peer_catch_up_page(
             .repository_replica
             .lock()
             .await
-            .receive_wire_from_repository(
+            .receive_initial_backfill_wire_from_repository(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,

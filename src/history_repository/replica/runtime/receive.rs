@@ -57,6 +57,16 @@ fn tombstone_acknowledgements_for_segment(
     Ok(acknowledgements)
 }
 
+struct RepositoryWireRequest<'a> {
+    cluster_id: &'a str,
+    identity: &'a RepositoryNodeIdentity,
+    wire: &'a [u8],
+    now_unix_seconds: u64,
+    ready_repositories: &'a [String],
+    local_repository_id: &'a str,
+    allow_retained_anchor: bool,
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn receive_wire(
         &mut self,
@@ -84,6 +94,50 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.receive_wire_from_repository_inner(RepositoryWireRequest {
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_anchor: false,
+        })
+    }
+
+    pub(crate) fn receive_initial_backfill_wire_from_repository(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.receive_wire_from_repository_inner(RepositoryWireRequest {
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_anchor: true,
+        })
+    }
+
+    fn receive_wire_from_repository_inner(
+        &mut self,
+        request: RepositoryWireRequest<'_>,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        let RepositoryWireRequest {
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_anchor,
+        } = request;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.refresh_capacity()?;
         let availability = self.snapshot.capacity.history_write_availability();
@@ -132,11 +186,17 @@ impl RepositoryReplicaRuntime {
                     gap.last_sequence,
                 )?;
         }
-        let acceptance = self
-            .receiver
-            .as_mut()
-            .expect("receiver initialized")
-            .accept(&segment, identity);
+        let acceptance = if allow_retained_anchor {
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .accept_retained_anchor(&segment, identity)
+        } else {
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .accept(&segment, identity)
+        };
         let acceptance = match acceptance {
             Ok(acceptance) => acceptance,
             Err(error) => {
