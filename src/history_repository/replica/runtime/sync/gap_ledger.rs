@@ -53,8 +53,10 @@ pub(super) fn prioritize_full_ledger(
     gaps.sort_by_key(|gap| {
         let incoming_kind = incoming
             .iter()
-            .find(|candidate| same_gap_range(candidate, gap))
-            .map_or(2, |candidate| if candidate.permanent { 0 } else { 1 });
+            .filter(|candidate| same_gap_range(candidate, gap))
+            .fold(2, |kind, candidate| {
+                kind.min(if candidate.permanent { 0 } else { 1 })
+            });
         match (gap.permanent, incoming_kind) {
             (true, 0) => 0,
             (true, _) => 1,

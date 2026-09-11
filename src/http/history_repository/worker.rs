@@ -12,8 +12,8 @@ use crate::{
         },
         identity::RepositoryNodeId,
         replica::{
-            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary,
-            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
+            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSummary, RepositorySyncReceipt,
+            RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
 };
@@ -64,9 +64,8 @@ pub(super) use direct::{
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;
 use source::{
-    local_repository_lifecycle, repair_legacy_tombstone_metadata, should_attempt_source_relay,
-    should_fanout_tombstone_acknowledgements, source_record, source_record_with_key,
-    source_record_with_key_for_subject,
+    receive_local_source_segment, repair_legacy_tombstone_metadata, should_attempt_source_relay,
+    source_record, source_record_with_key, source_record_with_key_for_subject,
 };
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
@@ -312,10 +311,17 @@ async fn publish_local_history_segment(
             super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
                 .await?;
     }
-    for segment in &segments {
+    for (index, segment) in segments.iter().enumerate() {
+        let segment_gaps = if index == 0 { gaps.as_slice() } else { &[] };
         if selected_repository_id == state.cluster.node_id {
-            if let Err(error) =
-                receive_local_source_segment(state, segment, &gaps, ready_repository_ids, now).await
+            if let Err(error) = receive_local_source_segment(
+                state,
+                segment,
+                segment_gaps,
+                ready_repository_ids,
+                now,
+            )
+            .await
             {
                 delivery_succeeded = false;
                 tracing::debug!(
@@ -331,7 +337,7 @@ async fn publish_local_history_segment(
             let body = serde_json::to_vec(&RepositorySyncRequest::with_wire(
                 segment.identity.clone(),
                 &segment.wire,
-                gaps.clone(),
+                segment_gaps.to_vec(),
             )?)?;
             match repository_direct_request::<RepositorySyncReceipt>(
                 state,
@@ -371,6 +377,15 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .acknowledge_local_source_segments_via(&delivered_segments, now, delivery_path)?;
+    }
+    if (segments.is_empty() && delivery_succeeded && !gaps.is_empty())
+        || !delivered_segments.is_empty()
+    {
+        state
+            .repository_replica
+            .lock()
+            .await
+            .commit_local_source_gap_page(&gaps)?;
     }
     if !tombstone_acknowledgements.is_empty() {
         state
@@ -497,35 +512,11 @@ async fn relay_local_source_segments(
         .lock()
         .await
         .acknowledge_local_source_segments_via(&payload.batch.segments, now, "dynamic_relay")?;
-    Ok(())
-}
-async fn receive_local_source_segment(
-    state: &AppState,
-    segment: &RepositoryReplicaSegment,
-    gaps: &[crate::state::history_repository::replica::RepositoryReplicaGap],
-    ready_repository_ids: &[String],
-    now: u64,
-) -> anyhow::Result<()> {
-    let receipt = {
-        let mut runtime = state.repository_replica.lock().await;
-        runtime.receive_wire_from_repository_with_gaps(
-            &state.cluster.cluster_id,
-            &segment.identity,
-            &segment.wire,
-            gaps,
-            now,
-            ready_repository_ids,
-            &state.cluster.node_id,
-        )?
-    };
-    if should_fanout_tombstone_acknowledgements(local_repository_lifecycle(state).await?)
-        && !receipt.tombstone_acknowledgements().is_empty()
-    {
-        tracing::debug!(
-            count = receipt.tombstone_acknowledgements().len(),
-            "history tombstone acknowledgement fanout deferred to replication worker"
-        );
-    }
+    state
+        .repository_replica
+        .lock()
+        .await
+        .commit_local_source_gap_page(&payload.batch.gaps)?;
     Ok(())
 }
 async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
@@ -895,7 +886,15 @@ async fn replicate_peer(
                                 .map(|segment| segment.wire.as_slice()),
                         )?;
                     }
-                    for segment in repair.segments {
+                    if repair.segments.is_empty() && !repair.gaps.is_empty() {
+                        state
+                            .repository_replica
+                            .lock()
+                            .await
+                            .merge_replica_gaps(&repair.gaps)?;
+                    }
+                    let repair_gaps = repair.gaps;
+                    for (index, segment) in repair.segments.into_iter().enumerate() {
                         if !super::identity_is_valid_for_history_replay(state, &segment.identity)
                             .await
                             .map_err(|_| {
@@ -912,7 +911,7 @@ async fn replicate_peer(
                                 &state.cluster.cluster_id,
                                 &segment.identity,
                                 &segment.wire,
-                                &repair.gaps,
+                                if index == 0 { &repair_gaps } else { &[] },
                                 now,
                                 ready_repository_ids,
                                 &state.cluster.node_id,

@@ -116,15 +116,30 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.merge_replica_gaps(gaps)?;
-        self.receive_wire_from_repository(
+        let previous_snapshot = self.snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
+        if let Err(error) = self.merge_replica_gaps(gaps) {
+            self.snapshot = previous_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+            return Err(error);
+        }
+        let result = self.receive_wire_from_repository(
             cluster_id,
             identity,
             wire,
             now_unix_seconds,
             ready_repositories,
             local_repository_id,
-        )
+        );
+        match result {
+            Ok(receipt) => Ok(receipt),
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                self.persist_control_state()?;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn receive_initial_backfill_wire_from_repository(
@@ -158,15 +173,30 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
-        self.merge_replica_gaps(gaps)?;
-        self.receive_initial_backfill_wire_from_repository(
+        let previous_snapshot = self.snapshot.clone();
+        let previous_tombstones = self.tombstones.checkpoint();
+        if let Err(error) = self.merge_replica_gaps(gaps) {
+            self.snapshot = previous_snapshot;
+            self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+            return Err(error);
+        }
+        let result = self.receive_initial_backfill_wire_from_repository(
             cluster_id,
             identity,
             wire,
             now_unix_seconds,
             ready_repositories,
             local_repository_id,
-        )
+        );
+        match result {
+            Ok(receipt) => Ok(receipt),
+            Err(error) => {
+                self.snapshot = previous_snapshot;
+                self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones.clone())?;
+                self.persist_control_state()?;
+                Err(error)
+            }
+        }
     }
 
     fn receive_wire_from_repository_inner(

@@ -543,7 +543,7 @@ impl RepositoryReplicaRuntime {
         }
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
-        let truncation_converged = self.snapshot.history_truncated == remote.history_truncated;
+        let truncation_converged = !self.snapshot.history_truncated && !remote.history_truncated;
         let partitions_converged = !deep_verification
             || !remote.partitions_included
             || !self.partition_summaries_ready()

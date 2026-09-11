@@ -201,7 +201,15 @@ async fn repair_ready_peer_catch_up_page(
         &mut remaining,
         &repair.unavailable_segment_ids,
     )?;
-    for segment in repair.segments {
+    if repair.segments.is_empty() && !repair.gaps.is_empty() {
+        state
+            .repository_replica
+            .lock()
+            .await
+            .merge_replica_gaps(&repair.gaps)?;
+    }
+    let repair_gaps = repair.gaps;
+    for (index, segment) in repair.segments.into_iter().enumerate() {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
             .map_err(|_| anyhow::anyhow!("check repository repair segment identity"))?
@@ -216,7 +224,7 @@ async fn repair_ready_peer_catch_up_page(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,
-                &repair.gaps,
+                if index == 0 { &repair_gaps } else { &[] },
                 now,
                 ready_repository_ids,
                 &state.cluster.node_id,
