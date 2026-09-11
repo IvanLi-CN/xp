@@ -508,13 +508,11 @@ async fn receive_local_source_segment(
 ) -> anyhow::Result<()> {
     let receipt = {
         let mut runtime = state.repository_replica.lock().await;
-        if !gaps.is_empty() {
-            runtime.merge_replica_gaps(gaps)?;
-        }
-        runtime.receive_wire_from_repository(
+        runtime.receive_wire_from_repository_with_gaps(
             &state.cluster.cluster_id,
             &segment.identity,
             &segment.wire,
+            gaps,
             now,
             ready_repository_ids,
             &state.cluster.node_id,
@@ -851,7 +849,7 @@ async fn replicate_peer(
             deep_verification_available = remote_summary.partitions_included;
         }
         let requires_repair = {
-            let runtime = state.repository_replica.lock().await;
+            let mut runtime = state.repository_replica.lock().await;
             runtime.requires_repair(&remote_summary, work.is_deep_verification())?
         };
         if requires_repair {
@@ -897,11 +895,6 @@ async fn replicate_peer(
                                 .map(|segment| segment.wire.as_slice()),
                         )?;
                     }
-                    state
-                        .repository_replica
-                        .lock()
-                        .await
-                        .merge_replica_gaps(&repair.gaps)?;
                     for segment in repair.segments {
                         if !super::identity_is_valid_for_history_replay(state, &segment.identity)
                             .await
@@ -915,10 +908,11 @@ async fn replicate_peer(
                             .repository_replica
                             .lock()
                             .await
-                            .receive_wire_from_repository(
+                            .receive_wire_from_repository_with_gaps(
                                 &state.cluster.cluster_id,
                                 &segment.identity,
                                 &segment.wire,
+                                &repair.gaps,
                                 now,
                                 ready_repository_ids,
                                 &state.cluster.node_id,
@@ -933,7 +927,7 @@ async fn replicate_peer(
                     .await?;
             }
             let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
-                let runtime = state.repository_replica.lock().await;
+                let mut runtime = state.repository_replica.lock().await;
                 (
                     !runtime
                         .missing_segment_ids(&remote_summary, work.is_deep_verification())?

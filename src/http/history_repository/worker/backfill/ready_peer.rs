@@ -113,7 +113,7 @@ async fn advance_ready_peer_catch_up_page(
             }
         };
     let (requires_repair, missing_segment_ids, partitions_converged) = {
-        let runtime = state.repository_replica.lock().await;
+        let mut runtime = state.repository_replica.lock().await;
         (
             runtime.requires_repair(&remote_summary, true)?,
             runtime.missing_segment_ids(&remote_summary, true)?,
@@ -201,11 +201,6 @@ async fn repair_ready_peer_catch_up_page(
         &mut remaining,
         &repair.unavailable_segment_ids,
     )?;
-    state
-        .repository_replica
-        .lock()
-        .await
-        .merge_replica_gaps(&repair.gaps)?;
     for segment in repair.segments {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
@@ -217,10 +212,11 @@ async fn repair_ready_peer_catch_up_page(
             .repository_replica
             .lock()
             .await
-            .receive_initial_backfill_wire_from_repository(
+            .receive_initial_backfill_wire_from_repository_with_gaps(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,
+                &repair.gaps,
                 now,
                 ready_repository_ids,
                 &state.cluster.node_id,

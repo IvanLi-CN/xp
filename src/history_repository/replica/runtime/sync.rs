@@ -20,7 +20,7 @@ use crate::state::history_repository::replica::{
 };
 
 mod gap_ledger;
-use gap_ledger::{canonical_gaps, same_gap_range};
+use gap_ledger::{canonical_gaps, prioritize_full_ledger};
 
 const MAX_REPAIR_SEGMENTS: usize = 64;
 const MAX_REPAIR_GAPS: usize = 64;
@@ -42,6 +42,8 @@ pub(crate) struct RepositoryReplicaSummary {
     pub(crate) partitions_included: bool,
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
     pub(crate) last_verified_unix_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) history_truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -506,6 +508,7 @@ impl RepositoryReplicaRuntime {
                 && (!self.uses_sqlite_history() || self.snapshot.partition_summaries_complete),
             gaps: self.snapshot.gaps.iter().map(gap_summary).collect(),
             last_verified_unix_seconds: self.snapshot.last_verified_unix_seconds,
+            history_truncated: self.snapshot.history_truncated,
             next_segment_id,
         })
     }
@@ -530,12 +533,17 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn requires_repair(
-        &self,
+        &mut self,
         remote: &RepositoryReplicaSummary,
         deep_verification: bool,
     ) -> Result<bool, RepositoryRuntimeError> {
+        if remote.history_truncated && !self.snapshot.history_truncated {
+            self.snapshot.history_truncated = true;
+            self.persist_control_state()?;
+        }
         let gaps_converged = canonical_gaps(self.snapshot.gaps.iter().map(gap_summary))
             == canonical_gaps(remote.gaps.iter().cloned());
+        let truncation_converged = self.snapshot.history_truncated == remote.history_truncated;
         let partitions_converged = !deep_verification
             || !remote.partitions_included
             || !self.partition_summaries_ready()
@@ -543,14 +551,17 @@ impl RepositoryReplicaRuntime {
         // The remote summary is keyset-paged. Its page is complete only when every advertised
         // segment is present locally; peer-owned extra pages converge on the peer's next cycle.
         let segments_converged = self.missing_segment_ids(remote, false)?.is_empty();
-        Ok(!(segments_converged && gaps_converged && partitions_converged))
+        Ok(!(segments_converged && gaps_converged && truncation_converged && partitions_converged))
     }
 
     pub(crate) fn retained_partitions_converged(
         &self,
         remote: &RepositoryReplicaSummary,
     ) -> Result<bool, RepositoryRuntimeError> {
-        if !remote.partitions_included || !self.partition_summaries_ready() {
+        if remote.history_truncated
+            || !remote.partitions_included
+            || !self.partition_summaries_ready()
+        {
             return Ok(true);
         }
         Ok(self.retained_partition_summaries()? == remote.partitions)
@@ -695,39 +706,7 @@ impl RepositoryReplicaRuntime {
         let mut merged = canonical_gaps(merged);
         if merged.len() > MAX_REPAIR_GAPS {
             self.snapshot.history_truncated = true;
-            // Preserve incoming permanent evidence first, then existing permanent evidence,
-            // before using remaining slots for recoverable ranges. This keeps permanent gaps from
-            // being evicted by a full request while retaining the source's repair predecessor.
-            let is_incoming = |gap: &RepositoryReplicaGap| {
-                incoming
-                    .iter()
-                    .any(|candidate| same_gap_range(candidate, gap))
-            };
-            let mut prioritized = merged
-                .iter()
-                .filter(|gap| gap.permanent && is_incoming(gap))
-                .cloned()
-                .collect::<Vec<_>>();
-            prioritized.extend(
-                merged
-                    .iter()
-                    .filter(|gap| gap.permanent && !is_incoming(gap))
-                    .cloned(),
-            );
-            prioritized.extend(
-                merged
-                    .iter()
-                    .filter(|gap| !gap.permanent && is_incoming(gap))
-                    .cloned(),
-            );
-            prioritized.extend(
-                merged
-                    .iter()
-                    .filter(|gap| !gap.permanent && !is_incoming(gap))
-                    .cloned(),
-            );
-            prioritized.truncate(MAX_REPAIR_GAPS);
-            merged = prioritized;
+            merged = prioritize_full_ledger(merged, &incoming, MAX_REPAIR_GAPS);
         }
         self.snapshot.gaps = merged.into_iter().map(stored_gap).collect();
         self.persist_control_state()
@@ -957,6 +936,10 @@ fn encode_relay_repair_batch(
         .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
     zstd::stream::encode_all(IoCursor::new(serialized), 1)
         .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn validate_replica_gaps(gaps: &[RepositoryReplicaGap]) -> Result<(), RepositoryRuntimeError> {

@@ -135,6 +135,9 @@
   existing permanent evidence, then incoming recoverable ranges and older recoverable evidence. This
   keeps permanent gaps from being evicted by recoverable evidence while retaining the source's
   repair predecessor.
+  Summary responses carry the additive `history_truncated` marker. A peer persists the marker when
+  observed and keeps its affected queries partial; summaries from older peers omit it and decode as
+  false.
   The follow-up hk2 canary must observe ten consecutive 60-second source cycles with CPU at or
   below the 10% node quota, bounded journal reads, and no loss of Direct/Public or control-plane
   health. The shared resource test measures journal CPU/read/RSS bounds in isolation; the canary

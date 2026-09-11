@@ -218,16 +218,12 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
     }
     let receipt = {
         let mut runtime = state.repository_replica.lock().await;
-        if !request.gaps.is_empty() {
-            runtime
-                .merge_replica_gaps(&request.gaps)
-                .map_err(repository_error)?;
-        }
         runtime
-            .receive_wire_from_repository(
+            .receive_wire_from_repository_with_gaps(
                 &state.cluster.cluster_id,
                 &request.identity,
                 &wire,
+                &request.gaps,
                 u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
                 &ready_repository_ids,
                 &state.cluster.node_id,
@@ -566,12 +562,14 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
         ));
     }
     let mut acknowledgements = Vec::new();
-    state
-        .repository_replica
-        .lock()
-        .await
-        .merge_replica_gaps(&batch.gaps)
-        .map_err(repository_error)?;
+    if batch.segments.is_empty() {
+        state
+            .repository_replica
+            .lock()
+            .await
+            .merge_replica_gaps(&batch.gaps)
+            .map_err(repository_error)?;
+    }
     for segment in batch.segments {
         let valid_identity = if source_is_ready_repository {
             identity_is_valid_for_history_replay(&state, &segment.identity).await?
@@ -587,10 +585,11 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .repository_replica
             .lock()
             .await
-            .receive_wire_from_repository(
+            .receive_wire_from_repository_with_gaps(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,
+                &batch.gaps,
                 u64::try_from(Utc::now().timestamp()).unwrap_or_default(),
                 &ready_repository_ids,
                 &state.cluster.node_id,

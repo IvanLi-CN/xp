@@ -183,7 +183,7 @@ fn incoming_gaps_are_deduplicated_and_preserved_over_a_full_local_ledger() {
         ..required.clone()
     };
     runtime
-        .merge_replica_gaps(&[transient, required.clone(), recoverable.clone()])
+        .merge_replica_gaps(&[transient.clone(), required.clone(), recoverable.clone()])
         .expect("merge authenticated source gaps");
 
     assert_eq!(runtime.snapshot.gaps.len(), 64);
@@ -223,13 +223,148 @@ fn incoming_gaps_are_deduplicated_and_preserved_over_a_full_local_ledger() {
 
     let resumed = segment(&key, 3, vec![record(b"resumed", false)], Some(first_hash));
     runtime
-        .receive_wire(
+        .receive_wire_from_repository_with_gaps(
             "cluster-a",
             &identity,
             &resumed.wire_bytes().expect("resumed segment wire"),
+            &[transient, required, recoverable],
             2,
+            &["local".to_owned()],
+            "local",
         )
         .expect("segment after the preserved source gap");
+}
+
+#[test]
+fn duplicate_gap_evidence_keeps_the_widest_time_bounds() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    let base = RepositoryReplicaGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_sequence: 4,
+        last_sequence: 5,
+        start_unix_seconds: 20,
+        end_unix_seconds: 30,
+        permanent: false,
+        reason: None,
+    };
+    let overlapping = RepositoryReplicaGap {
+        start_unix_seconds: 10,
+        end_unix_seconds: 40,
+        ..base.clone()
+    };
+    runtime
+        .merge_replica_gaps(&[base, overlapping])
+        .expect("merge duplicate gap evidence");
+    let gap = runtime.snapshot.gaps.first().expect("canonical gap");
+    assert_eq!(gap.start_unix_seconds, 10);
+    assert_eq!(gap.end_unix_seconds, 40);
+}
+
+#[test]
+fn truncated_gap_marker_propagates_to_peer_and_keeps_queries_partial() {
+    let sender_temporary = tempfile::tempdir().expect("sender directory");
+    let receiver_temporary = tempfile::tempdir().expect("receiver directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let segment = segment(&key, 0, vec![record(b"complete", false)], None);
+    let wire = segment.wire_bytes().expect("segment wire");
+    let mut sender = load(sender_temporary.path());
+    sender
+        .receive_wire("cluster-a", &identity, &wire, 12)
+        .expect("sender segment");
+    sender.snapshot.history_truncated = true;
+    let summary = sender.replication_summary().expect("sender summary");
+    assert!(summary.history_truncated);
+
+    let mut receiver = load(receiver_temporary.path());
+    receiver
+        .receive_wire("cluster-a", &identity, &wire, 12)
+        .expect("receiver segment");
+    assert!(
+        !receiver
+            .requires_repair(&summary, false)
+            .expect("observe sender truncation")
+    );
+    assert!(receiver.snapshot.history_truncated);
+    let response = receiver
+        .query(
+            "repository-a",
+            HistoryQuery::new(10, 11, 10).expect("query"),
+            LocalQueryMetadata::current_window(12),
+        )
+        .expect("partial query");
+    assert_eq!(
+        response.plan().completeness(),
+        crate::state::history_repository::query::Completeness::Partial
+    );
+}
+
+#[test]
+fn incoming_recoverable_duplicate_does_not_promote_local_permanent_evidence() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    let local = (0..64_u64)
+        .map(|sequence| RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: format!("local-{sequence:02}"),
+            first_sequence: sequence,
+            last_sequence: sequence,
+            start_unix_seconds: 1,
+            end_unix_seconds: 1,
+            permanent: true,
+            reason: None,
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .merge_replica_gaps(&local)
+        .expect("seed local permanent gaps");
+
+    let mut incoming = (0..63_u64)
+        .map(|sequence| RepositoryReplicaGap {
+            source_node_id: "node-b".to_owned(),
+            source_epoch: 8,
+            stream: format!("incoming-{sequence:02}"),
+            first_sequence: sequence,
+            last_sequence: sequence,
+            start_unix_seconds: 2,
+            end_unix_seconds: 2,
+            permanent: true,
+            reason: None,
+        })
+        .collect::<Vec<_>>();
+    incoming.push(RepositoryReplicaGap {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "local-63".to_owned(),
+        first_sequence: 63,
+        last_sequence: 63,
+        start_unix_seconds: 2,
+        end_unix_seconds: 2,
+        permanent: false,
+        reason: None,
+    });
+    runtime
+        .merge_replica_gaps(&incoming)
+        .expect("merge incoming gap evidence");
+
+    assert!(
+        runtime
+            .snapshot
+            .gaps
+            .iter()
+            .any(|gap| gap.stream == "local-00")
+    );
+    assert!(
+        !runtime
+            .snapshot
+            .gaps
+            .iter()
+            .any(|gap| gap.stream == "local-63")
+    );
 }
 
 #[test]

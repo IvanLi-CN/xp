@@ -105,6 +105,28 @@ impl RepositoryReplicaRuntime {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_wire_from_repository_with_gaps(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: &[RepositoryReplicaGap],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.merge_replica_gaps(gaps)?;
+        self.receive_wire_from_repository(
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+        )
+    }
+
     pub(crate) fn receive_initial_backfill_wire_from_repository(
         &mut self,
         cluster_id: &str,
@@ -123,6 +145,28 @@ impl RepositoryReplicaRuntime {
             local_repository_id,
             allow_retained_anchor: true,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_initial_backfill_wire_from_repository_with_gaps(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: &[RepositoryReplicaGap],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.merge_replica_gaps(gaps)?;
+        self.receive_initial_backfill_wire_from_repository(
+            cluster_id,
+            identity,
+            wire,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+        )
     }
 
     fn receive_wire_from_repository_inner(
