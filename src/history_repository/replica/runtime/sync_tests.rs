@@ -1,6 +1,3 @@
-use ed25519_dalek::SigningKey;
-use sha2::Digest as _;
-
 use super::{
     RepositoryRepairBatch, RepositoryReplicaRuntime, RepositoryRuntimeError, StoredSegment,
 };
@@ -14,6 +11,8 @@ use crate::{
         replica::{ReplicaError, ReplicaWork, RepositoryReplicaGap},
     },
 };
+use ed25519_dalek::SigningKey;
+use sha2::Digest as _;
 
 #[path = "source_delivery_capacity_tests.rs"]
 mod source_delivery_capacity_tests;
@@ -246,6 +245,7 @@ fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
     let invalid_batch = RepositoryRepairBatch {
         segments: Vec::new(),
         unavailable_segment_ids: Vec::new(),
+        history_truncated: false,
         gaps: vec![RepositoryReplicaGap {
             source_node_id: "node-a".to_owned(),
             source_epoch: 7,

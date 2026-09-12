@@ -81,7 +81,12 @@ partial.
 
 After a declared permanent gap, the first segment after the missing range is
 accepted as a new hash-chain head because the skipped segment hash is unknown;
-the following segments must continue from that newly accepted hash as usual.
+the following segments must continue from that newly accepted hash as usual. A
+repair response carrying `history_truncated=true` is the only additional proof
+that a retained tail may cross an existing local watermark during the first
+initial-backfill page; the receiver records the crossed range as
+`source_retention_expired`. Ordinary source delivery, anti-entropy, and later
+pages continue to require exact sequence continuity.
 
 A Source writes every unacknowledged signed segment to its SQLite delivery
 journal before attempting transfer, and removes it only after its Collector

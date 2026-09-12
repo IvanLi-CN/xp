@@ -85,6 +85,31 @@ impl RepositoryReplicaRuntime {
         });
     }
 
+    pub(super) fn record_retained_anchor_gap(
+        &mut self,
+        segment: &CanonicalSegment,
+        expected: u64,
+        actual: u64,
+    ) {
+        if actual <= expected {
+            return;
+        }
+        let gap = super::RepositoryReplicaGap {
+            source_node_id: segment.first_cursor().source_node_id().to_owned(),
+            source_epoch: segment.first_cursor().source_epoch(),
+            stream: segment.first_cursor().stream().to_owned(),
+            first_sequence: expected,
+            last_sequence: actual - 1,
+            start_unix_seconds: 0,
+            end_unix_seconds: segment.opened_at_unix_seconds(),
+            permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
+        };
+        // This evidence comes from the remote repository's explicit truncation marker. Keep it
+        // in the same bounded ledger as ordinary authenticated gaps.
+        let _ = self.merge_replica_gaps_in_memory(&[gap]);
+    }
+
     pub(super) fn record_epoch_rotation_gap(
         &mut self,
         gap: &CursorGap,

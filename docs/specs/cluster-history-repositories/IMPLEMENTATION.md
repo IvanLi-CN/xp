@@ -74,9 +74,12 @@
   durable history while preventing an expired repair page from pinning the member in `syncing`.
 - A ready peer's retained segment cache can also begin a source stream at a nonzero sequence when
   its predecessor has already expired. The initial summary-repair path accepts that signed frame
-  as an unanchored retained tail and keeps `hash_chain_verified=false`; it then requires strict
-  contiguous sequence/hash links for the remaining page. Ordinary source and anti-entropy receipt
-  keeps rejecting the same frame, so the relaxed boundary cannot bypass live fork protection.
+  as an unanchored retained tail and keeps `hash_chain_verified=false`; when the serving repair
+  response carries `history_truncated=true`, the same path may advance an existing local watermark
+  over the expired prefix and persists a `source_retention_expired` permanent gap. It then requires
+  strict contiguous sequence/hash links for the remaining page. Ordinary source, anti-entropy, and
+  later repair pages keep rejecting sequence gaps, so the relaxed boundary cannot bypass live fork
+  protection.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

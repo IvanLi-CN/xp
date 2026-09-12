@@ -59,7 +59,7 @@ use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
-    repository_direct_request, repository_mesh_request,
+    preserve_history_truncated, repository_direct_request, repository_mesh_request,
 };
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;
@@ -476,6 +476,7 @@ async fn relay_local_source_segments(
             segments,
             unavailable_segment_ids: Vec::new(),
             gaps,
+            history_truncated: false,
         }
         .frame_sized_relay_payload()?
     };
@@ -749,7 +750,8 @@ async fn replicate_peer_via_dynamic_relay(
         runtime.relay_batch(&target.node_id)?
     };
     let next_segment_id = page.next_segment_id().map(str::to_owned);
-    if page.batch.segments.is_empty() && page.batch.gaps.is_empty() {
+    if page.batch.segments.is_empty() && page.batch.gaps.is_empty() && !page.batch.history_truncated
+    {
         return Ok(());
     }
     let frame = RelayFrame::seal(

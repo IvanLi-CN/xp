@@ -83,6 +83,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   持久化，并将该 stream 标记为 `hash_chain_verified=false`；后续段仍必须按 sequence 和
   predecessor hash 连续到达。普通 source delivery 与 anti-entropy 接收路径不得接受无本地
   predecessor 的非零首段。
+- 若 repair 响应明确携带 `history_truncated=true`，且本地已经有该 source stream 的连续水位，
+  初始回填第一页可以把服务端保留的尾部首段作为新的 hash-chain head，跨过本地水位之后已被
+  保留策略淘汰的序号；接收方必须持久化 `source_retention_expired` permanent gap，并仅对该
+  初始第一页放宽序号检查。普通 source delivery、普通 anti-entropy 和后续回填页仍必须严格
+  连续，不能用该标记伪造缺失 payload。
 - repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
   不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
   状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。

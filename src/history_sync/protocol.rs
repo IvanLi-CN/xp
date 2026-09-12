@@ -12,6 +12,7 @@ use super::{encoding, proto};
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
 mod checkpoint;
 mod replay;
+mod retained_anchor;
 pub(crate) use checkpoint::SegmentReceiverCheckpoint;
 
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 1_000;
@@ -630,6 +631,7 @@ pub(crate) struct SegmentReceiver {
     quarantined_streams: BTreeMap<StreamKey, u64>,
     forwardable_unknown_segments: Vec<SignedSegment>,
     retained_anchor_mode: bool,
+    retained_anchor_sequence_gap: bool,
 }
 impl SegmentReceiver {
     pub(crate) fn for_cluster(
@@ -644,6 +646,7 @@ impl SegmentReceiver {
             quarantined_streams: BTreeMap::new(),
             forwardable_unknown_segments: Vec::new(),
             retained_anchor_mode: false,
+            retained_anchor_sequence_gap: false,
         }
     }
     pub(crate) fn accept(
@@ -739,12 +742,22 @@ impl SegmentReceiver {
                     .checked_add(1)
                     .ok_or(ProtocolError::InvalidSegment("sequence overflow"))?;
                 if first.sequence != expected {
-                    return Err(ProtocolError::SequenceGap {
-                        expected,
-                        actual: first.sequence,
-                    });
+                    if !(self.retained_anchor_mode
+                        && self.retained_anchor_sequence_gap
+                        && first.sequence > expected)
+                    {
+                        return Err(ProtocolError::SequenceGap {
+                            expected,
+                            actual: first.sequence,
+                        });
+                    }
+                    // A truncated repository can only prove the signed tail anchor. The
+                    // runtime records the omitted range as retention evidence and keeps the
+                    // accepted anchor's predecessor unverified.
+                    hash_chain_verified = false;
+                    previous_hash_verified = false;
                 }
-                if progress.previous_hash_verified()
+                if previous_hash_verified
                     && segment.canonical.previous_segment_hash != Some(progress.last_segment_hash)
                 {
                     return Err(ProtocolError::HashChainMismatch);
@@ -832,16 +845,6 @@ impl SegmentReceiver {
             gap,
             unknown_schema_records,
         })
-    }
-    pub(crate) fn accept_retained_anchor(
-        &mut self,
-        segment: &SignedSegment,
-        identity: &RepositoryNodeIdentity,
-    ) -> Result<Acceptance, ProtocolError> {
-        self.retained_anchor_mode = true;
-        let result = self.accept(segment, identity);
-        self.retained_anchor_mode = false;
-        result
     }
     pub(crate) fn advance_declared_sequence_gap(
         &mut self,

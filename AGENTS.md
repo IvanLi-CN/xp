@@ -52,6 +52,10 @@
   creates that index idempotently at startup without replacing the legacy index or signed payloads.
   An external-history database whose startup index creation fails preserves its durable rows on
   disk and returns a storage failure; it never falls back to a potentially stale JSON snapshot.
+  A repair response with `history_truncated=true` may let only the first initial-backfill page cross
+  an existing source watermark over an expired retained prefix; XP records a permanent
+  `source_retention_expired` gap and keeps later pages, ordinary anti-entropy, and live delivery
+  sequence-strict.
   The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
   candidate gate before rollout; the runner binds the clean commit and generated Web shell by
   SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.
