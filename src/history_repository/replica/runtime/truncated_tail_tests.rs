@@ -233,6 +233,7 @@ fn retained_anchor_checkpoint_and_segment_commit_retry_as_one_unit() {
         peer_node_id: "node-b".to_owned(),
         response_id: "response-1".to_owned(),
         response_complete: true,
+        allowance_complete: true,
         streams: std::collections::BTreeSet::from([InitialPeerRetainedAnchorStream {
             source_node_id: "node-a".to_owned(),
             source_epoch: 7,
@@ -361,6 +362,7 @@ fn retained_anchor_response_identity_survives_partial_failure() {
             peer_node_id: "node-b".to_owned(),
             response_id: response_id.to_owned(),
             response_complete,
+            allowance_complete: response_complete,
             streams,
         };
     let mut runtime = load(temporary.path());
@@ -461,6 +463,7 @@ fn retained_anchor_response_identity_survives_partial_failure() {
             false,
             Some("later-response".to_owned()),
             true,
+            true,
             checkpoint.retained_anchor_streams,
         )
         .expect("a later wire-bounded repair response may use a new identity");
@@ -472,6 +475,105 @@ fn retained_anchor_response_identity_survives_partial_failure() {
     assert_eq!(
         checkpoint.summary_pending_segment_ids,
         vec!["later-segment".to_owned()]
+    );
+}
+
+#[test]
+fn bounded_repair_responses_keep_stream_allowances_until_the_summary_page_drains() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first_runtime = segment(&key, 0, vec![record(b"first-runtime", false)], None);
+    let first_traffic = segment_at_stream(
+        &key,
+        "traffic",
+        0,
+        vec![record(b"first-traffic", false)],
+        None,
+    );
+    let anchor_runtime = segment(
+        &key,
+        3,
+        vec![record(b"anchor-runtime", false)],
+        Some([42; 32]),
+    );
+    let anchor_traffic = segment_at_stream(
+        &key,
+        "traffic",
+        3,
+        vec![record(b"anchor-traffic", false)],
+        Some([43; 32]),
+    );
+    let runtime_stream = InitialPeerRetainedAnchorStream {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+    };
+    let traffic_stream = InitialPeerRetainedAnchorStream {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "traffic".to_owned(),
+    };
+    let mut runtime = load(temporary.path());
+    for first in [&first_runtime, &first_traffic] {
+        runtime
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &first.wire_bytes().expect("first wire"),
+                11,
+            )
+            .expect("local progress");
+    }
+    runtime
+        .receive_initial_backfill_wire_from_repository_with_gaps_and_retained_anchor_state(
+            "cluster-a",
+            &identity,
+            &anchor_runtime.wire_bytes().expect("runtime anchor wire"),
+            &[],
+            12,
+            &["repository-a".to_owned()],
+            "repository-a",
+            true,
+            Some(RetainedAnchorCheckpointUpdate {
+                peer_node_id: "node-b".to_owned(),
+                response_id: "first-bounded-response".to_owned(),
+                response_complete: true,
+                allowance_complete: false,
+                streams: BTreeSet::from([runtime_stream.clone()]),
+            }),
+        )
+        .expect("first bounded response");
+    let checkpoint = runtime
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("checkpoint after first response");
+    assert!(!checkpoint.retained_anchor_repair_response_seen);
+    assert!(checkpoint.retained_anchor_repair_response_id.is_none());
+
+    runtime
+        .receive_initial_backfill_wire_from_repository_with_gaps_and_retained_anchor_state(
+            "cluster-a",
+            &identity,
+            &anchor_traffic.wire_bytes().expect("traffic anchor wire"),
+            &[],
+            13,
+            &["repository-a".to_owned()],
+            "repository-a",
+            true,
+            Some(RetainedAnchorCheckpointUpdate {
+                peer_node_id: "node-b".to_owned(),
+                response_id: "second-bounded-response".to_owned(),
+                response_complete: true,
+                allowance_complete: true,
+                streams: BTreeSet::from([runtime_stream, traffic_stream]),
+            }),
+        )
+        .expect("second response consumes the remaining stream allowance");
+    assert!(
+        runtime
+            .initial_peer_backfill_checkpoint("node-b")
+            .expect("completed checkpoint")
+            .retained_anchor_repair_response_seen
     );
 }
 

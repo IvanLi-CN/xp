@@ -3,6 +3,38 @@ use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate,
 };
 
+struct CompletedRepairResponse {
+    summary_cursor: Option<String>,
+    pending_segment_ids: Vec<String>,
+    pending_next_cursor: Option<String>,
+    summary_complete: bool,
+    response_complete: bool,
+    allowance_complete: bool,
+}
+
+fn completed_repair_response(
+    checkpoint: &InitialPeerBackfillCheckpoint,
+    remaining: BTreeSet<String>,
+) -> CompletedRepairResponse {
+    let page_complete = remaining.is_empty();
+    let summary_cursor = page_complete
+        .then(|| checkpoint.summary_pending_next_cursor.clone())
+        .flatten();
+    let summary_complete = page_complete && summary_cursor.is_none();
+    CompletedRepairResponse {
+        summary_cursor,
+        pending_segment_ids: remaining.into_iter().collect(),
+        pending_next_cursor: (!page_complete)
+            .then(|| checkpoint.summary_pending_next_cursor.clone())
+            .flatten(),
+        summary_complete,
+        // The wire-bounded response has been consumed even if it left IDs for
+        // the next request, whose content has a distinct response identity.
+        response_complete: true,
+        allowance_complete: page_complete,
+    }
+}
+
 pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
     now: u64,
@@ -284,36 +316,57 @@ async fn repair_ready_peer_catch_up_page(
                     peer_node_id: peer.node_id.clone(),
                     response_id: response_id.clone(),
                     response_complete: false,
+                    allowance_complete: false,
                     streams: retained_anchor_streams.clone(),
                 }),
             )?;
     }
-    let page_complete = remaining.is_empty();
-    let summary_cursor = page_complete
-        .then(|| checkpoint.summary_pending_next_cursor.clone())
-        .flatten();
-    let summary_complete = page_complete && summary_cursor.is_none();
+    let completed_response = completed_repair_response(&checkpoint, remaining);
     state
         .repository_replica
         .lock()
         .await
         .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
             &peer.node_id,
-            summary_cursor,
-            remaining.into_iter().collect(),
-            if page_complete {
-                None
-            } else {
-                checkpoint.summary_pending_next_cursor
-            },
-            summary_complete,
+            completed_response.summary_cursor,
+            completed_response.pending_segment_ids,
+            completed_response.pending_next_cursor,
+            completed_response.summary_complete,
             checkpoint.summary_requires_tiered_backfill,
             Some(response_id),
-            // This response has been fully consumed even when its wire bound leaves
-            // summary IDs for a later repair request. The later request has a new
-            // response identity and must not be compared with this one.
-            true,
+            completed_response.response_complete,
+            completed_response.allowance_complete,
             retained_anchor_streams,
         )?;
     Ok(InitialBackfillProgress::InProgress)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_bounded_repair_response_completes_its_identity_with_pending_ids() {
+        let checkpoint = InitialPeerBackfillCheckpoint {
+            summary_pending_next_cursor: Some("next-summary-page".to_owned()),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        let response = completed_repair_response(
+            &checkpoint,
+            BTreeSet::from(["remaining-segment".to_owned()]),
+        );
+
+        assert_eq!(
+            response.pending_segment_ids,
+            vec!["remaining-segment".to_owned()]
+        );
+        assert_eq!(
+            response.pending_next_cursor.as_deref(),
+            Some("next-summary-page")
+        );
+        assert!(response.summary_cursor.is_none());
+        assert!(!response.summary_complete);
+        assert!(response.response_complete);
+        assert!(!response.allowance_complete);
+    }
 }

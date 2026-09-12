@@ -7,6 +7,7 @@ pub(crate) struct RetainedAnchorCheckpointUpdate {
     pub(crate) peer_node_id: String,
     pub(crate) response_id: String,
     pub(crate) response_complete: bool,
+    pub(crate) allowance_complete: bool,
     pub(crate) streams: BTreeSet<InitialPeerRetainedAnchorStream>,
 }
 
@@ -142,6 +143,7 @@ impl RepositoryReplicaRuntime {
             summary_requires_tiered_backfill,
             response_id,
             retained_anchor_repair_response_seen,
+            retained_anchor_repair_response_seen,
             retained_anchor_streams,
         )
     }
@@ -157,6 +159,7 @@ impl RepositoryReplicaRuntime {
         summary_requires_tiered_backfill: bool,
         retained_anchor_repair_response_id: Option<String>,
         retained_anchor_repair_response_complete: bool,
+        retained_anchor_allowance_complete: bool,
         retained_anchor_streams: BTreeSet<InitialPeerRetainedAnchorStream>,
     ) -> Result<(), RepositoryRuntimeError> {
         let checkpoint = self
@@ -188,10 +191,13 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_complete = summary_complete;
         checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
         if retained_anchor_repair_response_complete {
-            checkpoint.retained_anchor_repair_response_seen = true;
             checkpoint.retained_anchor_repair_response_id = None;
         } else if !checkpoint.retained_anchor_repair_response_seen {
             checkpoint.retained_anchor_repair_response_id = retained_anchor_repair_response_id;
+        }
+        if retained_anchor_allowance_complete {
+            checkpoint.retained_anchor_repair_response_seen = true;
+            checkpoint.retained_anchor_repair_response_id = None;
         }
         checkpoint.retained_anchor_streams = retained_anchor_streams;
         self.persist_control_state()

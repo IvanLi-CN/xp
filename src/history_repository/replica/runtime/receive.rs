@@ -483,10 +483,13 @@ impl RepositoryReplicaRuntime {
             ));
         }
         if update.response_complete {
-            checkpoint.retained_anchor_repair_response_seen = true;
             checkpoint.retained_anchor_repair_response_id = None;
         } else {
             checkpoint.retained_anchor_repair_response_id = Some(update.response_id);
+        }
+        if update.allowance_complete {
+            checkpoint.retained_anchor_repair_response_seen = true;
+            checkpoint.retained_anchor_repair_response_id = None;
         }
         checkpoint.retained_anchor_streams = update.streams;
         Ok(())
