@@ -309,7 +309,10 @@ async fn repair_ready_peer_catch_up_page(
             summary_complete,
             checkpoint.summary_requires_tiered_backfill,
             Some(response_id),
-            page_complete,
+            // This response has been fully consumed even when its wire bound leaves
+            // summary IDs for a later repair request. The later request has a new
+            // response identity and must not be compared with this one.
+            true,
             retained_anchor_streams,
         )?;
     Ok(InitialBackfillProgress::InProgress)

@@ -450,6 +450,29 @@ fn retained_anchor_response_identity_survives_partial_failure() {
     assert!(checkpoint.retained_anchor_repair_response_seen);
     assert!(checkpoint.retained_anchor_repair_response_id.is_none());
     assert_eq!(checkpoint.retained_anchor_streams, streams);
+
+    runtime
+        .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+            "node-b",
+            None,
+            vec!["later-segment".to_owned()],
+            None,
+            false,
+            false,
+            Some("later-response".to_owned()),
+            true,
+            checkpoint.retained_anchor_streams,
+        )
+        .expect("a later wire-bounded repair response may use a new identity");
+    let checkpoint = runtime
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("checkpoint after later response");
+    assert!(checkpoint.retained_anchor_repair_response_seen);
+    assert!(checkpoint.retained_anchor_repair_response_id.is_none());
+    assert_eq!(
+        checkpoint.summary_pending_segment_ids,
+        vec!["later-segment".to_owned()]
+    );
 }
 
 fn segment_at_stream(
