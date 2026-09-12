@@ -171,6 +171,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
   journal delivery order oldest-first 连续投递；容量暂停只阻断新的 source capture，不阻断既有
   backlog 的重放，source worker 每个周期最多连续处理 4 个有界 replay page，保持每周期读取预算不超过 4 MiB。
+- source worker 的容量与生命周期 Raft 维护必须与 source capture 并发且各自受 repository request
+  budget 限制。维护写入失败或超时只记录并在下一周期重试，不得阻塞历史投递、推进 source cursor
+  或删除未 ACK 的 journal 行。
 - delivery journal 状态读取必须通过 SQLite 聚合条数与总字节数，并且只读取排序后的单条最老
   segment；状态/API 查询的进程内存不得随 durable backlog 大小增长。
 - delivery journal 的周期性状态、epoch 恢复和固定页读取必须使用持久化统计状态与匹配投递顺序的
