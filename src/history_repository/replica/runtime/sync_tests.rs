@@ -13,7 +13,6 @@ use crate::{
 };
 use ed25519_dalek::SigningKey;
 use sha2::Digest as _;
-
 #[path = "source_delivery_capacity_tests.rs"]
 mod source_delivery_capacity_tests;
 #[path = "source_delivery_collector_tests.rs"]
@@ -246,6 +245,7 @@ fn relay_payload_rejects_malformed_gap_ranges_before_delivery() {
         segments: Vec::new(),
         unavailable_segment_ids: Vec::new(),
         history_truncated: false,
+        response_id: None,
         gaps: vec![RepositoryReplicaGap {
             source_node_id: "node-a".to_owned(),
             source_epoch: 7,

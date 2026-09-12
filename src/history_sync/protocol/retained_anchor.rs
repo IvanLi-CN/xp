@@ -1,5 +1,11 @@
 use super::*;
 
+impl CanonicalSegment {
+    pub(crate) fn previous_segment_hash(&self) -> Option<[u8; 32]> {
+        self.previous_segment_hash
+    }
+}
+
 impl SegmentReceiver {
     pub(crate) fn accept_retained_anchor(
         &mut self,

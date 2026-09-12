@@ -76,10 +76,14 @@
   its predecessor has already expired. The initial summary-repair path accepts that signed frame
   as an unanchored retained tail and keeps `hash_chain_verified=false`; when the serving repair
   response carries `history_truncated=true`, the same path may advance an existing local watermark
-  over the expired prefix and persists a `source_retention_expired` permanent gap. It then requires
-  strict contiguous sequence/hash links for the remaining page. Ordinary source, anti-entropy, and
-  later repair pages keep rejecting sequence gaps, so the relaxed boundary cannot bypass live fork
-  protection.
+  once per affected stream in that first repair response, even if an earlier segment in the response
+  is already contiguous, and persists a `source_retention_expired` permanent gap. It then requires
+  strict contiguous sequence/hash links for the remaining response and all later responses. Ordinary
+  source delivery and anti-entropy keep rejecting sequence gaps, so the relaxed boundary cannot
+  bypass live fork protection.
+  The checkpoint records a content-derived repair response identity while that response is
+  incomplete. New peers return the identity; compatibility with older peers derives it from the
+  received batch. A changed retry is rejected before another stream can consume the allowance.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

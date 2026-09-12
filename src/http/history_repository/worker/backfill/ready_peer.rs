@@ -1,5 +1,7 @@
 use super::*;
-use crate::state::history_repository::replica::InitialPeerBackfillCheckpoint;
+use crate::state::history_repository::replica::{
+    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate,
+};
 
 pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
@@ -174,6 +176,7 @@ async fn repair_ready_peer_catch_up_page(
         .collect::<BTreeSet<_>>();
     let body = serde_json::to_vec(&RepositoryRepairRequest {
         segment_ids: pending.iter().cloned().collect(),
+        response_id: checkpoint.retained_anchor_repair_response_id.clone(),
     })?;
     let repair: RepositoryRepairBatch = repository_direct_request(
         state,
@@ -183,6 +186,24 @@ async fn repair_ready_peer_catch_up_page(
         body,
     )
     .await?;
+    // Old peers omit response_id. Derive it from their actual response rather than the
+    // request, so a changed retry cannot consume a first-response allowance.
+    let response_id = repair.response_id_digest()?;
+    if repair
+        .response_id
+        .as_ref()
+        .is_some_and(|provided| provided != &response_id)
+    {
+        anyhow::bail!("repository repair response identity does not match its content");
+    }
+    if !checkpoint.retained_anchor_repair_response_seen
+        && checkpoint
+            .retained_anchor_repair_response_id
+            .as_ref()
+            .is_some_and(|existing| existing != &response_id)
+    {
+        anyhow::bail!("retained anchor repair response changed before completion");
+    }
     let mut remaining = pending;
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
@@ -209,8 +230,8 @@ async fn repair_ready_peer_catch_up_page(
             .merge_replica_gaps(&repair.gaps)?;
     }
     let repair_gaps = repair.gaps;
-    let allow_retained_sequence_gap =
-        allows_retained_sequence_gap(&checkpoint, repair.history_truncated);
+    let first_repair_response = !checkpoint.retained_anchor_repair_response_seen;
+    let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
     for (index, segment) in repair.segments.into_iter().enumerate() {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
@@ -218,11 +239,39 @@ async fn repair_ready_peer_catch_up_page(
         {
             anyhow::bail!("repository repair segment identity is not pinned");
         }
+        let first_cursor = crate::history_sync::SignedSegment::from_wire(&segment.wire)?
+            .canonical()
+            .first_cursor()
+            .clone();
+        let stream_key = (
+            first_cursor.source_node_id().to_owned(),
+            first_cursor.source_epoch(),
+            first_cursor.stream().to_owned(),
+        );
+        let allow_retained_sequence_gap = if repair.history_truncated
+            && first_repair_response
+            && !retained_anchor_streams.iter().any(|key| {
+                key.source_node_id == stream_key.0
+                    && key.source_epoch == stream_key.1
+                    && key.stream == stream_key.2
+            }) {
+            let runtime = state.repository_replica.lock().await;
+            runtime.can_accept_retained_sequence_gap(&segment.wire, false)?
+        } else {
+            false
+        };
+        if allow_retained_sequence_gap {
+            retained_anchor_streams.insert(InitialPeerRetainedAnchorStream {
+                source_node_id: stream_key.0,
+                source_epoch: stream_key.1,
+                stream: stream_key.2,
+            });
+        }
         state
             .repository_replica
             .lock()
             .await
-            .receive_initial_backfill_wire_from_repository_with_gaps(
+            .receive_initial_backfill_wire_from_repository_with_gaps_and_retained_anchor_state(
                 &state.cluster.cluster_id,
                 &segment.identity,
                 &segment.wire,
@@ -230,7 +279,13 @@ async fn repair_ready_peer_catch_up_page(
                 now,
                 ready_repository_ids,
                 &state.cluster.node_id,
-                allow_retained_sequence_gap && index == 0,
+                allow_retained_sequence_gap,
+                Some(RetainedAnchorCheckpointUpdate {
+                    peer_node_id: peer.node_id.clone(),
+                    response_id: response_id.clone(),
+                    response_complete: false,
+                    streams: retained_anchor_streams.clone(),
+                }),
             )?;
     }
     let page_complete = remaining.is_empty();
@@ -242,7 +297,7 @@ async fn repair_ready_peer_catch_up_page(
         .repository_replica
         .lock()
         .await
-        .update_initial_peer_summary_checkpoint(
+        .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
             &peer.node_id,
             summary_cursor,
             remaining.into_iter().collect(),
@@ -253,35 +308,9 @@ async fn repair_ready_peer_catch_up_page(
             },
             summary_complete,
             checkpoint.summary_requires_tiered_backfill,
+            Some(response_id),
+            page_complete,
+            retained_anchor_streams,
         )?;
     Ok(InitialBackfillProgress::InProgress)
-}
-
-fn allows_retained_sequence_gap(
-    checkpoint: &InitialPeerBackfillCheckpoint,
-    history_truncated: bool,
-) -> bool {
-    history_truncated && checkpoint.summary_cursor.is_none()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retained_sequence_gap_is_limited_to_the_first_summary_page() {
-        let first_page = InitialPeerBackfillCheckpoint::default();
-        assert!(allows_retained_sequence_gap(&first_page, true));
-        assert!(!allows_retained_sequence_gap(
-            &InitialPeerBackfillCheckpoint {
-                summary_cursor: Some("page-2".to_owned()),
-                ..first_page
-            },
-            true,
-        ));
-        assert!(!allows_retained_sequence_gap(
-            &InitialPeerBackfillCheckpoint::default(),
-            false,
-        ));
-    }
 }

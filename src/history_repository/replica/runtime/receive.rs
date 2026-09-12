@@ -68,6 +68,7 @@ struct RepositoryWireRequest<'a> {
     rollback_snapshot: Option<RepositoryReplicaSnapshot>,
     discard_gap_evidence_on_error: bool,
     allow_retained_sequence_gap: bool,
+    retained_anchor_checkpoint: Option<RetainedAnchorCheckpointUpdate>,
 }
 
 impl RepositoryReplicaRuntime {
@@ -108,6 +109,7 @@ impl RepositoryReplicaRuntime {
             rollback_snapshot: None,
             discard_gap_evidence_on_error: false,
             allow_retained_sequence_gap: false,
+            retained_anchor_checkpoint: None,
         })
     }
 
@@ -141,6 +143,7 @@ impl RepositoryReplicaRuntime {
             rollback_snapshot: Some(previous_snapshot.clone()),
             discard_gap_evidence_on_error: true,
             allow_retained_sequence_gap: false,
+            retained_anchor_checkpoint: None,
         });
         match result {
             Ok(receipt) => Ok(receipt),
@@ -182,6 +185,7 @@ impl RepositoryReplicaRuntime {
             rollback_snapshot: None,
             discard_gap_evidence_on_error: false,
             allow_retained_sequence_gap: false,
+            retained_anchor_checkpoint: None,
         })
     }
 
@@ -196,6 +200,32 @@ impl RepositoryReplicaRuntime {
         ready_repositories: &[String],
         local_repository_id: &str,
         allow_retained_sequence_gap: bool,
+    ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
+        self.receive_initial_backfill_wire_from_repository_with_gaps_and_retained_anchor_state(
+            cluster_id,
+            identity,
+            wire,
+            gaps,
+            now_unix_seconds,
+            ready_repositories,
+            local_repository_id,
+            allow_retained_sequence_gap,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_initial_backfill_wire_from_repository_with_gaps_and_retained_anchor_state(
+        &mut self,
+        cluster_id: &str,
+        identity: &RepositoryNodeIdentity,
+        wire: &[u8],
+        gaps: &[RepositoryReplicaGap],
+        now_unix_seconds: u64,
+        ready_repositories: &[String],
+        local_repository_id: &str,
+        allow_retained_sequence_gap: bool,
+        retained_anchor_checkpoint: Option<RetainedAnchorCheckpointUpdate>,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
         self.rebuild_if_stale(now_unix_seconds)?;
         let previous_snapshot = self.snapshot.clone();
@@ -216,6 +246,7 @@ impl RepositoryReplicaRuntime {
             rollback_snapshot: Some(previous_snapshot.clone()),
             discard_gap_evidence_on_error: true,
             allow_retained_sequence_gap,
+            retained_anchor_checkpoint,
         });
         match result {
             Ok(receipt) => Ok(receipt),
@@ -252,6 +283,7 @@ impl RepositoryReplicaRuntime {
             rollback_snapshot,
             discard_gap_evidence_on_error,
             allow_retained_sequence_gap,
+            retained_anchor_checkpoint,
         } = request;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.refresh_capacity()?;
@@ -270,6 +302,7 @@ impl RepositoryReplicaRuntime {
         let previous_snapshot = rollback_snapshot.unwrap_or_else(|| self.snapshot.clone());
         let first_cursor = segment.canonical().first_cursor();
         let last_cursor = segment.canonical().last_cursor();
+        self.apply_retained_anchor_checkpoint(retained_anchor_checkpoint.clone())?;
         if self.snapshot.gaps.iter().any(|gap| {
             gap.permanent
                 && gap.source_node_id == first_cursor.source_node_id()
@@ -425,6 +458,38 @@ impl RepositoryReplicaRuntime {
             availability,
             tombstone_acknowledgements,
         ))
+    }
+
+    fn apply_retained_anchor_checkpoint(
+        &mut self,
+        update: Option<RetainedAnchorCheckpointUpdate>,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let Some(update) = update else {
+            return Ok(());
+        };
+        let checkpoint = self
+            .snapshot
+            .initial_peer_backfills
+            .entry(update.peer_node_id)
+            .or_default();
+        if checkpoint.retained_anchor_repair_response_seen {
+            return Ok(());
+        }
+        if let Some(existing_response_id) = checkpoint.retained_anchor_repair_response_id.as_ref()
+            && existing_response_id != &update.response_id
+        {
+            return Err(RepositoryRuntimeError::Storage(
+                "retained anchor repair response changed before completion".to_owned(),
+            ));
+        }
+        if update.response_complete {
+            checkpoint.retained_anchor_repair_response_seen = true;
+            checkpoint.retained_anchor_repair_response_id = None;
+        } else {
+            checkpoint.retained_anchor_repair_response_id = Some(update.response_id);
+        }
+        checkpoint.retained_anchor_streams = update.streams;
+        Ok(())
     }
 
     pub(super) fn bind_cluster(&mut self, cluster_id: &str) -> Result<(), RepositoryRuntimeError> {

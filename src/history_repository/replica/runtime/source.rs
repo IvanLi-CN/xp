@@ -103,6 +103,29 @@ impl RepositoryReplicaRuntime {
         self.snapshot.history_truncated
     }
 
+    pub(crate) fn can_accept_retained_sequence_gap(
+        &self,
+        wire: &[u8],
+        already_consumed: bool,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let segment = crate::history_sync::SignedSegment::from_wire(wire)?;
+        let first = segment.canonical().first_cursor();
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Ok(false);
+        };
+        let Some(watermark) = receiver.continuous_watermark(first)? else {
+            return Ok(false);
+        };
+        let expected = watermark.sequence().saturating_add(1);
+        if already_consumed
+            || first.sequence() <= expected
+            || segment.canonical().previous_segment_hash().is_none()
+        {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
 
     pub(crate) fn queue_local_source_segments(

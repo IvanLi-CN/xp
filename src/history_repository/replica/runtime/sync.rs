@@ -1,18 +1,13 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::{Cursor as IoCursor, Read as _},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::history_sync::{
-    MAX_DECOMPRESSION_EXPANSION_RATIO, MAX_RELAY_PLAINTEXT_BYTES, MAX_RESPONSE_WIRE_BYTES,
-    SignedSegment, SyncRecord,
-};
+use crate::history_sync::{MAX_RESPONSE_WIRE_BYTES, SignedSegment, SyncRecord};
 
 use super::{
     RelaySegmentCursor, RepositoryPartitionSummary, RepositoryReplicaRuntime,
     RepositoryRuntimeError, RepositoryTombstoneAcknowledgement, StoredGap,
+    repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment},
 };
 use crate::state::history_repository::replica::{
     AntiEntropySchedule, CollectorSelector, ReplicaError, ReplicaRecordKey, ReplicaWork,
@@ -22,9 +17,8 @@ use crate::state::history_repository::replica::{
 mod gap_ledger;
 use gap_ledger::{canonical_gaps, prioritize_full_ledger};
 
-const MAX_REPAIR_SEGMENTS: usize = 64;
-const MAX_REPAIR_GAPS: usize = 64;
-const MAX_RELAY_BATCH_DECODED_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_REPAIR_SEGMENTS: usize = 64;
+pub(super) const MAX_REPAIR_GAPS: usize = 64;
 const MAX_RELAY_TARGETS: usize = 64;
 const MAX_COLLECTION_SOURCES: usize = 4_096;
 const MAX_TOMBSTONE_ACKNOWLEDGEMENTS_PER_CYCLE: usize = 64;
@@ -58,133 +52,6 @@ pub(crate) struct RepositoryReplicaGap {
     pub(crate) permanent: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RepositoryReplicaSegment {
-    pub(crate) identity: crate::state::history_repository::identity::RepositoryNodeIdentity,
-    pub(crate) wire: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RepositoryRepairBatch {
-    pub(crate) segments: Vec<RepositoryReplicaSegment>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) unavailable_segment_ids: Vec<String>,
-    #[serde(default)]
-    pub(crate) gaps: Vec<RepositoryReplicaGap>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub(crate) history_truncated: bool,
-}
-
-pub(crate) struct RelayRepairPayload {
-    pub(crate) batch: RepositoryRepairBatch,
-    pub(crate) bytes: Vec<u8>,
-}
-
-impl RepositoryRepairBatch {
-    pub(crate) fn frame_sized_relay_payload(
-        self,
-    ) -> Result<RelayRepairPayload, RepositoryRuntimeError> {
-        if self.segments.len() > MAX_REPAIR_SEGMENTS
-            || self.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
-            || self.gaps.len() > MAX_REPAIR_GAPS
-        {
-            return Err(ReplicaError::RepairLimitExceeded.into());
-        }
-        validate_unavailable_segment_ids(&self.unavailable_segment_ids)?;
-        validate_replica_gaps(&self.gaps)?;
-
-        let gaps = self.gaps;
-        let unavailable_segment_ids = self.unavailable_segment_ids;
-        let history_truncated = self.history_truncated;
-        let mut selected = Vec::new();
-        let mut bytes = encode_relay_repair_batch(&RepositoryRepairBatch {
-            segments: Vec::new(),
-            unavailable_segment_ids: unavailable_segment_ids.clone(),
-            gaps: gaps.clone(),
-            history_truncated,
-        })?;
-        if bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
-            return Err(RepositoryRuntimeError::StateLimitExceeded);
-        }
-
-        let mut selected_wire_bytes = 0usize;
-        for segment in self.segments {
-            let next_wire_bytes = selected_wire_bytes.saturating_add(segment.wire.len());
-            if !selected.is_empty() && next_wire_bytes > MAX_RELAY_PLAINTEXT_BYTES {
-                break;
-            }
-            let mut candidate = selected.clone();
-            candidate.push(segment);
-            let candidate_batch = RepositoryRepairBatch {
-                segments: candidate,
-                unavailable_segment_ids: unavailable_segment_ids.clone(),
-                gaps: gaps.clone(),
-                history_truncated,
-            };
-            let candidate_bytes = encode_relay_repair_batch(&candidate_batch)?;
-            if candidate_bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
-                if selected.is_empty() {
-                    return Err(RepositoryRuntimeError::StateLimitExceeded);
-                }
-                break;
-            }
-            selected = candidate_batch.segments;
-            selected_wire_bytes = next_wire_bytes;
-            bytes = candidate_bytes;
-        }
-
-        Ok(RelayRepairPayload {
-            batch: RepositoryRepairBatch {
-                segments: selected,
-                unavailable_segment_ids,
-                gaps,
-                history_truncated,
-            },
-            bytes,
-        })
-    }
-
-    pub(crate) fn from_relay_payload(payload: &[u8]) -> Result<Self, RepositoryRuntimeError> {
-        if payload.len() > MAX_RELAY_PLAINTEXT_BYTES {
-            return Err(RepositoryRuntimeError::StateLimitExceeded);
-        }
-        let mut decoder =
-            zstd::stream::read::Decoder::new(IoCursor::new(payload)).map_err(|_| {
-                RepositoryRuntimeError::Storage("relay payload is malformed".to_owned())
-            })?;
-        let mut decoded = Vec::with_capacity(payload.len());
-        let mut chunk = [0_u8; 8 * 1024];
-        let max_expanded_len = payload
-            .len()
-            .saturating_mul(MAX_DECOMPRESSION_EXPANSION_RATIO)
-            .min(MAX_RELAY_BATCH_DECODED_BYTES);
-        loop {
-            let read = decoder.read(&mut chunk).map_err(|_| {
-                RepositoryRuntimeError::Storage("relay payload is malformed".to_owned())
-            })?;
-            if read == 0 {
-                break;
-            }
-            if decoded.len().saturating_add(read) > max_expanded_len {
-                return Err(RepositoryRuntimeError::StateLimitExceeded);
-            }
-            decoded.extend_from_slice(&chunk[..read]);
-        }
-        let batch = serde_json::from_slice::<Self>(&decoded).map_err(|_| {
-            RepositoryRuntimeError::Storage("relay payload is malformed".to_owned())
-        })?;
-        if batch.segments.len() > MAX_REPAIR_SEGMENTS
-            || batch.unavailable_segment_ids.len() > MAX_REPAIR_SEGMENTS
-            || batch.gaps.len() > MAX_REPAIR_GAPS
-        {
-            return Err(ReplicaError::RepairLimitExceeded.into());
-        }
-        validate_unavailable_segment_ids(&batch.unavailable_segment_ids)?;
-        validate_replica_gaps(&batch.gaps)?;
-        Ok(batch)
-    }
 }
 
 #[derive(Debug)]
@@ -577,6 +444,14 @@ impl RepositoryReplicaRuntime {
         &self,
         requested_segment_ids: &[String],
     ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
+        self.repair_batch_with_response_id(requested_segment_ids, None)
+    }
+
+    pub(crate) fn repair_batch_with_response_id(
+        &self,
+        requested_segment_ids: &[String],
+        expected_response_id: Option<&str>,
+    ) -> Result<RepositoryRepairBatch, RepositoryRuntimeError> {
         self.require_legacy_segment_cursor_index()?;
         if requested_segment_ids.len() > MAX_REPAIR_SEGMENTS {
             return Err(RepositoryRuntimeError::Replica(
@@ -618,12 +493,21 @@ impl RepositoryReplicaRuntime {
                 wire: segment.wire,
             });
         }
-        Ok(RepositoryRepairBatch {
+        let mut response = RepositoryRepairBatch {
             segments,
             unavailable_segment_ids: unavailable_segment_ids.into_iter().collect(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
             history_truncated: self.snapshot.history_truncated,
-        })
+            response_id: None,
+        };
+        let response_id = response.response_id_digest()?;
+        if expected_response_id.is_some_and(|expected| expected != response_id) {
+            return Err(RepositoryRuntimeError::Storage(
+                "repository repair response changed before completion".to_owned(),
+            ));
+        }
+        response.response_id = Some(response_id);
+        Ok(response)
     }
 
     pub(crate) fn relay_batch(
@@ -662,6 +546,7 @@ impl RepositoryReplicaRuntime {
             unavailable_segment_ids: Vec::new(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
             history_truncated: self.snapshot.history_truncated,
+            response_id: None,
         }
         .frame_sized_relay_payload()?;
         let next_segment_id = payload
@@ -953,20 +838,13 @@ fn stored_gap(gap: RepositoryReplicaGap) -> StoredGap {
     }
 }
 
-fn encode_relay_repair_batch(
-    batch: &RepositoryRepairBatch,
-) -> Result<Vec<u8>, RepositoryRuntimeError> {
-    let serialized = serde_json::to_vec(batch)
-        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
-    zstd::stream::encode_all(IoCursor::new(serialized), 1)
-        .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-}
-
-fn is_false(value: &bool) -> bool {
+pub(super) fn is_false(value: &bool) -> bool {
     !*value
 }
 
-fn validate_replica_gaps(gaps: &[RepositoryReplicaGap]) -> Result<(), RepositoryRuntimeError> {
+pub(super) fn validate_replica_gaps(
+    gaps: &[RepositoryReplicaGap],
+) -> Result<(), RepositoryRuntimeError> {
     if gaps.len() > MAX_REPAIR_GAPS {
         return Err(ReplicaError::RepairLimitExceeded.into());
     }
@@ -981,7 +859,9 @@ fn validate_replica_gaps(gaps: &[RepositoryReplicaGap]) -> Result<(), Repository
     Ok(())
 }
 
-fn validate_unavailable_segment_ids(ids: &[String]) -> Result<(), RepositoryRuntimeError> {
+pub(super) fn validate_unavailable_segment_ids(
+    ids: &[String],
+) -> Result<(), RepositoryRuntimeError> {
     if ids.len() > MAX_REPAIR_SEGMENTS {
         return Err(ReplicaError::RepairLimitExceeded.into());
     }

@@ -153,12 +153,12 @@ impl From<RepositorySyncWireEncoding> for PayloadEncoding {
         }
     }
 }
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RepositoryRepairRequest {
     segment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response_id: Option<String>,
 }
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RepositoryTombstoneAcknowledgementRequest {
     acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
@@ -392,7 +392,7 @@ pub(super) async fn admin_internal_history_repository_repair(
         .repository_replica
         .lock()
         .await
-        .repair_batch(&request.segment_ids)
+        .repair_batch_with_response_id(&request.segment_ids, request.response_id.as_deref())
         .map_err(repository_error)?;
     Ok(Json(response))
 }
