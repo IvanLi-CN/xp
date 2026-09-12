@@ -30,9 +30,8 @@ const SOURCE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
 const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
-const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
-const MAX_SOURCE_SUMMARY_ITEMS: usize = 64;
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
+
 mod backfill;
 mod deep_repair;
 mod direct;
@@ -59,7 +58,7 @@ use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
-    repository_direct_request, repository_mesh_request,
+    preserve_history_truncated, repository_direct_request, repository_mesh_request,
 };
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;
@@ -472,14 +471,19 @@ async fn relay_local_source_segments(
         }
         let segments = runtime.local_source_pending_segments();
         let gaps = runtime.local_source_gaps_for_segments(source_node_id, &segments);
+        let history_truncated = runtime.history_truncated();
         RepositoryRepairBatch {
             segments,
             unavailable_segment_ids: Vec::new(),
             gaps,
+            history_truncated,
         }
         .frame_sized_relay_payload()?
     };
-    if payload.batch.segments.is_empty() && payload.batch.gaps.is_empty() {
+    if payload.batch.segments.is_empty()
+        && payload.batch.gaps.is_empty()
+        && !payload.batch.history_truncated
+    {
         return Ok(());
     }
     let relay = peers
@@ -749,7 +753,8 @@ async fn replicate_peer_via_dynamic_relay(
         runtime.relay_batch(&target.node_id)?
     };
     let next_segment_id = page.next_segment_id().map(str::to_owned);
-    if page.batch.segments.is_empty() && page.batch.gaps.is_empty() {
+    if page.batch.segments.is_empty() && page.batch.gaps.is_empty() && !page.batch.history_truncated
+    {
         return Ok(());
     }
     let frame = RelayFrame::seal(

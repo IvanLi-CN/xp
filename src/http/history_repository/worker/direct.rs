@@ -8,9 +8,24 @@ use crate::{
     },
     history_sync::DirectPath,
     internal_auth::InternalRoute,
+    state::history_repository::replica::RepositoryRuntimeError,
 };
 
 use super::{AppState, REPOSITORY_REQUEST_BUDGET};
+
+pub(crate) async fn preserve_history_truncated(
+    state: &AppState,
+    history_truncated: bool,
+) -> Result<(), RepositoryRuntimeError> {
+    if history_truncated {
+        state
+            .repository_replica
+            .lock()
+            .await
+            .mark_history_truncated()?;
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 pub(crate) enum RepositoryDirectError {

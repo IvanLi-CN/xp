@@ -4,14 +4,14 @@ use crate::{
     state::history_repository::identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
 };
 use ed25519_dalek::SigningKey;
-
+#[path = "truncated_tail_tests.rs"]
+mod truncated_tail_tests;
 pub(super) fn signing_key() -> SigningKey {
     SigningKey::from_bytes(&[11; 32])
 }
 pub(super) fn identity(key: &SigningKey) -> RepositoryNodeIdentity {
     identity_for(key, "node-a")
 }
-
 pub(super) fn identity_for(key: &SigningKey, node_id: &str) -> RepositoryNodeIdentity {
     RepositoryNodeIdentity::new(
         RepositoryNodeId::try_from(node_id.to_owned()).expect("node id"),

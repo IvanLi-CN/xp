@@ -99,6 +99,10 @@ struct LocalSourceGap {
 }
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn history_truncated(&self) -> bool {
+        self.snapshot.history_truncated
+    }
+
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
 
     pub(crate) fn queue_local_source_segments(

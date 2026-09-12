@@ -27,7 +27,6 @@ use crate::{
         },
     },
 };
-
 const MAX_HISTORY_SYNC_BASE64_BYTES: usize = MAX_RESPONSE_WIRE_BYTES.div_ceil(3) * 4;
 const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
@@ -36,7 +35,6 @@ pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY: &str =
     "/api/admin/_internal/history-repository/relay";
 pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER: &str =
     "/api/admin/_internal/history-repository/relay-deliver";
-
 pub(super) mod gaps;
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
@@ -73,7 +71,6 @@ pub(super) struct RepositorySummaryQuery {
 pub(super) struct ReplaceRepositoryMembershipRequest {
     node_ids: Vec<String>,
 }
-
 #[derive(Debug, Serialize)]
 pub(super) struct AdminHistoryRepositoriesResponse {
     configured: bool,
@@ -561,6 +558,9 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             "ordinary source relay may carry only its own history segments",
         ));
     }
+    worker::preserve_history_truncated(&state, batch.history_truncated)
+        .await
+        .map_err(repository_error)?;
     let mut acknowledgements = Vec::new();
     if batch.segments.is_empty() {
         state

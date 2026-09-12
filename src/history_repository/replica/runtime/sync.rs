@@ -73,6 +73,8 @@ pub(crate) struct RepositoryRepairBatch {
     pub(crate) unavailable_segment_ids: Vec<String>,
     #[serde(default)]
     pub(crate) gaps: Vec<RepositoryReplicaGap>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) history_truncated: bool,
 }
 
 pub(crate) struct RelayRepairPayload {
@@ -95,11 +97,13 @@ impl RepositoryRepairBatch {
 
         let gaps = self.gaps;
         let unavailable_segment_ids = self.unavailable_segment_ids;
+        let history_truncated = self.history_truncated;
         let mut selected = Vec::new();
         let mut bytes = encode_relay_repair_batch(&RepositoryRepairBatch {
             segments: Vec::new(),
             unavailable_segment_ids: unavailable_segment_ids.clone(),
             gaps: gaps.clone(),
+            history_truncated,
         })?;
         if bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
             return Err(RepositoryRuntimeError::StateLimitExceeded);
@@ -117,6 +121,7 @@ impl RepositoryRepairBatch {
                 segments: candidate,
                 unavailable_segment_ids: unavailable_segment_ids.clone(),
                 gaps: gaps.clone(),
+                history_truncated,
             };
             let candidate_bytes = encode_relay_repair_batch(&candidate_batch)?;
             if candidate_bytes.len() > MAX_RELAY_PLAINTEXT_BYTES {
@@ -135,6 +140,7 @@ impl RepositoryRepairBatch {
                 segments: selected,
                 unavailable_segment_ids,
                 gaps,
+                history_truncated,
             },
             bytes,
         })
@@ -616,6 +622,7 @@ impl RepositoryReplicaRuntime {
             segments,
             unavailable_segment_ids: unavailable_segment_ids.into_iter().collect(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+            history_truncated: self.snapshot.history_truncated,
         })
     }
 
@@ -654,6 +661,7 @@ impl RepositoryReplicaRuntime {
                 .collect(),
             unavailable_segment_ids: Vec::new(),
             gaps: canonical_gaps(self.snapshot.gaps.iter().map(gap_summary)),
+            history_truncated: self.snapshot.history_truncated,
         }
         .frame_sized_relay_payload()?;
         let next_segment_id = payload
@@ -701,6 +709,14 @@ impl RepositoryReplicaRuntime {
     ) -> Result<(), RepositoryRuntimeError> {
         self.merge_replica_gaps_in_memory(remote_gaps)?;
         self.persist_control_state()
+    }
+
+    pub(crate) fn mark_history_truncated(&mut self) -> Result<(), RepositoryRuntimeError> {
+        if !self.snapshot.history_truncated {
+            self.snapshot.history_truncated = true;
+            self.persist_control_state()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn merge_replica_gaps_in_memory(

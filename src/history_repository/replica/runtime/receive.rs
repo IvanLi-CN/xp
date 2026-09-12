@@ -67,6 +67,7 @@ struct RepositoryWireRequest<'a> {
     allow_retained_anchor: bool,
     rollback_snapshot: Option<RepositoryReplicaSnapshot>,
     discard_gap_evidence_on_error: bool,
+    allow_retained_sequence_gap: bool,
 }
 
 impl RepositoryReplicaRuntime {
@@ -106,6 +107,7 @@ impl RepositoryReplicaRuntime {
             allow_retained_anchor: false,
             rollback_snapshot: None,
             discard_gap_evidence_on_error: false,
+            allow_retained_sequence_gap: false,
         })
     }
 
@@ -138,6 +140,7 @@ impl RepositoryReplicaRuntime {
             allow_retained_anchor: false,
             rollback_snapshot: Some(previous_snapshot.clone()),
             discard_gap_evidence_on_error: true,
+            allow_retained_sequence_gap: false,
         });
         match result {
             Ok(receipt) => Ok(receipt),
@@ -178,6 +181,7 @@ impl RepositoryReplicaRuntime {
             allow_retained_anchor: true,
             rollback_snapshot: None,
             discard_gap_evidence_on_error: false,
+            allow_retained_sequence_gap: false,
         })
     }
 
@@ -191,6 +195,7 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
         ready_repositories: &[String],
         local_repository_id: &str,
+        allow_retained_sequence_gap: bool,
     ) -> Result<RepositorySyncReceipt, RepositoryRuntimeError> {
         self.rebuild_if_stale(now_unix_seconds)?;
         let previous_snapshot = self.snapshot.clone();
@@ -210,6 +215,7 @@ impl RepositoryReplicaRuntime {
             allow_retained_anchor: true,
             rollback_snapshot: Some(previous_snapshot.clone()),
             discard_gap_evidence_on_error: true,
+            allow_retained_sequence_gap,
         });
         match result {
             Ok(receipt) => Ok(receipt),
@@ -245,6 +251,7 @@ impl RepositoryReplicaRuntime {
             allow_retained_anchor,
             rollback_snapshot,
             discard_gap_evidence_on_error,
+            allow_retained_sequence_gap,
         } = request;
         self.rebuild_if_stale(now_unix_seconds)?;
         self.refresh_capacity()?;
@@ -294,7 +301,25 @@ impl RepositoryReplicaRuntime {
                     gap.last_sequence,
                 )?;
         }
-        let acceptance = if allow_retained_anchor {
+        let retained_anchor_gap = if allow_retained_sequence_gap {
+            self.receiver
+                .as_ref()
+                .expect("receiver initialized")
+                .continuous_watermark(first_cursor)?
+                .and_then(|watermark| {
+                    let expected = watermark.sequence().checked_add(1)?;
+                    (first_cursor.sequence() > expected)
+                        .then_some((expected, first_cursor.sequence()))
+                })
+        } else {
+            None
+        };
+        let acceptance = if allow_retained_sequence_gap {
+            self.receiver
+                .as_mut()
+                .expect("receiver initialized")
+                .accept_retained_anchor_with_sequence_gap(&segment, identity)
+        } else if allow_retained_anchor {
             self.receiver
                 .as_mut()
                 .expect("receiver initialized")
@@ -354,6 +379,10 @@ impl RepositoryReplicaRuntime {
                 availability,
                 acknowledgements.unwrap_or_default(),
             ));
+        }
+
+        if let Some((expected, actual)) = retained_anchor_gap {
+            self.record_retained_anchor_gap(segment.canonical(), expected, actual);
         }
 
         if let Some(gap) = acceptance.gap() {

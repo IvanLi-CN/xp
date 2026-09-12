@@ -116,6 +116,7 @@ impl SegmentReceiver {
             quarantined_streams,
             forwardable_unknown_segments,
             retained_anchor_mode: false,
+            retained_anchor_sequence_gap: false,
         })
     }
 

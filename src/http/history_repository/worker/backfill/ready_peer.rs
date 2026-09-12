@@ -209,6 +209,8 @@ async fn repair_ready_peer_catch_up_page(
             .merge_replica_gaps(&repair.gaps)?;
     }
     let repair_gaps = repair.gaps;
+    let allow_retained_sequence_gap =
+        allows_retained_sequence_gap(&checkpoint, repair.history_truncated);
     for (index, segment) in repair.segments.into_iter().enumerate() {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
             .await
@@ -228,6 +230,7 @@ async fn repair_ready_peer_catch_up_page(
                 now,
                 ready_repository_ids,
                 &state.cluster.node_id,
+                allow_retained_sequence_gap && index == 0,
             )?;
     }
     let page_complete = remaining.is_empty();
@@ -252,4 +255,33 @@ async fn repair_ready_peer_catch_up_page(
             checkpoint.summary_requires_tiered_backfill,
         )?;
     Ok(InitialBackfillProgress::InProgress)
+}
+
+fn allows_retained_sequence_gap(
+    checkpoint: &InitialPeerBackfillCheckpoint,
+    history_truncated: bool,
+) -> bool {
+    history_truncated && checkpoint.summary_cursor.is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_sequence_gap_is_limited_to_the_first_summary_page() {
+        let first_page = InitialPeerBackfillCheckpoint::default();
+        assert!(allows_retained_sequence_gap(&first_page, true));
+        assert!(!allows_retained_sequence_gap(
+            &InitialPeerBackfillCheckpoint {
+                summary_cursor: Some("page-2".to_owned()),
+                ..first_page
+            },
+            true,
+        ));
+        assert!(!allows_retained_sequence_gap(
+            &InitialPeerBackfillCheckpoint::default(),
+            false,
+        ));
+    }
 }
