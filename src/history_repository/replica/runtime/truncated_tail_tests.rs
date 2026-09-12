@@ -338,6 +338,24 @@ fn retained_anchor_response_identity_survives_partial_failure() {
         vec![record(b"anchor-traffic", false)],
         Some([43; 32]),
     );
+    let response_id = RepositoryRepairBatch {
+        segments: vec![
+            super::RepositoryReplicaSegment {
+                identity: identity.clone(),
+                wire: anchor_runtime.wire_bytes().expect("runtime repair wire"),
+            },
+            super::RepositoryReplicaSegment {
+                identity: identity.clone(),
+                wire: anchor_traffic.wire_bytes().expect("traffic repair wire"),
+            },
+        ],
+        unavailable_segment_ids: Vec::new(),
+        gaps: Vec::new(),
+        history_truncated: true,
+        response_id: None,
+    }
+    .response_id_digest()
+    .expect("repair response identity");
     let update =
         |response_id: &str, response_complete: bool, streams| RetainedAnchorCheckpointUpdate {
             peer_node_id: "node-b".to_owned(),
@@ -372,7 +390,7 @@ fn retained_anchor_response_identity_survives_partial_failure() {
             &["repository-a".to_owned()],
             "repository-a",
             true,
-            Some(update("response-1", false, runtime_stream.clone())),
+            Some(update(&response_id, false, runtime_stream.clone())),
         )
         .expect("first stream in response");
 
@@ -396,8 +414,10 @@ fn retained_anchor_response_identity_survives_partial_failure() {
             .expect("in-progress checkpoint")
             .retained_anchor_repair_response_id
             .as_deref(),
-        Some("response-1")
+        Some(response_id.as_str())
     );
+
+    let mut runtime = load(temporary.path());
 
     let streams = BTreeSet::from([
         InitialPeerRetainedAnchorStream {
@@ -421,7 +441,7 @@ fn retained_anchor_response_identity_survives_partial_failure() {
             &["repository-a".to_owned()],
             "repository-a",
             true,
-            Some(update("response-1", true, streams.clone())),
+            Some(update(&response_id, true, streams.clone())),
         )
         .expect("same response retry consumes remaining stream");
     let checkpoint = runtime
