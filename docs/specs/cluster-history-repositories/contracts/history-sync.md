@@ -53,9 +53,8 @@ are interpreted as an empty list, preserving wire compatibility.
 
 A repair response may add `response_id`, a digest of its segments, unavailable
 IDs, gaps, and truncation flag. The receiver derives the same digest when an
-older peer omits it, so an interrupted first truncated response can be retried
-only with identical content. A supplied mismatch or a changed retry fails
-closed.
+older peer omits it, so an interrupted truncated response can be retried only
+with identical content. A supplied mismatch or a changed retry fails closed.
 
 A temporary transport failure, exhausted retry schedule, or full bounded outbox
 creates Recoverable Backlog, never a permanent gap. A Source or any ready
@@ -90,11 +89,12 @@ accepted as a new hash-chain head because the skipped segment hash is unknown;
 the following segments must continue from that newly accepted hash as usual. A
 repair response carrying `history_truncated=true` is the only additional proof
 that a retained tail may cross an existing local watermark during the first
-initial-backfill repair response, once per affected source stream; the receiver
-records each crossed range as `source_retention_expired`. An earlier contiguous
-segment in that response does not consume another stream's allowance. Ordinary
-source delivery, anti-entropy, and later repair responses continue to require
-exact sequence continuity.
+initial-backfill repair page, once per affected source stream; a wire-bounded
+page may span multiple responses. The receiver records each crossed range as
+`source_retention_expired`. An earlier contiguous segment or completed response
+in that page does not consume another stream's allowance. Ordinary source
+delivery, anti-entropy, and later repair pages continue to require exact
+sequence continuity.
 
 A Source writes every unacknowledged signed segment to its SQLite delivery
 journal before attempting transfer, and removes it only after its Collector

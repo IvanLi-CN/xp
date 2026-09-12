@@ -827,14 +827,14 @@ Notes:
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
   every following frame to be contiguous. When the repair response explicitly carries
-  `history_truncated=true`, its first repair response may also cross an existing local watermark
-  once for each affected source stream, even when an earlier segment in that response is already
-  contiguous; XP records that expired prefix as a `source_retention_expired` permanent gap. Live
-  source delivery, ordinary anti-entropy, and later repair responses still reject sequence gaps;
-  do not bypass that boundary by editing the checkpoint.
-  XP binds an interrupted first repair response to a digest of the actual returned batch. An older
-  peer that omits the digest remains compatible because XP calculates it locally; a later retry
-  with changed content fails closed instead of advancing or relaxing another stream.
+  `history_truncated=true`, its first repair page may also cross an existing local watermark once
+  for each affected source stream, even when wire bounds split that page into multiple responses or
+  an earlier segment is already contiguous; XP records that expired prefix as a
+  `source_retention_expired` permanent gap. Live source delivery, ordinary anti-entropy, and later
+  repair pages still reject sequence gaps; do not bypass that boundary by editing the checkpoint.
+  XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
+  that omits the digest remains compatible because XP calculates it locally; a changed retry fails
+  closed instead of advancing or relaxing another stream.
   A retained repair segment may belong to a node that has since been retired from cluster
   membership. Replay validates that identity against the deterministic cluster material and
   accepts the signed historical row; live source delivery remains limited to current pinned
