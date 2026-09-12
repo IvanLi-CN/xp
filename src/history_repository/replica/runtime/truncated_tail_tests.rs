@@ -62,6 +62,17 @@ fn relay_batch_preserves_history_truncated_marker() {
 }
 
 #[test]
+fn history_truncation_status_is_available_to_source_relay() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    assert!(!runtime.history_truncated());
+
+    runtime.snapshot.history_truncated = true;
+
+    assert!(runtime.history_truncated());
+}
+
+#[test]
 fn ordinary_backfill_rejects_a_truncated_sequence_gap() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

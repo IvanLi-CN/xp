@@ -3,7 +3,7 @@ use crate::state::history_repository::replica::{RepositoryReplicaGap, Repository
 use crate::state::history_repository::{control::RepositoryLifecycle, identity::RepositoryNodeId};
 
 use super::super::AppState;
-use super::MAX_SOURCE_PAYLOAD_BYTES;
+pub(super) const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
 
 pub(super) fn spawn_local_source_worker(state: AppState) {
     tokio::spawn(async move {
