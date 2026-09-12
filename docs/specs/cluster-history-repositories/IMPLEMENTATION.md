@@ -31,8 +31,8 @@
   existing five-minute stability window only after every page is complete. A local page records
   its pending wire set before delivery and commits all acknowledgements with the page cursor; an
   interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
-  ready peer, the single page budget is spent on one summary page, one repair response, or one
-  tiered export page; the summary cursor and pending repair IDs are part of the durable peer
+  ready peer, the single worker tick budget is spent on one summary page, one repair response, or
+  one tiered export page; the summary cursor and pending repair IDs are part of the durable peer
   checkpoint, so a restart resumes the same page instead of restarting an unbounded scan. Deep
   partition mismatches after a segment repair drains mark the checkpoint for the single-authority
   tiered import. A fresh summary verification pass must complete before the member can enter the

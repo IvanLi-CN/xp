@@ -805,9 +805,9 @@ Notes:
   fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, that page is exactly one summary page, one repair response, or one tiered export
-  page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a restart
-  cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
+  For ready peers, one worker tick processes one summary page, one repair response, or one tiered
+  export page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a
+  restart cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
   Summary pages enumerate repository segment IDs from SQLite metadata only (`id` and tombstone
   phase); they do not read or decode segment payloads. If a peer remains `syncing` after a summary
   timeout, roll out the serving repository first, then observe the next five-minute direct-path
