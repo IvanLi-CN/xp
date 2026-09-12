@@ -39,7 +39,11 @@ use status::SourceDeliveryStatus;
 
 pub(crate) use backfill::RepositoryTieredBackfillRecord;
 pub(crate) use error::RepositoryRuntimeError;
+pub(crate) use initial_peer::{
+    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate,
+};
 pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
+pub(crate) use repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment};
 pub(crate) use status::RepositoryRuntimeStatus;
 pub(crate) use sync::RepositoryReplicaGap;
 
@@ -390,30 +394,6 @@ struct RetentionCompactionContinuation {
     aggregate: Option<StoredRecord>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct InitialPeerBackfillCheckpoint {
-    #[serde(default)]
-    pub(crate) page_cursor: Option<String>,
-    #[serde(default)]
-    pub(crate) stream_state: BTreeMap<String, (u64, Option<[u8; 32]>)>,
-    #[serde(default)]
-    pub(crate) saw_history: bool,
-    #[serde(default)]
-    pub(crate) completed: bool,
-    #[serde(default)]
-    pub(crate) epoch: u64,
-    #[serde(default)]
-    pub(crate) summary_cursor: Option<String>,
-    #[serde(default)]
-    pub(crate) summary_pending_segment_ids: Vec<String>,
-    #[serde(default)]
-    pub(crate) summary_pending_next_cursor: Option<String>,
-    #[serde(default)]
-    pub(crate) summary_complete: bool,
-    #[serde(default)]
-    pub(crate) summary_requires_tiered_backfill: bool,
-}
-
 impl From<&RetentionCompactionCursor> for RepositoryHistoryCompactionCursor {
     fn from(cursor: &RetentionCompactionCursor) -> Self {
         Self {
@@ -739,94 +719,6 @@ impl RepositoryReplicaRuntime {
         self.checkpoint_local_history_backfill(None, true)
     }
 
-    pub(crate) fn initial_peer_backfill_checkpoint(
-        &self,
-        peer_node_id: &str,
-    ) -> Option<InitialPeerBackfillCheckpoint> {
-        self.snapshot
-            .initial_peer_backfills
-            .get(peer_node_id)
-            .cloned()
-    }
-
-    pub(crate) fn update_initial_peer_backfill_checkpoint(
-        &mut self,
-        peer_node_id: &str,
-        page_cursor: Option<String>,
-        stream_state: BTreeMap<String, (u64, Option<[u8; 32]>)>,
-        saw_history: bool,
-        completed: bool,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let checkpoint = self
-            .snapshot
-            .initial_peer_backfills
-            .get(peer_node_id)
-            .cloned()
-            .unwrap_or_default();
-        self.snapshot.initial_peer_backfills.insert(
-            peer_node_id.to_owned(),
-            InitialPeerBackfillCheckpoint {
-                page_cursor,
-                stream_state,
-                saw_history,
-                completed,
-                epoch: checkpoint.epoch,
-                summary_cursor: checkpoint.summary_cursor,
-                summary_pending_segment_ids: checkpoint.summary_pending_segment_ids,
-                summary_pending_next_cursor: checkpoint.summary_pending_next_cursor,
-                summary_complete: checkpoint.summary_complete,
-                summary_requires_tiered_backfill: checkpoint.summary_requires_tiered_backfill,
-            },
-        );
-        self.persist_control_state()
-    }
-
-    pub(crate) fn update_initial_peer_summary_checkpoint(
-        &mut self,
-        peer_node_id: &str,
-        summary_cursor: Option<String>,
-        pending_segment_ids: Vec<String>,
-        pending_next_cursor: Option<String>,
-        summary_complete: bool,
-        summary_requires_tiered_backfill: bool,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let checkpoint = self
-            .snapshot
-            .initial_peer_backfills
-            .entry(peer_node_id.to_owned())
-            .or_default();
-        checkpoint.summary_cursor = summary_cursor;
-        checkpoint.summary_pending_segment_ids = pending_segment_ids;
-        checkpoint.summary_pending_next_cursor = pending_next_cursor;
-        checkpoint.summary_complete = summary_complete;
-        checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
-        self.persist_control_state()
-    }
-
-    /// Restarts a peer export after its source-side immutable export lease expires. The import
-    /// epoch is intentionally preserved: already accepted segments are replayed as duplicates,
-    /// then the receiver resumes at the first previously unseen segment without creating a
-    /// second representation of the same historical rows.
-    pub(crate) fn restart_initial_peer_backfill(
-        &mut self,
-        peer_node_id: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let epoch = self
-            .snapshot
-            .initial_peer_backfills
-            .get(peer_node_id)
-            .map(|checkpoint| checkpoint.epoch)
-            .unwrap_or_default();
-        self.snapshot.initial_peer_backfills.insert(
-            peer_node_id.to_owned(),
-            InitialPeerBackfillCheckpoint {
-                epoch,
-                ..InitialPeerBackfillCheckpoint::default()
-            },
-        );
-        self.persist_control_state()
-    }
-
     pub(crate) fn initial_peer_backfill_epoch(
         &mut self,
         cluster_id: &str,
@@ -933,6 +825,7 @@ mod backfill_order_tests;
 mod base64_bytes;
 mod capacity;
 mod helpers;
+mod initial_peer;
 #[cfg(test)]
 #[path = "runtime/legacy_cursor_tests.rs"]
 mod legacy_cursor_tests;
@@ -942,6 +835,7 @@ mod legacy_relay_tests;
 mod paths;
 mod query;
 mod receive;
+mod repair_batch;
 mod retention;
 pub(crate) mod source;
 mod storage;
@@ -950,7 +844,7 @@ use helpers::{
     is_known_schema, known_schemas, serialized_response_overhead, sync_receipt,
     watermark_from_cursor,
 };
-pub(crate) use sync::{RepositoryRepairBatch, RepositoryReplicaSegment, RepositoryReplicaSummary};
+pub(crate) use sync::RepositoryReplicaSummary;
 
 pub(crate) fn source_epoch(cluster_id: &str, node_id: &str) -> u64 {
     let mut hasher = Sha256::new();
@@ -983,6 +877,9 @@ mod tests;
 #[path = "runtime/retention_tests.rs"]
 mod retention_tests;
 
+#[cfg(test)]
+#[path = "runtime/repair_batch_tests.rs"]
+mod repair_batch_tests;
 #[cfg(test)]
 #[path = "runtime/repair_tests.rs"]
 mod repair_tests;

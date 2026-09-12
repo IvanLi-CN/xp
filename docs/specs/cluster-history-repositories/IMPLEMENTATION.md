@@ -31,8 +31,8 @@
   existing five-minute stability window only after every page is complete. A local page records
   its pending wire set before delivery and commits all acknowledgements with the page cursor; an
   interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
-  ready peer, the single page budget is spent on one summary page, one repair response, or one
-  tiered export page; the summary cursor and pending repair IDs are part of the durable peer
+  ready peer, the single worker tick budget is spent on one summary page, one repair response, or
+  one tiered export page; the summary cursor and pending repair IDs are part of the durable peer
   checkpoint, so a restart resumes the same page instead of restarting an unbounded scan. Deep
   partition mismatches after a segment repair drains mark the checkpoint for the single-authority
   tiered import. A fresh summary verification pass must complete before the member can enter the
@@ -76,10 +76,16 @@
   its predecessor has already expired. The initial summary-repair path accepts that signed frame
   as an unanchored retained tail and keeps `hash_chain_verified=false`; when the serving repair
   response carries `history_truncated=true`, the same path may advance an existing local watermark
-  over the expired prefix and persists a `source_retention_expired` permanent gap. It then requires
-  strict contiguous sequence/hash links for the remaining page. Ordinary source, anti-entropy, and
-  later repair pages keep rejecting sequence gaps, so the relaxed boundary cannot bypass live fork
-  protection.
+  once per affected stream in that first repair page, even if wire bounds split it into multiple
+  responses or an earlier segment is already contiguous, and persists a `source_retention_expired`
+  permanent gap. Each completed response clears its own identity; strict contiguous sequence/hash
+  links apply after the page drains and on all later pages. Ordinary
+  source delivery and anti-entropy keep rejecting sequence gaps, so the relaxed boundary cannot
+  bypass live fork protection.
+  The checkpoint records a content-derived repair response identity while that response is
+  incomplete. New peers return the identity; compatibility with older peers derives it from the
+  received batch. A changed retry is rejected before another stream can consume the allowance; a
+  completed bounded response does not consume another stream's allowance before its page drains.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

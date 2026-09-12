@@ -477,13 +477,12 @@ async fn relay_local_source_segments(
             unavailable_segment_ids: Vec::new(),
             gaps,
             history_truncated,
+            response_id: None,
         }
         .frame_sized_relay_payload()?
     };
-    if payload.batch.segments.is_empty()
-        && payload.batch.gaps.is_empty()
-        && !payload.batch.history_truncated
-    {
+    let payload_is_empty = payload.batch.segments.is_empty() && payload.batch.gaps.is_empty();
+    if payload_is_empty && !payload.batch.history_truncated {
         return Ok(());
     }
     let relay = peers
@@ -868,6 +867,7 @@ async fn replicate_peer(
                     needs_gap_refresh = false;
                     let repair_body = serde_json::to_vec(&RepositoryRepairRequest {
                         segment_ids: pending_segment_ids.iter().cloned().collect(),
+                        response_id: None,
                     })?;
                     let repair: crate::state::history_repository::replica::RepositoryRepairBatch =
                         repository_direct_request(

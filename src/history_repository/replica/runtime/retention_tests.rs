@@ -436,6 +436,9 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             summary_pending_next_cursor: Some("segment-3".to_owned()),
             summary_complete: false,
             summary_requires_tiered_backfill: true,
+            retained_anchor_repair_response_seen: false,
+            retained_anchor_repair_response_id: None,
+            retained_anchor_streams: std::collections::BTreeSet::new(),
         })
     );
 }

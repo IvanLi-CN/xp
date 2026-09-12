@@ -805,9 +805,9 @@ Notes:
   fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, that page is exactly one summary page, one repair response, or one tiered export
-  page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a restart
-  cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
+  For ready peers, one worker tick processes one summary page, one repair response, or one tiered
+  export page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a
+  restart cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
   Summary pages enumerate repository segment IDs from SQLite metadata only (`id` and tombstone
   phase); they do not read or decode segment payloads. If a peer remains `syncing` after a summary
   timeout, roll out the serving repository first, then observe the next five-minute direct-path
@@ -827,10 +827,14 @@ Notes:
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
   every following frame to be contiguous. When the repair response explicitly carries
-  `history_truncated=true`, its first page may also cross an existing local watermark; XP records
-  that expired prefix as `source_retention_expired` permanent gap. Live source delivery, ordinary
-  anti-entropy, and later repair pages still reject sequence gaps; do not bypass that boundary by
-  editing the checkpoint.
+  `history_truncated=true`, its first repair page may also cross an existing local watermark once
+  for each affected source stream, even when wire bounds split that page into multiple responses or
+  an earlier segment is already contiguous; XP records that expired prefix as a
+  `source_retention_expired` permanent gap. Live source delivery, ordinary anti-entropy, and later
+  repair pages still reject sequence gaps; do not bypass that boundary by editing the checkpoint.
+  XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
+  that omits the digest remains compatible because XP calculates it locally; a changed retry fails
+  closed instead of advancing or relaxing another stream.
   A retained repair segment may belong to a node that has since been retired from cluster
   membership. Replay validates that identity against the deterministic cluster material and
   accepts the signed historical row; live source delivery remains limited to current pinned
