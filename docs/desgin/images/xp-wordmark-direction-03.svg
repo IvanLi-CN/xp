@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">XP wordmark direction three</title>
+  <desc id="description">A standalone custom XP wordmark. The wordmark does not modify the approved network mark.</desc>
+  <defs>
+    <g id="xp-wordmark" fill="currentColor" fill-rule="evenodd">
+      <path d="M0 0H50L102 70L154 0H204L132 100L204 200H154L102 130L50 200H0L72 100Z"/>
+      <path d="M240 0H332C390 0 430 32 430 80S390 160 332 160H292V200H240ZM292 48V112H331C361 112 380 100 380 80S361 48 331 48Z"/>
+    </g>
+    <g id="xp-wordmark-dark" color="#F8FBFA"><use href="#xp-wordmark"/></g>
+    <g id="xp-wordmark-light" color="#111817"><use href="#xp-wordmark"/></g>
+  </defs>
+
+  <rect width="1600" height="900" fill="#101716"/>
+  <text x="112" y="104" fill="#72CCA3" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">XP WORDMARK / DIRECTION 03</text>
+
+  <rect x="112" y="168" width="1376" height="254" fill="#111817" stroke="#2F5E59" stroke-width="2"/>
+  <use href="#xp-wordmark-dark" transform="translate(585 195) scale(1.05)"/>
+
+  <rect x="112" y="506" width="1376" height="254" fill="#F8FBFA"/>
+  <use href="#xp-wordmark-light" transform="translate(585 533) scale(1.05)"/>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">
+    <text x="112" y="460" fill="#B4C1BE">DARK FIELD</text>
+    <text x="112" y="798" fill="#B4C1BE">LIGHT FIELD</text>
+  </g>
+</svg>

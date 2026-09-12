@@ -1,0 +1,11 @@
+Use case: precise-object-edit
+Asset type: final dark-mode 4:5 product poster
+Input image: this dark poster is the locked master layout.
+
+Primary request: Re-render this full poster as a single coherent, high-quality dark-mode isometric illustration. Correct the central control-plane graphic while preserving every other element's existing visual position, wording, count, scale, silhouette, spacing, and hierarchy as closely as possible.
+
+Central correction: Replace only the incorrect central control-plane box with a clean single isometric cube: one top plane, one broad front plane, one right plane, and a shallow base. Put the approved XP mark and XP wordmark together, undistorted, on the broad front plane. Never split the logo across cube faces and never add a CONTROL PLANE caption. Keep the existing desired-state module, side-card ports, lower-bus port, and their connection positions intact.
+
+Preservation contract: Do not change the heading, subtitle, top-left XP lockup, desired-state module, side cards, card labels, card icons, six lower server nodes, legend, footer URL, outer hexagon pattern, margins, or object count. Keep all existing text verbatim and legible. Retain the existing dark palette, restrained teal/mint material language, and current connector-line style.
+
+Avoid: any new elements; card rearrangement; different server colors; floor grid; reflections; extra rays; altered background; changed text; altered icon count; new labels; a split or warped logo; excessive glow; crop; overflow; annotations; watermark.

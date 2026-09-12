@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1420" viewBox="0 0 1600 1420" role="img" aria-labelledby="title description">
+  <title id="title">XP product name lockup studies</title>
+  <desc id="description">Four horizontal XP product logo candidates. Every candidate uses the approved bicolor network mark unchanged and compares a different wordmark treatment.</desc>
+  <defs>
+    <line id="xp-radial-link" x1="512" y1="313" x2="512" y2="417" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <line id="xp-outer-link" x1="587.344" y1="269.5" x2="684.339" y2="325.5" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <circle id="xp-outer-node" cx="512" cy="226" r="62" fill="currentColor"/>
+    <g id="xp-approved-bicolor-mark">
+      <g color="#4CB1AB">
+        <use href="#xp-outer-link"/><use href="#xp-outer-link" transform="rotate(60 512 512)"/><use href="#xp-outer-link" transform="rotate(120 512 512)"/><use href="#xp-outer-link" transform="rotate(180 512 512)"/><use href="#xp-outer-link" transform="rotate(240 512 512)"/><use href="#xp-outer-link" transform="rotate(300 512 512)"/>
+        <use href="#xp-radial-link"/><use href="#xp-radial-link" transform="rotate(60 512 512)"/><use href="#xp-radial-link" transform="rotate(120 512 512)"/><use href="#xp-radial-link" transform="rotate(180 512 512)"/><use href="#xp-radial-link" transform="rotate(240 512 512)"/><use href="#xp-radial-link" transform="rotate(300 512 512)"/>
+        <use href="#xp-outer-node"/><use href="#xp-outer-node" transform="rotate(60 512 512)"/><use href="#xp-outer-node" transform="rotate(120 512 512)"/><use href="#xp-outer-node" transform="rotate(180 512 512)"/><use href="#xp-outer-node" transform="rotate(240 512 512)"/><use href="#xp-outer-node" transform="rotate(300 512 512)"/>
+      </g>
+      <circle cx="512" cy="512" r="70" fill="#72CCA3"/>
+    </g>
+    <g id="xp-custom-wordmark" fill="none" stroke="#F8FBFA" stroke-linecap="round" stroke-linejoin="round" stroke-width="28">
+      <path d="M16 12L136 172M136 12L16 172"/>
+      <path d="M202 172V12H266C307 12 334 43 334 83S307 154 266 154H202"/>
+    </g>
+    <pattern id="xp-grid" width="128" height="148" patternUnits="userSpaceOnUse">
+      <path d="M0 74L64 37L128 74M0 74L64 111L128 74M64 0V37M64 111V148" fill="none" stroke="#4CB1AB" stroke-opacity="0.12" stroke-width="2"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1420" fill="#111817"/>
+  <rect width="1600" height="1420" fill="url(#xp-grid)"/>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="112" y="112" fill="#72CCA3" font-size="24" font-weight="700">XP IDENTITY</text>
+    <text x="112" y="182" fill="#F8FBFA" font-size="56" font-weight="700">Product name lockup studies</text>
+    <text x="112" y="228" fill="#B4C1BE" font-size="28">The approved six-node mark remains fixed; only the XP wordmark and optical gap change.</text>
+
+    <line x1="112" y1="278" x2="1488" y2="278" stroke="#4CB1AB" stroke-opacity="0.5" stroke-width="2"/>
+
+    <use href="#xp-approved-bicolor-mark" transform="translate(112 288) scale(0.25)"/>
+    <use href="#xp-custom-wordmark" transform="translate(390 335) scale(0.9)"/>
+    <text x="930" y="356" fill="#72CCA3" font-size="22" font-weight="700">01 / RECOMMENDED</text>
+    <text x="930" y="404" fill="#F8FBFA" font-size="34" font-weight="700">Custom rounded geometric</text>
+    <text x="930" y="444" fill="#B4C1BE" font-size="23">Repeats the mark's soft terminals and direct construction.</text>
+    <text x="930" y="480" fill="#B4C1BE" font-size="23">A true product wordmark, independent of a font file.</text>
+
+    <line x1="112" y1="560" x2="1488" y2="560" stroke="#4CB1AB" stroke-opacity="0.32" stroke-width="2"/>
+
+    <use href="#xp-approved-bicolor-mark" transform="translate(112 570) scale(0.25)"/>
+    <text x="390" y="777" fill="#F8FBFA" font-family="Avenir Next, Avenir, Arial, sans-serif" font-size="220" font-weight="600">XP</text>
+    <text x="930" y="638" fill="#72CCA3" font-size="22" font-weight="700">02</text>
+    <text x="930" y="686" fill="#F8FBFA" font-size="34" font-weight="700">Avenir Next Demi Bold</text>
+    <text x="930" y="726" fill="#B4C1BE" font-size="23">Measured, humanist terminals with a quieter cadence.</text>
+    <text x="930" y="762" fill="#B4C1BE" font-size="23">The closest conventional type direction.</text>
+
+    <line x1="112" y1="842" x2="1488" y2="842" stroke="#4CB1AB" stroke-opacity="0.32" stroke-width="2"/>
+
+    <use href="#xp-approved-bicolor-mark" transform="translate(112 852) scale(0.25)"/>
+    <text x="390" y="1054" fill="#F8FBFA" font-family="Helvetica Neue, Arial, sans-serif" font-size="214" font-weight="700">XP</text>
+    <text x="930" y="920" fill="#72CCA3" font-size="22" font-weight="700">03</text>
+    <text x="930" y="968" fill="#F8FBFA" font-size="34" font-weight="700">Helvetica Neue Bold</text>
+    <text x="930" y="1008" fill="#B4C1BE" font-size="23">A neutral operational voice with higher visual tension.</text>
+    <text x="930" y="1044" fill="#B4C1BE" font-size="23">More utilitarian; less connected to the round nodes.</text>
+
+    <line x1="112" y1="1124" x2="1488" y2="1124" stroke="#4CB1AB" stroke-opacity="0.32" stroke-width="2"/>
+
+    <use href="#xp-approved-bicolor-mark" transform="translate(112 1134) scale(0.25)"/>
+    <text x="390" y="1338" fill="#F8FBFA" font-family="Futura, Arial, sans-serif" font-size="220" font-weight="700">XP</text>
+    <text x="930" y="1202" fill="#72CCA3" font-size="22" font-weight="700">04</text>
+    <text x="930" y="1250" fill="#F8FBFA" font-size="34" font-weight="700">Futura Bold</text>
+    <text x="930" y="1290" fill="#B4C1BE" font-size="23">A strict geometric profile with the strongest contrast.</text>
+    <text x="930" y="1326" fill="#B4C1BE" font-size="23">Distinctive, but more rigid than the approved mark.</text>
+  </g>
+</svg>

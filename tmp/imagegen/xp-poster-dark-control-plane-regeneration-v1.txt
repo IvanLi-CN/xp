@@ -1,0 +1,17 @@
+Use case: precise-object-edit
+Asset type: dark-mode 4:5 technical product poster
+Input images: Image 1 is the dark poster edit target. Image 2 is the approved light poster reference.
+
+Edit scope: Change only the transparent masked central control-plane area in Image 1. Every opaque pixel outside the mask is immutable and must be copied exactly from Image 1.
+
+Primary request: Replace only the faulty central control-plane graphic in Image 1 with the corresponding central graphic from Image 2, rendered for the dark palette. Match Image 2's exact isometric geometry: a single cube with one top plane, one broad front plane, one right plane, and a shallow isometric base. Use the same relative scale and anchor positions as Image 2. Keep the cube's composition clean and balanced.
+
+Logo invariant: The approved XP mark and XP wordmark appear together, intact, on the broad front plane of the cube. Do not divide the logo across faces. Do not rotate, shear, duplicate, distort, or invent a logo. Do not add a "CONTROL PLANE" caption.
+
+Connection invariant: Reconnect the incoming/outgoing mint lines to the same existing ports immediately outside the masked area. Each physical connector is one consistent muted-mint color. Preserve the existing card positions and existing upper/bottom connection routes outside the mask.
+
+Dark material direction: Deep teal cube faces with restrained mint edge lighting, consistent with the target's existing dark background. No bright floor, no reflections, no bloom outside the cube silhouette, and no new objects.
+
+Strictly preserve outside the mask: all heading and subtitle text; the XP lockup; desired-state module; side capability cards and their icons/text; six lower server nodes; background pattern; four-item legend; footer; all margins; all unmasked connectors.
+
+Avoid: changing anything outside the mask, altered copy, altered object counts, rectangular patches, split logos, changed text, new panels, new labels, ground grids, reflections, additional glow, crop, overflow, watermark, or annotation marks.

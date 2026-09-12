@@ -1,0 +1,13 @@
+Use case: precise-object-edit
+Asset type: 1600x2000 dark technical poster
+Input images: Image 1 is the dark poster edit target. Image 2 is the approved light poster reference for the central control-plane geometry only.
+
+Edit boundary: The transparent masked region belongs to Image 1 and is the only region that may change. Copy every opaque pixel outside that region from Image 1 unchanged. Do not redraw, restyle, shift, or reinterpret anything outside the mask.
+
+Central reconstruction: Within the masked area, render the same central cube graphic visible in Image 2, adapted to Image 1's existing dark materials. Preserve the reference cube's single isometric form: one top plane, one broad front plane, one right plane, and a shallow base. Align the reconstructed cube with the existing desired-state port, side-card ports, and lower bus at the mask boundary.
+
+Logo invariant: On the broad front plane, render the approved XP logo as one intact horizontal lockup: the node mark immediately LEFT of the letters "XP", both on one baseline, fully on the same front plane. Never stack the mark above XP, never split it across cube faces, never shear or rotate the lockup, and never add a CONTROL PLANE caption.
+
+Preserve outside the mask verbatim: all heading and subtitle text; top-left XP lockup; desired-state module; side cards, labels, icons, paths, and ports; six lower nodes; legend; footer URL; background; hexagon pattern; colors; margins; and canvas size.
+
+Avoid: any modification outside the masked area; changed copy; new object; changed card or node count; connector changes beyond the mask; ground/floor grid; reflections; extra glow; added labels; text drift; watermark; annotations; crop; overflow.

@@ -1,0 +1,11 @@
+Use case: precise-object-edit
+Asset type: approved 4:5 light technical poster
+Input image: Image 1 is the approved light poster and the edit target.
+
+This is a surgical edit. The transparent mask marks the only editable pixels. Preserve every opaque pixel from Image 1 exactly. Do not regenerate, retouch, sharpen, recolor, move, or reinterpret anything outside the mask.
+
+Edit only the central control-plane cube graphic inside the mask. Keep its exact footprint, scale, isometric perspective, three-face geometry, shallow base alignment, top connection port, side connection ports, and original placement. Keep the approved XP node-mark plus XP wordmark as one intact horizontal lockup on the broad front face; it must stay centered on that face, level with the face, and legible. Do not add CONTROL PLANE or any other caption.
+
+Material and color direction for the masked cube only: make it feel like a refined, light tactile control appliance instead of a flat toy block. Use a restrained neutral-warm white and pale mint front plane, a slightly deeper desaturated jade side plane, and a softly lit mint top plane. Add only subtle bevels, thin jade edge accents, and gentle value transitions that explain the isometric planes. Keep the surface matte-to-satin and calm, with no hard neon glow, no saturated cyan, and no heavy blue cast. The face contrast must remain sufficient for the dark green XP lockup.
+
+Do not change the desired-state module above, its label, its connector, side cards, card icons, card labels, connector paths, ports, six lower nodes, legend, footer, background, hexagon pattern, margins, or canvas framing. No crop, no layout change, no text reflow, no new object, no deleted object, no rainbow colors, no purple, blue, coral, olive, gray, watermark, or annotation.

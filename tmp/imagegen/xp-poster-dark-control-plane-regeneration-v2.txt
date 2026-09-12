@@ -1,0 +1,15 @@
+Use case: precise-object-edit
+Asset type: dark 4:5 technical poster
+Input image: the supplied dark poster is the final master image.
+
+Edit scope: Only the transparent area in the supplied mask may change. All opaque pixels outside the mask are immutable and must be reproduced without any visual alteration.
+
+Primary request: Within the masked central area only, replace the faulty control-plane graphic with one clean isometric cube: one top plane, one broad front plane, one right plane, and one shallow isometric base. Use the existing dark teal material and restrained mint edge light.
+
+Logo contract: On the broad front plane, render one intact horizontal XP lockup. The node mark is immediately LEFT of the letters "XP", both on a single baseline and entirely on the same front plane. Never stack the mark above XP, never split it across faces, never shear it, and never add any caption such as CONTROL PLANE.
+
+Connection contract: Reconnect only at the existing mint anchor ports visible at the mask boundary. Each connector remains one consistent mint color.
+
+Preserve exactly outside the mask: title, subtitle, top-left logo, desired-state module, four side cards, all labels and icons, six lower nodes, legend, footer, background, hexagon pattern, spacing, and margins.
+
+Avoid: any change outside the mask; changed text; altered card/node count; altered connector routes outside the mask; ground grids; reflections; new glow; new labels; crop; overflow; watermark; annotations.

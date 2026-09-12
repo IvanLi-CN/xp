@@ -1,0 +1,11 @@
+Use case: style-transfer
+Asset type: formal 4:5 product poster, dark-mode counterpart
+Input image: the supplied light poster is the final, approved layout and must be preserved exactly.
+
+Primary request: Produce a dark-mode material and color rendering of this exact poster. Change only the color palette, lighting, and surface material treatment. This is not a new composition and not a redesign.
+
+Immutable layout contract: Preserve every existing visible element in the supplied image at the same position, size, silhouette, perspective, spacing, and reading order. Preserve the entire top-left lockup, every glyph of all text, all icons, all card outlines, all connector paths and anchor circles, the desired-state module, the single central cube, the base, the six lower server nodes, the legend, the footer, and all canvas margins. Keep the central cube as the exact same single isometric shape from the source, with the mark and XP wordmark together on the same broad face. Do not alter any object count or move, resize, duplicate, remove, shear, rotate, or reinterpret any object.
+
+Allowed transformation only: Replace the pale background with a neutral near-black green-black backdrop. Convert the cyan cube to restrained deep teal, the mint accents and every connector to a single consistent muted mint, and keep the server-node accent colors present but lower their saturation. Retain the source's background hexagon pattern at the outer edges and retain the source's existing subtle shadows only.
+
+Disallowed: any ground plane, floor grid, floor reflections, additional light beams, new shadows, new glow bloom, altered perspective, new text, changed text, changed logo, extra panels, extra connectors, extra nodes, neon effects, cropping, overflow, annotation marks, watermark, or any graphic that does not already exist in the input image.

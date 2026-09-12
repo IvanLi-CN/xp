@@ -1,0 +1,15 @@
+Use case: infographic-diagram
+Asset type: final 4:5 dark-mode project poster
+Input image: the supplied light poster is the approved master blueprint for all content, geometry, and layout.
+
+Primary request: Generate a complete premium dark-mode re-render of the supplied poster as one coherent isometric technical illustration. Render every illustrated component afresh with consistent dark materials and lighting, while following the master blueprint exactly.
+
+Locked composition: Preserve the master blueprint's exact 4:5 portrait layout, all safe margins, relative positions, scale, silhouettes, object counts, and reading order. Keep the top-left XP lockup; two-line headline; subtitle; desired-state module; three left-side cards; one right-side subscription card; central cube; lower six-node row; four-item legend; footer; and the subtle outer-edge hexagon pattern. Do not crop or overflow.
+
+Central-module contract: Recreate the master blueprint's exact single cube geometry: top plane, broad front plane, right plane, shallow base, and the same line-anchor positions. Put the approved XP mark and wordmark together as one undistorted horizontal lockup on the broad front plane. Do not split it between cube faces and do not add a CONTROL PLANE caption.
+
+Dark art direction: Use a restrained neutral charcoal-green background, deep teal structural surfaces, muted mint connector lines, soft but controlled edge lighting, and a secondary low-saturation accent palette for the six lower nodes. The poster should feel precisely rendered, not neon. All connector paths are a single consistent mint color per physical line.
+
+Text contract: Preserve the supplied copy exactly and keep it legible. Do not invent, omit, or alter any words, letters, labels, or URL.
+
+Avoid: redesigning layout; ground grid; floor reflections; additional light beams; decorative panels; different module counts; changed card labels; text drift; altered logo geometry; split logos; added captions; excessive bloom; flat pasted areas; watermark; annotations; arrows; crop; overflow.

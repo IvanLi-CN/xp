@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="230" viewBox="0 0 520 230">
+  <text x="0" y="52" fill="#F8FBFA" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="40" font-weight="700">
+    One control plane
+  </text>
+  <text x="0" y="108" fill="#F8FBFA" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="40" font-weight="700">
+    for your self-hosted
+  </text>
+  <text x="0" y="164" fill="#F8FBFA" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="40" font-weight="700">
+    cluster.
+  </text>
+</svg>

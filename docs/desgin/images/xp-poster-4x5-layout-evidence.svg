@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2000" viewBox="0 0 1600 2000" role="img" aria-labelledby="title description">
+  <title id="title">XP 4 by 5 poster layout evidence</title>
+  <desc id="description">A 4 by 5 poster layout using a placeholder image to verify the hierarchy before generating a final key visual.</desc>
+  <defs>
+    <line id="xp-radial-link" x1="512" y1="313" x2="512" y2="417" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <line id="xp-outer-link" x1="587.344" y1="269.5" x2="684.339" y2="325.5" stroke="currentColor" stroke-linecap="round" stroke-width="20"/>
+    <circle id="xp-outer-node" cx="512" cy="226" r="62" fill="currentColor"/>
+    <g id="xp-approved-bicolor-mark">
+      <g color="#4CB1AB">
+        <use href="#xp-outer-link"/><use href="#xp-outer-link" transform="rotate(60 512 512)"/><use href="#xp-outer-link" transform="rotate(120 512 512)"/><use href="#xp-outer-link" transform="rotate(180 512 512)"/><use href="#xp-outer-link" transform="rotate(240 512 512)"/><use href="#xp-outer-link" transform="rotate(300 512 512)"/>
+        <use href="#xp-radial-link"/><use href="#xp-radial-link" transform="rotate(60 512 512)"/><use href="#xp-radial-link" transform="rotate(120 512 512)"/><use href="#xp-radial-link" transform="rotate(180 512 512)"/><use href="#xp-radial-link" transform="rotate(240 512 512)"/><use href="#xp-radial-link" transform="rotate(300 512 512)"/>
+        <use href="#xp-outer-node"/><use href="#xp-outer-node" transform="rotate(60 512 512)"/><use href="#xp-outer-node" transform="rotate(120 512 512)"/><use href="#xp-outer-node" transform="rotate(180 512 512)"/><use href="#xp-outer-node" transform="rotate(240 512 512)"/><use href="#xp-outer-node" transform="rotate(300 512 512)"/>
+      </g>
+      <circle cx="512" cy="512" r="70" fill="#72CCA3"/>
+    </g>
+  </defs>
+
+  <rect width="1600" height="2000" fill="#111817"/>
+
+  <use href="#xp-approved-bicolor-mark" transform="translate(132 110) scale(0.14)"/>
+  <text x="316" y="225" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="104" font-weight="700">XP</text>
+  <text x="132" y="360" fill="#72CCA3" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700">SELF-HOSTED XRAY CLUSTER MANAGEMENT</text>
+
+  <text x="126" y="505" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="94" font-weight="700">One control plane</text>
+  <text x="126" y="615" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="94" font-weight="700">for your Xray cluster.</text>
+  <text x="132" y="690" fill="#C8D4D1" font-family="Arial, Helvetica, sans-serif" font-size="34">Self-hosted management for nodes, endpoints, access, and quotas.</text>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <!-- The final model-generated key visual replaces only this bounded diagram area. -->
+    <circle cx="1005" cy="1150" r="248" fill="none" stroke="#4CB1AB" stroke-opacity="0.28" stroke-width="2"/>
+    <circle cx="1005" cy="1150" r="206" fill="none" stroke="#4CB1AB" stroke-opacity="0.22" stroke-dasharray="12 18" stroke-width="2"/>
+    <use href="#xp-approved-bicolor-mark" transform="translate(672 817) scale(0.65)"/>
+
+    <line x1="132" y1="1438" x2="1468" y2="1438" stroke="#4CB1AB" stroke-opacity="0.64" stroke-width="2"/>
+    <text x="132" y="1502" fill="#72CCA3" font-size="20" font-weight="700">01</text>
+    <text x="132" y="1544" fill="#FFFFFF" font-size="29" font-weight="700">Raft-backed desired state</text>
+    <text x="132" y="1580" fill="#B4C1BE" font-size="23">One consistent cluster configuration.</text>
+    <text x="806" y="1502" fill="#72CCA3" font-size="20" font-weight="700">02</text>
+    <text x="806" y="1544" fill="#FFFFFF" font-size="29" font-weight="700">Xray runtime reconciliation</text>
+    <text x="806" y="1580" fill="#B4C1BE" font-size="23">Desired state stays connected to the local runtime.</text>
+
+    <text x="132" y="1692" fill="#72CCA3" font-size="20" font-weight="700">03</text>
+    <text x="132" y="1734" fill="#FFFFFF" font-size="29" font-weight="700">Subscription output</text>
+    <text x="132" y="1770" fill="#B4C1BE" font-size="23">Raw URI, Base64, and Clash YAML.</text>
+    <text x="806" y="1692" fill="#72CCA3" font-size="20" font-weight="700">04</text>
+    <text x="806" y="1734" fill="#FFFFFF" font-size="29" font-weight="700">Deployment flexibility</text>
+    <text x="806" y="1770" fill="#B4C1BE" font-size="23">Systemd, OpenRC, and container deployment.</text>
+
+    <line x1="132" y1="1842" x2="1468" y2="1842" stroke="#4CB1AB" stroke-opacity="0.64" stroke-width="2"/>
+    <text x="132" y="1918" fill="#FFFFFF" font-size="28" font-weight="700">github.com/IvanLi-CN/xp</text>
+    <text x="1468" y="1918" fill="#72CCA3" font-size="25" font-weight="700" text-anchor="end">CONTROL YOUR CLUSTER</text>
+  </g>
+</svg>

@@ -1,0 +1,23 @@
+Use case: infographic-diagram
+Asset type: formal 4:5 GitHub project poster, dark-mode counterpart
+Input image: the supplied light poster is the edit target and the sole composition reference.
+
+Primary request: Re-render the entire supplied poster as one coherent, premium dark-mode isometric product illustration. Preserve the reference poster's information architecture and exact spatial composition. This is a full high-quality re-render, not a collage and not a localized patch.
+
+Composition invariants: Keep the 4:5 portrait aspect ratio. Preserve the safe margins, the top-left XP lockup, two-line heading, subtitle, upper desired-state module, left/right capability cards, central control-plane cube, the six-node lower server row, bottom four-item legend, and footer in the same relative positions and scale as the reference. Do not crop or let any element touch the canvas edges.
+
+Central module invariant: Use the same single isometric cube geometry as the reference: one top plane, one broad left/front plane, one right plane, and one shallow isometric base. The approved XP mark plus the XP wordmark must appear together as one intact horizontal lockup on the broad front plane. Do not split the mark and letters across cube faces. Do not shear, italicize, rotate, duplicate, or add "CONTROL PLANE" text.
+
+Visual direction: Near-black neutral emerald background, restrained deep teal cube materials, mint-green edge lighting, and a subtle hexagonal grid only at the outer background. The result should be cleanly rendered as a unified 3D information poster, with consistent isometric perspective, uniform mint connector lines, and no pasted-on panels. Dark mode must be materially different from the light poster while keeping its geometry and content.
+
+Text: Preserve all source copy exactly, including:
+- "ONE CONTROL PLANE FOR YOUR SELF-HOSTED CLUSTER."
+- "Manage endpoints, users, quotas, and subscriptions across every node."
+- "RAFT-BACKED DESIRED STATE"
+- "ENDPOINTS AND ACCESS"
+- "QUOTAS AND SUBSCRIPTIONS"
+- "SYSTEMD, OPENRC, AND CONTAINERS"
+- "SUBSCRIPTIONS"
+- "github.com/IvanLi-CN/xp"
+
+Avoid: changed copy, invented copy, illegible text, duplicate logos, split logos, rectangular patches, warped perspective, mixed connector colors within one line, extra modules, red annotation boxes or arrows, photorealistic objects, gradients that obscure content, watermark, and any crop or overflow.

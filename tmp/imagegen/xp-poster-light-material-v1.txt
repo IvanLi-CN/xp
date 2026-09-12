@@ -1,0 +1,15 @@
+Use case: precise-object-edit
+Asset type: 4:5 light technical product poster
+Input image: the supplied poster is the edit target.
+
+Edit boundary: the transparent regions of the supplied mask are the only pixels that may change. Preserve every opaque region verbatim: canvas, safe margins, headline, subtitle, top-left logo, desired-state module, all card borders/icons/copy, every connector path and port, all lower legend copy/icons/rules, footer, and hexagonal background.
+
+Primary request: make the masked control-plane cube and six masked lower node devices feel natural and refined rather than rigid or mechanically color-blocked. Preserve their exact positions, scale, silhouettes, isometric perspective, connector attachment points, and the existing horizontal XP lockup on the control-plane front face.
+
+Center control plane: retain one top plane, one broad front plane, one right plane, and the shallow base. Replace the saturated cyan solid block with a calm, low-saturation mint-and-jade material system: an airy pale-mint front plane, a slightly deeper jade side plane, a softly lit mint top plane, restrained deep-teal edges, and one subtle turquoise highlight. It must feel like a tactile translucent control appliance with gentle tonal transitions, not a glossy blue cube or a generic 3D sample block. Keep the node mark directly left of XP as one intact horizontal lockup, optically aligned with the broad front plane; use a deep green lockup for reliable contrast. Do not add a caption such as CONTROL PLANE.
+
+Lower nodes: preserve all six existing device silhouettes and their positions. Remove the blue, purple, salmon, and olive rainbow. Use one coherent low-saturation mint/green material family across all six, with only restrained value changes for depth. They should visually recede behind the central control plane rather than compete with it.
+
+Color palette: warm white background remains untouched; forest green #064E3B for dark detail, jade #16856D for edges, pale mint #DDF4EA for lit faces, and muted turquoise #32BFA6 only for small highlights. No gray, no saturated cyan field, no purple, blue, coral, olive, rainbow, or new background color.
+
+Constraints: preserve all original image text exactly. Preserve every non-masked pixel unchanged. No layout changes, no new lines, no changed port count, no card/node count changes, no text reflow, no crop, no watermark, no annotations, and no added object.

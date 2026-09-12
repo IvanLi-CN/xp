@@ -1,0 +1,15 @@
+Use case: style-transfer
+Asset type: final 4:5 dark-mode technical project poster
+Input image: this approved light poster is a non-negotiable composition blueprint.
+
+Primary request: Produce a faithful dark-mode material re-render of the supplied poster. Render the whole poster as a unified dark isometric illustration, but preserve the supplied blueprint's layout and graphic design exactly; this is a restrained color/material transformation, not a redesign.
+
+Immutable blueprint: Keep all existing elements in their current positions, scale, silhouette, perspective, spacing, and count: top-left XP lockup; two-line headline; subtitle; desired-state module; three stacked cards on the left; one subscription card on the right; central cube; six lower server nodes; four-item legend; footer; and the subtle hexagon border pattern. Keep the full 4:5 canvas and all safe margins. No crop or overflow.
+
+Central cube, exact: Preserve the source's cube geometry and shallow base. On the broad front plane, the XP logo is a single horizontal lockup: the node mark is immediately LEFT of the letters "XP", both on the SAME front plane, on ONE baseline. It must never become a vertical stack, never be split across faces, never be skewed, and never include a CONTROL PLANE caption.
+
+Text: Preserve every character of the supplied source exactly. No text may be changed, omitted, duplicated, or invented.
+
+Dark treatment only: Replace the pale background with a calm neutral black-green background. Use deep teal for structural surfaces, muted mint for all connector lines and edge highlights, and retain the source's lower-node accent colors in a more restrained, less saturated form. Use soft object shadows from the source only.
+
+Strictly avoid: any layout shift; new card; different card count; changed connection path; ground/floor grid; reflections; beams; extra glow; new shadows; neon effect; altered nodes; altered logo; vertical logo stack; split logo; added labels; altered copy; watermark; annotations; arrows; crop; overflow.
