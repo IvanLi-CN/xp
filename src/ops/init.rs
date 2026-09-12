@@ -958,8 +958,8 @@ mod tests {
     fn openrc_xray_script_does_not_background_when_supervised() {
         let script = openrc_xray_script();
         assert!(script.contains("supervisor=supervise-daemon"));
-        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\""));
-        assert!(script.contains("GOGC=\"${GOGC:-50}\""));
+        assert!(script.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\""));
+        assert!(script.contains("GOGC=\"${GOGC:-100}\""));
         assert!(!script.contains("command_background="));
         assert!(!script.contains("pidfile="));
     }

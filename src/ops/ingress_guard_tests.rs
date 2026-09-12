@@ -96,6 +96,8 @@ fn transaction_contract() {
 fn service_lifecycle_contract() {
     let enforced = render_openrc_xray_script(Some(GuardMode::Enforced));
     assert!(enforced.contains("return \"$result\""));
+    assert!(enforced.contains("GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\""));
+    assert!(enforced.contains("GOGC=\"${GOGC:-100}\""));
     let observe = render_openrc_xray_script(Some(GuardMode::Observe));
     assert!(observe.contains("Observe mode records failures"));
     assert!(observe.contains("return 0"));

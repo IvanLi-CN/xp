@@ -27,8 +27,9 @@
   overrides, including explicit variable/all-environment resets and readable
   non-regular inputs and continued directives. Environment-file values retain
   embedded spaces rather than being parsed as unit-directive word lists; only
-  complete XP-generated legacy service templates are eligible for the `8MiB`
-  to `12MiB` migration.
+  complete XP-generated legacy service templates are eligible for the
+  cloudflared `8MiB` to `12MiB` and Xray `16MiB` / `50` to `32MiB` / `100`
+  migrations.
 - Systemd override discovery follows the `/usr/lib`, `/usr/local/lib`, `/run`,
   and `/etc` drop-in hierarchy with higher-priority same-name masking. A
   lower-priority collision with XP's managed filename suppresses backfill

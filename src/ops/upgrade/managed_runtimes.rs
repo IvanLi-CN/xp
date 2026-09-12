@@ -644,7 +644,15 @@ mod tests {
         let paths = Paths::new(tmp.path().to_path_buf());
         let systemd = paths.systemd_unit_dir();
         fs::create_dir_all(&systemd).unwrap();
-        fs::write(systemd.join("xray.service"), "[Service]\n").unwrap();
+        let xray_unit = systemd.join("xray.service");
+        let original_xray_unit = include_str!("../../../docs/ops/systemd/xray.service")
+            .replace(
+                "Environment=GOMEMLIMIT=32MiB",
+                "Environment=GOMEMLIMIT=16MiB",
+            )
+            .replace("Environment=GOGC=100", "Environment=GOGC=50");
+        fs::write(&xray_unit, &original_xray_unit).unwrap();
+        let xray_drop_in = systemd.join("xray.service.d/20-xp-memory.conf");
         let cloudflared_unit = systemd.join("cloudflared.service");
         let original_unit = concat!(
             "[Service]\n",
@@ -702,9 +710,16 @@ mod tests {
                 .unwrap()
                 .contains("--token-file")
         );
+        assert!(
+            fs::read_to_string(&xray_drop_in)
+                .unwrap()
+                .contains("Environment=GOMEMLIMIT=32MiB")
+        );
 
         rollback_runtime_binaries_and_services(&paths, &[], &snapshot).unwrap();
 
+        assert_eq!(fs::read_to_string(&xray_unit).unwrap(), original_xray_unit);
+        assert!(!xray_drop_in.exists());
         assert_eq!(
             fs::read_to_string(&cloudflared_drop_in).unwrap(),
             original_drop_in

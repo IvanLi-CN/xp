@@ -38,8 +38,8 @@ pub(super) fn build_runtime_env(
         );
     }
     for (key, value) in [
-        ("XP_XRAY_GOMEMLIMIT", "16MiB"),
-        ("XP_XRAY_GOGC", "50"),
+        ("XP_XRAY_GOMEMLIMIT", "32MiB"),
+        ("XP_XRAY_GOGC", "100"),
         ("XP_CLOUDFLARED_GOMEMLIMIT", "12MiB"),
         ("XP_CLOUDFLARED_GOGC", "50"),
         ("XP_CLOUDFLARED_MANAGEMENT_DIAGNOSTICS", "false"),
@@ -49,4 +49,36 @@ pub(super) fn build_runtime_env(
             .or_insert_with(|| value.to_string());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_runtime_env;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn defaults_xray_runtime_environment() {
+        let runtime_env = build_runtime_env(&BTreeMap::new(), None);
+
+        assert_eq!(
+            runtime_env.get("XP_XRAY_GOMEMLIMIT"),
+            Some(&"32MiB".to_string())
+        );
+        assert_eq!(runtime_env.get("XP_XRAY_GOGC"), Some(&"100".to_string()));
+    }
+
+    #[test]
+    fn preserves_xray_runtime_environment_override() {
+        let env_map = BTreeMap::from([
+            ("XP_XRAY_GOMEMLIMIT".to_string(), "48MiB".to_string()),
+            ("XP_XRAY_GOGC".to_string(), "125".to_string()),
+        ]);
+        let runtime_env = build_runtime_env(&env_map, None);
+
+        assert_eq!(
+            runtime_env.get("XP_XRAY_GOMEMLIMIT"),
+            Some(&"48MiB".to_string())
+        );
+        assert_eq!(runtime_env.get("XP_XRAY_GOGC"), Some(&"125".to_string()));
+    }
 }

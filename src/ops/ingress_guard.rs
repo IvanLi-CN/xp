@@ -124,8 +124,8 @@ Type=simple\n\
 User=xray\n\
 Group=xray\n\
 WorkingDirectory={}\n\
-Environment=GOMEMLIMIT=16MiB\n\
-Environment=GOGC=50\n\
+Environment=GOMEMLIMIT=32MiB\n\
+Environment=GOGC=100\n\
 {}{}ExecStart={}\n\
 Restart=always\n\
 RestartSec=2s\n\
@@ -175,8 +175,8 @@ pub(crate) fn render_openrc_xray_script(mode: Option<GuardMode>) -> String {
             "description=\"xray (local proxy runtime)\"\n\n",
             "# Managed by xp-ops ingress-guard service boundary\n",
             "{}command_user=\"xray:xray\"\n",
-            "export GOMEMLIMIT=\"${{GOMEMLIMIT:-16MiB}}\"\n",
-            "export GOGC=\"${{GOGC:-50}}\"\n\n",
+            "export GOMEMLIMIT=\"${{GOMEMLIMIT:-32MiB}}\"\n",
+            "export GOGC=\"${{GOGC:-100}}\"\n\n",
             "# Ensure automatic recovery on crashes without busy-looping.\n",
             "supervisor=supervise-daemon\n",
             "respawn_delay=2\n",
