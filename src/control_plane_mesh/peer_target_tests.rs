@@ -1,5 +1,12 @@
 use super::*;
-use axum::{Router, extract::State, http::StatusCode, routing::post};
+use axum::{
+    Router,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, Method, StatusCode, Uri},
+    response::Response,
+    routing::{any, post},
+};
 use futures_util::{StreamExt, future::join_all};
 use reqwest::ResponseBuilderExt;
 use std::sync::{
@@ -59,6 +66,149 @@ async fn spawn_stalling_reverse_relay() -> (String, Arc<AtomicUsize>, JoinHandle
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{address}"), requests, task)
+}
+
+#[derive(Clone)]
+struct SignedServerState {
+    ca_key_pem: String,
+    ca_cert_pem: String,
+    requests: Arc<AtomicUsize>,
+}
+
+async fn stall_mesh(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
+    requests.fetch_add(1, Ordering::SeqCst);
+    sleep(Duration::from_secs(1)).await;
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+async fn signed_public(
+    State(state): State<SignedServerState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    state.requests.fetch_add(1, Ordering::SeqCst);
+    let verified = crate::internal_auth::verify_request_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &method,
+        &uri,
+        &headers,
+        &body,
+        xp_test_fixtures::cluster_fixture53(),
+        xp_test_fixtures::primary_node_id(),
+    )
+    .expect("public fallback receives a signed request");
+    let ack = crate::internal_auth::sign_ack_v2(
+        &state.ca_key_pem,
+        &state.ca_cert_pem,
+        &verified,
+        xp_test_fixtures::primary_node_id(),
+        StatusCode::OK.as_u16(),
+    )
+    .expect("sign public acknowledgement");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(crate::internal_auth::INTERNAL_ACK_HEADER, ack)
+        .body(axum::body::Body::empty())
+        .expect("public fallback response")
+}
+
+async fn spawn_stalling_mesh() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .fallback(any(stall_mesh))
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mesh listener");
+    let address = listener.local_addr().expect("mesh address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), requests, task)
+}
+
+async fn spawn_signed_public(
+    ca_key_pem: &str,
+    ca_cert_pem: &str,
+) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let state = SignedServerState {
+        ca_key_pem: ca_key_pem.to_owned(),
+        ca_cert_pem: ca_cert_pem.to_owned(),
+        requests: requests.clone(),
+    };
+    let app = Router::new()
+        .fallback(any(
+            |State(state): State<SignedServerState>,
+             method: Method,
+             uri: Uri,
+             headers: HeaderMap,
+             body: Bytes| async move {
+                let response = signed_public(State(state), method, uri, headers, body).await;
+                response
+            },
+        ))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("public listener");
+    let address = listener.local_addr().expect("public address");
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{address}"), requests, task)
+}
+
+#[tokio::test]
+async fn short_budget_keeps_public_fallback_after_mesh_and_reverse_timeouts() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(Some(mesh_base_url.clone()), public_base_url);
+    let rendezvous = secondary_reverse_target(Some(mesh_base_url), "http://127.0.0.1:1".into());
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(rendezvous, None, reverse_assignment()),
+        )
+        .await;
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "short-budget-public-fallback".to_string(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "public fallback should receive the request: {result:?}"
+    );
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    mesh_task.abort();
+    public_task.abort();
 }
 
 #[derive(Clone)]
