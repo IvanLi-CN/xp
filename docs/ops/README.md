@@ -452,9 +452,11 @@ Mesh read-only diagnosis:
   `mesh_reason`, breaker state, current path, and the latest sample timestamp.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
-- `missing_endpoint`, `ambiguous_endpoint`, `invalid_access_host`, and `unsupported_transport`
-  are configuration capability failures. `unsupported_transport` means the managed endpoint is
-  XHTTP, which is a user-proxy transport and not a plain HTTPS control-plane Mesh listener.
+- `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability
+  failures in the status API. An internal `unsupported_transport` reason means the managed
+  endpoint is XHTTP, which is a user-proxy transport and not a plain HTTPS control-plane Mesh
+  listener; for compatibility with the fixed 3.22/3.21/3.20 Web window, the status API serializes
+  that reason as the existing `invalid_access_host` value.
   `transport_timeout`, `transport_error`, and `protocol_rejected` mean the Mesh target exists but
   the directed transport or protocol failed. A public success with `fallback_active` is end-to-end
   success, not Mesh availability.

@@ -38,7 +38,6 @@ export const MeshPeerReasonSchema = z.enum([
 	"missing_endpoint",
 	"ambiguous_endpoint",
 	"invalid_access_host",
-	"unsupported_transport",
 	"no_sample",
 	"transport_timeout",
 	"transport_error",

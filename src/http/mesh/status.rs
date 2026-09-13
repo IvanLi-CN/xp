@@ -2,9 +2,17 @@ use chrono::{DateTime, Utc};
 
 use super::{AdminMeshTransportStatus, mesh_transport_counts_for, mesh_transport_health_for};
 use crate::{
-    mesh_telemetry::{MeshActiveRoute, MeshPeerTelemetry},
+    mesh_telemetry::{MeshActiveRoute, MeshPeerReason, MeshPeerTelemetry},
     reverse_mesh::ReverseMeshAssignment,
 };
+
+/// Keep the status wire enum compatible with the fixed 3.22/3.21/3.20 Web window.
+pub(super) fn status_mesh_reason(reason: MeshPeerReason) -> MeshPeerReason {
+    match reason {
+        MeshPeerReason::UnsupportedTransport => MeshPeerReason::InvalidAccessHost,
+        reason => reason,
+    }
+}
 
 pub(super) fn with_assignment(
     route: Option<MeshActiveRoute>,
@@ -50,11 +58,18 @@ pub(super) fn mesh_transport_status_for(
 #[cfg(test)]
 mod tests {
     use crate::{
-        mesh_telemetry::{ActiveRouteKind, MeshActiveRoute},
+        mesh_telemetry::{ActiveRouteKind, MeshActiveRoute, MeshPeerReason},
         reverse_mesh::ReverseMeshAssignment,
     };
 
     use super::with_assignment;
+
+    #[test]
+    fn unsupported_transport_keeps_the_legacy_status_reason() {
+        let reason = super::status_mesh_reason(MeshPeerReason::UnsupportedTransport);
+        assert_eq!(reason, MeshPeerReason::InvalidAccessHost);
+        assert_eq!(serde_json::to_value(reason).unwrap(), "invalid_access_host");
+    }
 
     #[test]
     fn assignment_enriches_a_direct_route_without_changing_its_kind() {

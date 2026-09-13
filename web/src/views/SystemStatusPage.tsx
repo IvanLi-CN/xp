@@ -94,7 +94,6 @@ const meshReasonLabel: Record<
 	missing_endpoint: "Mesh endpoint missing",
 	ambiguous_endpoint: "Multiple Mesh endpoints",
 	invalid_access_host: "Invalid access host",
-	unsupported_transport: "Endpoint transport not supported for Mesh",
 	no_sample: "Awaiting Mesh sample",
 	transport_timeout: "Mesh timed out",
 	transport_error: "Mesh transport error",

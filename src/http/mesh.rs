@@ -59,7 +59,6 @@ struct AdminMeshPeerStatus {
     mesh_transport: Option<AdminMeshTransportStatus>,
     buckets: Vec<crate::mesh_telemetry::MeshTelemetryBucket>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshTransportStatus {
     protocol: Option<MeshTransportProtocol>,
@@ -1042,7 +1041,8 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 )
             } else {
                 Some(target.mesh_reason)
-            };
+            }
+            .map(status::status_mesh_reason);
             let (
                 availability_1h,
                 availability_24h,

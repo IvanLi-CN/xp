@@ -41,7 +41,9 @@ outcome question.
   `transport_error`, `protocol_rejected`, and `fallback_active`. A successful signed Mesh
   acknowledgement records `mesh_available`.
 - The status API treats `mesh_capability` and `mesh_reason` as additive fields. Older snapshots may
-  omit them; clients display `unknown` rather than rejecting the snapshot.
+  omit them; clients display `unknown` rather than rejecting the snapshot. The internal
+  `unsupported_transport` reason is serialized as the legacy `invalid_access_host` value so Web
+  clients in the fixed compatibility window continue to parse the response.
 - Build the strict Mesh client once per process. Keep it HTTP/2-only with one idle connection per
   origin and a bounded idle timeout; public direct and relay fallback use separate compatibility
   clients. This limits steady-state control-plane sockets without forcing the public fallback onto
