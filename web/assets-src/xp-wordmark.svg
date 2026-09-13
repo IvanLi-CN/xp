@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="200" viewBox="0 0 430 200" role="img" aria-labelledby="title description" shape-rendering="geometricPrecision">
+  <title id="title">XP product wordmark</title>
+  <desc id="description">The XP product name in its approved custom geometric wordmark.</desc>
+  <g fill="#111817" fill-rule="evenodd">
+    <path d="M0 0H50L102 70L154 0H204L132 100L204 200H154L102 130L50 200H0L72 100Z"/>
+    <path d="M240 0H332C390 0 430 32 430 80S390 160 332 160H292V200H240ZM292 48V112H331C361 112 380 100 380 80S361 48 331 48Z"/>
+  </g>
+</svg>
