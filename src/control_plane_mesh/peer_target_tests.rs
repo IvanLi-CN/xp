@@ -147,8 +147,7 @@ async fn spawn_signed_public(
              uri: Uri,
              headers: HeaderMap,
              body: Bytes| async move {
-                let response = signed_public(State(state), method, uri, headers, body).await;
-                response
+                signed_public(State(state), method, uri, headers, body).await
             },
         ))
         .with_state(state);
