@@ -11,11 +11,13 @@ outcome question.
 ## Decision
 
 - For general Mesh calls, derive a Mesh origin only from exactly one peer
-  `managed_default` VLESS-REALITY endpoint. Treat absent or ambiguous endpoint
-  state as public-only.
-- Membership-lifecycle capability reads are stricter: a peer with a Mesh endpoint
-  uses Mesh exclusively, while a peer with no endpoint uses its registered API
-  control-plane origin only with the same signed `mesh-v2` request and acknowledgement.
+  `managed_default` VLESS-REALITY Vision/TCP endpoint. Treat absent, ambiguous,
+  or XHTTP endpoint state as public-only because XHTTP is not a plain HTTPS
+  control-plane listener.
+- Membership-lifecycle capability reads are stricter: a peer with an eligible Mesh
+  endpoint uses Mesh exclusively, while a peer with no eligible endpoint uses its
+  registered API control-plane origin only with the same signed `mesh-v2` request
+  and acknowledgement.
   An ambiguous endpoint or invalid access host remains unavailable; it must not
   silently take the direct path.
 - Send signed `health-v2` and `mesh-v2` requests through the canary's reserved
@@ -34,11 +36,14 @@ outcome question.
 - A relay timeout is just as ambiguous as a Mesh timeout. Retry it on a direct public path only
   when the operation is read-only, Raft-idempotent, or protected by the durable request ledger.
 - Persist the latest per-peer diagnostic reason independently of the active path. Static target
-  reasons are `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host`; runtime reasons
-  are `no_sample`, `transport_timeout`, `transport_error`, `protocol_rejected`, and
-  `fallback_active`. A successful signed Mesh acknowledgement records `mesh_available`.
+  reasons are `missing_endpoint`, `ambiguous_endpoint`, `invalid_access_host`, and
+  `unsupported_transport`; runtime reasons are `no_sample`, `transport_timeout`,
+  `transport_error`, `protocol_rejected`, and `fallback_active`. A successful signed Mesh
+  acknowledgement records `mesh_available`.
 - The status API treats `mesh_capability` and `mesh_reason` as additive fields. Older snapshots may
-  omit them; clients display `unknown` rather than rejecting the snapshot.
+  omit them; clients display `unknown` rather than rejecting the snapshot. The internal
+  `unsupported_transport` reason is serialized as the legacy `invalid_access_host` value so Web
+  clients in the fixed compatibility window continue to parse the response.
 - Build the strict Mesh client once per process. Keep it HTTP/2-only with one idle connection per
   origin and a bounded idle timeout; public direct and relay fallback use separate compatibility
   clients. This limits steady-state control-plane sockets without forcing the public fallback onto

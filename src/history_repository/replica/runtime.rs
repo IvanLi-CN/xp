@@ -40,7 +40,8 @@ use status::SourceDeliveryStatus;
 pub(crate) use backfill::RepositoryTieredBackfillRecord;
 pub(crate) use error::RepositoryRuntimeError;
 pub(crate) use initial_peer::{
-    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate,
+    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
+    RetainedAnchorCheckpointUpdate,
 };
 pub(crate) use receive::{PendingRepositoryMutation, source_stream_for_schema};
 pub(crate) use repair_batch::{RepositoryRepairBatch, RepositoryReplicaSegment};

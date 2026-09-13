@@ -70,6 +70,16 @@ impl RepositoryReplicaRuntime {
             self.snapshot.history_truncated = true;
             return;
         }
+        if self.snapshot.gaps.iter().any(|gap| {
+            !gap.permanent
+                && gap.source_node_id == segment.first_cursor().source_node_id()
+                && gap.source_epoch == segment.first_cursor().source_epoch()
+                && gap.stream == segment.first_cursor().stream()
+                && gap.first_sequence == expected
+                && gap.last_sequence == actual - 1
+        }) {
+            return;
+        }
         self.snapshot.gaps.push(StoredGap {
             source_node_id: segment.first_cursor().source_node_id().to_owned(),
             source_epoch: segment.first_cursor().source_epoch(),

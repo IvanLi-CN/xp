@@ -1,9 +1,58 @@
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::replica::{RepositoryReplicaGap, RepositoryReplicaSegment};
 use crate::state::history_repository::{control::RepositoryLifecycle, identity::RepositoryNodeId};
+use std::{future::Future, time::Duration};
 
 use super::super::AppState;
 pub(super) const MAX_SOURCE_PAYLOAD_BYTES: usize = 32 * 1024;
+
+pub(super) async fn run_local_source_worker_cycle<Capacity, Lifecycle, Source>(
+    capacity: Capacity,
+    lifecycle: Lifecycle,
+    source: Source,
+) -> (anyhow::Result<()>, anyhow::Result<()>, anyhow::Result<()>)
+where
+    Capacity: std::future::Future<Output = anyhow::Result<()>>,
+    Lifecycle: std::future::Future<Output = anyhow::Result<()>>,
+    Source: std::future::Future<Output = anyhow::Result<()>>,
+{
+    run_local_source_worker_cycle_with_budget(
+        capacity,
+        lifecycle,
+        source,
+        super::REPOSITORY_REQUEST_BUDGET,
+    )
+    .await
+}
+
+async fn run_local_source_worker_cycle_with_budget<Capacity, Lifecycle, Source>(
+    capacity: Capacity,
+    lifecycle: Lifecycle,
+    source: Source,
+    maintenance_budget: Duration,
+) -> (anyhow::Result<()>, anyhow::Result<()>, anyhow::Result<()>)
+where
+    Capacity: Future<Output = anyhow::Result<()>>,
+    Lifecycle: Future<Output = anyhow::Result<()>>,
+    Source: Future<Output = anyhow::Result<()>>,
+{
+    let capacity = bounded_maintenance("capacity", capacity, maintenance_budget);
+    let lifecycle = bounded_maintenance("lifecycle", lifecycle, maintenance_budget);
+    tokio::join!(capacity, lifecycle, source)
+}
+
+async fn bounded_maintenance<F>(
+    name: &'static str,
+    future: F,
+    budget: Duration,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = anyhow::Result<()>>,
+{
+    tokio::time::timeout(budget, future)
+        .await
+        .map_err(|_| anyhow::anyhow!("history repository {name} maintenance timed out"))?
+}
 
 pub(super) fn spawn_local_source_worker(state: AppState) {
     tokio::spawn(async move {
@@ -23,14 +72,19 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
                     "history source journal order repair cycle skipped"
                 );
             }
-            if let Err(error) = super::sync_local_repository_capacity(&state, now).await {
+            let (capacity_result, lifecycle_result, source_result) = run_local_source_worker_cycle(
+                super::sync_local_repository_capacity(&state, now),
+                super::advance_local_repository_lifecycle(&state, now),
+                super::source_records::publish_local_history_segments(&state),
+            )
+            .await;
+            if let Err(error) = capacity_result {
                 tracing::debug!(error = %error, "history repository capacity cycle skipped");
             }
-            if let Err(error) = super::advance_local_repository_lifecycle(&state, now).await {
+            if let Err(error) = lifecycle_result {
                 tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
             }
-            if let Err(error) = super::source_records::publish_local_history_segments(&state).await
-            {
+            if let Err(error) = source_result {
                 tracing::debug!(error = %error, "history source collection cycle skipped");
             }
         }
@@ -165,7 +219,10 @@ pub(super) fn should_attempt_source_relay(transport_failed: bool, target_is_loca
 
 #[cfg(test)]
 mod tests {
-    use super::{should_attempt_source_relay, source_record, source_record_with_key};
+    use super::{
+        run_local_source_worker_cycle_with_budget, should_attempt_source_relay, source_record,
+        source_record_with_key,
+    };
 
     #[test]
     fn source_relay_requires_a_direct_transport_failure() {
@@ -198,5 +255,26 @@ mod tests {
             .record_key(),
             b"deleted-history-key",
         );
+    }
+
+    #[tokio::test]
+    async fn source_cycle_does_not_wait_for_stuck_raft_maintenance() {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            run_local_source_worker_cycle_with_budget(
+                std::future::pending::<anyhow::Result<()>>(),
+                std::future::pending::<anyhow::Result<()>>(),
+                async { Ok(()) },
+                std::time::Duration::from_millis(10),
+            ),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "source collection must not be blocked by a Raft maintenance write"
+        );
+        let (_capacity, _lifecycle, source) = result.expect("worker cycle completed");
+        assert!(source.is_ok());
     }
 }

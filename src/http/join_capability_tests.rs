@@ -83,6 +83,7 @@ enum MeshTransportAvailability {
     Unreachable,
     MissingEndpoint,
     InvalidAccessHost,
+    UnsupportedTransport,
 }
 
 #[derive(Clone)]
@@ -462,6 +463,7 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
         }
         MeshTransportAvailability::MissingEndpoint => (None, None),
         MeshTransportAvailability::InvalidAccessHost => (Some(mesh_address.port()), None),
+        MeshTransportAvailability::UnsupportedTransport => (Some(mesh_address.port()), None),
     };
     match public_api {
         PublicApiAvailability::Available => {
@@ -489,7 +491,7 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
         let mut locked = store.lock().await;
         locked.upsert_node(remote_node.clone()).unwrap();
         if let Some(mesh_endpoint_port) = mesh_endpoint_port {
-            let endpoint = build_managed_default_vless_endpoint(
+            let mut endpoint = build_managed_default_vless_endpoint(
                 &DefaultVlessEndpointSpec {
                     port: mesh_endpoint_port,
                     reality_dest: "origin.example.test:443".to_string(),
@@ -500,6 +502,12 @@ async fn run_orphan_repair_dry_run_with_mesh_transport(
                 remote_node.node_id.clone(),
             )
             .unwrap();
+            if !matches!(
+                mesh_transport,
+                MeshTransportAvailability::UnsupportedTransport
+            ) {
+                endpoint.meta["transport"] = serde_json::json!("vision_tcp");
+            }
             DesiredStateCommand::UpsertEndpoint {
                 endpoint,
                 expected: None,
@@ -687,6 +695,25 @@ async fn orphan_repair_dry_run_rejects_unreachable_control_plane_origin_without_
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
     assert_eq!(capability_requests, 0);
+    assert_eq!(legacy_requests, 0);
+}
+
+#[tokio::test]
+async fn orphan_repair_dry_run_uses_signed_control_plane_origin_for_xhttp_endpoint() {
+    let (status, body, orphan_node_id, capability_requests, legacy_requests) =
+        run_orphan_repair_dry_run_with_mesh_transport(
+            StatusCode::OK,
+            MeshTransportAvailability::UnsupportedTransport,
+            PublicApiAvailability::Available,
+            InternalCapabilitiesBody::Json,
+            InternalCapabilitiesAcknowledgement::Signed,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(body["raft_node_id"], orphan_node_id);
+    assert_eq!(capability_requests, 1);
     assert_eq!(legacy_requests, 0);
 }
 

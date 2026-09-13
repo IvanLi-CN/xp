@@ -278,8 +278,10 @@ Contract:
 
 ## Reality fallback control-plane Mesh
 
-When a peer has exactly one managed-default VLESS/REALITY endpoint, XP derives
-`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The canary keeps
+When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
+`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints
+are proxy-only and are excluded from this plain HTTPS route, so XP uses the existing Reverse/Public
+fallbacks for control-plane traffic. The canary keeps
 ordinary `/generate_204` and authority-based camouflage traffic separate from Mesh traffic:
 
 - signed `health-v2` requests reach only the bodyless Mesh health endpoint;
@@ -450,10 +452,14 @@ Mesh read-only diagnosis:
   `mesh_reason`, breaker state, current path, and the latest sample timestamp.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
-- `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration
-  capability failures. `transport_timeout`, `transport_error`, and `protocol_rejected` mean the
-  Mesh target exists but the directed transport or protocol failed. A public success with
-  `fallback_active` is end-to-end success, not Mesh availability.
+- `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability
+  failures in the status API. An internal `unsupported_transport` reason means the managed
+  endpoint is XHTTP, which is a user-proxy transport and not a plain HTTPS control-plane Mesh
+  listener; for compatibility with the fixed 3.22/3.21/3.20 Web window, the status API serializes
+  that reason as the existing `invalid_access_host` value.
+  `transport_timeout`, `transport_error`, and `protocol_rejected` mean the Mesh target exists but
+  the directed transport or protocol failed. A public success with `fallback_active` is end-to-end
+  success, not Mesh availability.
 - This audit is read-only: do not edit endpoint metadata, restart Xray/XP, reset breakers, or
   remove cluster members as part of diagnosis.
 
@@ -826,12 +832,14 @@ Notes:
   A retained segment may be the first locally available frame for a source stream and therefore
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
-  every following frame to be contiguous. When the repair response explicitly carries
-  `history_truncated=true`, its first repair page may also cross an existing local watermark once
-  for each affected source stream, even when wire bounds split that page into multiple responses or
-  an earlier segment is already contiguous; XP records that expired prefix as a
-  `source_retention_expired` permanent gap. Live source delivery, ordinary anti-entropy, and later
-  repair pages still reject sequence gaps; do not bypass that boundary by editing the checkpoint.
+  every following frame to be contiguous. If the receiver already has a continuous watermark and
+  the repair response explicitly carries `history_truncated=true`, its first repair page may also
+  cross that watermark once for each affected source stream through a tiered handoff; the retained
+  anchor may omit its predecessor hash because the local watermark supplies the predecessor
+  boundary. XP records that expired prefix as a `source_retention_expired` permanent gap, even when
+  wire bounds split the page into multiple responses or an earlier segment is already contiguous.
+  Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
+  do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
   that omits the digest remains compatible because XP calculates it locally; a changed retry fails
   closed instead of advancing or relaxing another stream.

@@ -47,9 +47,10 @@
 
 ## 必须满足
 
-- Mesh URL 只能由唯一 managed-default endpoint 推导。
-- 无端点、多个 endpoint 或不可用的 `access_host` 时，使用 `Node.api_base_url`；已选择 Mesh
-  路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
+- Mesh URL 只能由唯一 managed-default Vision/TCP endpoint 推导；XHTTP endpoint 仅用于代理
+  流量，不能被当作普通 HTTPS 控制面入口。
+- 无端点、多个 endpoint、不可用的 `access_host` 或不支持控制面 Mesh 的 transport 时，使用
+  `Node.api_base_url`；已选择 Mesh 路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
 - `health-v2` 与 `mesh-v2` 使用同一个 v2 认证协议。
 - canonical 覆盖版本、route、method、原始 URI、content metadata、body hash、
   cluster、sender、target、request ID 和 issued-at。
@@ -189,7 +190,6 @@ Web upgrade stale-conflict state:
 - The immediate conflict message is visible and the Upgrade action is enabled.
 - Whitespace normalization: already satisfied the required 16 px outer margin.
 
-PR: include
 ![Version indicator stale upgrade conflict](./assets/version-indicator-stale-upgrade-conflict.png)
 
 - Source: mock-only, login-free `/ui-demo/system-status`.
@@ -199,10 +199,8 @@ PR: include
   `rendered_assets=1265x712,393x852`, `sensitive_exclusion=N/A`,
   `submission_gate=approved`.
 
-PR: include
 ![Desktop system status controls at 1280x720](./assets/system-status-desktop.png)
 
-PR: include
 ![Mobile system status controls at 393x852](./assets/system-status-mobile.png)
 
 - Whitespace normalization: no meaningful surrounding whitespace was present.
@@ -218,10 +216,8 @@ Latest capability/reason diagnostics and unified row actions:
 - The desktop peer rows show equal `32x32` Probe and details controls; the mobile
   capture keeps the existing text actions and shows short Mesh reasons.
 
-PR: include
 ![Desktop system status diagnostics](./assets/system-status-desktop-new.png)
 
-PR: include
 ![Mobile system status diagnostics](./assets/system-status-mobile-new.png)
 
 Peer action containment at the production-width content column:
@@ -259,10 +255,8 @@ Latest real AppShell route evidence:
 - Desktop geometry asserts each peer row and details action remain inside the real `main.xp-panel`
   content boundary. Mobile capture shows the stacked peer actions without horizontal overflow.
 
-PR: include
 ![Real AppShell System Status desktop geometry](./assets/system-status-appshell-route-desktop.png)
 
-PR: include
 ![Real AppShell System Status mobile peer actions](./assets/system-status-appshell-route-mobile.png)
 
 ## 参考
