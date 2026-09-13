@@ -8,6 +8,7 @@ use super::*;
 const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_BYTES: u64 = 128 * 1024 * 1024;
+pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS: usize = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES: usize = 1024 * 1024;
 const SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT: i64 = 80;
 const SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT: i64 = 60;
@@ -378,9 +379,21 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
+    #[cfg(test)]
     pub(crate) fn source_delivery_journal_page(
         &self,
         limit: usize,
+    ) -> Result<SourceDeliveryJournalPage> {
+        self.source_delivery_journal_page_with_budget(
+            limit,
+            SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+        )
+    }
+
+    pub(crate) fn source_delivery_journal_page_with_budget(
+        &self,
+        limit: usize,
+        max_wire_bytes: usize,
     ) -> Result<SourceDeliveryJournalPage> {
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
@@ -398,7 +411,10 @@ impl HistoryStorage {
         if order_repair_completed == 0 {
             return Ok(SourceDeliveryJournalPage::Repairing);
         }
-        let limit = limit.min(SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE as usize);
+        let limit = limit.min(SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS);
+        if limit == 0 || max_wire_bytes == 0 {
+            return Ok(SourceDeliveryJournalPage::Ready(Vec::new()));
+        }
         let mut statement = connection
             .prepare(
                 "SELECT id, length(wire)
@@ -417,13 +433,10 @@ impl HistoryStorage {
             let id = row.get::<_, String>(0).map_err(sqlite_error)?;
             let row_bytes = usize::try_from(row.get::<_, i64>(1).map_err(sqlite_error)?)
                 .map_err(|_| HistoryStorageError("negative journal wire length".to_owned()))?;
-            if !ids.is_empty()
-                && wire_bytes.saturating_add(row_bytes)
-                    > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
-            {
+            if !ids.is_empty() && wire_bytes.saturating_add(row_bytes) > max_wire_bytes {
                 break;
             }
-            if ids.is_empty() && row_bytes > SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES {
+            if ids.is_empty() && row_bytes > max_wire_bytes {
                 break;
             }
             wire_bytes = wire_bytes.saturating_add(row_bytes);
@@ -450,29 +463,55 @@ impl HistoryStorage {
     pub(crate) fn source_delivery_journal_stream_heads(
         &self,
         streams: &[String],
+        limit: usize,
+        max_wire_bytes: usize,
     ) -> Result<Vec<SourceDeliveryJournalRow>> {
         let mut backend = self.lock_backend();
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(Vec::new());
         };
-        let mut heads = Vec::with_capacity(streams.len());
-        for stream in streams {
+        if limit == 0 || max_wire_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        let mut head_ids = Vec::with_capacity(streams.len().min(limit));
+        let mut wire_bytes = 0_usize;
+        for stream in streams.iter().take(limit) {
             let head = connection
                 .query_row(
-                    "SELECT id, stream, closed_at, identity, wire
+                    "SELECT id, length(wire)
                      FROM source_delivery_journal
                      WHERE stream = ?1
                      ORDER BY source_node_id, source_epoch, first_sequence,
                               created_at, id
                      LIMIT 1",
                     [stream],
-                    source_delivery_journal_row,
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .optional()
                 .map_err(sqlite_error)?;
-            if let Some(head) = head {
-                heads.push(head);
+            let Some((id, wire_len)) = head else {
+                continue;
+            };
+            let wire_len = usize::try_from(wire_len)
+                .map_err(|_| HistoryStorageError("negative journal wire length".to_owned()))?;
+            if wire_len > max_wire_bytes.saturating_sub(wire_bytes) {
+                continue;
             }
+            wire_bytes = wire_bytes.saturating_add(wire_len);
+            head_ids.push(id);
+        }
+        let mut heads = Vec::with_capacity(head_ids.len());
+        for id in head_ids {
+            heads.push(
+                connection
+                    .query_row(
+                        "SELECT id, stream, closed_at, identity, wire
+                         FROM source_delivery_journal WHERE id = ?1",
+                        [id],
+                        source_delivery_journal_row,
+                    )
+                    .map_err(sqlite_error)?,
+            );
         }
         Ok(heads)
     }

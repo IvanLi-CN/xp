@@ -351,6 +351,71 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
 }
 
 #[test]
+fn source_delivery_hydration_shares_the_wire_budget_with_stream_heads() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let source_identity = identity();
+    let identity_wire = serde_json::to_vec(&source_identity).expect("serialize source identity");
+    let wire = vec![7_u8; 200 * 1024];
+    let streams = [
+        "runtime",
+        "path_health",
+        "traffic",
+        "connections",
+        "ip_usage",
+        "uptime",
+        "resource_metrics-v1",
+        "tombstone",
+    ];
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin source journal transaction");
+    for (sequence, stream) in streams.iter().enumerate() {
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, ?2, 100, ?3, ?4, 100, 'node-a', 1, ?5)",
+                rusqlite::params![
+                    format!("head-{stream}"),
+                    stream,
+                    &identity_wire,
+                    &wire,
+                    sequence as i64,
+                ],
+            )
+            .expect("insert oversized stream head");
+    }
+    transaction
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 8,
+                 pending_bytes = ?1,
+                 epoch_high_water = 1,
+                 order_repair_completed = 1
+             WHERE singleton = 1",
+            [wire.len() as i64 * streams.len() as i64],
+        )
+        .expect("record source journal statistics");
+    transaction
+        .commit()
+        .expect("commit source journal transaction");
+    drop(connection);
+    drop(storage);
+
+    let restored = load(temporary.path());
+    let page = restored.local_source_pending_segments_page();
+    assert!(page.len() <= 256);
+    assert!(
+        page.iter().map(|segment| segment.wire.len()).sum::<usize>()
+            <= crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+    );
+}
+
+#[test]
 fn source_delivery_stream_heads_use_the_stream_index() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
@@ -379,7 +444,11 @@ fn source_delivery_stream_heads_use_the_stream_index() {
 
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
     let heads = storage
-        .source_delivery_journal_stream_heads(&["connections".to_owned()])
+        .source_delivery_journal_stream_heads(
+            &["connections".to_owned()],
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+        )
         .expect("read requested stream head");
     assert_eq!(heads.len(), 1);
 

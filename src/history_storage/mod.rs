@@ -38,8 +38,9 @@ pub(crate) use repository::{
 #[allow(unused_imports)]
 pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_MAX_BYTES, SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS,
-    SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES, SourceDeliveryJournalPage,
-    SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
+    SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS, SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
+    SourceDeliveryJournalSummary,
 };
 pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
@@ -48,7 +49,6 @@ use startup::{
     fail_next_segment_keyset_index_for_test, take_segment_keyset_index_failure_for_test,
 };
 use startup::{open_backend, repository_history_is_external, sqlite_connection};
-
 const SQLITE_FILE: &str = "history.sqlite3";
 const SQLITE_STAGING_FILE: &str = "history.sqlite3.migrating";
 const JSON_FALLBACK_FILE: &str = "history.sqlite3.json-fallback";

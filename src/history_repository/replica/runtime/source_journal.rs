@@ -1,5 +1,6 @@
 use crate::history_sync::SignedSegment;
 use crate::state::history_storage::{
+    SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS, SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
     SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
 };
 use std::collections::BTreeSet;
@@ -333,9 +334,22 @@ impl RepositoryReplicaRuntime {
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
+        let stream_names = stream_names.into_iter().collect::<Vec<_>>();
+        let stream_heads = self
+            .storage
+            .source_delivery_journal_stream_heads(
+                &stream_names,
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let head_wire_bytes = stream_heads.iter().map(|row| row.wire.len()).sum::<usize>();
         let (rows, order_repairing) = match self
             .storage
-            .source_delivery_journal_page(256_usize.saturating_sub(stream_names.len()))
+            .source_delivery_journal_page_with_budget(
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS.saturating_sub(stream_heads.len()),
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES.saturating_sub(head_wire_bytes),
+            )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         {
             SourceDeliveryJournalPage::Ready(rows) => (rows, false),
@@ -344,10 +358,6 @@ impl RepositoryReplicaRuntime {
         if order_repairing {
             return Ok(false);
         }
-        let stream_heads = self
-            .storage
-            .source_delivery_journal_stream_heads(&stream_names.into_iter().collect::<Vec<_>>())
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let max_epoch = self
             .storage
             .source_delivery_journal_max_epoch()
@@ -363,7 +373,7 @@ impl RepositoryReplicaRuntime {
                 .filter(|epoch| *epoch <= i64::MAX as u64)
                 .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
             self.snapshot.local_source.epoch = next_epoch.max(1);
-            if let Some(row) = rows.first() {
+            if let Some(row) = rows.first().or_else(|| stream_heads.first()) {
                 self.snapshot.local_source.node_id = row.identity.node_id().as_str().to_owned();
             }
         }
