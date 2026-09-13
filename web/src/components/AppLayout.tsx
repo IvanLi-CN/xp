@@ -14,7 +14,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 				brand={{
 					name: "xp",
 					subtitle: "cluster manager",
-					markSrc: "/xp-mark.png",
+					logo: "xp-lockup",
 				}}
 				navGroups={[
 					{
