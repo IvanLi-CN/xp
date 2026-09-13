@@ -97,7 +97,8 @@
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
-  repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
+  repository SQLite boundary. Every peer tracks direct Vision/TCP Reality Mesh and Cloudflare Tunnel
+  health; managed XHTTP endpoints are excluded from the plain HTTPS Mesh path,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source
   or repository work may use its Raft-assigned Reality Mesh Reverse route, then its independently
   paced dynamic relay.
@@ -135,6 +136,10 @@
   data, so a large backlog cannot inflate the XP process working set. A capacity-suspended source
   skips only new capture and continues replaying existing rows; each source worker cycle processes
   at most four successful replay pages and stops immediately on a failed page.
+  Capacity and lifecycle Raft maintenance run concurrently with source capture and each has the
+  repository request budget as a deadline. A failed or timed-out maintenance write is logged and
+  retried on the next cycle; it never blocks source delivery, advances a source cursor, or removes
+  an unacknowledged journal row.
   When a bounded source page has pending segments, the gap page first includes any permanent gap
   whose end sequence immediately precedes a segment on that page, then fills the remaining slots
   from the persisted rotating gap cursor. This preserves the 64-gap bound and cursor ordering while

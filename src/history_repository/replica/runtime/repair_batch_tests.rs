@@ -42,7 +42,7 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
         .expect("segment id");
 
     let response = runtime
-        .repair_batch(&[segment_id.clone()])
+        .repair_batch(std::slice::from_ref(&segment_id))
         .expect("repair response");
     let response_id = response.response_id.clone().expect("response id");
     assert_eq!(
@@ -57,7 +57,7 @@ fn repair_response_id_accepts_only_the_same_returned_content() {
         response_id
     );
     runtime
-        .repair_batch_with_response_id(&[segment_id.clone()], Some(&response_id))
+        .repair_batch_with_response_id(std::slice::from_ref(&segment_id), Some(&response_id))
         .expect("same response accepted");
     assert!(
         runtime

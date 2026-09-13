@@ -15,8 +15,9 @@
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、
   node history、探针、管理 fan-out 与 SSE 共用进程级传输 bundle。托管 Mesh 使用 HTTP/2-only
   client，每 origin 最多保留一条 idle connection，idle timeout 为 120 秒；公网 direct/relay
-  fallback 使用独立的长期 client。空白 `access_host` 会直接选择公网 fallback，不会构造无效
-  Mesh URL。
+  fallback 使用独立的长期 client。只有 Vision/TCP managed-default endpoint 可生成 plain
+  HTTPS Mesh URL；XHTTP endpoint 保持 proxy-only，空白 `access_host` 与不兼容 transport 都
+  直接选择 Reverse/Public fallback，不会构造无效 Mesh URL。
 - durable local internal idempotency ledger。
 - Mesh status API、status SSE revision 与 System Status Web surface；复用 telemetry 记录 H2 请求、
   connection start、generation 与 `healthy` / `churning` / `unknown` 状态，不持久化 socket 地址。

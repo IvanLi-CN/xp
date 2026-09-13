@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate, identity, load, record,
@@ -108,6 +108,156 @@ fn ordinary_backfill_rejects_a_truncated_sequence_gap() {
         )
         .expect_err("ordinary backfill must reject a sequence gap");
     assert!(matches!(error, super::RepositoryRuntimeError::Protocol(_)));
+}
+
+#[test]
+fn tiered_handoff_bridges_a_retained_sequence_gap_before_repair_retry() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let next = segment(&key, 3, vec![record(b"next", false)], Some([42; 32]));
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+    let handoff = super::InitialPeerTieredHandoff {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_missing: 1,
+        last_missing: 2,
+        next_sequence: 3,
+        end_unix_seconds: 12,
+    };
+    runtime
+        .start_initial_peer_tiered_handoff("node-b", handoff.clone())
+        .expect("start tiered handoff");
+    runtime
+        .import_tiered_backfill_records(
+            (1..=2)
+                .map(|sequence| super::RepositoryTieredBackfillRecord {
+                    observed_at_unix_seconds: 12,
+                    source_node_id: "node-a".to_owned(),
+                    source_epoch: 7,
+                    stream: "runtime".to_owned(),
+                    sequence,
+                    subject_node_id: "subject-a".to_owned(),
+                    observer_node_id: "node-a".to_owned(),
+                    schema_id: "runtime.v1".to_owned(),
+                    schema_version: 1,
+                    record_key: format!("tiered-{sequence}").into_bytes(),
+                    payload: b"sample".to_vec(),
+                    tombstone: false,
+                })
+                .collect(),
+            12,
+            &["repository-a".to_owned()],
+            "repository-a",
+        )
+        .expect("import tiered records");
+    runtime
+        .update_initial_peer_backfill_checkpoint("node-b", None, BTreeMap::new(), true, true)
+        .expect("finish tiered export");
+    runtime
+        .complete_initial_peer_tiered_handoff("node-b", &handoff)
+        .expect("bridge tiered gap");
+
+    runtime
+        .receive_initial_backfill_wire_from_repository(
+            "cluster-a",
+            &identity,
+            &next.wire_bytes().expect("next wire"),
+            13,
+            &["repository-a".to_owned()],
+            "repository-a",
+        )
+        .expect("repair anchor after tiered bridge");
+    assert_eq!(
+        runtime
+            .receiver
+            .as_ref()
+            .expect("receiver")
+            .continuous_watermarks()[0]
+            .sequence(),
+        3
+    );
+    assert!(runtime.snapshot.gaps.iter().any(|gap| {
+        gap.first_sequence == 1
+            && gap.last_sequence == 2
+            && gap.permanent
+            && gap.reason.as_deref() == Some("source_retention_expired")
+    }));
+}
+
+#[test]
+fn tiered_handoff_detects_a_retained_anchor_without_a_previous_hash() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let anchor = segment(&key, 3, vec![record(b"anchor", false)], None);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+
+    let handoff = runtime
+        .tiered_handoff_for_sequence_gap(&anchor.wire_bytes().expect("anchor wire"))
+        .expect("detect tiered handoff")
+        .expect("retained anchor crosses the local watermark");
+
+    assert_eq!(handoff.first_missing, 1);
+    assert_eq!(handoff.last_missing, 2);
+    assert_eq!(handoff.next_sequence, 3);
+}
+
+#[test]
+fn tiered_handoff_does_not_repeat_after_the_retention_gap_is_recorded() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let anchor = segment(&key, 3, vec![record(b"anchor", false)], None);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+    runtime
+        .merge_replica_gaps_in_memory(&[super::RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            last_sequence: 2,
+            start_unix_seconds: 0,
+            end_unix_seconds: 12,
+            permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
+        }])
+        .expect("record retention gap");
+
+    assert!(
+        runtime
+            .tiered_handoff_for_sequence_gap(&anchor.wire_bytes().expect("anchor wire"))
+            .expect("detect repeated handoff")
+            .is_none()
+    );
 }
 
 #[test]
@@ -311,6 +461,52 @@ fn retained_anchor_checkpoint_and_segment_commit_retry_as_one_unit() {
         )
         .expect_err("retry must not consume a second retained allowance");
     assert!(matches!(error, super::RepositoryRuntimeError::Protocol(_)));
+}
+
+#[test]
+fn tiered_handoff_preserves_the_bounded_repair_request_for_retry() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    let pending = vec![
+        "anchor-segment".to_owned(),
+        "unavailable-segment".to_owned(),
+    ];
+    runtime
+        .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+            "node-b",
+            Some("summary-page".to_owned()),
+            pending.clone(),
+            Some("next-summary-page".to_owned()),
+            false,
+            true,
+            Some("bounded-response".to_owned()),
+            false,
+            false,
+            BTreeSet::new(),
+        )
+        .expect("persist bounded repair request");
+    let handoff = super::InitialPeerTieredHandoff {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+        first_missing: 1,
+        last_missing: 2,
+        next_sequence: 3,
+        end_unix_seconds: 12,
+    };
+    runtime
+        .start_initial_peer_tiered_handoff("node-b", handoff)
+        .expect("schedule tiered handoff");
+
+    let checkpoint = runtime
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("handoff checkpoint");
+    assert_eq!(checkpoint.summary_pending_segment_ids, pending);
+    assert_eq!(
+        checkpoint.retained_anchor_repair_response_id.as_deref(),
+        Some("bounded-response")
+    );
+    assert!(!checkpoint.retained_anchor_repair_response_seen);
 }
 
 #[test]

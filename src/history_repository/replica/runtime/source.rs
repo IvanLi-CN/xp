@@ -126,6 +126,48 @@ impl RepositoryReplicaRuntime {
         Ok(true)
     }
 
+    pub(crate) fn tiered_handoff_for_sequence_gap(
+        &self,
+        wire: &[u8],
+    ) -> Result<Option<InitialPeerTieredHandoff>, RepositoryRuntimeError> {
+        let segment = crate::history_sync::SignedSegment::from_wire(wire)?;
+        let first = segment.canonical().first_cursor();
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Ok(None);
+        };
+        let Some(watermark) = receiver.continuous_watermark(first)? else {
+            return Ok(None);
+        };
+        let Some(first_missing) = watermark.sequence().checked_add(1) else {
+            return Ok(None);
+        };
+        // The receiver already has a predecessor watermark, so a retained anchor does not need
+        // to carry its predecessor hash. The handoff records the omitted range before retrying
+        // the same anchor through the retained-anchor receive path.
+        if first.sequence() <= first_missing {
+            return Ok(None);
+        }
+        if self.snapshot.gaps.iter().any(|gap| {
+            gap.permanent
+                && gap.source_node_id == first.source_node_id()
+                && gap.source_epoch == first.source_epoch()
+                && gap.stream == first.stream()
+                && gap.first_sequence <= first_missing
+                && gap.last_sequence >= first.sequence().saturating_sub(1)
+        }) {
+            return Ok(None);
+        }
+        Ok(Some(InitialPeerTieredHandoff {
+            source_node_id: first.source_node_id().to_owned(),
+            source_epoch: first.source_epoch(),
+            stream: first.stream().to_owned(),
+            first_missing,
+            last_missing: first.sequence().saturating_sub(1),
+            next_sequence: first.sequence(),
+            end_unix_seconds: segment.canonical().opened_at_unix_seconds(),
+        }))
+    }
+
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
 
     pub(crate) fn queue_local_source_segments(

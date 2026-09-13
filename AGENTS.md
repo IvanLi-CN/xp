@@ -45,7 +45,8 @@
   rollback is unsupported.
 - Cluster history repositories persist their replica state in `${XP_DATA_DIR}/history.sqlite3` on
   each configured repository node. Membership, lifecycle and capacity are Raft-backed; repository
-  sync uses Reality Mesh and Cloudflare Tunnel/public origin as equal direct paths, then the
+  sync uses a managed-default Vision/TCP Reality Mesh path and Cloudflare Tunnel/public origin as
+  equal direct paths, then the
   Raft-assigned Reality Mesh Reverse relay, and only then the in-memory encrypted dynamic relay.
   Summary continuation resolves its opaque segment ID to the durable five-column keyset and seeks
   the additive `repository_history_segments_sync_order_v2` SQLite index; an existing database

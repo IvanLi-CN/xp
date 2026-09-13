@@ -167,7 +167,15 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         [_] if validate_reality_server_name(access_host).is_err() => {
             MeshPeerReason::InvalidAccessHost
         }
-        [_] => MeshPeerReason::MeshAvailable,
+        [endpoint] => {
+            let meta = managed_default_vless_endpoint(endpoint)
+                .expect("managed endpoint was filtered above");
+            if meta.transport.is_vision_tcp() {
+                MeshPeerReason::MeshAvailable
+            } else {
+                MeshPeerReason::UnsupportedTransport
+            }
+        }
         _ => MeshPeerReason::AmbiguousEndpoint,
     };
     let mesh_base_url = matches!(mesh_reason, MeshPeerReason::MeshAvailable)
@@ -588,6 +596,14 @@ impl MeshAwareHttpClient {
             && let Some(reverse_route) =
                 self.reverse_routes.read().await.get(&peer.node_id).cloned()
         {
+            // Keep one normal Mesh-sized slice for the public path. A short Raft TTL can be
+            // exhausted by the failed Mesh attempt plus Reverse otherwise, leaving the known
+            // reachable public origin no time to establish quorum.
+            let public_fallback_reserve = if allow_public_fallback {
+                mesh_attempt_budget(request.total_budget).min(request.total_budget)
+            } else {
+                Duration::ZERO
+            };
             let reverse_class = if request.route == InternalRoute::HealthV2 {
                 reverse::ReverseRequestClass::Health
             } else {
@@ -595,8 +611,9 @@ impl MeshAwareHttpClient {
             };
             for candidate in reverse_route.candidates() {
                 let elapsed = started.elapsed();
+                let remaining = request.total_budget.saturating_sub(elapsed);
                 let reverse_budget = route_budget(request.total_budget)
-                    .min(request.total_budget.saturating_sub(elapsed));
+                    .min(remaining.saturating_sub(public_fallback_reserve));
                 if reverse_budget.is_zero() {
                     break;
                 }

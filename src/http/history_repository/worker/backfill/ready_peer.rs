@@ -1,6 +1,7 @@
 use super::*;
 use crate::state::history_repository::replica::{
-    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, RetainedAnchorCheckpointUpdate,
+    InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
+    RetainedAnchorCheckpointUpdate,
 };
 
 struct CompletedRepairResponse {
@@ -33,6 +34,18 @@ fn completed_repair_response(
         response_complete: true,
         allowance_complete: page_complete,
     }
+}
+
+fn can_schedule_tiered_handoff(
+    checkpoint: &InitialPeerBackfillCheckpoint,
+    handoff: &InitialPeerTieredHandoff,
+) -> bool {
+    !checkpoint.retained_anchor_repair_response_seen
+        && !checkpoint.retained_anchor_streams.iter().any(|stream| {
+            stream.source_node_id == handoff.source_node_id
+                && stream.source_epoch == handoff.source_epoch
+                && stream.stream == handoff.stream
+        })
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -120,6 +133,26 @@ async fn advance_ready_peer_catch_up_page(
         .await
         .initial_peer_backfill_checkpoint(&peer.node_id)
         .unwrap_or_default();
+    if let Some(handoff) = checkpoint.summary_tiered_handoff.clone() {
+        let tiered_progress = pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+        if tiered_progress == InitialBackfillProgress::Complete {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .complete_initial_peer_tiered_handoff(&peer.node_id, &handoff)?;
+            tracing::info!(
+                peer = %peer.node_id,
+                source = %handoff.source_node_id,
+                stream = %handoff.stream,
+                first_missing = handoff.first_missing,
+                last_missing = handoff.last_missing,
+                "history repair tiered handoff completed"
+            );
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+        return Ok(tiered_progress);
+    }
     if !checkpoint.summary_pending_segment_ids.is_empty() {
         return repair_ready_peer_catch_up_page(state, peer, ready_repository_ids, now, checkpoint)
             .await;
@@ -236,7 +269,8 @@ async fn repair_ready_peer_catch_up_page(
     {
         anyhow::bail!("retained anchor repair response changed before completion");
     }
-    let mut remaining = pending;
+    let first_repair_response = !checkpoint.retained_anchor_repair_response_seen;
+    let mut remaining = pending.clone();
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
             anyhow::bail!("repository repair response did not advance the requested segment set");
@@ -254,6 +288,58 @@ async fn repair_ready_peer_catch_up_page(
         &mut remaining,
         &repair.unavailable_segment_ids,
     )?;
+    // A truncated repository can return a valid retained anchor (with no unavailable IDs) whose
+    // first segment starts after this receiver's watermark. Detect that sequence gap before
+    // applying any segment; otherwise the receive path rejects the anchor and retries forever.
+    if repair.history_truncated && first_repair_response {
+        let tiered_handoff = {
+            let runtime = state.repository_replica.lock().await;
+            repair
+                .segments
+                .iter()
+                .find_map(|segment| {
+                    runtime
+                        .tiered_handoff_for_sequence_gap(&segment.wire)
+                        .transpose()
+                })
+                .transpose()?
+        };
+        if let Some(tiered_handoff) =
+            tiered_handoff.filter(|handoff| can_schedule_tiered_handoff(&checkpoint, handoff))
+        {
+            // Do not remove any segment from the original request yet. The bounded response has
+            // not been received while the predecessor gap is bridged; retrying the same request
+            // keeps its response identity stable and lets the anchor be applied afterwards.
+            let pending_segment_ids = pending.iter().cloned().collect();
+            let repair_gaps = repair.gaps.clone();
+            let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
+            retained_anchor_streams.insert(InitialPeerRetainedAnchorStream {
+                source_node_id: tiered_handoff.source_node_id.clone(),
+                source_epoch: tiered_handoff.source_epoch,
+                stream: tiered_handoff.stream.clone(),
+            });
+            let mut runtime = state.repository_replica.lock().await;
+            runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
+            runtime.start_initial_peer_tiered_handoff(&peer.node_id, tiered_handoff)?;
+            runtime.update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+                &peer.node_id,
+                checkpoint.summary_cursor.clone(),
+                pending_segment_ids,
+                checkpoint.summary_pending_next_cursor.clone(),
+                false,
+                true,
+                Some(response_id),
+                false,
+                false,
+                retained_anchor_streams,
+            )?;
+            tracing::warn!(
+                peer = %peer.node_id,
+                "history repair page crossed retention boundary; tiered backfill scheduled"
+            );
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+    }
     if repair.segments.is_empty() && !repair.gaps.is_empty() {
         state
             .repository_replica
@@ -262,7 +348,6 @@ async fn repair_ready_peer_catch_up_page(
             .merge_replica_gaps(&repair.gaps)?;
     }
     let repair_gaps = repair.gaps;
-    let first_repair_response = !checkpoint.retained_anchor_repair_response_seen;
     let mut retained_anchor_streams = checkpoint.retained_anchor_streams.clone();
     for (index, segment) in repair.segments.into_iter().enumerate() {
         if !super::super::super::identity_is_valid_for_history_replay(state, &segment.identity)
@@ -368,5 +453,38 @@ mod tests {
         assert!(!response.summary_complete);
         assert!(response.response_complete);
         assert!(!response.allowance_complete);
+    }
+
+    #[test]
+    fn tiered_handoff_is_limited_to_the_first_unconsumed_repair_page_stream() {
+        let handoff = InitialPeerTieredHandoff {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_missing: 1,
+            last_missing: 2,
+            next_sequence: 3,
+            end_unix_seconds: 12,
+        };
+        assert!(can_schedule_tiered_handoff(
+            &InitialPeerBackfillCheckpoint::default(),
+            &handoff
+        ));
+
+        let mut stream_consumed = InitialPeerBackfillCheckpoint::default();
+        stream_consumed
+            .retained_anchor_streams
+            .insert(InitialPeerRetainedAnchorStream {
+                source_node_id: handoff.source_node_id.clone(),
+                source_epoch: handoff.source_epoch,
+                stream: handoff.stream.clone(),
+            });
+        assert!(!can_schedule_tiered_handoff(&stream_consumed, &handoff));
+
+        let later_page = InitialPeerBackfillCheckpoint {
+            retained_anchor_repair_response_seen: true,
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(!can_schedule_tiered_handoff(&later_page, &handoff));
     }
 }

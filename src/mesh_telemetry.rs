@@ -95,6 +95,7 @@ pub enum MeshPeerReason {
     MissingEndpoint,
     AmbiguousEndpoint,
     InvalidAccessHost,
+    UnsupportedTransport,
     NoSample,
     TransportTimeout,
     TransportError,

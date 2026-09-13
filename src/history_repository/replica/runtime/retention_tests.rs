@@ -439,6 +439,7 @@ fn peer_initial_backfill_checkpoint_survives_restart() {
             retained_anchor_repair_response_seen: false,
             retained_anchor_repair_response_id: None,
             retained_anchor_streams: std::collections::BTreeSet::new(),
+            summary_tiered_handoff: None,
         })
     );
 }
