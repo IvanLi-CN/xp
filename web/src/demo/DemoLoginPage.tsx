@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
+import { XpBrandLogo } from "../components/XpBrandLogo";
 import { Input } from "../components/ui/input";
 import {
 	Select,
@@ -32,12 +33,7 @@ export function DemoLoginPage() {
 			<div className="mx-auto grid min-h-[calc(100vh-5rem)] w-full max-w-6xl items-center gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
 				<section className="space-y-6">
 					<div className="flex items-center gap-3">
-						<img
-							src="/xp-mark.png"
-							alt=""
-							aria-hidden="true"
-							className="size-12 shrink-0"
-						/>
+						<XpBrandLogo kind="lockup" className="h-12 w-[10rem] shrink-0" />
 						<div>
 							<h1 className="text-3xl font-semibold tracking-tight">
 								xp Demo Site

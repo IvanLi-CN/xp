@@ -1,6 +1,7 @@
 import type { AdminMeshStatus } from "@/api/adminMesh";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
+import { XpBrandLogo } from "@/components/XpBrandLogo";
 import { SystemStatusSurface } from "@/views/SystemStatusPage";
 
 import { createDemoState } from "./fixtures";
@@ -318,7 +319,7 @@ export function UiDemoSystemStatusPage() {
 					<header className="xp-panel px-2 py-2 sm:px-4 sm:py-3">
 						<div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
 							<div className="flex min-w-0 items-center gap-2">
-								<img src="/xp-mark.png" alt="" className="size-6 shrink-0" />
+								<XpBrandLogo kind="mark" alt="" className="size-6 shrink-0" />
 								<span className="text-lg font-semibold">xp</span>
 								<span className="hidden text-sm text-muted-foreground sm:inline">
 									cluster manager

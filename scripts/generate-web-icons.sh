@@ -75,6 +75,8 @@ FAVICON16="$TMP/favicon-16x16.png"
 FAVICON32="$TMP/favicon-32x32.png"
 BICOLOR_SVG="$TMP/xp-logo-bicolor.svg"
 PINNED_TAB_SVG="$TMP/safari-pinned-tab.svg"
+LOCKUP_SVG="$TMP/xp-logo-lockup-horizontal.svg"
+LOCKUP_INVERSE_SVG="$TMP/xp-logo-lockup-horizontal-inverse.svg"
 
 # Build an alpha mask that keeps the icon body while removing the low-saturation gray background
 # (and the bottom-right sparkle). Then fill "holes" caused by white strokes/nodes.
@@ -107,6 +109,8 @@ rsvg-convert -w 512 -h 512 "$MASKABLE_IN" -o "$MASKABLE512"
 magick "$MARK_IN" -background none -trim +repage -resize 960x960 -gravity center -background none -extent 1024x1024 -resize 256x256 "$OUTDIR/xp-mark.png"
 cp "$ROOT/web/assets-src/xp-logo-bicolor.svg" "$BICOLOR_SVG"
 cp "$ROOT/web/assets-src/xp-logo-monochrome.svg" "$PINNED_TAB_SVG"
+cp "$ROOT/web/assets-src/xp-logo-lockup-horizontal.svg" "$LOCKUP_SVG"
+cp "$ROOT/web/assets-src/xp-logo-lockup-horizontal-inverse.svg" "$LOCKUP_INVERSE_SVG"
 
 # Keep stable legacy aliases for existing installations, while all current
 # install metadata points at content-versioned URLs below.
@@ -120,13 +124,17 @@ cp "$MASKABLE192" "$OUTDIR/android-chrome-192x192-maskable.png"
 cp "$MASKABLE512" "$OUTDIR/android-chrome-512x512-maskable.png"
 cp "$BICOLOR_SVG" "$OUTDIR/xp-logo-bicolor.svg"
 cp "$PINNED_TAB_SVG" "$OUTDIR/safari-pinned-tab.svg"
+cp "$LOCKUP_SVG" "$OUTDIR/xp-logo-lockup-horizontal.svg"
+cp "$LOCKUP_INVERSE_SVG" "$OUTDIR/xp-logo-lockup-horizontal-inverse.svg"
 
 ICON_VERSION="$(printf '%s\n' \
 	"$(sha256_file "$ICON_IN")" \
 	"$(sha256_file "$MARK_IN")" \
 	"$(sha256_file "$MASKABLE_IN")" \
 	"$(sha256_file "$ROOT/web/assets-src/xp-logo-bicolor.svg")" \
-	"$(sha256_file "$ROOT/web/assets-src/xp-logo-monochrome.svg")" | sha256_stdin | cut -c 1-12)"
+	"$(sha256_file "$ROOT/web/assets-src/xp-logo-monochrome.svg")" \
+	"$(sha256_file "$ROOT/web/assets-src/xp-logo-lockup-horizontal.svg")" \
+	"$(sha256_file "$ROOT/web/assets-src/xp-logo-lockup-horizontal-inverse.svg")" | sha256_stdin | cut -c 1-12)"
 
 versioned_name() {
   printf '%s.%s.%s\n' "$1" "$ICON_VERSION" "$2"
@@ -142,6 +150,8 @@ MASKABLE192_V="$(versioned_name android-chrome-192x192-maskable png)"
 MASKABLE512_V="$(versioned_name android-chrome-512x512-maskable png)"
 BICOLOR_SVG_V="$(versioned_name xp-logo-bicolor svg)"
 PINNED_TAB_SVG_V="$(versioned_name safari-pinned-tab svg)"
+LOCKUP_SVG_V="$(versioned_name xp-logo-lockup-horizontal svg)"
+LOCKUP_INVERSE_SVG_V="$(versioned_name xp-logo-lockup-horizontal-inverse svg)"
 
 # Remove only previously generated content-versioned files. Stable aliases are
 # retained for older installed clients and are not referenced by new metadata.
@@ -156,6 +166,8 @@ find "$OUTDIR" -maxdepth 1 -type f \( \
   -o -name 'android-chrome-512x512-maskable.*.png' \
   -o -name 'xp-logo-bicolor.*.svg' \
   -o -name 'safari-pinned-tab.*.svg' \
+  -o -name 'xp-logo-lockup-horizontal.*.svg' \
+  -o -name 'xp-logo-lockup-horizontal-inverse.*.svg' \
 \) -delete
 
 cp "$FAVICON" "$OUTDIR/$FAVICON_V"
@@ -168,6 +180,8 @@ cp "$MASKABLE192" "$OUTDIR/$MASKABLE192_V"
 cp "$MASKABLE512" "$OUTDIR/$MASKABLE512_V"
 cp "$BICOLOR_SVG" "$OUTDIR/$BICOLOR_SVG_V"
 cp "$PINNED_TAB_SVG" "$OUTDIR/$PINNED_TAB_SVG_V"
+cp "$LOCKUP_SVG" "$OUTDIR/$LOCKUP_SVG_V"
+cp "$LOCKUP_INVERSE_SVG" "$OUTDIR/$LOCKUP_INVERSE_SVG_V"
 
 cat > "$ASSET_META" <<EOF
 {
@@ -181,7 +195,9 @@ cat > "$ASSET_META" <<EOF
 	"maskable192": "$MASKABLE192_V",
 	"maskable512": "$MASKABLE512_V",
 	"bicolorSvg": "$BICOLOR_SVG_V",
-	"pinnedTabSvg": "$PINNED_TAB_SVG_V"
+	"pinnedTabSvg": "$PINNED_TAB_SVG_V",
+	"lockupSvg": "$LOCKUP_SVG_V",
+	"lockupInverseSvg": "$LOCKUP_INVERSE_SVG_V"
 }
 EOF
 

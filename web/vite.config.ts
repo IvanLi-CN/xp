@@ -32,6 +32,8 @@ const iconAssets = JSON.parse(
 	maskable512: string;
 	bicolorSvg: string;
 	pinnedTabSvg: string;
+	lockupSvg: string;
+	lockupInverseSvg: string;
 };
 
 function resolveBuildId() {
@@ -234,6 +236,8 @@ export default defineConfig(({ mode }) => {
 					iconAssets.maskable192,
 					iconAssets.maskable512,
 					"xp-mark.png",
+					iconAssets.lockupSvg,
+					iconAssets.lockupInverseSvg,
 				],
 				manifest: {
 					name: "xp",

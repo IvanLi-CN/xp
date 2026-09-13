@@ -24,11 +24,13 @@ describe("<AppLayout />", () => {
 
 		expect(mockAppShell).toHaveBeenCalledTimes(1);
 		const props = mockAppShell.mock.calls[0]?.[0] as unknown as {
+			brand: { logo?: string };
 			navGroups: Array<{
 				title: string;
 				items: Array<{ label: string; to: string }>;
 			}>;
 		};
+		expect(props.brand.logo).toBe("xp-lockup");
 		const settingsGroup = props.navGroups.find(
 			(group) => group.title === "Settings",
 		);

@@ -8,6 +8,7 @@ import { verifyAdminToken } from "../api/adminAuth";
 import { isBackendApiError } from "../api/backendError";
 import { isStaticWebConsole } from "../backend/primaryBackend";
 import { Button } from "../components/Button";
+import { XpBrandLogo } from "../components/XpBrandLogo";
 import {
 	ADMIN_TOKEN_STORAGE_KEY,
 	clearAdminToken,
@@ -130,13 +131,8 @@ export function LoginPage({
 		<div className="flex min-h-screen items-center justify-center bg-muted/35 px-6 py-10">
 			<div className="xp-card w-full max-w-lg">
 				<div className="xp-card-body space-y-5">
-					<div className="flex items-start gap-3">
-						<img
-							src="/xp-mark.png"
-							alt=""
-							aria-hidden="true"
-							className="size-12 shrink-0"
-						/>
+					<div className="flex items-start gap-4">
+						<XpBrandLogo kind="lockup" className="h-12 w-[10rem] shrink-0" />
 						<div className="space-y-1">
 							<h1 className="text-2xl font-semibold tracking-tight">
 								Admin login

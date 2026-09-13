@@ -1005,6 +1005,8 @@ async fn ui_serves_favicon_and_manifest() {
     let cases = [
         ("/favicon.ico", "image/x-icon"),
         ("/xp-logo-bicolor.svg", "image/svg+xml"),
+        ("/xp-logo-lockup-horizontal.svg", "image/svg+xml"),
+        ("/xp-logo-lockup-horizontal-inverse.svg", "image/svg+xml"),
         ("/safari-pinned-tab.svg", "image/svg+xml"),
         ("/favicon-16x16.png", "image/png"),
         ("/favicon-32x32.png", "image/png"),
