@@ -223,6 +223,44 @@ fn tiered_handoff_detects_a_retained_anchor_without_a_previous_hash() {
 }
 
 #[test]
+fn tiered_handoff_does_not_repeat_after_the_retention_gap_is_recorded() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let anchor = segment(&key, 3, vec![record(b"anchor", false)], None);
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+    runtime
+        .merge_replica_gaps_in_memory(&[super::RepositoryReplicaGap {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            first_sequence: 1,
+            last_sequence: 2,
+            start_unix_seconds: 0,
+            end_unix_seconds: 12,
+            permanent: true,
+            reason: Some("source_retention_expired".to_owned()),
+        }])
+        .expect("record retention gap");
+
+    assert!(
+        runtime
+            .tiered_handoff_for_sequence_gap(&anchor.wire_bytes().expect("anchor wire"))
+            .expect("detect repeated handoff")
+            .is_none()
+    );
+}
+
+#[test]
 fn retained_sequence_gap_is_allowed_once_for_a_later_repair_page() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

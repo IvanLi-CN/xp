@@ -147,6 +147,16 @@ impl RepositoryReplicaRuntime {
         if first.sequence() <= first_missing {
             return Ok(None);
         }
+        if self.snapshot.gaps.iter().any(|gap| {
+            gap.permanent
+                && gap.source_node_id == first.source_node_id()
+                && gap.source_epoch == first.source_epoch()
+                && gap.stream == first.stream()
+                && gap.first_sequence <= first_missing
+                && gap.last_sequence >= first.sequence().saturating_sub(1)
+        }) {
+            return Ok(None);
+        }
         Ok(Some(InitialPeerTieredHandoff {
             source_node_id: first.source_node_id().to_owned(),
             source_epoch: first.source_epoch(),
