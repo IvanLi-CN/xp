@@ -175,9 +175,7 @@ impl HttpNetwork {
 
         let resp = if let Some(mesh_auth) = &self.mesh_auth {
             let body = serde_json::to_vec(req).context("serialize raft rpc")?;
-            let target =
-                mesh_target_for_raft(&mesh_auth.store, self.target, &self.base, &self.target_node)
-                    .await;
+            let target = mesh_target_for_raft(&mesh_auth.store, self.target).await?;
             configure_reverse_route_for_raft(&mesh_auth.store, &self.client, &target).await;
             self.client
                 .send_peer_request(
@@ -225,9 +223,7 @@ impl HttpNetwork {
 async fn mesh_target_for_raft(
     store: &Arc<Mutex<JsonSnapshotStore>>,
     target_raft_id: NodeId,
-    raft_base_url: &str,
-    target_node: &NodeMeta,
-) -> MeshPeerTarget {
+) -> anyhow::Result<MeshPeerTarget> {
     let store = store.lock().await;
     // Raft membership owns the target identity. Never infer it from a URL: stale local state can
     // retain an old node row with the same endpoint, and signing with that row would be rejected
@@ -236,16 +232,12 @@ async fn mesh_target_for_raft(
         crate::raft::types::raft_node_id_from_ulid(&node.node_id)
             .is_ok_and(|node_id| node_id == target_raft_id)
     });
-    let Some(peer) = peer else {
-        return MeshPeerTarget {
-            node_id: target_node.name.clone(),
-            node_name: target_node.name.clone(),
-            mesh_base_url: None,
-            mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
-            public_base_url: raft_base_url.to_string(),
-        };
-    };
-    peer_target_from_node(&peer, &store.list_endpoints())
+    let peer = peer.ok_or_else(|| {
+        anyhow::anyhow!(
+            "raft target {target_raft_id} is missing from the local node registry; refusing to send"
+        )
+    })?;
+    Ok(peer_target_from_node(&peer, &store.list_endpoints()))
 }
 
 async fn configure_reverse_route_for_raft(
@@ -397,19 +389,12 @@ mod tests {
             })
             .expect("insert current node");
         let store = Arc::new(Mutex::new(store));
-        let target_node = NodeMeta {
-            name: xp_test_fixtures::secondary_node_name().to_owned(),
-            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
-        };
-
         let target = mesh_target_for_raft(
             &store,
             raft_node_id_from_ulid(current_id).expect("current raft id"),
-            xp_test_fixtures::secondary_api_url(),
-            &target_node,
         )
-        .await;
+        .await
+        .expect("current membership target must resolve");
 
         assert_eq!(
             raft_node_id_from_ulid(&target.node_id).expect("target node id"),
@@ -440,25 +425,17 @@ mod tests {
             })
             .expect("insert stale node");
         let store = Arc::new(Mutex::new(store));
-        let target_node = NodeMeta {
-            name: xp_test_fixtures::secondary_node_name().to_owned(),
-            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
-            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
-        };
-
         let target = mesh_target_for_raft(
             &store,
             raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_c()).expect("target raft id"),
-            xp_test_fixtures::secondary_api_url(),
-            &target_node,
         )
-        .await;
+        .await
+        .expect_err("unknown membership target must not produce a sendable peer");
 
-        assert_eq!(target.node_id, target_node.name);
-        assert!(target.mesh_base_url.is_none());
-        assert_eq!(
-            target.public_base_url,
-            xp_test_fixtures::secondary_api_url()
+        assert!(
+            target
+                .to_string()
+                .contains("missing from the local node registry")
         );
     }
 }
