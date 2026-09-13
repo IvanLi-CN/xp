@@ -269,7 +269,7 @@ fn source_delivery_replay_page_is_bounded() {
     }
 
     let page = runtime.local_source_pending_segments_page();
-    assert_eq!(page.len(), 256);
+    assert!(page.len() <= 256);
     assert!(page.iter().map(|segment| segment.wire.len()).sum::<usize>() <= 1024 * 1024);
 }
 
@@ -348,4 +348,60 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
 
     assert!(head_cursors.contains(&("connections".to_owned(), 0)));
     assert!(head_cursors.contains(&("resource_metrics-v1".to_owned(), 0)));
+}
+
+#[test]
+fn source_delivery_stream_heads_use_the_stream_index() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    for sequence in 0..300_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "connections.v1",
+                    1,
+                    format!("connection:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue connections backlog");
+    }
+    drop(runtime);
+
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let heads = storage
+        .source_delivery_journal_stream_heads(&["connections".to_owned()])
+        .expect("read requested stream head");
+    assert_eq!(heads.len(), 1);
+
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    let plan = connection
+        .prepare(
+            "EXPLAIN QUERY PLAN
+             SELECT id, stream, closed_at, identity, wire
+             FROM source_delivery_journal
+             WHERE stream = 'connections'
+             ORDER BY source_node_id, source_epoch, first_sequence, created_at, id
+             LIMIT 1",
+        )
+        .expect("prepare stream-head plan")
+        .query_map([], |row| row.get::<_, String>(3))
+        .expect("read stream-head plan")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("collect stream-head plan")
+        .join(" ");
+    assert!(
+        plan.contains("source_delivery_journal_cursor_order"),
+        "stream head must use the bounded stream index: {plan}"
+    );
 }

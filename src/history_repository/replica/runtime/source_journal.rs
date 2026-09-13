@@ -317,12 +317,25 @@ impl RepositoryReplicaRuntime {
         if !legacy_rows.is_empty() {
             self.snapshot.local_source.clear_pending();
         }
+        let stream_names = self
+            .snapshot
+            .local_source
+            .streams
+            .keys()
+            .cloned()
+            .chain(
+                super::KNOWN_SCHEMAS
+                    .iter()
+                    .filter_map(|(schema, _)| super::stream_for_schema(schema))
+                    .map(ToOwned::to_owned),
+            )
+            .collect::<BTreeSet<_>>();
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
         let (rows, order_repairing) = match self
             .storage
-            .source_delivery_journal_page(256)
+            .source_delivery_journal_page(256_usize.saturating_sub(stream_names.len()))
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         {
             SourceDeliveryJournalPage::Ready(rows) => (rows, false),
@@ -333,7 +346,7 @@ impl RepositoryReplicaRuntime {
         }
         let stream_heads = self
             .storage
-            .source_delivery_journal_stream_heads()
+            .source_delivery_journal_stream_heads(&stream_names.into_iter().collect::<Vec<_>>())
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let max_epoch = self
             .storage
