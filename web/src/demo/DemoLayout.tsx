@@ -34,6 +34,7 @@ import {
 	type ResourceNavigationGroup,
 } from "../components/ResourceNavigation";
 import { ToastProvider } from "../components/Toast";
+import { XpBrandLogo } from "../components/XpBrandLogo";
 import {
 	Sheet,
 	SheetContent,
@@ -350,12 +351,7 @@ function DemoShell({ children }: { children: ReactNode }) {
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</Button>
 								<Link to="/demo" className="flex min-w-0 items-center gap-2">
-									<img
-										src="/xp-mark.png"
-										alt=""
-										aria-hidden="true"
-										className="size-7 shrink-0"
-									/>
+									<XpBrandLogo kind="mark" alt="" className="size-7 shrink-0" />
 									<div className="min-w-0">
 										<p className="text-lg font-semibold leading-tight">
 											xp demo

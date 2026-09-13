@@ -10,6 +10,7 @@ import {
 import { Button } from "./Button";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
+import { XpBrandLogo } from "./XpBrandLogo";
 
 type FrameworkErrorRecoveryProps = {
 	error: unknown;
@@ -185,15 +186,8 @@ export function FrameworkErrorRecovery({
 		>
 			<div className="mx-auto w-full max-w-lg">
 				<div className="mb-10 flex items-center gap-2.5 text-muted-foreground">
-					<img
-						src="/xp-mark.png"
-						alt=""
-						aria-hidden="true"
-						className="size-8 shrink-0"
-					/>
+					<XpBrandLogo kind="lockup" className="h-9 w-[7.55rem] shrink-0" />
 					<div className="text-sm">
-						<span className="font-semibold text-foreground">xp</span>
-						<span className="mx-2 text-border">/</span>
 						<span>cluster manager</span>
 					</div>
 				</div>

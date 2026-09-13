@@ -53,6 +53,35 @@ async fn ui_serves_versioned_icon_manifest() {
         "/web/assets-src/icon-assets.json"
     )))
     .unwrap();
+    let lockup_light = icon_assets["lockupSvg"].as_str().unwrap();
+    let lockup_inverse = icon_assets["lockupInverseSvg"].as_str().unwrap();
+    let lockup_light_path = format!("/{lockup_light}");
+    let light_response = app
+        .clone()
+        .oneshot(req("GET", &lockup_light_path))
+        .await
+        .unwrap();
+    assert_eq!(
+        light_response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/svg+xml"
+    );
+    let lockup_inverse_path = format!("/{lockup_inverse}");
+    let inverse_response = app
+        .clone()
+        .oneshot(req("GET", &lockup_inverse_path))
+        .await
+        .unwrap();
+    assert_eq!(
+        inverse_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap(),
+        "image/svg+xml"
+    );
+    assert_ne!(
+        body_bytes(light_response).await,
+        body_bytes(inverse_response).await
+    );
     for key in ["appleTouch", "maskable192", "maskable512"] {
         let src = format!("/{}", icon_assets[key].as_str().unwrap());
         let response = app.clone().oneshot(req("GET", &src)).await.unwrap();

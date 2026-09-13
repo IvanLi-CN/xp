@@ -88,6 +88,7 @@ import { PrimaryBackendSwitcher } from "./PrimaryBackendSwitcher";
 import { ReadStateIndicator } from "./ReadStateIndicator";
 import { useUiPrefs } from "./UiPrefs";
 import { VersionIndicator } from "./VersionIndicator";
+import { XpBrandLogo } from "./XpBrandLogo";
 import { clearAdminToken, readAdminToken } from "./auth";
 import { inputClass } from "./ui-helpers";
 import {
@@ -99,7 +100,12 @@ import {
 } from "./versionCheckUi";
 
 type AppShellProps = {
-	brand: { name: string; subtitle?: string; markSrc?: string };
+	brand: {
+		name: string;
+		subtitle?: string;
+		markSrc?: string;
+		logo?: "xp-lockup";
+	};
 	navItems?: Array<{ label: string; to: string; icon: string }>;
 	navGroups?: AppNavigationGroup[];
 	headerStatus?: ReactNode;
@@ -759,7 +765,12 @@ export function AppShell({
 									<Icon name="tabler:menu-2" ariaLabel="Menu" />
 								</Button>
 								<Link to="/" className="flex min-w-0 items-center gap-2">
-									{brand.markSrc ? (
+									{brand.logo === "xp-lockup" ? (
+										<XpBrandLogo
+											kind="lockup"
+											className="block h-8 w-[6.7rem] shrink-0 sm:h-9 sm:w-[7.55rem]"
+										/>
+									) : brand.markSrc ? (
 										<img
 											src={brand.markSrc}
 											alt=""
@@ -767,9 +778,11 @@ export function AppShell({
 											className="size-6 shrink-0"
 										/>
 									) : null}
-									<span className="text-lg font-semibold tracking-tight">
-										{brand.name}
-									</span>
+									{brand.logo === "xp-lockup" ? null : (
+										<span className="text-lg font-semibold tracking-tight">
+											{brand.name}
+										</span>
+									)}
 									{brand.subtitle ? (
 										<span className="hidden truncate text-sm text-muted-foreground sm:inline">
 											{brand.subtitle}
