@@ -167,7 +167,15 @@ pub fn peer_target_from_node(node: &Node, endpoints: &[Endpoint]) -> MeshPeerTar
         [_] if validate_reality_server_name(access_host).is_err() => {
             MeshPeerReason::InvalidAccessHost
         }
-        [_] => MeshPeerReason::MeshAvailable,
+        [endpoint] => {
+            let meta = managed_default_vless_endpoint(endpoint)
+                .expect("managed endpoint was filtered above");
+            if meta.transport.is_vision_tcp() {
+                MeshPeerReason::MeshAvailable
+            } else {
+                MeshPeerReason::UnsupportedTransport
+            }
+        }
         _ => MeshPeerReason::AmbiguousEndpoint,
     };
     let mesh_base_url = matches!(mesh_reason, MeshPeerReason::MeshAvailable)

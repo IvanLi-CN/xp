@@ -372,6 +372,12 @@ fn managed_vless_endpoint(_endpoint_id: &str, port: u16) -> Endpoint {
     }
 }
 
+fn managed_xhttp_endpoint(port: u16) -> Endpoint {
+    let mut endpoint = managed_vless_endpoint("xhttp", port);
+    endpoint.meta["transport"] = serde_json::json!("xhttp");
+    endpoint
+}
+
 #[test]
 fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     let node = peer_node();
@@ -444,6 +450,16 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     );
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
+}
+
+#[test]
+fn peer_target_skips_xhttp_endpoint_for_control_plane_mesh() {
+    let node = peer_node();
+    let target = peer_target_from_node(&node, &[managed_xhttp_endpoint(443)]);
+
+    assert!(target.mesh_base_url.is_none());
+    assert_eq!(target.mesh_reason, MeshPeerReason::UnsupportedTransport);
+    assert_eq!(target.public_base_url, node.api_base_url);
 }
 
 #[tokio::test]

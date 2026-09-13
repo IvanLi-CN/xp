@@ -278,8 +278,10 @@ Contract:
 
 ## Reality fallback control-plane Mesh
 
-When a peer has exactly one managed-default VLESS/REALITY endpoint, XP derives
-`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. The canary keeps
+When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
+`https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints
+are proxy-only and are excluded from this plain HTTPS route, so XP uses the existing Reverse/Public
+fallbacks for control-plane traffic. The canary keeps
 ordinary `/generate_204` and authority-based camouflage traffic separate from Mesh traffic:
 
 - signed `health-v2` requests reach only the bodyless Mesh health endpoint;
@@ -450,10 +452,12 @@ Mesh read-only diagnosis:
   `mesh_reason`, breaker state, current path, and the latest sample timestamp.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
-- `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration
-  capability failures. `transport_timeout`, `transport_error`, and `protocol_rejected` mean the
-  Mesh target exists but the directed transport or protocol failed. A public success with
-  `fallback_active` is end-to-end success, not Mesh availability.
+- `missing_endpoint`, `ambiguous_endpoint`, `invalid_access_host`, and `unsupported_transport`
+  are configuration capability failures. `unsupported_transport` means the managed endpoint is
+  XHTTP, which is a user-proxy transport and not a plain HTTPS control-plane Mesh listener.
+  `transport_timeout`, `transport_error`, and `protocol_rejected` mean the Mesh target exists but
+  the directed transport or protocol failed. A public success with `fallback_active` is end-to-end
+  success, not Mesh availability.
 - This audit is read-only: do not edit endpoint metadata, restart Xray/XP, reset breakers, or
   remove cluster members as part of diagnosis.
 

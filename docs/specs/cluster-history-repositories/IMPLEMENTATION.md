@@ -97,7 +97,8 @@
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.
 - Incremental sync transport and path selection: accepted signed segment state is restored from the
-  repository SQLite boundary. Every peer tracks direct Reality Mesh and Cloudflare Tunnel health,
+  repository SQLite boundary. Every peer tracks direct Vision/TCP Reality Mesh and Cloudflare Tunnel
+  health; managed XHTTP endpoints are excluded from the plain HTTPS Mesh path,
   keeps a stable path with hysteresis, and probes the standby path at low frequency before source
   or repository work may use its Raft-assigned Reality Mesh Reverse route, then its independently
   paced dynamic relay.

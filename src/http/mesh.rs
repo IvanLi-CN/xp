@@ -1521,10 +1521,10 @@ pub(super) async fn send_mesh_internal_capability_read(
     let response = if matches!(
         peer.mesh_reason,
         crate::mesh_telemetry::MeshPeerReason::MissingEndpoint
+            | crate::mesh_telemetry::MeshPeerReason::UnsupportedTransport
     ) {
-        // A voter without a VLESS/REALITY Mesh endpoint must still prove capability through its
-        // registered control-plane origin using the same Mesh-v2 request signature and
-        // acknowledgement checks; a Mesh-capable peer never takes this path.
+        // A voter without an eligible VLESS/REALITY Mesh endpoint must still prove capability
+        // through its registered control-plane origin using the same Mesh-v2 request signature.
         client
             .send_peer_direct_request(
                 &peer,
