@@ -807,6 +807,11 @@ impl RepositoryReplicaRuntime {
             .map(|state| state.next_sequence)
     }
 
+    #[cfg(test)]
+    pub(crate) fn local_source_replay_window_cursor(&self) -> Option<&str> {
+        self.snapshot.local_source.replay_window_cursor.as_deref()
+    }
+
     pub(crate) fn local_source_tombstones_fully_acknowledged(
         &self,
         _source_node_id: &str,

@@ -244,9 +244,6 @@ impl RepositoryReplicaRuntime {
                 self.snapshot = previous_snapshot;
                 return Err(error);
             }
-            if replay_stream_cursor.is_some() {
-                self.snapshot.local_source.replay_window_cursor = None;
-            }
             self.hydrate_source_delivery_journal()?;
         }
         Ok(())

@@ -775,6 +775,12 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
         )
         .expect("read replay cursor after partial ack");
     assert_eq!(cursor_after_ack.as_deref(), Some("runtime"));
+    assert_eq!(runtime.local_source_replay_window_cursor(), Some("runtime"));
+    let second_page = runtime.local_source_pending_segments();
+    runtime
+        .acknowledge_local_source_segment_via(&second_page[0].wire, 201, "direct")
+        .expect("acknowledge second replay head");
+    assert_eq!(runtime.local_source_replay_window_cursor(), Some("runtime"));
     drop(runtime);
 
     let restarted = load(temporary.path());
