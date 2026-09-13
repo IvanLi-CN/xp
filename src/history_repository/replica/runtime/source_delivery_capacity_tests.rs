@@ -1,6 +1,51 @@
 use super::*;
 use sha2::Sha256;
 
+pub(crate) fn append_signed_source_journal_rows(
+    path: &std::path::Path,
+    key: &SigningKey,
+    source_identity: &crate::state::history_repository::identity::RepositoryNodeIdentity,
+    stream: &str,
+    schema: &str,
+    sequences: std::ops::Range<u64>,
+) {
+    let rows = sequences
+        .map(|sequence| {
+            let wire = CanonicalSegment::new(
+                "cluster-a",
+                Cursor::new("node-a", 1, stream, sequence).expect("cursor"),
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    schema,
+                    1,
+                    format!("{stream}:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                None,
+                sequence,
+                sequence,
+            )
+            .expect("segment")
+            .sign(key)
+            .expect("sign segment")
+            .wire_bytes()
+            .expect("encode segment");
+            crate::state::history_storage::SourceDeliveryJournalRow {
+                id: hex::encode(Sha256::digest(&wire)),
+                stream: stream.to_owned(),
+                closed_at_unix_seconds: sequence,
+                identity: source_identity.clone(),
+                wire,
+            }
+        })
+        .collect::<Vec<_>>();
+    crate::state::history_repository::HistoryStorage::open(path)
+        .append_source_delivery_journal(&rows)
+        .expect("append signed source journal rows");
+}
+
 #[test]
 fn source_delivery_capacity_guard_preserves_cursor_and_backlog() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -249,7 +294,7 @@ fn source_delivery_replay_page_is_bounded() {
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let source_identity = identity();
     let mut runtime = load(temporary.path());
-    for sequence in 0..300_u64 {
+    for sequence in 0..256_u64 {
         runtime
             .queue_local_source_segment(
                 "cluster-a",
@@ -281,7 +326,7 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
     let source_identity = identity();
     let mut runtime = load(temporary.path());
 
-    for sequence in 0..300_u64 {
+    for sequence in 0..256_u64 {
         runtime
             .queue_local_source_segment(
                 "cluster-a",
@@ -319,24 +364,7 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
         .expect("queue resource backlog");
     drop(runtime);
 
-    let mut restored = load(temporary.path());
-    restored
-        .queue_local_source_segment(
-            "cluster-a",
-            source_identity,
-            &signing_key,
-            vec![SyncRecord::new(
-                "node-a",
-                "node-a",
-                "resource_metrics.v1",
-                1,
-                b"resource:1".to_vec(),
-                b"sample".to_vec(),
-                false,
-            )],
-            301,
-        )
-        .expect("queue resource after restore");
+    let restored = load(temporary.path());
     let heads = restored.local_source_pending_segments();
     let head_cursors = heads
         .iter()
@@ -349,6 +377,76 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
 
     assert!(head_cursors.contains(&("connections".to_owned(), 0)));
     assert!(head_cursors.contains(&("resource_metrics-v1".to_owned(), 0)));
+}
+
+#[test]
+fn source_delivery_pauses_capture_while_a_stream_tail_is_still_on_disk() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+
+    for sequence in 0..256_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "connections.v1",
+                    1,
+                    format!("connection:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue connections backlog");
+    }
+    drop(runtime);
+
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "connections",
+        "connections.v1",
+        256..257,
+    );
+
+    let mut restarted = load(temporary.path());
+    assert!(
+        restarted
+            .source_delivery_capture_paused()
+            .expect("read source capture guard")
+    );
+    let result = restarted.queue_local_source_segment(
+        "cluster-a",
+        source_identity,
+        &signing_key,
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "connections.v1",
+            1,
+            b"connection:257".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        257,
+    );
+    assert!(
+        result
+            .expect_err("capture must wait for the durable stream tail")
+            .to_string()
+            .contains("source delivery journal has unloaded durable tail")
+    );
+    assert_eq!(
+        restarted.local_source_next_sequence("connections"),
+        Some(256)
+    );
 }
 
 #[test]
@@ -799,11 +897,11 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
     assert_eq!(
         next_streams,
         [
-            "connections",
             "ip_usage",
             "path_health",
+            "resource_metrics-v1",
             "service_monitor_observation-v1",
-            "traffic"
+            "traffic",
         ]
     );
 }
@@ -814,7 +912,7 @@ fn source_delivery_stream_heads_use_the_stream_index() {
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let source_identity = identity();
     let mut runtime = load(temporary.path());
-    for sequence in 0..300_u64 {
+    for sequence in 0..256_u64 {
         runtime
             .queue_local_source_segment(
                 "cluster-a",

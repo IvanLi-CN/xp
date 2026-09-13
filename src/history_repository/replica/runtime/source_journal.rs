@@ -30,6 +30,28 @@ impl LocalSourceState {
 }
 
 impl RepositoryReplicaRuntime {
+    fn source_delivery_journal_has_unloaded_tail(&self) -> Result<bool, RepositoryRuntimeError> {
+        let pending_by_stream = self
+            .snapshot
+            .local_source
+            .streams
+            .iter()
+            .map(|(stream, state)| (stream.clone(), state.pending.len()))
+            .collect::<BTreeMap<_, _>>();
+        self.storage
+            .source_delivery_journal_has_unloaded_tail(&pending_by_stream)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
+    fn ensure_source_delivery_capture_ready(&self) -> Result<(), RepositoryRuntimeError> {
+        if self.source_delivery_journal_has_unloaded_tail()? {
+            return Err(RepositoryRuntimeError::Storage(
+                "source delivery journal has unloaded durable tail".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn local_source_backpressure_gaps(
         &mut self,
         source_node_id: &str,
@@ -293,6 +315,9 @@ impl RepositoryReplicaRuntime {
         {
             return Ok(true);
         }
+        if self.source_delivery_journal_has_unloaded_tail()? {
+            return Ok(true);
+        }
         let available = self
             .storage
             .available_bytes()
@@ -303,6 +328,7 @@ impl RepositoryReplicaRuntime {
     pub(super) fn ensure_source_delivery_capacity(
         &self,
         defer_journal: bool,
+        journal_ready: bool,
     ) -> Result<(), RepositoryRuntimeError> {
         if defer_journal || !self.storage.is_sqlite() {
             return Ok(());
@@ -315,6 +341,9 @@ impl RepositoryReplicaRuntime {
             return Err(RepositoryRuntimeError::Storage(
                 "source delivery journal capacity guard".to_owned(),
             ));
+        }
+        if journal_ready {
+            self.ensure_source_delivery_capture_ready()?;
         }
         Ok(())
     }
@@ -346,6 +375,7 @@ impl RepositoryReplicaRuntime {
             .flat_map(|stream| stream.pending.iter())
             .map(|segment| segment.wire.len())
             .sum::<usize>();
+        let has_unloaded_tail = self.source_delivery_journal_has_unloaded_tail()?;
         let legacy_rows = self
             .snapshot
             .local_source
@@ -369,6 +399,7 @@ impl RepositoryReplicaRuntime {
         if had_pending_window
             && pending_window_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
             && pending_window_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+            && !has_unloaded_tail
         {
             let summary = self
                 .storage
@@ -481,7 +512,9 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
-        self.snapshot.local_source.replay_window_cursor = next_replay_stream;
+        if !had_pending_window || self.snapshot.local_source.replay_window_cursor.is_none() {
+            self.snapshot.local_source.replay_window_cursor = next_replay_stream;
+        }
         Ok(true)
     }
 

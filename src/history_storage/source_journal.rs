@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::history_sync::SignedSegment;
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
@@ -379,6 +380,28 @@ impl HistoryStorage {
             )
             .map(|value| value != 0)
             .map_err(sqlite_error)
+    }
+
+    pub(crate) fn source_delivery_journal_has_unloaded_tail(
+        &self,
+        pending_by_stream: &BTreeMap<String, usize>,
+    ) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(false);
+        };
+        let mut statement = connection
+            .prepare("SELECT stream, COUNT(*) FROM source_delivery_journal GROUP BY stream")
+            .map_err(sqlite_error)?;
+        let mut rows = statement.query([]).map_err(sqlite_error)?;
+        while let Some(row) = rows.next().map_err(sqlite_error)? {
+            let stream = row.get::<_, String>(0).map_err(sqlite_error)?;
+            let durable_count = row.get::<_, i64>(1).map_err(sqlite_error)? as usize;
+            if durable_count > pending_by_stream.get(&stream).copied().unwrap_or_default() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     #[cfg(test)]

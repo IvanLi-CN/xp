@@ -427,7 +427,7 @@ impl RepositoryReplicaRuntime {
                     HistoryWriteAvailability::DegradedLowSpace,
                 ));
             }
-            self.ensure_source_delivery_capacity(options.defer_journal)?;
+            self.ensure_source_delivery_capacity(options.defer_journal, journal_ready)?;
         }
         if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
             return Err(RepositoryRuntimeError::Storage(
