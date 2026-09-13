@@ -447,6 +447,46 @@ impl HistoryStorage {
         Ok(SourceDeliveryJournalPage::Ready(page))
     }
 
+    pub(crate) fn source_delivery_journal_stream_heads(
+        &self,
+    ) -> Result<Vec<SourceDeliveryJournalRow>> {
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(Vec::new());
+        };
+        let streams = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT DISTINCT stream
+                     FROM source_delivery_journal
+                     ORDER BY stream",
+                )
+                .map_err(sqlite_error)?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(sqlite_error)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?
+        };
+        let mut heads = Vec::with_capacity(streams.len());
+        for stream in streams {
+            let head = connection
+                .query_row(
+                    "SELECT id, stream, closed_at, identity, wire
+                     FROM source_delivery_journal
+                     WHERE stream = ?1
+                     ORDER BY source_node_id, source_epoch, first_sequence,
+                              created_at, id
+                     LIMIT 1",
+                    [stream],
+                    source_delivery_journal_row,
+                )
+                .map_err(sqlite_error)?;
+            heads.push(head);
+        }
+        Ok(heads)
+    }
+
     pub(crate) fn repair_source_delivery_journal_order_page(
         &self,
     ) -> Result<SourceDeliveryJournalRepairProgress> {

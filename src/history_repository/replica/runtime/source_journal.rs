@@ -331,6 +331,10 @@ impl RepositoryReplicaRuntime {
         if order_repairing {
             return Ok(false);
         }
+        let stream_heads = self
+            .storage
+            .source_delivery_journal_stream_heads()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let max_epoch = self
             .storage
             .source_delivery_journal_max_epoch()
@@ -350,7 +354,7 @@ impl RepositoryReplicaRuntime {
                 self.snapshot.local_source.node_id = row.identity.node_id().as_str().to_owned();
             }
         }
-        for row in rows {
+        for row in rows.into_iter().chain(stream_heads) {
             let stream = row.stream;
             let segment = StoredSegment {
                 id: row.id,

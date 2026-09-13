@@ -272,3 +272,80 @@ fn source_delivery_replay_page_is_bounded() {
     assert_eq!(page.len(), 256);
     assert!(page.iter().map(|segment| segment.wire.len()).sum::<usize>() <= 1024 * 1024);
 }
+
+#[test]
+fn source_delivery_hydration_keeps_each_stream_head_visible() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+
+    for sequence in 0..300_u64 {
+        runtime
+            .queue_local_source_segment(
+                "cluster-a",
+                source_identity.clone(),
+                &signing_key,
+                vec![SyncRecord::new(
+                    "node-a",
+                    "node-a",
+                    "connections.v1",
+                    1,
+                    format!("connection:{sequence}").into_bytes(),
+                    b"sample".to_vec(),
+                    false,
+                )],
+                sequence,
+            )
+            .expect("queue connections backlog");
+    }
+    runtime
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity.clone(),
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "resource_metrics.v1",
+                1,
+                b"resource:0".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            300,
+        )
+        .expect("queue resource backlog");
+    drop(runtime);
+
+    let mut restored = load(temporary.path());
+    restored
+        .queue_local_source_segment(
+            "cluster-a",
+            source_identity,
+            &signing_key,
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "resource_metrics.v1",
+                1,
+                b"resource:1".to_vec(),
+                b"sample".to_vec(),
+                false,
+            )],
+            301,
+        )
+        .expect("queue resource after restore");
+    let heads = restored.local_source_pending_segments();
+    let head_cursors = heads
+        .iter()
+        .map(|segment| {
+            let signed = SignedSegment::from_wire(&segment.wire).expect("signed head");
+            let cursor = signed.canonical().first_cursor();
+            (cursor.stream().to_owned(), cursor.sequence())
+        })
+        .collect::<Vec<_>>();
+
+    assert!(head_cursors.contains(&("connections".to_owned(), 0)));
+    assert!(head_cursors.contains(&("resource_metrics-v1".to_owned(), 0)));
+}
