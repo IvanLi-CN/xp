@@ -765,6 +765,10 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn local_source_pending_segments(&self) -> Vec<RepositoryReplicaSegment> {
+        const MAX_SEGMENTS: usize =
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS;
+        const MAX_WIRE_BYTES: usize =
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES;
         let mut pending = self
             .snapshot
             .local_source
@@ -775,14 +779,23 @@ impl RepositoryReplicaRuntime {
         // A deletion must reach every repository before a later record can resurrect the same
         // key, so the independent tombstone stream is always offered first.
         pending.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
-        pending
-            .into_iter()
-            .map(|(_, pending)| pending)
-            .map(|pending| RepositoryReplicaSegment {
+        let mut page = Vec::new();
+        let mut wire_bytes = 0_usize;
+        for (_, pending) in pending {
+            if page.len() == MAX_SEGMENTS {
+                break;
+            }
+            let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
+            if next_wire_bytes > MAX_WIRE_BYTES {
+                continue;
+            }
+            wire_bytes = next_wire_bytes;
+            page.push(RepositoryReplicaSegment {
                 identity: pending.identity.clone(),
                 wire: pending.wire.clone(),
-            })
-            .collect()
+            });
+        }
+        page
     }
 
     #[cfg(test)]

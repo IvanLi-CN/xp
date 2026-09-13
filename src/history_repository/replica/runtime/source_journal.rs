@@ -218,14 +218,10 @@ impl RepositoryReplicaRuntime {
                 }
             }
         }
-        let replay_stream_cursor = self
-            .snapshot
-            .local_source
-            .streams
-            .values()
-            .all(|stream| stream.pending.is_empty())
-            .then(|| self.snapshot.local_source.replay_window_cursor.clone())
-            .flatten();
+        // Persist the selected replay window's rotation cursor with every successful ACK. The
+        // durable journal may still contain tails for the current streams; waiting for those
+        // tails to drain would leave the cursor unset across a restart and starve later streams.
+        let replay_stream_cursor = self.snapshot.local_source.replay_window_cursor.clone();
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);
