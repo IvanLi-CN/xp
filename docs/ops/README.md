@@ -826,12 +826,14 @@ Notes:
   A retained segment may be the first locally available frame for a source stream and therefore
   have a nonzero sequence plus a predecessor hash that is no longer retained. The ready-peer
   initial backfill path accepts this signed anchor and keeps the stream unverified while requiring
-  every following frame to be contiguous. When the repair response explicitly carries
-  `history_truncated=true`, its first repair page may also cross an existing local watermark once
-  for each affected source stream, even when wire bounds split that page into multiple responses or
-  an earlier segment is already contiguous; XP records that expired prefix as a
-  `source_retention_expired` permanent gap. Live source delivery, ordinary anti-entropy, and later
-  repair pages still reject sequence gaps; do not bypass that boundary by editing the checkpoint.
+  every following frame to be contiguous. If the receiver already has a continuous watermark and
+  the repair response explicitly carries `history_truncated=true`, its first repair page may also
+  cross that watermark once for each affected source stream through a tiered handoff; the retained
+  anchor may omit its predecessor hash because the local watermark supplies the predecessor
+  boundary. XP records that expired prefix as a `source_retention_expired` permanent gap, even when
+  wire bounds split the page into multiple responses or an earlier segment is already contiguous.
+  Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
+  do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
   that omits the digest remains compatible because XP calculates it locally; a changed retry fails
   closed instead of advancing or relaxing another stream.

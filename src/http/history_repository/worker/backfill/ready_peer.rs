@@ -120,6 +120,26 @@ async fn advance_ready_peer_catch_up_page(
         .await
         .initial_peer_backfill_checkpoint(&peer.node_id)
         .unwrap_or_default();
+    if let Some(handoff) = checkpoint.summary_tiered_handoff.clone() {
+        let tiered_progress = pull_peer_initial_history(state, peer, ready_repository_ids).await?;
+        if tiered_progress == InitialBackfillProgress::Complete {
+            state
+                .repository_replica
+                .lock()
+                .await
+                .complete_initial_peer_tiered_handoff(&peer.node_id, &handoff)?;
+            tracing::info!(
+                peer = %peer.node_id,
+                source = %handoff.source_node_id,
+                stream = %handoff.stream,
+                first_missing = handoff.first_missing,
+                last_missing = handoff.last_missing,
+                "history repair tiered handoff completed"
+            );
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+        return Ok(tiered_progress);
+    }
     if !checkpoint.summary_pending_segment_ids.is_empty() {
         return repair_ready_peer_catch_up_page(state, peer, ready_repository_ids, now, checkpoint)
             .await;
@@ -236,7 +256,7 @@ async fn repair_ready_peer_catch_up_page(
     {
         anyhow::bail!("retained anchor repair response changed before completion");
     }
-    let mut remaining = pending;
+    let mut remaining = pending.clone();
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
             anyhow::bail!("repository repair response did not advance the requested segment set");
@@ -254,6 +274,50 @@ async fn repair_ready_peer_catch_up_page(
         &mut remaining,
         &repair.unavailable_segment_ids,
     )?;
+    // A truncated repository can return a valid retained anchor (with no unavailable IDs) whose
+    // first segment starts after this receiver's watermark. Detect that sequence gap before
+    // applying any segment; otherwise the receive path rejects the anchor and retries forever.
+    if repair.history_truncated {
+        let tiered_handoff = {
+            let runtime = state.repository_replica.lock().await;
+            repair
+                .segments
+                .iter()
+                .find_map(|segment| {
+                    runtime
+                        .tiered_handoff_for_sequence_gap(&segment.wire)
+                        .transpose()
+                })
+                .transpose()?
+        };
+        if let Some(tiered_handoff) = tiered_handoff {
+            // Do not remove any segment from the original request yet. The bounded response has
+            // not been received while the predecessor gap is bridged; retrying the same request
+            // keeps its response identity stable and lets the anchor be applied afterwards.
+            let pending_segment_ids = pending.iter().cloned().collect();
+            let repair_gaps = repair.gaps.clone();
+            let mut runtime = state.repository_replica.lock().await;
+            runtime.merge_replica_gaps_in_memory(&repair_gaps)?;
+            runtime.start_initial_peer_tiered_handoff(&peer.node_id, tiered_handoff)?;
+            runtime.update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+                &peer.node_id,
+                checkpoint.summary_cursor.clone(),
+                pending_segment_ids,
+                checkpoint.summary_pending_next_cursor.clone(),
+                false,
+                true,
+                Some(response_id),
+                false,
+                false,
+                checkpoint.retained_anchor_streams.clone(),
+            )?;
+            tracing::warn!(
+                peer = %peer.node_id,
+                "history repair page crossed retention boundary; tiered backfill scheduled"
+            );
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+    }
     if repair.segments.is_empty() && !repair.gaps.is_empty() {
         state
             .repository_replica

@@ -78,9 +78,12 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   repair/backfill 路径仍按既有完整 payload 查询执行，summary 的外部 JSON、分页顺序和 cursor
   语义保持不变。continuation 先由 opaque segment ID 解析五个持久排序键，再以行值范围继续
   seek；不得以 nullable cursor 或子查询包裹该范围，导致 SQLite 从 phase 起点重扫。
-- ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若首段 sequence
-  非零且携带已签名的 predecessor hash，初始回填专用接收路径可以把它作为 retained anchor
-  持久化，并将该 stream 标记为 `hash_chain_verified=false`；后续段仍必须按 sequence 和
+- ready repository 的初始回填可能只保留某条 source stream 的尾部 segment。若没有本地水位，
+  非零首段必须携带已签名的 predecessor hash，初始回填专用接收路径才可以把它作为 retained
+  anchor 持久化。若本地已有该 stream 的连续水位，且 repair 明确携带
+  `history_truncated=true`，则首个 repair page 可以通过 tiered handoff 接受无 predecessor
+  hash 的保留尾部首段，先记录被淘汰的前缀，再以该首段建立新的 hash-chain head。两种 retained
+  anchor 都将该 stream 标记为 `hash_chain_verified=false`；后续段仍必须按 sequence 和
   predecessor hash 连续到达。普通 source delivery 与 anti-entropy 接收路径不得接受无本地
   predecessor 的非零首段。
 - 若 repair 响应明确携带 `history_truncated=true`，且本地已经有该 source stream 的连续水位，
