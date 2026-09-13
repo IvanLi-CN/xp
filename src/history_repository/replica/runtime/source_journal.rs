@@ -298,6 +298,27 @@ impl RepositoryReplicaRuntime {
         if !self.storage.is_sqlite() {
             return Ok(true);
         }
+        let had_pending_window = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .any(|stream| !stream.pending.is_empty());
+        let pending_window_segments = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .map(|stream| stream.pending.len())
+            .sum::<usize>();
+        let pending_window_wire_bytes = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .map(|segment| segment.wire.len())
+            .sum::<usize>();
         let legacy_rows = self
             .snapshot
             .local_source
@@ -315,6 +336,29 @@ impl RepositoryReplicaRuntime {
         self.storage
             .append_source_delivery_journal(&legacy_rows)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        // Keep an unacknowledged replay page stable across failed delivery cycles. A new page is
+        // selected only after ACK removes the current window, which preserves source ordering and
+        // prevents a transient collector failure from rotating past an unresolved sequence gap.
+        if had_pending_window
+            && pending_window_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
+            && pending_window_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+        {
+            let summary = self
+                .storage
+                .source_delivery_journal_summary()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if summary.order_repairing {
+                self.snapshot.local_source.clear_pending();
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        // A legacy snapshot may contain an unbounded pre-journal queue. It has already been
+        // copied into SQLite above, so drop the oversized in-memory copy before rebuilding a
+        // bounded replay window.
+        if had_pending_window {
+            self.snapshot.local_source.clear_pending();
+        }
         if !legacy_rows.is_empty() {
             self.snapshot.local_source.clear_pending();
         }
@@ -334,7 +378,10 @@ impl RepositoryReplicaRuntime {
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
-        let stream_names = stream_names.into_iter().collect::<Vec<_>>();
+        let stream_names = stream_names
+            .into_iter()
+            .chain(std::iter::once("tombstone".to_owned()))
+            .collect::<Vec<_>>();
         let stream_heads = self
             .storage
             .source_delivery_journal_stream_heads(
@@ -377,6 +424,11 @@ impl RepositoryReplicaRuntime {
                 self.snapshot.local_source.node_id = row.identity.node_id().as_str().to_owned();
             }
         }
+        let next_replay_stream = stream_heads
+            .iter()
+            .rev()
+            .find(|row| row.stream != "tombstone")
+            .map(|row| row.stream.clone());
         for row in rows.into_iter().chain(stream_heads) {
             let stream = row.stream;
             let segment = StoredSegment {
@@ -402,6 +454,9 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
+        self.storage
+            .commit_source_delivery_replay_cursor(next_replay_stream.as_deref())
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         Ok(true)
     }
 

@@ -64,7 +64,8 @@ pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection
                  last_delivery_path TEXT,
                  order_repair_cursor_id TEXT,
                  order_repair_completed INTEGER NOT NULL DEFAULT 0,
-                 capacity_suspended INTEGER NOT NULL DEFAULT 0
+                 capacity_suspended INTEGER NOT NULL DEFAULT 0,
+                 replay_stream_cursor TEXT
              );",
         )
         .map_err(sqlite_error)?;
@@ -86,6 +87,7 @@ pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection
         ("order_repair_cursor_id", "TEXT"),
         ("order_repair_completed", "INTEGER NOT NULL DEFAULT 0"),
         ("capacity_suspended", "INTEGER NOT NULL DEFAULT 0"),
+        ("replay_stream_cursor", "TEXT"),
     ] {
         if !state_columns.contains(name) {
             transaction
@@ -473,10 +475,40 @@ impl HistoryStorage {
         if limit == 0 || max_wire_bytes == 0 {
             return Ok(Vec::new());
         }
-        let mut head_ids = Vec::with_capacity(streams.len().min(limit));
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        let replay_cursor = transaction
+            .query_row(
+                "SELECT replay_stream_cursor
+                 FROM source_delivery_journal_state
+                 WHERE singleton = 1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(sqlite_error)?;
+        let mut live_streams = streams
+            .iter()
+            .filter(|stream| stream.as_str() != "tombstone")
+            .cloned()
+            .collect::<Vec<_>>();
+        live_streams.sort();
+        live_streams.dedup();
+        let start = replay_cursor
+            .as_deref()
+            .and_then(|cursor| live_streams.iter().position(|stream| stream == cursor))
+            .map_or(0, |index| (index + 1) % live_streams.len().max(1));
+        let mut ordered_streams = Vec::with_capacity(live_streams.len() + 1);
+        if streams.iter().any(|stream| stream == "tombstone") {
+            ordered_streams.push("tombstone".to_owned());
+        }
+        ordered_streams.extend(
+            (0..live_streams.len())
+                .map(|offset| live_streams[(start + offset) % live_streams.len()].clone()),
+        );
+
+        let mut head_ids = Vec::with_capacity(ordered_streams.len().min(limit));
         let mut wire_bytes = 0_usize;
-        for stream in streams.iter().take(limit) {
-            let head = connection
+        for stream in ordered_streams.iter().take(limit) {
+            let head = transaction
                 .query_row(
                     "SELECT id, length(wire)
                      FROM source_delivery_journal
@@ -503,7 +535,7 @@ impl HistoryStorage {
         let mut heads = Vec::with_capacity(head_ids.len());
         for id in head_ids {
             heads.push(
-                connection
+                transaction
                     .query_row(
                         "SELECT id, stream, closed_at, identity, wire
                          FROM source_delivery_journal WHERE id = ?1",
@@ -513,7 +545,27 @@ impl HistoryStorage {
                     .map_err(sqlite_error)?,
             );
         }
+        transaction.commit().map_err(sqlite_error)?;
         Ok(heads)
+    }
+
+    pub(crate) fn commit_source_delivery_replay_cursor(&self, stream: Option<&str>) -> Result<()> {
+        let Some(stream) = stream else {
+            return Ok(());
+        };
+        let mut backend = self.lock_backend();
+        let Some(connection) = sqlite_connection(&mut backend)? else {
+            return Ok(());
+        };
+        connection
+            .execute(
+                "UPDATE source_delivery_journal_state
+                 SET replay_stream_cursor = ?1
+                 WHERE singleton = 1",
+                [stream],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
     }
 
     pub(crate) fn repair_source_delivery_journal_order_page(

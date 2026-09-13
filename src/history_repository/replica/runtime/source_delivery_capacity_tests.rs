@@ -408,11 +408,121 @@ fn source_delivery_hydration_shares_the_wire_budget_with_stream_heads() {
 
     let restored = load(temporary.path());
     let page = restored.local_source_pending_segments_page();
+    assert_eq!(page.len(), 5, "heads must share the aggregate 1 MiB budget");
     assert!(page.len() <= 256);
     assert!(
         page.iter().map(|segment| segment.wire.len()).sum::<usize>()
             <= crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
     );
+}
+
+#[test]
+fn source_delivery_stream_heads_rotate_after_budget_exhaustion() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let source_identity = identity();
+    let identity_wire = serde_json::to_vec(&source_identity).expect("serialize source identity");
+    let wire = vec![7_u8; 200 * 1024];
+    let streams = [
+        "runtime",
+        "path_health",
+        "traffic",
+        "connections",
+        "ip_usage",
+        "uptime",
+        "resource_metrics-v1",
+        "tombstone",
+    ];
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin source journal transaction");
+    for (sequence, stream) in streams.iter().enumerate() {
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, ?2, 100, ?3, ?4, 100, 'node-a', 1, ?5)",
+                rusqlite::params![
+                    format!("rotate-{stream}"),
+                    stream,
+                    &identity_wire,
+                    &wire,
+                    sequence as i64,
+                ],
+            )
+            .expect("insert source journal row");
+    }
+    transaction
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 8,
+                 pending_bytes = ?1,
+                 replay_stream_cursor = NULL,
+                 order_repair_completed = 1
+             WHERE singleton = 1",
+            [wire.len() as i64 * streams.len() as i64],
+        )
+        .expect("record source journal statistics");
+    transaction
+        .commit()
+        .expect("commit source journal transaction");
+    drop(connection);
+
+    let first = storage
+        .source_delivery_journal_stream_heads(
+            &streams
+                .iter()
+                .map(|stream| (*stream).to_owned())
+                .collect::<Vec<_>>(),
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+        )
+        .expect("read first rotated heads");
+    assert_eq!(first.len(), 5);
+    assert_eq!(first[0].stream, "tombstone");
+    let cursor_before_commit = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("reopen source journal database")
+        .query_row(
+            "SELECT replay_stream_cursor
+             FROM source_delivery_journal_state
+             WHERE singleton = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("read replay cursor before commit");
+    assert!(cursor_before_commit.is_none());
+    storage
+        .commit_source_delivery_replay_cursor(
+            first
+                .iter()
+                .rev()
+                .find(|row| row.stream != "tombstone")
+                .map(|row| row.stream.as_str()),
+        )
+        .expect("commit first rotation cursor");
+    let first_ids = first.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+    storage
+        .acknowledge_source_delivery_journal(&first_ids, None, None)
+        .expect("acknowledge first rotated heads");
+
+    let second = storage
+        .source_delivery_journal_stream_heads(
+            &streams
+                .iter()
+                .map(|stream| (*stream).to_owned())
+                .collect::<Vec<_>>(),
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+        )
+        .expect("read second rotated heads");
+    let second_streams = second
+        .iter()
+        .map(|row| row.stream.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(second_streams, ["runtime", "traffic", "uptime"]);
 }
 
 #[test]

@@ -174,6 +174,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
   journal delivery order oldest-first 连续投递；容量暂停只阻断新的 source capture，不阻断既有
   backlog 的重放，source worker 每个周期最多连续处理 4 个有界 replay page，保持每周期读取预算不超过 4 MiB。
+  当多个 stream head 共同超过单页 wire 预算时，tombstone head 固定优先，live stream head
+  通过 state row 中的持久化 replay stream cursor 轮转，避免字典序选择造成后续 stream 饥饿；未确认
+  的 replay window 在 ACK 前保持稳定。
 - source worker 的容量与生命周期 Raft 维护必须与 source capture 并发且各自受 repository request
   budget 限制。维护写入失败或超时只记录并在下一周期重试，不得阻塞历史投递、推进 source cursor
   或删除未 ACK 的 journal 行。

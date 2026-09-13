@@ -166,7 +166,9 @@
   history database, the process retains SQLite and propagates the storage error instead of
   selecting the JSON fallback.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
-  the entire journal.
+  the entire journal. When stream heads compete for the 1 MiB window, tombstones are selected first
+  and live heads rotate from the durable replay stream cursor; an unacknowledged in-memory window is
+  retained across failed delivery cycles.
   The summary memory regression uses the shared testbox's summary-only mode to start the release
   `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
   and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
