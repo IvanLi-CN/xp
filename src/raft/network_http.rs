@@ -229,21 +229,13 @@ async fn mesh_target_for_raft(
     target_node: &NodeMeta,
 ) -> MeshPeerTarget {
     let store = store.lock().await;
-    // Raft membership owns the target identity. URL matching is only a legacy fallback for
-    // peers that predate the numeric target binding; it must never win over the current target
-    // when stale local state contains another node with the same URL.
-    let peer = store
-        .list_nodes()
-        .into_iter()
-        .find(|node| {
-            crate::raft::types::raft_node_id_from_ulid(&node.node_id)
-                .is_ok_and(|node_id| node_id == target_raft_id)
-        })
-        .or_else(|| {
-            store.list_nodes().into_iter().find(|node| {
-                node.api_base_url == target_node.api_base_url || node.api_base_url == raft_base_url
-            })
-        });
+    // Raft membership owns the target identity. Never infer it from a URL: stale local state can
+    // retain an old node row with the same endpoint, and signing with that row would be rejected
+    // by the current peer before it can emit an acknowledgement.
+    let peer = store.list_nodes().into_iter().find(|node| {
+        crate::raft::types::raft_node_id_from_ulid(&node.node_id)
+            .is_ok_and(|node_id| node_id == target_raft_id)
+    });
     let Some(peer) = peer else {
         return MeshPeerTarget {
             node_id: target_node.name.clone(),
@@ -375,13 +367,10 @@ mod tests {
     #[tokio::test]
     async fn raft_mesh_target_uses_membership_target_id_when_urls_are_duplicated() {
         let temp = tempfile::tempdir().expect("temporary data directory");
-        let bootstrap_id = xp_test_fixtures::identifier_ulid_a();
-        let stale_id = xp_test_fixtures::identifier_ulid_b();
         let current_id = xp_test_fixtures::identifier_ulid_c();
-        let shared_url = xp_test_fixtures::secondary_api_url();
         let mut store = JsonSnapshotStore::load_or_init(StoreInit {
             data_dir: temp.path().to_path_buf(),
-            bootstrap_node_id: Some(bootstrap_id.to_owned()),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
             bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
             bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
             bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
@@ -389,20 +378,20 @@ mod tests {
         .expect("initialize state store");
         store
             .upsert_node(Node {
-                node_id: stale_id.to_owned(),
-                node_name: "stale-us".to_string(),
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                node_name: xp_test_fixtures::secondary_node_name().to_owned(),
                 access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: shared_url.to_owned(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
             .expect("insert stale node");
         store
             .upsert_node(Node {
-                node_id: current_id.to_owned(),
+                node_id: xp_test_fixtures::identifier_ulid_c().to_owned(),
                 node_name: xp_test_fixtures::secondary_node_name().to_owned(),
                 access_host: xp_test_fixtures::secondary_host().to_owned(),
-                api_base_url: shared_url.to_owned(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
                 quota_limit_bytes: 0,
                 quota_reset: NodeQuotaReset::default(),
             })
@@ -410,14 +399,14 @@ mod tests {
         let store = Arc::new(Mutex::new(store));
         let target_node = NodeMeta {
             name: xp_test_fixtures::secondary_node_name().to_owned(),
-            api_base_url: shared_url.to_owned(),
-            raft_endpoint: shared_url.to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
         };
 
         let target = mesh_target_for_raft(
             &store,
             raft_node_id_from_ulid(current_id).expect("current raft id"),
-            shared_url,
+            xp_test_fixtures::secondary_api_url(),
             &target_node,
         )
         .await;
@@ -426,6 +415,50 @@ mod tests {
             raft_node_id_from_ulid(&target.node_id).expect("target node id"),
             raft_node_id_from_ulid(current_id).expect("current raft id"),
             "Raft target resolution must not select a stale node sharing the URL"
+        );
+    }
+
+    #[tokio::test]
+    async fn raft_mesh_target_does_not_fall_back_to_stale_url_match() {
+        let temp = tempfile::tempdir().expect("temporary data directory");
+        let mut store = JsonSnapshotStore::load_or_init(StoreInit {
+            data_dir: temp.path().to_path_buf(),
+            bootstrap_node_id: Some(xp_test_fixtures::identifier_ulid_a().to_owned()),
+            bootstrap_node_name: xp_test_fixtures::primary_node_name().to_owned(),
+            bootstrap_access_host: xp_test_fixtures::primary_host().to_owned(),
+            bootstrap_api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        })
+        .expect("initialize state store");
+        store
+            .upsert_node(Node {
+                node_id: xp_test_fixtures::identifier_ulid_b().to_owned(),
+                node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+                access_host: xp_test_fixtures::secondary_host().to_owned(),
+                api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+                quota_limit_bytes: 0,
+                quota_reset: NodeQuotaReset::default(),
+            })
+            .expect("insert stale node");
+        let store = Arc::new(Mutex::new(store));
+        let target_node = NodeMeta {
+            name: xp_test_fixtures::secondary_node_name().to_owned(),
+            api_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+            raft_endpoint: xp_test_fixtures::secondary_api_url().to_owned(),
+        };
+
+        let target = mesh_target_for_raft(
+            &store,
+            raft_node_id_from_ulid(xp_test_fixtures::identifier_ulid_c()).expect("target raft id"),
+            xp_test_fixtures::secondary_api_url(),
+            &target_node,
+        )
+        .await;
+
+        assert_eq!(target.node_id, target_node.name);
+        assert!(target.mesh_base_url.is_none());
+        assert_eq!(
+            target.public_base_url,
+            xp_test_fixtures::secondary_api_url()
         );
     }
 }
