@@ -549,25 +549,6 @@ impl HistoryStorage {
         Ok(heads)
     }
 
-    pub(crate) fn commit_source_delivery_replay_cursor(&self, stream: Option<&str>) -> Result<()> {
-        let Some(stream) = stream else {
-            return Ok(());
-        };
-        let mut backend = self.lock_backend();
-        let Some(connection) = sqlite_connection(&mut backend)? else {
-            return Ok(());
-        };
-        connection
-            .execute(
-                "UPDATE source_delivery_journal_state
-                 SET replay_stream_cursor = ?1
-                 WHERE singleton = 1",
-                [stream],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
-
     pub(crate) fn repair_source_delivery_journal_order_page(
         &self,
     ) -> Result<SourceDeliveryJournalRepairProgress> {
@@ -713,6 +694,21 @@ impl HistoryStorage {
         acknowledged_at_unix_seconds: Option<u64>,
         delivery_path: Option<&str>,
     ) -> Result<()> {
+        self.acknowledge_source_delivery_journal_with_cursor(
+            ids,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            None,
+        )
+    }
+
+    pub(crate) fn acknowledge_source_delivery_journal_with_cursor(
+        &self,
+        ids: &[String],
+        acknowledged_at_unix_seconds: Option<u64>,
+        delivery_path: Option<&str>,
+        replay_stream_cursor: Option<&str>,
+    ) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -778,6 +774,16 @@ impl HistoryStorage {
                         durable_i64(acknowledged_at, "journal acknowledgement time")?,
                         delivery_path,
                     ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        if deleted_any && let Some(stream) = replay_stream_cursor {
+            transaction
+                .execute(
+                    "UPDATE source_delivery_journal_state
+                     SET replay_stream_cursor = ?1
+                     WHERE singleton = 1",
+                    [stream],
                 )
                 .map_err(sqlite_error)?;
         }

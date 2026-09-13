@@ -1,4 +1,5 @@
 use super::*;
+use sha2::Sha256;
 
 #[test]
 fn source_delivery_capacity_guard_preserves_cursor_and_backlog() {
@@ -494,18 +495,18 @@ fn source_delivery_stream_heads_rotate_after_budget_exhaustion() {
         )
         .expect("read replay cursor before commit");
     assert!(cursor_before_commit.is_none());
+    let first_ids = first.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
     storage
-        .commit_source_delivery_replay_cursor(
+        .acknowledge_source_delivery_journal_with_cursor(
+            &first_ids,
+            None,
+            None,
             first
                 .iter()
                 .rev()
                 .find(|row| row.stream != "tombstone")
                 .map(|row| row.stream.as_str()),
         )
-        .expect("commit first rotation cursor");
-    let first_ids = first.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
-    storage
-        .acknowledge_source_delivery_journal(&first_ids, None, None)
         .expect("acknowledge first rotated heads");
 
     let second = storage
@@ -523,6 +524,107 @@ fn source_delivery_stream_heads_rotate_after_budget_exhaustion() {
         .map(|row| row.stream.as_str())
         .collect::<Vec<_>>();
     assert_eq!(second_streams, ["runtime", "traffic", "uptime"]);
+}
+
+#[test]
+fn source_delivery_replay_window_is_stable_across_restart_before_ack() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let source_identity = identity();
+    let identity_wire = serde_json::to_vec(&source_identity).expect("serialize source identity");
+    let wire_len = 200 * 1024;
+    let streams = [
+        "runtime",
+        "path_health",
+        "traffic",
+        "connections",
+        "ip_usage",
+        "uptime",
+        "resource_metrics-v1",
+        "tombstone",
+    ];
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open source journal database");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("begin source journal transaction");
+    for (sequence, stream) in streams.iter().enumerate() {
+        let wire = vec![u8::try_from(sequence + 1).expect("wire marker"); wire_len];
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, ?2, 100, ?3, ?4, 100, 'node-a', 1, ?5)",
+                rusqlite::params![
+                    hex::encode(Sha256::digest(&wire)),
+                    stream,
+                    &identity_wire,
+                    &wire,
+                    sequence as i64,
+                ],
+            )
+            .expect("insert source journal row");
+    }
+    transaction
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 8,
+                 pending_bytes = ?1,
+                 epoch_high_water = 1,
+                 replay_stream_cursor = NULL,
+                 order_repair_completed = 1
+             WHERE singleton = 1",
+            [wire_len as i64 * streams.len() as i64],
+        )
+        .expect("record source journal statistics");
+    transaction
+        .commit()
+        .expect("commit source journal transaction");
+    drop(connection);
+    drop(storage);
+
+    let first = load(temporary.path());
+    let first_page = first.local_source_pending_segments_page();
+    let first_digests = first_page
+        .iter()
+        .map(|segment| Sha256::digest(&segment.wire))
+        .collect::<Vec<_>>();
+    drop(first);
+
+    let mut restarted = load(temporary.path());
+    let restarted_page = restarted.local_source_pending_segments_page();
+    let restarted_digests = restarted_page
+        .iter()
+        .map(|segment| Sha256::digest(&segment.wire))
+        .collect::<Vec<_>>();
+    assert_eq!(restarted_digests, first_digests);
+    let cursor_before_ack = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("reopen source journal database")
+        .query_row(
+            "SELECT replay_stream_cursor
+             FROM source_delivery_journal_state
+             WHERE singleton = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("read replay cursor before ack");
+    assert!(cursor_before_ack.is_none());
+
+    restarted
+        .acknowledge_local_source_segments_via(&restarted_page, 200, "direct")
+        .expect("acknowledge replay window");
+    let cursor_after_ack = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("reopen source journal database")
+        .query_row(
+            "SELECT replay_stream_cursor
+             FROM source_delivery_journal_state
+             WHERE singleton = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("read replay cursor after ack");
+    assert_eq!(cursor_after_ack.as_deref(), Some("resource_metrics-v1"));
 }
 
 #[test]

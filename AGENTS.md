@@ -80,8 +80,9 @@
   At 80% either dimension it persists `capacity_suspended`, reports `journal_capacity_guard`, and
   stops source capture without advancing the cursor or deleting unacknowledged rows; ACK drain
   clears the marker only below 60% on both dimensions. Replay pages are limited to 256 segments and
-  1 MiB wire data, with tombstone-first live-stream rotation through a durable replay cursor and a
-  stable unacknowledged window across retries. The Resource Alert path reports fixed XP PSS
+  1 MiB wire data, with tombstone-first live-stream rotation through a replay cursor that is
+  written durably in the ACK transaction and a stable unacknowledged window across retries. The
+  Resource Alert path reports fixed XP PSS
   warning/critical thresholds at 28/32 MiB
   for one minute and never restarts XP. Generated OpenRC XP services use `supervise-daemon`,
   `respawn_delay=2`, and `respawn_max=0`; systemd and container supervision remain unchanged.

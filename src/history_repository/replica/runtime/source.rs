@@ -29,6 +29,8 @@ pub(super) struct LocalSourceState {
     backpressure_gaps: BTreeMap<String, LocalSourceGap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     backpressure_gap_cursor: Option<String>,
+    #[serde(skip)]
+    replay_window_cursor: Option<String>,
     /// Durable marker-to-cursor mapping. Tombstones use their own stream, so their sequence
     /// cannot be reconstructed from the affected schema's live cursor.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -55,25 +57,6 @@ impl LocalSourceState {
         for stream in self.streams.values_mut() {
             stream.pending.clear();
         }
-    }
-
-    pub(super) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
-        if self.epoch != 0 {
-            if self.epoch >= i64::MAX as u64 {
-                return Err(RepositoryRuntimeError::Storage(
-                    "source epoch exhausted".to_owned(),
-                ));
-            }
-            self.epoch += 1;
-        }
-        self.streams.clear();
-        self.backpressure_gaps.clear();
-        self.backpressure_gap_cursor = None;
-        self.deletion_marker_keys.clear();
-        self.primary_failure_cycles = 0;
-        self.standby_success_cycles = 0;
-        self.primary_failure_repository_id = None;
-        Ok(())
     }
 }
 

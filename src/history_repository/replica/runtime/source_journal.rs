@@ -7,6 +7,28 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+impl LocalSourceState {
+    pub(crate) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
+        if self.epoch != 0 {
+            if self.epoch >= i64::MAX as u64 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source epoch exhausted".to_owned(),
+                ));
+            }
+            self.epoch += 1;
+        }
+        self.streams.clear();
+        self.backpressure_gaps.clear();
+        self.backpressure_gap_cursor = None;
+        self.replay_window_cursor = None;
+        self.deletion_marker_keys.clear();
+        self.primary_failure_cycles = 0;
+        self.standby_success_cycles = 0;
+        self.primary_failure_repository_id = None;
+        Ok(())
+    }
+}
+
 impl RepositoryReplicaRuntime {
     pub(crate) fn local_source_backpressure_gaps(
         &mut self,
@@ -196,6 +218,14 @@ impl RepositoryReplicaRuntime {
                 }
             }
         }
+        let replay_stream_cursor = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .all(|stream| stream.pending.is_empty())
+            .then(|| self.snapshot.local_source.replay_window_cursor.clone())
+            .flatten();
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);
@@ -207,15 +237,19 @@ impl RepositoryReplicaRuntime {
                 .collect::<Vec<_>>();
             if let Err(error) = self
                 .storage
-                .acknowledge_source_delivery_journal(
+                .acknowledge_source_delivery_journal_with_cursor(
                     &ids,
                     acknowledged_at_unix_seconds,
                     delivery_path,
+                    replay_stream_cursor.as_deref(),
                 )
                 .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
             {
                 self.snapshot = previous_snapshot;
                 return Err(error);
+            }
+            if replay_stream_cursor.is_some() {
+                self.snapshot.local_source.replay_window_cursor = None;
             }
             self.hydrate_source_delivery_journal()?;
         }
@@ -454,9 +488,7 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
-        self.storage
-            .commit_source_delivery_replay_cursor(next_replay_stream.as_deref())
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        self.snapshot.local_source.replay_window_cursor = next_replay_stream;
         Ok(true)
     }
 
