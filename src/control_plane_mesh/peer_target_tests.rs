@@ -72,7 +72,7 @@ async fn spawn_stalling_reverse_relay() -> (String, Arc<AtomicUsize>, JoinHandle
 struct SignedServerState {
     ca_key_pem: String,
     ca_cert_pem: String,
-    requests: Arc<AtomicUsize>,
+    observations: Arc<AtomicUsize>,
 }
 
 async fn stall_mesh(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
@@ -88,7 +88,7 @@ async fn signed_public(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    state.requests.fetch_add(1, Ordering::SeqCst);
+    state.observations.fetch_add(1, Ordering::SeqCst);
     let verified = crate::internal_auth::verify_request_v2(
         &state.ca_key_pem,
         &state.ca_cert_pem,
@@ -138,7 +138,7 @@ async fn spawn_signed_public(
     let state = SignedServerState {
         ca_key_pem: ca_key_pem.to_owned(),
         ca_cert_pem: ca_cert_pem.to_owned(),
-        requests: requests.clone(),
+        observations: requests.clone(),
     };
     let app = Router::new()
         .fallback(any(
