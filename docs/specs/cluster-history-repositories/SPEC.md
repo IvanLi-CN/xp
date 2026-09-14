@@ -68,6 +68,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   动态 Mesh relay。两类 relay 均不落盘；动态 relay 使用端到端 X25519+AEAD。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
+- ready peer 的每个五分钟同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
+  并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
+  达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
+  summary cursor、pending repair IDs 或 tiered handoff 状态。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。
