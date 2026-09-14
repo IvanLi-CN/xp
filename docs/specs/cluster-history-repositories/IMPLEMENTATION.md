@@ -85,8 +85,8 @@
   protection.
   A replayed wire whose exact SHA-256 segment ID is already durable and whose complete cursor range
   is at or below the receiver watermark gets an idempotent acknowledgement even while the retained
-  anchor remains unverified; the payload is not applied again, and a different ID at the same cursor
-  remains a fork candidate.
+  anchor remains unverified; the payload is not applied again, including after runtime restart, and
+  a different ID at the same cursor remains a fork candidate.
   The checkpoint records a content-derived repair response identity while that response is
   incomplete. New peers return the identity; compatibility with older peers derives it from the
   received batch. A changed retry is rejected before another stream can consume the allowance; a

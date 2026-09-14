@@ -97,6 +97,11 @@ another stream's allowance, while a second handoff for the same stream remains
 rejected. Ordinary source delivery and anti-entropy continue to require exact
 sequence continuity.
 
+An exact persisted segment replay remains an idempotent ACK after the receiving
+runtime restarts; the durable segment identity and watermark are the authority,
+not the in-memory recent hash window. A different segment ID at the same cursor
+continues to fail fork validation.
+
 A Source writes every unacknowledged signed segment to its SQLite delivery
 journal before attempting transfer, and removes it only after its Collector
 acknowledges the continuous watermark. The journal uses Zstandard level 1 when
