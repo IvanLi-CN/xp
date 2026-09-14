@@ -74,37 +74,21 @@ pub(crate) async fn catch_up_against_ready_repositories(
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .collect::<Vec<_>>();
-    let mut in_progress = false;
-    for (index, peer) in peer_targets.iter().enumerate() {
-        let remaining_budget = deadline.saturating_duration_since(Instant::now());
-        if remaining_budget.is_zero() {
-            in_progress = true;
-            break;
+    match drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
+        let peer = peer_targets[index];
+        async {
+            advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
         }
-        let remaining_peers = (peer_targets.len() - index) as u32;
-        let peer_deadline = Instant::now() + remaining_budget / remaining_peers;
-        match drain_bounded_catch_up_pages(
-            MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
-            peer_deadline,
-            || async {
-                advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
-            },
-        )
-        .await?
-        {
-            InitialBackfillProgress::InProgress => in_progress = true,
-            InitialBackfillProgress::Complete => {}
-            InitialBackfillProgress::Unavailable => {
-                return Ok(InitialBackfillProgress::Unavailable);
-            }
-        }
-    }
-    if in_progress {
-        return Ok(InitialBackfillProgress::InProgress);
+    })
+    .await?
+    {
+        InitialBackfillProgress::InProgress => return Ok(InitialBackfillProgress::InProgress),
+        InitialBackfillProgress::Complete => {}
+        InitialBackfillProgress::Unavailable => return Ok(InitialBackfillProgress::Unavailable),
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
     // still advancing every peer's signed summary through bounded pages per worker tick.
-    let Some(tiered_peer) = peer_targets.first() else {
+    let Some(tiered_peer) = peer_targets.first().copied() else {
         return Ok(InitialBackfillProgress::Unavailable);
     };
     let needs_reverification = {
@@ -139,6 +123,45 @@ pub(crate) async fn catch_up_against_ready_repositories(
         return Ok(InitialBackfillProgress::InProgress);
     }
     Ok(tiered_progress)
+}
+
+async fn drain_ready_peer_pages<F, Fut>(
+    peer_count: usize,
+    deadline: Instant,
+    mut fetch_page: F,
+) -> anyhow::Result<InitialBackfillProgress>
+where
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
+{
+    let mut in_progress = false;
+    for index in 0..peer_count {
+        let remaining_budget = deadline.saturating_duration_since(Instant::now());
+        if remaining_budget.is_zero() {
+            in_progress = true;
+            break;
+        }
+        let remaining_peers = (peer_count - index) as u32;
+        let peer_deadline = Instant::now() + remaining_budget / remaining_peers;
+        match drain_bounded_catch_up_pages(
+            MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
+            peer_deadline,
+            || fetch_page(index),
+        )
+        .await?
+        {
+            InitialBackfillProgress::InProgress => in_progress = true,
+            InitialBackfillProgress::Complete => {}
+            InitialBackfillProgress::Unavailable => {
+                return Ok(InitialBackfillProgress::Unavailable);
+            }
+        }
+    }
+    Ok(if in_progress {
+        InitialBackfillProgress::InProgress
+    } else {
+        InitialBackfillProgress::Complete
+    })
 }
 
 async fn drain_bounded_catch_up_pages<F, Fut>(
@@ -561,6 +584,36 @@ mod tests {
 
         assert_eq!(calls, 1);
         assert_eq!(result, InitialBackfillProgress::Unavailable);
+    }
+
+    #[tokio::test]
+    async fn ready_peer_drain_gives_later_peers_a_slice_after_a_slow_peer() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_calls = calls.clone();
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            drain_ready_peer_pages(
+                2,
+                Instant::now() + Duration::from_millis(40),
+                move |index| {
+                    recorded_calls.lock().expect("record peer call").push(index);
+                    async move {
+                        if index == 0 {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            Ok(InitialBackfillProgress::InProgress)
+                        } else {
+                            Ok(InitialBackfillProgress::Complete)
+                        }
+                    }
+                },
+            ),
+        )
+        .await
+        .expect("ready peer drain must remain bounded")
+        .expect("ready peer drain");
+
+        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
+        assert_eq!(result, InitialBackfillProgress::InProgress);
     }
 
     #[test]
