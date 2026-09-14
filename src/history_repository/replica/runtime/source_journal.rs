@@ -49,7 +49,7 @@ impl RepositoryReplicaRuntime {
             return Vec::new();
         }
         if journal_ready {
-            self.local_source_pending_segments()
+            self.local_source_pending_segments_page()
         } else {
             Vec::new()
         }
@@ -208,18 +208,43 @@ impl RepositoryReplicaRuntime {
             .streams
             .iter()
             .collect::<Vec<_>>();
-        // Tombstones remain ahead of live streams so a deletion cannot be overtaken by a later
-        // record that resurrects the same key.
-        streams.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
+        let tombstone = streams
+            .iter()
+            .find(|(stream, _)| stream.as_str() == "tombstone")
+            .copied();
+        let mut live_streams = streams
+            .drain(..)
+            .filter(|(stream, _)| stream.as_str() != "tombstone")
+            .collect::<Vec<_>>();
+        live_streams.sort_by_key(|(stream, _)| *stream);
+        let start = self
+            .snapshot
+            .local_source
+            .replay_window_cursor
+            .as_deref()
+            .and_then(|cursor| {
+                live_streams
+                    .iter()
+                    .position(|(stream, _)| stream == &cursor)
+            })
+            .map_or(0, |index| (index + 1) % live_streams.len().max(1));
+        let mut ordered_streams = Vec::with_capacity(live_streams.len() + 1);
+        if let Some(tombstone) = tombstone {
+            ordered_streams.push(tombstone);
+        }
+        ordered_streams.extend(
+            (0..live_streams.len())
+                .map(|offset| live_streams[(start + offset) % live_streams.len()]),
+        );
         let mut page = Vec::new();
         let mut wire_bytes = 0_usize;
-        let mut offsets = vec![0_usize; streams.len()];
+        let mut offsets = vec![0_usize; ordered_streams.len()];
         loop {
             if page.len() == MAX_SEGMENTS {
                 break;
             }
             let mut added = false;
-            for (index, (_, state)) in streams.iter().enumerate() {
+            for (index, (_, state)) in ordered_streams.iter().enumerate() {
                 let Some(pending) = state.pending.get(offsets[index]) else {
                     continue;
                 };

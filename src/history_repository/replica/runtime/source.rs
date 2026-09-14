@@ -402,7 +402,7 @@ impl RepositoryReplicaRuntime {
         }
         if records_by_stream.is_empty() {
             return Ok(if journal_ready {
-                self.local_source_pending_segments()
+                self.local_source_pending_segments_page()
             } else {
                 Vec::new()
             });

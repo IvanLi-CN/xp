@@ -540,7 +540,7 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                  capacity_suspended = 0,
                  stream_counts_initialized = 1
              WHERE singleton = 1",
-            [i64::try_from(source_wire_len * 257).expect("source journal byte count")],
+            [i64::from(source_wire_len * 257)],
         )
         .expect("record source delivery resource backlog");
 
