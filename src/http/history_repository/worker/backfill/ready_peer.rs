@@ -70,14 +70,22 @@ pub(crate) async fn catch_up_against_ready_repositories(
     }
 
     let deadline = Instant::now() + INITIAL_CATCH_UP_TICK_BUDGET;
-    let mut in_progress = false;
-    for peer in peers
+    let peer_targets = peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
-    {
+        .collect::<Vec<_>>();
+    let mut in_progress = false;
+    for (index, peer) in peer_targets.iter().enumerate() {
+        let remaining_budget = deadline.saturating_duration_since(Instant::now());
+        if remaining_budget.is_zero() {
+            in_progress = true;
+            break;
+        }
+        let remaining_peers = (peer_targets.len() - index) as u32;
+        let peer_deadline = Instant::now() + remaining_budget / remaining_peers;
         match drain_bounded_catch_up_pages(
             MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
-            deadline,
+            peer_deadline,
             || async {
                 advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
             },
@@ -96,10 +104,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
     // still advancing every peer's signed summary through bounded pages per worker tick.
-    let Some(tiered_peer) = peers
-        .iter()
-        .find(|peer| peer.node_id != state.cluster.node_id)
-    else {
+    let Some(tiered_peer) = peer_targets.first() else {
         return Ok(InitialBackfillProgress::Unavailable);
     };
     let needs_reverification = {
@@ -146,10 +151,15 @@ where
     Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
 {
     for _ in 0..max_pages {
-        if Instant::now() >= deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             return Ok(InitialBackfillProgress::InProgress);
         }
-        match fetch_page().await? {
+        let progress = match tokio::time::timeout(remaining, fetch_page()).await {
+            Ok(progress) => progress?,
+            Err(_) => return Ok(InitialBackfillProgress::InProgress),
+        };
+        match progress {
             InitialBackfillProgress::Complete => return Ok(InitialBackfillProgress::Complete),
             InitialBackfillProgress::Unavailable => {
                 return Ok(InitialBackfillProgress::Unavailable);
@@ -515,6 +525,42 @@ mod tests {
 
         assert_eq!(calls, 0);
         assert_eq!(result, InitialBackfillProgress::InProgress);
+    }
+
+    #[tokio::test]
+    async fn bounded_catch_up_drain_cancels_a_slow_page_at_the_deadline() {
+        let mut calls = 0;
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_millis(20), || {
+                calls += 1;
+                async {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    Ok(InitialBackfillProgress::InProgress)
+                }
+            }),
+        )
+        .await
+        .expect("bounded catch-up drain must honor its deadline")
+        .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 1);
+        assert_eq!(result, InitialBackfillProgress::InProgress);
+    }
+
+    #[tokio::test]
+    async fn bounded_catch_up_drain_stops_after_an_unavailable_page() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::Unavailable) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 1);
+        assert_eq!(result, InitialBackfillProgress::Unavailable);
     }
 
     #[test]
