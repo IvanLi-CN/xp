@@ -347,7 +347,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(created)
     }
-
     pub(crate) fn queue_local_source_segments_for_repositories(
         &mut self,
         cluster_id: &str,
@@ -382,6 +381,7 @@ impl RepositoryReplicaRuntime {
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
         let journal_ready = self.hydrate_source_delivery_journal()?;
+        let journal_has_unloaded_tail = self.source_delivery_journal_has_unloaded_tail()?;
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
@@ -551,14 +551,17 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        let hydration = if options.defer_journal {
+        let hydration = if options.defer_journal
+            || (journal_ready
+                && !journal_has_unloaded_tail
+                && self.local_source_pending_window_within_budget())
+        {
             Ok(())
         } else {
             self.hydrate_source_delivery_journal().map(|_| ())
         };
         Ok(self.finish_source_delivery_capture(journal_ready, hydration))
     }
-
     pub(crate) fn queue_local_source_segment(
         &mut self,
         cluster_id: &str,
@@ -617,7 +620,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(())
     }
-
     pub(crate) fn local_history_backfill_inflight_checkpoint(
         &self,
     ) -> Option<(Option<String>, bool)> {

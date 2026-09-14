@@ -168,7 +168,6 @@ fn source_delivery_capacity_guard_clears_only_below_both_low_watermarks() {
             .capacity_suspended
     );
 }
-
 #[test]
 fn source_delivery_capacity_rejection_persists_suspension_without_writing() {
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -903,12 +902,16 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
         )
         .expect("read replay cursor after partial ack");
     assert_eq!(cursor_after_ack.as_deref(), Some("runtime"));
-    assert_eq!(runtime.local_source_replay_window_cursor(), Some("runtime"));
+    assert_ne!(
+        runtime.local_source_replay_window_cursor(),
+        Some("runtime"),
+        "an in-process ACK must rotate the replay window before tails drain"
+    );
     let second_page = runtime.local_source_pending_segments();
     runtime
         .acknowledge_local_source_segment_via(&second_page[0].wire, 201, "direct")
         .expect("acknowledge second replay head");
-    assert_eq!(runtime.local_source_replay_window_cursor(), Some("runtime"));
+    assert_ne!(runtime.local_source_replay_window_cursor(), Some("runtime"));
     drop(runtime);
 
     let restarted = load(temporary.path());
@@ -928,8 +931,8 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
         next_streams,
         [
             "ip_usage",
-            "path_health",
             "resource_metrics-v1",
+            "runtime",
             "service_monitor_observation-v1",
             "traffic",
         ]

@@ -93,22 +93,24 @@ impl RepositoryReplicaRuntime {
         }
         // Keep the gap immediately before each pending segment in the bounded page so a receiver
         // can advance its signed chain without waiting for a full rotation of the gap cursor.
+        let required_key_for_segment = |segment: &RepositoryReplicaSegment| {
+            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+            let cursor = signed.canonical().first_cursor();
+            self.snapshot
+                .local_source
+                .backpressure_gaps
+                .iter()
+                .find(|(key, gap)| {
+                    super::backpressure_gap_stream(key) == cursor.stream()
+                        && gap.source_epoch == cursor.source_epoch()
+                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                })
+                .map(|(key, _)| key.clone())
+        };
+        let first_required_key = pending_segments.first().and_then(required_key_for_segment);
         let required_keys = pending_segments
             .iter()
-            .filter_map(|segment| {
-                let signed = SignedSegment::from_wire(&segment.wire).ok()?;
-                let cursor = signed.canonical().first_cursor();
-                self.snapshot
-                    .local_source
-                    .backpressure_gaps
-                    .iter()
-                    .find(|(key, gap)| {
-                        super::backpressure_gap_stream(key) == cursor.stream()
-                            && gap.source_epoch == cursor.source_epoch()
-                            && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
-                    })
-                    .map(|(key, _)| key.clone())
-            })
+            .filter_map(required_key_for_segment)
             .collect::<BTreeSet<_>>();
         let start = self
             .snapshot
@@ -118,11 +120,23 @@ impl RepositoryReplicaRuntime {
             .and_then(|cursor| keys.iter().position(|key| key == cursor))
             .map_or(0, |index| (index + 1) % keys.len());
         let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
-        let mut selected_keys = required_keys
-            .into_iter()
-            .filter(|key| keys.binary_search(key).is_ok())
-            .take(page_len)
-            .collect::<Vec<_>>();
+        let mut selected_keys = Vec::with_capacity(page_len);
+        // The worker attaches the gap page to its first segment only. Preserve that segment's
+        // predecessor even when many later pending segments contribute lexicographically earlier
+        // required gaps.
+        if let Some(key) = first_required_key.filter(|key| keys.binary_search(key).is_ok()) {
+            selected_keys.push(key);
+        }
+        for key in required_keys {
+            if selected_keys.len() >= page_len {
+                break;
+            }
+            if keys.binary_search(&key).is_ok()
+                && !selected_keys.iter().any(|selected| selected == &key)
+            {
+                selected_keys.push(key);
+            }
+        }
         for offset in 0..keys.len() {
             if selected_keys.len() >= page_len {
                 break;
@@ -533,10 +547,31 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
-        if !had_pending_window || self.snapshot.local_source.replay_window_cursor.is_none() {
-            self.snapshot.local_source.replay_window_cursor = next_replay_stream;
-        }
+        // A completed ACK rotates the bounded window in-process as well as across restarts. Keep
+        // the cursor at the last stream selected for the new window so a hot stream cannot starve
+        // later streams while the durable journal still contains their tails.
+        self.snapshot.local_source.replay_window_cursor = next_replay_stream;
         Ok(true)
+    }
+
+    pub(super) fn local_source_pending_window_within_budget(&self) -> bool {
+        let pending_segments = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .map(|stream| stream.pending.len())
+            .sum::<usize>();
+        let pending_wire_bytes = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .map(|segment| segment.wire.len())
+            .sum::<usize>();
+        pending_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
+            && pending_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
     }
 
     pub(crate) fn snapshot_for_persistence(&self) -> RepositoryReplicaSnapshot {
