@@ -390,18 +390,18 @@ impl HistoryStorage {
         let Some(connection) = sqlite_connection(&mut backend)? else {
             return Ok(false);
         };
-        let mut statement = connection
-            .prepare("SELECT stream, COUNT(*) FROM source_delivery_journal GROUP BY stream")
+        let durable_count = connection
+            .query_row(
+                "SELECT pending_segments FROM source_delivery_journal_state WHERE singleton = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .map_err(sqlite_error)?;
-        let mut rows = statement.query([]).map_err(sqlite_error)?;
-        while let Some(row) = rows.next().map_err(sqlite_error)? {
-            let stream = row.get::<_, String>(0).map_err(sqlite_error)?;
-            let durable_count = row.get::<_, i64>(1).map_err(sqlite_error)? as usize;
-            if durable_count > pending_by_stream.get(&stream).copied().unwrap_or_default() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        let loaded_count = pending_by_stream.values().sum::<usize>();
+        let loaded_count = i64::try_from(loaded_count).map_err(|_| {
+            HistoryStorageError("loaded source journal count exceeds SQLite integer".to_owned())
+        })?;
+        Ok(durable_count > loaded_count)
     }
 
     #[cfg(test)]

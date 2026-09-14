@@ -285,20 +285,33 @@ impl RepositoryReplicaRuntime {
         streams.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
         let mut page = Vec::new();
         let mut wire_bytes = 0_usize;
-        'streams: for (_, state) in streams {
-            for pending in &state.pending {
-                if page.len() == MAX_SEGMENTS {
-                    break 'streams;
-                }
+        let mut offsets = vec![0_usize; streams.len()];
+        loop {
+            if page.len() == MAX_SEGMENTS {
+                break;
+            }
+            let mut added = false;
+            for (index, (_, state)) in streams.iter().enumerate() {
+                let Some(pending) = state.pending.get(offsets[index]) else {
+                    continue;
+                };
                 let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
                 if next_wire_bytes > MAX_WIRE_BYTES {
-                    break 'streams;
+                    continue;
                 }
                 wire_bytes = next_wire_bytes;
+                offsets[index] += 1;
                 page.push(RepositoryReplicaSegment {
                     identity: pending.identity.clone(),
                     wire: pending.wire.clone(),
                 });
+                added = true;
+                if page.len() == MAX_SEGMENTS {
+                    break;
+                }
+            }
+            if !added {
+                break;
             }
         }
         page
