@@ -484,9 +484,6 @@ impl RepositoryReplicaRuntime {
             .initial_peer_backfills
             .entry(update.peer_node_id)
             .or_default();
-        if checkpoint.retained_anchor_repair_response_seen {
-            return Ok(());
-        }
         if let Some(existing_response_id) = checkpoint.retained_anchor_repair_response_id.as_ref()
             && existing_response_id != &update.response_id
         {

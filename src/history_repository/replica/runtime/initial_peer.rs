@@ -182,23 +182,21 @@ impl RepositoryReplicaRuntime {
             .initial_peer_backfills
             .entry(peer_node_id.to_owned())
             .or_default();
-        if !checkpoint.retained_anchor_repair_response_seen {
-            match (
-                checkpoint.retained_anchor_repair_response_id.as_deref(),
-                retained_anchor_repair_response_id.as_deref(),
-            ) {
-                (Some(existing), Some(incoming)) if existing != incoming => {
-                    return Err(RepositoryRuntimeError::Storage(
-                        "retained anchor repair response changed before completion".to_owned(),
-                    ));
-                }
-                (Some(_), None) => {
-                    return Err(RepositoryRuntimeError::Storage(
-                        "retained anchor repair response identity is missing".to_owned(),
-                    ));
-                }
-                _ => {}
+        match (
+            checkpoint.retained_anchor_repair_response_id.as_deref(),
+            retained_anchor_repair_response_id.as_deref(),
+        ) {
+            (Some(existing), Some(incoming)) if existing != incoming => {
+                return Err(RepositoryRuntimeError::Storage(
+                    "retained anchor repair response changed before completion".to_owned(),
+                ));
             }
+            (Some(_), None) => {
+                return Err(RepositoryRuntimeError::Storage(
+                    "retained anchor repair response identity is missing".to_owned(),
+                ));
+            }
+            _ => {}
         }
         checkpoint.summary_cursor = summary_cursor;
         checkpoint.summary_pending_segment_ids = pending_segment_ids;
@@ -207,7 +205,7 @@ impl RepositoryReplicaRuntime {
         checkpoint.summary_requires_tiered_backfill = summary_requires_tiered_backfill;
         if retained_anchor_repair_response_complete {
             checkpoint.retained_anchor_repair_response_id = None;
-        } else if !checkpoint.retained_anchor_repair_response_seen {
+        } else {
             checkpoint.retained_anchor_repair_response_id = retained_anchor_repair_response_id;
         }
         if retained_anchor_allowance_complete {

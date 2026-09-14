@@ -40,12 +40,11 @@ fn can_schedule_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,
     handoff: &InitialPeerTieredHandoff,
 ) -> bool {
-    !checkpoint.retained_anchor_repair_response_seen
-        && !checkpoint.retained_anchor_streams.iter().any(|stream| {
-            stream.source_node_id == handoff.source_node_id
-                && stream.source_epoch == handoff.source_epoch
-                && stream.stream == handoff.stream
-        })
+    !checkpoint.retained_anchor_streams.iter().any(|stream| {
+        stream.source_node_id == handoff.source_node_id
+            && stream.source_epoch == handoff.source_epoch
+            && stream.stream == handoff.stream
+    })
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -261,15 +260,13 @@ async fn repair_ready_peer_catch_up_page(
     {
         anyhow::bail!("repository repair response identity does not match its content");
     }
-    if !checkpoint.retained_anchor_repair_response_seen
-        && checkpoint
-            .retained_anchor_repair_response_id
-            .as_ref()
-            .is_some_and(|existing| existing != &response_id)
+    if checkpoint
+        .retained_anchor_repair_response_id
+        .as_ref()
+        .is_some_and(|existing| existing != &response_id)
     {
         anyhow::bail!("retained anchor repair response changed before completion");
     }
-    let first_repair_response = !checkpoint.retained_anchor_repair_response_seen;
     let mut remaining = pending.clone();
     if repair.segments.is_empty() {
         if repair.unavailable_segment_ids.is_empty() {
@@ -291,7 +288,7 @@ async fn repair_ready_peer_catch_up_page(
     // A truncated repository can return a valid retained anchor (with no unavailable IDs) whose
     // first segment starts after this receiver's watermark. Detect that sequence gap before
     // applying any segment; otherwise the receive path rejects the anchor and retries forever.
-    if repair.history_truncated && first_repair_response {
+    if repair.history_truncated {
         let tiered_handoff = {
             let runtime = state.repository_replica.lock().await;
             repair
@@ -366,7 +363,6 @@ async fn repair_ready_peer_catch_up_page(
             first_cursor.stream().to_owned(),
         );
         let allow_retained_sequence_gap = if repair.history_truncated
-            && first_repair_response
             && !retained_anchor_streams.iter().any(|key| {
                 key.source_node_id == stream_key.0
                     && key.source_epoch == stream_key.1
@@ -456,11 +452,11 @@ mod tests {
     }
 
     #[test]
-    fn tiered_handoff_is_limited_to_the_first_unconsumed_repair_page_stream() {
+    fn tiered_handoff_allows_an_unseen_stream_after_another_stream_consumed_allowance() {
         let handoff = InitialPeerTieredHandoff {
             source_node_id: "node-a".to_owned(),
             source_epoch: 7,
-            stream: "runtime".to_owned(),
+            stream: "tombstone".to_owned(),
             first_missing: 1,
             last_missing: 2,
             next_sequence: 3,
@@ -477,14 +473,21 @@ mod tests {
             .insert(InitialPeerRetainedAnchorStream {
                 source_node_id: handoff.source_node_id.clone(),
                 source_epoch: handoff.source_epoch,
-                stream: handoff.stream.clone(),
+                stream: "connections".to_owned(),
             });
-        assert!(!can_schedule_tiered_handoff(&stream_consumed, &handoff));
+        assert!(can_schedule_tiered_handoff(&stream_consumed, &handoff));
+
+        let same_stream = InitialPeerTieredHandoff {
+            stream: "connections".to_owned(),
+            ..handoff.clone()
+        };
+        assert!(!can_schedule_tiered_handoff(&stream_consumed, &same_stream));
 
         let later_page = InitialPeerBackfillCheckpoint {
             retained_anchor_repair_response_seen: true,
+            retained_anchor_streams: stream_consumed.retained_anchor_streams,
             ..InitialPeerBackfillCheckpoint::default()
         };
-        assert!(!can_schedule_tiered_handoff(&later_page, &handoff));
+        assert!(can_schedule_tiered_handoff(&later_page, &handoff));
     }
 }

@@ -88,13 +88,19 @@ After a declared permanent gap, the first segment after the missing range is
 accepted as a new hash-chain head because the skipped segment hash is unknown;
 the following segments must continue from that newly accepted hash as usual. A
 repair response carrying `history_truncated=true` is the only additional proof
-that a retained tail may cross an existing local watermark during the first
-initial-backfill repair page, once per affected source stream; a wire-bounded
-page may span multiple responses. The receiver records each crossed range as
-`source_retention_expired`. An earlier contiguous segment or completed response
-in that page does not consume another stream's allowance. Ordinary source
-delivery, anti-entropy, and later repair pages continue to require exact
+that a retained tail may cross an existing local watermark during initial
+backfill, once per affected source stream; a wire-bounded page may span multiple
+responses or summary pages. The receiver records each crossed range as
+`source_retention_expired` and persists the consumed `(source, epoch, stream)`
+allowance. An earlier contiguous segment or completed response does not consume
+another stream's allowance, while a second handoff for the same stream remains
+rejected. Ordinary source delivery and anti-entropy continue to require exact
 sequence continuity.
+
+An exact persisted segment replay remains an idempotent ACK after the receiving
+runtime restarts; the durable segment identity and watermark are the authority,
+not the in-memory recent hash window. A different segment ID at the same cursor
+continues to fail fork validation.
 
 A Source writes every unacknowledged signed segment to its SQLite delivery
 journal before attempting transfer, and removes it only after its Collector
