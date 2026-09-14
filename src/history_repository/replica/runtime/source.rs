@@ -36,14 +36,12 @@ pub(super) struct LocalSourceState {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     deletion_marker_keys: BTreeMap<String, ReplicaRecordKey>,
 }
-
 struct LocalSourceQueueOptions<'a> {
     ready_repositories: &'a [String],
     _max_pending_segments_per_stream: usize,
     persist: bool,
     defer_journal: bool,
 }
-
 impl LocalSourceState {
     pub(super) fn epoch(&self) -> u64 {
         self.epoch
@@ -52,7 +50,6 @@ impl LocalSourceState {
     pub(super) fn node_id(&self) -> Option<&str> {
         (!self.node_id.is_empty()).then_some(self.node_id.as_str())
     }
-
     fn clear_pending(&mut self) {
         for stream in self.streams.values_mut() {
             stream.pending.clear();
@@ -82,7 +79,6 @@ impl RepositoryReplicaRuntime {
     pub(crate) fn history_truncated(&self) -> bool {
         self.snapshot.history_truncated
     }
-
     pub(crate) fn can_accept_retained_sequence_gap(
         &self,
         wire: &[u8],
@@ -105,7 +101,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(true)
     }
-
     pub(crate) fn tiered_handoff_for_sequence_gap(
         &self,
         wire: &[u8],
@@ -147,7 +142,6 @@ impl RepositoryReplicaRuntime {
             end_unix_seconds: segment.canonical().opened_at_unix_seconds(),
         }))
     }
-
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
 
     pub(crate) fn queue_local_source_segments(
@@ -167,7 +161,6 @@ impl RepositoryReplicaRuntime {
             &["local".to_owned()],
         )
     }
-
     /// Queue one historical backfill page without returning unrelated live outbox fronts. The
     /// caller can atomically acknowledge these exact segments with the page checkpoint.
     pub(crate) fn queue_local_history_backfill_segments(
@@ -551,11 +544,18 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        let hydration = if options.defer_journal
-            || (journal_ready
-                && !journal_has_unloaded_tail
-                && self.local_source_pending_window_within_budget())
-        {
+        let hydration = if options.defer_journal {
+            Ok(())
+        } else if journal_ready && journal_has_unloaded_tail {
+            for (stream, state) in &mut self.snapshot.local_source.streams {
+                state.pending = previous_snapshot
+                    .local_source
+                    .streams
+                    .get(stream)
+                    .map_or_else(VecDeque::new, |previous| previous.pending.clone());
+            }
+            Ok(())
+        } else if journal_ready && self.local_source_pending_window_within_budget() {
             Ok(())
         } else {
             self.hydrate_source_delivery_journal().map(|_| ())

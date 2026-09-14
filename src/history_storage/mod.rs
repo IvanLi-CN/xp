@@ -23,9 +23,9 @@ pub(crate) const TCP_CONNECTION_USAGE_KEY: &str = "tcp_connection_usage";
 pub(crate) const NODE_HISTORY_KEY: &str = "node_history";
 pub(crate) const MESH_TELEMETRY_KEY: &str = "mesh_telemetry";
 pub(crate) const REPOSITORY_REPLICA_KEY: &str = "repository_replica";
-
 mod repository;
 mod source_journal;
+mod source_journal_tail;
 mod startup;
 #[cfg(test)]
 use repository::segment_phase_sql;

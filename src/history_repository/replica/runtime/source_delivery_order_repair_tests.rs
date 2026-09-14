@@ -1,4 +1,39 @@
+use super::source_delivery_capacity_tests::append_signed_source_journal_rows;
 use super::*;
+
+#[test]
+fn source_delivery_detects_unloaded_tail_when_stream_totals_match() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "runtime",
+        "runtime.v1",
+        0..2,
+    );
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "traffic",
+        "traffic.v1",
+        0..1,
+    );
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let loaded_by_stream = std::collections::BTreeMap::from([
+        ("runtime".to_owned(), 3_usize),
+        ("traffic".to_owned(), 0_usize),
+    ]);
+    assert!(
+        storage
+            .source_delivery_journal_has_unloaded_tail(&loaded_by_stream)
+            .expect("detect per-stream durable tail"),
+        "an unloaded traffic row must be detected even when aggregate counts match"
+    );
+}
 
 #[test]
 fn source_delivery_journal_order_repair_is_resumable() {

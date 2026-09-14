@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+#[path = "source_journal_ack.rs"]
+mod source_journal_ack;
+
 impl LocalSourceState {
     pub(crate) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
         if self.epoch != 0 {
@@ -192,110 +195,6 @@ impl RepositoryReplicaRuntime {
         if let Some(key) = committed_key {
             self.snapshot.local_source.backpressure_gap_cursor = Some(key);
             self.persist_control_state()?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn acknowledge_local_source_segment(
-        &mut self,
-        delivered_wire: &[u8],
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(delivered_wire, None, None)
-    }
-
-    pub(crate) fn acknowledge_local_source_segment_via(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: u64,
-        delivery_path: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(
-            delivered_wire,
-            Some(acknowledged_at_unix_seconds),
-            Some(delivery_path),
-        )
-    }
-
-    pub(crate) fn acknowledge_local_source_segments_via(
-        &mut self,
-        delivered_segments: &[RepositoryReplicaSegment],
-        acknowledged_at_unix_seconds: u64,
-        delivery_path: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let delivered_wires = delivered_segments
-            .iter()
-            .map(|segment| segment.wire.as_slice())
-            .collect::<Vec<_>>();
-        self.acknowledge_local_source_segments_inner(
-            &delivered_wires,
-            Some(acknowledged_at_unix_seconds),
-            Some(delivery_path),
-        )
-    }
-
-    fn acknowledge_local_source_segment_inner(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: Option<u64>,
-        delivery_path: Option<&str>,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segments_inner(
-            &[delivered_wire],
-            acknowledged_at_unix_seconds,
-            delivery_path,
-        )
-    }
-
-    fn acknowledge_local_source_segments_inner(
-        &mut self,
-        delivered_wires: &[&[u8]],
-        acknowledged_at_unix_seconds: Option<u64>,
-        delivery_path: Option<&str>,
-    ) -> Result<(), RepositoryRuntimeError> {
-        if delivered_wires.is_empty() {
-            return Ok(());
-        }
-        let previous_snapshot = self.snapshot.clone();
-        for delivered_wire in delivered_wires {
-            match self.remove_local_source_pending_segment(delivered_wire) {
-                Ok(true) => {}
-                Ok(false) => {
-                    self.snapshot = previous_snapshot;
-                    return Ok(());
-                }
-                Err(error) => {
-                    self.snapshot = previous_snapshot;
-                    return Err(error);
-                }
-            }
-        }
-        // Persist the selected replay window's rotation cursor with every successful ACK. The
-        // durable journal may still contain tails for the current streams; waiting for those
-        // tails to drain would leave the cursor unset across a restart and starve later streams.
-        let replay_stream_cursor = self.snapshot.local_source.replay_window_cursor.clone();
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            let ids = delivered_wires
-                .iter()
-                .map(|wire| hex::encode(Sha256::digest(wire)))
-                .collect::<Vec<_>>();
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal_with_cursor(
-                    &ids,
-                    acknowledged_at_unix_seconds,
-                    delivery_path,
-                    replay_stream_cursor.as_deref(),
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
         }
         Ok(())
     }

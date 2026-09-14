@@ -1,8 +1,6 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
 use crate::history_sync::SignedSegment;
 use crate::state::history_repository::identity::RepositoryNodeIdentity;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
@@ -243,7 +241,11 @@ impl HistoryStorage {
         }
         write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
+        // The journal mutation is durable once the transaction commits. Maintenance is bounded
+        // housekeeping; a failure must not make callers roll back their in-memory snapshot and
+        // recapture rows that were already committed.
+        finish_post_commit_maintenance(maintain_sqlite(connection));
+        Ok(())
     }
 
     pub(crate) fn append_source_delivery_journal(
@@ -268,7 +270,8 @@ impl HistoryStorage {
             return Err(error);
         }
         transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
+        finish_post_commit_maintenance(maintain_sqlite(connection));
+        Ok(())
     }
 
     #[cfg(test)]
@@ -380,28 +383,6 @@ impl HistoryStorage {
             )
             .map(|value| value != 0)
             .map_err(sqlite_error)
-    }
-
-    pub(crate) fn source_delivery_journal_has_unloaded_tail(
-        &self,
-        pending_by_stream: &BTreeMap<String, usize>,
-    ) -> Result<bool> {
-        let mut backend = self.lock_backend();
-        let Some(connection) = sqlite_connection(&mut backend)? else {
-            return Ok(false);
-        };
-        let durable_count = connection
-            .query_row(
-                "SELECT pending_segments FROM source_delivery_journal_state WHERE singleton = 1",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(sqlite_error)?;
-        let loaded_count = pending_by_stream.values().sum::<usize>();
-        let loaded_count = i64::try_from(loaded_count).map_err(|_| {
-            HistoryStorageError("loaded source journal count exceeds SQLite integer".to_owned())
-        })?;
-        Ok(durable_count > loaded_count)
     }
 
     #[cfg(test)]
@@ -811,7 +792,8 @@ impl HistoryStorage {
                 .map_err(sqlite_error)?;
         }
         transaction.commit().map_err(sqlite_error)?;
-        maintain_sqlite(connection)
+        finish_post_commit_maintenance(maintain_sqlite(connection));
+        Ok(())
     }
 }
 
