@@ -30,7 +30,9 @@ impl LocalSourceState {
 }
 
 impl RepositoryReplicaRuntime {
-    fn source_delivery_journal_has_unloaded_tail(&self) -> Result<bool, RepositoryRuntimeError> {
+    pub(super) fn source_delivery_journal_has_unloaded_tail(
+        &self,
+    ) -> Result<bool, RepositoryRuntimeError> {
         let pending_by_stream = self
             .snapshot
             .local_source
@@ -41,15 +43,6 @@ impl RepositoryReplicaRuntime {
         self.storage
             .source_delivery_journal_has_unloaded_tail(&pending_by_stream)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-    }
-
-    fn ensure_source_delivery_capture_ready(&self) -> Result<(), RepositoryRuntimeError> {
-        if self.source_delivery_journal_has_unloaded_tail()? {
-            return Err(RepositoryRuntimeError::Storage(
-                "source delivery journal has unloaded durable tail".to_owned(),
-            ));
-        }
-        Ok(())
     }
 
     pub(crate) fn local_source_backpressure_gaps(
@@ -328,9 +321,6 @@ impl RepositoryReplicaRuntime {
         {
             return Ok(true);
         }
-        if self.source_delivery_journal_has_unloaded_tail()? {
-            return Ok(true);
-        }
         let available = self
             .storage
             .available_bytes()
@@ -341,7 +331,6 @@ impl RepositoryReplicaRuntime {
     pub(super) fn ensure_source_delivery_capacity(
         &self,
         defer_journal: bool,
-        journal_ready: bool,
     ) -> Result<(), RepositoryRuntimeError> {
         if defer_journal || !self.storage.is_sqlite() {
             return Ok(());
@@ -354,9 +343,6 @@ impl RepositoryReplicaRuntime {
             return Err(RepositoryRuntimeError::Storage(
                 "source delivery journal capacity guard".to_owned(),
             ));
-        }
-        if journal_ready {
-            self.ensure_source_delivery_capture_ready()?;
         }
         Ok(())
     }

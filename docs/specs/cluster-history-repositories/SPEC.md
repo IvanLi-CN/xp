@@ -174,6 +174,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   写入前完成，拒绝不得推进 source cursor、删除 backlog 或修改 control snapshot。恢复后按
   journal delivery order oldest-first 连续投递；容量暂停只阻断新的 source capture，不阻断既有
   backlog 的重放，source worker 每个周期最多连续处理 4 个有界 replay page，保持每周期读取预算不超过 4 MiB。
+  若 durable journal 尾部尚未装入当前 bounded replay window，source capture 仍可继续追加；追加事务
+  只把新段放在 SQLite 尾部，并立即重建有界窗口，禁止新段越过未确认的旧序列。该尾部重建状态不等同于
+  `capacity_suspended`，也不丢弃新的 minute capture。
   当多个 stream head 共同超过单页 wire 预算时，tombstone head 固定优先，live stream head
   通过 state row 中的 replay stream cursor 轮转，游标只在删除已确认窗口的 ACK 事务中持久化，避免
   字典序选择造成后续 stream 饥饿；未确认的 replay window 在 ACK 前保持稳定。

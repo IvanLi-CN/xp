@@ -59,7 +59,6 @@ impl LocalSourceState {
         }
     }
 }
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct LocalSourceStreamState {
     #[serde(default)]
@@ -71,7 +70,6 @@ struct LocalSourceStreamState {
     #[serde(default)]
     backpressured_records: u64,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LocalSourceGap {
     source_epoch: u64,
@@ -80,7 +78,6 @@ struct LocalSourceGap {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
 }
-
 impl RepositoryReplicaRuntime {
     pub(crate) fn history_truncated(&self) -> bool {
         self.snapshot.history_truncated
@@ -427,7 +424,7 @@ impl RepositoryReplicaRuntime {
                     HistoryWriteAvailability::DegradedLowSpace,
                 ));
             }
-            self.ensure_source_delivery_capacity(options.defer_journal, journal_ready)?;
+            self.ensure_source_delivery_capacity(options.defer_journal)?;
         }
         if self.storage.is_sqlite() && !journal_ready && self.snapshot.local_source.epoch == 0 {
             return Err(RepositoryRuntimeError::Storage(
@@ -553,6 +550,9 @@ impl RepositoryReplicaRuntime {
             self.snapshot = previous_snapshot;
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
+        }
+        if !options.defer_journal {
+            self.hydrate_source_delivery_journal()?;
         }
         Ok(if journal_ready {
             self.local_source_pending_segments()

@@ -380,13 +380,13 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
 }
 
 #[test]
-fn source_delivery_pauses_capture_while_a_stream_tail_is_still_on_disk() {
+fn source_delivery_appends_after_unloaded_tail_without_overtaking_it() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
     let source_identity = identity();
     let mut runtime = load(temporary.path());
 
-    for sequence in 0..256_u64 {
+    for sequence in 0..257_u64 {
         runtime
             .queue_local_source_segment(
                 "cluster-a",
@@ -407,18 +407,9 @@ fn source_delivery_pauses_capture_while_a_stream_tail_is_still_on_disk() {
     }
     drop(runtime);
 
-    append_signed_source_journal_rows(
-        temporary.path(),
-        &signing_key,
-        &source_identity,
-        "connections",
-        "connections.v1",
-        256..257,
-    );
-
     let mut restarted = load(temporary.path());
     assert!(
-        restarted
+        !restarted
             .source_delivery_capture_paused()
             .expect("read source capture guard")
     );
@@ -437,16 +428,20 @@ fn source_delivery_pauses_capture_while_a_stream_tail_is_still_on_disk() {
         )],
         257,
     );
-    assert!(
-        result
-            .expect_err("capture must wait for the durable stream tail")
-            .to_string()
-            .contains("source delivery journal has unloaded durable tail")
-    );
+    result.expect("capture after durable tail");
     assert_eq!(
         restarted.local_source_next_sequence("connections"),
-        Some(256)
+        Some(258)
     );
+    let page = restarted.local_source_pending_segments_page();
+    assert!(page.iter().all(|segment| {
+        SignedSegment::from_wire(&segment.wire)
+            .expect("signed replay segment")
+            .canonical()
+            .first_cursor()
+            .sequence()
+            < 257
+    }));
 }
 
 #[test]
