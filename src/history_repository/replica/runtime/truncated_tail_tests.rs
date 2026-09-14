@@ -365,6 +365,10 @@ fn persisted_retained_anchor_replay_is_idempotent_after_recent_window_eviction()
             .expect("continuation");
     }
 
+    // Reopen the repository so the replay check exercises the durable SQLite row after a
+    // process restart, rather than the in-memory receiver state from the initial ingest.
+    drop(runtime);
+    let mut runtime = load(temporary.path());
     runtime
         .receive_wire(
             "cluster-a",
