@@ -3,6 +3,10 @@ use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate,
 };
+use std::{future::Future, time::Instant};
+
+const MAX_INITIAL_CATCH_UP_PAGES_PER_TICK: usize = 8;
+const INITIAL_CATCH_UP_TICK_BUDGET: Duration = Duration::from_secs(15);
 
 struct CompletedRepairResponse {
     summary_cursor: Option<String>,
@@ -65,12 +69,21 @@ pub(crate) async fn catch_up_against_ready_repositories(
         runtime.reconcile_ready_repositories(&receiving_repository_ids)?;
     }
 
+    let deadline = Instant::now() + INITIAL_CATCH_UP_TICK_BUDGET;
     let mut in_progress = false;
     for peer in peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
     {
-        match advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await? {
+        match drain_bounded_catch_up_pages(
+            MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
+            deadline,
+            || async {
+                advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
+            },
+        )
+        .await?
+        {
             InitialBackfillProgress::InProgress => in_progress = true,
             InitialBackfillProgress::Complete => {}
             InitialBackfillProgress::Unavailable => {
@@ -82,7 +95,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
         return Ok(InitialBackfillProgress::InProgress);
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
-    // still advancing every peer's signed summary one bounded page per worker tick.
+    // still advancing every peer's signed summary through bounded pages per worker tick.
     let Some(tiered_peer) = peers
         .iter()
         .find(|peer| peer.node_id != state.cluster.node_id)
@@ -99,7 +112,10 @@ pub(crate) async fn catch_up_against_ready_repositories(
         })
     };
     let tiered_progress =
-        pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await?;
+        drain_bounded_catch_up_pages(MAX_INITIAL_CATCH_UP_PAGES_PER_TICK, deadline, || async {
+            pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await
+        })
+        .await?;
     if needs_reverification && tiered_progress == InitialBackfillProgress::Complete {
         let mut runtime = state.repository_replica.lock().await;
         for peer in peers
@@ -118,6 +134,30 @@ pub(crate) async fn catch_up_against_ready_repositories(
         return Ok(InitialBackfillProgress::InProgress);
     }
     Ok(tiered_progress)
+}
+
+async fn drain_bounded_catch_up_pages<F, Fut>(
+    max_pages: usize,
+    deadline: Instant,
+    mut fetch_page: F,
+) -> anyhow::Result<InitialBackfillProgress>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
+{
+    for _ in 0..max_pages {
+        if Instant::now() >= deadline {
+            return Ok(InitialBackfillProgress::InProgress);
+        }
+        match fetch_page().await? {
+            InitialBackfillProgress::Complete => return Ok(InitialBackfillProgress::Complete),
+            InitialBackfillProgress::Unavailable => {
+                return Ok(InitialBackfillProgress::Unavailable);
+            }
+            InitialBackfillProgress::InProgress => {}
+        }
+    }
+    Ok(InitialBackfillProgress::InProgress)
 }
 
 async fn advance_ready_peer_catch_up_page(
@@ -425,6 +465,57 @@ async fn repair_ready_peer_catch_up_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bounded_catch_up_drain_consumes_multiple_pages_in_one_tick() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async move {
+                    Ok(if calls < 3 {
+                        InitialBackfillProgress::InProgress
+                    } else {
+                        InitialBackfillProgress::Complete
+                    })
+                }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 3);
+        assert_eq!(result, InitialBackfillProgress::Complete);
+    }
+
+    #[tokio::test]
+    async fn bounded_catch_up_drain_stops_at_page_cap() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(3, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::InProgress) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 3);
+        assert_eq!(result, InitialBackfillProgress::InProgress);
+    }
+
+    #[tokio::test]
+    async fn bounded_catch_up_drain_stops_before_an_expired_deadline() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() - Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::InProgress) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 0);
+        assert_eq!(result, InitialBackfillProgress::InProgress);
+    }
 
     #[test]
     fn wire_bounded_repair_response_completes_its_identity_with_pending_ids() {
