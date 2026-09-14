@@ -31,7 +31,6 @@ const REPOSITORY_REQUEST_BUDGET: Duration = Duration::from_secs(15);
 const MAX_REPOSITORY_PEERS_PER_CYCLE: usize = 4;
 const READY_STABILITY_WINDOW: Duration = Duration::from_secs(5 * 60);
 const CLUSTER_RELAY_KEY_CONTEXT: &[u8] = b"xp-history-repository-relay-key-v1\0";
-
 mod backfill;
 mod deep_repair;
 mod direct;
@@ -255,16 +254,20 @@ async fn publish_local_history_segment(
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         let segments = if capture_paused {
+            runtime.hydrate_source_delivery_journal()?;
             runtime.local_source_pending_segments_page()
         } else {
-            runtime.queue_local_source_segments_for_repositories(
+            let segments = runtime.queue_local_source_segments_for_repositories(
                 &state.cluster.cluster_id,
                 identity.clone(),
                 &signing_key,
                 source_batch.take_records(),
                 now,
                 ready_repository_ids,
-            )?
+            )?;
+            // Journal commit makes resource rows safe to mark enqueued before collector ACK.
+            source_batch.mark_resources_enqueued(state);
+            segments
         };
         let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
         (segments, gaps)
@@ -377,7 +380,11 @@ async fn publish_local_history_segment(
             .repository_replica
             .lock()
             .await
-            .acknowledge_local_source_segments_via(&delivered_segments, now, delivery_path)?;
+            .acknowledge_local_source_segments_via_without_hydrating(
+                &delivered_segments,
+                now,
+                delivery_path,
+            )?;
     }
     if (segments.is_empty() && delivery_succeeded && !gaps.is_empty())
         || !delivered_segments.is_empty()
@@ -435,9 +442,6 @@ async fn publish_local_history_segment(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
         )?;
-    if !capture_paused && delivery_succeeded && !transport_failed && acknowledgements_replicated {
-        source_batch.mark_resources_enqueued(state);
-    }
     if delivery_succeeded
         && !transport_failed
         && acknowledgements_replicated
@@ -516,7 +520,11 @@ async fn relay_local_source_segments(
         .repository_replica
         .lock()
         .await
-        .acknowledge_local_source_segments_via(&payload.batch.segments, now, "dynamic_relay")?;
+        .acknowledge_local_source_segments_via_without_hydrating(
+            &payload.batch.segments,
+            now,
+            "dynamic_relay",
+        )?;
     state
         .repository_replica
         .lock()
@@ -584,7 +592,6 @@ async fn advance_local_repository_lifecycle(state: &AppState, now: u64) -> anyho
     if lifecycle != RepositoryLifecycle::Syncing {
         return Ok(());
     }
-
     // Catch-up validates a bounded point in time. Once it completes, continuously arriving
     // source segments must not reset the five-minute stability window: a busy cluster otherwise
     // has no instant at which it can be exactly equal to an actively writing repository.
@@ -657,7 +664,6 @@ async fn apply_local_catch_up_result(
     .map_err(|_| anyhow::anyhow!("write local history repository lifecycle to Raft"))?;
     Ok(())
 }
-
 async fn update_local_replica_convergence(
     state: &AppState,
     replica_converged: bool,
@@ -693,7 +699,6 @@ async fn update_local_replica_convergence(
 }
 async fn known_history_source_node_ids(state: &AppState) -> Vec<String> {
     const MAX_KNOWN_HISTORY_SOURCES: usize = 4_096;
-
     let store = state.store.lock().await;
     store
         .state()
@@ -710,7 +715,6 @@ fn completed_replication_work(work: ReplicaWork, deep_verification_succeeded: bo
         work
     }
 }
-
 fn remove_delivered_repair_segment_ids<'a>(
     pending_segment_ids: &mut BTreeSet<String>,
     delivered_wires: impl IntoIterator<Item = &'a [u8]>,
@@ -729,7 +733,6 @@ fn remove_delivered_repair_segment_ids<'a>(
     pending_segment_ids.retain(|segment_id| !delivered_set.contains(segment_id));
     Ok(())
 }
-
 async fn replicate_peer_via_dynamic_relay(
     state: &AppState,
     target: &MeshPeerTarget,
@@ -784,7 +787,6 @@ async fn replicate_peer_via_dynamic_relay(
         .record_relay_batch_delivered(&target.node_id, next_segment_id.as_deref())?;
     Ok(())
 }
-
 pub(super) fn cluster_relay_keypair(
     state: &AppState,
     node_id: &str,
@@ -802,7 +804,6 @@ pub(super) fn cluster_relay_keypair(
         cluster_ca_key,
     ))
 }
-
 fn relay_keypair_from_cluster_material(
     cluster_id: &str,
     node_id: &str,
@@ -817,7 +818,6 @@ fn relay_keypair_from_cluster_material(
     hasher.update(cluster_ca_key.as_bytes());
     RelayKeypair::from_private_key(hasher.finalize().into())
 }
-
 async fn replicate_peer(
     state: &AppState,
     peer: &MeshPeerTarget,

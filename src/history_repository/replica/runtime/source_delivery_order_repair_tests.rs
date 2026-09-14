@@ -1,4 +1,39 @@
+use super::source_delivery_capacity_tests::append_signed_source_journal_rows;
 use super::*;
+
+#[test]
+fn source_delivery_detects_unloaded_tail_when_stream_totals_match() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "runtime",
+        "runtime.v1",
+        0..2,
+    );
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &source_identity,
+        "traffic",
+        "traffic.v1",
+        0..1,
+    );
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let loaded_by_stream = std::collections::BTreeMap::from([
+        ("runtime".to_owned(), 3_usize),
+        ("traffic".to_owned(), 0_usize),
+    ]);
+    assert!(
+        storage
+            .source_delivery_journal_has_unloaded_tail(&loaded_by_stream)
+            .expect("detect per-stream durable tail"),
+        "an unloaded traffic row must be detected even when aggregate counts match"
+    );
+}
 
 #[test]
 fn source_delivery_journal_order_repair_is_resumable() {
@@ -7,7 +42,7 @@ fn source_delivery_journal_order_repair_is_resumable() {
     let source_identity = identity();
     let mut runtime = load(temporary.path());
 
-    for sequence in 0..257_u64 {
+    for sequence in 0..256_u64 {
         runtime
             .queue_local_source_segment(
                 "cluster-a",
@@ -27,6 +62,40 @@ fn source_delivery_journal_order_repair_is_resumable() {
             .expect("queue source segment");
     }
     drop(runtime);
+
+    let tail = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 1, "runtime", 256).expect("tail cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"runtime:256".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        256,
+        256,
+    )
+    .expect("tail segment")
+    .sign(&signing_key)
+    .expect("sign tail segment")
+    .wire_bytes()
+    .expect("encode tail segment");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    storage
+        .append_source_delivery_journal(&[
+            crate::state::history_storage::SourceDeliveryJournalRow {
+                id: hex::encode(sha2::Sha256::digest(&tail)),
+                stream: "runtime".to_owned(),
+                closed_at_unix_seconds: 256,
+                identity: source_identity.clone(),
+                wire: tail,
+            },
+        ])
+        .expect("append durable journal tail");
 
     let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
         .expect("open history database");

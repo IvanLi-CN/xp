@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{LocalSourceState, LocalSourceStreamState, RepositoryReplicaRuntime};
-use crate::history_sync::SyncRecord;
+use crate::history_sync::{CanonicalSegment, Cursor, SyncRecord};
 use crate::state::history_repository::identity::{
     Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey,
 };
+use crate::state::history_repository::replica::RepositoryReplicaSegment;
 use ed25519_dalek::SigningKey;
 
 #[test]
@@ -166,6 +167,89 @@ fn backpressure_gap_page_prioritizes_the_gap_before_the_pending_segment() {
     assert!(
         gaps.iter()
             .any(|gap| (gap.first_sequence, gap.last_sequence) == (120, 129))
+    );
+}
+
+#[test]
+fn backpressure_gap_page_keeps_the_first_pending_predecessor_after_the_limit() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    let mut runtime = RepositoryReplicaRuntime::empty(storage);
+    runtime.snapshot.local_source.epoch = 7;
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = RepositoryNodeIdentity::new(
+        RepositoryNodeId::try_from("node-a".to_owned()).expect("node id"),
+        Ed25519PublicKey::from_bytes(signing_key.verifying_key().to_bytes()).expect("public key"),
+        X25519PublicKey::from_bytes([12; 32]).expect("relay key"),
+    )
+    .expect("identity");
+
+    let mut pending = Vec::with_capacity(65);
+    for index in 0..64 {
+        let stream = format!("stream-{index:02}");
+        runtime.record_local_source_backpressure_gap(&stream, 0, 0, 100);
+        let wire = CanonicalSegment::new(
+            "cluster-a",
+            Cursor::new("node-a", 7, &stream, 1).expect("cursor"),
+            vec![SyncRecord::new(
+                "node-a",
+                "node-a",
+                "runtime.v1",
+                1,
+                format!("pending-{index}").into_bytes(),
+                b"sample".to_vec(),
+                false,
+            )],
+            None,
+            100,
+            100,
+        )
+        .expect("segment")
+        .sign(&signing_key)
+        .expect("sign segment")
+        .wire_bytes()
+        .expect("wire");
+        pending.push(RepositoryReplicaSegment {
+            identity: source_identity.clone(),
+            wire,
+        });
+    }
+    runtime.record_local_source_backpressure_gap("zz-stream", 0, 0, 100);
+    let wire = CanonicalSegment::new(
+        "cluster-a",
+        Cursor::new("node-a", 7, "zz-stream", 1).expect("cursor"),
+        vec![SyncRecord::new(
+            "node-a",
+            "node-a",
+            "runtime.v1",
+            1,
+            b"first".to_vec(),
+            b"sample".to_vec(),
+            false,
+        )],
+        None,
+        100,
+        100,
+    )
+    .expect("first segment")
+    .sign(&signing_key)
+    .expect("sign first segment")
+    .wire_bytes()
+    .expect("first wire");
+    pending.insert(
+        0,
+        RepositoryReplicaSegment {
+            identity: source_identity,
+            wire,
+        },
+    );
+
+    let gaps = runtime.local_source_gaps_for_segments("node-a", &pending);
+    assert_eq!(gaps.len(), 64);
+    assert!(
+        gaps.iter()
+            .any(|gap| gap.stream == "zz-stream" && gap.last_sequence == 0),
+        "the first pending segment predecessor must survive the gap page limit"
     );
 }
 

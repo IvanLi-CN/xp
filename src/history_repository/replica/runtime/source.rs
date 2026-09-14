@@ -29,19 +29,19 @@ pub(super) struct LocalSourceState {
     backpressure_gaps: BTreeMap<String, LocalSourceGap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     backpressure_gap_cursor: Option<String>,
+    #[serde(skip)]
+    replay_window_cursor: Option<String>,
     /// Durable marker-to-cursor mapping. Tombstones use their own stream, so their sequence
     /// cannot be reconstructed from the affected schema's live cursor.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     deletion_marker_keys: BTreeMap<String, ReplicaRecordKey>,
 }
-
 struct LocalSourceQueueOptions<'a> {
     ready_repositories: &'a [String],
     _max_pending_segments_per_stream: usize,
     persist: bool,
     defer_journal: bool,
 }
-
 impl LocalSourceState {
     pub(super) fn epoch(&self) -> u64 {
         self.epoch
@@ -50,33 +50,12 @@ impl LocalSourceState {
     pub(super) fn node_id(&self) -> Option<&str> {
         (!self.node_id.is_empty()).then_some(self.node_id.as_str())
     }
-
     fn clear_pending(&mut self) {
         for stream in self.streams.values_mut() {
             stream.pending.clear();
         }
     }
-
-    pub(super) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
-        if self.epoch != 0 {
-            if self.epoch >= i64::MAX as u64 {
-                return Err(RepositoryRuntimeError::Storage(
-                    "source epoch exhausted".to_owned(),
-                ));
-            }
-            self.epoch += 1;
-        }
-        self.streams.clear();
-        self.backpressure_gaps.clear();
-        self.backpressure_gap_cursor = None;
-        self.deletion_marker_keys.clear();
-        self.primary_failure_cycles = 0;
-        self.standby_success_cycles = 0;
-        self.primary_failure_repository_id = None;
-        Ok(())
-    }
 }
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct LocalSourceStreamState {
     #[serde(default)]
@@ -88,7 +67,6 @@ struct LocalSourceStreamState {
     #[serde(default)]
     backpressured_records: u64,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LocalSourceGap {
     source_epoch: u64,
@@ -97,12 +75,10 @@ struct LocalSourceGap {
     start_unix_seconds: u64,
     end_unix_seconds: u64,
 }
-
 impl RepositoryReplicaRuntime {
     pub(crate) fn history_truncated(&self) -> bool {
         self.snapshot.history_truncated
     }
-
     pub(crate) fn can_accept_retained_sequence_gap(
         &self,
         wire: &[u8],
@@ -125,7 +101,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(true)
     }
-
     pub(crate) fn tiered_handoff_for_sequence_gap(
         &self,
         wire: &[u8],
@@ -167,7 +142,6 @@ impl RepositoryReplicaRuntime {
             end_unix_seconds: segment.canonical().opened_at_unix_seconds(),
         }))
     }
-
     const MAX_HISTORY_BACKFILL_PENDING_SEGMENTS_PER_STREAM: usize = 128;
 
     pub(crate) fn queue_local_source_segments(
@@ -187,7 +161,6 @@ impl RepositoryReplicaRuntime {
             &["local".to_owned()],
         )
     }
-
     /// Queue one historical backfill page without returning unrelated live outbox fronts. The
     /// caller can atomically acknowledge these exact segments with the page checkpoint.
     pub(crate) fn queue_local_history_backfill_segments(
@@ -367,7 +340,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(created)
     }
-
     pub(crate) fn queue_local_source_segments_for_repositories(
         &mut self,
         cluster_id: &str,
@@ -402,6 +374,7 @@ impl RepositoryReplicaRuntime {
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
         let journal_ready = self.hydrate_source_delivery_journal()?;
+        let journal_has_unloaded_tail = self.source_delivery_journal_has_unloaded_tail()?;
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
@@ -429,7 +402,7 @@ impl RepositoryReplicaRuntime {
         }
         if records_by_stream.is_empty() {
             return Ok(if journal_ready {
-                self.local_source_pending_segments()
+                self.local_source_pending_segments_page()
             } else {
                 Vec::new()
             });
@@ -571,13 +544,24 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        Ok(if journal_ready {
-            self.local_source_pending_segments()
+        let hydration = if options.defer_journal {
+            Ok(())
+        } else if journal_ready && journal_has_unloaded_tail {
+            for (stream, state) in &mut self.snapshot.local_source.streams {
+                state.pending = previous_snapshot
+                    .local_source
+                    .streams
+                    .get(stream)
+                    .map_or_else(VecDeque::new, |previous| previous.pending.clone());
+            }
+            Ok(())
+        } else if journal_ready && self.local_source_pending_window_within_budget() {
+            Ok(())
         } else {
-            Vec::new()
-        })
+            self.hydrate_source_delivery_journal().map(|_| ())
+        };
+        Ok(self.finish_source_delivery_capture(journal_ready, hydration))
     }
-
     pub(crate) fn queue_local_source_segment(
         &mut self,
         cluster_id: &str,
@@ -636,7 +620,6 @@ impl RepositoryReplicaRuntime {
         }
         Ok(())
     }
-
     pub(crate) fn local_history_backfill_inflight_checkpoint(
         &self,
     ) -> Option<(Option<String>, bool)> {
@@ -782,6 +765,10 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn local_source_pending_segments(&self) -> Vec<RepositoryReplicaSegment> {
+        const MAX_SEGMENTS: usize =
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS;
+        const MAX_WIRE_BYTES: usize =
+            crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES;
         let mut pending = self
             .snapshot
             .local_source
@@ -792,14 +779,23 @@ impl RepositoryReplicaRuntime {
         // A deletion must reach every repository before a later record can resurrect the same
         // key, so the independent tombstone stream is always offered first.
         pending.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
-        pending
-            .into_iter()
-            .map(|(_, pending)| pending)
-            .map(|pending| RepositoryReplicaSegment {
+        let mut page = Vec::new();
+        let mut wire_bytes = 0_usize;
+        for (_, pending) in pending {
+            if page.len() == MAX_SEGMENTS {
+                break;
+            }
+            let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
+            if next_wire_bytes > MAX_WIRE_BYTES {
+                continue;
+            }
+            wire_bytes = next_wire_bytes;
+            page.push(RepositoryReplicaSegment {
                 identity: pending.identity.clone(),
                 wire: pending.wire.clone(),
-            })
-            .collect()
+            });
+        }
+        page
     }
 
     #[cfg(test)]
@@ -809,6 +805,11 @@ impl RepositoryReplicaRuntime {
             .streams
             .get(stream)
             .map(|state| state.next_sequence)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_source_replay_window_cursor(&self) -> Option<&str> {
+        self.snapshot.local_source.replay_window_cursor.as_deref()
     }
 
     pub(crate) fn local_source_tombstones_fully_acknowledged(

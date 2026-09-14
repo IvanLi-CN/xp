@@ -445,6 +445,13 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         .expect("begin summary resource transaction");
     let now_unix_seconds = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
     let first_observed = now_unix_seconds.saturating_sub(60);
+    let source_identity = serde_json::to_vec(&serde_json::json!({
+        "node_id": "summary-source",
+        "ed25519_public_key": URL_SAFE_NO_PAD.encode([7_u8; 32]),
+        "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32]),
+    }))
+    .expect("encode source journal identity");
+    let source_wire_len = 192 * 1024 - 1024;
     for sequence in 0..257_u64 {
         let observed = first_observed.saturating_add(sequence);
         transaction
@@ -496,7 +503,46 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                 ],
             )
             .expect("insert summary resource record");
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal
+                     (id, stream, closed_at, identity, wire, created_at,
+                      source_node_id, source_epoch, first_sequence)
+                 VALUES (?1, 'runtime', ?2, ?3, zeroblob(?4), ?2,
+                         'summary-source', 1, ?5)",
+                rusqlite::params![
+                    format!("{sequence:064x}"),
+                    observed,
+                    &source_identity,
+                    source_wire_len,
+                    sequence,
+                ],
+            )
+            .expect("insert source delivery resource segment");
     }
+    transaction
+        .execute("DELETE FROM source_delivery_journal_stream_state", [])
+        .expect("reset source delivery stream counters");
+    transaction
+        .execute(
+            "INSERT INTO source_delivery_journal_stream_state (stream, pending_segments)
+             VALUES ('runtime', 257)",
+            [],
+        )
+        .expect("record source delivery stream counter");
+    transaction
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 257,
+                 pending_bytes = ?1,
+                 epoch_high_water = 1,
+                 order_repair_completed = 1,
+                 capacity_suspended = 0,
+                 stream_counts_initialized = 1
+             WHERE singleton = 1",
+            [i64::from(source_wire_len * 257)],
+        )
+        .expect("record source delivery resource backlog");
 
     let replica_snapshot = serde_json::json!({
         "external_history": true,
@@ -592,6 +638,9 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
         "/api/admin/_internal/history-repository/summary?deep_verification=true"
             .parse()
             .expect("summary resource URI");
+    let status_uri: axum::http::Uri = "/api/admin/_internal/history-repository/status"
+        .parse()
+        .expect("source delivery status URI");
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
@@ -672,6 +721,44 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             summary["next_segment_id"]
                 .as_str()
                 .is_some_and(|cursor| { cursor.starts_with("r:") })
+        );
+
+        let status_context = xp::internal_auth::RequestContext::now(
+            xp::internal_auth::InternalRoute::MeshV2,
+            &cluster.cluster_id,
+            &cluster.node_id,
+            &cluster.node_id,
+            xp::id::new_ulid_string(),
+        );
+        let mut status_headers = axum::http::HeaderMap::new();
+        xp::internal_auth::sign_request_v2(
+            &ca_key_pem,
+            &ca_pem,
+            &axum::http::Method::GET,
+            &status_uri,
+            None,
+            &[],
+            &status_context,
+            &mut status_headers,
+        )
+        .expect("sign source delivery status request");
+        let mut status_request = client.get(format!("http://127.0.0.1:{bind_port}{status_uri}"));
+        for (name, value) in &status_headers {
+            status_request =
+                status_request.header(name.as_str(), value.to_str().expect("signed header value"));
+        }
+        let status_response = status_request
+            .send()
+            .await
+            .expect("source delivery status response");
+        assert_eq!(status_response.status(), reqwest::StatusCode::OK);
+        let runtime_status: serde_json::Value = status_response
+            .json()
+            .await
+            .expect("decode source delivery status");
+        assert_eq!(
+            runtime_status["source_delivery"]["pending_segments"],
+            serde_json::json!(257)
         );
         max_pss_kib = max_pss_kib
             .max(sampled_peak_pss_kib.load(Ordering::Relaxed))

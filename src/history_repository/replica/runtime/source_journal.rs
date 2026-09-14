@@ -1,12 +1,75 @@
 use crate::history_sync::SignedSegment;
 use crate::state::history_storage::{
+    SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS, SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
     SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
 };
 use std::collections::BTreeSet;
 
 use super::*;
 
+#[path = "source_journal_ack.rs"]
+mod source_journal_ack;
+
+impl LocalSourceState {
+    pub(crate) fn rotate_after_repository_rebuild(&mut self) -> Result<(), RepositoryRuntimeError> {
+        if self.epoch != 0 {
+            if self.epoch >= i64::MAX as u64 {
+                return Err(RepositoryRuntimeError::Storage(
+                    "source epoch exhausted".to_owned(),
+                ));
+            }
+            self.epoch += 1;
+        }
+        self.streams.clear();
+        self.backpressure_gaps.clear();
+        self.backpressure_gap_cursor = None;
+        self.replay_window_cursor = None;
+        self.deletion_marker_keys.clear();
+        self.primary_failure_cycles = 0;
+        self.standby_success_cycles = 0;
+        self.primary_failure_repository_id = None;
+        Ok(())
+    }
+}
+
 impl RepositoryReplicaRuntime {
+    pub(crate) fn finish_source_delivery_capture(
+        &mut self,
+        journal_ready: bool,
+        hydration: Result<(), RepositoryRuntimeError>,
+    ) -> Vec<RepositoryReplicaSegment> {
+        if let Err(error) = hydration {
+            // The journal transaction already committed. Keep durable rows as the source of
+            // truth and clear only the in-memory window to avoid recapture.
+            tracing::warn!(
+                error = %error,
+                "source delivery window hydration deferred after commit"
+            );
+            self.snapshot.local_source.clear_pending();
+            return Vec::new();
+        }
+        if journal_ready {
+            self.local_source_pending_segments_page()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(super) fn source_delivery_journal_has_unloaded_tail(
+        &self,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        let pending_by_stream = self
+            .snapshot
+            .local_source
+            .streams
+            .iter()
+            .map(|(stream, state)| (stream.clone(), state.pending.len()))
+            .collect::<BTreeMap<_, _>>();
+        self.storage
+            .source_delivery_journal_has_unloaded_tail(&pending_by_stream)
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+    }
+
     pub(crate) fn local_source_backpressure_gaps(
         &mut self,
         source_node_id: &str,
@@ -33,22 +96,24 @@ impl RepositoryReplicaRuntime {
         }
         // Keep the gap immediately before each pending segment in the bounded page so a receiver
         // can advance its signed chain without waiting for a full rotation of the gap cursor.
+        let required_key_for_segment = |segment: &RepositoryReplicaSegment| {
+            let signed = SignedSegment::from_wire(&segment.wire).ok()?;
+            let cursor = signed.canonical().first_cursor();
+            self.snapshot
+                .local_source
+                .backpressure_gaps
+                .iter()
+                .find(|(key, gap)| {
+                    super::backpressure_gap_stream(key) == cursor.stream()
+                        && gap.source_epoch == cursor.source_epoch()
+                        && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
+                })
+                .map(|(key, _)| key.clone())
+        };
+        let first_required_key = pending_segments.first().and_then(required_key_for_segment);
         let required_keys = pending_segments
             .iter()
-            .filter_map(|segment| {
-                let signed = SignedSegment::from_wire(&segment.wire).ok()?;
-                let cursor = signed.canonical().first_cursor();
-                self.snapshot
-                    .local_source
-                    .backpressure_gaps
-                    .iter()
-                    .find(|(key, gap)| {
-                        super::backpressure_gap_stream(key) == cursor.stream()
-                            && gap.source_epoch == cursor.source_epoch()
-                            && gap.last_sequence.checked_add(1) == Some(cursor.sequence())
-                    })
-                    .map(|(key, _)| key.clone())
-            })
+            .filter_map(required_key_for_segment)
             .collect::<BTreeSet<_>>();
         let start = self
             .snapshot
@@ -58,11 +123,23 @@ impl RepositoryReplicaRuntime {
             .and_then(|cursor| keys.iter().position(|key| key == cursor))
             .map_or(0, |index| (index + 1) % keys.len());
         let page_len = keys.len().min(MAX_SOURCE_GAPS_PER_REQUEST);
-        let mut selected_keys = required_keys
-            .into_iter()
-            .filter(|key| keys.binary_search(key).is_ok())
-            .take(page_len)
-            .collect::<Vec<_>>();
+        let mut selected_keys = Vec::with_capacity(page_len);
+        // The worker attaches the gap page to its first segment only. Preserve that segment's
+        // predecessor even when many later pending segments contribute lexicographically earlier
+        // required gaps.
+        if let Some(key) = first_required_key.filter(|key| keys.binary_search(key).is_ok()) {
+            selected_keys.push(key);
+        }
+        for key in required_keys {
+            if selected_keys.len() >= page_len {
+                break;
+            }
+            if keys.binary_search(&key).is_ok()
+                && !selected_keys.iter().any(|selected| selected == &key)
+            {
+                selected_keys.push(key);
+            }
+        }
         for offset in 0..keys.len() {
             if selected_keys.len() >= page_len {
                 break;
@@ -122,105 +199,6 @@ impl RepositoryReplicaRuntime {
         Ok(())
     }
 
-    pub(crate) fn acknowledge_local_source_segment(
-        &mut self,
-        delivered_wire: &[u8],
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(delivered_wire, None, None)
-    }
-
-    pub(crate) fn acknowledge_local_source_segment_via(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: u64,
-        delivery_path: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segment_inner(
-            delivered_wire,
-            Some(acknowledged_at_unix_seconds),
-            Some(delivery_path),
-        )
-    }
-
-    pub(crate) fn acknowledge_local_source_segments_via(
-        &mut self,
-        delivered_segments: &[RepositoryReplicaSegment],
-        acknowledged_at_unix_seconds: u64,
-        delivery_path: &str,
-    ) -> Result<(), RepositoryRuntimeError> {
-        let delivered_wires = delivered_segments
-            .iter()
-            .map(|segment| segment.wire.as_slice())
-            .collect::<Vec<_>>();
-        self.acknowledge_local_source_segments_inner(
-            &delivered_wires,
-            Some(acknowledged_at_unix_seconds),
-            Some(delivery_path),
-        )
-    }
-
-    fn acknowledge_local_source_segment_inner(
-        &mut self,
-        delivered_wire: &[u8],
-        acknowledged_at_unix_seconds: Option<u64>,
-        delivery_path: Option<&str>,
-    ) -> Result<(), RepositoryRuntimeError> {
-        self.acknowledge_local_source_segments_inner(
-            &[delivered_wire],
-            acknowledged_at_unix_seconds,
-            delivery_path,
-        )
-    }
-
-    fn acknowledge_local_source_segments_inner(
-        &mut self,
-        delivered_wires: &[&[u8]],
-        acknowledged_at_unix_seconds: Option<u64>,
-        delivery_path: Option<&str>,
-    ) -> Result<(), RepositoryRuntimeError> {
-        if delivered_wires.is_empty() {
-            return Ok(());
-        }
-        let previous_snapshot = self.snapshot.clone();
-        for delivered_wire in delivered_wires {
-            match self.remove_local_source_pending_segment(delivered_wire) {
-                Ok(true) => {}
-                Ok(false) => {
-                    self.snapshot = previous_snapshot;
-                    return Ok(());
-                }
-                Err(error) => {
-                    self.snapshot = previous_snapshot;
-                    return Err(error);
-                }
-            }
-        }
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
-        if self.storage.is_sqlite() {
-            let ids = delivered_wires
-                .iter()
-                .map(|wire| hex::encode(Sha256::digest(wire)))
-                .collect::<Vec<_>>();
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal(
-                    &ids,
-                    acknowledged_at_unix_seconds,
-                    delivery_path,
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
-            }
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn local_source_pending_segments_page(&self) -> Vec<RepositoryReplicaSegment> {
         const MAX_SEGMENTS: usize = 256;
         const MAX_WIRE_BYTES: usize = 1024 * 1024;
@@ -230,25 +208,63 @@ impl RepositoryReplicaRuntime {
             .streams
             .iter()
             .collect::<Vec<_>>();
-        // Tombstones remain ahead of live streams so a deletion cannot be overtaken by a later
-        // record that resurrects the same key.
-        streams.sort_by_key(|(stream, _)| (*stream != "tombstone", *stream));
+        let tombstone = streams
+            .iter()
+            .find(|(stream, _)| stream.as_str() == "tombstone")
+            .copied();
+        let mut live_streams = streams
+            .drain(..)
+            .filter(|(stream, _)| stream.as_str() != "tombstone")
+            .collect::<Vec<_>>();
+        live_streams.sort_by_key(|(stream, _)| *stream);
+        let start = self
+            .snapshot
+            .local_source
+            .replay_window_cursor
+            .as_deref()
+            .and_then(|cursor| {
+                live_streams
+                    .iter()
+                    .position(|(stream, _)| stream == &cursor)
+            })
+            .map_or(0, |index| (index + 1) % live_streams.len().max(1));
+        let mut ordered_streams = Vec::with_capacity(live_streams.len() + 1);
+        if let Some(tombstone) = tombstone {
+            ordered_streams.push(tombstone);
+        }
+        ordered_streams.extend(
+            (0..live_streams.len())
+                .map(|offset| live_streams[(start + offset) % live_streams.len()]),
+        );
         let mut page = Vec::new();
         let mut wire_bytes = 0_usize;
-        'streams: for (_, state) in streams {
-            for pending in &state.pending {
-                if page.len() == MAX_SEGMENTS {
-                    break 'streams;
-                }
+        let mut offsets = vec![0_usize; ordered_streams.len()];
+        loop {
+            if page.len() == MAX_SEGMENTS {
+                break;
+            }
+            let mut added = false;
+            for (index, (_, state)) in ordered_streams.iter().enumerate() {
+                let Some(pending) = state.pending.get(offsets[index]) else {
+                    continue;
+                };
                 let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
                 if next_wire_bytes > MAX_WIRE_BYTES {
-                    break 'streams;
+                    continue;
                 }
                 wire_bytes = next_wire_bytes;
+                offsets[index] += 1;
                 page.push(RepositoryReplicaSegment {
                     identity: pending.identity.clone(),
                     wire: pending.wire.clone(),
                 });
+                added = true;
+                if page.len() == MAX_SEGMENTS {
+                    break;
+                }
+            }
+            if !added {
+                break;
             }
         }
         page
@@ -297,6 +313,27 @@ impl RepositoryReplicaRuntime {
         if !self.storage.is_sqlite() {
             return Ok(true);
         }
+        let had_pending_window = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .any(|stream| !stream.pending.is_empty());
+        let pending_window_segments = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .map(|stream| stream.pending.len())
+            .sum::<usize>();
+        let pending_window_wire_bytes = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .map(|segment| segment.wire.len())
+            .sum::<usize>();
         let legacy_rows = self
             .snapshot
             .local_source
@@ -314,15 +351,67 @@ impl RepositoryReplicaRuntime {
         self.storage
             .append_source_delivery_journal(&legacy_rows)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        // Keep an unacknowledged replay page stable across failed delivery cycles. A new page is
+        // selected only after ACK removes the current window, which preserves source ordering and
+        // prevents a transient collector failure from rotating past an unresolved sequence gap.
+        if had_pending_window
+            && pending_window_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
+            && pending_window_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
+        {
+            let summary = self
+                .storage
+                .source_delivery_journal_summary()
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+            if summary.order_repairing {
+                self.snapshot.local_source.clear_pending();
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        // A legacy snapshot may contain an unbounded pre-journal queue. It has already been
+        // copied into SQLite above, so drop the oversized in-memory copy before rebuilding a
+        // bounded replay window.
+        if had_pending_window {
+            self.snapshot.local_source.clear_pending();
+        }
         if !legacy_rows.is_empty() {
             self.snapshot.local_source.clear_pending();
         }
+        let stream_names = self
+            .snapshot
+            .local_source
+            .streams
+            .keys()
+            .cloned()
+            .chain(
+                super::KNOWN_SCHEMAS
+                    .iter()
+                    .filter_map(|(schema, _)| super::stream_for_schema(schema))
+                    .map(ToOwned::to_owned),
+            )
+            .collect::<BTreeSet<_>>();
         // Keep the in-memory replay window bounded. Acknowledgement removes the durable head
         // before calling this method again, so the next page entry slides into the window on the
         // following delivery tick without loading an unbounded backlog into the control snapshot.
+        let stream_names = stream_names
+            .into_iter()
+            .chain(std::iter::once("tombstone".to_owned()))
+            .collect::<Vec<_>>();
+        let stream_heads = self
+            .storage
+            .source_delivery_journal_stream_heads(
+                &stream_names,
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+            )
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let head_wire_bytes = stream_heads.iter().map(|row| row.wire.len()).sum::<usize>();
         let (rows, order_repairing) = match self
             .storage
-            .source_delivery_journal_page(256)
+            .source_delivery_journal_page_with_budget(
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS.saturating_sub(stream_heads.len()),
+                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES.saturating_sub(head_wire_bytes),
+            )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         {
             SourceDeliveryJournalPage::Ready(rows) => (rows, false),
@@ -346,11 +435,16 @@ impl RepositoryReplicaRuntime {
                 .filter(|epoch| *epoch <= i64::MAX as u64)
                 .ok_or(RepositoryRuntimeError::StateLimitExceeded)?;
             self.snapshot.local_source.epoch = next_epoch.max(1);
-            if let Some(row) = rows.first() {
+            if let Some(row) = rows.first().or_else(|| stream_heads.first()) {
                 self.snapshot.local_source.node_id = row.identity.node_id().as_str().to_owned();
             }
         }
-        for row in rows {
+        let next_replay_stream = stream_heads
+            .iter()
+            .rev()
+            .find(|row| row.stream != "tombstone")
+            .map(|row| row.stream.clone());
+        for row in rows.into_iter().chain(stream_heads) {
             let stream = row.stream;
             let segment = StoredSegment {
                 id: row.id,
@@ -375,7 +469,31 @@ impl RepositoryReplicaRuntime {
                 .pending
                 .push_back(segment);
         }
+        // A completed ACK rotates the bounded window in-process as well as across restarts. Keep
+        // the cursor at the last stream selected for the new window so a hot stream cannot starve
+        // later streams while the durable journal still contains their tails.
+        self.snapshot.local_source.replay_window_cursor = next_replay_stream;
         Ok(true)
+    }
+
+    pub(super) fn local_source_pending_window_within_budget(&self) -> bool {
+        let pending_segments = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .map(|stream| stream.pending.len())
+            .sum::<usize>();
+        let pending_wire_bytes = self
+            .snapshot
+            .local_source
+            .streams
+            .values()
+            .flat_map(|stream| stream.pending.iter())
+            .map(|segment| segment.wire.len())
+            .sum::<usize>();
+        pending_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
+            && pending_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
     }
 
     pub(crate) fn snapshot_for_persistence(&self) -> RepositoryReplicaSnapshot {

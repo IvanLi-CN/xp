@@ -116,6 +116,9 @@
   Backpressure ranges retained in snapshots from the pre-journal queue implementation remain
   recoverable and are replayed through the persisted gap-page cursor; the current SQLite capacity
   guard rejects capture before allocating a source cursor and therefore creates no new such range.
+  A bounded replay window may leave durable journal tails on disk after restart. New source segments
+  remain appendable in that state, but are persisted behind the durable tail and trigger another
+  bounded window hydration before delivery; only the capacity or filesystem guards suspend capture.
   `path_health.v1` reads a bounded telemetry source view directly from runtime state: rotating
   through at most 16 peers, with each peer's latest one-minute bucket, rather than cloning complete
   local 24-hour telemetry series. It bounds copied strings and latency samples before adding each
@@ -166,7 +169,10 @@
   history database, the process retains SQLite and propagates the storage error instead of
   selecting the JSON fallback.
   Restart hydration reads at most 256 rows and the persisted epoch high-water instead of decoding
-  the entire journal.
+  the entire journal. When stream heads compete for the 1 MiB window, tombstones are selected first
+  and live heads rotate from the replay stream cursor, which is persisted in the same transaction
+  that deletes an acknowledged window; an unacknowledged in-memory window is retained across
+  failed delivery cycles and its cursor cannot advance before ACK.
   The summary memory regression uses the shared testbox's summary-only mode to start the release
   `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
   and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
