@@ -309,7 +309,6 @@ impl RepositoryReplicaRuntime {
             .flat_map(|stream| stream.pending.iter())
             .map(|segment| segment.wire.len())
             .sum::<usize>();
-        let has_unloaded_tail = self.source_delivery_journal_has_unloaded_tail()?;
         let legacy_rows = self
             .snapshot
             .local_source
@@ -333,7 +332,6 @@ impl RepositoryReplicaRuntime {
         if had_pending_window
             && pending_window_segments <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS
             && pending_window_wire_bytes <= SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES
-            && !has_unloaded_tail
         {
             let summary = self
                 .storage

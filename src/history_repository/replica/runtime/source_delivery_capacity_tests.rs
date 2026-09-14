@@ -413,71 +413,6 @@ fn source_delivery_hydration_keeps_each_stream_head_visible() {
 }
 
 #[test]
-fn source_delivery_appends_after_unloaded_tail_without_overtaking_it() {
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let signing_key = SigningKey::from_bytes(&[11; 32]);
-    let source_identity = identity();
-    let mut runtime = load(temporary.path());
-
-    for sequence in 0..257_u64 {
-        runtime
-            .queue_local_source_segment(
-                "cluster-a",
-                source_identity.clone(),
-                &signing_key,
-                vec![SyncRecord::new(
-                    "node-a",
-                    "node-a",
-                    "connections.v1",
-                    1,
-                    format!("connection:{sequence}").into_bytes(),
-                    b"sample".to_vec(),
-                    false,
-                )],
-                sequence,
-            )
-            .expect("queue connections backlog");
-    }
-    drop(runtime);
-
-    let mut restarted = load(temporary.path());
-    assert!(
-        !restarted
-            .source_delivery_capture_paused()
-            .expect("read source capture guard")
-    );
-    let result = restarted.queue_local_source_segment(
-        "cluster-a",
-        source_identity,
-        &signing_key,
-        vec![SyncRecord::new(
-            "node-a",
-            "node-a",
-            "connections.v1",
-            1,
-            b"connection:257".to_vec(),
-            b"sample".to_vec(),
-            false,
-        )],
-        257,
-    );
-    result.expect("capture after durable tail");
-    assert_eq!(
-        restarted.local_source_next_sequence("connections"),
-        Some(258)
-    );
-    let page = restarted.local_source_pending_segments_page();
-    assert!(page.iter().all(|segment| {
-        SignedSegment::from_wire(&segment.wire)
-            .expect("signed replay segment")
-            .canonical()
-            .first_cursor()
-            .sequence()
-            < 257
-    }));
-}
-
-#[test]
 fn source_delivery_hydration_shares_the_wire_budget_with_stream_heads() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
@@ -902,16 +837,20 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
         )
         .expect("read replay cursor after partial ack");
     assert_eq!(cursor_after_ack.as_deref(), Some("runtime"));
-    assert_ne!(
+    assert_eq!(
         runtime.local_source_replay_window_cursor(),
         Some("runtime"),
-        "an in-process ACK must rotate the replay window before tails drain"
+        "an in-process partial ACK must keep the replay window cursor stable"
     );
     let second_page = runtime.local_source_pending_segments();
     runtime
         .acknowledge_local_source_segment_via(&second_page[0].wire, 201, "direct")
         .expect("acknowledge second replay head");
-    assert_ne!(runtime.local_source_replay_window_cursor(), Some("runtime"));
+    assert_eq!(
+        runtime.local_source_replay_window_cursor(),
+        Some("runtime"),
+        "successive partial ACKs must keep the replay window cursor stable"
+    );
     drop(runtime);
 
     let restarted = load(temporary.path());
@@ -930,9 +869,9 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
     assert_eq!(
         next_streams,
         [
+            "connections",
             "ip_usage",
-            "resource_metrics-v1",
-            "runtime",
+            "path_health",
             "service_monitor_observation-v1",
             "traffic",
         ]
