@@ -125,30 +125,59 @@ impl RepositoryReplicaRuntime {
         if !hydrate_after_ack && let Some(stream) = replay_stream_cursor.as_ref() {
             self.snapshot.local_source.replay_window_cursor = Some(stream.clone());
         }
-        if let Err(error) = self.persist_control_state() {
-            self.snapshot = previous_snapshot;
-            return Err(error);
-        }
         if self.storage.is_sqlite() {
             let ids = delivered_wires
                 .iter()
                 .map(|wire| hex::encode(Sha256::digest(wire)))
                 .collect::<Vec<_>>();
-            if let Err(error) = self
-                .storage
-                .acknowledge_source_delivery_journal_with_cursor(
-                    &ids,
-                    acknowledged_at_unix_seconds,
-                    delivery_path,
-                    replay_stream_cursor.as_deref(),
-                )
-                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
-            {
-                self.snapshot = previous_snapshot;
-                return Err(error);
+            if hydrate_after_ack {
+                if let Err(error) = self.persist_control_state() {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
+                if let Err(error) = self
+                    .storage
+                    .acknowledge_source_delivery_journal_with_cursor(
+                        &ids,
+                        acknowledged_at_unix_seconds,
+                        delivery_path,
+                        replay_stream_cursor.as_deref(),
+                    )
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+                {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
+            } else {
+                self.snapshot.tombstones = self.tombstones.checkpoint();
+                let control_payload = serde_json::to_vec(&self.snapshot_for_persistence())
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+                if control_payload.len() > super::MAX_RUNTIME_STATE_BYTES {
+                    self.snapshot = previous_snapshot;
+                    return Err(RepositoryRuntimeError::StateLimitExceeded);
+                }
+                if let Err(error) = self
+                    .storage
+                    .acknowledge_source_delivery_journal_with_cursor_and_control(
+                        &ids,
+                        acknowledged_at_unix_seconds,
+                        delivery_path,
+                        replay_stream_cursor.as_deref(),
+                        &control_payload,
+                    )
+                    .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))
+                {
+                    self.snapshot = previous_snapshot;
+                    return Err(error);
+                }
             }
             if hydrate_after_ack {
                 self.hydrate_source_delivery_journal()?;
+            }
+        } else {
+            if let Err(error) = self.persist_control_state() {
+                self.snapshot = previous_snapshot;
+                return Err(error);
             }
         }
         Ok(())

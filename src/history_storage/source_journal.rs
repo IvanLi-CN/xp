@@ -755,6 +755,40 @@ impl HistoryStorage {
         delivery_path: Option<&str>,
         replay_stream_cursor: Option<&str>,
     ) -> Result<()> {
+        self.acknowledge_source_delivery_journal_inner(
+            ids,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            replay_stream_cursor,
+            None,
+        )
+    }
+
+    pub(crate) fn acknowledge_source_delivery_journal_with_cursor_and_control(
+        &self,
+        ids: &[String],
+        acknowledged_at_unix_seconds: Option<u64>,
+        delivery_path: Option<&str>,
+        replay_stream_cursor: Option<&str>,
+        control_payload: &[u8],
+    ) -> Result<()> {
+        self.acknowledge_source_delivery_journal_inner(
+            ids,
+            acknowledged_at_unix_seconds,
+            delivery_path,
+            replay_stream_cursor,
+            Some(control_payload),
+        )
+    }
+
+    fn acknowledge_source_delivery_journal_inner(
+        &self,
+        ids: &[String],
+        acknowledged_at_unix_seconds: Option<u64>,
+        delivery_path: Option<&str>,
+        replay_stream_cursor: Option<&str>,
+        control_payload: Option<&[u8]>,
+    ) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -841,6 +875,9 @@ impl HistoryStorage {
                     [stream],
                 )
                 .map_err(sqlite_error)?;
+        }
+        if deleted_any && let Some(control_payload) = control_payload {
+            super::write_snapshot(&transaction, REPOSITORY_REPLICA_KEY, control_payload)?;
         }
         transaction.commit().map_err(sqlite_error)?;
         finish_post_commit_maintenance(maintain_sqlite(connection));
