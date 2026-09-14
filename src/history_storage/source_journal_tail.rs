@@ -13,9 +13,9 @@ impl HistoryStorage {
         };
         let mut statement = connection
             .prepare(
-                "SELECT stream, COUNT(*)
-                 FROM source_delivery_journal
-                 GROUP BY stream",
+                "SELECT stream, pending_segments
+                 FROM source_delivery_journal_stream_state
+                 WHERE pending_segments > 0",
             )
             .map_err(sqlite_error)?;
         let durable_by_stream = statement

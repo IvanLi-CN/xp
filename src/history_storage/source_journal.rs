@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+#[path = "source_journal_write.rs"]
+mod source_journal_write;
+
 const SOURCE_DELIVERY_JOURNAL_REPAIR_PAGE_SIZE: i64 = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_BYTES: u64 = 128 * 1024 * 1024;
@@ -64,7 +67,12 @@ pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection
                  order_repair_cursor_id TEXT,
                  order_repair_completed INTEGER NOT NULL DEFAULT 0,
                  capacity_suspended INTEGER NOT NULL DEFAULT 0,
-                 replay_stream_cursor TEXT
+                 replay_stream_cursor TEXT,
+                 stream_counts_initialized INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS source_delivery_journal_stream_state (
+                 stream TEXT PRIMARY KEY NOT NULL,
+                 pending_segments INTEGER NOT NULL
              );",
         )
         .map_err(sqlite_error)?;
@@ -82,11 +90,13 @@ pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection
         .iter()
         .any(|name| !state_columns.contains(*name));
     let state_capacity_column_missing = !state_columns.contains("capacity_suspended");
+    let stream_counts_column_missing = !state_columns.contains("stream_counts_initialized");
     for (name, definition) in [
         ("order_repair_cursor_id", "TEXT"),
         ("order_repair_completed", "INTEGER NOT NULL DEFAULT 0"),
         ("capacity_suspended", "INTEGER NOT NULL DEFAULT 0"),
         ("replay_stream_cursor", "TEXT"),
+        ("stream_counts_initialized", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         if !state_columns.contains(name) {
             transaction
@@ -145,6 +155,38 @@ pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection
                     SOURCE_DELIVERY_JOURNAL_MAX_BYTES as i64,
                     SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
                 ],
+            )
+            .map_err(sqlite_error)?;
+    }
+    let stream_counts_initialized = transaction
+        .query_row(
+            "SELECT stream_counts_initialized
+             FROM source_delivery_journal_state
+             WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_error)?
+        != 0;
+    if stream_counts_column_missing || !stream_counts_initialized {
+        transaction
+            .execute("DELETE FROM source_delivery_journal_stream_state", [])
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "INSERT INTO source_delivery_journal_stream_state (stream, pending_segments)
+                 SELECT stream, COUNT(*)
+                 FROM source_delivery_journal
+                 GROUP BY stream",
+                [],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE source_delivery_journal_state
+                 SET stream_counts_initialized = 1
+                 WHERE singleton = 1",
+                [],
             )
             .map_err(sqlite_error)?;
     }
@@ -232,7 +274,7 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = insert_journal_rows(&transaction, rows) {
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows) {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -262,7 +304,7 @@ impl HistoryStorage {
             ));
         };
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        if let Err(error) = insert_journal_rows(&transaction, rows) {
+        if let Err(error) = source_journal_write::insert_journal_rows(&transaction, rows) {
             if error.0 == "source delivery journal capacity guard" {
                 drop(transaction);
                 mark_capacity_suspended(connection)?;
@@ -725,11 +767,12 @@ impl HistoryStorage {
         let transaction = connection.transaction().map_err(sqlite_error)?;
         let mut deleted_any = false;
         for id in ids {
-            let Some(wire_len) = transaction
+            let Some((stream, wire_len)) = transaction
                 .query_row(
-                    "SELECT length(wire) FROM source_delivery_journal WHERE id = ?1",
+                    "SELECT stream, length(wire)
+                     FROM source_delivery_journal WHERE id = ?1",
                     [id],
-                    |row| row.get::<_, i64>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .optional()
                 .map_err(sqlite_error)?
@@ -748,6 +791,14 @@ impl HistoryStorage {
                              pending_bytes = pending_bytes - ?1
                          WHERE singleton = 1",
                         [wire_len],
+                    )
+                    .map_err(sqlite_error)?;
+                transaction
+                    .execute(
+                        "UPDATE source_delivery_journal_stream_state
+                         SET pending_segments = pending_segments - 1
+                         WHERE stream = ?1",
+                        [&stream],
                     )
                     .map_err(sqlite_error)?;
             }
@@ -823,160 +874,4 @@ fn source_delivery_journal_row(
         identity,
         wire: row.get(4)?,
     })
-}
-
-fn insert_journal_rows(
-    transaction: &rusqlite::Transaction<'_>,
-    rows: &[SourceDeliveryJournalRow],
-) -> Result<()> {
-    let (pending_segments, pending_bytes) = transaction
-        .query_row(
-            "SELECT pending_segments, pending_bytes
-             FROM source_delivery_journal_state WHERE singleton = 1",
-            [],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-        )
-        .map_err(sqlite_error)?;
-    let mut projected_segments = pending_segments;
-    let mut projected_bytes = pending_bytes;
-    let mut projected_rows = std::collections::BTreeMap::<String, Option<i64>>::new();
-    for row in rows {
-        let wire_len = i64::try_from(row.wire.len()).map_err(|_| {
-            HistoryStorageError("journal wire length exceeds SQLite integer".to_owned())
-        })?;
-        SignedSegment::from_wire(&row.wire).map_err(|error| {
-            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
-        })?;
-        let previous_wire_len = if let Some(previous) = projected_rows.get(&row.id) {
-            *previous
-        } else {
-            transaction
-                .query_row(
-                    "SELECT length(wire) FROM source_delivery_journal WHERE id = ?1",
-                    [&row.id],
-                    |query_row| query_row.get::<_, i64>(0),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-        };
-        match previous_wire_len {
-            Some(previous_wire_len) => {
-                projected_bytes = projected_bytes
-                    .checked_sub(previous_wire_len)
-                    .and_then(|value| value.checked_add(wire_len))
-                    .ok_or_else(|| HistoryStorageError("journal byte count overflow".to_owned()))?;
-            }
-            None => {
-                projected_segments = projected_segments.checked_add(1).ok_or_else(|| {
-                    HistoryStorageError("journal segment count overflow".to_owned())
-                })?;
-                projected_bytes = projected_bytes
-                    .checked_add(wire_len)
-                    .ok_or_else(|| HistoryStorageError("journal byte count overflow".to_owned()))?;
-            }
-        }
-        projected_rows.insert(row.id.clone(), Some(wire_len));
-        if projected_segments > SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS as i64
-            || projected_bytes > SOURCE_DELIVERY_JOURNAL_MAX_BYTES as i64
-        {
-            return Err(HistoryStorageError(
-                "source delivery journal capacity guard".to_owned(),
-            ));
-        }
-    }
-    for row in rows {
-        let identity = serde_json::to_vec(&row.identity)
-            .map_err(|error| HistoryStorageError(error.to_string()))?;
-        let segment = SignedSegment::from_wire(&row.wire).map_err(|error| {
-            HistoryStorageError(format!("invalid source delivery journal wire: {error}"))
-        })?;
-        let cursor = segment.canonical().first_cursor();
-        let previous_wire_len = transaction
-            .query_row(
-                "SELECT length(wire) FROM source_delivery_journal WHERE id = ?1",
-                [&row.id],
-                |query_row| query_row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        transaction
-            .execute(
-                "INSERT INTO source_delivery_journal
-                     (id, stream, closed_at, identity, wire, created_at,
-                      source_node_id, source_epoch, first_sequence)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                 ON CONFLICT(id) DO UPDATE SET
-                     stream = excluded.stream,
-                     closed_at = excluded.closed_at,
-                     identity = excluded.identity,
-                     wire = excluded.wire,
-                     source_node_id = excluded.source_node_id,
-                     source_epoch = excluded.source_epoch,
-                     first_sequence = excluded.first_sequence",
-                params![
-                    row.id,
-                    row.stream,
-                    durable_i64(row.closed_at_unix_seconds, "journal closed_at")?,
-                    identity,
-                    row.wire,
-                    durable_i64(row.closed_at_unix_seconds, "journal created_at")?,
-                    cursor.source_node_id(),
-                    durable_i64(cursor.source_epoch(), "journal source epoch")?,
-                    durable_i64(cursor.sequence(), "journal first sequence")?,
-                ],
-            )
-            .map_err(sqlite_error)?;
-        let wire_len = i64::try_from(row.wire.len()).map_err(|_| {
-            HistoryStorageError("journal wire length exceeds SQLite integer".to_owned())
-        })?;
-        match previous_wire_len {
-            Some(previous_wire_len) => {
-                let delta = wire_len.checked_sub(previous_wire_len).ok_or_else(|| {
-                    HistoryStorageError("journal wire length delta overflow".to_owned())
-                })?;
-                transaction
-                    .execute(
-                        "UPDATE source_delivery_journal_state
-                         SET pending_bytes = pending_bytes + ?1,
-                             epoch_high_water = MAX(epoch_high_water, ?2),
-                             capacity_suspended = CASE
-                               WHEN (pending_segments * 100 >= ?3 * ?4)
-                                 OR ((pending_bytes + ?1) * 100 >= ?5 * ?4)
-                               THEN 1 ELSE capacity_suspended END
-                         WHERE singleton = 1",
-                        params![
-                            delta,
-                            durable_i64(cursor.source_epoch(), "journal source epoch")?,
-                            SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS as i64,
-                            SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
-                            SOURCE_DELIVERY_JOURNAL_MAX_BYTES as i64,
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-            }
-            None => {
-                transaction
-                    .execute(
-                        "UPDATE source_delivery_journal_state
-                         SET pending_segments = pending_segments + 1,
-                             pending_bytes = pending_bytes + ?1,
-                             epoch_high_water = MAX(epoch_high_water, ?2),
-                             capacity_suspended = CASE
-                               WHEN ((pending_segments + 1) * 100 >= ?3 * ?4)
-                                 OR ((pending_bytes + ?1) * 100 >= ?5 * ?4)
-                               THEN 1 ELSE capacity_suspended END
-                         WHERE singleton = 1",
-                        params![
-                            wire_len,
-                            durable_i64(cursor.source_epoch(), "journal source epoch")?,
-                            SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS as i64,
-                            SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
-                            SOURCE_DELIVERY_JOURNAL_MAX_BYTES as i64,
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-            }
-        }
-    }
-    Ok(())
 }

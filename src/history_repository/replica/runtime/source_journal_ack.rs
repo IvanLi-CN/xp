@@ -108,7 +108,23 @@ impl RepositoryReplicaRuntime {
                 }
             }
         }
-        let replay_stream_cursor = self.snapshot.local_source.replay_window_cursor.clone();
+        // The normal hydrated path computes the next rotation point while rebuilding the window.
+        // The worker's deferred-hydration path still needs an in-process rotation point, so derive
+        // it from the last acknowledged segment without loading another page.
+        let replay_stream_cursor = if hydrate_after_ack {
+            self.snapshot.local_source.replay_window_cursor.clone()
+        } else {
+            delivered_wires
+                .last()
+                .map(|wire| {
+                    SignedSegment::from_wire(wire)
+                        .map(|segment| segment.canonical().first_cursor().stream().to_owned())
+                })
+                .transpose()?
+        };
+        if !hydrate_after_ack && let Some(stream) = replay_stream_cursor.as_ref() {
+            self.snapshot.local_source.replay_window_cursor = Some(stream.clone());
+        }
         if let Err(error) = self.persist_control_state() {
             self.snapshot = previous_snapshot;
             return Err(error);

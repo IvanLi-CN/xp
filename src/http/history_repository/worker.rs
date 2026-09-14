@@ -257,14 +257,17 @@ async fn publish_local_history_segment(
             runtime.hydrate_source_delivery_journal()?;
             runtime.local_source_pending_segments_page()
         } else {
-            runtime.queue_local_source_segments_for_repositories(
+            let segments = runtime.queue_local_source_segments_for_repositories(
                 &state.cluster.cluster_id,
                 identity.clone(),
                 &signing_key,
                 source_batch.take_records(),
                 now,
                 ready_repository_ids,
-            )?
+            )?;
+            // Journal commit makes resource rows safe to mark enqueued before collector ACK.
+            source_batch.mark_resources_enqueued(state);
+            segments
         };
         let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
         (segments, gaps)
@@ -439,9 +442,6 @@ async fn publish_local_history_segment(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
         )?;
-    if !capture_paused && delivery_succeeded && !transport_failed && acknowledgements_replicated {
-        source_batch.mark_resources_enqueued(state);
-    }
     if delivery_succeeded
         && !transport_failed
         && acknowledgements_replicated

@@ -70,7 +70,6 @@ fn source_delivery_capacity_guard_preserves_cursor_and_backlog() {
         )
         .expect("queue initial source segment");
     drop(runtime);
-
     let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
         .expect("open history database");
     connection
@@ -849,7 +848,8 @@ fn source_delivery_replay_cursor_persists_before_stream_tails_drain() {
                  pending_bytes = ?2,
                  epoch_high_water = 1,
                  replay_stream_cursor = NULL,
-                 order_repair_completed = 1
+                 order_repair_completed = 1,
+                 stream_counts_initialized = 0
              WHERE singleton = 1",
             rusqlite::params![
                 i64::try_from(streams.len() * 2).expect("segment count"),
