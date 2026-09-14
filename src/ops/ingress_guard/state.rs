@@ -497,7 +497,10 @@ fn is_generated_xray_memory_drop_in(raw: &str) -> bool {
     lines.all(|line| {
         matches!(
             line,
-            "" | "Environment=GOMEMLIMIT=16MiB" | "Environment=GOGC=50"
+            "" | "Environment=GOMEMLIMIT=16MiB"
+                | "Environment=GOGC=50"
+                | "Environment=GOMEMLIMIT=32MiB"
+                | "Environment=GOGC=100"
         )
     })
 }
@@ -514,25 +517,35 @@ fn is_generated_xray_service_asset(init: InitSystem, raw: &str) -> bool {
                 return false;
             };
             let direct = super::render_systemd_xray_unit(&work_dir, None);
-            [
+            let expected = [
                 direct.clone(),
                 super::render_systemd_xray_unit(&work_dir, Some(GuardMode::Enforced)),
                 super::render_systemd_xray_unit(&work_dir, Some(GuardMode::Observe)),
                 direct.replacen(MARKER, "", 1),
-            ]
-            .iter()
-            .any(|expected| raw == expected)
+            ];
+            expected.iter().any(|asset| raw == asset)
+                || expected.iter().any(|asset| {
+                    raw.replace(
+                        "Environment=GOMEMLIMIT=16MiB\nEnvironment=GOGC=50\n",
+                        "Environment=GOMEMLIMIT=32MiB\nEnvironment=GOGC=100\n",
+                    ) == *asset
+                })
         }
         InitSystem::OpenRc => {
             let direct = super::render_openrc_xray_script(None);
-            [
+            let expected = [
                 direct.clone(),
                 super::render_openrc_xray_script(Some(GuardMode::Enforced)),
                 super::render_openrc_xray_script(Some(GuardMode::Observe)),
                 direct.replacen(MARKER, "", 1),
-            ]
-            .iter()
-            .any(|expected| raw == expected)
+            ];
+            expected.iter().any(|asset| raw == asset)
+                || expected.iter().any(|asset| {
+                    raw.replace(
+                    "export GOMEMLIMIT=\"${GOMEMLIMIT:-16MiB}\"\nexport GOGC=\"${GOGC:-50}\"\n",
+                    "export GOMEMLIMIT=\"${GOMEMLIMIT:-32MiB}\"\nexport GOGC=\"${GOGC:-100}\"\n",
+                ) == *asset
+                })
         }
         InitSystem::None => false,
     }

@@ -31,7 +31,8 @@ fn low_memory_backfill_writes_systemd_drop_ins() {
             .join("cloudflared.service.d/20-xp-memory.conf"),
     )
     .unwrap();
-    assert!(xray.contains("GOMEMLIMIT=16MiB"));
+    assert!(xray.contains("GOMEMLIMIT=32MiB"));
+    assert!(xray.contains("GOGC=100"));
     assert!(cloudflared.contains("GOMEMLIMIT=12MiB"));
     assert!(cloudflared.contains("TUNNEL_MANAGEMENT_DIAGNOSTICS=false"));
     assert!(cloudflared.contains("XP_CLOUDFLARED_PROTOCOL=http2"));
