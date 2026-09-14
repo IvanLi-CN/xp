@@ -551,14 +551,12 @@ impl RepositoryReplicaRuntime {
             self.tombstones = TombstoneLedger::from_checkpoint(previous_tombstones)?;
             return Err(error);
         }
-        if !options.defer_journal {
-            self.hydrate_source_delivery_journal()?;
-        }
-        Ok(if journal_ready {
-            self.local_source_pending_segments()
+        let hydration = if options.defer_journal {
+            Ok(())
         } else {
-            Vec::new()
-        })
+            self.hydrate_source_delivery_journal().map(|_| ())
+        };
+        Ok(self.finish_source_delivery_capture(journal_ready, hydration))
     }
 
     pub(crate) fn queue_local_source_segment(

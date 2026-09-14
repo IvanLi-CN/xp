@@ -289,6 +289,41 @@ fn source_delivery_capacity_guard_allows_replaying_existing_backlog() {
 }
 
 #[test]
+fn source_delivery_post_commit_hydration_failure_keeps_capture_committed() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let source_identity = identity();
+    let mut runtime = load(temporary.path());
+    let records = vec![SyncRecord::new(
+        "node-a",
+        "node-a",
+        "runtime.v1",
+        1,
+        b"runtime:post-commit".to_vec(),
+        b"sample".to_vec(),
+        false,
+    )];
+    runtime
+        .queue_local_source_segment("cluster-a", source_identity, &signing_key, records, 100)
+        .expect("queue source segment");
+    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+    assert_eq!(storage.source_delivery_journal().unwrap().len(), 1);
+
+    let result = runtime.finish_source_delivery_capture(
+        true,
+        Err(RepositoryRuntimeError::Storage(
+            "injected post-commit hydration failure".to_owned(),
+        )),
+    );
+    assert!(result.is_empty(), "committed capture must not be retried");
+    assert!(runtime.local_source_pending_segments().is_empty());
+    assert_eq!(storage.source_delivery_journal().unwrap().len(), 1);
+
+    let restored = load(temporary.path());
+    assert_eq!(restored.local_source_pending_segments().len(), 1);
+}
+
+#[test]
 fn source_delivery_replay_page_is_bounded() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);

@@ -30,6 +30,28 @@ impl LocalSourceState {
 }
 
 impl RepositoryReplicaRuntime {
+    pub(crate) fn finish_source_delivery_capture(
+        &mut self,
+        journal_ready: bool,
+        hydration: Result<(), RepositoryRuntimeError>,
+    ) -> Vec<RepositoryReplicaSegment> {
+        if let Err(error) = hydration {
+            // The journal transaction already committed. Keep durable rows as the source of
+            // truth and clear only the in-memory window to avoid recapture.
+            tracing::warn!(
+                error = %error,
+                "source delivery window hydration deferred after commit"
+            );
+            self.snapshot.local_source.clear_pending();
+            return Vec::new();
+        }
+        if journal_ready {
+            self.local_source_pending_segments()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(super) fn source_delivery_journal_has_unloaded_tail(
         &self,
     ) -> Result<bool, RepositoryRuntimeError> {
