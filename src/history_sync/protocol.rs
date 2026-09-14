@@ -846,6 +846,7 @@ impl SegmentReceiver {
             unknown_schema_records,
         })
     }
+
     pub(crate) fn advance_declared_sequence_gap(
         &mut self,
         next: &Cursor,
