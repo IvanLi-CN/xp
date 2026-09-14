@@ -294,6 +294,8 @@ impl RepositoryReplicaRuntime {
         let segment = SignedSegment::from_wire(wire)?;
         self.bind_cluster(cluster_id)?;
         self.ensure_receiver()?;
+        let persisted_segment_id = hex::encode(Sha256::digest(wire));
+        let persisted_segment = self.stored_segment_exists(&persisted_segment_id)?;
         let previous_receiver = self
             .receiver
             .as_ref()
@@ -347,7 +349,17 @@ impl RepositoryReplicaRuntime {
         } else {
             None
         };
-        let acceptance = if allow_retained_sequence_gap {
+        let persisted_acceptance = if persisted_segment {
+            self.receiver
+                .as_ref()
+                .expect("receiver initialized")
+                .accept_persisted_duplicate(&segment, identity)?
+        } else {
+            None
+        };
+        let acceptance = if let Some(acceptance) = persisted_acceptance {
+            Ok(acceptance)
+        } else if allow_retained_sequence_gap {
             self.receiver
                 .as_mut()
                 .expect("receiver initialized")

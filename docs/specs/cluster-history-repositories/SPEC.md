@@ -86,6 +86,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   anchor 都将该 stream 标记为 `hash_chain_verified=false`；后续段仍必须按 sequence 和
   predecessor hash 连续到达。普通 source delivery 与 anti-entropy 接收路径不得接受无本地
   predecessor 的非零首段。
+- 若重放 wire 的 SHA-256 segment ID 已经在接收仓库持久化，且其完整 cursor range 已落在当前
+  continuous watermark 内，接收方必须返回幂等 ACK，即使该 stream 的 retained anchor 仍未验证；
+  这条路径不重新应用 payload。相同序号但不同 segment ID 仍按 fork 处理，不得借此放宽 fork 防护。
 - 若 repair 响应明确携带 `history_truncated=true`，且本地已经有该 source stream 的连续水位，
   初始回填的首个 repair page 可以按 stream 各允许一次服务端保留尾部首段作为新的
   hash-chain head，跨过本地水位之后已被保留策略淘汰的序号；该 page 可能因 wire 上限拆为

@@ -104,6 +104,24 @@ impl HistoryStorage {
             .map_err(sqlite_error)
     }
 
+    pub(crate) fn repository_history_segment_exists(&self, id: &str) -> Result<bool> {
+        let mut backend = self.lock_backend();
+        let connection = match &mut *backend {
+            Backend::Sqlite(connection) => connection,
+            Backend::Unavailable(error) => return Err(error.clone()),
+            Backend::Json => return Ok(false),
+        };
+        connection
+            .query_row(
+                "SELECT EXISTS (
+                     SELECT 1 FROM repository_history_segments WHERE id = ?1
+                 )",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)
+    }
+
     pub(crate) fn repository_history_segments_missing_cursor_index(
         &self,
         after_id: Option<&str>,

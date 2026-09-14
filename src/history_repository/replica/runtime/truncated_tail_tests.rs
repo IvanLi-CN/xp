@@ -318,6 +318,77 @@ fn retained_sequence_gap_is_allowed_once_for_a_later_repair_page() {
 }
 
 #[test]
+fn persisted_retained_anchor_replay_is_idempotent_after_recent_window_eviction() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let key = signing_key();
+    let identity = identity(&key);
+    let first = segment(&key, 0, vec![record(b"first", false)], None);
+    let anchor = segment(&key, 3, vec![record(b"anchor", false)], Some([42; 32]));
+    let mut runtime = load(temporary.path());
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &first.wire_bytes().expect("first wire"),
+            11,
+        )
+        .expect("local progress");
+    runtime
+        .receive_initial_backfill_wire_from_repository_with_gaps(
+            "cluster-a",
+            &identity,
+            &anchor.wire_bytes().expect("anchor wire"),
+            &[],
+            12,
+            &["repository-a".to_owned()],
+            "repository-a",
+            true,
+        )
+        .expect("retained anchor");
+
+    let mut previous_hash = anchor.segment_hash().expect("anchor hash");
+    for sequence in 4..=70 {
+        let continuation = segment(
+            &key,
+            sequence,
+            vec![record(format!("record-{sequence}").as_bytes(), false)],
+            Some(previous_hash),
+        );
+        previous_hash = continuation.segment_hash().expect("continuation hash");
+        runtime
+            .receive_wire(
+                "cluster-a",
+                &identity,
+                &continuation.wire_bytes().expect("continuation wire"),
+                12 + sequence,
+            )
+            .expect("continuation");
+    }
+
+    runtime
+        .receive_wire(
+            "cluster-a",
+            &identity,
+            &anchor.wire_bytes().expect("anchor replay wire"),
+            100,
+        )
+        .expect("an exact persisted replay must be acknowledged");
+
+    let fork = segment(&key, 3, vec![record(b"different", false)], Some([42; 32]));
+    assert!(matches!(
+        runtime.receive_wire(
+            "cluster-a",
+            &identity,
+            &fork.wire_bytes().expect("fork wire"),
+            101,
+        ),
+        Err(super::RepositoryRuntimeError::Protocol(
+            crate::history_sync::ProtocolError::ForkDetected { .. }
+        ))
+    ));
+}
+
+#[test]
 fn retained_sequence_gap_probe_is_scoped_to_each_source_stream() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();
