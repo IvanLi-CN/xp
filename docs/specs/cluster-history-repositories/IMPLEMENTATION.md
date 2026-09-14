@@ -76,12 +76,13 @@
   its predecessor has already expired. The initial summary-repair path accepts that signed frame
   as an unanchored retained tail and keeps `hash_chain_verified=false`; when the serving repair
   response carries `history_truncated=true`, the same path may advance an existing local watermark
-  once per affected stream in that first repair page, even if wire bounds split it into multiple
-  responses or an earlier segment is already contiguous, and persists a `source_retention_expired`
-  permanent gap. Each completed response clears its own identity; strict contiguous sequence/hash
-  links apply after the page drains and on all later pages. Ordinary
-  source delivery and anti-entropy keep rejecting sequence gaps, so the relaxed boundary cannot
-  bypass live fork protection.
+  once per affected source stream during initial backfill, even if wire bounds split a page into
+  multiple responses or the stream appears after another stream's completed page. The durable
+  `(source, epoch, stream)` allowance set prevents a second handoff for the same stream and the
+  receiver persists a `source_retention_expired` permanent gap. Each completed response clears only
+  its own identity; strict contiguous sequence/hash links apply after that stream is anchored and
+  on ordinary source delivery and anti-entropy, so the relaxed boundary cannot bypass live fork
+  protection.
   A replayed wire whose exact SHA-256 segment ID is already durable and whose complete cursor range
   is at or below the receiver watermark gets an idempotent acknowledgement even while the retained
   anchor remains unverified; the payload is not applied again, and a different ID at the same cursor
