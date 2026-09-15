@@ -1,4 +1,6 @@
 use super::*;
+use ed25519_dalek::SigningKey;
+use xp::history_sync::{CanonicalSegment, Cursor, SyncRecord};
 
 const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
@@ -234,25 +236,61 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     connection
         .pragma_update(None, "wal_autocheckpoint", 100_i64)
         .expect("limit source journal WAL checkpoint");
+    let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+    let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
     let identity = serde_json::to_vec(&serde_json::json!({
-        "node_id": "source-node",
-        "ed25519_public_key": URL_SAFE_NO_PAD.encode([7_u8; 32]),
+        "node_id": cluster.node_id.clone(),
+        "ed25519_public_key": public_key.clone(),
         "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32]),
     }))
     .expect("encode source journal identity");
-    let wire = vec![0_u8; 27 * 1024];
+    let payload = vec![0_u8; 26 * 1024];
+    let mut previous_hash = None;
+    let mut total_wire_bytes = 0_i64;
     for batch_start in (0..20_000_i64).step_by(256) {
         let transaction = connection
             .unchecked_transaction()
             .expect("begin source journal backlog transaction");
         for sequence in batch_start..(batch_start + 256).min(20_000) {
+            let record = SyncRecord::new(
+                cluster.node_id.clone(),
+                cluster.node_id.clone(),
+                "runtime.v1",
+                1,
+                format!("runtime:{sequence}").into_bytes(),
+                payload.clone(),
+                false,
+            );
+            let segment = CanonicalSegment::new(
+                cluster.cluster_id.clone(),
+                Cursor::new(cluster.node_id.clone(), 1, "runtime", sequence as u64)
+                    .expect("source journal cursor"),
+                vec![record],
+                previous_hash,
+                100,
+                100,
+            )
+            .expect("source journal segment")
+            .sign(&signing_key)
+            .expect("sign source journal segment");
+            let wire = segment.wire_bytes().expect("encode source journal segment");
+            previous_hash = Some(segment.segment_hash().expect("hash source journal segment"));
+            total_wire_bytes = total_wire_bytes
+                .checked_add(i64::try_from(wire.len()).expect("source journal wire length"))
+                .expect("source journal byte count");
             transaction
                 .execute(
                     "INSERT INTO source_delivery_journal
                          (id, stream, closed_at, identity, wire, created_at,
                           source_node_id, source_epoch, first_sequence)
-                     VALUES (?1, 'runtime', 100, ?2, ?3, 100, 'source-node', 1, ?4)",
-                    rusqlite::params![format!("{sequence:064x}"), &identity, &wire, sequence,],
+                     VALUES (?1, 'runtime', 100, ?2, ?3, 100, ?4, 1, ?5)",
+                    rusqlite::params![
+                        format!("{sequence:064x}"),
+                        &identity,
+                        &wire,
+                        &cluster.node_id,
+                        sequence,
+                    ],
                 )
                 .expect("insert source journal resource row");
         }
@@ -270,7 +308,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                  capacity_suspended = 1,
                  stream_counts_initialized = 1
              WHERE singleton = 1",
-            [i64::from(wire.len() as u32) * 20_000],
+            [total_wire_bytes],
         )
         .expect("record source journal resource backlog");
     connection
@@ -293,7 +331,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         "members": [{
             "identity": {
                 "node_id": cluster.node_id.clone(),
-                "ed25519_public_key": URL_SAFE_NO_PAD.encode([7_u8; 32]),
+                "ed25519_public_key": public_key,
                 "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32])
             },
             "lifecycle": "ready",
