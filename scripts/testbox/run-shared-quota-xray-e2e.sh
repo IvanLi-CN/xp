@@ -619,6 +619,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       --unit "$SOURCE_JOURNAL_SCOPE_UNIT" \
       -p MemoryMax=128M \
       -p MemorySwapMax=0 \
+      --setenv=XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_CHILD=1 \
       -- "$journal_test_bin" \
       --exact \
       "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
