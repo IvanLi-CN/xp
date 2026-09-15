@@ -251,7 +251,6 @@ async fn xp_source_delivery_journal_memory_e2e() {
     let peak_pss_kib = run_source_delivery_journal_resource_workload(&candidate_path).await;
     assert!(
         peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
-        "candidate XP source journal peak PSS {peak_pss_kib} KiB is not below "
-            "{XP_TOTAL_PSS_LIMIT_KIB} KiB"
+        "source journal PSS {peak_pss_kib} KiB exceeds {XP_TOTAL_PSS_LIMIT_KIB} KiB"
     );
 }
