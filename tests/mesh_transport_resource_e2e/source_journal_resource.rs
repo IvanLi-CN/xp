@@ -2,6 +2,7 @@ use super::*;
 use ed25519_dalek::{Signer as _, SigningKey};
 use prost::Message as _;
 use sha2::{Digest as _, Sha256};
+use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
 const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
@@ -131,6 +132,21 @@ fn read_process_rss_bytes(pid: u32) -> u64 {
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     assert!(page_size > 0, "system page size must be positive");
     resident_pages.saturating_mul(page_size as u64)
+}
+
+fn derived_fixture_key_material(
+    context: &[u8],
+    cluster: &ClusterMetadata,
+    ca_key_pem: &str,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(context);
+    hasher.update(cluster.cluster_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(cluster.node_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(ca_key_pem.as_bytes());
+    hasher.finalize().into()
 }
 
 pub(super) async fn stop_child(child: &mut XpProcess) {
@@ -367,12 +383,26 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     connection
         .pragma_update(None, "wal_autocheckpoint", 100_i64)
         .expect("limit source journal WAL checkpoint");
-    let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+    let ca_key_pem = cluster
+        .read_cluster_ca_key_pem(data_dir)
+        .expect("read source journal CA key")
+        .expect("source journal private CA key");
+    let signing_key = SigningKey::from_bytes(&derived_fixture_key_material(
+        b"xp-history-repository-ed25519-v1\0",
+        cluster,
+        &ca_key_pem,
+    ));
     let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
+    let relay_secret = StaticSecret::from(derived_fixture_key_material(
+        b"xp-history-repository-x25519-v1\0",
+        cluster,
+        &ca_key_pem,
+    ));
+    let relay_public_key = URL_SAFE_NO_PAD.encode(X25519PublicKey::from(&relay_secret).as_bytes());
     let identity = serde_json::to_vec(&serde_json::json!({
         "node_id": cluster.node_id.clone(),
         "ed25519_public_key": public_key.clone(),
-        "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32]),
+        "x25519_relay_public_key": relay_public_key.clone(),
     }))
     .expect("encode source journal identity");
     let payload = vec![0_u8; 26 * 1024];
@@ -444,7 +474,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             "identity": {
                 "node_id": cluster.node_id.clone(),
                 "ed25519_public_key": public_key,
-                "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32])
+                "x25519_relay_public_key": relay_public_key
             },
             "lifecycle": "ready",
             "catch_up_completed_at": 1,
