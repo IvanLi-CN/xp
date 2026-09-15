@@ -439,7 +439,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   CARGO_TARGET_DIR="$candidate_resource_target" \
     cargo test --release --test mesh_transport_resource_e2e --no-run
   resource_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-    -name 'mesh_transport_resource_e2e-*' -perm -111 | sort | head -n 1)"
+    -name 'mesh_transport_resource_e2e-*' -perm -111 -print -quit)"
   if [ -z "$resource_test_bin" ]; then
     echo "resource workload test binary was not built" >&2
     exit 1
@@ -448,7 +448,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     CARGO_TARGET_DIR="$candidate_resource_target" \
       cargo test --release --lib --no-run
     journal_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-      -name 'xp-[0-9a-f]*' -perm -111 | sort | head -n 1)"
+      -name 'xp-[0-9a-f]*' -perm -111 -print -quit)"
     if [ -z "$journal_test_bin" ]; then
       echo "source journal resource test binary was not built" >&2
       exit 1
