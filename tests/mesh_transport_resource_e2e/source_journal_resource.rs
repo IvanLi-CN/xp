@@ -82,8 +82,7 @@ fn signed_fixture_wire(
         .encode_length_delimited(&mut encoded_record)
         .expect("encode source journal record");
     records_hash.update(encoded_record);
-    let canonical = FixtureSegment {
-        cluster_id: cluster_id.to_owned(),
+    let mut canonical = FixtureSegment {
         first_cursor: Some(FixtureCursor {
             source_node_id: source_node_id.to_owned(),
             source_epoch: 1,
@@ -103,6 +102,7 @@ fn signed_fixture_wire(
         signature: Vec::new(),
         records_hash: records_hash.finalize().to_vec(),
     };
+    canonical.cluster_id = cluster_id.to_owned();
     let canonical_wire = canonical.encode_to_vec();
     let signature = signing_key.sign(&canonical_wire).to_bytes().to_vec();
     let mut signed = canonical;
