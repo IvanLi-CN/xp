@@ -280,6 +280,11 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     stop_sampling.store(true, Ordering::Relaxed);
     sampler.await.expect("source journal PSS sampler");
     peak_pss_kib = peak_pss_kib.max(pss_peak.load(Ordering::Relaxed));
+    if !saw_replayed_page {
+        let log = fs::read_to_string(&log_path)
+            .unwrap_or_else(|error| format!("<unavailable: {error}>",));
+        eprintln!("source journal XP log before replay failure:\n{log}");
+    }
     assert!(
         saw_replayed_page,
         "source journal worker must replay at least one bounded page"
