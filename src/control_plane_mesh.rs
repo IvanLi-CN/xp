@@ -672,7 +672,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
-        let public_url = join_url(&peer.public_base_url, &request.path_and_query, true)?;
+        let public_url = join_url(&peer.public_base_url, &request.path_and_query, false)?;
         let response = match self
             .send_public_signed(
                 &public_url,
@@ -944,7 +944,7 @@ impl MeshAwareHttpClient {
                 let outer_url = join_url(
                     &route.rendezvous.public_base_url,
                     &outer_request.path_and_query,
-                    true,
+                    false,
                 )?;
                 reverse::send_outer_request(
                     &self.public_direct,
