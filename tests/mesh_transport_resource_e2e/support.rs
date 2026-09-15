@@ -373,7 +373,6 @@ impl Drop for XpProcess {
         let _ = self.child.wait();
     }
 }
-
 impl XpProcess {
     fn id(&self) -> u32 {
         self.pid
@@ -394,10 +393,11 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         let safe_run_id = run_id
             .chars()
             .map(|character| {
-                character
-                    .is_ascii_alphanumeric()
-                    .then_some(character)
-                    .unwrap_or('_')
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '_'
+                }
             })
             .collect::<String>();
         format!("codex-xp-resource-{safe_run_id}-{label}.scope")

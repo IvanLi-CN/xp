@@ -67,7 +67,8 @@ pub(crate) async fn catch_up_against_ready_repositories(
     if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
     }
-    let mut receiving_repository_ids = ready_repository_ids.clone();
+    let mut receiving_repository_ids =
+        super::super::available_ready_repository_ids(&ready_repository_ids, &peers);
     receiving_repository_ids.push(state.cluster.node_id.clone());
     receiving_repository_ids.sort_unstable();
     receiving_repository_ids.dedup();

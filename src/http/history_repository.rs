@@ -1053,7 +1053,10 @@ async fn ready_repository_ids(state: &AppState) -> Result<Vec<String>, ApiError>
     };
     let ready = membership
         .ready_members()
-        .map(|member| member.node_id().as_str().to_owned())
+        .filter_map(|member| {
+            let node_id = member.node_id().as_str();
+            store.get_node(node_id).map(|_| node_id.to_owned())
+        })
         .collect::<Vec<_>>();
     if ready.is_empty() {
         return Err(ApiError::conflict(

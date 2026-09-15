@@ -58,7 +58,7 @@ pub(super) use direct::{
     RepositoryDirectError, preserve_history_truncated, repository_direct_request,
 };
 pub(super) use ready_peers::{
-    ready_repository_peers, ready_repository_peers_for_catch_up,
+    available_ready_repository_ids, ready_repository_peers, ready_repository_peers_for_catch_up,
     ready_repository_peers_with_metadata_status, repository_peer_targets,
 };
 use repair::remove_unavailable_repair_segment_ids;
@@ -90,6 +90,8 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     else {
         return Ok(());
     };
+    let available_ready_repository_ids =
+        available_ready_repository_ids(&ready_repository_ids, &peers);
     let known_source_node_ids = known_history_source_node_ids(state).await;
     if !ready_repository_ids
         .iter()
@@ -100,10 +102,10 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&ready_repository_ids)?;
+        runtime.reconcile_ready_repositories(&available_ready_repository_ids)?;
         runtime.record_stale_collection_cycles(
             now,
-            &ready_repository_ids,
+            &available_ready_repository_ids,
             &state.cluster.node_id,
             &known_source_node_ids,
         )?;
@@ -163,7 +165,16 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             false
         };
     for peer in peers_to_replicate {
-        match replicate_peer(state, peer, &ready_repository_ids, now, work, true).await {
+        match replicate_peer(
+            state,
+            peer,
+            &available_ready_repository_ids,
+            now,
+            work,
+            true,
+        )
+        .await
+        {
             Ok(directly_converged) => {
                 synchronized = true;
                 if work.is_deep_verification() && directly_converged {

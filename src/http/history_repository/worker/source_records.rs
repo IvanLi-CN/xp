@@ -11,8 +11,10 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     let Ok((ready_repository_ids, peers)) = super::ready_repository_peers(state).await else {
         return Ok(());
     };
+    let available_ready_repository_ids =
+        super::available_ready_repository_ids(&ready_repository_ids, &peers);
     let Some(collector_repository_ids) =
-        source_collector_repository_ids(&ready_repository_ids, &peers)
+        source_collector_repository_ids(&available_ready_repository_ids, &peers)
     else {
         return Ok(());
     };
@@ -20,7 +22,7 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
-            &ready_repository_ids,
+            &available_ready_repository_ids,
             &collector_repository_ids,
             &peers,
             now,

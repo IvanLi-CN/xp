@@ -49,6 +49,17 @@ where
     (peers, missing_metadata)
 }
 
+pub(in crate::http::history_repository) fn available_ready_repository_ids(
+    ready_repository_ids: &[String],
+    peers: &[MeshPeerTarget],
+) -> Vec<String> {
+    ready_repository_ids
+        .iter()
+        .filter(|repository_id| peers.iter().any(|peer| &peer.node_id == *repository_id))
+        .cloned()
+        .collect()
+}
+
 pub(in crate::http::history_repository) fn repository_peer_targets(
     store: &JsonSnapshotStore,
     repository_ids: &[String],
@@ -119,7 +130,10 @@ pub(in crate::http::history_repository) async fn ready_repository_peers_for_catc
 
 #[cfg(test)]
 mod tests {
-    use super::{map_ready_repository_peers, map_ready_repository_peers_for_catch_up};
+    use super::{
+        available_ready_repository_ids, map_ready_repository_peers,
+        map_ready_repository_peers_for_catch_up,
+    };
 
     #[test]
     fn missing_ready_repository_metadata_blocks_peer_targets() {
@@ -136,5 +150,22 @@ mod tests {
             map_ready_repository_peers_for_catch_up(&repository_ids, &[], |_| None);
         assert!(peers.is_empty());
         assert!(missing_metadata);
+    }
+
+    #[test]
+    fn stale_ready_repository_is_excluded_from_acknowledgement_targets() {
+        let ready_repository_ids = vec!["repo-a".to_owned(), "stale-ready".to_owned()];
+        let peers = vec![crate::control_plane_mesh::MeshPeerTarget {
+            node_id: "repo-a".to_owned(),
+            node_name: "repo-a".to_owned(),
+            mesh_base_url: None,
+            mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
+            public_base_url: "https://repo-a.invalid".to_owned(),
+        }];
+
+        assert_eq!(
+            available_ready_repository_ids(&ready_repository_ids, &peers),
+            vec!["repo-a".to_owned()]
+        );
     }
 }
