@@ -798,20 +798,31 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
         {
             child.pid = if let Some(unit) = child.unit.as_deref() {
                 let output = Command::new("systemctl")
-                    .args(["--user", "show", unit, "--property=MainPID", "--value"])
+                    .args(["--user", "show", unit, "--property=ControlGroup", "--value"])
                     .output()
-                    .expect("resolve XP scope MainPID");
+                    .expect("resolve XP scope cgroup");
                 assert!(
                     output.status.success(),
-                    "resolve XP scope MainPID for {unit}: {output:?}"
+                    "resolve XP scope cgroup for {unit}: {output:?}"
                 );
-                let pid = String::from_utf8(output.stdout)
-                    .expect("XP scope MainPID output")
+                let cgroup = String::from_utf8(output.stdout)
+                    .expect("XP scope cgroup output")
                     .trim()
-                    .parse::<u32>()
-                    .expect("XP scope MainPID");
-                assert!(pid > 0, "XP scope {unit} must expose a MainPID");
-                pid
+                    .to_owned();
+                assert!(!cgroup.is_empty(), "XP scope {unit} must expose a cgroup");
+                let processes = fs::read_to_string(
+                    Path::new("/sys/fs/cgroup")
+                        .join(cgroup.trim_start_matches('/'))
+                        .join("cgroup.procs"),
+                )
+                .expect("read XP scope cgroup processes");
+                let mut pids = processes
+                    .lines()
+                    .filter_map(|line| line.trim().parse::<u32>().ok())
+                    .filter(|pid| *pid != child.child.id())
+                    .collect::<Vec<_>>();
+                pids.sort_unstable();
+                *pids.last().expect("XP scope must contain the XP process")
             } else {
                 child.child.id()
             };
