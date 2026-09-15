@@ -321,6 +321,31 @@ pub(super) async fn source_records(
     })
 }
 
+pub(super) fn source_records_with_deletions(
+    node_id: &str,
+    now: u64,
+    deletion_markers: Vec<(String, Vec<u8>, Option<String>)>,
+    live_records: Vec<SyncRecord>,
+) -> anyhow::Result<Vec<SyncRecord>> {
+    let mut tombstones = deletion_markers
+        .into_iter()
+        .map(|(schema_id, record_key, target_node_id)| {
+            let target_node_id = target_node_id.as_deref().unwrap_or(node_id);
+            source_record_with_key_for_subject(
+                &schema_id,
+                target_node_id,
+                target_node_id,
+                now,
+                record_key,
+                serde_json::json!({ "deleted_at_unix_seconds": now }),
+                true,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    tombstones.extend(live_records);
+    Ok(tombstones)
+}
+
 #[cfg(test)]
 mod tests {
     use super::source_collector_repository_ids;
@@ -358,29 +383,4 @@ mod tests {
         let ready = vec!["repo-a".to_owned()];
         assert!(source_collector_repository_ids(&ready, &[]).is_none());
     }
-}
-
-pub(super) fn source_records_with_deletions(
-    node_id: &str,
-    now: u64,
-    deletion_markers: Vec<(String, Vec<u8>, Option<String>)>,
-    live_records: Vec<SyncRecord>,
-) -> anyhow::Result<Vec<SyncRecord>> {
-    let mut tombstones = deletion_markers
-        .into_iter()
-        .map(|(schema_id, record_key, target_node_id)| {
-            let target_node_id = target_node_id.as_deref().unwrap_or(node_id);
-            source_record_with_key_for_subject(
-                &schema_id,
-                target_node_id,
-                target_node_id,
-                now,
-                record_key,
-                serde_json::json!({ "deleted_at_unix_seconds": now }),
-                true,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    tombstones.extend(live_records);
-    Ok(tombstones)
 }

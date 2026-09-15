@@ -99,25 +99,33 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
         .expect("open history database");
     let identity = serde_json::to_vec(&super::identity()).expect("serialize source identity");
     let wire = vec![0_u8; 27 * 1024];
+    // Build the existing backlog in bounded transactions so fixture creation
+    // itself does not exceed the runtime memory budget.
+    for batch_start in (0..20_000_i64).step_by(256) {
+        let transaction = connection
+            .unchecked_transaction()
+            .expect("begin backlog transaction");
+        for sequence in batch_start..(batch_start + 256).min(20_000) {
+            transaction
+                .execute(
+                    "INSERT INTO source_delivery_journal
+                         (id, stream, closed_at, identity, wire, created_at,
+                          source_node_id, source_epoch, first_sequence)
+                     VALUES (?1, 'runtime', 100, ?2, ?3, 100, 'node-a', 1, ?4)",
+                    rusqlite::params![
+                        format!("resource-segment-{sequence}"),
+                        &identity,
+                        &wire,
+                        sequence
+                    ],
+                )
+                .expect("insert resource backlog row");
+        }
+        transaction.commit().expect("commit backlog transaction");
+    }
     let transaction = connection
         .unchecked_transaction()
-        .expect("begin backlog transaction");
-    for sequence in 0..20_000_i64 {
-        transaction
-            .execute(
-                "INSERT INTO source_delivery_journal
-                     (id, stream, closed_at, identity, wire, created_at,
-                      source_node_id, source_epoch, first_sequence)
-                 VALUES (?1, 'runtime', 100, ?2, ?3, 100, 'node-a', 1, ?4)",
-                rusqlite::params![
-                    format!("resource-segment-{sequence}"),
-                    &identity,
-                    &wire,
-                    sequence
-                ],
-            )
-            .expect("insert resource backlog row");
-    }
+        .expect("begin backlog state transaction");
     transaction
         .execute(
             "UPDATE source_delivery_journal_state

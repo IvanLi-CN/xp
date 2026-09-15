@@ -286,7 +286,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、legacy relay 接收兼容、
   anti-entropy、聚合和查询。
-- shared testbox 验证 50 source/2 repository、256 MiB 无 swap；普通节点新增稳态内存不超过
+- shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
   不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 9%，每个 60 秒周期数据库读取不超过

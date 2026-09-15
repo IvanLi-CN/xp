@@ -807,7 +807,8 @@ Notes:
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
-  and one page per peer, capped at 128 records and 192 KiB. Before any member is `ready`, syncing
+  and one initial summary page per peer, capped at 128 records and 192 KiB. Before any member is
+  `ready`, syncing
   repositories import each peer's node-local history, including another configured syncing
   repository. This establishes the full cluster baseline without recursive repository repair. The
   existing opaque page cursor fixes the first page's snapshot horizon, so new samples cannot keep
