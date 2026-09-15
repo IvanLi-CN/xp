@@ -1,4 +1,5 @@
 use super::*;
+use crate::history_sync::RelayFrame;
 use crate::state::history_repository::{
     HistoryStorage,
     identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},

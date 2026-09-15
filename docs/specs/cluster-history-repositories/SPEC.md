@@ -65,14 +65,18 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   payload 纳入，必须保持在 32 KiB source-record 上限内。
 - History repository 的 summary、repair、initial-backfill 和 anti-entropy direct 请求只使用目标节点的
   公网 HTTPS `api_base_url`；不会因配置了 Mesh endpoint 而选择、探测或回退到 Mesh/Reverse Mesh。
-  公网传输失败时保留 durable checkpoint 和 backlog，等待下一次有界重试；独立的动态 Mesh relay
-  仍仅作为显式、限频的历史投递 fallback，使用端到端 X25519+AEAD 且不落盘。
+  source delivery 也只使用该公网 HTTPS 路径；公网传输失败时保留 durable checkpoint、outbox
+  和 backlog，等待下一次有界重试，不打开历史 Mesh relay。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
 - ready peer 的每个 60 秒生命周期同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
   并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
   达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
   summary cursor、pending repair IDs 或 tiered handoff 状态。
+- 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer；只要至少
+  一个 Ready peer 完成公网追赶，就不得因另一个失效 peer 阻塞本地 ready 稳定窗口。只有所有
+  Ready peer 都不可达时才返回 `Unavailable`。失效成员仍保留在 Raft 并由状态/运维面报告，不能
+  自动删除、跳过其历史或伪造 ACK。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。
@@ -162,8 +166,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 2. source 将新 segment 按 cursor 提供给 primary；primary 写入本地 SQLite 并返回 ack；
    其他 ready 仓库通过 anti-entropy 修复缺口。
 3. repository direct path 固定使用目标节点公网 `api_base_url`；不会读取 Mesh/Tunnel 健康状态，也不
-   触发 standby probe 或 Reverse Mesh。公网传输失败只保留 checkpoint 等待重试；独立动态 relay
-   仍按既有限频规则尝试，sync control-plane 字节单独计量，不计入用户流量配额。
+   触发 standby probe 或 Reverse Mesh。source delivery、summary、repair 和 anti-entropy 的公网
+   传输失败只保留 checkpoint 或 outbox 等待重试，不使用历史 Mesh relay；sync control-plane
+   字节单独计量，不计入用户流量配额。
 4. 仓库按 UTC observed time 聚合粗粒度数据，保留输入 sequence 范围、hash、算法和 complete 状态，
    再清理已提交的细粒度记录。
 5. 查询端点从最完整仓库读取；仓库不可用时切换到下一仓库；全部不可用时只返回本地当前窗口，

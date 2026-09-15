@@ -1,11 +1,10 @@
 use super::super::AppState;
 use super::{
-    INTERNAL_HISTORY_REPOSITORY_RELAY, RepositoryRelayRequest, RepositoryRepairRequest,
-    RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
+    RepositoryRepairRequest, RepositorySyncRequest, RepositoryTombstoneAcknowledgementRequest,
 };
 use crate::{
     control_plane_mesh::MeshPeerTarget,
-    history_sync::{CanonicalSegment, Cursor, RelayFrame, RelayKeypair, SyncRecord},
+    history_sync::{CanonicalSegment, Cursor, RelayKeypair, SyncRecord},
     state::history_repository::{
         control::{
             RepositoryLifecycle, RepositoryMemberRuntimePatch, RepositoryMemberRuntimeUpdate,
@@ -56,16 +55,16 @@ use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
-    RepositoryDirectError, all_cluster_peers, eligible_mesh_relay_peers, is_transport_failure,
-    preserve_history_truncated, repository_direct_request, repository_mesh_request,
+    RepositoryDirectError, all_cluster_peers, preserve_history_truncated,
+    repository_direct_request, repository_mesh_request,
 };
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
 use source::{
-    receive_local_source_segment, repair_legacy_tombstone_metadata, should_attempt_source_relay,
-    source_record, source_record_with_key, source_record_with_key_for_subject,
+    receive_local_source_segment, repair_legacy_tombstone_metadata, source_record,
+    source_record_with_key, source_record_with_key_for_subject,
 };
 use source_records::{SourceRecordBatch, source_records, source_records_with_deletions};
 pub(crate) fn spawn_repository_replica_worker(state: AppState) {
@@ -189,29 +188,8 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                     error = %error,
                     "history repository peer replication failed"
                 );
-                if !is_transport_failure(&error) {
-                    continue;
-                }
-                match replicate_peer_via_dynamic_relay(
-                    state,
-                    peer,
-                    &peers,
-                    &ready_repository_ids,
-                    now,
-                )
-                .await
-                {
-                    Err(relay_error) => {
-                        tracing::debug!(
-                            peer = %peer.node_id,
-                            error = %relay_error,
-                            "history repository dynamic relay was unavailable"
-                        );
-                    }
-                    Ok(()) => {
-                        synchronized = true;
-                    }
-                }
+                // A public transport failure leaves the durable checkpoint for the next
+                // retry. History synchronization must never fall back to Mesh.
             }
         }
     }
@@ -307,13 +285,13 @@ async fn publish_local_history_segment(
         return Ok(false);
     };
     let mut delivery_succeeded = true;
-    let mut transport_failed = false;
     let mut tombstone_acknowledgements = Vec::new();
     let mut delivered_segments = Vec::new();
     if segments.is_empty() {
-        (delivery_succeeded, transport_failed) =
+        delivery_succeeded =
             super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
-                .await?;
+                .await?
+                .0;
     }
     for (index, segment) in segments.iter().enumerate() {
         let segment_gaps = if index == 0 { gaps.as_slice() } else { &[] };
@@ -358,7 +336,6 @@ async fn publish_local_history_segment(
                     delivered_segments.push(segment.clone());
                 }
                 Err(error) => {
-                    transport_failed |= error.is_transport();
                     delivery_succeeded = false;
                     tracing::debug!(
                         repository = selected_repository_id,
@@ -403,28 +380,6 @@ async fn publish_local_history_segment(
             .acknowledge_tombstones(&tombstone_acknowledgements)?;
     }
     let acknowledgements_replicated = true;
-    if should_attempt_source_relay(
-        transport_failed,
-        selected_repository_id == state.cluster.node_id,
-    ) {
-        let relay_peers = eligible_mesh_relay_peers(state).await;
-        match relay_local_source_segments(
-            state,
-            selected_peer,
-            &relay_peers,
-            &state.cluster.node_id,
-            now,
-        )
-        .await
-        {
-            Ok(()) => delivery_succeeded = true,
-            Err(error) => tracing::debug!(
-                repository = selected_repository_id,
-                error = %error,
-                "history source dynamic relay was unavailable"
-            ),
-        }
-    }
     state
         .repository_replica
         .lock()
@@ -442,11 +397,7 @@ async fn publish_local_history_segment(
             &state.cluster.node_id,
             &source_batch.deletion_markers,
         )?;
-    if delivery_succeeded
-        && !transport_failed
-        && acknowledgements_replicated
-        && tombstones_fully_acknowledged
-    {
+    if delivery_succeeded && acknowledgements_replicated && tombstones_fully_acknowledged {
         for marker in &source_batch.deletion_markers {
             state
                 .node_history
@@ -459,78 +410,7 @@ async fn publish_local_history_segment(
             .await
             .complete_local_source_tombstones(&source_batch.deletion_markers)?;
     }
-    Ok(delivery_succeeded && !transport_failed)
-}
-async fn relay_local_source_segments(
-    state: &AppState,
-    target: &MeshPeerTarget,
-    peers: &[MeshPeerTarget],
-    source_node_id: &str,
-    now: u64,
-) -> anyhow::Result<()> {
-    let payload = {
-        let mut runtime = state.repository_replica.lock().await;
-        if !runtime.begin_source_dynamic_relay_attempt(&state.cluster.cluster_id, now)? {
-            return Err(anyhow::anyhow!("source dynamic relay attempt is not due"));
-        }
-        let segments = runtime.local_source_pending_segments();
-        let gaps = runtime.local_source_gaps_for_segments(source_node_id, &segments);
-        let history_truncated = runtime.history_truncated();
-        RepositoryRepairBatch {
-            segments,
-            unavailable_segment_ids: Vec::new(),
-            gaps,
-            history_truncated,
-            response_id: None,
-        }
-        .frame_sized_relay_payload()?
-    };
-    let payload_is_empty = payload.batch.segments.is_empty() && payload.batch.gaps.is_empty();
-    if payload_is_empty && !payload.batch.history_truncated {
-        return Ok(());
-    }
-    let relay = peers
-        .iter()
-        .find(|peer| peer.node_id != target.node_id && peer.node_id != source_node_id)
-        .ok_or_else(|| anyhow::anyhow!("no eligible Mesh member can relay source history"))?;
-    let keypair = cluster_relay_keypair(state, source_node_id)?;
-    let target_public_key = cluster_relay_keypair(state, &target.node_id)?.public_key();
-    let frame = RelayFrame::seal(
-        keypair,
-        target_public_key,
-        rand::random(),
-        &payload.bytes,
-        target.node_id.as_bytes(),
-    )?;
-    let body = serde_json::to_vec(&RepositoryRelayRequest {
-        target_repository_id: target.node_id.clone(),
-        source_repository_id: source_node_id.to_owned(),
-        relay_repository_id: None,
-        frame,
-    })?;
-    repository_mesh_request::<serde_json::Value>(
-        state,
-        relay,
-        Method::POST,
-        INTERNAL_HISTORY_REPOSITORY_RELAY,
-        body,
-    )
-    .await?;
-    state
-        .repository_replica
-        .lock()
-        .await
-        .acknowledge_local_source_segments_via_without_hydrating(
-            &payload.batch.segments,
-            now,
-            "dynamic_relay",
-        )?;
-    state
-        .repository_replica
-        .lock()
-        .await
-        .commit_local_source_gap_page(&payload.batch.gaps)?;
-    Ok(())
+    Ok(delivery_succeeded)
 }
 async fn sync_local_repository_capacity(state: &AppState, now: u64) -> anyhow::Result<()> {
     let capacity = state
@@ -731,60 +611,6 @@ fn remove_delivered_repair_segment_ids<'a>(
         anyhow::bail!("repository repair response did not advance the requested segment set")
     }
     pending_segment_ids.retain(|segment_id| !delivered_set.contains(segment_id));
-    Ok(())
-}
-async fn replicate_peer_via_dynamic_relay(
-    state: &AppState,
-    target: &MeshPeerTarget,
-    _peers: &[MeshPeerTarget],
-    _ready_repository_ids: &[String],
-    now: u64,
-) -> anyhow::Result<()> {
-    let relay_peers = eligible_mesh_relay_peers(state).await;
-    let relay = relay_peers
-        .iter()
-        .find(|peer| peer.node_id != state.cluster.node_id && peer.node_id != target.node_id)
-        .ok_or_else(|| anyhow::anyhow!("no independent ready repository can relay"))?;
-    let keypair = cluster_relay_keypair(state, &state.cluster.node_id)?;
-    let target_public_key = cluster_relay_keypair(state, &target.node_id)?.public_key();
-    let page = {
-        let mut runtime = state.repository_replica.lock().await;
-        if !runtime.begin_dynamic_relay_attempt(now)? {
-            anyhow::bail!("hourly jittered dynamic relay attempt is not due");
-        }
-        runtime.relay_batch(&target.node_id)?
-    };
-    let next_segment_id = page.next_segment_id().map(str::to_owned);
-    if page.batch.segments.is_empty() && page.batch.gaps.is_empty() && !page.batch.history_truncated
-    {
-        return Ok(());
-    }
-    let frame = RelayFrame::seal(
-        keypair,
-        target_public_key,
-        rand::random(),
-        &page.payload,
-        target.node_id.as_bytes(),
-    )?;
-    let body = serde_json::to_vec(&RepositoryRelayRequest {
-        target_repository_id: target.node_id.clone(),
-        source_repository_id: state.cluster.node_id.clone(),
-        relay_repository_id: None,
-        frame,
-    })?;
-    repository_mesh_request::<serde_json::Value>(
-        state,
-        relay,
-        Method::POST,
-        INTERNAL_HISTORY_REPOSITORY_RELAY,
-        body,
-    )
-    .await?;
-    state
-        .repository_replica
-        .lock()
-        .await
-        .record_relay_batch_delivered(&target.node_id, next_segment_id.as_deref())?;
     Ok(())
 }
 pub(super) fn cluster_relay_keypair(

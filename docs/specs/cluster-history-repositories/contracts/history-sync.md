@@ -27,11 +27,11 @@ decompressed-size, record-count, nesting and expansion-ratio limits before stora
 Repository summary, repair, initial-backfill and anti-entropy direct requests use
 the target node's registered public HTTPS `api_base_url` only. A configured Mesh
 endpoint is not selected or probed, and direct requests never enter Reverse Mesh.
-When public transport fails, the durable checkpoint remains unchanged for the
-next bounded retry. The separately rate-limited dynamic relay remains an
-explicit fallback for source delivery, is streaming-only, and persists no
-history. Its payloads use end-to-end X25519 plus AEAD and are compressed and
-paged against the actual encrypted-frame budget before sealing.
+Source delivery uses the same public endpoint. When public transport fails, the
+durable checkpoint or source outbox remains unchanged for the next bounded retry;
+history synchronization never opens a Mesh relay. Legacy relay payloads remain
+parseable at the receive boundary for wire compatibility, but the repository
+worker never constructs or sends them.
 
 ## Acknowledgement and repair
 

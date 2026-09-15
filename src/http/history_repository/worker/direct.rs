@@ -35,12 +35,6 @@ impl RepositoryDirectError {
     }
 }
 
-pub(crate) fn is_transport_failure(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<RepositoryDirectError>()
-        .is_some_and(RepositoryDirectError::is_transport)
-}
-
 impl std::fmt::Display for RepositoryDirectError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -74,17 +68,9 @@ pub(super) async fn clear_peer_deep_verification(
     Ok(())
 }
 
-pub(crate) async fn eligible_mesh_relay_peers(state: &AppState) -> Vec<MeshPeerTarget> {
-    all_cluster_peers(state)
-        .await
-        .into_iter()
-        .filter(|peer| peer.mesh_base_url.is_some())
-        .collect()
-}
-
-/// Dynamic relay is an authenticated Mesh-only transport. It deliberately does not participate
-/// in the source-to-repository direct-path selector, whose Reality Mesh and Tunnel paths are
-/// equal alternatives and must both fail before this call is reachable.
+/// Dynamic relay is an authenticated Mesh-only transport. It is kept separate from the
+/// source-to-repository history catch-up path, which always uses the peer's public HTTPS origin.
+/// The worker never invokes this transport; it remains only for the legacy relay endpoint.
 pub(crate) async fn repository_mesh_request<T>(
     state: &AppState,
     peer: &MeshPeerTarget,
@@ -190,20 +176,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{RepositoryDirectError, is_transport_failure};
     use crate::control_plane_mesh::PeerDirectPath;
-
-    #[test]
-    fn application_rejection_is_not_a_transport_failure() {
-        let rejection = RepositoryDirectError::Application(anyhow::anyhow!("409 conflict"));
-        assert!(!rejection.is_transport());
-        let rejection = anyhow::Error::new(rejection);
-        assert!(!is_transport_failure(&rejection));
-        let transport = anyhow::Error::new(RepositoryDirectError::Transport(anyhow::anyhow!(
-            "connection reset"
-        )));
-        assert!(is_transport_failure(&transport));
-    }
 
     #[test]
     fn repository_direct_path_is_public_even_when_mesh_is_configured() {

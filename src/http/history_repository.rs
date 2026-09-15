@@ -31,8 +31,6 @@ const MAX_HISTORY_SYNC_BASE64_BYTES: usize = MAX_RESPONSE_WIRE_BYTES.div_ceil(3)
 const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
-pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY: &str =
-    "/api/admin/_internal/history-repository/relay";
 pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER: &str =
     "/api/admin/_internal/history-repository/relay-deliver";
 pub(super) mod gaps;

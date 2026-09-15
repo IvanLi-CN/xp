@@ -62,7 +62,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
     now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
     let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
-    if peers.len() != ready_repository_ids.len() {
+    if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
     }
     let mut receiving_repository_ids = ready_repository_ids.clone();
@@ -80,7 +80,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .collect::<Vec<_>>();
-    let (peer_progress, pages_by_peer) =
+    let (peer_progress, pages_by_peer, progress_by_peer) =
         drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
             let peer = peer_targets[index];
             async {
@@ -95,17 +95,27 @@ pub(crate) async fn catch_up_against_ready_repositories(
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
     // still advancing every peer's signed summary through bounded pages per worker tick.
-    let Some(tiered_peer) = peer_targets.first().copied() else {
+    let Some(tiered_peer) =
+        peer_targets
+            .iter()
+            .zip(progress_by_peer.iter())
+            .find_map(|(peer, progress)| {
+                (*progress != InitialBackfillProgress::Unavailable).then_some(*peer)
+            })
+    else {
         return Ok(InitialBackfillProgress::Unavailable);
     };
     let needs_reverification = {
         let runtime = state.repository_replica.lock().await;
-        peers.iter().any(|peer| {
-            peer.node_id != state.cluster.node_id
-                && runtime
-                    .initial_peer_backfill_checkpoint(&peer.node_id)
-                    .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
-        })
+        peer_targets
+            .iter()
+            .zip(progress_by_peer.iter())
+            .any(|(peer, progress)| {
+                *progress != InitialBackfillProgress::Unavailable
+                    && runtime
+                        .initial_peer_backfill_checkpoint(&peer.node_id)
+                        .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
+            })
     };
     let tiered_page_cap = pages_by_peer
         .first()
@@ -122,9 +132,11 @@ pub(crate) async fn catch_up_against_ready_repositories(
     };
     if needs_reverification && tiered_progress == InitialBackfillProgress::Complete {
         let mut runtime = state.repository_replica.lock().await;
-        for peer in peers
+        for peer in peer_targets
             .iter()
-            .filter(|peer| peer.node_id != state.cluster.node_id)
+            .zip(progress_by_peer.iter())
+            .filter(|(_, progress)| **progress != InitialBackfillProgress::Unavailable)
+            .map(|(peer, _)| *peer)
         {
             runtime.update_initial_peer_summary_checkpoint(
                 &peer.node_id,
@@ -148,13 +160,20 @@ async fn drain_ready_peer_pages<F, Fut>(
     peer_count: usize,
     deadline: Instant,
     mut fetch_page: F,
-) -> anyhow::Result<(InitialBackfillProgress, Vec<usize>)>
+) -> anyhow::Result<(
+    InitialBackfillProgress,
+    Vec<usize>,
+    Vec<InitialBackfillProgress>,
+)>
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
 {
     let mut in_progress = false;
+    let mut unavailable = false;
+    let mut complete = false;
     let mut pages_by_peer = Vec::with_capacity(peer_count);
+    let mut progress_by_peer = Vec::with_capacity(peer_count);
     for index in 0..peer_count {
         let remaining_budget = deadline.saturating_duration_since(Instant::now());
         if remaining_budget.is_zero() {
@@ -170,21 +189,29 @@ where
         )
         .await?;
         pages_by_peer.push(drain.pages_consumed);
+        progress_by_peer.push(drain.progress);
         match drain.progress {
             InitialBackfillProgress::InProgress => in_progress = true,
-            InitialBackfillProgress::Complete => {}
+            InitialBackfillProgress::Complete => complete = true,
             InitialBackfillProgress::Unavailable => {
-                return Ok((InitialBackfillProgress::Unavailable, pages_by_peer));
+                // A failed public peer must not consume the whole tick. Continue with the
+                // remaining peers, then report the aggregate result for the next retry.
+                unavailable = true;
             }
         }
     }
     Ok((
         if in_progress {
             InitialBackfillProgress::InProgress
+        } else if complete {
+            InitialBackfillProgress::Complete
+        } else if unavailable {
+            InitialBackfillProgress::Unavailable
         } else {
             InitialBackfillProgress::Complete
         },
         pages_by_peer,
+        progress_by_peer,
     ))
 }
 
@@ -665,6 +692,36 @@ mod tests {
         assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
         assert_eq!(result.0, InitialBackfillProgress::InProgress);
         assert_eq!(result.1, vec![1, 1]);
+    }
+
+    #[tokio::test]
+    async fn ready_peer_drain_continues_after_an_unavailable_peer() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_calls = calls.clone();
+        let result =
+            drain_ready_peer_pages(2, Instant::now() + Duration::from_secs(1), move |index| {
+                recorded_calls.lock().expect("record peer call").push(index);
+                async move {
+                    if index == 0 {
+                        Ok(InitialBackfillProgress::Unavailable)
+                    } else {
+                        Ok(InitialBackfillProgress::Complete)
+                    }
+                }
+            })
+            .await
+            .expect("ready peer drain");
+
+        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
+        assert_eq!(result.0, InitialBackfillProgress::Complete);
+        assert_eq!(result.1, vec![1, 1]);
+        assert_eq!(
+            result.2,
+            vec![
+                InitialBackfillProgress::Unavailable,
+                InitialBackfillProgress::Complete,
+            ]
+        );
     }
 
     #[test]

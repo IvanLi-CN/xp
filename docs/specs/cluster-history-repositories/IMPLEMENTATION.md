@@ -106,9 +106,14 @@
 - Incremental sync transport: accepted signed segment state is restored from the repository SQLite
   boundary. Summary, repair, initial-backfill and anti-entropy direct requests always use the target
   node's public HTTPS `api_base_url`; they do not select or probe a configured Mesh endpoint and do
-  not enter the Reverse Mesh path. A failed public request leaves the durable checkpoint unchanged
-  for the next bounded retry. The separately rate-limited dynamic relay remains an explicit fallback
-  for a public transport failure and never stores relay frames.
+  not enter the Reverse Mesh path. Source delivery uses the same public endpoint. A failed public
+  request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
+  synchronization never opens a Mesh relay.
+- During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while
+  other Ready peers continue to receive their bounded public pages. A healthy Ready peer may
+  complete catch-up and start the local stability window; only when every Ready peer is unavailable
+  does the worker return `Unavailable`. Stale membership remains visible for explicit operator
+  cleanup and is never removed or treated as an ACK.
 - Every node produces bounded one-minute signed source segments for runtime, traffic, Mesh path
   health, inbound-IP and connection summaries. Each schema family has its own durable outbox,
   cursor, sequence and hash chain; pending segments retry unchanged until the rendezvous primary
@@ -132,9 +137,8 @@
   peer only when the serialized source view still fits the 32 KiB source-record budget.
   After three failed primary delivery cycles, a source selects its rendezvous
   standby; both collectors accept the signed segment so that the transition has no coordination
-  race. When the public direct path fails, an hourly-jittered relay carries compressed encrypted,
-  frame-budgeted pending-source pages through an eligible cluster member without storing history
-  at the relay.
+  race. When the public direct path fails, the pending-source page remains durable and is retried on
+  the next bounded cycle; no history relay or alternate Mesh path is opened.
   A target returns the signed source-delivery receipt once the segment is durable. Tombstone
   acknowledgement fanout to other repositories is best-effort and logged for retry; a transient
   fanout failure never converts an already persisted source delivery into a 5xx response.
@@ -195,9 +199,10 @@
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,
   anonymize IP identifiers after seven days, and select the healthiest most complete ready response.
-- The proxy configuration, proxy client, proxy listener, proxy status, and compatibility path were
-  removed. The dynamic relay contract remains separate from peer-direct transport and does not
-  persist relay frames.
+- The proxy configuration, proxy client, proxy listener, proxy status, compatibility path, and
+  history synchronization relay path are not used by the repository worker. Legacy relay payload
+  types remain wire-compatible for the receive boundary, but normal source delivery and
+  anti-entropy never construct or send them.
 - Deployment parity: systemd, OpenRC and the single-image container keep the same persistent
   `${XP_DATA_DIR}/history.sqlite3` replica database. SQLite performs bounded incremental release;
   low disk or quota stops only history writes, and normal node-data retention behavior is unchanged.

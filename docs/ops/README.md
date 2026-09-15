@@ -122,9 +122,9 @@ Host-managed mode assumptions:
   existing fallback/error policy. The slot remains held while the response body/stream is live.
   This is a fixed safety limit with no node-local override.
   Repository synchronization direct requests use the peer's public HTTPS `api_base_url` only; they
-  do not select or probe Mesh or Reverse Mesh. A public transport failure leaves the durable
-  checkpoint for the next bounded retry, while the existing separately rate-limited dynamic relay
-  remains an explicit source-delivery fallback.
+  do not select or probe Mesh or Reverse Mesh. Source delivery uses the same public HTTPS path. A
+  public transport failure leaves the durable checkpoint or outbox for the next bounded retry and
+  never opens a history Mesh relay.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
@@ -824,9 +824,14 @@ Notes:
   phase); they do not read or decode segment payloads. If a peer remains `syncing` after a summary
   timeout, roll out the serving repository first, then observe the next lifecycle retry so its
   durable checkpoint can resume. The history worker uses the peer's public HTTPS `api_base_url`
-  for this request and does not select or probe Mesh. Do not restart the source, run `VACUUM`,
+  for all summary, repair and source-delivery requests and does not select or probe Mesh. Do not
+  restart the source, run `VACUUM`,
   clear the
   database, or delete unacknowledged backlog as a workaround.
+  During initial catch-up, an unavailable Ready member does not block other Ready members from
+  receiving their public pages; a healthy Ready member may complete the catch-up window. If every
+  Ready member is unavailable, the node remains `syncing` and retries on the next bounded cycle.
+  Keep stale membership for explicit operator cleanup; never remove it by editing the checkpoint.
   If a source delivery backlog is unchanged while the serving peer reports a sequence gap, inspect
   the oldest pending segment and its permanent predecessor gap. The serving release must be active
   before retrying; its bounded gap page prioritizes that predecessor before rotating the remainder.
