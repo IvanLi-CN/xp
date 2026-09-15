@@ -400,7 +400,7 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
                     .unwrap_or('_')
             })
             .collect::<String>();
-        format!("codex-xp-resource-{safe_run_id}-{label}")
+        format!("codex-xp-resource-{safe_run_id}-{label}.scope")
     });
     let mut command = if child_cgroup {
         let mut command = Command::new("systemd-run");
