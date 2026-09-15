@@ -82,26 +82,24 @@ fn signed_fixture_wire(
         .encode_length_delimited(&mut encoded_record)
         .expect("encode source journal record");
     records_hash.update(encoded_record);
-    let mut canonical = FixtureSegment {
-        first_cursor: Some(FixtureCursor {
-            source_node_id: source_node_id.to_owned(),
-            source_epoch: 1,
-            stream: "runtime".to_owned(),
-            sequence,
-        }),
-        last_cursor: Some(FixtureCursor {
-            source_node_id: source_node_id.to_owned(),
-            source_epoch: 1,
-            stream: "runtime".to_owned(),
-            sequence,
-        }),
-        records: vec![record],
-        previous_segment_hash: previous_hash.map_or_else(Vec::new, |hash| hash.to_vec()),
-        opened_at_unix_seconds: 100,
-        closed_at_unix_seconds: 100,
-        signature: Vec::new(),
-        records_hash: records_hash.finalize().to_vec(),
-    };
+    let mut canonical = FixtureSegment::default();
+    canonical.first_cursor = Some(FixtureCursor {
+        source_node_id: source_node_id.to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence,
+    });
+    canonical.last_cursor = Some(FixtureCursor {
+        source_node_id: source_node_id.to_owned(),
+        source_epoch: 1,
+        stream: "runtime".to_owned(),
+        sequence,
+    });
+    canonical.records = vec![record];
+    canonical.previous_segment_hash = previous_hash.map_or_else(Vec::new, |hash| hash.to_vec());
+    canonical.opened_at_unix_seconds = 100;
+    canonical.closed_at_unix_seconds = 100;
+    canonical.records_hash = records_hash.finalize().to_vec();
     canonical.cluster_id = cluster_id.to_owned();
     let canonical_wire = canonical.encode_to_vec();
     let signature = signing_key.sign(&canonical_wire).to_bytes().to_vec();
