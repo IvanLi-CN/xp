@@ -455,7 +455,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     fi
     echo "running source delivery journal resource workload (XP memory=128MiB, swap=0)"
     systemd-run --user --scope --collect \
-      --unit "codex-xp-source-journal-${GIT_SHA_FULL:0:12}" \
+      --unit "codex-xp-source-journal-${RUN_ID}" \
       -p MemoryMax=128M \
       -p MemorySwapMax=0 \
       -- "$journal_test_bin" \
