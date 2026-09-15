@@ -1,3 +1,13 @@
+use axum::{
+    Router,
+    body::{Body, to_bytes},
+    extract::{Request, State},
+    http::{StatusCode, Version},
+    response::Response,
+    routing::any,
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use std::{
     fs::{self, File},
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -9,17 +19,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-
-use axum::{
-    Router,
-    body::{Body, to_bytes},
-    extract::{Request, State},
-    http::{StatusCode, Version},
-    response::Response,
-    routing::any,
-};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::sleep};
 use xp::{
     cluster_metadata::ClusterMetadata,
@@ -51,14 +50,12 @@ pub struct ResourceRun {
     pub active_per_peer: Vec<usize>,
     pub peak_active_per_peer: Vec<usize>,
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 struct PssSample {
     total_kib: u64,
     anon_kib: u64,
     file_kib: u64,
 }
-
 #[derive(Clone)]
 struct PeerServerState {
     ca_key_pem: String,
@@ -68,7 +65,6 @@ struct PeerServerState {
     requests: Arc<AtomicUsize>,
     non_h2_requests: Arc<AtomicUsize>,
 }
-
 struct PeerConnectionCounters {
     accepts: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
@@ -76,19 +72,16 @@ struct PeerConnectionCounters {
     requests: Arc<AtomicUsize>,
     non_h2_requests: Arc<AtomicUsize>,
 }
-
 struct PeerTarget {
     node_id: String,
     access_host: String,
     port: u16,
 }
-
 struct PeerFleet {
     targets: Vec<PeerTarget>,
     counters: Vec<PeerConnectionCounters>,
     tasks: Vec<JoinHandle<()>>,
 }
-
 impl Drop for PeerFleet {
     fn drop(&mut self) {
         for task in &self.tasks {
@@ -96,7 +89,6 @@ impl Drop for PeerFleet {
         }
     }
 }
-
 async fn signed_response(State(state): State<PeerServerState>, request: Request) -> Response<Body> {
     let (parts, body) = request.into_parts();
     state.requests.fetch_add(1, Ordering::SeqCst);
@@ -821,11 +813,19 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
                         let mut pids = processes
                             .lines()
                             .filter_map(|line| line.trim().parse::<u32>().ok())
-                            .filter(|pid| *pid != child.child.id())
                             .collect::<Vec<_>>();
                         pids.sort_unstable();
-                        if let Some(pid) = pids.last() {
-                            break *pid;
+                        let child_pid = child.child.id();
+                        let xp_pid = pids
+                            .iter()
+                            .copied()
+                            .find(|pid| {
+                                fs::read_to_string(format!("/proc/{pid}/comm"))
+                                    .is_ok_and(|name| name.trim() == "xp")
+                            })
+                            .or_else(|| pids.iter().copied().find(|pid| *pid != child_pid));
+                        if let Some(pid) = xp_pid {
+                            break pid;
                         }
                     }
                     assert!(
