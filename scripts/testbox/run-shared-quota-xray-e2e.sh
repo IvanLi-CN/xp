@@ -450,8 +450,15 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
     CARGO_TARGET_DIR="$candidate_resource_target" \
       cargo test --release --lib --no-run
-    journal_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-      -name 'xp-[0-9a-f]*' -perm -111 -print -quit)"
+    journal_test_bin=""
+    while IFS= read -r candidate_bin; do
+      if "$candidate_bin" --list 2>/dev/null | grep -Fq \
+        'state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog'; then
+        journal_test_bin="$candidate_bin"
+        break
+      fi
+    done < <(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
+      -name 'xp-*' -perm -111 -print | sort)
     if [ -z "$journal_test_bin" ]; then
       echo "source journal resource test binary was not built" >&2
       exit 1
