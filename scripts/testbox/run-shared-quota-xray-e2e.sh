@@ -67,6 +67,12 @@ tar -C "$REPO_ROOT/web/dist" -cf "$WEB_DIST_ARCHIVE" .
 WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+case "$REPO_NAME" in
+  ""|*[!A-Za-z0-9._-]*)
+    echo "repository name contains unsupported path characters: $REPO_NAME" >&2
+    exit 2
+    ;;
+esac
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib, os, sys
 p=os.path.realpath(sys.argv[1]).encode()
@@ -80,10 +86,18 @@ RUN_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
 RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
+case "${USER:-}" in
+  ""|*[!A-Za-z0-9._-]*)
+    echo "USER contains unsupported remote path characters" >&2
+    exit 2
+    ;;
+esac
 REMOTE_BASE="/srv/codex/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
-REMOTE_SUBNET_CLAIMS="$REMOTE_BASE/.shared-testbox-subnet-claims"
+# Subnet claims are host-global so concurrent runs from different users cannot
+# select the same Docker network range.
+REMOTE_SUBNET_CLAIMS="/srv/codex/.shared-testbox-subnet-claims"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -104,20 +118,30 @@ MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900
 MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | base64 | tr -d '\n')"
 GIT_SHA_FULL_B64="$(printf '%s' "$GIT_SHA_FULL" | base64 | tr -d '\n')"
 RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
+REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 
-# 3) Create remote run dir and attach minimal metadata.
+# 3) Create remote run dir and attach minimal metadata. Paths and contents are
+# transported as base64 so the bootstrap shell never interpolates user input.
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
-local_repo_root=$REPO_ROOT
+WORKSPACE_METADATA="local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 git_commit=$GIT_SHA_FULL
 source_archive_sha256=$SOURCE_ARCHIVE_SHA
 web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
-TXT
+"
+WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
+ssh -o BatchMode=yes "$TESTBOX" \
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
+set -euo pipefail
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
+mkdir -p "$REMOTE_RUN"
+printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
+REMOTE_BOOTSTRAP
 
 # 4) Sync the immutable tracked tree, then overlay the generated Web shell.
 rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
@@ -153,13 +177,17 @@ RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 SOURCE_JOURNAL_SCOPE_UNIT="codex-xp-source-journal-${RUN_ID}.scope"
 
 cleanup() {
+  if [ "${CLEANUP_DONE:-0}" = "1" ]; then
+    return
+  fi
+  CLEANUP_DONE=1
   set +e
   if [ -n "${SOURCE_JOURNAL_SCOPE_UNIT:-}" ] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user stop "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
     systemctl --user reset-failed "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
   fi
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    cd "$REMOTE_RUN/scripts/e2e" || exit 0
+    cd "$REMOTE_RUN/scripts/e2e" || return 0
     if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
       cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
       if [ -f ".codex.user-compat.yaml" ]; then
@@ -175,7 +203,14 @@ cleanup() {
     rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
   fi
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  cleanup
+  trap - EXIT INT TERM
+  exit "$1"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 cd "$REMOTE_RUN/scripts/e2e"
 
