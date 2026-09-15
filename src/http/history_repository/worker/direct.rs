@@ -1,12 +1,8 @@
 use axum::http::Method;
-use chrono::Utc;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    control_plane_mesh::{
-        MeshPeerTarget, MeshRequest, PeerDirectPath, ReverseRelayRoute, peer_target_from_node,
-    },
-    history_sync::DirectPath,
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath, peer_target_from_node},
     internal_auth::InternalRoute,
     state::history_repository::replica::RepositoryRuntimeError,
 };
@@ -126,167 +122,20 @@ pub(crate) async fn repository_direct_request<T>(
 where
     T: DeserializeOwned,
 {
-    let now = u64::try_from(Utc::now().timestamp()).unwrap_or_default();
-    let (preferred, probe_standby) = {
-        let mut runtime = state.repository_replica.lock().await;
-        runtime
-            .select_peer_direct_path(peer.node_id.as_str(), peer.mesh_base_url.is_some(), now)
-            .map_err(|error| RepositoryDirectError::Transport(error.into()))?
-    };
-    let preferred_path = peer_direct_path(preferred);
-    let alternate_path = match preferred {
-        DirectPath::RealityMesh => PeerDirectPath::ApiBaseUrl,
-        DirectPath::CloudflareTunnel => PeerDirectPath::RealityMesh,
-    };
-    let mut last_error = None::<RepositoryDirectError>;
-    for path in [preferred_path, alternate_path] {
-        match send_repository_request_on_path(
-            state,
-            peer,
-            path,
-            method.clone(),
-            path_and_query,
-            body.clone(),
-            true,
-        )
-        .await
-        {
-            Ok(decoded) => {
-                let _ = state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .record_peer_direct_path_result(
-                        peer.node_id.as_str(),
-                        history_direct_path(path),
-                        true,
-                        now,
-                    );
-                if path == preferred_path && probe_standby {
-                    probe_repository_path(state, peer, alternate_path, now).await;
-                }
-                return Ok(decoded);
-            }
-            Err(error) => {
-                let healthy_response = !error.is_transport();
-                let _ = state
-                    .repository_replica
-                    .lock()
-                    .await
-                    .record_peer_direct_path_result(
-                        peer.node_id.as_str(),
-                        history_direct_path(path),
-                        healthy_response,
-                        now,
-                    );
-                if healthy_response {
-                    return Err(error);
-                }
-                last_error = Some(error);
-            }
-        }
-    }
-    let direct_error = last_error.expect("both direct paths were attempted");
-    if configure_repository_reverse_route(state, peer).await {
-        let reverse_request = MeshRequest {
-            method,
-            path_and_query: path_and_query.to_owned(),
-            content_type: (!body.is_empty()).then(|| "application/json".to_owned()),
-            body,
-            total_budget: REPOSITORY_REQUEST_BUDGET,
-            allow_ambiguous_fallback: true,
-            request_id: crate::id::new_ulid_string(),
-            route: InternalRoute::MeshV2,
-            cluster_id: state.cluster.cluster_id.clone(),
-            sender_id: state.cluster.node_id.clone(),
-            updates_active_path: true,
-        };
-        if let Ok(response) = state
-            .mesh_client
-            .send_peer_reverse_request(
-                peer,
-                reverse_request,
-                state.cluster_ca_key_pem.as_deref().ok_or_else(|| {
-                    RepositoryDirectError::Transport(anyhow::anyhow!(
-                        "cluster CA key is not available"
-                    ))
-                })?,
-                &state.cluster_ca_pem,
-            )
-            .await
-            .map_err(|error| RepositoryDirectError::Transport(error.into()))
-        {
-            if !response.status().is_success() {
-                return Err(RepositoryDirectError::Application(anyhow::anyhow!(
-                    "repository reverse peer rejected request with {}",
-                    response.status()
-                )));
-            }
-            return response
-                .json::<T>()
-                .await
-                .map_err(|error| RepositoryDirectError::Application(error.into()));
-        }
-    }
-    Err(direct_error)
+    send_repository_request_on_path(
+        state,
+        peer,
+        repository_direct_path(),
+        method,
+        path_and_query,
+        body,
+        true,
+    )
+    .await
 }
 
-async fn configure_repository_reverse_route(state: &AppState, peer: &MeshPeerTarget) -> bool {
-    let route = {
-        let store = state.store.lock().await;
-        let nodes = store.list_nodes();
-        let endpoints = store.list_endpoints();
-        (|| {
-            let assignment = store
-                .state()
-                .reverse_mesh_assignments
-                .get(&peer.node_id)
-                .cloned()?;
-            let primary_node = nodes
-                .iter()
-                .find(|node| node.node_id == assignment.primary_node_id)?;
-            let primary = peer_target_from_node(primary_node, &endpoints);
-            let standby = assignment.standby_node_id.as_ref().and_then(|standby_id| {
-                nodes
-                    .iter()
-                    .find(|node| node.node_id == *standby_id)
-                    .map(|node| peer_target_from_node(node, &endpoints))
-            });
-            Some(ReverseRelayRoute {
-                rendezvous: primary,
-                standby_rendezvous: standby,
-                assignment,
-                role: crate::reverse_mesh::ReverseRole::Primary,
-            })
-        })()
-    };
-    match route {
-        Some(route) => {
-            state
-                .mesh_client
-                .set_reverse_route(peer.node_id.clone(), route)
-                .await;
-            true
-        }
-        None => {
-            state.mesh_client.clear_reverse_route(&peer.node_id).await;
-            false
-        }
-    }
-}
-
-fn peer_direct_path(path: DirectPath) -> PeerDirectPath {
-    match path {
-        DirectPath::RealityMesh => PeerDirectPath::RealityMesh,
-        DirectPath::CloudflareTunnel => PeerDirectPath::ApiBaseUrl,
-    }
-}
-
-fn history_direct_path(path: PeerDirectPath) -> DirectPath {
-    match path {
-        PeerDirectPath::RealityMesh => DirectPath::RealityMesh,
-        PeerDirectPath::ApiBaseUrl => DirectPath::CloudflareTunnel,
-    }
+fn repository_direct_path() -> PeerDirectPath {
+    PeerDirectPath::ApiBaseUrl
 }
 
 async fn send_repository_request_on_path<T>(
@@ -339,37 +188,10 @@ where
         .map_err(|error| RepositoryDirectError::Application(error.into()))
 }
 
-async fn probe_repository_path(
-    state: &AppState,
-    peer: &MeshPeerTarget,
-    path: PeerDirectPath,
-    now: u64,
-) {
-    let result = send_repository_request_on_path::<serde_json::Value>(
-        state,
-        peer,
-        path,
-        Method::GET,
-        "/api/admin/_internal/history-repository/status",
-        Vec::new(),
-        false,
-    )
-    .await;
-    let _ = state
-        .repository_replica
-        .lock()
-        .await
-        .record_peer_direct_path_result(
-            peer.node_id.as_str(),
-            history_direct_path(path),
-            !matches!(&result, Err(error) if error.is_transport()),
-            now,
-        );
-}
-
 #[cfg(test)]
 mod tests {
     use super::{RepositoryDirectError, is_transport_failure};
+    use crate::control_plane_mesh::PeerDirectPath;
 
     #[test]
     fn application_rejection_is_not_a_transport_failure() {
@@ -381,5 +203,10 @@ mod tests {
             "connection reset"
         )));
         assert!(is_transport_failure(&transport));
+    }
+
+    #[test]
+    fn repository_direct_path_is_public_even_when_mesh_is_configured() {
+        assert_eq!(super::repository_direct_path(), PeerDirectPath::ApiBaseUrl);
     }
 }

@@ -24,14 +24,14 @@ decompressed-size, record-count, nesting and expansion-ratio limits before stora
 
 ## Paths
 
-Reality Mesh and Cloudflare Tunnel are equal-level direct paths. The path
-selector prefers a healthy/stable path, switches with hysteresis, and probes
-standby at low frequency. Only when both direct paths fail may the source try
-the Raft-assigned Reality Mesh Reverse relay; only after that fails may it
-attempt a jittered hourly relay through an eligible Mesh member. Both relays
-are streaming only and persist no history. The dynamic relay carries end-to-end
-X25519 plus AEAD payloads; its batches are compressed and paged against the
-actual encrypted-frame budget before sealing.
+Repository summary, repair, initial-backfill and anti-entropy direct requests use
+the target node's registered public HTTPS `api_base_url` only. A configured Mesh
+endpoint is not selected or probed, and direct requests never enter Reverse Mesh.
+When public transport fails, the durable checkpoint remains unchanged for the
+next bounded retry. The separately rate-limited dynamic relay remains an
+explicit fallback for source delivery, is streaming-only, and persists no
+history. Its payloads use end-to-end X25519 plus AEAD and are compressed and
+paged against the actual encrypted-frame budget before sealing.
 
 ## Acknowledgement and repair
 

@@ -63,12 +63,13 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 每分钟 source 的 `path_health.v1` 以轮转顺序携带最多 16 个 peer 的当前状态和每 peer 最新一分钟
   bucket；不复制本地完整 24 小时 telemetry 序列。字段和延迟样本先受限，再逐 peer 按序列化后的
   payload 纳入，必须保持在 32 KiB source-record 上限内。
-- Reality Mesh 和 Cloudflare Tunnel 是同级直连路径；选择稳定健康路径，另一条低频探测。
-  两条都失败后，先尝试 Raft 分配的 Reality Mesh Reverse；Reverse 失败后才每小时抖动一次
-  动态 Mesh relay。两类 relay 均不落盘；动态 relay 使用端到端 X25519+AEAD。
+- History repository 的 summary、repair、initial-backfill 和 anti-entropy direct 请求只使用目标节点的
+  公网 HTTPS `api_base_url`；不会因配置了 Mesh endpoint 而选择、探测或回退到 Mesh/Reverse Mesh。
+  公网传输失败时保留 durable checkpoint 和 backlog，等待下一次有界重试；独立的动态 Mesh relay
+  仍仅作为显式、限频的历史投递 fallback，使用端到端 X25519+AEAD 且不落盘。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
-- ready peer 的每个五分钟同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
+- ready peer 的每个 60 秒生命周期同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
   并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
   达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
   summary cursor、pending repair IDs 或 tiered handoff 状态。
@@ -160,8 +161,9 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
    进入 `ready`。已一致确认的永久 gap 不阻止 ready，但阻止 `replica_converged`。
 2. source 将新 segment 按 cursor 提供给 primary；primary 写入本地 SQLite 并返回 ack；
    其他 ready 仓库通过 anti-entropy 修复缺口。
-3. direct path 依据现有 Mesh/Tunnel 健康选择；只有两者均失败时才依次尝试 Reverse 与动态 relay。
-   sync control-plane 字节单独计量，不计入用户流量配额。
+3. repository direct path 固定使用目标节点公网 `api_base_url`；不会读取 Mesh/Tunnel 健康状态，也不
+   触发 standby probe 或 Reverse Mesh。公网传输失败只保留 checkpoint 等待重试；独立动态 relay
+   仍按既有限频规则尝试，sync control-plane 字节单独计量，不计入用户流量配额。
 4. 仓库按 UTC observed time 聚合粗粒度数据，保留输入 sequence 范围、hash、算法和 complete 状态，
    再清理已提交的细粒度记录。
 5. 查询端点从最完整仓库读取；仓库不可用时切换到下一仓库；全部不可用时只返回本地当前窗口，
@@ -316,7 +318,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - 风险：历史数据规模与多节点并发可能放大 SQLite 写入和同步队列；必须保持独立低优先级队列与固定预算。
 - 风险：legacy 节点不具备签名能力；不得伪造 source proof，需明确标记 sync unsupported 或先升级。
-- 假设：现有 Mesh/Tunnel path health 可复用，不增加全网 all-to-all 探测。
+- 假设：节点可通过已注册的公网 `api_base_url` 访问 peer，不增加全网 all-to-all 探测；Mesh
+  健康状态不参与 repository direct path 选择。
 
 ## 参考（References）
 

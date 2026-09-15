@@ -63,8 +63,8 @@
   They do not load or deserialize segment payloads merely to enumerate IDs or advance the
   continuation cursor. Repair and backfill retain the separate full-payload path, so existing
   signed rows and the summary wire shape remain unchanged. When a peer is stuck in `syncing`
-  because its summary request times out, upgrade the serving repository first and let the next
-  five-minute direct-path retry resume the persisted catch-up; do not restart the source or
+  because its summary request times out, keep the serving repository's public HTTPS endpoint healthy
+  and let the next lifecycle retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
 - When a serving repository confirms an expired permanent sequence gap, the receiver advances
   its cursor without inventing the skipped segment hash. The first segment after that range
@@ -103,12 +103,12 @@
   If startup cannot create the additive summary keyset index for an external-history database,
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.
-- Incremental sync transport and path selection: accepted signed segment state is restored from the
-  repository SQLite boundary. Every peer tracks direct Vision/TCP Reality Mesh and Cloudflare Tunnel
-  health; managed XHTTP endpoints are excluded from the plain HTTPS Mesh path,
-  keeps a stable path with hysteresis, and probes the standby path at low frequency before source
-  or repository work may use its Raft-assigned Reality Mesh Reverse route, then its independently
-  paced dynamic relay.
+- Incremental sync transport: accepted signed segment state is restored from the repository SQLite
+  boundary. Summary, repair, initial-backfill and anti-entropy direct requests always use the target
+  node's public HTTPS `api_base_url`; they do not select or probe a configured Mesh endpoint and do
+  not enter the Reverse Mesh path. A failed public request leaves the durable checkpoint unchanged
+  for the next bounded retry. The separately rate-limited dynamic relay remains an explicit fallback
+  for a public transport failure and never stores relay frames.
 - Every node produces bounded one-minute signed source segments for runtime, traffic, Mesh path
   health, inbound-IP and connection summaries. Each schema family has its own durable outbox,
   cursor, sequence and hash chain; pending segments retry unchanged until the rendezvous primary
@@ -132,7 +132,7 @@
   peer only when the serialized source view still fits the 32 KiB source-record budget.
   After three failed primary delivery cycles, a source selects its rendezvous
   standby; both collectors accept the signed segment so that the transition has no coordination
-  race. When both direct paths fail, an hourly-jittered relay carries compressed encrypted,
+  race. When the public direct path fails, an hourly-jittered relay carries compressed encrypted,
   frame-budgeted pending-source pages through an eligible cluster member without storing history
   at the relay.
   A target returns the signed source-delivery receipt once the segment is durable. Tombstone

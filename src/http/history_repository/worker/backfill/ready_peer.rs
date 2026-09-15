@@ -8,6 +8,12 @@ use std::{future::Future, time::Instant};
 const MAX_INITIAL_CATCH_UP_PAGES_PER_TICK: usize = 8;
 const INITIAL_CATCH_UP_TICK_BUDGET: Duration = Duration::from_secs(15);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CatchUpDrain {
+    progress: InitialBackfillProgress,
+    pages_consumed: usize,
+}
+
 struct CompletedRepairResponse {
     summary_cursor: Option<String>,
     pending_segment_ids: Vec<String>,
@@ -74,14 +80,15 @@ pub(crate) async fn catch_up_against_ready_repositories(
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
         .collect::<Vec<_>>();
-    match drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
-        let peer = peer_targets[index];
-        async {
-            advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
-        }
-    })
-    .await?
-    {
+    let (peer_progress, pages_by_peer) =
+        drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
+            let peer = peer_targets[index];
+            async {
+                advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
+            }
+        })
+        .await?;
+    match peer_progress {
         InitialBackfillProgress::InProgress => return Ok(InitialBackfillProgress::InProgress),
         InitialBackfillProgress::Complete => {}
         InitialBackfillProgress::Unavailable => return Ok(InitialBackfillProgress::Unavailable),
@@ -100,11 +107,19 @@ pub(crate) async fn catch_up_against_ready_repositories(
                     .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
         })
     };
-    let tiered_progress =
-        drain_bounded_catch_up_pages(MAX_INITIAL_CATCH_UP_PAGES_PER_TICK, deadline, || async {
+    let tiered_page_cap = pages_by_peer
+        .first()
+        .copied()
+        .map_or(0, remaining_peer_page_budget);
+    let tiered_progress = if tiered_page_cap == 0 {
+        InitialBackfillProgress::InProgress
+    } else {
+        drain_bounded_catch_up_pages(tiered_page_cap, deadline, || async {
             pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await
         })
-        .await?;
+        .await?
+        .progress
+    };
     if needs_reverification && tiered_progress == InitialBackfillProgress::Complete {
         let mut runtime = state.repository_replica.lock().await;
         for peer in peers
@@ -125,16 +140,21 @@ pub(crate) async fn catch_up_against_ready_repositories(
     Ok(tiered_progress)
 }
 
+fn remaining_peer_page_budget(pages_consumed: usize) -> usize {
+    MAX_INITIAL_CATCH_UP_PAGES_PER_TICK.saturating_sub(pages_consumed)
+}
+
 async fn drain_ready_peer_pages<F, Fut>(
     peer_count: usize,
     deadline: Instant,
     mut fetch_page: F,
-) -> anyhow::Result<InitialBackfillProgress>
+) -> anyhow::Result<(InitialBackfillProgress, Vec<usize>)>
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
 {
     let mut in_progress = false;
+    let mut pages_by_peer = Vec::with_capacity(peer_count);
     for index in 0..peer_count {
         let remaining_budget = deadline.saturating_duration_since(Instant::now());
         if remaining_budget.is_zero() {
@@ -143,54 +163,79 @@ where
         }
         let remaining_peers = (peer_count - index) as u32;
         let peer_deadline = Instant::now() + remaining_budget / remaining_peers;
-        match drain_bounded_catch_up_pages(
+        let drain = drain_bounded_catch_up_pages(
             MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
             peer_deadline,
             || fetch_page(index),
         )
-        .await?
-        {
+        .await?;
+        pages_by_peer.push(drain.pages_consumed);
+        match drain.progress {
             InitialBackfillProgress::InProgress => in_progress = true,
             InitialBackfillProgress::Complete => {}
             InitialBackfillProgress::Unavailable => {
-                return Ok(InitialBackfillProgress::Unavailable);
+                return Ok((InitialBackfillProgress::Unavailable, pages_by_peer));
             }
         }
     }
-    Ok(if in_progress {
-        InitialBackfillProgress::InProgress
-    } else {
-        InitialBackfillProgress::Complete
-    })
+    Ok((
+        if in_progress {
+            InitialBackfillProgress::InProgress
+        } else {
+            InitialBackfillProgress::Complete
+        },
+        pages_by_peer,
+    ))
 }
 
 async fn drain_bounded_catch_up_pages<F, Fut>(
     max_pages: usize,
     deadline: Instant,
     mut fetch_page: F,
-) -> anyhow::Result<InitialBackfillProgress>
+) -> anyhow::Result<CatchUpDrain>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
 {
+    let mut pages_consumed = 0;
     for _ in 0..max_pages {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Ok(InitialBackfillProgress::InProgress);
+            return Ok(CatchUpDrain {
+                progress: InitialBackfillProgress::InProgress,
+                pages_consumed,
+            });
         }
+        pages_consumed += 1;
         let progress = match tokio::time::timeout(remaining, fetch_page()).await {
             Ok(progress) => progress?,
-            Err(_) => return Ok(InitialBackfillProgress::InProgress),
+            Err(_) => {
+                return Ok(CatchUpDrain {
+                    progress: InitialBackfillProgress::InProgress,
+                    pages_consumed,
+                });
+            }
         };
         match progress {
-            InitialBackfillProgress::Complete => return Ok(InitialBackfillProgress::Complete),
+            InitialBackfillProgress::Complete => {
+                return Ok(CatchUpDrain {
+                    progress,
+                    pages_consumed,
+                });
+            }
             InitialBackfillProgress::Unavailable => {
-                return Ok(InitialBackfillProgress::Unavailable);
+                return Ok(CatchUpDrain {
+                    progress,
+                    pages_consumed,
+                });
             }
             InitialBackfillProgress::InProgress => {}
         }
     }
-    Ok(InitialBackfillProgress::InProgress)
+    Ok(CatchUpDrain {
+        progress: InitialBackfillProgress::InProgress,
+        pages_consumed,
+    })
 }
 
 async fn advance_ready_peer_catch_up_page(
@@ -517,7 +562,8 @@ mod tests {
             .expect("bounded catch-up drain");
 
         assert_eq!(calls, 3);
-        assert_eq!(result, InitialBackfillProgress::Complete);
+        assert_eq!(result.progress, InitialBackfillProgress::Complete);
+        assert_eq!(result.pages_consumed, 3);
     }
 
     #[tokio::test]
@@ -532,7 +578,8 @@ mod tests {
             .expect("bounded catch-up drain");
 
         assert_eq!(calls, 3);
-        assert_eq!(result, InitialBackfillProgress::InProgress);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 3);
     }
 
     #[tokio::test]
@@ -547,7 +594,8 @@ mod tests {
             .expect("bounded catch-up drain");
 
         assert_eq!(calls, 0);
-        assert_eq!(result, InitialBackfillProgress::InProgress);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 0);
     }
 
     #[tokio::test]
@@ -568,7 +616,8 @@ mod tests {
         .expect("bounded catch-up drain");
 
         assert_eq!(calls, 1);
-        assert_eq!(result, InitialBackfillProgress::InProgress);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 1);
     }
 
     #[tokio::test]
@@ -583,7 +632,8 @@ mod tests {
             .expect("bounded catch-up drain");
 
         assert_eq!(calls, 1);
-        assert_eq!(result, InitialBackfillProgress::Unavailable);
+        assert_eq!(result.progress, InitialBackfillProgress::Unavailable);
+        assert_eq!(result.pages_consumed, 1);
     }
 
     #[tokio::test]
@@ -613,7 +663,16 @@ mod tests {
         .expect("ready peer drain");
 
         assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
-        assert_eq!(result, InitialBackfillProgress::InProgress);
+        assert_eq!(result.0, InitialBackfillProgress::InProgress);
+        assert_eq!(result.1, vec![1, 1]);
+    }
+
+    #[test]
+    fn tiered_export_uses_only_the_remaining_peer_page_budget() {
+        assert_eq!(remaining_peer_page_budget(0), 8);
+        assert_eq!(remaining_peer_page_budget(3), 5);
+        assert_eq!(remaining_peer_page_budget(8), 0);
+        assert_eq!(remaining_peer_page_budget(16), 0);
     }
 
     #[test]

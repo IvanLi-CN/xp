@@ -121,8 +121,10 @@ Host-managed mode assumptions:
   health probes. Excess requests fail before opening another underlay stream and follow the
   existing fallback/error policy. The slot remains held while the response body/stream is live.
   This is a fixed safety limit with no node-local override.
-  Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-
-  relay order.
+  Repository synchronization direct requests use the peer's public HTTPS `api_base_url` only; they
+  do not select or probe Mesh or Reverse Mesh. A public transport failure leaves the durable
+  checkpoint for the next bounded retry, while the existing separately rate-limited dynamic relay
+  remains an explicit source-delivery fallback.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
@@ -811,16 +813,19 @@ Notes:
   fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, one worker tick drains up to eight consecutive summary, repair, or tiered export
-  pages per peer within a shared 15-second maintenance budget. The remaining budget is split among
-  peers in stable order so a slow peer cannot starve later peers. The summary cursor and pending
-  repair IDs are persisted in the peer checkpoint so a restart cannot trigger an unbounded bootstrap
-  scan or starve capacity and lifecycle ticks. When the page or time bound is reached, the worker
-  returns `InProgress` and resumes from that durable checkpoint on the next replication tick.
+  For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or
+  tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
+  split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
+  pending repair IDs are persisted in the peer checkpoint so a restart cannot trigger an unbounded
+  bootstrap scan or starve capacity and lifecycle ticks. When the page or time bound is reached,
+  the worker returns `InProgress` and resumes from that durable checkpoint on the next replication
+  tick.
   Summary pages enumerate repository segment IDs from SQLite metadata only (`id` and tombstone
   phase); they do not read or decode segment payloads. If a peer remains `syncing` after a summary
-  timeout, roll out the serving repository first, then observe the next five-minute direct-path
-  retry so its durable checkpoint can resume. Do not restart the source, run `VACUUM`, clear the
+  timeout, roll out the serving repository first, then observe the next lifecycle retry so its
+  durable checkpoint can resume. The history worker uses the peer's public HTTPS `api_base_url`
+  for this request and does not select or probe Mesh. Do not restart the source, run `VACUUM`,
+  clear the
   database, or delete unacknowledged backlog as a workaround.
   If a source delivery backlog is unchanged while the serving peer reports a sequence gap, inspect
   the oldest pending segment and its permanent predecessor gap. The serving release must be active
