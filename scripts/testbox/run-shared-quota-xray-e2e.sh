@@ -119,14 +119,35 @@ MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | ba
 GIT_SHA_FULL_B64="$(printf '%s' "$GIT_SHA_FULL" | base64 | tr -d '\n')"
 RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
 REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
+EVIDENCE_DIR="${XP_TESTBOX_EVIDENCE_DIR:-${TMPDIR:-/tmp}/xp-testbox-evidence}"
+EVIDENCE_PATH="$EVIDENCE_DIR/${RUN_ID}.manifest"
+EVIDENCE_OUTPUT_PATH="$EVIDENCE_DIR/${RUN_ID}.log"
+EVIDENCE_STATUS=running
+
+write_evidence_manifest() {
+  local status="${1:-$EVIDENCE_STATUS}"
+  /bin/mkdir -p "$EVIDENCE_DIR"
+  /bin/chmod 700 "$EVIDENCE_DIR" 2>/dev/null || true
+  /usr/bin/printf '%s\n' \
+    "run_id=$RUN_ID" \
+    "created_utc=$CREATED_UTC" \
+    "git_commit=$GIT_SHA_FULL" \
+    "source_archive_sha256=$SOURCE_ARCHIVE_SHA" \
+    "web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA" \
+    "baseline_archive_sha256=${BASELINE_ARCHIVE_SHA:-none}" \
+    "status=$status" \
+    "output_log=$EVIDENCE_OUTPUT_PATH" > "$EVIDENCE_PATH"
+}
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
+echo "evidence_manifest=$EVIDENCE_PATH"
 
 REMOTE_RUN_CREATED=0
 cleanup_local() {
   set +e
+  write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
   rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
   if [ -n "${BASELINE_ARCHIVE:-}" ]; then
     rm -f "$BASELINE_ARCHIVE"
@@ -217,6 +238,7 @@ fi
 # 5) Run on testbox.
 if ssh -o BatchMode=yes "$TESTBOX" \
   "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE'
+  2>&1 | tee "$EVIDENCE_OUTPUT_PATH"
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
@@ -628,9 +650,11 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
 fi
 REMOTE
 then
+  EVIDENCE_STATUS=passed
   REMOTE_RUN_CREATED=0
 else
-  status=$?
+  status=${PIPESTATUS[0]}
+  EVIDENCE_STATUS=failed
   exit "$status"
 fi
 
@@ -639,3 +663,5 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
 else
   echo "OK: xray_e2e + xray_mesh_transport_e2e + xray_vless_xhttp_e2e + shared_quota_xray_e2e on $TESTBOX"
 fi
+write_evidence_manifest passed
+echo "evidence_log=$EVIDENCE_OUTPUT_PATH"

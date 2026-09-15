@@ -252,12 +252,30 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     }
     let replay_deadline = Instant::now() + Duration::from_secs(75);
     while !saw_replayed_page && Instant::now() < replay_deadline {
+        let started = Instant::now();
+        let cpu_before = read_cpu_ticks(pid);
+        let read_before = read_process_read_bytes(pid);
         let pending =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
         saw_replayed_page = pending < initial_pending;
+        let operation_elapsed = started.elapsed();
+        let wall_seconds = operation_elapsed.as_secs_f64().max(0.001);
+        let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }
+            .try_into()
+            .ok()
+            .filter(|value: &u64| *value > 0)
+            .unwrap_or(100);
+        let cpu_seconds =
+            read_cpu_ticks(pid).saturating_sub(cpu_before) as f64 / ticks_per_second as f64;
+        cpu_percentages.push(cpu_seconds * 100.0 / wall_seconds);
+        max_read_bytes =
+            max_read_bytes.max(read_process_read_bytes(pid).saturating_sub(read_before));
+        max_rss_delta = max_rss_delta.max(read_process_rss_bytes(pid).saturating_sub(baseline_rss));
         peak_pss_kib =
             peak_pss_kib.max(read_pss(pid).expect("read source journal XP PSS").total_kib);
-        sleep(Duration::from_secs(1)).await;
+        if operation_elapsed < Duration::from_secs(1) {
+            sleep(Duration::from_secs(1) - operation_elapsed).await;
+        }
     }
     stop_sampling.store(true, Ordering::Relaxed);
     sampler.await.expect("source journal PSS sampler");

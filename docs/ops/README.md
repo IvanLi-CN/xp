@@ -884,8 +884,9 @@ Notes:
   it records the candidate XP `smaps_rollup` PSS peak during request execution before any rollout
   decision. The runner requires a clean commit, verifies tracked source and generated Web-shell
   archive SHA256 values, and embeds the commit in the candidate build. GitHub CI and release
-  publication do not access the shared testbox; attach this run's evidence separately before
-  production rollout.
+  publication do not access the shared testbox; the runner writes a SHA-bound manifest and full
+  workload log to `${XP_TESTBOX_EVIDENCE_DIR:-$TMPDIR/xp-testbox-evidence}` before cleanup, so
+  attach those files separately before production rollout.
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.
