@@ -120,6 +120,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         match propagate_tombstone_acknowledgements(
             state,
             &peers,
+            &ready_repository_ids,
             tombstone_acknowledgements.acknowledgements().to_vec(),
         )
         .await
@@ -225,7 +226,7 @@ fn should_record_anti_entropy_completion(
 async fn publish_local_history_segment(
     state: &AppState,
     ready_repository_ids: &[String],
-    collector_repository_ids: &[String],
+    collector_repository_ids: Option<&[String]>,
     peers: &[MeshPeerTarget],
     now: u64,
     capture_live: bool,
@@ -278,6 +279,10 @@ async fn publish_local_history_segment(
     if segments.is_empty() && gaps.is_empty() {
         return Ok(false);
     }
+    let Some(collector_repository_ids) = collector_repository_ids else {
+        tracing::debug!("history source capture queued while no Ready collector is available");
+        return Ok(false);
+    };
     let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
     let primary_repository_id = assignment.primary().to_owned();
     let selected_repository_id = state
@@ -776,7 +781,13 @@ async fn replicate_peer(
                 }
             }
             if propagate_acknowledgements {
-                propagate_tombstone_acknowledgements(state, peers, acknowledgements).await?;
+                propagate_tombstone_acknowledgements(
+                    state,
+                    peers,
+                    ready_repository_ids,
+                    acknowledgements,
+                )
+                .await?;
             }
             let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
                 let mut runtime = state.repository_replica.lock().await;
@@ -818,13 +829,17 @@ async fn replicate_peer(
 pub(super) async fn propagate_tombstone_acknowledgements(
     state: &AppState,
     peers: &[MeshPeerTarget],
+    ready_repository_ids: &[String],
     acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
 ) -> anyhow::Result<()> {
     if acknowledgements.is_empty() {
         return Ok(());
     }
     let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
-    let mut first_delivery_error = None::<anyhow::Error>;
+    let mut first_delivery_error =
+        missing_tombstone_ack_peer(ready_repository_ids, &state.cluster.node_id, peers).map(
+            |repository_id| anyhow::anyhow!("ready repository {repository_id} has no usable peer"),
+        );
     for peer in peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
@@ -842,4 +857,16 @@ pub(super) async fn propagate_tombstone_acknowledgements(
         }
     }
     first_delivery_error.map_or(Ok(()), Err)
+}
+
+fn missing_tombstone_ack_peer(
+    ready_repository_ids: &[String],
+    local_repository_id: &str,
+    peers: &[MeshPeerTarget],
+) -> Option<String> {
+    ready_repository_ids
+        .iter()
+        .filter(|repository_id| repository_id.as_str() != local_repository_id)
+        .find(|repository_id| !peers.iter().any(|peer| &peer.node_id == *repository_id))
+        .cloned()
 }

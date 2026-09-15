@@ -228,6 +228,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         let read_before = read_process_read_bytes(pid);
         let pending =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        eprintln!("source journal warm status pending={pending}");
         if pending < initial_pending {
             saw_replayed_page = true;
         }
@@ -257,6 +258,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         let read_before = read_process_read_bytes(pid);
         let pending =
             request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        eprintln!("source journal replay status pending={pending}");
         saw_replayed_page = pending < initial_pending;
         let operation_elapsed = started.elapsed();
         let wall_seconds = operation_elapsed.as_secs_f64().max(0.001);

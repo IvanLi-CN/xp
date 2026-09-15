@@ -59,6 +59,16 @@ fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
 }
 
 #[test]
+fn stale_ready_metadata_blocks_tombstone_ack_cursor_advance() {
+    let ready = vec!["local".to_owned(), "stale-ready".to_owned()];
+    let peers = Vec::new();
+    assert_eq!(
+        super::missing_tombstone_ack_peer(&ready, "local", &peers).as_deref(),
+        Some("stale-ready")
+    );
+}
+
+#[test]
 fn deep_partition_mismatch_restarts_tiered_backfill_after_segment_drain() {
     assert!(deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,

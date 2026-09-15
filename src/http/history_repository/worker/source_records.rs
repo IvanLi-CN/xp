@@ -13,17 +13,21 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     };
     let available_ready_repository_ids =
         super::available_ready_repository_ids(&ready_repository_ids, &peers);
-    let Some(collector_repository_ids) =
-        source_collector_repository_ids(&available_ready_repository_ids, &peers)
-    else {
+    let collector_repository_ids =
+        source_collector_repository_ids(&available_ready_repository_ids, &peers);
+    if collector_repository_ids.is_none() {
+        // Persist one bounded capture page even when every Ready peer is missing metadata.
+        // Delivery remains deferred until a usable collector appears on a later cycle.
+        super::publish_local_history_segment(state, &ready_repository_ids, None, &peers, now, true)
+            .await?;
         return Ok(());
-    };
+    }
     let mut capture_live = true;
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
             &ready_repository_ids,
-            &collector_repository_ids,
+            collector_repository_ids.as_deref(),
             &peers,
             now,
             capture_live,
