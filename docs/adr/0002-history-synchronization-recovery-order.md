@@ -1,20 +1,18 @@
-# Keep peer direct paths equal before history repair relays
+# Keep public HTTPS authoritative for history synchronization
 
-History synchronization selects Reality Mesh and Cloudflare Tunnel as equal
-peer-direct paths, then tries the Raft-assigned Reality Mesh Reverse relay, and
-only then the in-memory encrypted dynamic relay. The two direct paths have
-independent availability and neither is a fallback for the other; Reverse adds
-a routed dependency and therefore follows both, while the dynamic relay remains
-the low-frequency last resort. A temporary delivery failure or bounded outbox is
-Recoverable Backlog, not a Permanent Gap: a Source or any ready History
-Repository may repair the original cursor range before a Permanent Gap is
-declared.
+History synchronization uses the target node's registered public HTTPS
+`api_base_url` for summary, repair, backfill, anti-entropy, source delivery and
+acknowledgements. It never probes or opens Mesh, Reverse Mesh or dynamic relay
+fallbacks. A temporary delivery failure or bounded outbox is Recoverable
+Backlog, not a Permanent Gap: a Source or any ready History Repository may
+repair the original cursor range before a Permanent Gap is declared.
 
 ## Considered options
 
-- Treating Cloudflare Tunnel as a fallback for Reality Mesh: rejected because
-  both are direct node-to-node paths with independent health.
-- Skipping Reverse for history: rejected because it leaves NAT-only targets
-  dependent on the low-frequency dynamic relay.
+- Using Mesh or Reverse as a history fallback: rejected because it creates an
+  additional routed dependency and can hide public-path failures from the
+  durable retry state.
+- Treating an unavailable public peer as converged: rejected because it would
+  allow a repository to claim readiness without the complete known union.
 - Declaring a gap when a source outbox fills: rejected because delivery pressure
   does not prove the underlying source history is unavailable.

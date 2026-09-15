@@ -31,12 +31,18 @@
   existing five-minute stability window only after every page is complete. A local page records
   its pending wire set before delivery and commits all acknowledgements with the page cursor; an
   interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
-  ready peer, the single worker tick budget is spent on one summary page, one repair response, or
-  one tiered export page; the summary cursor and pending repair IDs are part of the durable peer
-  checkpoint, so a restart resumes the same page instead of restarting an unbounded scan. Deep
-  partition mismatches after a segment repair drains mark the checkpoint for the single-authority
-  tiered import. A fresh summary verification pass must complete before the member can enter the
-  readiness window.
+  ready peer, each worker tick drains up to eight consecutive summary, repair, or tiered export
+  pages per peer within a shared 15-second maintenance budget. The remaining budget is split among
+  peers in stable order so a slow peer cannot starve later peers. The summary cursor and pending
+  repair IDs are part of the durable peer checkpoint, so a restart resumes the same page instead of
+  restarting an unbounded scan. Hitting either bound returns `InProgress` and defers the remaining
+  work to the next replication tick. Deep partition mismatches after a segment repair drains mark
+  the checkpoint for the single-authority tiered import. A fresh summary verification pass must
+  complete before the member can enter the readiness window.
+- Ready repository metadata is resolved independently for each member. A stale Ready member with
+  no node metadata is retained in the aggregate and keeps catch-up incomplete, while available
+  Ready peers continue their bounded pages; source delivery and history queries use the available
+  peer targets without treating the stale member as acknowledged.
 - Tombstones received while a repository is `syncing` are atomically stored with their local
   cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
   membership reports `ready`. The durable page is then retried through the existing all-node
@@ -61,8 +67,8 @@
   They do not load or deserialize segment payloads merely to enumerate IDs or advance the
   continuation cursor. Repair and backfill retain the separate full-payload path, so existing
   signed rows and the summary wire shape remain unchanged. When a peer is stuck in `syncing`
-  because its summary request times out, upgrade the serving repository first and let the next
-  five-minute direct-path retry resume the persisted catch-up; do not restart the source or
+  because its summary request times out, keep the serving repository's public HTTPS endpoint healthy
+  and let the next lifecycle retry resume the persisted catch-up; do not restart the source or
   delete its backlog as a recovery shortcut.
 - When a serving repository confirms an expired permanent sequence gap, the receiver advances
   its cursor without inventing the skipped segment hash. The first segment after that range
@@ -101,12 +107,17 @@
   If startup cannot create the additive summary keyset index for an external-history database,
   XP preserves its durable rows, exposes history storage as unavailable, and rejects history reads
   and writes rather than selecting a potentially stale JSON fallback.
-- Incremental sync transport and path selection: accepted signed segment state is restored from the
-  repository SQLite boundary. Every peer tracks direct Vision/TCP Reality Mesh and Cloudflare Tunnel
-  health; managed XHTTP endpoints are excluded from the plain HTTPS Mesh path,
-  keeps a stable path with hysteresis, and probes the standby path at low frequency before source
-  or repository work may use its Raft-assigned Reality Mesh Reverse route, then its independently
-  paced dynamic relay.
+- Incremental sync transport: accepted signed segment state is restored from the repository SQLite
+  boundary. Summary, repair, initial-backfill and anti-entropy direct requests always use the target
+  node's public HTTPS `api_base_url`; they do not select or probe a configured Mesh endpoint and do
+  not enter the Reverse Mesh path. Source delivery uses the same public endpoint. A failed public
+  request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
+  synchronization never opens a Mesh relay.
+- During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while
+  other Ready peers continue to receive their bounded public pages. Any unavailable or stale Ready
+  peer keeps the aggregate catch-up incomplete, so the worker does not start the local stability
+  window until every Ready peer has been covered. Stale membership remains visible for explicit
+  operator cleanup and is never removed or treated as an ACK.
 - Every node produces bounded one-minute signed source segments for runtime, traffic, Mesh path
   health, inbound-IP and connection summaries. Each schema family has its own durable outbox,
   cursor, sequence and hash chain; pending segments retry unchanged until the rendezvous primary
@@ -130,9 +141,8 @@
   peer only when the serialized source view still fits the 32 KiB source-record budget.
   After three failed primary delivery cycles, a source selects its rendezvous
   standby; both collectors accept the signed segment so that the transition has no coordination
-  race. When both direct paths fail, an hourly-jittered relay carries compressed encrypted,
-  frame-budgeted pending-source pages through an eligible cluster member without storing history
-  at the relay.
+  race. When the public direct path fails, the pending-source page remains durable and is retried on
+  the next bounded cycle; no history relay or alternate Mesh path is opened.
   A target returns the signed source-delivery receipt once the segment is durable. Tombstone
   acknowledgement fanout to other repositories is best-effort and logged for retry; a transient
   fanout failure never converts an already persisted source delivery into a 5xx response.
@@ -181,21 +191,27 @@
   The summary memory regression uses the shared testbox's summary-only mode to start the release
   `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
   and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
+  The source-journal resource workload resolves the release binary from the candidate build,
+  verifies the same clean commit, and uses a cryptographically random run nonce in the remote
+  workspace, Compose project, and run-scoped systemd unit so concurrent testbox runs cannot share
+  a cgroup or mask a resource result. The resource harness forwards its successful child metrics
+  to the outer test output for auditability.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
   Live receivers require the complete pinned identity: repository senders must match their current
   Raft member identity, while ordinary cluster-node sources use the same server-derived pinned
   identity. History replay from an already-serving repository also accepts a retired source node
   when its identity exactly matches the deterministic cluster-derived identity; ready-repository
-  repair/relay batches use that replay check, while ordinary source relay batches still reject
-  substituted public keys before signature verification.
+  repair batches use that replay check, while legacy relay payloads remain receive-only and still
+  reject substituted public keys before signature verification.
 - Replica, retention and query selection: ready repositories run bounded five-minute repair and
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,
   anonymize IP identifiers after seven days, and select the healthiest most complete ready response.
-- The proxy configuration, proxy client, proxy listener, proxy status, and compatibility path were
-  removed. The dynamic relay contract remains separate from peer-direct transport and does not
-  persist relay frames.
+- The proxy configuration, proxy client, proxy listener, proxy status, compatibility path, and
+  history synchronization relay path are not used by the repository worker. Legacy relay payload
+  types remain wire-compatible for the receive boundary, but normal source delivery and
+  anti-entropy never construct or send them.
 - Deployment parity: systemd, OpenRC and the single-image container keep the same persistent
   `${XP_DATA_DIR}/history.sqlite3` replica database. SQLite performs bounded incremental release;
   low disk or quota stops only history writes, and normal node-data retention behavior is unchanged.

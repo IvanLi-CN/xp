@@ -239,8 +239,9 @@ impl MeshAwareHttpClient {
         .map(|_| ())
     }
 
-    /// Sends only through the Raft-assigned Reverse route. This is used after a repository's
-    /// equal direct paths have both failed, before the legacy encrypted dynamic relay is tried.
+    /// Sends only through the Raft-assigned Reverse route for control-plane callers that opt in.
+    /// History repository direct requests intentionally do not use this method.
+    #[allow(dead_code)]
     pub(crate) async fn send_peer_reverse_request(
         &self,
         peer: &MeshPeerTarget,

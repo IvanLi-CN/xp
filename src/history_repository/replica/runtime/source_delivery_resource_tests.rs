@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 use std::{
     fs,
+    path::{Path, PathBuf},
     process::Command,
     thread,
     time::{Duration, Instant},
@@ -8,6 +9,10 @@ use std::{
 
 #[cfg(target_os = "linux")]
 const RESOURCE_BENCHMARK_CHILD: &str = "XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_CHILD";
+#[cfg(target_os = "linux")]
+const RESOURCE_BENCHMARK_SETUP: &str = "XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_SETUP";
+#[cfg(target_os = "linux")]
+const RESOURCE_BENCHMARK_FIXTURE_DIR: &str = "XP_SOURCE_JOURNAL_RESOURCE_FIXTURE_DIR";
 
 #[cfg(target_os = "linux")]
 const RESOURCE_BENCHMARK_TEST: &str = concat!(
@@ -69,49 +74,41 @@ fn process_pss_bytes() -> u64 {
 }
 
 #[cfg(target_os = "linux")]
-#[test]
-fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
-    if std::env::var_os(RESOURCE_BENCHMARK_CHILD).is_none() {
-        let output = Command::new(std::env::current_exe().expect("current test executable"))
-            .args(["--exact", RESOURCE_BENCHMARK_TEST, "--nocapture"])
-            .env(RESOURCE_BENCHMARK_CHILD, "1")
-            .output()
-            .expect("run isolated source journal resource benchmark");
-        assert!(
-            output.status.success(),
-            "isolated source journal resource benchmark failed:\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return;
-    }
-
-    let temporary = tempfile::tempdir().expect("temporary directory");
-    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+fn build_source_journal_fixture(path: &Path) {
+    fs::create_dir_all(path).expect("create source journal fixture directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(path);
     drop(storage);
-    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
-        .expect("open history database");
+    let connection =
+        rusqlite::Connection::open(path.join("history.sqlite3")).expect("open history database");
     let identity = serde_json::to_vec(&super::identity()).expect("serialize source identity");
     let wire = vec![0_u8; 27 * 1024];
+    // Keep fixture construction outside the measured cgroup. The running XP
+    // process only needs to read this already-persisted backlog.
+    for batch_start in (0..20_000_i64).step_by(256) {
+        let transaction = connection
+            .unchecked_transaction()
+            .expect("begin backlog transaction");
+        for sequence in batch_start..(batch_start + 256).min(20_000) {
+            transaction
+                .execute(
+                    "INSERT INTO source_delivery_journal
+                         (id, stream, closed_at, identity, wire, created_at,
+                          source_node_id, source_epoch, first_sequence)
+                     VALUES (?1, 'runtime', 100, ?2, ?3, 100, 'node-a', 1, ?4)",
+                    rusqlite::params![
+                        format!("resource-segment-{sequence}"),
+                        &identity,
+                        &wire,
+                        sequence
+                    ],
+                )
+                .expect("insert resource backlog row");
+        }
+        transaction.commit().expect("commit backlog transaction");
+    }
     let transaction = connection
         .unchecked_transaction()
-        .expect("begin backlog transaction");
-    for sequence in 0..20_000_i64 {
-        transaction
-            .execute(
-                "INSERT INTO source_delivery_journal
-                     (id, stream, closed_at, identity, wire, created_at,
-                      source_node_id, source_epoch, first_sequence)
-                 VALUES (?1, 'runtime', 100, ?2, ?3, 100, 'node-a', 1, ?4)",
-                rusqlite::params![
-                    format!("resource-segment-{sequence}"),
-                    &identity,
-                    &wire,
-                    sequence
-                ],
-            )
-            .expect("insert resource backlog row");
-    }
+        .expect("begin backlog state transaction");
     transaction
         .execute(
             "UPDATE source_delivery_journal_state
@@ -123,9 +120,47 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
         )
         .expect("record resource backlog statistics");
     transaction.commit().expect("commit resource backlog");
-    drop(connection);
+}
 
-    let storage = crate::state::history_repository::HistoryStorage::open(temporary.path());
+#[cfg(target_os = "linux")]
+#[test]
+fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
+    if std::env::var_os(RESOURCE_BENCHMARK_SETUP).is_some() {
+        let fixture_dir = std::env::var_os(RESOURCE_BENCHMARK_FIXTURE_DIR)
+            .map(PathBuf::from)
+            .expect("source journal fixture directory");
+        build_source_journal_fixture(&fixture_dir);
+        return;
+    }
+
+    if std::env::var_os(RESOURCE_BENCHMARK_CHILD).is_none() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        build_source_journal_fixture(temporary.path());
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args(["--exact", RESOURCE_BENCHMARK_TEST, "--nocapture"])
+            .env(RESOURCE_BENCHMARK_CHILD, "1")
+            .env(RESOURCE_BENCHMARK_FIXTURE_DIR, temporary.path())
+            .output()
+            .expect("run isolated source journal resource benchmark");
+        if !output.stdout.is_empty() {
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        if !output.stderr.is_empty() {
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        }
+        assert!(
+            output.status.success(),
+            "isolated source journal resource benchmark failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let fixture_dir = std::env::var_os(RESOURCE_BENCHMARK_FIXTURE_DIR)
+        .map(PathBuf::from)
+        .expect("source journal fixture directory");
+    let storage = crate::state::history_repository::HistoryStorage::open(&fixture_dir);
     let _ = storage
         .source_delivery_journal_summary()
         .expect("warm summary");

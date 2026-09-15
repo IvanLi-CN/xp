@@ -213,23 +213,9 @@ pub(super) fn source_record_with_key_for_subject(
     ))
 }
 
-pub(super) fn should_attempt_source_relay(transport_failed: bool, target_is_local: bool) -> bool {
-    transport_failed && !target_is_local
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        run_local_source_worker_cycle_with_budget, should_attempt_source_relay, source_record,
-        source_record_with_key,
-    };
-
-    #[test]
-    fn source_relay_requires_a_direct_transport_failure() {
-        assert!(!should_attempt_source_relay(false, false));
-        assert!(!should_attempt_source_relay(true, true));
-        assert!(should_attempt_source_relay(true, false));
-    }
+    use super::{run_local_source_worker_cycle_with_budget, source_record, source_record_with_key};
 
     #[test]
     fn source_tombstone_keeps_the_affected_schema_and_marks_the_record() {

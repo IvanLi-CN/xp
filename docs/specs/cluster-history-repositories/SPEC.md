@@ -33,8 +33,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - 节点历史、Mesh 遥测、入站 IP、TCP 连接历史的 SQLite 存储和原子 JSON 迁移。
 - 仓库角色、Ed25519 节点身份、同步状态、退役和容量护栏。
-- cursor/segment 同步、Zstandard level 1、同级 direct path、双 direct 失败后的
-  Reality Mesh Reverse 与最终动态 Mesh relay。
+- cursor/segment 同步、Zstandard level 1，以及固定使用公网 HTTPS `api_base_url` 的
+  repository direct path。
 - primary/standby、五分钟 anti-entropy、分层保留、聚合、查询选择和管理 API/Web。
 - systemd、OpenRC、Docker/Compose 的持久卷和启动自检兼容性。
 
@@ -63,11 +63,20 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 - 每分钟 source 的 `path_health.v1` 以轮转顺序携带最多 16 个 peer 的当前状态和每 peer 最新一分钟
   bucket；不复制本地完整 24 小时 telemetry 序列。字段和延迟样本先受限，再逐 peer 按序列化后的
   payload 纳入，必须保持在 32 KiB source-record 上限内。
-- Reality Mesh 和 Cloudflare Tunnel 是同级直连路径；选择稳定健康路径，另一条低频探测。
-  两条都失败后，先尝试 Raft 分配的 Reality Mesh Reverse；Reverse 失败后才每小时抖动一次
-  动态 Mesh relay。两类 relay 均不落盘；动态 relay 使用端到端 X25519+AEAD。
+- History repository 的 summary、repair、initial-backfill 和 anti-entropy direct 请求只使用目标节点的
+  公网 HTTPS `api_base_url`；不会因配置了 Mesh endpoint 而选择、探测或回退到 Mesh/Reverse Mesh。
+  source delivery 也只使用该公网 HTTPS 路径；公网传输失败时保留 durable checkpoint、outbox
+  和 backlog，等待下一次有界重试，不打开历史 Mesh relay。
 - 每个 ready 仓库都保存完整并集；查询选择最完整健康 ready 仓库，响应必须带
   `complete|partial|local_only`、coverage、watermark、gap 和 skew。
+- ready peer 的每个 60 秒生命周期同步 tick 最多连续处理 8 个 summary、repair 或 tiered export page，
+  并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
+  达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
+  summary cursor、pending repair IDs 或 tiered handoff 状态。
+- 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer，但任何
+  不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
+  覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
+  删除、跳过其历史或伪造 ACK。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。
@@ -156,8 +165,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
    进入 `ready`。已一致确认的永久 gap 不阻止 ready，但阻止 `replica_converged`。
 2. source 将新 segment 按 cursor 提供给 primary；primary 写入本地 SQLite 并返回 ack；
    其他 ready 仓库通过 anti-entropy 修复缺口。
-3. direct path 依据现有 Mesh/Tunnel 健康选择；只有两者均失败时才依次尝试 Reverse 与动态 relay。
-   sync control-plane 字节单独计量，不计入用户流量配额。
+3. repository direct path 固定使用目标节点公网 `api_base_url`；不会读取 Mesh/Tunnel 健康状态，也不
+   触发 standby probe 或 Reverse Mesh。source delivery、summary、repair 和 anti-entropy 的公网
+   传输失败只保留 checkpoint 或 outbox 等待重试，不使用历史 Mesh relay；sync control-plane
+   字节单独计量，不计入用户流量配额。
 4. 仓库按 UTC observed time 聚合粗粒度数据，保留输入 sequence 范围、hash、算法和 complete 状态，
    再清理已提交的细粒度记录。
 5. 查询端点从最完整仓库读取；仓库不可用时切换到下一仓库；全部不可用时只返回本地当前窗口，
@@ -201,7 +212,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   journal，不得伪造成功或产生无界并发重试。Collector 恢复后必须按固定页继续投递并只删除有效 ACK
   所列 segment。
 - 仓库磁盘达到护栏时停止历史写入但不影响 Raft、join、配置、代理或升级。
-- relay 只承担流式转发；relay 失败不得被误报为数据已持久化。
+- legacy relay payload 仅保留接收边界的 wire 兼容性；repository worker 不构造、不发送
+  relay 请求，也不得把公网传输失败误报为数据已持久化。
 - 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
 
 ## Interfaces and Contracts
@@ -212,7 +224,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 ### 接口清单（Inventory）
 
 - `history sync cursor/segment`：Protobuf/internal HTTP；internal；
-  新增；详见 `./contracts/history-sync.md`；source、repository、relay 使用。
+  新增；详见 `./contracts/history-sync.md`；source 与 repository 使用，legacy relay 仅作接收兼容。
 - `repository membership/status`：Raft + admin JSON；external/internal；
   新增；详见 `./contracts/history-sync.md`；admin UI、workers 使用。
 - `repository history query`：admin JSON；external；新增；详见
@@ -226,8 +238,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不影响集群控制面。
 - Given 两个 ready 仓库和丢包/分区，When 网络恢复，Then anti-entropy 修复到同一完整并集，
   永久缺口显式标记。
-- Given Mesh 与 Tunnel 同时不可用，When relay 周期到达，Then 使用端到端加密流式 relay；
-  relay 不得落盘。
+- Given 公网 HTTPS peer 不可用，When replication 周期到达，Then 保留 durable checkpoint 或
+  outbox，等待下一次有界重试；不得探测或打开历史 Mesh/Reverse relay。
 - Given 查询仓库部分缺失，When 管理员读取历史，Then 返回 partial 及覆盖/水位/缺口信息，
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
@@ -261,18 +273,21 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   Linux cgroup with `MemoryMax=128M` and `MemorySwapMax=0`, samples each process through
   `smaps_rollup`, and requires every candidate PSS sample to remain below 32 MiB. This is an
   operator-run shared-testbox source/release-candidate gate; the runner binds a clean commit and
-  generated Web-shell archive by SHA before building. GitHub CI and release publication do not
-  access that capacity and cannot replace its evidence.
+  generated Web-shell archive by SHA before building, then persists a SHA-bound manifest and full
+  workload log locally before remote cleanup. GitHub CI and release publication do not access that
+  capacity and cannot replace its evidence.
 - The summary-specific resource gate runs `xp_repository_summary_memory_e2e` in the same
   128 MiB/no-swap cgroup with 257 near-limit segments and repeated summary requests; the runner's
-  `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode isolates this gate from the 50-peer comparison.
+  `XP_MESH_RESOURCE_SUMMARY_ONLY=1` mode runs this gate together with the 20,000-row source journal
+  resource benchmark, while isolating both from the 50-peer comparison.
 
 ## Resource and Quality Constraints
 
 ### Testing
 
-- Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、relay、anti-entropy、聚合和查询。
-- shared testbox 验证 50 source/2 repository、256 MiB 无 swap；普通节点新增稳态内存不超过
+- Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、legacy relay 接收兼容、
+  anti-entropy、聚合和查询。
+- shared testbox 验证 50 source/2 repository、128 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
   不可达 Collector 和恢复 drain；5 秒 CPU 采样 p95 不超过 9%，每个 60 秒周期数据库读取不超过
@@ -312,7 +327,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - 风险：历史数据规模与多节点并发可能放大 SQLite 写入和同步队列；必须保持独立低优先级队列与固定预算。
 - 风险：legacy 节点不具备签名能力；不得伪造 source proof，需明确标记 sync unsupported 或先升级。
-- 假设：现有 Mesh/Tunnel path health 可复用，不增加全网 all-to-all 探测。
+- 假设：节点可通过已注册的公网 `api_base_url` 访问 peer，不增加全网 all-to-all 探测；Mesh
+  健康状态不参与 repository direct path 选择。
 
 ## 参考（References）
 

@@ -41,19 +41,38 @@ if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; the
   exit 2
 fi
 GIT_SHA_FULL="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-if [ ! -f "$REPO_ROOT/web/dist/index.html" ]; then
-  echo "missing $REPO_ROOT/web/dist/index.html; run 'cd web && bun run build' locally" >&2
+if ! command -v bun >/dev/null 2>&1; then
+  echo "missing bun; build the candidate Web shell with Bun before running the testbox gate" >&2
+  exit 2
+fi
+(
+  cd "$REPO_ROOT/web"
+  XP_WEB_BUILD_ID="$GIT_SHA_FULL" bun install --frozen-lockfile
+  XP_WEB_BUILD_ID="$GIT_SHA_FULL" bun run build
+)
+if [ ! -f "$REPO_ROOT/web/dist/index.html" ] || [ ! -f "$REPO_ROOT/web/dist/sw.js" ]; then
+  echo "candidate Web shell build did not produce index.html and sw.js" >&2
+  exit 2
+fi
+if ! grep -R -F -- "$GIT_SHA_FULL" "$REPO_ROOT/web/dist" >/dev/null; then
+  echo "candidate Web shell does not embed commit $GIT_SHA_FULL" >&2
   exit 2
 fi
 SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
 WEB_DIST_ARCHIVE="$(mktemp -t xp-testbox-web-dist.XXXXXX.tar)"
-trap 'rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"' EXIT
+BASELINE_ARCHIVE=""
 git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
 SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
 tar -C "$REPO_ROOT/web/dist" -cf "$WEB_DIST_ARCHIVE" .
 WEB_DIST_ARCHIVE_SHA="$(shasum -a 256 "$WEB_DIST_ARCHIVE" | awk '{print $1}')"
 
 REPO_NAME="$(basename "$REPO_ROOT")"
+case "$REPO_NAME" in
+  ""|*[!A-Za-z0-9._-]*)
+    echo "repository name contains unsupported path characters: $REPO_NAME" >&2
+    exit 2
+    ;;
+esac
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib, os, sys
 p=os.path.realpath(sys.argv[1]).encode()
@@ -63,13 +82,22 @@ PY
 
 # 2) Per-run identifiers.
 GIT_SHA="${GIT_SHA_FULL:0:12}"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
+RUN_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
+case "${USER:-}" in
+  ""|*[!A-Za-z0-9._-]*)
+    echo "USER contains unsupported remote path characters" >&2
+    exit 2
+    ;;
+esac
 REMOTE_BASE="/srv/codex/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
-REMOTE_SUBNET_CLAIMS="$REMOTE_BASE/.shared-testbox-subnet-claims"
+# Subnet claims are host-global so concurrent runs from different users cannot
+# select the same Docker network range.
+REMOTE_SUBNET_CLAIMS="/srv/codex/agents/.shared-testbox-subnet-claims"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
@@ -89,20 +117,104 @@ ONLY_MESH_RESOURCE_B64="$(printf '%s' "$ONLY_MESH_RESOURCE" | base64 | tr -d '\n
 MESH_RESOURCE_DURATION_B64="$(printf '%s' "${XP_MESH_RESOURCE_DURATION_SECS:-900}" | base64 | tr -d '\n')"
 MESH_RESOURCE_SUMMARY_ONLY_B64="$(printf '%s' "$MESH_RESOURCE_SUMMARY_ONLY" | base64 | tr -d '\n')"
 GIT_SHA_FULL_B64="$(printf '%s' "$GIT_SHA_FULL" | base64 | tr -d '\n')"
+RUN_ID_B64="$(printf '%s' "$RUN_ID" | base64 | tr -d '\n')"
+REMOTE_WORKSPACE_B64="$(printf '%s' "$REMOTE_WORKSPACE" | base64 | tr -d '\n')"
+EVIDENCE_DIR="${XP_TESTBOX_EVIDENCE_DIR:-${TMPDIR:-/tmp}/xp-testbox-evidence}"
+EVIDENCE_PATH="$EVIDENCE_DIR/${RUN_ID}.manifest"
+EVIDENCE_OUTPUT_PATH="$EVIDENCE_DIR/${RUN_ID}.log"
+EVIDENCE_STATUS=running
+
+write_evidence_manifest() {
+  local status="${1:-$EVIDENCE_STATUS}"
+  /bin/mkdir -p "$EVIDENCE_DIR"
+  /bin/chmod 700 "$EVIDENCE_DIR" 2>/dev/null || true
+  /usr/bin/printf '%s\n' \
+    "run_id=$RUN_ID" \
+    "created_utc=$CREATED_UTC" \
+    "git_commit=$GIT_SHA_FULL" \
+    "source_archive_sha256=$SOURCE_ARCHIVE_SHA" \
+    "web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA" \
+    "baseline_archive_sha256=${BASELINE_ARCHIVE_SHA:-none}" \
+    "status=$status" \
+    "output_log=$EVIDENCE_OUTPUT_PATH" > "$EVIDENCE_PATH"
+}
 
 echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
+echo "evidence_manifest=$EVIDENCE_PATH"
 
-# 3) Create remote run dir and attach minimal metadata.
+REMOTE_RUN_CREATED=0
+cleanup_local() {
+  set +e
+  write_evidence_manifest "${EVIDENCE_STATUS:-interrupted}"
+  rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
+  if [ -n "${BASELINE_ARCHIVE:-}" ]; then
+    rm -f "$BASELINE_ARCHIVE"
+  fi
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
+    ssh -o BatchMode=yes "$TESTBOX" \
+      "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
+set -euo pipefail
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+case "$REMOTE_RUN" in
+  /srv/codex/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
+systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
+systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
+for resource_label in candidate-smoke baseline candidate source-journal summary; do
+  resource_unit="codex-xp-resource-${RUN_ID}-${resource_label}.scope"
+  systemctl --user stop "$resource_unit" >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$resource_unit" >/dev/null 2>&1 || true
+done
+if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
+  cd "$REMOTE_RUN/scripts/e2e"
+  cleanup_files=()
+  for file in docker-compose.xray.yml .codex.caps-compat.yaml .codex.net-compat.yaml .codex.user-compat.yaml; do
+    if [ -f "$file" ]; then
+      cleanup_files+=(-f "$file")
+    fi
+  done
+  if [ "${#cleanup_files[@]}" -gt 0 ]; then
+    docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  fi
+fi
+rm -rf "$REMOTE_RUN"
+REMOTE_CLEANUP
+  fi
+}
+on_local_signal() {
+  trap - EXIT INT TERM
+  cleanup_local
+  exit "$1"
+}
+trap cleanup_local EXIT
+trap 'on_local_signal 130' INT
+trap 'on_local_signal 143' TERM
+
+# 3) Create remote run dir and attach minimal metadata. Paths and contents are
+# transported as base64 so the bootstrap shell never interpolates user input.
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RUN' && cat > '$REMOTE_WORKSPACE/workspace.txt'" <<TXT
-local_repo_root=$REPO_ROOT
+WORKSPACE_METADATA="local_repo_root=$REPO_ROOT
 created_utc=$CREATED_UTC
 git_commit=$GIT_SHA_FULL
 source_archive_sha256=$SOURCE_ARCHIVE_SHA
 web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
-TXT
+"
+WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
+REMOTE_RUN_CREATED=1
+ssh -o BatchMode=yes "$TESTBOX" \
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
+set -euo pipefail
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+REMOTE_WORKSPACE="$(printf '%s' "${REMOTE_WORKSPACE_B64:?}" | base64 -d)"
+mkdir -p "$REMOTE_RUN"
+printf '%s' "${WORKSPACE_METADATA_B64:?}" | base64 -d > "$REMOTE_WORKSPACE/workspace.txt"
+REMOTE_BOOTSTRAP
 
 # 4) Sync the immutable tracked tree, then overlay the generated Web shell.
 rsync -a "$SOURCE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/source.tar"
@@ -114,15 +226,18 @@ ssh -o BatchMode=yes "$TESTBOX" \
 
 if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
-  ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RESOURCE_BASELINE'"
-  git -C "$REPO_ROOT" archive "$MESH_RESOURCE_BASELINE_SHA" \
-    | ssh -o BatchMode=yes "$TESTBOX" "tar -x -C '$REMOTE_RESOURCE_BASELINE'"
+  BASELINE_ARCHIVE="$(mktemp -t xp-testbox-baseline.XXXXXX.tar)"
+  git -C "$REPO_ROOT" archive --format=tar "$MESH_RESOURCE_BASELINE_SHA" > "$BASELINE_ARCHIVE"
+  BASELINE_ARCHIVE_SHA="$(shasum -a 256 "$BASELINE_ARCHIVE" | awk '{print $1}')"
+  rsync -a "$BASELINE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/resource-baseline.tar"
+  ssh -o BatchMode=yes "$TESTBOX" \
+    "test \"\$(sha256sum '$REMOTE_RUN/resource-baseline.tar' | awk '{print \$1}')\" = '$BASELINE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RESOURCE_BASELINE' && tar -xf '$REMOTE_RUN/resource-baseline.tar' -C '$REMOTE_RESOURCE_BASELINE' && rm -f '$REMOTE_RUN/resource-baseline.tar'"
   rsync -az --delete "$REPO_ROOT/web/dist/" "$TESTBOX:$REMOTE_RESOURCE_BASELINE/web/dist/"
 fi
 
 # 5) Run on testbox.
-ssh -o BatchMode=yes "$TESTBOX" \
-  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' bash -s" <<'REMOTE'
+if ssh -o BatchMode=yes "$TESTBOX" \
+  "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" 2>&1 <<'REMOTE' | tee "$EVIDENCE_OUTPUT_PATH"
 set -euo pipefail
 
 REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
@@ -134,11 +249,16 @@ ONLY_MESH_RESOURCE="$(printf '%s' "${ONLY_MESH_RESOURCE_B64:?}" | base64 -d)"
 MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64 -d)"
 MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
 GIT_SHA_FULL="$(printf '%s' "${GIT_SHA_FULL_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
 
 cleanup() {
+  if [ "${CLEANUP_DONE:-0}" = "1" ]; then
+    return
+  fi
+  CLEANUP_DONE=1
   set +e
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
-    cd "$REMOTE_RUN/scripts/e2e" || exit 0
+    cd "$REMOTE_RUN/scripts/e2e" || return 0
     if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
       cleanup_files=(-f "docker-compose.xray.yml" -f ".codex.caps-compat.yaml" -f ".codex.net-compat.yaml")
       if [ -f ".codex.user-compat.yaml" ]; then
@@ -154,7 +274,14 @@ cleanup() {
     rm -rf "$REMOTE_RUN" >/dev/null 2>&1 || true
   fi
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  cleanup
+  trap - EXIT INT TERM
+  exit "$1"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 cd "$REMOTE_RUN/scripts/e2e"
 
@@ -247,6 +374,7 @@ compose_project = sys.argv[3]
 lock_dir = claim_root / ".allocator.lock"
 lock_timeout_seconds = 30
 lock_poll_seconds = 0.2
+pending_claim_grace_seconds = 120
 
 claim_root.mkdir(parents=True, exist_ok=True)
 
@@ -270,8 +398,9 @@ try:
             ["docker", "network", "ls", "-q"],
             text=True,
         ).split()
-    except subprocess.CalledProcessError:
-        docker_ids = []
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(f"cannot enumerate Docker networks for subnet allocation: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if docker_ids:
         inspect = json.loads(
@@ -308,7 +437,44 @@ try:
             continue
 
         run_path = pathlib.Path(run_path_file.read_text().strip())
-        if not run_path.exists():
+
+        def remove_stale_run():
+            if run_path.is_symlink() or not run_path.is_dir():
+                return
+            allowed_root = pathlib.Path("/srv/codex/workspaces").resolve()
+            try:
+                run_path.resolve(strict=False).relative_to(allowed_root)
+            except ValueError:
+                return
+            shutil.rmtree(run_path, ignore_errors=True)
+
+        active = False
+        lease_file = claim_dir / "lease"
+        if run_path.is_dir() and not run_path.is_symlink() and lease_file.is_file():
+            lease = {}
+            try:
+                for line in lease_file.read_text().splitlines():
+                    key, value = line.split("=", 1)
+                    lease[key] = value
+                pid = int(lease["pid"])
+                start_ticks = int(lease["start_ticks"])
+                proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+                proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
+                proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
+                run_real = pathlib.Path(os.path.realpath(run_path))
+                active = proc_start_ticks == start_ticks and (
+                    proc_cwd == run_real or run_real in proc_cwd.parents
+                )
+            except (KeyError, ValueError, FileNotFoundError, OSError):
+                active = False
+        elif run_path.is_dir() and not run_path.is_symlink():
+            try:
+                active = time.time() - claim_dir.stat().st_mtime < pending_claim_grace_seconds
+            except OSError:
+                active = False
+
+        if not active:
+            remove_stale_run()
             shutil.rmtree(claim_dir, ignore_errors=True)
             continue
 
@@ -352,6 +518,11 @@ SUBNET_CLAIM_DIR="${subnet_claim_info[1]:-}"
 if [ -z "$TESTBOX_SUBNET" ] || [ -z "$SUBNET_CLAIM_DIR" ]; then
   echo "failed to allocate isolated shared-testbox subnet claim" >&2
   exit 1
+fi
+
+claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+if [ -n "$claim_start_ticks" ]; then
+  printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
 fi
 
 cat > "$net_override" <<YAML
@@ -439,17 +610,26 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   CARGO_TARGET_DIR="$candidate_resource_target" \
     cargo test --release --test mesh_transport_resource_e2e --no-run
   resource_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-    -name 'mesh_transport_resource_e2e-*' -perm -111 | sort | head -n 1)"
+    -name 'mesh_transport_resource_e2e-*' -perm -111 -print -quit)"
   if [ -z "$resource_test_bin" ]; then
     echo "resource workload test binary was not built" >&2
     exit 1
   fi
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+    echo "running source journal resource workload in the actual XP process (XP memory=128MiB, swap=0)"
+    env \
+      XP_MESH_RESOURCE_MODE=shared-testbox \
+      XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
+      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+      "$resource_test_bin" xp_source_delivery_journal_memory_e2e --ignored --nocapture
     echo "running repository summary resource workload (XP memory=128MiB, swap=0)"
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \
       XP_MESH_RESOURCE_SUMMARY_ONLY=1 \
       XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
       XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
       XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
       "$resource_test_bin" xp_repository_summary_memory_e2e --ignored --nocapture
@@ -458,6 +638,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \
       XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
       XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
       XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
       XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \
@@ -467,9 +648,19 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   fi
 fi
 REMOTE
+then
+  EVIDENCE_STATUS=passed
+  REMOTE_RUN_CREATED=0
+else
+  status=${PIPESTATUS[0]}
+  EVIDENCE_STATUS=failed
+  exit "$status"
+fi
 
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   echo "OK: Mesh transport resource workload on $TESTBOX"
 else
   echo "OK: xray_e2e + xray_mesh_transport_e2e + xray_vless_xhttp_e2e + shared_quota_xray_e2e on $TESTBOX"
 fi
+write_evidence_manifest passed
+echo "evidence_log=$EVIDENCE_OUTPUT_PATH"
