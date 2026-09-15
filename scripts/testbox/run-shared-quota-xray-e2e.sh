@@ -41,8 +41,21 @@ if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; the
   exit 2
 fi
 GIT_SHA_FULL="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-if [ ! -f "$REPO_ROOT/web/dist/index.html" ]; then
-  echo "missing $REPO_ROOT/web/dist/index.html; run 'cd web && bun run build' locally" >&2
+if ! command -v bun >/dev/null 2>&1; then
+  echo "missing bun; build the candidate Web shell with Bun before running the testbox gate" >&2
+  exit 2
+fi
+(
+  cd "$REPO_ROOT/web"
+  XP_WEB_BUILD_ID="$GIT_SHA_FULL" bun install --frozen-lockfile
+  XP_WEB_BUILD_ID="$GIT_SHA_FULL" bun run build
+)
+if [ ! -f "$REPO_ROOT/web/dist/index.html" ] || [ ! -f "$REPO_ROOT/web/dist/sw.js" ]; then
+  echo "candidate Web shell build did not produce index.html and sw.js" >&2
+  exit 2
+fi
+if ! grep -R -F -- "$GIT_SHA_FULL" "$REPO_ROOT/web/dist" >/dev/null; then
+  echo "candidate Web shell does not embed commit $GIT_SHA_FULL" >&2
   exit 2
 fi
 SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
@@ -137,9 +150,14 @@ MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64
 MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
 GIT_SHA_FULL="$(printf '%s' "${GIT_SHA_FULL_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+SOURCE_JOURNAL_SCOPE_UNIT="codex-xp-source-journal-${RUN_ID}.scope"
 
 cleanup() {
   set +e
+  if [ -n "${SOURCE_JOURNAL_SCOPE_UNIT:-}" ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user stop "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
+    systemctl --user reset-failed "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
+  fi
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     cd "$REMOTE_RUN/scripts/e2e" || exit 0
     if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
@@ -467,7 +485,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     fi
     echo "running source delivery journal resource workload (XP memory=128MiB, swap=0)"
     systemd-run --user --scope --collect \
-      --unit "codex-xp-source-journal-${RUN_ID}" \
+      --unit "$SOURCE_JOURNAL_SCOPE_UNIT" \
       -p MemoryMax=128M \
       -p MemorySwapMax=0 \
       -- "$journal_test_bin" \
