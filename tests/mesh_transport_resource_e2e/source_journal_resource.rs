@@ -369,6 +369,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                 previous_hash,
             );
             previous_hash = Some(segment_hash);
+            let journal_id = format!("{:x}", Sha256::digest(&wire));
             total_wire_bytes = total_wire_bytes
                 .checked_add(i64::try_from(wire.len()).expect("source journal wire length"))
                 .expect("source journal byte count");
@@ -378,13 +379,7 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
                          (id, stream, closed_at, identity, wire, created_at,
                           source_node_id, source_epoch, first_sequence)
                      VALUES (?1, 'runtime', 100, ?2, ?3, 100, ?4, 1, ?5)",
-                    rusqlite::params![
-                        format!("{sequence:064x}"),
-                        &identity,
-                        &wire,
-                        &cluster.node_id,
-                        sequence,
-                    ],
+                    rusqlite::params![journal_id, &identity, &wire, &cluster.node_id, sequence,],
                 )
                 .expect("insert source journal resource row");
         }
