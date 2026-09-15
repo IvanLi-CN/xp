@@ -145,6 +145,11 @@ esac
 scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
 systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
+for resource_label in candidate-smoke baseline candidate source-journal summary; do
+  resource_unit="codex-xp-resource-${RUN_ID}-${resource_label}.scope"
+  systemctl --user stop "$resource_unit" >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$resource_unit" >/dev/null 2>&1 || true
+done
 if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
   cd "$REMOTE_RUN/scripts/e2e"
   cleanup_files=()
@@ -596,6 +601,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \
       XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
       XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
       XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
       "$resource_test_bin" xp_source_delivery_journal_memory_e2e --ignored --nocapture
@@ -604,6 +610,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       XP_MESH_RESOURCE_MODE=shared-testbox \
       XP_MESH_RESOURCE_SUMMARY_ONLY=1 \
       XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
       XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
       XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
       "$resource_test_bin" xp_repository_summary_memory_e2e --ignored --nocapture
@@ -612,6 +619,7 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \
       XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_RUN_ID="$RUN_ID" \
       XP_MESH_RESOURCE_BASELINE_BIN="$REMOTE_RUN/xp-resource-baseline" \
       XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
       XP_MESH_RESOURCE_SUPPORT_PIDS="$xray_pid" \

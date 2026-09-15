@@ -388,7 +388,20 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         xp::admin_token::hash_admin_token_argon2id("mesh-resource-test-token-0000000000000000")
             .expect("hash test admin token");
     let child_cgroup = std::env::var_os("XP_MESH_RESOURCE_CHILD_CGROUP").is_some();
-    let unit = child_cgroup.then(|| format!("codex-xp-resource-{label}-{}", std::process::id()));
+    let unit = child_cgroup.then(|| {
+        let run_id = std::env::var("XP_MESH_RESOURCE_RUN_ID")
+            .unwrap_or_else(|_| std::process::id().to_string());
+        let safe_run_id = run_id
+            .chars()
+            .map(|character| {
+                character
+                    .is_ascii_alphanumeric()
+                    .then_some(character)
+                    .unwrap_or('_')
+            })
+            .collect::<String>();
+        format!("codex-xp-resource-{safe_run_id}-{label}")
+    });
     let mut command = if child_cgroup {
         let mut command = Command::new("systemd-run");
         command.args([
@@ -768,7 +781,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             .max(read_pss(pid).expect("read summary XP PSS").total_kib);
         sleep(Duration::from_secs(1)).await;
     }
-    stop_child(&mut child).await;
+    source_journal_resource::stop_child(&mut child).await;
     max_pss_kib
 }
 
@@ -783,24 +796,25 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
             .await
             .is_ok()
         {
-            child.pid = child
-                .unit
-                .as_deref()
-                .and_then(|unit| {
-                    Command::new("systemctl")
-                        .args(["--user", "show", unit, "--property=MainPID", "--value"])
-                        .output()
-                        .ok()
-                })
-                .and_then(|output| {
-                    String::from_utf8(output.stdout)
-                        .ok()?
-                        .trim()
-                        .parse::<u32>()
-                        .ok()
-                })
-                .filter(|pid| *pid > 0)
-                .unwrap_or_else(|| child.child.id());
+            child.pid = if let Some(unit) = child.unit.as_deref() {
+                let output = Command::new("systemctl")
+                    .args(["--user", "show", unit, "--property=MainPID", "--value"])
+                    .output()
+                    .expect("resolve XP scope MainPID");
+                assert!(
+                    output.status.success(),
+                    "resolve XP scope MainPID for {unit}: {output:?}"
+                );
+                let pid = String::from_utf8(output.stdout)
+                    .expect("XP scope MainPID output")
+                    .trim()
+                    .parse::<u32>()
+                    .expect("XP scope MainPID");
+                assert!(pid > 0, "XP scope {unit} must expose a MainPID");
+                pid
+            } else {
+                child.child.id()
+            };
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for XP");
@@ -858,7 +872,7 @@ fn assert_expected_memory_scope(pid: u32) {
     );
 }
 
-fn read_cpu_ticks(pid: u32) -> u64 {
+pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
     let fields = stat
         .split_once(") ")
@@ -869,27 +883,6 @@ fn read_cpu_ticks(pid: u32) -> u64 {
     let user = fields[11].parse::<u64>().expect("user CPU ticks");
     let system = fields[12].parse::<u64>().expect("system CPU ticks");
     user + system
-}
-
-async fn stop_child(child: &mut XpProcess) {
-    if let Some(unit) = child.unit.as_deref() {
-        let _ = Command::new("systemctl")
-            .args(["--user", "stop", unit])
-            .status();
-    } else {
-        unsafe {
-            libc::kill(child.child.id() as libc::pid_t, libc::SIGINT);
-        }
-    }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if child.child.try_wait().expect("poll stopped XP").is_some() {
-            return;
-        }
-        sleep(Duration::from_millis(50)).await;
-    }
-    child.child.kill().expect("kill XP after grace period");
-    let _ = child.child.wait();
 }
 
 pub fn support_pids_from_env() -> Vec<u32> {
@@ -969,7 +962,7 @@ pub async fn run_resource_workload(
         .iter()
         .map(|counter| counter.peak_active.load(Ordering::SeqCst))
         .collect();
-    stop_child(&mut child).await;
+    source_journal_resource::stop_child(&mut child).await;
     ResourceRun {
         xp_peak_pss_kib,
         xp_peak_anon_pss_kib,
