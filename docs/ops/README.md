@@ -879,11 +879,12 @@ Notes:
   continuation also requires the release's direct five-column keyset seek.
   The operator-run source/release-candidate validation path
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the signed summary endpoint against
-  257 near-limit segments in a 128 MiB/no-swap cgroup and records the candidate XP
-  `smaps_rollup` PSS peak during request execution before any rollout decision. The runner requires
-  a clean commit, verifies tracked source and generated Web-shell archive SHA256 values, and embeds
-  the commit in the candidate build. GitHub CI and release publication do not access the shared
-  testbox; attach this run's evidence separately before production rollout.
+  257 near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
+  it records the candidate XP `smaps_rollup` PSS peak during request execution before any rollout
+  decision. The runner requires a clean commit, verifies tracked source and generated Web-shell
+  archive SHA256 values, and embeds the commit in the candidate build. GitHub CI and release
+  publication do not access the shared testbox; attach this run's evidence separately before
+  production rollout.
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.

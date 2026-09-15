@@ -445,6 +445,23 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     exit 1
   fi
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
+    CARGO_TARGET_DIR="$candidate_resource_target" \
+      cargo test --release --lib --no-run
+    journal_test_bin="$(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
+      -name 'xp-[0-9a-f]*' -perm -111 | sort | head -n 1)"
+    if [ -z "$journal_test_bin" ]; then
+      echo "source journal resource test binary was not built" >&2
+      exit 1
+    fi
+    echo "running source delivery journal resource workload (XP memory=128MiB, swap=0)"
+    systemd-run --user --scope --collect \
+      --unit "codex-xp-source-journal-${GIT_SHA_FULL:0:12}" \
+      -p MemoryMax=128M \
+      -p MemorySwapMax=0 \
+      -- "$journal_test_bin" \
+      --exact \
+      "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
+      --nocapture
     echo "running repository summary resource workload (XP memory=128MiB, swap=0)"
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \
