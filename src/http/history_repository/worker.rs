@@ -58,7 +58,8 @@ pub(super) use direct::{
     RepositoryDirectError, preserve_history_truncated, repository_direct_request,
 };
 pub(super) use ready_peers::{
-    ready_repository_peers, ready_repository_peers_for_catch_up, repository_peer_targets,
+    ready_repository_peers, ready_repository_peers_for_catch_up,
+    ready_repository_peers_with_metadata_status, repository_peer_targets,
 };
 use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
@@ -84,7 +85,9 @@ pub(crate) fn spawn_repository_replica_worker(state: AppState) {
 }
 async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-    let Ok((ready_repository_ids, peers)) = ready_repository_peers(state).await else {
+    let Ok((ready_repository_ids, peers, missing_metadata)) =
+        ready_repository_peers_with_metadata_status(state).await
+    else {
         return Ok(());
     };
     let known_source_node_ids = known_history_source_node_ids(state).await;
@@ -194,7 +197,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             }
         }
     }
-    if synchronized || peers.len() == 1 {
+    if should_record_anti_entropy_completion(synchronized, peers.len(), missing_metadata) {
         let completed_work = completed_replication_work(work, deep_verification_succeeded);
         state
             .repository_replica
@@ -206,6 +209,14 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
         update_local_replica_convergence(state, deep_verification_succeeded).await?;
     }
     Ok(())
+}
+
+fn should_record_anti_entropy_completion(
+    synchronized: bool,
+    peer_count: usize,
+    missing_ready_metadata: bool,
+) -> bool {
+    !missing_ready_metadata && (synchronized || peer_count == 1)
 }
 async fn publish_local_history_segment(
     state: &AppState,

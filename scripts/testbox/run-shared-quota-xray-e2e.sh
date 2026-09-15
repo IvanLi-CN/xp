@@ -224,7 +224,6 @@ MESH_RESOURCE_DURATION="$(printf '%s' "${MESH_RESOURCE_DURATION_B64:?}" | base64
 MESH_RESOURCE_SUMMARY_ONLY="$(printf '%s' "${MESH_RESOURCE_SUMMARY_ONLY_B64:?}" | base64 -d)"
 GIT_SHA_FULL="$(printf '%s' "${GIT_SHA_FULL_B64:?}" | base64 -d)"
 RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
-SOURCE_JOURNAL_SCOPE_UNIT="codex-xp-source-journal-${RUN_ID}.scope"
 
 cleanup() {
   if [ "${CLEANUP_DONE:-0}" = "1" ]; then
@@ -232,10 +231,6 @@ cleanup() {
   fi
   CLEANUP_DONE=1
   set +e
-  if [ -n "${SOURCE_JOURNAL_SCOPE_UNIT:-}" ] && command -v systemctl >/dev/null 2>&1; then
-    systemctl --user stop "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
-    systemctl --user reset-failed "$SOURCE_JOURNAL_SCOPE_UNIT" >/dev/null 2>&1 || true
-  fi
   if [ -n "${REMOTE_RUN:-}" ] && [ -d "$REMOTE_RUN/scripts/e2e" ]; then
     cd "$REMOTE_RUN/scripts/e2e" || return 0
     if [ -f "docker-compose.xray.yml" ] && [ -f ".codex.caps-compat.yaml" ] && [ -f ".codex.net-compat.yaml" ]; then
@@ -597,42 +592,13 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
     exit 1
   fi
   if [ "$MESH_RESOURCE_SUMMARY_ONLY" = "1" ]; then
-    CARGO_TARGET_DIR="$candidate_resource_target" \
-      cargo test --release --lib --no-run
-    journal_test_bin=""
-    while IFS= read -r candidate_bin; do
-      if "$candidate_bin" --list 2>/dev/null |
-        grep -F \
-          'state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog' \
-          >/dev/null; then
-        journal_test_bin="$candidate_bin"
-        break
-      fi
-    done < <(find "$candidate_resource_target/release/deps" -maxdepth 1 -type f \
-      -name 'xp-*' -perm -111 -print | sort)
-    if [ -z "$journal_test_bin" ]; then
-      echo "source journal resource test binary was not built" >&2
-      exit 1
-    fi
-    journal_fixture_dir="$REMOTE_RUN/source-journal-fixture"
-    echo "building persisted source journal fixture outside the XP memory scope"
-    XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_SETUP=1 \
-      XP_SOURCE_JOURNAL_RESOURCE_FIXTURE_DIR="$journal_fixture_dir" \
-      "$journal_test_bin" \
-      --exact \
-      "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
-      --nocapture
-    echo "running source delivery journal resource workload (XP memory=128MiB, swap=0)"
-    systemd-run --user --scope --collect \
-      --unit "$SOURCE_JOURNAL_SCOPE_UNIT" \
-      -p MemoryMax=128M \
-      -p MemorySwapMax=0 \
-      --setenv=XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_CHILD=1 \
-      "--setenv=XP_SOURCE_JOURNAL_RESOURCE_FIXTURE_DIR=$journal_fixture_dir" \
-      -- "$journal_test_bin" \
-      --exact \
-      "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
-      --nocapture
+    echo "running source journal resource workload in the actual XP process (XP memory=128MiB, swap=0)"
+    env \
+      XP_MESH_RESOURCE_MODE=shared-testbox \
+      XP_MESH_RESOURCE_CHILD_CGROUP=1 \
+      XP_MESH_RESOURCE_CANDIDATE_BIN="$REMOTE_RUN/xp-resource-candidate" \
+      XP_MESH_RESOURCE_EXPECT_MEMORY_LIMIT=128MiB \
+      "$resource_test_bin" xp_source_delivery_journal_memory_e2e --ignored --nocapture
     echo "running repository summary resource workload (XP memory=128MiB, swap=0)"
     env \
       XP_MESH_RESOURCE_MODE=shared-testbox \

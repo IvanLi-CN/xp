@@ -21,7 +21,7 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
         if !super::publish_local_history_segment(
             state,
             &ready_repository_ids,
-            collector_repository_ids,
+            &collector_repository_ids,
             &peers,
             now,
             capture_live,
@@ -35,11 +35,16 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     Ok(())
 }
 
-fn source_collector_repository_ids<'a>(
-    ready_repository_ids: &'a [String],
+fn source_collector_repository_ids(
+    ready_repository_ids: &[String],
     peers: &[MeshPeerTarget],
-) -> Option<&'a [String]> {
-    (!peers.is_empty()).then_some(ready_repository_ids)
+) -> Option<Vec<String>> {
+    let available = ready_repository_ids
+        .iter()
+        .filter(|repository_id| peers.iter().any(|peer| &peer.node_id == *repository_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    (!available.is_empty()).then_some(available)
 }
 
 pub(super) struct SourceRecordBatch {
@@ -355,7 +360,7 @@ mod tests {
     };
 
     #[test]
-    fn metadata_gap_keeps_full_ready_set_for_source_assignment() {
+    fn metadata_gap_uses_only_available_ready_peers_for_source_assignment() {
         let ready = vec![
             "repo-a".to_owned(),
             "repo-b".to_owned(),
@@ -371,10 +376,37 @@ mod tests {
         let collector_ids = source_collector_repository_ids(&ready, &[reachable])
             .expect("a reachable peer permits source delivery");
 
-        assert_eq!(collector_ids, ready.as_slice());
+        assert_eq!(collector_ids, vec!["repo-b".to_owned()]);
         assert_eq!(
-            rendezvous_collectors("source-a", collector_ids).expect("full assignment"),
-            rendezvous_collectors("source-a", &ready).expect("full assignment"),
+            rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
+            rendezvous_collectors("source-a", &["repo-b".to_owned()])
+                .expect("available assignment"),
+        );
+    }
+
+    #[test]
+    fn stale_primary_and_standby_do_not_block_available_collector() {
+        let ready = vec![
+            "stale-primary".to_owned(),
+            "available".to_owned(),
+            "stale-standby".to_owned(),
+        ];
+        let reachable = MeshPeerTarget {
+            node_id: "available".to_owned(),
+            node_name: "available".to_owned(),
+            mesh_base_url: None,
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: "https://available.example".to_owned(),
+        };
+
+        let collector_ids = source_collector_repository_ids(&ready, &[reachable])
+            .expect("available collector remains eligible");
+
+        assert_eq!(collector_ids, vec!["available".to_owned()]);
+        assert_eq!(
+            rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
+            rendezvous_collectors("source-a", &["available".to_owned()])
+                .expect("available assignment"),
         );
     }
 

@@ -47,6 +47,18 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
 }
 
 #[test]
+fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
+    assert!(!super::should_record_anti_entropy_completion(
+        false, 1, true
+    ));
+    assert!(!super::should_record_anti_entropy_completion(true, 2, true));
+    assert!(super::should_record_anti_entropy_completion(
+        false, 1, false
+    ));
+    assert!(super::should_record_anti_entropy_completion(true, 2, false));
+}
+
+#[test]
 fn deep_partition_mismatch_restarts_tiered_backfill_after_segment_drain() {
     assert!(deep_repair_requires_tiered_backfill(
         ReplicaWork::DeepVerification,

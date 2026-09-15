@@ -32,6 +32,9 @@ use xp::{
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
 
+mod source_journal_resource;
+pub use source_journal_resource::run_source_delivery_journal_resource_workload;
+
 const PEER_COUNT: usize = 50;
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
 

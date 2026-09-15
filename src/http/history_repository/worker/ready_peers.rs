@@ -62,6 +62,14 @@ pub(in crate::http::history_repository) fn repository_peer_targets(
 pub(in crate::http::history_repository) async fn ready_repository_peers(
     state: &AppState,
 ) -> anyhow::Result<(Vec<String>, Vec<MeshPeerTarget>)> {
+    let (ready_repository_ids, peers, _) =
+        ready_repository_peers_with_metadata_status(state).await?;
+    Ok((ready_repository_ids, peers))
+}
+
+pub(in crate::http::history_repository) async fn ready_repository_peers_with_metadata_status(
+    state: &AppState,
+) -> anyhow::Result<(Vec<String>, Vec<MeshPeerTarget>, bool)> {
     let store = state.store.lock().await;
     let membership = store
         .state()
@@ -76,12 +84,12 @@ pub(in crate::http::history_repository) async fn ready_repository_peers(
         anyhow::bail!("no ready history repository is available");
     }
     let endpoints = store.list_endpoints();
-    let (peers, _) = map_ready_repository_peers_for_catch_up(
+    let (peers, missing_metadata) = map_ready_repository_peers_for_catch_up(
         &ready_repository_ids,
         &endpoints,
         |repository_id| store.get_node(repository_id),
     );
-    Ok((ready_repository_ids, peers))
+    Ok((ready_repository_ids, peers, missing_metadata))
 }
 
 pub(in crate::http::history_repository) async fn ready_repository_peers_for_catch_up(

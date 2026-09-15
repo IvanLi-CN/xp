@@ -5,6 +5,7 @@ use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
 use mesh_transport_resource_support::{
     ResourceRun, run_repository_summary_resource_workload, run_resource_workload,
+    run_source_delivery_journal_resource_workload,
 };
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(15 * 60);
@@ -235,5 +236,22 @@ async fn xp_repository_summary_memory_e2e() {
     assert!(
         peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
         "candidate XP summary peak PSS {peak_pss_kib} KiB is not below {XP_TOTAL_PSS_LIMIT_KIB} KiB"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn xp_source_delivery_journal_memory_e2e() {
+    if std::env::var("XP_MESH_RESOURCE_MODE").ok().as_deref() != Some("shared-testbox") {
+        return;
+    }
+    let _workload_guard = resource_workload_lock().lock().await;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let candidate_path = required_path("XP_MESH_RESOURCE_CANDIDATE_BIN");
+    let peak_pss_kib = run_source_delivery_journal_resource_workload(&candidate_path).await;
+    assert!(
+        peak_pss_kib < XP_TOTAL_PSS_LIMIT_KIB,
+        "candidate XP source journal peak PSS {peak_pss_kib} KiB is not below "
+            "{XP_TOTAL_PSS_LIMIT_KIB} KiB"
     );
 }
