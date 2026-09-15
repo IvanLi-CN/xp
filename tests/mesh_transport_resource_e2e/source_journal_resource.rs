@@ -71,14 +71,14 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     let temp = tempfile::tempdir().expect("source journal resource data directory");
     let bind_port = reserve_local_port();
     run_init(binary, temp.path(), bind_port);
-    prepare_source_delivery_storage(temp.path());
+    let cluster = ClusterMetadata::load(temp.path()).expect("load source journal cluster");
+    prepare_source_delivery_storage(temp.path(), &cluster);
     let log_path = temp.path().join("source-journal.log");
     let mut child = spawn_xp(binary, temp.path(), bind_port, "source-journal");
     wait_for_xp(&mut child, bind_port, &log_path).await;
     let pid = child.id();
     assert_expected_memory_scope(pid);
 
-    let cluster = ClusterMetadata::load(temp.path()).expect("load source journal cluster");
     let ca_pem = cluster
         .read_cluster_ca_pem(temp.path())
         .expect("read source journal CA");
@@ -94,17 +94,35 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         .build()
         .expect("source journal HTTP client");
     // Warm the endpoint and allocator before taking the bounded-cycle samples.
-    request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    let initial_pending =
+        request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
     let baseline_rss = read_process_rss_bytes(pid);
     let mut peak_pss_kib = read_pss(pid).expect("read source journal XP PSS").total_kib;
     let mut cpu_percentages = Vec::with_capacity(5);
     let mut max_read_bytes = 0_u64;
     let mut max_rss_delta = 0_u64;
+    let mut saw_replayed_page = false;
+    let stop_sampling = Arc::new(AtomicBool::new(false));
+    let sampled_stop = stop_sampling.clone();
+    let pss_peak = Arc::new(AtomicU64::new(peak_pss_kib));
+    let sampled_pss_peak = pss_peak.clone();
+    let sampler = tokio::spawn(async move {
+        while !sampled_stop.load(Ordering::Relaxed) {
+            if let Some(sample) = read_pss(pid) {
+                sampled_pss_peak.fetch_max(sample.total_kib, Ordering::Relaxed);
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    });
     for _ in 0..5 {
         let started = Instant::now();
         let cpu_before = read_cpu_ticks(pid);
         let read_before = read_process_read_bytes(pid);
-        request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        let pending =
+            request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+        if pending < initial_pending {
+            saw_replayed_page = true;
+        }
         let operation_elapsed = started.elapsed();
         if operation_elapsed < Duration::from_secs(1) {
             sleep(Duration::from_secs(1) - operation_elapsed).await;
@@ -124,6 +142,13 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         peak_pss_kib =
             peak_pss_kib.max(read_pss(pid).expect("read source journal XP PSS").total_kib);
     }
+    stop_sampling.store(true, Ordering::Relaxed);
+    sampler.await.expect("source journal PSS sampler");
+    peak_pss_kib = peak_pss_kib.max(pss_peak.load(Ordering::Relaxed));
+    assert!(
+        saw_replayed_page,
+        "source journal worker must replay at least one bounded page"
+    );
     cpu_percentages.sort_by(f64::total_cmp);
     let cpu_p95 = *cpu_percentages
         .last()
@@ -156,7 +181,7 @@ async fn request_source_status(
     cluster: &ClusterMetadata,
     ca_key_pem: &str,
     ca_pem: &str,
-) {
+) -> u64 {
     let context = xp::internal_auth::RequestContext::now(
         xp::internal_auth::InternalRoute::MeshV2,
         &cluster.cluster_id,
@@ -186,13 +211,12 @@ async fn request_source_status(
         .expect("source journal status response");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let status: serde_json::Value = response.json().await.expect("decode source journal status");
-    assert_eq!(
-        status["source_delivery"]["pending_segments"],
-        serde_json::json!(20_000)
-    );
+    status["source_delivery"]["pending_segments"]
+        .as_u64()
+        .expect("source journal pending segment count")
 }
 
-fn prepare_source_delivery_storage(data_dir: &Path) {
+fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let connection = rusqlite::Connection::open(data_dir.join("history.sqlite3"))
         .expect("open source journal resource database");
     connection
@@ -247,4 +271,38 @@ fn prepare_source_delivery_storage(data_dir: &Path) {
             [],
         )
         .expect("record source journal stream backlog");
+    let state_payload = connection
+        .query_row(
+            "SELECT payload FROM history_snapshots WHERE key = 'persistent_state'",
+            [],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .expect("read initialized source journal state snapshot");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&state_payload).expect("decode source journal state snapshot");
+    state["repository_membership"] = serde_json::json!({
+        "members": [{
+            "identity": {
+                "node_id": cluster.node_id.clone(),
+                "ed25519_public_key": URL_SAFE_NO_PAD.encode([7_u8; 32]),
+                "x25519_relay_public_key": URL_SAFE_NO_PAD.encode([8_u8; 32])
+            },
+            "lifecycle": "ready",
+            "catch_up_completed_at": 1,
+            "ready_at": 301,
+            "replica_converged": false,
+            "capacity": {
+                "quota_bytes": 10_u64 * 1024 * 1024 * 1024,
+                "used_bytes": 0,
+                "filesystem_available_bytes": u64::MAX
+            }
+        }]
+    });
+    let state_payload = serde_json::to_vec(&state).expect("encode source journal state snapshot");
+    connection
+        .execute(
+            "UPDATE history_snapshots SET payload = ?1 WHERE key = 'persistent_state'",
+            rusqlite::params![state_payload],
+        )
+        .expect("write source journal repository membership");
 }

@@ -67,11 +67,6 @@ pub(crate) async fn catch_up_against_ready_repositories(
     if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
     }
-    let mut receiving_repository_ids =
-        super::super::available_ready_repository_ids(&ready_repository_ids, &peers);
-    receiving_repository_ids.push(state.cluster.node_id.clone());
-    receiving_repository_ids.sort_unstable();
-    receiving_repository_ids.dedup();
     {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
@@ -89,7 +84,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
         drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
             let peer = peer_targets[index];
             async {
-                advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await
+                advance_ready_peer_catch_up_page(state, peer, &ready_repository_ids, now).await
             }
         })
         .await?;
@@ -133,7 +128,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
         InitialBackfillProgress::InProgress
     } else {
         drain_bounded_catch_up_pages(tiered_page_cap, deadline, || async {
-            pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await
+            pull_peer_initial_history(state, tiered_peer, &ready_repository_ids).await
         })
         .await?
         .progress
@@ -157,14 +152,34 @@ pub(crate) async fn catch_up_against_ready_repositories(
         }
         return Ok(InitialBackfillProgress::InProgress);
     }
-    if missing_metadata {
-        return Ok(InitialBackfillProgress::Unavailable);
-    }
-    Ok(tiered_progress)
+    Ok(ready_peer_catch_up_result(
+        peer_progress,
+        missing_metadata,
+        tiered_progress,
+    ))
 }
 
 fn remaining_peer_page_budget(pages_consumed: usize) -> usize {
     MAX_INITIAL_CATCH_UP_PAGES_PER_TICK.saturating_sub(pages_consumed)
+}
+
+fn ready_peer_catch_up_result(
+    peer_progress: InitialBackfillProgress,
+    missing_metadata: bool,
+    tiered_progress: InitialBackfillProgress,
+) -> InitialBackfillProgress {
+    if peer_progress == InitialBackfillProgress::InProgress
+        || tiered_progress == InitialBackfillProgress::InProgress
+    {
+        return InitialBackfillProgress::InProgress;
+    }
+    if missing_metadata
+        || peer_progress == InitialBackfillProgress::Unavailable
+        || tiered_progress == InitialBackfillProgress::Unavailable
+    {
+        return InitialBackfillProgress::Unavailable;
+    }
+    InitialBackfillProgress::Complete
 }
 
 async fn drain_ready_peer_pages<F, Fut>(
@@ -760,6 +775,26 @@ mod tests {
         assert_eq!(remaining_peer_page_budget(3), 5);
         assert_eq!(remaining_peer_page_budget(8), 0);
         assert_eq!(remaining_peer_page_budget(16), 0);
+    }
+
+    #[test]
+    fn unavailable_ready_peer_keeps_catch_up_incomplete_after_tiered_drain() {
+        assert_eq!(
+            ready_peer_catch_up_result(
+                InitialBackfillProgress::Unavailable,
+                false,
+                InitialBackfillProgress::Complete,
+            ),
+            InitialBackfillProgress::Unavailable
+        );
+        assert_eq!(
+            ready_peer_catch_up_result(
+                InitialBackfillProgress::Complete,
+                false,
+                InitialBackfillProgress::Complete,
+            ),
+            InitialBackfillProgress::Complete
+        );
     }
 
     #[test]
