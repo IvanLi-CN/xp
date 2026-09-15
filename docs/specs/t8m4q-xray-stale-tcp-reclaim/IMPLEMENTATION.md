@@ -10,7 +10,11 @@
 - Static config rewrite preserves the custom `XP_XRAY_API_ADDR` binding for the `api` inbound and removes the retired legacy control-plane proxy inbound.
 - The local real-Xray CI helper now pins `RUST_TEST_THREADS=1` so the ignored external-Xray suites do not race each other against one shared Xray process and forwarded SS port.
 - The shared testbox runner now allocates an explicit free `10.203.x.0/24` subnet per isolated compose run and preflights host `make` availability before compiling vendored OpenSSL dependencies.
-- Shared testbox subnet allocation is now serialized through a remote claim directory under `/srv/codex/shared-testbox/subnet-claims`, so concurrent real-Xray runs cannot select the same subnet between inspection and `docker compose up`.
+- Shared testbox subnet allocation is serialized through the host-global claim
+  directory `/srv/codex/.shared-testbox-subnet-claims`, so concurrent real-Xray
+  runs cannot select the same subnet between inspection and `docker compose up`.
+  Claims carry a process lease and stale run directories are reclaimed after an
+  interrupted run; Docker network inventory failure is fail-closed.
 
 ## Coverage Target
 

@@ -60,7 +60,7 @@ if ! grep -R -F -- "$GIT_SHA_FULL" "$REPO_ROOT/web/dist" >/dev/null; then
 fi
 SOURCE_ARCHIVE="$(mktemp -t xp-testbox-source.XXXXXX.tar)"
 WEB_DIST_ARCHIVE="$(mktemp -t xp-testbox-web-dist.XXXXXX.tar)"
-trap 'rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"' EXIT
+BASELINE_ARCHIVE=""
 git -C "$REPO_ROOT" archive --format=tar "$GIT_SHA_FULL" > "$SOURCE_ARCHIVE"
 SOURCE_ARCHIVE_SHA="$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')"
 tar -C "$REPO_ROOT/web/dist" -cf "$WEB_DIST_ARCHIVE" .
@@ -124,6 +124,52 @@ echo "testbox=$TESTBOX"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 
+REMOTE_RUN_CREATED=0
+cleanup_local() {
+  set +e
+  rm -f "$SOURCE_ARCHIVE" "$WEB_DIST_ARCHIVE"
+  if [ -n "${BASELINE_ARCHIVE:-}" ]; then
+    rm -f "$BASELINE_ARCHIVE"
+  fi
+  if [ "${REMOTE_RUN_CREATED:-0}" = "1" ]; then
+    ssh -o BatchMode=yes "$TESTBOX" \
+      "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE_CLEANUP' >/dev/null 2>&1 || true
+set -euo pipefail
+REMOTE_RUN="$(printf '%s' "${REMOTE_RUN_B64:?}" | base64 -d)"
+COMPOSE_PROJECT="$(printf '%s' "${COMPOSE_PROJECT_B64:?}" | base64 -d)"
+RUN_ID="$(printf '%s' "${RUN_ID_B64:?}" | base64 -d)"
+case "$REMOTE_RUN" in
+  /srv/codex/workspaces/*/runs/*) ;;
+  *) exit 2 ;;
+esac
+scope_unit="codex-xp-source-journal-${RUN_ID}.scope"
+systemctl --user stop "$scope_unit" >/dev/null 2>&1 || true
+systemctl --user reset-failed "$scope_unit" >/dev/null 2>&1 || true
+if [ -d "$REMOTE_RUN/scripts/e2e" ]; then
+  cd "$REMOTE_RUN/scripts/e2e"
+  cleanup_files=()
+  for file in docker-compose.xray.yml .codex.caps-compat.yaml .codex.net-compat.yaml .codex.user-compat.yaml; do
+    if [ -f "$file" ]; then
+      cleanup_files+=(-f "$file")
+    fi
+  done
+  if [ "${#cleanup_files[@]}" -gt 0 ]; then
+    docker compose -p "$COMPOSE_PROJECT" "${cleanup_files[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  fi
+fi
+rm -rf "$REMOTE_RUN"
+REMOTE_CLEANUP
+  fi
+}
+on_local_signal() {
+  trap - EXIT INT TERM
+  cleanup_local
+  exit "$1"
+}
+trap cleanup_local EXIT
+trap 'on_local_signal 130' INT
+trap 'on_local_signal 143' TERM
+
 # 3) Create remote run dir and attach minimal metadata. Paths and contents are
 # transported as base64 so the bootstrap shell never interpolates user input.
 CREATED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -134,6 +180,7 @@ source_archive_sha256=$SOURCE_ARCHIVE_SHA
 web_dist_archive_sha256=$WEB_DIST_ARCHIVE_SHA
 "
 WORKSPACE_METADATA_B64="$(printf '%s' "$WORKSPACE_METADATA" | base64 | tr -d '\n')"
+REMOTE_RUN_CREATED=1
 ssh -o BatchMode=yes "$TESTBOX" \
   "REMOTE_RUN_B64='$REMOTE_RUN_B64' REMOTE_WORKSPACE_B64='$REMOTE_WORKSPACE_B64' WORKSPACE_METADATA_B64='$WORKSPACE_METADATA_B64' bash -s" <<'REMOTE_BOOTSTRAP'
 set -euo pipefail
@@ -153,14 +200,17 @@ ssh -o BatchMode=yes "$TESTBOX" \
 
 if [ "$RUN_MESH_RESOURCE" = "1" ] && [ "$MESH_RESOURCE_SUMMARY_ONLY" != "1" ]; then
   git -C "$REPO_ROOT" cat-file -e "$MESH_RESOURCE_BASELINE_SHA^{commit}"
-  ssh -o BatchMode=yes "$TESTBOX" "mkdir -p '$REMOTE_RESOURCE_BASELINE'"
-  git -C "$REPO_ROOT" archive "$MESH_RESOURCE_BASELINE_SHA" \
-    | ssh -o BatchMode=yes "$TESTBOX" "tar -x -C '$REMOTE_RESOURCE_BASELINE'"
+  BASELINE_ARCHIVE="$(mktemp -t xp-testbox-baseline.XXXXXX.tar)"
+  git -C "$REPO_ROOT" archive --format=tar "$MESH_RESOURCE_BASELINE_SHA" > "$BASELINE_ARCHIVE"
+  BASELINE_ARCHIVE_SHA="$(shasum -a 256 "$BASELINE_ARCHIVE" | awk '{print $1}')"
+  rsync -a "$BASELINE_ARCHIVE" "$TESTBOX:$REMOTE_RUN/resource-baseline.tar"
+  ssh -o BatchMode=yes "$TESTBOX" \
+    "test \"\$(sha256sum '$REMOTE_RUN/resource-baseline.tar' | awk '{print \$1}')\" = '$BASELINE_ARCHIVE_SHA' && mkdir -p '$REMOTE_RESOURCE_BASELINE' && tar -xf '$REMOTE_RUN/resource-baseline.tar' -C '$REMOTE_RESOURCE_BASELINE' && rm -f '$REMOTE_RUN/resource-baseline.tar'"
   rsync -az --delete "$REPO_ROOT/web/dist/" "$TESTBOX:$REMOTE_RESOURCE_BASELINE/web/dist/"
 fi
 
 # 5) Run on testbox.
-ssh -o BatchMode=yes "$TESTBOX" \
+if ssh -o BatchMode=yes "$TESTBOX" \
   "REMOTE_RUN_B64='$REMOTE_RUN_B64' COMPOSE_PROJECT_B64='$COMPOSE_PROJECT_B64' SUBNET_CLAIM_ROOT_B64='$SUBNET_CLAIM_ROOT_B64' REMOTE_RESOURCE_BASELINE_B64='$REMOTE_RESOURCE_BASELINE_B64' RUN_MESH_RESOURCE_B64='$RUN_MESH_RESOURCE_B64' ONLY_MESH_RESOURCE_B64='$ONLY_MESH_RESOURCE_B64' MESH_RESOURCE_DURATION_B64='$MESH_RESOURCE_DURATION_B64' MESH_RESOURCE_SUMMARY_ONLY_B64='$MESH_RESOURCE_SUMMARY_ONLY_B64' GIT_SHA_FULL_B64='$GIT_SHA_FULL_B64' RUN_ID_B64='$RUN_ID_B64' bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -213,6 +263,13 @@ trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
 cd "$REMOTE_RUN/scripts/e2e"
+
+if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ -d "$SUBNET_CLAIM_DIR" ]; then
+  claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+  if [ -n "$claim_start_ticks" ]; then
+    printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
+  fi
+fi
 
 if ! command -v make >/dev/null 2>&1; then
   echo "missing 'make' on codex-testbox; vendored OpenSSL builds require it" >&2
@@ -303,6 +360,7 @@ compose_project = sys.argv[3]
 lock_dir = claim_root / ".allocator.lock"
 lock_timeout_seconds = 30
 lock_poll_seconds = 0.2
+pending_claim_grace_seconds = 120
 
 claim_root.mkdir(parents=True, exist_ok=True)
 
@@ -326,8 +384,9 @@ try:
             ["docker", "network", "ls", "-q"],
             text=True,
         ).split()
-    except subprocess.CalledProcessError:
-        docker_ids = []
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(f"cannot enumerate Docker networks for subnet allocation: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if docker_ids:
         inspect = json.loads(
@@ -364,7 +423,44 @@ try:
             continue
 
         run_path = pathlib.Path(run_path_file.read_text().strip())
-        if not run_path.exists():
+
+        def remove_stale_run():
+            if run_path.is_symlink() or not run_path.is_dir():
+                return
+            allowed_root = pathlib.Path("/srv/codex/workspaces").resolve()
+            try:
+                run_path.resolve(strict=False).relative_to(allowed_root)
+            except ValueError:
+                return
+            shutil.rmtree(run_path, ignore_errors=True)
+
+        active = False
+        lease_file = claim_dir / "lease"
+        if run_path.is_dir() and not run_path.is_symlink() and lease_file.is_file():
+            lease = {}
+            try:
+                for line in lease_file.read_text().splitlines():
+                    key, value = line.split("=", 1)
+                    lease[key] = value
+                pid = int(lease["pid"])
+                start_ticks = int(lease["start_ticks"])
+                proc_stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+                proc_start_ticks = int(proc_stat.rsplit(")", 1)[1].split()[19])
+                proc_cwd = pathlib.Path(os.path.realpath(f"/proc/{pid}/cwd"))
+                run_real = pathlib.Path(os.path.realpath(run_path))
+                active = proc_start_ticks == start_ticks and (
+                    proc_cwd == run_real or run_real in proc_cwd.parents
+                )
+            except (KeyError, ValueError, FileNotFoundError, OSError):
+                active = False
+        elif run_path.is_dir() and not run_path.is_symlink():
+            try:
+                active = time.time() - claim_dir.stat().st_mtime < pending_claim_grace_seconds
+            except OSError:
+                active = False
+
+        if not active:
+            remove_stale_run()
             shutil.rmtree(claim_dir, ignore_errors=True)
             continue
 
@@ -549,6 +645,12 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   fi
 fi
 REMOTE
+then
+  REMOTE_RUN_CREATED=0
+else
+  status=$?
+  exit "$status"
+fi
 
 if [ "$RUN_MESH_RESOURCE" = "1" ]; then
   echo "OK: Mesh transport resource workload on $TESTBOX"
