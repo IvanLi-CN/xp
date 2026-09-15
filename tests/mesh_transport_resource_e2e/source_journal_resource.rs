@@ -1,10 +1,118 @@
 use super::*;
-use ed25519_dalek::SigningKey;
-use xp::history_sync::{CanonicalSegment, Cursor, SyncRecord};
+use ed25519_dalek::{Signer as _, SigningKey};
+use prost::Message as _;
+use sha2::{Digest as _, Sha256};
 
 const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
 const JOURNAL_RSS_DELTA_LIMIT: u64 = 2 * 1024 * 1024;
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct FixtureCursor {
+    #[prost(string, tag = "1")]
+    source_node_id: String,
+    #[prost(uint64, tag = "2")]
+    source_epoch: u64,
+    #[prost(string, tag = "3")]
+    stream: String,
+    #[prost(uint64, tag = "4")]
+    sequence: u64,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct FixtureRecord {
+    #[prost(string, tag = "1")]
+    schema_id: String,
+    #[prost(uint32, tag = "2")]
+    schema_version: u32,
+    #[prost(bytes, tag = "3")]
+    record_key: Vec<u8>,
+    #[prost(bytes, tag = "4")]
+    payload: Vec<u8>,
+    #[prost(bool, tag = "5")]
+    tombstone: bool,
+    #[prost(string, tag = "6")]
+    subject_node_id: String,
+    #[prost(string, tag = "7")]
+    observer_node_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct FixtureSegment {
+    #[prost(string, tag = "1")]
+    cluster_id: String,
+    #[prost(message, optional, tag = "2")]
+    first_cursor: Option<FixtureCursor>,
+    #[prost(message, optional, tag = "3")]
+    last_cursor: Option<FixtureCursor>,
+    #[prost(message, repeated, tag = "4")]
+    records: Vec<FixtureRecord>,
+    #[prost(bytes, tag = "5")]
+    previous_segment_hash: Vec<u8>,
+    #[prost(uint64, tag = "6")]
+    opened_at_unix_seconds: u64,
+    #[prost(uint64, tag = "7")]
+    closed_at_unix_seconds: u64,
+    #[prost(bytes, tag = "8")]
+    signature: Vec<u8>,
+    #[prost(bytes, tag = "9")]
+    records_hash: Vec<u8>,
+}
+
+fn signed_fixture_wire(
+    signing_key: &SigningKey,
+    cluster_id: &str,
+    source_node_id: &str,
+    sequence: u64,
+    payload: &[u8],
+    previous_hash: Option<[u8; 32]>,
+) -> (Vec<u8>, [u8; 32]) {
+    let record = FixtureRecord {
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key: format!("runtime:{sequence}").into_bytes(),
+        payload: payload.to_vec(),
+        tombstone: false,
+        subject_node_id: source_node_id.to_owned(),
+        observer_node_id: source_node_id.to_owned(),
+    };
+    let mut records_hash = Sha256::new();
+    let mut encoded_record = Vec::new();
+    record
+        .encode_length_delimited(&mut encoded_record)
+        .expect("encode source journal record");
+    records_hash.update(encoded_record);
+    let canonical = FixtureSegment {
+        cluster_id: cluster_id.to_owned(),
+        first_cursor: Some(FixtureCursor {
+            source_node_id: source_node_id.to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            sequence,
+        }),
+        last_cursor: Some(FixtureCursor {
+            source_node_id: source_node_id.to_owned(),
+            source_epoch: 1,
+            stream: "runtime".to_owned(),
+            sequence,
+        }),
+        records: vec![record],
+        previous_segment_hash: previous_hash.map_or_else(Vec::new, |hash| hash.to_vec()),
+        opened_at_unix_seconds: 100,
+        closed_at_unix_seconds: 100,
+        signature: Vec::new(),
+        records_hash: records_hash.finalize().to_vec(),
+    };
+    let canonical_wire = canonical.encode_to_vec();
+    let signature = signing_key.sign(&canonical_wire).to_bytes().to_vec();
+    let mut signed = canonical;
+    signed.signature = signature;
+    let wire = signed.encode_to_vec();
+    let mut segment_hash = Sha256::new();
+    segment_hash.update(canonical_wire);
+    segment_hash.update(&signed.signature);
+    (wire, segment_hash.finalize().into())
+}
 
 fn read_process_read_bytes(pid: u32) -> u64 {
     fs::read_to_string(format!("/proc/{pid}/io"))
@@ -252,29 +360,15 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
             .unchecked_transaction()
             .expect("begin source journal backlog transaction");
         for sequence in batch_start..(batch_start + 256).min(20_000) {
-            let record = SyncRecord::new(
-                cluster.node_id.clone(),
-                cluster.node_id.clone(),
-                "runtime.v1",
-                1,
-                format!("runtime:{sequence}").into_bytes(),
-                payload.clone(),
-                false,
-            );
-            let segment = CanonicalSegment::new(
-                cluster.cluster_id.clone(),
-                Cursor::new(cluster.node_id.clone(), 1, "runtime", sequence as u64)
-                    .expect("source journal cursor"),
-                vec![record],
+            let (wire, segment_hash) = signed_fixture_wire(
+                &signing_key,
+                &cluster.cluster_id,
+                &cluster.node_id,
+                sequence as u64,
+                &payload,
                 previous_hash,
-                100,
-                100,
-            )
-            .expect("source journal segment")
-            .sign(&signing_key)
-            .expect("sign source journal segment");
-            let wire = segment.wire_bytes().expect("encode source journal segment");
-            previous_hash = Some(segment.segment_hash().expect("hash source journal segment"));
+            );
+            previous_hash = Some(segment_hash);
             total_wire_bytes = total_wire_bytes
                 .checked_add(i64::try_from(wire.len()).expect("source journal wire length"))
                 .expect("source journal byte count");
