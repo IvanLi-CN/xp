@@ -16,8 +16,9 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - 在 Raft DesiredState 中保存一次性的 `reverse_mesh_epoch` 与每个 target 的确定性双 Rendezvous assignment。
 - 只选择当前 voter、具备静态 capability、signed Xray readiness 和 managed VLESS endpoint 的 Rendezvous；target 自身不要求 managed endpoint。
 - 使用上游 Xray 动态 Handler/Routing API、固定本地 SOCKS5 portal 和 reqwest HTTP/2 prior knowledge，不手写 H2C、CONNECT 或 Xray fork。
-- 为 health、Raft、内部 Admin fan-out、SSE 和 history 提供 Reverse Relay；各调用方保留既有
+- 为 health、Raft、内部 Admin fan-out 和 SSE 提供 Reverse Relay；这些调用方保留既有
   peer-direct 选择，只有 direct 路径未成功时才使用 Reverse，并保持现有 `outcome_unknown` 与幂等语义。
+  History repository 同步固定使用目标节点的公网 HTTPS `api_base_url`，不进入 Reverse 或 dynamic relay。
 - Reverse 只承载 authenticated XP control-plane HTTP，禁止通用 VPN、任意 TCP/UDP、用户流量和递归中继。
 - 为 generation drain、Xray worker tombstone、受控重启、fresh join、host-managed systemd/OpenRC 与 single-image container 提供确定性降级。
 - 以 additive status API 和紧凑 System Status 行显示 `reality_direct|reverse_relay|public`，不新增手动选路控件。
@@ -26,7 +27,7 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 - 通用 VPN、任意 TCP/UDP 转发、WebSocket、CONNECT passthrough、内层 TLS 或用户流量隧道。
 - 自制 H2/H2C 帧、reqwest connector、静态 Rendezvous 角色、公网监听端口、人工路径 override。
-- 替换 Cloudflare Tunnel/Public fallback，或删除 history repository 的加密 dynamic relay。
+- 替换 Cloudflare Tunnel/Public fallback，或改变 history repository 的公网 HTTPS-only 同步合同。
 - 放宽 internal-auth、membership、Raft promotion、64 MiB 总 PSS 或现有部署升级合同。
 
 ## 稳定契约
@@ -72,12 +73,13 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - 共享 HMAC 只表示 joined-member trust，不宣称 per-node 不可伪造身份；日志不得记录 body、凭据或原始 socket 信息。
 - 对采用 `Reality Direct -> Reverse Relay -> Public/API` 的控制面调用，Reality 与 Reverse 各占
   `min(5s,max(500ms,total/3))`，Public 使用剩余预算；breaker-open 跳过相应段。收到 headers/
-  首字节后不换路；不安全重试返回 `outcome_unknown`。history 使用自己的同级 Mesh/Tunnel direct
-  选择，随后 Reverse，再使用动态 relay。
+  首字节后不换路；不安全重试返回 `outcome_unknown`。history 不属于该 Reverse fallback 路径，
+  固定使用公网 HTTPS `api_base_url`。
 - assignment worker 对每个 target 的 primary 和 standby Rendezvous 分别发送 signed Reverse `health-v2`。
   只有各自收到 target ACK 的 Rendezvous 才可转发该 generation 的非 health 请求；因此 standby
   在故障切换前已完成预热验证。
-- 普通 body 上限 1 MiB，Raft/snapshot 8 MiB；请求缓冲、响应流式。history 保留 Reality/Public direct 两条等价路径，再试 Reverse，最后使用现有加密 dynamic relay。
+- 普通 body 上限 1 MiB，Raft/snapshot 8 MiB；请求缓冲、响应流式。History repository 使用
+  自己的公网 HTTPS direct 请求和 durable retry，不使用 Reverse 或 dynamic relay。
 
 ### Join、部署与状态 API
 

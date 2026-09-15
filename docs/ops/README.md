@@ -110,9 +110,10 @@ Host-managed mode assumptions:
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 - `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal
-  peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous,
-  control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path
-  and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only,
+  peer-direct control-plane paths for health, Raft, Admin fan-out and SSE. When Raft has assigned a
+  target a healthy Reverse Rendezvous, those control-plane requests try that authenticated Reality
+  Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic
+  relay. The Reverse portal is TCP-only,
   password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
   A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
   120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
@@ -121,8 +122,9 @@ Host-managed mode assumptions:
   health probes. Excess requests fail before opening another underlay stream and follow the
   existing fallback/error policy. The slot remains held while the response body/stream is live.
   This is a fixed safety limit with no node-local override.
-  Repository synchronization direct requests use the peer's public HTTPS `api_base_url` only; they
-  do not select or probe Mesh or Reverse Mesh. Source delivery uses the same public HTTPS path. A
+  Repository synchronization is separate from that control-plane fallback: direct requests use the
+  peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
+  delivery uses the same public HTTPS path. A
   public transport failure leaves the durable checkpoint or outbox for the next bounded retry and
   never opens a history Mesh relay.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
@@ -828,10 +830,10 @@ Notes:
   restart the source, run `VACUUM`,
   clear the
   database, or delete unacknowledged backlog as a workaround.
-  During initial catch-up, an unavailable Ready member does not block other Ready members from
-  receiving their public pages; a healthy Ready member may complete the catch-up window. If every
-  Ready member is unavailable, the node remains `syncing` and retries on the next bounded cycle.
-  Keep stale membership for explicit operator cleanup; never remove it by editing the checkpoint.
+  During initial catch-up, an unavailable or stale Ready member does not block other Ready members
+  from receiving their public pages, but it keeps the aggregate catch-up incomplete. The node does
+  not start its readiness window until every Ready member has been covered. Keep stale membership
+  for explicit operator cleanup; never remove it by editing the checkpoint.
   If a source delivery backlog is unchanged while the serving peer reports a sequence gap, inspect
   the oldest pending segment and its permanent predecessor gap. The serving release must be active
   before retrying; its bounded gap page prioritizes that predecessor before rotating the remainder.

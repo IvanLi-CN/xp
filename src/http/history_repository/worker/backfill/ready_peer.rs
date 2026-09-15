@@ -582,7 +582,7 @@ async fn repair_ready_peer_catch_up_page(
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn bounded_catch_up_drain_consumes_multiple_pages_in_one_tick() {
         let mut calls = 0;
         let result =
@@ -604,7 +604,7 @@ mod tests {
         assert_eq!(result.pages_consumed, 3);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn bounded_catch_up_drain_stops_at_page_cap() {
         let mut calls = 0;
         let result =
