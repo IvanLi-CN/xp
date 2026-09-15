@@ -39,6 +39,10 @@
   work to the next replication tick. Deep partition mismatches after a segment repair drains mark
   the checkpoint for the single-authority tiered import. A fresh summary verification pass must
   complete before the member can enter the readiness window.
+- Ready repository metadata is resolved independently for each member. A stale Ready member with
+  no node metadata is retained in the aggregate and keeps catch-up incomplete, while available
+  Ready peers continue their bounded pages; source delivery and history queries use the available
+  peer targets without treating the stale member as acknowledged.
 - Tombstones received while a repository is `syncing` are atomically stored with their local
   cursor and acknowledgement page, but acknowledgement fanout is deferred until the Raft
   membership reports `ready`. The durable page is then retried through the existing all-node
@@ -188,8 +192,10 @@
   `xp run` binary with 257 near-limit SQLite segments, call the signed summary endpoint repeatedly,
   and sample `smaps_rollup` under the 128 MiB/no-swap cgroup without a concurrent peer workload.
   The source-journal resource workload resolves the release binary from the candidate build,
-  verifies the same clean commit, and uses a run-scoped systemd unit so concurrent testbox runs
-  cannot share a cgroup or mask a resource result.
+  verifies the same clean commit, and uses a cryptographically random run nonce in the remote
+  workspace, Compose project, and run-scoped systemd unit so concurrent testbox runs cannot share
+  a cgroup or mask a resource result. The resource harness forwards its successful child metrics
+  to the outer test output for auditability.
   Existing databases initialize these fields idempotently without deleting or rewriting signed
   pending segments.
   Live receivers require the complete pinned identity: repository senders must match their current

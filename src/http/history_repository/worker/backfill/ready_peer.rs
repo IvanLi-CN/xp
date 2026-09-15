@@ -62,7 +62,8 @@ pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
     now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
-    let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
+    let (ready_repository_ids, peers, missing_metadata) =
+        super::ready_repository_peers_for_catch_up(state).await?;
     if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
     }
@@ -149,6 +150,9 @@ pub(crate) async fn catch_up_against_ready_repositories(
             )?;
         }
         return Ok(InitialBackfillProgress::InProgress);
+    }
+    if missing_metadata {
+        return Ok(InitialBackfillProgress::Unavailable);
     }
     Ok(tiered_progress)
 }

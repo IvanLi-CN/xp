@@ -57,7 +57,9 @@ use direct::clear_peer_deep_verification;
 pub(super) use direct::{
     RepositoryDirectError, preserve_history_truncated, repository_direct_request,
 };
-pub(super) use ready_peers::{ready_repository_peers, repository_peer_targets};
+pub(super) use ready_peers::{
+    ready_repository_peers, ready_repository_peers_for_catch_up, repository_peer_targets,
+};
 use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
@@ -208,6 +210,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
 async fn publish_local_history_segment(
     state: &AppState,
     ready_repository_ids: &[String],
+    collector_repository_ids: &[String],
     peers: &[MeshPeerTarget],
     now: u64,
     capture_live: bool,
@@ -240,7 +243,7 @@ async fn publish_local_history_segment(
                 &signing_key,
                 source_batch.take_records(),
                 now,
-                ready_repository_ids,
+                collector_repository_ids,
             )?;
             // Journal commit makes resource rows safe to mark enqueued before collector ACK.
             source_batch.mark_resources_enqueued(state);
@@ -257,7 +260,7 @@ async fn publish_local_history_segment(
     if segments.is_empty() && gaps.is_empty() {
         return Ok(false);
     }
-    let assignment = rendezvous_collectors(&state.cluster.node_id, ready_repository_ids)?;
+    let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
     let primary_repository_id = assignment.primary().to_owned();
     let selected_repository_id = state
         .repository_replica

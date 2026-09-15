@@ -63,7 +63,8 @@ PY
 
 # 2) Per-run identifiers.
 GIT_SHA="${GIT_SHA_FULL:0:12}"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_$GIT_SHA"
+RUN_NONCE="$(python3 -c 'import secrets; print(secrets.token_hex(4))')"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_${RUN_NONCE}"
 WORKSPACE_SLUG="${REPO_NAME}__${PATH_HASH8}"
 
 REMOTE_BASE="/srv/codex/workspaces/$USER"

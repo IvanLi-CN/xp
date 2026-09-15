@@ -11,11 +11,19 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     let Ok((ready_repository_ids, peers)) = super::ready_repository_peers(state).await else {
         return Ok(());
     };
+    let collector_repository_ids = peers
+        .iter()
+        .map(|peer| peer.node_id.clone())
+        .collect::<Vec<_>>();
+    if collector_repository_ids.is_empty() {
+        return Ok(());
+    }
     let mut capture_live = true;
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
             &ready_repository_ids,
+            &collector_repository_ids,
             &peers,
             now,
             capture_live,

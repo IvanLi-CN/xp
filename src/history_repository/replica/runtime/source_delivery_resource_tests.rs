@@ -77,6 +77,12 @@ fn source_delivery_journal_resource_budget_stays_fixed_for_large_backlog() {
             .env(RESOURCE_BENCHMARK_CHILD, "1")
             .output()
             .expect("run isolated source journal resource benchmark");
+        if !output.stdout.is_empty() {
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        if !output.stderr.is_empty() {
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        }
         assert!(
             output.status.success(),
             "isolated source journal resource benchmark failed:\n{}{}",
