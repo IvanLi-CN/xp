@@ -68,36 +68,6 @@ pub(super) async fn clear_peer_deep_verification(
     Ok(())
 }
 
-/// Dynamic relay is an authenticated Mesh-only transport. It is kept separate from the
-/// source-to-repository history catch-up path, which always uses the peer's public HTTPS origin.
-/// The worker never invokes this transport; it remains only for the legacy relay endpoint.
-pub(crate) async fn repository_mesh_request<T>(
-    state: &AppState,
-    peer: &MeshPeerTarget,
-    method: Method,
-    path_and_query: &str,
-    body: Vec<u8>,
-) -> Result<T, RepositoryDirectError>
-where
-    T: DeserializeOwned,
-{
-    if peer.mesh_base_url.is_none() {
-        return Err(RepositoryDirectError::Application(anyhow::anyhow!(
-            "relay peer has no eligible Mesh endpoint"
-        )));
-    }
-    send_repository_request_on_path(
-        state,
-        peer,
-        PeerDirectPath::RealityMesh,
-        method,
-        path_and_query,
-        body,
-        false,
-    )
-    .await
-}
-
 pub(crate) async fn repository_direct_request<T>(
     state: &AppState,
     peer: &MeshPeerTarget,

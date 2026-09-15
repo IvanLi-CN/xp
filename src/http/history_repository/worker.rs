@@ -55,8 +55,7 @@ use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
-    RepositoryDirectError, all_cluster_peers, preserve_history_truncated,
-    repository_direct_request, repository_mesh_request,
+    RepositoryDirectError, all_cluster_peers, preserve_history_truncated, repository_direct_request,
 };
 pub(super) use ready_peers::ready_repository_peers;
 use repair::remove_unavailable_repair_segment_ids;

@@ -95,13 +95,13 @@ pub(crate) async fn catch_up_against_ready_repositories(
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
     // still advancing every peer's signed summary through bounded pages per worker tick.
-    let Some(tiered_peer) =
-        peer_targets
-            .iter()
-            .zip(progress_by_peer.iter())
-            .find_map(|(peer, progress)| {
-                (*progress != InitialBackfillProgress::Unavailable).then_some(*peer)
-            })
+    let Some((tiered_peer_index, tiered_peer)) = peer_targets
+        .iter()
+        .zip(progress_by_peer.iter())
+        .enumerate()
+        .find_map(|(index, (peer, progress))| {
+            (*progress != InitialBackfillProgress::Unavailable).then_some((index, *peer))
+        })
     else {
         return Ok(InitialBackfillProgress::Unavailable);
     };
@@ -118,7 +118,7 @@ pub(crate) async fn catch_up_against_ready_repositories(
             })
     };
     let tiered_page_cap = pages_by_peer
-        .first()
+        .get(tiered_peer_index)
         .copied()
         .map_or(0, remaining_peer_page_budget);
     let tiered_progress = if tiered_page_cap == 0 {
@@ -387,14 +387,25 @@ async fn repair_ready_peer_catch_up_page(
         segment_ids: pending.iter().cloned().collect(),
         response_id: checkpoint.retained_anchor_repair_response_id.clone(),
     })?;
-    let repair: RepositoryRepairBatch = repository_direct_request(
+    let repair: RepositoryRepairBatch = match repository_direct_request(
         state,
         peer,
         Method::POST,
         "/api/admin/_internal/history-repository/repair",
         body,
     )
-    .await?;
+    .await
+    {
+        Ok(repair) => repair,
+        Err(error) => {
+            tracing::debug!(
+                peer = %peer.node_id,
+                error = %error,
+                "history repository repair page failed"
+            );
+            return Ok(InitialBackfillProgress::Unavailable);
+        }
+    };
     // Old peers omit response_id. Derive it from their actual response rather than the
     // request, so a changed retry cannot consume a first-response allowance.
     let response_id = repair.response_id_digest()?;

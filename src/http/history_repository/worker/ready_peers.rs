@@ -26,12 +26,8 @@ pub(in crate::http::history_repository) async fn ready_repository_peers(
     if peers.is_empty() {
         anyhow::bail!("no ready history repository has a registered node endpoint");
     }
-    // A stale Raft member can outlive its node metadata (for example after a host is
-    // destroyed). Do not make healthy public collectors wait on a peer that cannot be
-    // addressed; membership cleanup remains an explicit operator action.
-    let available_repository_ids = peers
-        .iter()
-        .map(|peer| peer.node_id.clone())
-        .collect::<Vec<_>>();
-    Ok((available_repository_ids, peers))
+    // Keep the complete Ready ID set for ACK and retention obligations. The peer list may be
+    // shorter when stale membership has no node metadata; callers can continue with the peers
+    // that still have a public endpoint without treating the stale member as acknowledged.
+    Ok((ready_repository_ids, peers))
 }
