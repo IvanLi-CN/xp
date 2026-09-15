@@ -97,7 +97,7 @@ REMOTE_WORKSPACE="$REMOTE_BASE/$WORKSPACE_SLUG"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
 # Subnet claims are host-global so concurrent runs from different users cannot
 # select the same Docker network range.
-REMOTE_SUBNET_CLAIMS="/srv/codex/.shared-testbox-subnet-claims"
+REMOTE_SUBNET_CLAIMS="/srv/codex/agents/.shared-testbox-subnet-claims"
 REMOTE_RESOURCE_BASELINE="$REMOTE_RUN/resource-baseline"
 
 COMPOSE_PROJECT_RAW="codex_${WORKSPACE_SLUG}_${RUN_ID}"
