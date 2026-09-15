@@ -819,11 +819,8 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
                         let xp_pid = pids
                             .iter()
                             .copied()
-                            .find(|pid| {
-                                fs::read_to_string(format!("/proc/{pid}/comm"))
-                                    .is_ok_and(|name| name.trim() == "xp")
-                            })
-                            .or_else(|| pids.iter().copied().find(|pid| *pid != child_pid));
+                            .find(|pid| *pid == child_pid)
+                            .or_else(|| pids.last().copied());
                         if let Some(pid) = xp_pid {
                             break pid;
                         }
