@@ -1,9 +1,37 @@
 use std::time::Duration;
 
-use super::MeshAwareHttpClient;
+use super::{MeshAwareHttpClient, MeshRequestError};
 
 pub const MESH_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const MESH_POOL_MAX_IDLE_PER_HOST: usize = 1;
+
+pub(super) fn join_url(
+    base: &str,
+    path_and_query: &str,
+    require_https: bool,
+) -> Result<String, MeshRequestError> {
+    if !path_and_query.starts_with('/') {
+        return Err(MeshRequestError::InvalidTarget(
+            "request path must start with /".to_string(),
+        ));
+    }
+    let base = reqwest::Url::parse(base)
+        .map_err(|error| MeshRequestError::InvalidTarget(error.to_string()))?;
+    if !matches!(base.scheme(), "https" | "http")
+        || (require_https && base.scheme() != "https")
+        || base.path() != "/"
+        || base.query().is_some()
+    {
+        return Err(MeshRequestError::InvalidTarget(
+            "invalid peer base URL".to_string(),
+        ));
+    }
+    Ok(format!(
+        "{}{}",
+        base.as_str().trim_end_matches('/'),
+        path_and_query
+    ))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeshTransportPolicy {

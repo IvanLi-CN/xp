@@ -3,7 +3,8 @@ use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate,
 };
-use std::{future::Future, time::Instant};
+use std::future::Future;
+use tokio::time::Instant;
 
 const MAX_INITIAL_CATCH_UP_PAGES_PER_TICK: usize = 8;
 const INITIAL_CATCH_UP_TICK_BUDGET: Duration = Duration::from_secs(15);
@@ -171,7 +172,6 @@ where
 {
     let mut in_progress = false;
     let mut unavailable = false;
-    let mut complete = false;
     let mut pages_by_peer = Vec::with_capacity(peer_count);
     let mut progress_by_peer = Vec::with_capacity(peer_count);
     for index in 0..peer_count {
@@ -192,7 +192,7 @@ where
         progress_by_peer.push(drain.progress);
         match drain.progress {
             InitialBackfillProgress::InProgress => in_progress = true,
-            InitialBackfillProgress::Complete => complete = true,
+            InitialBackfillProgress::Complete => {}
             InitialBackfillProgress::Unavailable => {
                 // A failed public peer must not consume the whole tick. Continue with the
                 // remaining peers, then report the aggregate result for the next retry.
@@ -203,8 +203,6 @@ where
     Ok((
         if in_progress {
             InitialBackfillProgress::InProgress
-        } else if complete {
-            InitialBackfillProgress::Complete
         } else if unavailable {
             InitialBackfillProgress::Unavailable
         } else {
@@ -314,7 +312,7 @@ async fn advance_ready_peer_catch_up_page(
     let remote_summary: RepositoryReplicaSummary =
         match repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await {
             Ok(summary) => summary,
-            Err(error) => {
+            Err(error) if error.is_transport() => {
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
@@ -322,6 +320,7 @@ async fn advance_ready_peer_catch_up_page(
                 );
                 return Ok(InitialBackfillProgress::Unavailable);
             }
+            Err(error) => return Err(error.into()),
         };
     let (requires_repair, missing_segment_ids, partitions_converged) = {
         let mut runtime = state.repository_replica.lock().await;
@@ -397,7 +396,7 @@ async fn repair_ready_peer_catch_up_page(
     .await
     {
         Ok(repair) => repair,
-        Err(error) => {
+        Err(error) if error.is_transport() => {
             tracing::debug!(
                 peer = %peer.node_id,
                 error = %error,
@@ -405,6 +404,7 @@ async fn repair_ready_peer_catch_up_page(
             );
             return Ok(InitialBackfillProgress::Unavailable);
         }
+        Err(error) => return Err(error.into()),
     };
     // Old peers omit response_id. Derive it from their actual response rather than the
     // request, so a changed retry cannot consume a first-response allowance.
@@ -620,7 +620,7 @@ mod tests {
         assert_eq!(result.pages_consumed, 3);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn bounded_catch_up_drain_stops_before_an_expired_deadline() {
         let mut calls = 0;
         let result =
@@ -636,29 +636,33 @@ mod tests {
         assert_eq!(result.pages_consumed, 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn bounded_catch_up_drain_cancels_a_slow_page_at_the_deadline() {
-        let mut calls = 0;
-        let result = tokio::time::timeout(
-            Duration::from_millis(200),
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let recorded_calls = calls.clone();
+        let task = tokio::spawn(async move {
             drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_millis(20), || {
-                calls += 1;
+                recorded_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 async {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     Ok(InitialBackfillProgress::InProgress)
                 }
-            }),
-        )
-        .await
-        .expect("bounded catch-up drain must honor its deadline")
-        .expect("bounded catch-up drain");
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        let result = task
+            .await
+            .expect("bounded catch-up drain task")
+            .expect("bounded catch-up drain");
 
-        assert_eq!(calls, 1);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(result.progress, InitialBackfillProgress::InProgress);
         assert_eq!(result.pages_consumed, 1);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn bounded_catch_up_drain_stops_after_an_unavailable_page() {
         let mut calls = 0;
         let result =
@@ -674,12 +678,11 @@ mod tests {
         assert_eq!(result.pages_consumed, 1);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn ready_peer_drain_gives_later_peers_a_slice_after_a_slow_peer() {
         let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded_calls = calls.clone();
-        let result = tokio::time::timeout(
-            Duration::from_millis(200),
+        let task = tokio::spawn(async move {
             drain_ready_peer_pages(
                 2,
                 Instant::now() + Duration::from_millis(40),
@@ -694,18 +697,24 @@ mod tests {
                         }
                     }
                 },
-            ),
-        )
-        .await
-        .expect("ready peer drain must remain bounded")
-        .expect("ready peer drain");
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        let result = task
+            .await
+            .expect("ready peer drain task")
+            .expect("ready peer drain");
 
         assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
         assert_eq!(result.0, InitialBackfillProgress::InProgress);
         assert_eq!(result.1, vec![1, 1]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn ready_peer_drain_continues_after_an_unavailable_peer() {
         let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded_calls = calls.clone();
@@ -724,7 +733,7 @@ mod tests {
             .expect("ready peer drain");
 
         assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
-        assert_eq!(result.0, InitialBackfillProgress::Complete);
+        assert_eq!(result.0, InitialBackfillProgress::Unavailable);
         assert_eq!(result.1, vec![1, 1]);
         assert_eq!(
             result.2,

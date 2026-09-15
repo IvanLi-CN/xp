@@ -55,9 +55,9 @@ use deep_repair::deep_repair_requires_tiered_backfill;
 use deep_repair::restart_tiered_backfill_after_incomplete_deep_repair;
 use direct::clear_peer_deep_verification;
 pub(super) use direct::{
-    RepositoryDirectError, all_cluster_peers, preserve_history_truncated, repository_direct_request,
+    RepositoryDirectError, preserve_history_truncated, repository_direct_request,
 };
-pub(super) use ready_peers::ready_repository_peers;
+pub(super) use ready_peers::{ready_repository_peers, repository_peer_targets};
 use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
 pub(super) use source::should_fanout_tombstone_acknowledgements;
@@ -796,13 +796,17 @@ async fn replicate_peer(
 
 pub(super) async fn propagate_tombstone_acknowledgements(
     state: &AppState,
-    _ready_repository_ids: &[String],
+    ready_repository_ids: &[String],
     acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
 ) -> anyhow::Result<()> {
     if acknowledgements.is_empty() {
         return Ok(());
     }
-    let peers = all_cluster_peers(state).await;
+    let peers = {
+        let store = state.store.lock().await;
+        let endpoints = store.list_endpoints();
+        repository_peer_targets(&store, ready_repository_ids, &endpoints)?
+    };
     let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
     let mut first_delivery_error = None::<anyhow::Error>;
     for peer in peers

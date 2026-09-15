@@ -2,7 +2,7 @@ use axum::http::Method;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath, peer_target_from_node},
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath},
     internal_auth::InternalRoute,
     state::history_repository::replica::RepositoryRuntimeError,
 };
@@ -44,17 +44,6 @@ impl std::fmt::Display for RepositoryDirectError {
 }
 
 impl std::error::Error for RepositoryDirectError {}
-
-pub(crate) async fn all_cluster_peers(state: &AppState) -> Vec<MeshPeerTarget> {
-    let store = state.store.lock().await;
-    let endpoints = store.list_endpoints();
-    store
-        .list_nodes()
-        .into_iter()
-        .filter(|node| node.node_id != state.cluster.node_id)
-        .map(|node| peer_target_from_node(&node, &endpoints))
-        .collect()
-}
 
 pub(super) async fn clear_peer_deep_verification(
     state: &AppState,

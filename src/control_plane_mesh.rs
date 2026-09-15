@@ -24,6 +24,7 @@ mod transport;
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
 pub(crate) use transport::build_unauthenticated_mesh_http_client;
+use transport::join_url;
 pub use transport::{MESH_POOL_IDLE_TIMEOUT, MeshTransportPolicy, build_mesh_http_client};
 
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
@@ -342,7 +343,11 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
-        let url = join_url(base_url, &request.path_and_query)?;
+        let url = join_url(
+            base_url,
+            &request.path_and_query,
+            path == PeerDirectPath::ApiBaseUrl,
+        )?;
         let context = RequestContext::now(
             request.route,
             request.cluster_id.clone(),
@@ -490,6 +495,7 @@ impl MeshAwareHttpClient {
             let mesh_url = join_url(
                 peer.mesh_base_url.as_deref().expect("checked enabled"),
                 &request.path_and_query,
+                false,
             )?;
             let budget = mesh_attempt_budget(request.total_budget);
             match tokio::time::timeout(
@@ -666,7 +672,7 @@ impl MeshAwareHttpClient {
             self.record_terminal_failure(peer).await;
             return Err(MeshRequestError::OutcomeUnknown);
         }
-        let public_url = join_url(&peer.public_base_url, &request.path_and_query)?;
+        let public_url = join_url(&peer.public_base_url, &request.path_and_query, true)?;
         let response = match self
             .send_public_signed(
                 &public_url,
@@ -893,7 +899,7 @@ impl MeshAwareHttpClient {
             .filter(|local| local.node_id == route.rendezvous.node_id);
         let mut response = None;
         if let Some(local) = local_rendezvous {
-            let local_url = join_url(&local.base_url, &outer_request.path_and_query)?;
+            let local_url = join_url(&local.base_url, &outer_request.path_and_query, false)?;
             response = Some(
                 reverse::send_outer_request(
                     &self.public_direct,
@@ -907,7 +913,7 @@ impl MeshAwareHttpClient {
             );
         } else if let Some(mesh_base_url) = route.rendezvous.mesh_base_url.as_deref() {
             let mesh_budget = mesh_attempt_budget(budget).min(budget);
-            let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query)?;
+            let mesh_url = join_url(mesh_base_url, &outer_request.path_and_query, false)?;
             match reverse::send_outer_request(
                 &self.mesh,
                 &outer_request,
@@ -938,6 +944,7 @@ impl MeshAwareHttpClient {
                 let outer_url = join_url(
                     &route.rendezvous.public_base_url,
                     &outer_request.path_and_query,
+                    true,
                 )?;
                 reverse::send_outer_request(
                     &self.public_direct,
@@ -1109,26 +1116,6 @@ fn public_transport_error(
     } else {
         MeshRequestError::OutcomeUnknown
     }
-}
-
-fn join_url(base: &str, path_and_query: &str) -> Result<String, MeshRequestError> {
-    if !path_and_query.starts_with('/') {
-        return Err(MeshRequestError::InvalidTarget(
-            "request path must start with /".to_string(),
-        ));
-    }
-    let base = reqwest::Url::parse(base)
-        .map_err(|error| MeshRequestError::InvalidTarget(error.to_string()))?;
-    if !matches!(base.scheme(), "https" | "http") || base.path() != "/" || base.query().is_some() {
-        return Err(MeshRequestError::InvalidTarget(
-            "peer base URL must be an origin".to_string(),
-        ));
-    }
-    Ok(format!(
-        "{}{}",
-        base.as_str().trim_end_matches('/'),
-        path_and_query
-    ))
 }
 
 async fn signed_send(

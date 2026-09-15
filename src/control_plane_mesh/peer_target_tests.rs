@@ -19,6 +19,13 @@ use tokio::{
     time::sleep,
 };
 
+#[test]
+fn public_direct_api_url_rejects_plain_http() {
+    let error = super::join_url("http://peer.example", "/api/health", true)
+        .expect_err("public direct requests must require HTTPS");
+    assert!(matches!(error, MeshRequestError::InvalidTarget(_)));
+}
+
 async fn count_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> StatusCode {
     requests.fetch_add(1, Ordering::SeqCst);
     StatusCode::SERVICE_UNAVAILABLE

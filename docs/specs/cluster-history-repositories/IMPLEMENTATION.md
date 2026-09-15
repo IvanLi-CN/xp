@@ -110,10 +110,10 @@
   request leaves the durable checkpoint or outbox unchanged for the next bounded retry; history
   synchronization never opens a Mesh relay.
 - During initial catch-up, an unavailable Ready peer is recorded as unavailable for that tick while
-  other Ready peers continue to receive their bounded public pages. A healthy Ready peer may
-  complete catch-up and start the local stability window; only when every Ready peer is unavailable
-  does the worker return `Unavailable`. Stale membership remains visible for explicit operator
-  cleanup and is never removed or treated as an ACK.
+  other Ready peers continue to receive their bounded public pages. Any unavailable or stale Ready
+  peer keeps the aggregate catch-up incomplete, so the worker does not start the local stability
+  window until every Ready peer has been covered. Stale membership remains visible for explicit
+  operator cleanup and is never removed or treated as an ACK.
 - Every node produces bounded one-minute signed source segments for runtime, traffic, Mesh path
   health, inbound-IP and connection summaries. Each schema family has its own durable outbox,
   cursor, sequence and hash chain; pending segments retry unchanged until the rendezvous primary
@@ -193,8 +193,8 @@
   Raft member identity, while ordinary cluster-node sources use the same server-derived pinned
   identity. History replay from an already-serving repository also accepts a retired source node
   when its identity exactly matches the deterministic cluster-derived identity; ready-repository
-  repair/relay batches use that replay check, while ordinary source relay batches still reject
-  substituted public keys before signature verification.
+  repair batches use that replay check, while legacy relay payloads remain receive-only and still
+  reject substituted public keys before signature verification.
 - Replica, retention and query selection: ready repositories run bounded five-minute repair and
   daily deep verification scheduling, preserve gaps/forks/unknown schemas/tombstones across
   restart, retain source segment repair state, transform older repository history into aggregates,

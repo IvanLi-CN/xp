@@ -33,8 +33,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 - 节点历史、Mesh 遥测、入站 IP、TCP 连接历史的 SQLite 存储和原子 JSON 迁移。
 - 仓库角色、Ed25519 节点身份、同步状态、退役和容量护栏。
-- cursor/segment 同步、Zstandard level 1、同级 direct path、双 direct 失败后的
-  Reality Mesh Reverse 与最终动态 Mesh relay。
+- cursor/segment 同步、Zstandard level 1，以及固定使用公网 HTTPS `api_base_url` 的
+  repository direct path。
 - primary/standby、五分钟 anti-entropy、分层保留、聚合、查询选择和管理 API/Web。
 - systemd、OpenRC、Docker/Compose 的持久卷和启动自检兼容性。
 
@@ -212,7 +212,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   journal，不得伪造成功或产生无界并发重试。Collector 恢复后必须按固定页继续投递并只删除有效 ACK
   所列 segment。
 - 仓库磁盘达到护栏时停止历史写入但不影响 Raft、join、配置、代理或升级。
-- relay 只承担流式转发；relay 失败不得被误报为数据已持久化。
+- legacy relay payload 仅保留接收边界的 wire 兼容性；repository worker 不构造、不发送
+  relay 请求，也不得把公网传输失败误报为数据已持久化。
 - 仓库过期超过 tombstone horizon 必须清除并重建，不允许继续宣称 converged。
 
 ## Interfaces and Contracts
@@ -223,7 +224,7 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 ### 接口清单（Inventory）
 
 - `history sync cursor/segment`：Protobuf/internal HTTP；internal；
-  新增；详见 `./contracts/history-sync.md`；source、repository、relay 使用。
+  新增；详见 `./contracts/history-sync.md`；source 与 repository 使用，legacy relay 仅作接收兼容。
 - `repository membership/status`：Raft + admin JSON；external/internal；
   新增；详见 `./contracts/history-sync.md`；admin UI、workers 使用。
 - `repository history query`：admin JSON；external；新增；详见
@@ -237,8 +238,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不影响集群控制面。
 - Given 两个 ready 仓库和丢包/分区，When 网络恢复，Then anti-entropy 修复到同一完整并集，
   永久缺口显式标记。
-- Given Mesh 与 Tunnel 同时不可用，When relay 周期到达，Then 使用端到端加密流式 relay；
-  relay 不得落盘。
+- Given 公网 HTTPS peer 不可用，When replication 周期到达，Then 保留 durable checkpoint 或
+  outbox，等待下一次有界重试；不得探测或打开历史 Mesh/Reverse relay。
 - Given 查询仓库部分缺失，When 管理员读取历史，Then 返回 partial 及覆盖/水位/缺口信息，
   不伪装为 complete。
 - Given 磁盘可用空间低于 256 MiB，When 触发历史写入，Then 写入停止、容量状态 degraded，
@@ -282,7 +283,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
 
 ### Testing
 
-- Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、relay、anti-entropy、聚合和查询。
+- Rust unit/HTTP tests 覆盖迁移、cursor、segment、签名、压缩、legacy relay 接收兼容、
+  anti-entropy、聚合和查询。
 - shared testbox 验证 50 source/2 repository、256 MiB 无 swap；普通节点新增稳态内存不超过
   2 MiB、idle CPU 近零。
 - shared testbox 还必须验证至少 20,000 条或 128 MiB source delivery journal 的索引计划、迁移幂等、
