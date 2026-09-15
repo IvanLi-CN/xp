@@ -258,7 +258,10 @@ async fn publish_local_history_segment(
                 &signing_key,
                 source_batch.take_records(),
                 now,
-                collector_repository_ids,
+                // The outbox must retain ACK requirements for every Ready member. The
+                // collector-only set is for transport selection and must not weaken tombstone
+                // bookkeeping when a Ready member has no usable metadata.
+                ready_repository_ids,
             )?;
             // Journal commit makes resource rows safe to mark enqueued before collector ACK.
             source_batch.mark_resources_enqueued(state);
