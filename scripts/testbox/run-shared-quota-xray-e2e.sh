@@ -614,12 +614,21 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       echo "source journal resource test binary was not built" >&2
       exit 1
     fi
+    journal_fixture_dir="$REMOTE_RUN/source-journal-fixture"
+    echo "building persisted source journal fixture outside the XP memory scope"
+    XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_SETUP=1 \
+      XP_SOURCE_JOURNAL_RESOURCE_FIXTURE_DIR="$journal_fixture_dir" \
+      "$journal_test_bin" \
+      --exact \
+      "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
+      --nocapture
     echo "running source delivery journal resource workload (XP memory=128MiB, swap=0)"
     systemd-run --user --scope --collect \
       --unit "$SOURCE_JOURNAL_SCOPE_UNIT" \
       -p MemoryMax=128M \
       -p MemorySwapMax=0 \
       --setenv=XP_SOURCE_JOURNAL_RESOURCE_BENCHMARK_CHILD=1 \
+      "--setenv=XP_SOURCE_JOURNAL_RESOURCE_FIXTURE_DIR=$journal_fixture_dir" \
       -- "$journal_test_bin" \
       --exact \
       "state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog" \
