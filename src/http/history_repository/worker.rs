@@ -59,7 +59,7 @@ pub(super) use direct::{
 };
 pub(super) use ready_peers::{
     available_ready_repository_ids, ready_repository_peers, ready_repository_peers_for_catch_up,
-    ready_repository_peers_with_metadata_status, repository_peer_targets,
+    ready_repository_peers_with_metadata_status,
 };
 use repair::remove_unavailable_repair_segment_ids;
 #[cfg(test)]
@@ -102,7 +102,9 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     let (work, tombstone_acknowledgements) = {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&available_ready_repository_ids)?;
+        // Keep every Raft Ready member in the tombstone ledger. Missing node metadata
+        // must not turn an unacknowledged stale member into an acknowledged one.
+        runtime.reconcile_ready_repositories(&ready_repository_ids)?;
         runtime.record_stale_collection_cycles(
             now,
             &available_ready_repository_ids,
@@ -117,7 +119,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
     if !tombstone_acknowledgements.acknowledgements().is_empty() {
         match propagate_tombstone_acknowledgements(
             state,
-            &ready_repository_ids,
+            &peers,
             tombstone_acknowledgements.acknowledgements().to_vec(),
         )
         .await
@@ -165,16 +167,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
             false
         };
     for peer in peers_to_replicate {
-        match replicate_peer(
-            state,
-            peer,
-            &available_ready_repository_ids,
-            now,
-            work,
-            true,
-        )
-        .await
-        {
+        match replicate_peer(state, peer, &ready_repository_ids, &peers, now, work, true).await {
             Ok(directly_converged) => {
                 synchronized = true;
                 if work.is_deep_verification() && directly_converged {
@@ -672,6 +665,7 @@ async fn replicate_peer(
     state: &AppState,
     peer: &MeshPeerTarget,
     ready_repository_ids: &[String],
+    peers: &[MeshPeerTarget],
     now: u64,
     work: ReplicaWork,
     propagate_acknowledgements: bool,
@@ -779,8 +773,7 @@ async fn replicate_peer(
                 }
             }
             if propagate_acknowledgements {
-                propagate_tombstone_acknowledgements(state, ready_repository_ids, acknowledgements)
-                    .await?;
+                propagate_tombstone_acknowledgements(state, peers, acknowledgements).await?;
             }
             let (remaining_segment_repairs, repair_remains_after_segment_repairs) = {
                 let mut runtime = state.repository_replica.lock().await;
@@ -821,17 +814,12 @@ async fn replicate_peer(
 
 pub(super) async fn propagate_tombstone_acknowledgements(
     state: &AppState,
-    ready_repository_ids: &[String],
+    peers: &[MeshPeerTarget],
     acknowledgements: Vec<RepositoryTombstoneAcknowledgement>,
 ) -> anyhow::Result<()> {
     if acknowledgements.is_empty() {
         return Ok(());
     }
-    let peers = {
-        let store = state.store.lock().await;
-        let endpoints = store.list_endpoints();
-        repository_peer_targets(&store, ready_repository_ids, &endpoints)?
-    };
     let body = serde_json::to_vec(&RepositoryTombstoneAcknowledgementRequest { acknowledgements })?;
     let mut first_delivery_error = None::<anyhow::Error>;
     for peer in peers

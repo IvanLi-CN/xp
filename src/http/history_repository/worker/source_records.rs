@@ -22,7 +22,7 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
-            &available_ready_repository_ids,
+            &ready_repository_ids,
             &collector_repository_ids,
             &peers,
             now,
@@ -364,57 +364,69 @@ mod tests {
     #[test]
     fn metadata_gap_uses_only_available_ready_peers_for_source_assignment() {
         let ready = vec![
-            "repo-a".to_owned(),
-            "repo-b".to_owned(),
-            "repo-c".to_owned(),
+            xp_test_fixtures::primary_node_id().to_owned(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
         ];
         let reachable = MeshPeerTarget {
-            node_id: "repo-b".to_owned(),
-            node_name: "repo-b".to_owned(),
-            mesh_base_url: None,
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
             mesh_reason: MeshPeerReason::MissingEndpoint,
-            public_base_url: "https://repo-b.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
         let collector_ids = source_collector_repository_ids(&ready, &[reachable])
             .expect("a reachable peer permits source delivery");
 
-        assert_eq!(collector_ids, vec!["repo-b".to_owned()]);
+        assert_eq!(
+            collector_ids,
+            vec![xp_test_fixtures::secondary_node_id().to_owned()]
+        );
         assert_eq!(
             rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
-            rendezvous_collectors("source-a", &["repo-b".to_owned()])
-                .expect("available assignment"),
+            rendezvous_collectors(
+                "source-a",
+                &[xp_test_fixtures::secondary_node_id().to_owned()]
+            )
+            .expect("available assignment"),
         );
     }
 
     #[test]
     fn stale_primary_and_standby_do_not_block_available_collector() {
         let ready = vec![
-            "stale-primary".to_owned(),
-            "available".to_owned(),
-            "stale-standby".to_owned(),
+            xp_test_fixtures::primary_node_id().to_owned(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
         ];
         let reachable = MeshPeerTarget {
-            node_id: "available".to_owned(),
-            node_name: "available".to_owned(),
-            mesh_base_url: None,
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
             mesh_reason: MeshPeerReason::MissingEndpoint,
-            public_base_url: "https://available.example".to_owned(),
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
         };
 
         let collector_ids = source_collector_repository_ids(&ready, &[reachable])
             .expect("available collector remains eligible");
 
-        assert_eq!(collector_ids, vec!["available".to_owned()]);
+        assert_eq!(
+            collector_ids,
+            vec![xp_test_fixtures::secondary_node_id().to_owned()]
+        );
         assert_eq!(
             rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
-            rendezvous_collectors("source-a", &["available".to_owned()])
-                .expect("available assignment"),
+            rendezvous_collectors(
+                "source-a",
+                &[xp_test_fixtures::secondary_node_id().to_owned()]
+            )
+            .expect("available assignment"),
         );
     }
 
     #[test]
     fn metadata_gap_with_no_reachable_peer_pauses_source_capture() {
-        let ready = vec!["repo-a".to_owned()];
+        let ready = vec![xp_test_fixtures::primary_node_id().to_owned()];
         assert!(source_collector_repository_ids(&ready, &[]).is_none());
     }
 }

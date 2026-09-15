@@ -187,14 +187,19 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             "repository segment identity is not pinned for the authenticated sender",
         ));
     }
-    let ready_repository_ids = ready_repository_ids(&state).await?;
+    let (ready_repository_ids, peers, _) =
+        worker::ready_repository_peers_with_metadata_status(&state)
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let available_ready_repository_ids =
+        worker::available_ready_repository_ids(&ready_repository_ids, &peers);
     let accepts_source = state
         .repository_replica
         .lock()
         .await
         .accepts_source(
             request.identity.node_id().as_str(),
-            &ready_repository_ids,
+            &available_ready_repository_ids,
             &state.cluster.node_id,
         )
         .map_err(repository_error)?;
@@ -446,7 +451,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             "relay delivery target does not match this repository",
         ));
     }
-    let ready_repository_ids = ready_repository_ids(&state).await?;
+    let (ready_repository_ids, peers, _) =
+        worker::ready_repository_peers_with_metadata_status(&state)
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let available_ready_repository_ids =
+        worker::available_ready_repository_ids(&ready_repository_ids, &peers);
     if !ready_repository_ids
         .iter()
         .any(|repository_id| repository_id == &state.cluster.node_id)
@@ -482,7 +492,7 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .await
             .accepts_source(
                 &request.source_repository_id,
-                &ready_repository_ids,
+                &available_ready_repository_ids,
                 &state.cluster.node_id,
             )
             .map_err(repository_error)?;
@@ -1053,10 +1063,7 @@ async fn ready_repository_ids(state: &AppState) -> Result<Vec<String>, ApiError>
     };
     let ready = membership
         .ready_members()
-        .filter_map(|member| {
-            let node_id = member.node_id().as_str();
-            store.get_node(node_id).map(|_| node_id.to_owned())
-        })
+        .map(|member| member.node_id().as_str().to_owned())
         .collect::<Vec<_>>();
     if ready.is_empty() {
         return Err(ApiError::conflict(

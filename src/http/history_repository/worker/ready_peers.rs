@@ -2,9 +2,9 @@ use super::*;
 use crate::{
     control_plane_mesh::{MeshPeerTarget, peer_target_from_node},
     domain::{Endpoint, Node},
-    state::JsonSnapshotStore,
 };
 
+#[cfg(test)]
 fn map_ready_repository_peers<F>(
     repository_ids: &[String],
     endpoints: &[Endpoint],
@@ -58,16 +58,6 @@ pub(in crate::http::history_repository) fn available_ready_repository_ids(
         .filter(|repository_id| peers.iter().any(|peer| &peer.node_id == *repository_id))
         .cloned()
         .collect()
-}
-
-pub(in crate::http::history_repository) fn repository_peer_targets(
-    store: &JsonSnapshotStore,
-    repository_ids: &[String],
-    endpoints: &[Endpoint],
-) -> anyhow::Result<Vec<MeshPeerTarget>> {
-    map_ready_repository_peers(repository_ids, endpoints, |repository_id| {
-        store.get_node(repository_id)
-    })
 }
 
 pub(in crate::http::history_repository) async fn ready_repository_peers(

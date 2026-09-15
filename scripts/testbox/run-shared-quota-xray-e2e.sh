@@ -264,13 +264,6 @@ trap 'on_signal 143' TERM
 
 cd "$REMOTE_RUN/scripts/e2e"
 
-if [ -n "${SUBNET_CLAIM_DIR:-}" ] && [ -d "$SUBNET_CLAIM_DIR" ]; then
-  claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
-  if [ -n "$claim_start_ticks" ]; then
-    printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
-  fi
-fi
-
 if ! command -v make >/dev/null 2>&1; then
   echo "missing 'make' on codex-testbox; vendored OpenSSL builds require it" >&2
   echo "repair with shared-testbox-bootstrap before running real-Xray suites" >&2
@@ -504,6 +497,11 @@ SUBNET_CLAIM_DIR="${subnet_claim_info[1]:-}"
 if [ -z "$TESTBOX_SUBNET" ] || [ -z "$SUBNET_CLAIM_DIR" ]; then
   echo "failed to allocate isolated shared-testbox subnet claim" >&2
   exit 1
+fi
+
+claim_start_ticks="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+if [ -n "$claim_start_ticks" ]; then
+  printf 'pid=%s\nstart_ticks=%s\n' "$$" "$claim_start_ticks" > "$SUBNET_CLAIM_DIR/lease"
 fi
 
 cat > "$net_override" <<YAML

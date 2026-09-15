@@ -75,7 +75,9 @@ pub(crate) async fn catch_up_against_ready_repositories(
     {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&receiving_repository_ids)?;
+        // Keep stale Ready members in the tombstone ledger even when their node metadata is
+        // unavailable. Network fanout remains limited to `peers` below.
+        runtime.reconcile_ready_repositories(&ready_repository_ids)?;
     }
 
     let deadline = Instant::now() + INITIAL_CATCH_UP_TICK_BUDGET;
@@ -94,7 +96,10 @@ pub(crate) async fn catch_up_against_ready_repositories(
     match peer_progress {
         InitialBackfillProgress::InProgress => return Ok(InitialBackfillProgress::InProgress),
         InitialBackfillProgress::Complete => {}
-        InitialBackfillProgress::Unavailable => return Ok(InitialBackfillProgress::Unavailable),
+        // An unavailable peer must not prevent a reachable peer from completing its
+        // tiered handoff. The aggregate result remains unavailable below when no
+        // reachable peer can make progress.
+        InitialBackfillProgress::Unavailable => {}
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
     // still advancing every peer's signed summary through bounded pages per worker tick.
