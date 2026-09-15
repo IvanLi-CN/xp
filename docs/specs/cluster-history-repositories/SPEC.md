@@ -73,10 +73,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   并共享 15 秒维护预算；多个 peer 按稳定顺序分配剩余时间片，慢 peer 不得阻塞后续 peer。
   达到页数或时间边界时必须返回 `InProgress`，从持久 checkpoint 在下一 tick 继续，不能重置
   summary cursor、pending repair IDs 或 tiered handoff 状态。
-- 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer；只要至少
-  一个 Ready peer 完成公网追赶，就不得因另一个失效 peer 阻塞本地 ready 稳定窗口。只有所有
-  Ready peer 都不可达时才返回 `Unavailable`。失效成员仍保留在 Raft 并由状态/运维面报告，不能
-  自动删除、跳过其历史或伪造 ACK。
+- 初始追赶遇到不可达的 Ready peer 时，必须继续处理同一 tick 中其他可达的 Ready peer，但任何
+  不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
+  覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
+  删除、跳过其历史或伪造 ACK。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。
