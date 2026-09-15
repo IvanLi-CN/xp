@@ -11,19 +11,17 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     let Ok((ready_repository_ids, peers)) = super::ready_repository_peers(state).await else {
         return Ok(());
     };
-    let collector_repository_ids = peers
-        .iter()
-        .map(|peer| peer.node_id.clone())
-        .collect::<Vec<_>>();
-    if collector_repository_ids.is_empty() {
+    let Some(collector_repository_ids) =
+        source_collector_repository_ids(&ready_repository_ids, &peers)
+    else {
         return Ok(());
-    }
+    };
     let mut capture_live = true;
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
             &ready_repository_ids,
-            &collector_repository_ids,
+            collector_repository_ids,
             &peers,
             now,
             capture_live,
@@ -35,6 +33,13 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
         capture_live = false;
     }
     Ok(())
+}
+
+fn source_collector_repository_ids<'a>(
+    ready_repository_ids: &'a [String],
+    peers: &[MeshPeerTarget],
+) -> Option<&'a [String]> {
+    (!peers.is_empty()).then_some(ready_repository_ids)
 }
 
 pub(super) struct SourceRecordBatch {
@@ -314,6 +319,45 @@ pub(super) async fn source_records(
         resource_rollup_buckets,
         resource_gap_ids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_collector_repository_ids;
+    use crate::{
+        control_plane_mesh::MeshPeerTarget, mesh_telemetry::MeshPeerReason,
+        state::history_repository::replica::rendezvous_collectors,
+    };
+
+    #[test]
+    fn metadata_gap_keeps_full_ready_set_for_source_assignment() {
+        let ready = vec![
+            "repo-a".to_owned(),
+            "repo-b".to_owned(),
+            "repo-c".to_owned(),
+        ];
+        let reachable = MeshPeerTarget {
+            node_id: "repo-b".to_owned(),
+            node_name: "repo-b".to_owned(),
+            mesh_base_url: None,
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: "https://repo-b.example".to_owned(),
+        };
+        let collector_ids = source_collector_repository_ids(&ready, &[reachable])
+            .expect("a reachable peer permits source delivery");
+
+        assert_eq!(collector_ids, ready.as_slice());
+        assert_eq!(
+            rendezvous_collectors("source-a", collector_ids).expect("full assignment"),
+            rendezvous_collectors("source-a", &ready).expect("full assignment"),
+        );
+    }
+
+    #[test]
+    fn metadata_gap_with_no_reachable_peer_pauses_source_capture() {
+        let ready = vec!["repo-a".to_owned()];
+        assert!(source_collector_repository_ids(&ready, &[]).is_none());
+    }
 }
 
 pub(super) fn source_records_with_deletions(

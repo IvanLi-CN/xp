@@ -452,8 +452,10 @@ if [ "$RUN_MESH_RESOURCE" = "1" ]; then
       cargo test --release --lib --no-run
     journal_test_bin=""
     while IFS= read -r candidate_bin; do
-      if "$candidate_bin" --list 2>/dev/null | grep -Fq \
-        'state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog'; then
+      if "$candidate_bin" --list 2>/dev/null |
+        grep -F \
+          'state::history_repository::replica::runtime::sync_tests::source_delivery_resource_tests::source_delivery_journal_resource_budget_stays_fixed_for_large_backlog' \
+          >/dev/null; then
         journal_test_bin="$candidate_bin"
         break
       fi
