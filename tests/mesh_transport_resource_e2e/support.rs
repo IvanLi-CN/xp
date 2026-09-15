@@ -797,32 +797,43 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
             .is_ok()
         {
             child.pid = if let Some(unit) = child.unit.as_deref() {
-                let output = Command::new("systemctl")
-                    .args(["--user", "show", unit, "--property=ControlGroup", "--value"])
-                    .output()
-                    .expect("resolve XP scope cgroup");
-                assert!(
-                    output.status.success(),
-                    "resolve XP scope cgroup for {unit}: {output:?}"
-                );
-                let cgroup = String::from_utf8(output.stdout)
-                    .expect("XP scope cgroup output")
-                    .trim()
-                    .to_owned();
-                assert!(!cgroup.is_empty(), "XP scope {unit} must expose a cgroup");
-                let processes = fs::read_to_string(
-                    Path::new("/sys/fs/cgroup")
-                        .join(cgroup.trim_start_matches('/'))
-                        .join("cgroup.procs"),
-                )
-                .expect("read XP scope cgroup processes");
-                let mut pids = processes
-                    .lines()
-                    .filter_map(|line| line.trim().parse::<u32>().ok())
-                    .filter(|pid| *pid != child.child.id())
-                    .collect::<Vec<_>>();
-                pids.sort_unstable();
-                *pids.last().expect("XP scope must contain the XP process")
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let output = Command::new("systemctl")
+                        .args(["--user", "show", unit, "--property=ControlGroup", "--value"])
+                        .output()
+                        .expect("resolve XP scope cgroup");
+                    assert!(
+                        output.status.success(),
+                        "resolve XP scope cgroup for {unit}: {output:?}"
+                    );
+                    let cgroup = String::from_utf8(output.stdout)
+                        .expect("XP scope cgroup output")
+                        .trim()
+                        .to_owned();
+                    if !cgroup.is_empty() {
+                        let processes = fs::read_to_string(
+                            Path::new("/sys/fs/cgroup")
+                                .join(cgroup.trim_start_matches('/'))
+                                .join("cgroup.procs"),
+                        )
+                        .expect("read XP scope cgroup processes");
+                        let mut pids = processes
+                            .lines()
+                            .filter_map(|line| line.trim().parse::<u32>().ok())
+                            .filter(|pid| *pid != child.child.id())
+                            .collect::<Vec<_>>();
+                        pids.sort_unstable();
+                        if let Some(pid) = pids.last() {
+                            break *pid;
+                        }
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "XP scope must contain the XP process"
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             } else {
                 child.child.id()
             };
