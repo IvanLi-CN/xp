@@ -1,3 +1,13 @@
+use axum::{
+    Router,
+    body::{Body, to_bytes},
+    extract::{Request, State},
+    http::{StatusCode, Version},
+    response::Response,
+    routing::any,
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use std::{
     fs::{self, File},
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -9,17 +19,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-
-use axum::{
-    Router,
-    body::{Body, to_bytes},
-    extract::{Request, State},
-    http::{StatusCode, Version},
-    response::Response,
-    routing::any,
-};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rcgen::{CertificateParams, Issuer, KeyPair, PKCS_ECDSA_P256_SHA256};
 use tokio::{io::copy_bidirectional, net::TcpListener, task::JoinHandle, time::sleep};
 use xp::{
     cluster_metadata::ClusterMetadata,
@@ -31,6 +30,9 @@ use xp::{
     },
     state::{DesiredStateCommand, JsonSnapshotStore, StoreInit},
 };
+
+mod source_journal_resource;
+pub use source_journal_resource::run_source_delivery_journal_resource_workload;
 
 const PEER_COUNT: usize = 50;
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
@@ -48,14 +50,12 @@ pub struct ResourceRun {
     pub active_per_peer: Vec<usize>,
     pub peak_active_per_peer: Vec<usize>,
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 struct PssSample {
     total_kib: u64,
     anon_kib: u64,
     file_kib: u64,
 }
-
 #[derive(Clone)]
 struct PeerServerState {
     ca_key_pem: String,
@@ -65,7 +65,6 @@ struct PeerServerState {
     requests: Arc<AtomicUsize>,
     non_h2_requests: Arc<AtomicUsize>,
 }
-
 struct PeerConnectionCounters {
     accepts: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
@@ -73,19 +72,16 @@ struct PeerConnectionCounters {
     requests: Arc<AtomicUsize>,
     non_h2_requests: Arc<AtomicUsize>,
 }
-
 struct PeerTarget {
     node_id: String,
     access_host: String,
     port: u16,
 }
-
 struct PeerFleet {
     targets: Vec<PeerTarget>,
     counters: Vec<PeerConnectionCounters>,
     tasks: Vec<JoinHandle<()>>,
 }
-
 impl Drop for PeerFleet {
     fn drop(&mut self) {
         for task in &self.tasks {
@@ -93,7 +89,6 @@ impl Drop for PeerFleet {
         }
     }
 }
-
 async fn signed_response(State(state): State<PeerServerState>, request: Request) -> Response<Body> {
     let (parts, body) = request.into_parts();
     state.requests.fetch_add(1, Ordering::SeqCst);
@@ -141,7 +136,6 @@ async fn signed_response(State(state): State<PeerServerState>, request: Request)
         .body(Body::empty())
         .expect("signed response")
 }
-
 async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFleet {
     let ca_key_pem = cluster
         .read_cluster_ca_key_pem(data_dir)
@@ -166,7 +160,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
     )
     .await
     .expect("TLS config");
-
     let mut targets = Vec::with_capacity(PEER_COUNT);
     let mut counters = Vec::with_capacity(PEER_COUNT);
     let mut tasks = Vec::with_capacity(PEER_COUNT * 2);
@@ -197,7 +190,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
         tasks.push(tokio::spawn(async move {
             let _ = server.into_future().await;
         }));
-
         let bind_ip: IpAddr = access_host.parse().expect("loopback peer IP");
         let proxy_listener = TcpListener::bind(SocketAddr::new(bind_ip, 0))
             .await
@@ -343,7 +335,6 @@ struct XpProcess {
     unit: Option<String>,
     pid: u32,
 }
-
 impl Drop for XpProcess {
     fn drop(&mut self) {
         if self.child.try_wait().ok().flatten().is_some() {
@@ -370,14 +361,13 @@ impl Drop for XpProcess {
         let _ = self.child.wait();
     }
 }
-
 impl XpProcess {
     fn id(&self) -> u32 {
         self.pid
     }
 }
-
 fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
+    let cluster = ClusterMetadata::load(data_dir).expect("load XP cluster metadata");
     let log_path = data_dir.join(format!("{label}.log"));
     let stdout = File::create(&log_path).expect("create XP resource log");
     let stderr = stdout.try_clone().expect("clone XP resource log");
@@ -385,7 +375,21 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         xp::admin_token::hash_admin_token_argon2id("mesh-resource-test-token-0000000000000000")
             .expect("hash test admin token");
     let child_cgroup = std::env::var_os("XP_MESH_RESOURCE_CHILD_CGROUP").is_some();
-    let unit = child_cgroup.then(|| format!("codex-xp-resource-{label}-{}", std::process::id()));
+    let unit = child_cgroup.then(|| {
+        let run_id = std::env::var("XP_MESH_RESOURCE_RUN_ID")
+            .unwrap_or_else(|_| std::process::id().to_string());
+        let safe_run_id = run_id
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        format!("codex-xp-resource-{safe_run_id}-{label}.scope")
+    });
     let mut command = if child_cgroup {
         let mut command = Command::new("systemd-run");
         command.args([
@@ -409,6 +413,10 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         .args([
             "--data-dir",
             data_dir.to_str().expect("UTF-8 data dir"),
+            "--node-name",
+            &cluster.node_name,
+            "--api-base-url",
+            &cluster.api_base_url,
             "--bind",
             &format!("127.0.0.1:{bind_port}"),
             "--xray-api-addr",
@@ -418,7 +426,10 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
             "run",
         ])
         .env("XP_ADMIN_TOKEN_HASH", admin_hash.as_str())
-        .env("RUST_LOG", "error")
+        .env(
+            "RUST_LOG",
+            std::env::var("XP_MESH_RESOURCE_RUST_LOG").unwrap_or_else(|_| "warn".to_owned()),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -765,7 +776,7 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
             .max(read_pss(pid).expect("read summary XP PSS").total_kib);
         sleep(Duration::from_secs(1)).await;
     }
-    stop_child(&mut child).await;
+    source_journal_resource::stop_child(&mut child).await;
     max_pss_kib
 }
 
@@ -780,24 +791,52 @@ async fn wait_for_xp(child: &mut XpProcess, bind_port: u16, log_path: &Path) {
             .await
             .is_ok()
         {
-            child.pid = child
-                .unit
-                .as_deref()
-                .and_then(|unit| {
-                    Command::new("systemctl")
-                        .args(["--user", "show", unit, "--property=MainPID", "--value"])
+            child.pid = if let Some(unit) = child.unit.as_deref() {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let output = Command::new("systemctl")
+                        .args(["--user", "show", unit, "--property=ControlGroup", "--value"])
                         .output()
-                        .ok()
-                })
-                .and_then(|output| {
-                    String::from_utf8(output.stdout)
-                        .ok()?
+                        .expect("resolve XP scope cgroup");
+                    assert!(
+                        output.status.success(),
+                        "resolve XP scope cgroup for {unit}: {output:?}"
+                    );
+                    let cgroup = String::from_utf8(output.stdout)
+                        .expect("XP scope cgroup output")
                         .trim()
-                        .parse::<u32>()
-                        .ok()
-                })
-                .filter(|pid| *pid > 0)
-                .unwrap_or_else(|| child.child.id());
+                        .to_owned();
+                    if !cgroup.is_empty() {
+                        let processes = fs::read_to_string(
+                            Path::new("/sys/fs/cgroup")
+                                .join(cgroup.trim_start_matches('/'))
+                                .join("cgroup.procs"),
+                        )
+                        .expect("read XP scope cgroup processes");
+                        let mut pids = processes
+                            .lines()
+                            .filter_map(|line| line.trim().parse::<u32>().ok())
+                            .collect::<Vec<_>>();
+                        pids.sort_unstable();
+                        let child_pid = child.child.id();
+                        let xp_pid = pids
+                            .iter()
+                            .copied()
+                            .find(|pid| *pid == child_pid)
+                            .or_else(|| pids.last().copied());
+                        if let Some(pid) = xp_pid {
+                            break pid;
+                        }
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "XP scope must contain the XP process"
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            } else {
+                child.child.id()
+            };
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for XP");
@@ -855,7 +894,7 @@ fn assert_expected_memory_scope(pid: u32) {
     );
 }
 
-fn read_cpu_ticks(pid: u32) -> u64 {
+pub(crate) fn read_cpu_ticks(pid: u32) -> u64 {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).expect("read process stat");
     let fields = stat
         .split_once(") ")
@@ -866,27 +905,6 @@ fn read_cpu_ticks(pid: u32) -> u64 {
     let user = fields[11].parse::<u64>().expect("user CPU ticks");
     let system = fields[12].parse::<u64>().expect("system CPU ticks");
     user + system
-}
-
-async fn stop_child(child: &mut XpProcess) {
-    if let Some(unit) = child.unit.as_deref() {
-        let _ = Command::new("systemctl")
-            .args(["--user", "stop", unit])
-            .status();
-    } else {
-        unsafe {
-            libc::kill(child.child.id() as libc::pid_t, libc::SIGINT);
-        }
-    }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if child.child.try_wait().expect("poll stopped XP").is_some() {
-            return;
-        }
-        sleep(Duration::from_millis(50)).await;
-    }
-    child.child.kill().expect("kill XP after grace period");
-    let _ = child.child.wait();
 }
 
 pub fn support_pids_from_env() -> Vec<u32> {
@@ -966,7 +984,7 @@ pub async fn run_resource_workload(
         .iter()
         .map(|counter| counter.peak_active.load(Ordering::SeqCst))
         .collect();
-    stop_child(&mut child).await;
+    source_journal_resource::stop_child(&mut child).await;
     ResourceRun {
         xp_peak_pss_kib,
         xp_peak_anon_pss_kib,

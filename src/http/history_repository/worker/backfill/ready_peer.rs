@@ -3,6 +3,17 @@ use crate::state::history_repository::replica::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,
     RetainedAnchorCheckpointUpdate,
 };
+use std::future::Future;
+use tokio::time::Instant;
+
+const MAX_INITIAL_CATCH_UP_PAGES_PER_TICK: usize = 8;
+const INITIAL_CATCH_UP_TICK_BUDGET: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CatchUpDrain {
+    progress: InitialBackfillProgress,
+    pages_consumed: usize,
+}
 
 struct CompletedRepairResponse {
     summary_cursor: Option<String>,
@@ -51,60 +62,84 @@ pub(crate) async fn catch_up_against_ready_repositories(
     state: &AppState,
     now: u64,
 ) -> anyhow::Result<InitialBackfillProgress> {
-    let (ready_repository_ids, peers) = ready_repository_peers(state).await?;
-    if peers.len() != ready_repository_ids.len() {
+    let (ready_repository_ids, peers, missing_metadata) =
+        super::ready_repository_peers_for_catch_up(state).await?;
+    if peers.is_empty() {
         return Ok(InitialBackfillProgress::Unavailable);
     }
-    let mut receiving_repository_ids = ready_repository_ids.clone();
-    receiving_repository_ids.push(state.cluster.node_id.clone());
-    receiving_repository_ids.sort_unstable();
-    receiving_repository_ids.dedup();
     {
         let mut runtime = state.repository_replica.lock().await;
         runtime.prepare_for_replication(now)?;
-        runtime.reconcile_ready_repositories(&receiving_repository_ids)?;
+        // Keep stale Ready members in the tombstone ledger even when their node metadata is
+        // unavailable. Network fanout remains limited to `peers` below.
+        runtime.reconcile_ready_repositories(&ready_repository_ids)?;
     }
 
-    let mut in_progress = false;
-    for peer in peers
+    let deadline = Instant::now() + INITIAL_CATCH_UP_TICK_BUDGET;
+    let peer_targets = peers
         .iter()
         .filter(|peer| peer.node_id != state.cluster.node_id)
-    {
-        match advance_ready_peer_catch_up_page(state, peer, &receiving_repository_ids, now).await? {
-            InitialBackfillProgress::InProgress => in_progress = true,
-            InitialBackfillProgress::Complete => {}
-            InitialBackfillProgress::Unavailable => {
-                return Ok(InitialBackfillProgress::Unavailable);
+        .collect::<Vec<_>>();
+    let (peer_progress, pages_by_peer, progress_by_peer) =
+        drain_ready_peer_pages(peer_targets.len(), deadline, |index| {
+            let peer = peer_targets[index];
+            async {
+                advance_ready_peer_catch_up_page(state, peer, &ready_repository_ids, now).await
             }
-        }
-    }
-    if in_progress {
-        return Ok(InitialBackfillProgress::InProgress);
+        })
+        .await?;
+    match peer_progress {
+        InitialBackfillProgress::InProgress => return Ok(InitialBackfillProgress::InProgress),
+        InitialBackfillProgress::Complete => {}
+        // An unavailable peer must not prevent a reachable peer from completing its
+        // tiered handoff. The aggregate result remains unavailable below when no
+        // reachable peer can make progress.
+        InitialBackfillProgress::Unavailable => {}
     }
     // Tiered rows overlap across ready repositories. Keep the prior single-authority rule while
-    // still advancing every peer's signed summary one bounded page per worker tick.
-    let Some(tiered_peer) = peers
+    // still advancing every peer's signed summary through bounded pages per worker tick.
+    let Some((tiered_peer_index, tiered_peer)) = peer_targets
         .iter()
-        .find(|peer| peer.node_id != state.cluster.node_id)
+        .zip(progress_by_peer.iter())
+        .enumerate()
+        .find_map(|(index, (peer, progress))| {
+            (*progress != InitialBackfillProgress::Unavailable).then_some((index, *peer))
+        })
     else {
         return Ok(InitialBackfillProgress::Unavailable);
     };
     let needs_reverification = {
         let runtime = state.repository_replica.lock().await;
-        peers.iter().any(|peer| {
-            peer.node_id != state.cluster.node_id
-                && runtime
-                    .initial_peer_backfill_checkpoint(&peer.node_id)
-                    .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
-        })
+        peer_targets
+            .iter()
+            .zip(progress_by_peer.iter())
+            .any(|(peer, progress)| {
+                *progress != InitialBackfillProgress::Unavailable
+                    && runtime
+                        .initial_peer_backfill_checkpoint(&peer.node_id)
+                        .is_some_and(|checkpoint| checkpoint.summary_requires_tiered_backfill)
+            })
     };
-    let tiered_progress =
-        pull_peer_initial_history(state, tiered_peer, &receiving_repository_ids).await?;
+    let tiered_page_cap = pages_by_peer
+        .get(tiered_peer_index)
+        .copied()
+        .map_or(0, remaining_peer_page_budget);
+    let tiered_progress = if tiered_page_cap == 0 {
+        InitialBackfillProgress::InProgress
+    } else {
+        drain_bounded_catch_up_pages(tiered_page_cap, deadline, || async {
+            pull_peer_initial_history(state, tiered_peer, &ready_repository_ids).await
+        })
+        .await?
+        .progress
+    };
     if needs_reverification && tiered_progress == InitialBackfillProgress::Complete {
         let mut runtime = state.repository_replica.lock().await;
-        for peer in peers
+        for peer in peer_targets
             .iter()
-            .filter(|peer| peer.node_id != state.cluster.node_id)
+            .zip(progress_by_peer.iter())
+            .filter(|(_, progress)| **progress != InitialBackfillProgress::Unavailable)
+            .map(|(peer, _)| *peer)
         {
             runtime.update_initial_peer_summary_checkpoint(
                 &peer.node_id,
@@ -117,7 +152,140 @@ pub(crate) async fn catch_up_against_ready_repositories(
         }
         return Ok(InitialBackfillProgress::InProgress);
     }
-    Ok(tiered_progress)
+    Ok(ready_peer_catch_up_result(
+        peer_progress,
+        missing_metadata,
+        tiered_progress,
+    ))
+}
+
+fn remaining_peer_page_budget(pages_consumed: usize) -> usize {
+    MAX_INITIAL_CATCH_UP_PAGES_PER_TICK.saturating_sub(pages_consumed)
+}
+
+fn ready_peer_catch_up_result(
+    peer_progress: InitialBackfillProgress,
+    missing_metadata: bool,
+    tiered_progress: InitialBackfillProgress,
+) -> InitialBackfillProgress {
+    if peer_progress == InitialBackfillProgress::InProgress
+        || tiered_progress == InitialBackfillProgress::InProgress
+    {
+        return InitialBackfillProgress::InProgress;
+    }
+    if missing_metadata
+        || peer_progress == InitialBackfillProgress::Unavailable
+        || tiered_progress == InitialBackfillProgress::Unavailable
+    {
+        return InitialBackfillProgress::Unavailable;
+    }
+    InitialBackfillProgress::Complete
+}
+
+async fn drain_ready_peer_pages<F, Fut>(
+    peer_count: usize,
+    deadline: Instant,
+    mut fetch_page: F,
+) -> anyhow::Result<(
+    InitialBackfillProgress,
+    Vec<usize>,
+    Vec<InitialBackfillProgress>,
+)>
+where
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
+{
+    let mut in_progress = false;
+    let mut unavailable = false;
+    let mut pages_by_peer = Vec::with_capacity(peer_count);
+    let mut progress_by_peer = Vec::with_capacity(peer_count);
+    for index in 0..peer_count {
+        let remaining_budget = deadline.saturating_duration_since(Instant::now());
+        if remaining_budget.is_zero() {
+            in_progress = true;
+            break;
+        }
+        let remaining_peers = (peer_count - index) as u32;
+        let peer_deadline = Instant::now() + remaining_budget / remaining_peers;
+        let drain = drain_bounded_catch_up_pages(
+            MAX_INITIAL_CATCH_UP_PAGES_PER_TICK,
+            peer_deadline,
+            || fetch_page(index),
+        )
+        .await?;
+        pages_by_peer.push(drain.pages_consumed);
+        progress_by_peer.push(drain.progress);
+        match drain.progress {
+            InitialBackfillProgress::InProgress => in_progress = true,
+            InitialBackfillProgress::Complete => {}
+            InitialBackfillProgress::Unavailable => {
+                // A failed public peer must not consume the whole tick. Continue with the
+                // remaining peers, then report the aggregate result for the next retry.
+                unavailable = true;
+            }
+        }
+    }
+    Ok((
+        if in_progress {
+            InitialBackfillProgress::InProgress
+        } else if unavailable {
+            InitialBackfillProgress::Unavailable
+        } else {
+            InitialBackfillProgress::Complete
+        },
+        pages_by_peer,
+        progress_by_peer,
+    ))
+}
+
+async fn drain_bounded_catch_up_pages<F, Fut>(
+    max_pages: usize,
+    deadline: Instant,
+    mut fetch_page: F,
+) -> anyhow::Result<CatchUpDrain>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<InitialBackfillProgress>>,
+{
+    let mut pages_consumed = 0;
+    for _ in 0..max_pages {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(CatchUpDrain {
+                progress: InitialBackfillProgress::InProgress,
+                pages_consumed,
+            });
+        }
+        pages_consumed += 1;
+        let progress = match tokio::time::timeout(remaining, fetch_page()).await {
+            Ok(progress) => progress?,
+            Err(_) => {
+                return Ok(CatchUpDrain {
+                    progress: InitialBackfillProgress::InProgress,
+                    pages_consumed,
+                });
+            }
+        };
+        match progress {
+            InitialBackfillProgress::Complete => {
+                return Ok(CatchUpDrain {
+                    progress,
+                    pages_consumed,
+                });
+            }
+            InitialBackfillProgress::Unavailable => {
+                return Ok(CatchUpDrain {
+                    progress,
+                    pages_consumed,
+                });
+            }
+            InitialBackfillProgress::InProgress => {}
+        }
+    }
+    Ok(CatchUpDrain {
+        progress: InitialBackfillProgress::InProgress,
+        pages_consumed,
+    })
 }
 
 async fn advance_ready_peer_catch_up_page(
@@ -169,7 +337,7 @@ async fn advance_ready_peer_catch_up_page(
     let remote_summary: RepositoryReplicaSummary =
         match repository_direct_request(state, peer, Method::GET, &path, Vec::new()).await {
             Ok(summary) => summary,
-            Err(error) => {
+            Err(error) if error.is_transport() => {
                 tracing::debug!(
                     peer = %peer.node_id,
                     error = %error,
@@ -177,6 +345,7 @@ async fn advance_ready_peer_catch_up_page(
                 );
                 return Ok(InitialBackfillProgress::Unavailable);
             }
+            Err(error) => return Err(error.into()),
         };
     let (requires_repair, missing_segment_ids, partitions_converged) = {
         let mut runtime = state.repository_replica.lock().await;
@@ -242,14 +411,26 @@ async fn repair_ready_peer_catch_up_page(
         segment_ids: pending.iter().cloned().collect(),
         response_id: checkpoint.retained_anchor_repair_response_id.clone(),
     })?;
-    let repair: RepositoryRepairBatch = repository_direct_request(
+    let repair: RepositoryRepairBatch = match repository_direct_request(
         state,
         peer,
         Method::POST,
         "/api/admin/_internal/history-repository/repair",
         body,
     )
-    .await?;
+    .await
+    {
+        Ok(repair) => repair,
+        Err(error) if error.is_transport() => {
+            tracing::debug!(
+                peer = %peer.node_id,
+                error = %error,
+                "history repository repair page failed"
+            );
+            return Ok(InitialBackfillProgress::Unavailable);
+        }
+        Err(error) => return Err(error.into()),
+    };
     // Old peers omit response_id. Derive it from their actual response rather than the
     // request, so a changed retry cannot consume a first-response allowance.
     let response_id = repair.response_id_digest()?;
@@ -425,6 +606,196 @@ async fn repair_ready_peer_catch_up_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_catch_up_drain_consumes_multiple_pages_in_one_tick() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async move {
+                    Ok(if calls < 3 {
+                        InitialBackfillProgress::InProgress
+                    } else {
+                        InitialBackfillProgress::Complete
+                    })
+                }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 3);
+        assert_eq!(result.progress, InitialBackfillProgress::Complete);
+        assert_eq!(result.pages_consumed, 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_catch_up_drain_stops_at_page_cap() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(3, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::InProgress) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 3);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_catch_up_drain_stops_before_an_expired_deadline() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() - Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::InProgress) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 0);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_catch_up_drain_cancels_a_slow_page_at_the_deadline() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let recorded_calls = calls.clone();
+        let task = tokio::spawn(async move {
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_millis(20), || {
+                recorded_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                async {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    Ok(InitialBackfillProgress::InProgress)
+                }
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        let result = task
+            .await
+            .expect("bounded catch-up drain task")
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(result.progress, InitialBackfillProgress::InProgress);
+        assert_eq!(result.pages_consumed, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_catch_up_drain_stops_after_an_unavailable_page() {
+        let mut calls = 0;
+        let result =
+            drain_bounded_catch_up_pages(8, Instant::now() + Duration::from_secs(1), || {
+                calls += 1;
+                async { Ok(InitialBackfillProgress::Unavailable) }
+            })
+            .await
+            .expect("bounded catch-up drain");
+
+        assert_eq!(calls, 1);
+        assert_eq!(result.progress, InitialBackfillProgress::Unavailable);
+        assert_eq!(result.pages_consumed, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ready_peer_drain_gives_later_peers_a_slice_after_a_slow_peer() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_calls = calls.clone();
+        let task = tokio::spawn(async move {
+            drain_ready_peer_pages(
+                2,
+                Instant::now() + Duration::from_millis(40),
+                move |index| {
+                    recorded_calls.lock().expect("record peer call").push(index);
+                    async move {
+                        if index == 0 {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            Ok(InitialBackfillProgress::InProgress)
+                        } else {
+                            Ok(InitialBackfillProgress::Complete)
+                        }
+                    }
+                },
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        let result = task
+            .await
+            .expect("ready peer drain task")
+            .expect("ready peer drain");
+
+        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
+        assert_eq!(result.0, InitialBackfillProgress::InProgress);
+        assert_eq!(result.1, vec![1, 1]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ready_peer_drain_continues_after_an_unavailable_peer() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_calls = calls.clone();
+        let result =
+            drain_ready_peer_pages(2, Instant::now() + Duration::from_secs(1), move |index| {
+                recorded_calls.lock().expect("record peer call").push(index);
+                async move {
+                    if index == 0 {
+                        Ok(InitialBackfillProgress::Unavailable)
+                    } else {
+                        Ok(InitialBackfillProgress::Complete)
+                    }
+                }
+            })
+            .await
+            .expect("ready peer drain");
+
+        assert_eq!(*calls.lock().expect("read peer calls"), vec![0, 1]);
+        assert_eq!(result.0, InitialBackfillProgress::Unavailable);
+        assert_eq!(result.1, vec![1, 1]);
+        assert_eq!(
+            result.2,
+            vec![
+                InitialBackfillProgress::Unavailable,
+                InitialBackfillProgress::Complete,
+            ]
+        );
+    }
+
+    #[test]
+    fn tiered_export_uses_only_the_remaining_peer_page_budget() {
+        assert_eq!(remaining_peer_page_budget(0), 8);
+        assert_eq!(remaining_peer_page_budget(3), 5);
+        assert_eq!(remaining_peer_page_budget(8), 0);
+        assert_eq!(remaining_peer_page_budget(16), 0);
+    }
+
+    #[test]
+    fn unavailable_ready_peer_keeps_catch_up_incomplete_after_tiered_drain() {
+        assert_eq!(
+            ready_peer_catch_up_result(
+                InitialBackfillProgress::Unavailable,
+                false,
+                InitialBackfillProgress::Complete,
+            ),
+            InitialBackfillProgress::Unavailable
+        );
+        assert_eq!(
+            ready_peer_catch_up_result(
+                InitialBackfillProgress::Complete,
+                false,
+                InitialBackfillProgress::Complete,
+            ),
+            InitialBackfillProgress::Complete
+        );
+    }
 
     #[test]
     fn wire_bounded_repair_response_completes_its_identity_with_pending_ids() {

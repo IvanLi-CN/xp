@@ -1,4 +1,5 @@
 use super::*;
+use crate::history_sync::RelayFrame;
 use crate::state::history_repository::{
     HistoryStorage,
     identity::{Ed25519PublicKey, RepositoryNodeId, RepositoryNodeIdentity, X25519PublicKey},
@@ -42,6 +43,28 @@ fn relay_repair_does_not_complete_daily_deep_verification() {
     assert_eq!(
         completed_replication_work(ReplicaWork::DeepVerification, true),
         ReplicaWork::DeepVerification
+    );
+}
+
+#[test]
+fn stale_ready_metadata_keeps_anti_entropy_incomplete() {
+    assert!(!super::should_record_anti_entropy_completion(
+        false, 1, true
+    ));
+    assert!(!super::should_record_anti_entropy_completion(true, 2, true));
+    assert!(super::should_record_anti_entropy_completion(
+        false, 1, false
+    ));
+    assert!(super::should_record_anti_entropy_completion(true, 2, false));
+}
+
+#[test]
+fn stale_ready_metadata_blocks_tombstone_ack_cursor_advance() {
+    let ready = vec!["local".to_owned(), "stale-ready".to_owned()];
+    let peers = Vec::new();
+    assert_eq!(
+        super::missing_tombstone_ack_peer(&ready, "local", &peers).as_deref(),
+        Some("stale-ready")
     );
 }
 

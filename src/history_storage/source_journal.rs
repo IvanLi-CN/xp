@@ -12,7 +12,7 @@ pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS: usize = 20_000;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_MAX_BYTES: u64 = 128 * 1024 * 1024;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS: usize = 256;
 pub(crate) const SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES: usize = 1024 * 1024;
-const SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT: i64 = 80;
+pub(crate) const SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT: i64 = 80;
 const SOURCE_DELIVERY_JOURNAL_RESUME_PERCENT: i64 = 60;
 
 pub(super) fn ensure_source_delivery_journal_columns(connection: &mut Connection) -> Result<()> {

@@ -31,10 +31,6 @@ const MAX_HISTORY_SYNC_BASE64_BYTES: usize = MAX_RESPONSE_WIRE_BYTES.div_ceil(3)
 const MAX_REPAIR_REQUEST_IDS: usize = 64;
 const REPOSITORY_ED25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-ed25519-v1\0";
 const REPOSITORY_X25519_KEY_CONTEXT: &[u8] = b"xp-history-repository-x25519-v1\0";
-pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY: &str =
-    "/api/admin/_internal/history-repository/relay";
-pub(super) const INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER: &str =
-    "/api/admin/_internal/history-repository/relay-deliver";
 pub(super) mod gaps;
 mod worker;
 pub(crate) use worker::spawn_repository_replica_worker;
@@ -191,14 +187,19 @@ pub(super) async fn admin_internal_receive_history_repository_segment(
             "repository segment identity is not pinned for the authenticated sender",
         ));
     }
-    let ready_repository_ids = ready_repository_ids(&state).await?;
+    let (ready_repository_ids, peers, _) =
+        worker::ready_repository_peers_with_metadata_status(&state)
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let available_ready_repository_ids =
+        worker::available_ready_repository_ids(&ready_repository_ids, &peers);
     let accepts_source = state
         .repository_replica
         .lock()
         .await
         .accepts_source(
             request.identity.node_id().as_str(),
-            &ready_repository_ids,
+            &available_ready_repository_ids,
             &state.cluster.node_id,
         )
         .map_err(repository_error)?;
@@ -434,54 +435,6 @@ pub(super) async fn admin_internal_query_history_repository(
     Ok(Json(response))
 }
 
-pub(super) async fn admin_internal_forward_history_repository_relay(
-    Extension(state): Extension<AppState>,
-    internal: Option<Extension<InternalSignatureAuth>>,
-    ApiJson(request): ApiJson<RepositoryRelayRequest>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let sender = ensure_cluster_sender(&state, internal).await?;
-    if request.source_repository_id != sender {
-        return Err(ApiError::unauthorized(
-            "relay source does not match the authenticated sender",
-        ));
-    }
-    if request.relay_repository_id.is_some() {
-        return Err(ApiError::invalid_request(
-            "nested repository relay is not supported",
-        ));
-    }
-    let (ready_repository_ids, peers) = worker::ready_repository_peers(&state)
-        .await
-        .map_err(|error| ApiError::conflict(error.to_string()))?;
-    let target = peers
-        .iter()
-        .find(|peer| peer.node_id == request.target_repository_id)
-        .ok_or_else(|| ApiError::invalid_request("relay target is not a ready repository"))?;
-    if !ready_repository_ids
-        .iter()
-        .any(|repository_id| repository_id == &request.target_repository_id)
-    {
-        return Err(ApiError::invalid_request("relay target is not ready"));
-    }
-    let body = serde_json::to_vec(&RepositoryRelayRequest {
-        target_repository_id: request.target_repository_id,
-        source_repository_id: request.source_repository_id,
-        relay_repository_id: Some(state.cluster.node_id.clone()),
-        frame: request.frame,
-    })
-    .map_err(|error| ApiError::internal(error.to_string()))?;
-    worker::repository_mesh_request::<serde_json::Value>(
-        &state,
-        target,
-        axum::http::Method::POST,
-        INTERNAL_HISTORY_REPOSITORY_RELAY_DELIVER,
-        body,
-    )
-    .await
-    .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
-    Ok(Json(serde_json::json!({})))
-}
-
 pub(super) async fn admin_internal_deliver_history_repository_relay(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -498,7 +451,12 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             "relay delivery target does not match this repository",
         ));
     }
-    let ready_repository_ids = ready_repository_ids(&state).await?;
+    let (ready_repository_ids, peers, _) =
+        worker::ready_repository_peers_with_metadata_status(&state)
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let available_ready_repository_ids =
+        worker::available_ready_repository_ids(&ready_repository_ids, &peers);
     if !ready_repository_ids
         .iter()
         .any(|repository_id| repository_id == &state.cluster.node_id)
@@ -534,7 +492,7 @@ pub(super) async fn admin_internal_deliver_history_repository_relay(
             .await
             .accepts_source(
                 &request.source_repository_id,
-                &ready_repository_ids,
+                &available_ready_repository_ids,
                 &state.cluster.node_id,
             )
             .map_err(repository_error)?;

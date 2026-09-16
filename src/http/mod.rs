@@ -1178,10 +1178,6 @@ pub fn build_router_with_mesh_telemetry(
             post(history_repository::admin_internal_query_history_repository),
         )
         .route(
-            "/_internal/history-repository/relay",
-            post(history_repository::admin_internal_forward_history_repository_relay),
-        )
-        .route(
             "/_internal/history-repository/relay-deliver",
             post(history_repository::admin_internal_deliver_history_repository_relay),
         )

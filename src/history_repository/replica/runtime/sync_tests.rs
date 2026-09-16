@@ -450,7 +450,7 @@ fn source_tombstone_acknowledgements_use_the_tombstone_cursor_stream() {
             "cluster-a",
             source_identity.clone(),
             &key,
-            vec![tombstone],
+            [tombstone],
             100,
             &ready,
         )
@@ -492,7 +492,7 @@ fn source_epoch_rotates_when_the_replica_snapshot_is_lost_but_sqlite_remains() {
             "cluster-a",
             source_identity.clone(),
             &key,
-            vec![SyncRecord::new(
+            &[SyncRecord::new(
                 "node-a",
                 "node-a",
                 "runtime.v1",
@@ -518,7 +518,7 @@ fn source_epoch_rotates_when_the_replica_snapshot_is_lost_but_sqlite_remains() {
             "cluster-a",
             source_identity,
             &key,
-            vec![SyncRecord::new(
+            &[SyncRecord::new(
                 "node-a",
                 "node-a",
                 "runtime.v1",
@@ -649,7 +649,7 @@ fn a_delayed_stream_preserves_other_streams_without_declaring_a_permanent_gap() 
             "cluster-a",
             source_identity,
             &signing_key,
-            vec![
+            &[
                 SyncRecord::new(
                     "node-a",
                     "node-a",
@@ -699,7 +699,7 @@ fn local_source_segments_keep_each_observation_stream_independent() {
             "cluster-a",
             identity(),
             &signing_key,
-            vec![
+            &[
                 SyncRecord::new(
                     "node-a",
                     "node-a",

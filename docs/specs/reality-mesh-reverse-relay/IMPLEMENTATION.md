@@ -14,8 +14,11 @@
   state barrier is schema v13, and the coordinator refuses to write the first epoch until every
   voter advertises the assignment capability and at least one candidate reports signed Xray
   readiness plus a managed VLESS endpoint.
-- History repository direct sync now tries the assigned Reverse route after Reality/Public direct
-  failures and before the existing encrypted dynamic relay.
+- History repository direct sync uses the target node's public HTTPS `api_base_url` only; it never
+  probes or opens the assigned Reverse route or the legacy encrypted dynamic relay. Public failures
+  leave the durable checkpoint or outbox for the next bounded retry.
+  Control-plane fallback URL handling preserves the registered public endpoint for non-history
+  callers while keeping this history-specific HTTPS-only boundary explicit.
 - Fresh join now returns an additive `reverse_mesh_bootstrap` marker when the assignment capability
   barrier and a managed Rendezvous candidate are available. The leader pre-registers the learner's
   generation/assignment in Raft; `xp join` stores only the public endpoint parameters, epoch and

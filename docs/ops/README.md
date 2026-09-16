@@ -110,9 +110,10 @@ Host-managed mode assumptions:
 - `xray` runs locally and exposes its gRPC API on loopback by default (`127.0.0.1:10085`).
 - `xp` talks to `xray` via gRPC at `XP_XRAY_API_ADDR`.
 - `xp` uses managed VLESS/REALITY and the peer `api_base_url` Tunnel/public origin as equal
-  peer-direct control-plane paths. When Raft has assigned a target a healthy Reverse Rendezvous,
-  control-plane requests try that authenticated Reality Mesh Reverse relay after the direct path
-  and before the existing in-memory encrypted dynamic relay. The Reverse portal is TCP-only,
+  peer-direct control-plane paths for health, Raft, Admin fan-out and SSE. When Raft has assigned a
+  target a healthy Reverse Rendezvous, those control-plane requests try that authenticated Reality
+  Mesh Reverse relay after the direct path and before the existing in-memory encrypted dynamic
+  relay. The Reverse portal is TCP-only,
   password-authenticated, bound to XP-owned `127.0.0.1:10086`, and does not add a public listener.
   A target installs a Reverse initiating outbound only during its 10-second signed-health probe or
   120-second local lease; an unreachable Rendezvous removes that outbound and retries locally with
@@ -121,8 +122,11 @@ Host-managed mode assumptions:
   health probes. Excess requests fail before opening another underlay stream and follow the
   existing fallback/error policy. The slot remains held while the response body/stream is live.
   This is a fixed safety limit with no node-local override.
-  Repository synchronization keeps both direct paths and follows the same Reverse-before-dynamic-
-  relay order.
+  Repository synchronization is separate from that control-plane fallback: direct requests use the
+  peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
+  delivery uses the same public HTTPS path. A
+  public transport failure leaves the durable checkpoint or outbox for the next bounded retry and
+  never opens a history Mesh relay.
 - A configured history repository persists its replica state in `${XP_DATA_DIR}/history.sqlite3`.
   Membership, lifecycle and capacity are Raft-backed; `GET /api/admin/history-repositories`
   reports configured, partial and unreachable states with per-member capacity and sync quality.
@@ -803,7 +807,8 @@ Notes:
   through the admin repository endpoints; requests have a bounded range, page size and cursor, so
   the endpoints are not an arbitrary SQL or bulk-export interface.
 - Repository bootstrap is bounded and resumable: one worker tick handles at most one local page
-  and one page per peer, capped at 128 records and 192 KiB. Before any member is `ready`, syncing
+  and one initial summary page per peer, capped at 128 records and 192 KiB. Before any member is
+  `ready`, syncing
   repositories import each peer's node-local history, including another configured syncing
   repository. This establishes the full cluster baseline without recursive repository repair. The
   existing opaque page cursor fixes the first page's snapshot horizon, so new samples cannot keep
@@ -811,14 +816,25 @@ Notes:
   fully completed catch-up starts the five-minute readiness window.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
-  For ready peers, one worker tick processes one summary page, one repair response, or one tiered
-  export page. The summary cursor and pending repair IDs are persisted in the peer checkpoint so a
-  restart cannot trigger an unbounded bootstrap scan or starve capacity and lifecycle ticks.
+  For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or
+  tiered export pages per peer within a shared 15-second maintenance budget. The remaining budget is
+  split among peers in stable order so a slow peer cannot starve later peers. The summary cursor and
+  pending repair IDs are persisted in the peer checkpoint so a restart cannot trigger an unbounded
+  bootstrap scan or starve capacity and lifecycle ticks. When the page or time bound is reached,
+  the worker returns `InProgress` and resumes from that durable checkpoint on the next replication
+  tick.
   Summary pages enumerate repository segment IDs from SQLite metadata only (`id` and tombstone
   phase); they do not read or decode segment payloads. If a peer remains `syncing` after a summary
-  timeout, roll out the serving repository first, then observe the next five-minute direct-path
-  retry so its durable checkpoint can resume. Do not restart the source, run `VACUUM`, clear the
+  timeout, roll out the serving repository first, then observe the next lifecycle retry so its
+  durable checkpoint can resume. The history worker uses the peer's public HTTPS `api_base_url`
+  for all summary, repair and source-delivery requests and does not select or probe Mesh. Do not
+  restart the source, run `VACUUM`,
+  clear the
   database, or delete unacknowledged backlog as a workaround.
+  During initial catch-up, an unavailable or stale Ready member does not block other Ready members
+  from receiving their public pages, but it keeps the aggregate catch-up incomplete. The node does
+  not start its readiness window until every Ready member has been covered. Keep stale membership
+  for explicit operator cleanup; never remove it by editing the checkpoint.
   If a source delivery backlog is unchanged while the serving peer reports a sequence gap, inspect
   the oldest pending segment and its permanent predecessor gap. The serving release must be active
   before retrying; its bounded gap page prioritizes that predecessor before rotating the remainder.
@@ -864,11 +880,13 @@ Notes:
   continuation also requires the release's direct five-column keyset seek.
   The operator-run source/release-candidate validation path
   `XP_MESH_RESOURCE_SUMMARY_ONLY=1 XP_RUN_MESH_RESOURCE=1` runs the signed summary endpoint against
-  257 near-limit segments in a 128 MiB/no-swap cgroup and records the candidate XP
-  `smaps_rollup` PSS peak during request execution before any rollout decision. The runner requires
-  a clean commit, verifies tracked source and generated Web-shell archive SHA256 values, and embeds
-  the commit in the candidate build. GitHub CI and release publication do not access the shared
-  testbox; attach this run's evidence separately before production rollout.
+  257 near-limit segments and the 20,000-row source journal benchmark in 128 MiB/no-swap cgroups;
+  it records the candidate XP `smaps_rollup` PSS peak during request execution before any rollout
+  decision. The runner requires a clean commit, verifies tracked source and generated Web-shell
+  archive SHA256 values, and embeds the commit in the candidate build. GitHub CI and release
+  publication do not access the shared testbox; the runner writes a SHA-bound manifest and full
+  workload log to `${XP_TESTBOX_EVIDENCE_DIR:-$TMPDIR/xp-testbox-evidence}` before cleanup, so
+  attach those files separately before production rollout.
   Retained partition mismatches after segment repair drains trigger the same single-authority
   tiered import followed by a fresh deep summary pass; the member cannot enter `ready` while that
   verification remains unresolved.

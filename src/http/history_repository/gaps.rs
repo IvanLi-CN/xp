@@ -32,14 +32,19 @@ pub(in crate::http) async fn admin_internal_receive_history_repository_gaps(
     {
         return Err(ApiError::unauthorized("repository gap sender is invalid"));
     }
-    let ready_repository_ids = ready_repository_ids(&state).await?;
+    let (ready_repository_ids, peers, _) =
+        worker::ready_repository_peers_with_metadata_status(&state)
+            .await
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+    let available_ready_repository_ids =
+        worker::available_ready_repository_ids(&ready_repository_ids, &peers);
     let accepts_source = state
         .repository_replica
         .lock()
         .await
         .accepts_source(
             request.identity.node_id().as_str(),
-            &ready_repository_ids,
+            &available_ready_repository_ids,
             &state.cluster.node_id,
         )
         .map_err(repository_error)?;

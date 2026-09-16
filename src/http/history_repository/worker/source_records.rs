@@ -8,14 +8,30 @@ const MAX_PATH_HEALTH_SOURCE_BUCKETS_PER_PEER: usize = 1;
 pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::Result<()> {
     const MAX_PAGES_PER_CYCLE: usize = 4;
     let now = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default();
-    let Ok((ready_repository_ids, peers)) = super::ready_repository_peers(state).await else {
-        return Ok(());
+    let (ready_repository_ids, peers) = match super::ready_repository_peers(state).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(error = %error, "history source collection unavailable before replay");
+            return Ok(());
+        }
     };
+    let available_ready_repository_ids =
+        super::available_ready_repository_ids(&ready_repository_ids, &peers);
+    let collector_repository_ids =
+        source_collector_repository_ids(&available_ready_repository_ids, &peers);
+    if collector_repository_ids.is_none() {
+        // Persist one bounded capture page even when every Ready peer is missing metadata.
+        // Delivery remains deferred until a usable collector appears on a later cycle.
+        super::publish_local_history_segment(state, &ready_repository_ids, None, &peers, now, true)
+            .await?;
+        return Ok(());
+    }
     let mut capture_live = true;
     for _ in 0..MAX_PAGES_PER_CYCLE {
         if !super::publish_local_history_segment(
             state,
             &ready_repository_ids,
+            collector_repository_ids.as_deref(),
             &peers,
             now,
             capture_live,
@@ -27,6 +43,18 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
         capture_live = false;
     }
     Ok(())
+}
+
+fn source_collector_repository_ids(
+    ready_repository_ids: &[String],
+    peers: &[MeshPeerTarget],
+) -> Option<Vec<String>> {
+    let available = ready_repository_ids
+        .iter()
+        .filter(|repository_id| peers.iter().any(|peer| &peer.node_id == *repository_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    (!available.is_empty()).then_some(available)
 }
 
 pub(super) struct SourceRecordBatch {
@@ -48,6 +76,12 @@ impl SourceRecordBatch {
             resource_rollup_buckets: Vec::new(),
             resource_gap_ids: Vec::new(),
         }
+    }
+
+    pub(super) fn has_records(&self) -> bool {
+        self.records
+            .as_ref()
+            .is_some_and(|records| !records.is_empty())
     }
 
     pub(super) fn take_records(&mut self) -> Vec<SyncRecord> {
@@ -331,4 +365,82 @@ pub(super) fn source_records_with_deletions(
         .collect::<Result<Vec<_>, _>>()?;
     tombstones.extend(live_records);
     Ok(tombstones)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_collector_repository_ids;
+    use crate::{
+        control_plane_mesh::MeshPeerTarget, mesh_telemetry::MeshPeerReason,
+        state::history_repository::replica::rendezvous_collectors,
+    };
+
+    #[test]
+    fn metadata_gap_uses_only_available_ready_peers_for_source_assignment() {
+        let ready = vec![
+            xp_test_fixtures::primary_node_id().to_owned(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
+        ];
+        let reachable = MeshPeerTarget {
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+        };
+        let collector_ids = source_collector_repository_ids(&ready, &[reachable])
+            .expect("a reachable peer permits source delivery");
+
+        assert_eq!(
+            collector_ids,
+            vec![xp_test_fixtures::secondary_node_id().to_owned()]
+        );
+        assert_eq!(
+            rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
+            rendezvous_collectors(
+                "source-a",
+                &[xp_test_fixtures::secondary_node_id().to_owned()]
+            )
+            .expect("available assignment"),
+        );
+    }
+
+    #[test]
+    fn stale_primary_and_standby_do_not_block_available_collector() {
+        let ready = vec![
+            xp_test_fixtures::primary_node_id().to_owned(),
+            xp_test_fixtures::secondary_node_id().to_owned(),
+            xp_test_fixtures::tertiary_node_id().to_owned(),
+        ];
+        let reachable = MeshPeerTarget {
+            node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            node_name: xp_test_fixtures::secondary_node_name().to_owned(),
+            mesh_base_url: xp_test_fixtures::none(),
+            mesh_reason: MeshPeerReason::MissingEndpoint,
+            public_base_url: xp_test_fixtures::secondary_api_url().to_owned(),
+        };
+
+        let collector_ids = source_collector_repository_ids(&ready, &[reachable])
+            .expect("available collector remains eligible");
+
+        assert_eq!(
+            collector_ids,
+            vec![xp_test_fixtures::secondary_node_id().to_owned()]
+        );
+        assert_eq!(
+            rendezvous_collectors("source-a", &collector_ids).expect("available assignment"),
+            rendezvous_collectors(
+                "source-a",
+                &[xp_test_fixtures::secondary_node_id().to_owned()]
+            )
+            .expect("available assignment"),
+        );
+    }
+
+    #[test]
+    fn metadata_gap_with_no_reachable_peer_pauses_source_capture() {
+        let ready = vec![xp_test_fixtures::primary_node_id().to_owned()];
+        assert!(source_collector_repository_ids(&ready, &[]).is_none());
+    }
 }
