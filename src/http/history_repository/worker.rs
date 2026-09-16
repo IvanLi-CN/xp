@@ -274,11 +274,19 @@ async fn publish_local_history_segment(
                     segments
                 }
                 Err(RepositoryRuntimeError::Storage(error))
-                    if error == "source delivery journal capacity guard" =>
+                    if error.contains("source delivery journal capacity guard") =>
                 {
                     capture_paused = true;
-                    runtime.hydrate_source_delivery_journal()?;
-                    runtime.local_source_pending_segments_page()
+                    // Re-enter through the empty-record path so the capacity preflight is
+                    // bypassed while the durable journal page is still replayed.
+                    runtime.queue_local_source_segments_for_repositories(
+                        &state.cluster.cluster_id,
+                        identity.clone(),
+                        &signing_key,
+                        Vec::new(),
+                        now,
+                        ready_repository_ids,
+                    )?
                 }
                 Err(error) => return Err(error.into()),
             }
