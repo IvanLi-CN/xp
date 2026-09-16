@@ -362,9 +362,11 @@ impl RepositoryReplicaRuntime {
                 wire: segment.wire.clone(),
             })
             .collect::<Vec<_>>();
-        self.storage
-            .append_source_delivery_journal(&legacy_rows)
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        if !legacy_rows.is_empty() {
+            self.storage
+                .append_source_delivery_journal(&legacy_rows)
+                .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        }
         // Keep an unacknowledged replay page stable across failed delivery cycles. A new page is
         // selected only after ACK removes the current window, which preserves source ordering and
         // prevents a transient collector failure from rotating past an unresolved sequence gap.

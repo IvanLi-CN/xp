@@ -312,6 +312,41 @@ fn source_delivery_capacity_guard_allows_replaying_existing_backlog() {
 }
 
 #[test]
+fn source_delivery_capacity_guard_allows_hydrating_empty_window() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    append_signed_source_journal_rows(
+        temporary.path(),
+        &signing_key,
+        &identity(),
+        "runtime",
+        "runtime.v1",
+        0..1,
+    );
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 20_000,
+                 pending_bytes = 128 * 1024 * 1024,
+                 capacity_suspended = 1,
+                 order_repair_completed = 1
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("saturate source delivery journal");
+    drop(connection);
+    let mut runtime = load(temporary.path());
+    assert!(
+        runtime
+            .hydrate_source_delivery_journal()
+            .expect("capacity guard must not block hydration")
+    );
+    assert_eq!(runtime.local_source_pending_segments_page().len(), 1);
+}
+
+#[test]
 fn source_delivery_post_commit_hydration_failure_keeps_capture_committed() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);
