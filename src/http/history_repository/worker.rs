@@ -286,6 +286,13 @@ async fn publish_local_history_segment(
         let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
         (segments, gaps)
     };
+    tracing::error!(
+        capture_paused,
+        segments = segments.len(),
+        gaps = gaps.len(),
+        collectors = collector_repository_ids.as_ref().map_or(0, |ids| ids.len()),
+        "source delivery page selected"
+    );
     if !capture_paused {
         source_batch
             .mark_uptime_observations_enqueued(state)
