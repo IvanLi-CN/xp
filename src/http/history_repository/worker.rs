@@ -346,7 +346,7 @@ async fn publish_local_history_segment(
             .await
             {
                 delivery_succeeded = false;
-                tracing::debug!(
+                tracing::error!(
                     repository = selected_repository_id,
                     error = %error,
                     "local history source segment remains queued for retry"
