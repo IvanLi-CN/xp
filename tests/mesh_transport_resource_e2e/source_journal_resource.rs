@@ -6,9 +6,9 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
 const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
-// SQLite WAL bookkeeping can retain a small amount of transaction memory outside the 1 MiB
-// page/cache budgets; the process-wide PSS limit remains the authoritative memory gate.
-const JOURNAL_RSS_DELTA_LIMIT: u64 = 3 * 1024 * 1024;
+// Keep RSS growth within the repository resource contract; PSS remains the authoritative
+// process-wide memory gate.
+const JOURNAL_RSS_DELTA_LIMIT: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, prost::Message)]
 struct FixtureCursor {
@@ -311,10 +311,15 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
         saw_replayed_page,
         "source journal worker must replay at least one bounded page"
     );
+    let post_replay_pending =
+        request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    assert!(
+        post_replay_pending < initial_pending,
+        "source journal backlog must remain drained after the replay page"
+    );
     cpu_percentages.sort_by(f64::total_cmp);
-    let cpu_p95 = *cpu_percentages
-        .last()
-        .expect("source journal resource samples");
+    let p95_index = (cpu_percentages.len().saturating_sub(1) * 95) / 100;
+    let cpu_p95 = cpu_percentages[p95_index];
     println!(
         "source_journal_resource cpu_p95_percent={cpu_p95:.2} max_read_bytes={max_read_bytes} \
          max_rss_delta={max_rss_delta} peak_pss_kib={peak_pss_kib}"

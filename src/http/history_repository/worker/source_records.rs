@@ -78,8 +78,14 @@ impl SourceRecordBatch {
         }
     }
 
-    pub(super) fn records(&self) -> &[SyncRecord] {
-        self.records.as_deref().unwrap_or(&[])
+    pub(super) fn has_records(&self) -> bool {
+        self.records
+            .as_ref()
+            .is_some_and(|records| !records.is_empty())
+    }
+
+    pub(super) fn take_records(&mut self) -> Vec<SyncRecord> {
+        self.records.take().unwrap_or_default()
     }
 
     pub(super) async fn mark_uptime_observations_enqueued(

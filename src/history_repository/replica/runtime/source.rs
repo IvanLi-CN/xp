@@ -156,7 +156,7 @@ impl RepositoryReplicaRuntime {
             cluster_id,
             identity,
             signing_key,
-            records,
+            records.iter().cloned(),
             now_unix_seconds,
             &["local".to_owned()],
         )
@@ -275,7 +275,7 @@ impl RepositoryReplicaRuntime {
                 cluster_id,
                 identity.clone(),
                 signing_key,
-                &records,
+                records.iter().cloned(),
                 observed_at,
                 LocalSourceQueueOptions {
                     ready_repositories: &["local".to_owned()],
@@ -345,7 +345,7 @@ impl RepositoryReplicaRuntime {
         cluster_id: &str,
         identity: RepositoryNodeIdentity,
         signing_key: &ed25519_dalek::SigningKey,
-        records: &[SyncRecord],
+        records: impl IntoIterator<Item = SyncRecord>,
         now_unix_seconds: u64,
         ready_repositories: &[String],
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
@@ -369,7 +369,7 @@ impl RepositoryReplicaRuntime {
         cluster_id: &str,
         identity: RepositoryNodeIdentity,
         signing_key: &ed25519_dalek::SigningKey,
-        records: &[SyncRecord],
+        records: impl IntoIterator<Item = SyncRecord>,
         now_unix_seconds: u64,
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
@@ -378,7 +378,7 @@ impl RepositoryReplicaRuntime {
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
-        for record in records.iter().cloned() {
+        for record in records {
             if record.is_tombstone()
                 && self
                     .snapshot

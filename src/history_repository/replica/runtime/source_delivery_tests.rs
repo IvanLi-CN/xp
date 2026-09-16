@@ -26,7 +26,7 @@ fn syncing_tombstone_receipt_is_deferred_until_repository_is_ready() {
             "cluster-a",
             source_identity.clone(),
             &key,
-            &[tombstone],
+            [tombstone].into_iter(),
             100,
             &["repo-a".to_owned(), "repo-b".to_owned()],
         )

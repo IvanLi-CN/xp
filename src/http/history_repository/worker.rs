@@ -245,7 +245,7 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .source_delivery_capture_paused()?;
-    let source_batch = if capture_paused {
+    let mut source_batch = if capture_paused {
         SourceRecordBatch::empty()
     } else {
         source_records(state, now).await?
@@ -280,7 +280,7 @@ async fn publish_local_history_segment(
             // Capacity can be reached after the initial guard check (for example while another
             // source cycle commits). Treat that race exactly like a paused capture: keep the
             // generated observations pending and replay the durable page instead.
-            let queue_result = if source_batch.records().is_empty() {
+            let queue_result = if !source_batch.has_records() {
                 let mut page = runtime.local_source_pending_segments_page_with_budget(
                     MAX_SEGMENTS_PER_DELIVERY_PAGE,
                     1024 * 1024,
@@ -301,7 +301,7 @@ async fn publish_local_history_segment(
                     &state.cluster.cluster_id,
                     identity.clone(),
                     &signing_key,
-                    source_batch.records(),
+                    source_batch.take_records(),
                     now,
                     // The outbox must retain ACK requirements for every Ready member. The
                     // collector-only set is for transport selection and must not weaken tombstone
