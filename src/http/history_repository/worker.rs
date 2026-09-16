@@ -280,22 +280,50 @@ async fn publish_local_history_segment(
             // Capacity can be reached after the initial guard check (for example while another
             // source cycle commits). Treat that race exactly like a paused capture: keep the
             // generated observations pending and replay the durable page instead.
-            match runtime.queue_local_source_segments_for_repositories(
-                &state.cluster.cluster_id,
-                identity.clone(),
-                &signing_key,
-                source_batch.records(),
-                now,
-                // The outbox must retain ACK requirements for every Ready member. The
-                // collector-only set is for transport selection and must not weaken tombstone
-                // bookkeeping when a Ready member has no usable metadata.
-                ready_repository_ids,
-            ) {
+            let queue_result = if source_batch.records().is_empty() {
+                let mut page = runtime.local_source_pending_segments_page_with_budget(
+                    MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                    1024 * 1024,
+                );
+                if page.is_empty() {
+                    runtime.hydrate_source_delivery_journal_with_budget(
+                        MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                        1024 * 1024,
+                    )?;
+                    page = runtime.local_source_pending_segments_page_with_budget(
+                        MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                        1024 * 1024,
+                    );
+                }
+                Ok(page)
+            } else {
+                runtime.queue_local_source_segments_for_repositories(
+                    &state.cluster.cluster_id,
+                    identity.clone(),
+                    &signing_key,
+                    source_batch.records(),
+                    now,
+                    // The outbox must retain ACK requirements for every Ready member. The
+                    // collector-only set is for transport selection and must not weaken tombstone
+                    // bookkeeping when a Ready member has no usable metadata.
+                    ready_repository_ids,
+                )
+            };
+            match queue_result {
                 Ok(segments) => {
                     // Journal commit makes resource rows safe to mark enqueued before collector
                     // ACK.
                     source_batch.mark_resources_enqueued(state);
-                    segments
+                    // The queue API may return its legacy default page size. Re-read through the
+                    // bounded projection so live capture and replay share the same memory limit.
+                    if segments.len() > MAX_SEGMENTS_PER_DELIVERY_PAGE {
+                        runtime.local_source_pending_segments_page_with_budget(
+                            MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                            1024 * 1024,
+                        )
+                    } else {
+                        segments
+                    }
                 }
                 Err(RepositoryRuntimeError::Storage(error))
                     if error.contains("source delivery journal capacity guard") =>
