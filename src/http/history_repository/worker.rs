@@ -192,7 +192,7 @@ async fn replicate_ready_repositories(state: &AppState) -> anyhow::Result<()> {
                     clear_peer_deep_verification(state, &peer.node_id).await?;
                     deep_verification_succeeded = false;
                 }
-                tracing::debug!(
+                tracing::error!(
                     peer = %peer.node_id,
                     error = %error,
                     "history repository peer replication failed"
@@ -346,7 +346,7 @@ async fn publish_local_history_segment(
             .await
             {
                 delivery_succeeded = false;
-                tracing::debug!(
+                tracing::error!(
                     repository = selected_repository_id,
                     error = %error,
                     "local history source segment remains queued for retry"

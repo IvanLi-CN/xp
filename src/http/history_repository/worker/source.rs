@@ -67,7 +67,7 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
                 .await
                 .repair_source_delivery_journal_order_page()
             {
-                tracing::debug!(
+                tracing::error!(
                     error = %error,
                     "history source journal order repair cycle skipped"
                 );
@@ -85,7 +85,7 @@ pub(super) fn spawn_local_source_worker(state: AppState) {
                 tracing::debug!(error = %error, "history repository lifecycle cycle skipped");
             }
             if let Err(error) = source_result {
-                tracing::debug!(error = %error, "history source collection cycle skipped");
+                tracing::error!(error = %error, "history source collection cycle skipped");
             }
         }
     });
