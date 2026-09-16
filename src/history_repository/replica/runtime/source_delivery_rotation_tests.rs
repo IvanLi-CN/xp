@@ -95,7 +95,7 @@ fn source_delivery_capture_returns_the_rotated_page_to_the_worker() {
             "cluster-a",
             source_identity,
             &signing_key,
-            vec![SyncRecord::new(
+            &[SyncRecord::new(
                 "node-a",
                 "node-a",
                 "runtime.v1",
