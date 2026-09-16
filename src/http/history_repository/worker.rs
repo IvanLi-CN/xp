@@ -294,21 +294,34 @@ async fn publish_local_history_segment(
     if segments.is_empty() && gaps.is_empty() {
         return Ok(false);
     }
-    let Some(collector_repository_ids) = collector_repository_ids else {
+    if collector_repository_ids.is_none()
+        && !ready_repository_ids
+            .iter()
+            .any(|id| id == &state.cluster.node_id)
+    {
         tracing::debug!("history source capture queued while no Ready collector is available");
         return Ok(false);
+    }
+    let (primary_repository_id, selected_repository_id) = if let Some(collector_repository_ids) =
+        collector_repository_ids
+    {
+        let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
+        let primary_repository_id = assignment.primary().to_owned();
+        let selected_repository_id = state
+            .repository_replica
+            .lock()
+            .await
+            .local_source_collector(&primary_repository_id, assignment.standby());
+        (primary_repository_id, selected_repository_id)
+    } else {
+        // A Ready local repository can drain its own durable outbox even when every remote
+        // collector lacks usable metadata. Keep the page lossless and retry remote delivery later.
+        (state.cluster.node_id.clone(), state.cluster.node_id.clone())
     };
-    let assignment = rendezvous_collectors(&state.cluster.node_id, collector_repository_ids)?;
-    let primary_repository_id = assignment.primary().to_owned();
-    let selected_repository_id = state
-        .repository_replica
-        .lock()
-        .await
-        .local_source_collector(&primary_repository_id, assignment.standby());
-    let Some(selected_peer) = peers
+    let selected_peer = peers
         .iter()
-        .find(|peer| peer.node_id == selected_repository_id)
-    else {
+        .find(|peer| peer.node_id == selected_repository_id);
+    if selected_repository_id != state.cluster.node_id && selected_peer.is_none() {
         state
             .repository_replica
             .lock()
@@ -323,15 +336,18 @@ async fn publish_local_history_segment(
             "selected history repository is unreachable"
         );
         return Ok(false);
-    };
+    }
     let mut delivery_succeeded = true;
     let mut tombstone_acknowledgements = Vec::new();
     let mut delivered_segments = Vec::new();
     if segments.is_empty() {
-        delivery_succeeded =
+        delivery_succeeded = if let Some(selected_peer) = selected_peer {
             super::gaps::deliver_source_gaps(state, selected_peer, identity.clone(), gaps.clone())
                 .await?
-                .0;
+                .0
+        } else {
+            true
+        };
     }
     for (index, segment) in segments.iter().enumerate() {
         let segment_gaps = if index == 0 { gaps.as_slice() } else { &[] };
@@ -346,7 +362,7 @@ async fn publish_local_history_segment(
             .await
             {
                 delivery_succeeded = false;
-                tracing::error!(
+                tracing::debug!(
                     repository = selected_repository_id,
                     error = %error,
                     "local history source segment remains queued for retry"
@@ -363,7 +379,7 @@ async fn publish_local_history_segment(
             )?)?;
             match repository_direct_request::<RepositorySyncReceipt>(
                 state,
-                selected_peer,
+                selected_peer.expect("remote source delivery requires a peer"),
                 Method::POST,
                 "/api/admin/_internal/history-repository/sync",
                 body,
