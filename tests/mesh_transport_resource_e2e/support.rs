@@ -426,7 +426,10 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
             "run",
         ])
         .env("XP_ADMIN_TOKEN_HASH", admin_hash.as_str())
-        .env("RUST_LOG", "error")
+        .env(
+            "RUST_LOG",
+            std::env::var("XP_RESOURCE_RUST_LOG").unwrap_or_else(|_| "error".to_owned()),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
