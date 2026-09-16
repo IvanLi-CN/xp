@@ -103,8 +103,7 @@ fn source_delivery_capture_returns_the_rotated_page_to_the_worker() {
                 b"runtime:0".to_vec(),
                 b"sample".to_vec(),
                 false,
-            )]
-            .into_iter(),
+            )],
             256,
             &["local".to_owned()],
         )

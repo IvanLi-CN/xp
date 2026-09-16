@@ -302,7 +302,7 @@ fn source_delivery_capacity_guard_allows_replaying_existing_backlog() {
             "cluster-a",
             source_identity,
             &signing_key,
-            Vec::new().into_iter(),
+            Vec::new(),
             101,
             &["repository-a".to_owned()],
         )

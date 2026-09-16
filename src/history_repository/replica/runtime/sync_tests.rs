@@ -450,7 +450,7 @@ fn source_tombstone_acknowledgements_use_the_tombstone_cursor_stream() {
             "cluster-a",
             source_identity.clone(),
             &key,
-            [tombstone].into_iter(),
+            [tombstone],
             100,
             &ready,
         )
