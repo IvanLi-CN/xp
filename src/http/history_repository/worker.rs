@@ -11,8 +11,8 @@ use crate::{
         },
         identity::RepositoryNodeId,
         replica::{
-            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSummary, RepositorySyncReceipt,
-            RepositoryTombstoneAcknowledgement, rendezvous_collectors,
+            ReplicaWork, RepositoryRepairBatch, RepositoryReplicaSummary, RepositoryRuntimeError,
+            RepositorySyncReceipt, RepositoryTombstoneAcknowledgement, rendezvous_collectors,
         },
     },
 };
@@ -236,7 +236,7 @@ async fn publish_local_history_segment(
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
     let signing_key = super::derived_repository_signing_key(state, identity.node_id().as_str())
         .map_err(|_| anyhow::anyhow!("derive local history source signing key"))?;
-    let capture_paused = !capture_live
+    let mut capture_paused = !capture_live
         || state
             .repository_replica
             .lock()
@@ -253,7 +253,10 @@ async fn publish_local_history_segment(
             runtime.hydrate_source_delivery_journal()?;
             runtime.local_source_pending_segments_page()
         } else {
-            let segments = runtime.queue_local_source_segments_for_repositories(
+            // Capacity can be reached after the initial guard check (for example while another
+            // source cycle commits). Treat that race exactly like a paused capture: keep the
+            // generated observations pending and replay the durable page instead.
+            match runtime.queue_local_source_segments_for_repositories(
                 &state.cluster.cluster_id,
                 identity.clone(),
                 &signing_key,
@@ -263,10 +266,22 @@ async fn publish_local_history_segment(
                 // collector-only set is for transport selection and must not weaken tombstone
                 // bookkeeping when a Ready member has no usable metadata.
                 ready_repository_ids,
-            )?;
-            // Journal commit makes resource rows safe to mark enqueued before collector ACK.
-            source_batch.mark_resources_enqueued(state);
-            segments
+            ) {
+                Ok(segments) => {
+                    // Journal commit makes resource rows safe to mark enqueued before collector
+                    // ACK.
+                    source_batch.mark_resources_enqueued(state);
+                    segments
+                }
+                Err(RepositoryRuntimeError::Storage(error))
+                    if error == "source delivery journal capacity guard" =>
+                {
+                    capture_paused = true;
+                    runtime.hydrate_source_delivery_journal()?;
+                    runtime.local_source_pending_segments_page()
+                }
+                Err(error) => return Err(error.into()),
+            }
         };
         let gaps = runtime.local_source_gaps_for_segments(&state.cluster.node_id, &segments);
         (segments, gaps)
