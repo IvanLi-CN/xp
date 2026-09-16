@@ -369,6 +369,15 @@ async fn request_source_status(
         .expect("source journal status response");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let status: serde_json::Value = response.json().await.expect("decode source journal status");
+    eprintln!(
+        "source journal status state={} pending={}",
+        status["source_delivery"]["state"]
+            .as_str()
+            .unwrap_or("unknown"),
+        status["source_delivery"]["pending_segments"]
+            .as_u64()
+            .unwrap_or_default()
+    );
     status["source_delivery"]["pending_segments"]
         .as_u64()
         .expect("source journal pending segment count")
