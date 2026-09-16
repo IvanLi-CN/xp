@@ -515,9 +515,25 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     }
     .apply(store.state_mut())
     .expect("seed source journal local node metadata");
+    assert!(
+        store.state().nodes.contains_key(&cluster.node_id),
+        "source journal fixture must persist local node metadata"
+    );
     store.state_mut().repository_membership = Some(
         serde_json::from_value(state["repository_membership"].clone())
             .expect("decode source journal repository membership"),
     );
     store.save().expect("persist source journal control state");
+    let persisted = JsonSnapshotStore::load_or_init(StoreInit {
+        data_dir: data_dir.to_path_buf(),
+        bootstrap_node_id: Some(cluster.node_id.clone()),
+        bootstrap_node_name: cluster.node_name.clone(),
+        bootstrap_access_host: cluster.access_host.clone(),
+        bootstrap_api_base_url: cluster.api_base_url.clone(),
+    })
+    .expect("reload source journal control state");
+    assert!(
+        persisted.state().nodes.contains_key(&cluster.node_id),
+        "source journal fixture must reload local node metadata"
+    );
 }

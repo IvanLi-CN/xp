@@ -338,7 +338,6 @@ struct XpProcess {
     unit: Option<String>,
     pid: u32,
 }
-
 impl Drop for XpProcess {
     fn drop(&mut self) {
         if self.child.try_wait().ok().flatten().is_some() {
@@ -370,8 +369,8 @@ impl XpProcess {
         self.pid
     }
 }
-
 fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpProcess {
+    let cluster = ClusterMetadata::load(data_dir).expect("load XP cluster metadata");
     let log_path = data_dir.join(format!("{label}.log"));
     let stdout = File::create(&log_path).expect("create XP resource log");
     let stderr = stdout.try_clone().expect("clone XP resource log");
@@ -417,6 +416,10 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
         .args([
             "--data-dir",
             data_dir.to_str().expect("UTF-8 data dir"),
+            "--node-name",
+            &cluster.node_name,
+            "--api-base-url",
+            &cluster.api_base_url,
             "--bind",
             &format!("127.0.0.1:{bind_port}"),
             "--xray-api-addr",
