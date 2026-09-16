@@ -136,7 +136,6 @@ async fn signed_response(State(state): State<PeerServerState>, request: Request)
         .body(Body::empty())
         .expect("signed response")
 }
-
 async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFleet {
     let ca_key_pem = cluster
         .read_cluster_ca_key_pem(data_dir)
@@ -161,7 +160,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
     )
     .await
     .expect("TLS config");
-
     let mut targets = Vec::with_capacity(PEER_COUNT);
     let mut counters = Vec::with_capacity(PEER_COUNT);
     let mut tasks = Vec::with_capacity(PEER_COUNT * 2);
@@ -192,7 +190,6 @@ async fn spawn_peer_fleet(cluster: &ClusterMetadata, data_dir: &Path) -> PeerFle
         tasks.push(tokio::spawn(async move {
             let _ = server.into_future().await;
         }));
-
         let bind_ip: IpAddr = access_host.parse().expect("loopback peer IP");
         let proxy_listener = TcpListener::bind(SocketAddr::new(bind_ip, 0))
             .await
@@ -429,7 +426,10 @@ fn spawn_xp(binary: &Path, data_dir: &Path, bind_port: u16, label: &str) -> XpPr
             "run",
         ])
         .env("XP_ADMIN_TOKEN_HASH", admin_hash.as_str())
-        .env("RUST_LOG", "warn")
+        .env(
+            "RUST_LOG",
+            std::env::var("XP_MESH_RESOURCE_RUST_LOG").unwrap_or_else(|_| "warn".to_owned()),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
