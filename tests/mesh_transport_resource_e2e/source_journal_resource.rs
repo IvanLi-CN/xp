@@ -502,6 +502,19 @@ fn prepare_source_delivery_storage(data_dir: &Path, cluster: &ClusterMetadata) {
         bootstrap_api_base_url: cluster.api_base_url.clone(),
     })
     .expect("load source journal control state");
+    xp::state::DesiredStateCommand::UpsertNode {
+        node: xp::domain::Node {
+            node_id: cluster.node_id.clone(),
+            node_name: cluster.node_name.clone(),
+            access_host: cluster.access_host.clone(),
+            api_base_url: cluster.api_base_url.clone(),
+            quota_limit_bytes: 0,
+            quota_reset: Default::default(),
+        },
+        join_session: None,
+    }
+    .apply(store.state_mut())
+    .expect("seed source journal local node metadata");
     store.state_mut().repository_membership = Some(
         serde_json::from_value(state["repository_membership"].clone())
             .expect("decode source journal repository membership"),
