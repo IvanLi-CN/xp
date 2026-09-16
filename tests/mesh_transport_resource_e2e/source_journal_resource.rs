@@ -227,6 +227,7 @@ pub async fn run_source_delivery_journal_resource_workload(binary: &Path) -> u64
     // Touch the status path twice before taking the RSS baseline so lazy SQLite/HTTP pages are
     // accounted for as warm process state rather than charged to the replay workload.
     let _ = request_source_status(&client, bind_port, &uri, &cluster, &ca_key_pem, &ca_pem).await;
+    sleep(Duration::from_secs(1)).await;
     let baseline_rss = read_process_rss_bytes(pid);
     let mut peak_pss_kib = read_pss(pid).expect("read source journal XP PSS").total_kib;
     let mut cpu_percentages = Vec::with_capacity(8);
