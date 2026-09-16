@@ -120,6 +120,31 @@ fn source_delivery_capacity_guard_preserves_cursor_and_backlog() {
 }
 
 #[test]
+fn source_delivery_pause_uses_durable_counts_when_marker_is_stale() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let runtime = load(temporary.path());
+    let connection = rusqlite::Connection::open(temporary.path().join("history.sqlite3"))
+        .expect("open history database");
+    connection
+        .execute(
+            "UPDATE source_delivery_journal_state
+             SET pending_segments = 16_000,
+                 pending_bytes = 0,
+                 capacity_suspended = 0
+             WHERE singleton = 1",
+            [],
+        )
+        .expect("record stale capacity marker");
+    drop(connection);
+
+    assert!(
+        runtime
+            .source_delivery_capture_paused()
+            .expect("read pause state")
+    );
+}
+
+#[test]
 fn source_delivery_capacity_guard_clears_only_below_both_low_watermarks() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let signing_key = SigningKey::from_bytes(&[11; 32]);

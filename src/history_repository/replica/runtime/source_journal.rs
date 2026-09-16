@@ -274,11 +274,25 @@ impl RepositoryReplicaRuntime {
         if !self.storage.is_sqlite() {
             return Ok(false);
         }
-        if self
+        let summary = self
             .storage
-            .source_delivery_journal_capacity_suspended()
-            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
-        {
+            .source_delivery_journal_summary()
+            .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
+        let at_suspend_threshold = summary.pending_segments.saturating_mul(100)
+            >= crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS.saturating_mul(
+                usize::try_from(
+                    crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
+                )
+                .unwrap_or(80),
+            )
+            || summary.pending_bytes.saturating_mul(100)
+                >= crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_MAX_BYTES.saturating_mul(
+                    u64::try_from(
+                        crate::state::history_storage::SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT,
+                    )
+                    .unwrap_or(80),
+                );
+        if summary.capacity_suspended || at_suspend_threshold {
             return Ok(true);
         }
         let available = self

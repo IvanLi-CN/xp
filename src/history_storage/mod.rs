@@ -39,8 +39,8 @@ pub(crate) use repository::{
 pub(crate) use source_journal::{
     SOURCE_DELIVERY_JOURNAL_MAX_BYTES, SOURCE_DELIVERY_JOURNAL_MAX_SEGMENTS,
     SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS, SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
-    SourceDeliveryJournalPage, SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow,
-    SourceDeliveryJournalSummary,
+    SOURCE_DELIVERY_JOURNAL_SUSPEND_PERCENT, SourceDeliveryJournalPage,
+    SourceDeliveryJournalRepairProgress, SourceDeliveryJournalRow, SourceDeliveryJournalSummary,
 };
 pub(crate) use startup::HistoryStorageMode;
 #[cfg(test)]
