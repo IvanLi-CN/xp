@@ -11,7 +11,7 @@ pub(super) async fn publish_local_history_segments(state: &AppState) -> anyhow::
     let (ready_repository_ids, peers) = match super::ready_repository_peers(state).await {
         Ok(value) => value,
         Err(error) => {
-            tracing::warn!(error = %error, "history source collection unavailable");
+            tracing::warn!(error = %error, "history source collection unavailable before replay");
             return Ok(());
         }
     };
@@ -78,8 +78,8 @@ impl SourceRecordBatch {
         }
     }
 
-    pub(super) fn take_records(&mut self) -> Vec<SyncRecord> {
-        self.records.take().unwrap_or_default()
+    pub(super) fn records(&self) -> &[SyncRecord] {
+        self.records.as_deref().unwrap_or(&[])
     }
 
     pub(super) async fn mark_uptime_observations_enqueued(

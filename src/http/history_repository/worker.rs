@@ -231,6 +231,9 @@ async fn publish_local_history_segment(
     now: u64,
     capture_live: bool,
 ) -> anyhow::Result<bool> {
+    // Keep the replay window small enough for the PSS budget while allowing a suspended
+    // backlog to make useful progress on every source cycle.
+    const MAX_SEGMENTS_PER_DELIVERY_PAGE: usize = 8;
     let node_id = RepositoryNodeId::try_from(state.cluster.node_id.clone())?;
     let identity = super::derived_repository_identity(state, node_id)
         .map_err(|_| anyhow::anyhow!("derive local history source identity"))?;
@@ -242,7 +245,7 @@ async fn publish_local_history_segment(
             .lock()
             .await
             .source_delivery_capture_paused()?;
-    let mut source_batch = if capture_paused {
+    let source_batch = if capture_paused {
         SourceRecordBatch::empty()
     } else {
         source_records(state, now).await?
@@ -250,8 +253,29 @@ async fn publish_local_history_segment(
     let (segments, gaps) = {
         let mut runtime = state.repository_replica.lock().await;
         let segments = if capture_paused {
-            runtime.hydrate_source_delivery_journal()?;
-            runtime.local_source_pending_segments_page()
+            // `RepositoryReplicaRuntime::load` already hydrates the first durable replay page.
+            // Re-hydrating it here makes the worker repeat the expensive oldest-row query over a
+            // large backlog before it can deliver anything. Only load a page when the in-memory
+            // window is empty, such as after the previous page was ACKed.
+            let mut page = runtime.local_source_pending_segments_page_with_budget(
+                MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                1024 * 1024,
+            );
+            if page.is_empty() {
+                runtime.hydrate_source_delivery_journal_with_budget(
+                    MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                    1024 * 1024,
+                )?;
+                page = runtime.local_source_pending_segments_page_with_budget(
+                    MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                    1024 * 1024,
+                );
+            }
+            // The durable journal is authoritative. Drop the cloned replay window before
+            // receiver processing so large wire payloads do not remain resident until the next
+            // hydration; ACK can remove the durable rows even when this in-memory window is empty.
+            runtime.clear_local_source_pending_window();
+            page
         } else {
             // Capacity can be reached after the initial guard check (for example while another
             // source cycle commits). Treat that race exactly like a paused capture: keep the
@@ -260,7 +284,7 @@ async fn publish_local_history_segment(
                 &state.cluster.cluster_id,
                 identity.clone(),
                 &signing_key,
-                source_batch.take_records(),
+                source_batch.records(),
                 now,
                 // The outbox must retain ACK requirements for every Ready member. The
                 // collector-only set is for transport selection and must not weaken tombstone
@@ -279,14 +303,22 @@ async fn publish_local_history_segment(
                     capture_paused = true;
                     // Re-enter through the empty-record path so the capacity preflight is
                     // bypassed while the durable journal page is still replayed.
-                    runtime.queue_local_source_segments_for_repositories(
-                        &state.cluster.cluster_id,
-                        identity.clone(),
-                        &signing_key,
-                        Vec::new(),
-                        now,
-                        ready_repository_ids,
-                    )?
+                    let mut page = runtime.local_source_pending_segments_page_with_budget(
+                        MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                        1024 * 1024,
+                    );
+                    if page.is_empty() {
+                        runtime.hydrate_source_delivery_journal_with_budget(
+                            MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                            1024 * 1024,
+                        )?;
+                        page = runtime.local_source_pending_segments_page_with_budget(
+                            MAX_SEGMENTS_PER_DELIVERY_PAGE,
+                            1024 * 1024,
+                        );
+                    }
+                    runtime.clear_local_source_pending_window();
+                    page
                 }
                 Err(error) => return Err(error.into()),
             }

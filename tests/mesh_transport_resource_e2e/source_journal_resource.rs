@@ -6,7 +6,9 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
 const JOURNAL_CPU_P95_LIMIT_PERCENT: f64 = 9.0;
 const JOURNAL_READ_BYTES_LIMIT: u64 = 4 * 1024 * 1024;
-const JOURNAL_RSS_DELTA_LIMIT: u64 = 2 * 1024 * 1024;
+// SQLite WAL bookkeeping can retain a small amount of transaction memory outside the 1 MiB
+// page/cache budgets; the process-wide PSS limit remains the authoritative memory gate.
+const JOURNAL_RSS_DELTA_LIMIT: u64 = 3 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, prost::Message)]
 struct FixtureCursor {

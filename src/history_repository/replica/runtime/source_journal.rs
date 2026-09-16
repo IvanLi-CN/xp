@@ -200,8 +200,14 @@ impl RepositoryReplicaRuntime {
     }
 
     pub(crate) fn local_source_pending_segments_page(&self) -> Vec<RepositoryReplicaSegment> {
-        const MAX_SEGMENTS: usize = 256;
-        const MAX_WIRE_BYTES: usize = 1024 * 1024;
+        self.local_source_pending_segments_page_with_budget(256, 1024 * 1024)
+    }
+
+    pub(crate) fn local_source_pending_segments_page_with_budget(
+        &self,
+        max_segments: usize,
+        max_wire_bytes: usize,
+    ) -> Vec<RepositoryReplicaSegment> {
         let mut streams = self
             .snapshot
             .local_source
@@ -240,7 +246,7 @@ impl RepositoryReplicaRuntime {
         let mut wire_bytes = 0_usize;
         let mut offsets = vec![0_usize; ordered_streams.len()];
         loop {
-            if page.len() == MAX_SEGMENTS {
+            if page.len() == max_segments {
                 break;
             }
             let mut added = false;
@@ -249,7 +255,7 @@ impl RepositoryReplicaRuntime {
                     continue;
                 };
                 let next_wire_bytes = wire_bytes.saturating_add(pending.wire.len());
-                if next_wire_bytes > MAX_WIRE_BYTES {
+                if next_wire_bytes > max_wire_bytes {
                     continue;
                 }
                 wire_bytes = next_wire_bytes;
@@ -259,7 +265,7 @@ impl RepositoryReplicaRuntime {
                     wire: pending.wire.clone(),
                 });
                 added = true;
-                if page.len() == MAX_SEGMENTS {
+                if page.len() == max_segments {
                     break;
                 }
             }
@@ -268,6 +274,10 @@ impl RepositoryReplicaRuntime {
             }
         }
         page
+    }
+
+    pub(crate) fn clear_local_source_pending_window(&mut self) {
+        self.snapshot.local_source.clear_pending();
     }
 
     pub(crate) fn source_delivery_capture_paused(&self) -> Result<bool, RepositoryRuntimeError> {
@@ -323,6 +333,17 @@ impl RepositoryReplicaRuntime {
 
     pub(crate) fn hydrate_source_delivery_journal(
         &mut self,
+    ) -> Result<bool, RepositoryRuntimeError> {
+        self.hydrate_source_delivery_journal_with_budget(
+            SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
+            SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
+        )
+    }
+
+    pub(crate) fn hydrate_source_delivery_journal_with_budget(
+        &mut self,
+        max_segments: usize,
+        max_wire_bytes: usize,
     ) -> Result<bool, RepositoryRuntimeError> {
         if !self.storage.is_sqlite() {
             return Ok(true);
@@ -415,18 +436,14 @@ impl RepositoryReplicaRuntime {
             .collect::<Vec<_>>();
         let stream_heads = self
             .storage
-            .source_delivery_journal_stream_heads(
-                &stream_names,
-                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS,
-                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES,
-            )
+            .source_delivery_journal_stream_heads(&stream_names, max_segments, max_wire_bytes)
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?;
         let head_wire_bytes = stream_heads.iter().map(|row| row.wire.len()).sum::<usize>();
         let (rows, order_repairing) = match self
             .storage
             .source_delivery_journal_page_with_budget(
-                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_SEGMENTS.saturating_sub(stream_heads.len()),
-                SOURCE_DELIVERY_JOURNAL_PAGE_MAX_WIRE_BYTES.saturating_sub(head_wire_bytes),
+                max_segments.saturating_sub(stream_heads.len()),
+                max_wire_bytes.saturating_sub(head_wire_bytes),
             )
             .map_err(|error| RepositoryRuntimeError::Storage(error.to_string()))?
         {

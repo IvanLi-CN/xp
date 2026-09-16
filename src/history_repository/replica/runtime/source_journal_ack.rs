@@ -99,8 +99,8 @@ impl RepositoryReplicaRuntime {
             match self.remove_local_source_pending_segment(delivered_wire) {
                 Ok(true) => {}
                 Ok(false) => {
-                    self.snapshot = previous_snapshot;
-                    return Ok(());
+                    // The worker may have released its bounded in-memory replay window before
+                    // delivery. The durable journal remains the source of truth for ACKs.
                 }
                 Err(error) => {
                     self.snapshot = previous_snapshot;

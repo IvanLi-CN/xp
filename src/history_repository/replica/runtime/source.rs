@@ -149,7 +149,7 @@ impl RepositoryReplicaRuntime {
         cluster_id: &str,
         identity: RepositoryNodeIdentity,
         signing_key: &ed25519_dalek::SigningKey,
-        records: Vec<SyncRecord>,
+        records: &[SyncRecord],
         now_unix_seconds: u64,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
         self.queue_local_source_segments_for_repositories(
@@ -207,7 +207,7 @@ impl RepositoryReplicaRuntime {
             cluster_id,
             identity,
             signing_key,
-            records,
+            &records,
             now_unix_seconds,
         )?;
         let created = self
@@ -275,7 +275,7 @@ impl RepositoryReplicaRuntime {
                 cluster_id,
                 identity.clone(),
                 signing_key,
-                records.clone(),
+                &records,
                 observed_at,
                 LocalSourceQueueOptions {
                     ready_repositories: &["local".to_owned()],
@@ -345,7 +345,7 @@ impl RepositoryReplicaRuntime {
         cluster_id: &str,
         identity: RepositoryNodeIdentity,
         signing_key: &ed25519_dalek::SigningKey,
-        records: Vec<SyncRecord>,
+        records: &[SyncRecord],
         now_unix_seconds: u64,
         ready_repositories: &[String],
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
@@ -369,7 +369,7 @@ impl RepositoryReplicaRuntime {
         cluster_id: &str,
         identity: RepositoryNodeIdentity,
         signing_key: &ed25519_dalek::SigningKey,
-        records: Vec<SyncRecord>,
+        records: &[SyncRecord],
         now_unix_seconds: u64,
         options: LocalSourceQueueOptions<'_>,
     ) -> Result<Vec<RepositoryReplicaSegment>, RepositoryRuntimeError> {
@@ -378,7 +378,7 @@ impl RepositoryReplicaRuntime {
         let previous_snapshot = self.snapshot.clone();
         let previous_tombstones = self.tombstones.checkpoint();
         let mut records_by_stream = BTreeMap::<&'static str, Vec<SyncRecord>>::new();
-        for record in records {
+        for record in records.iter().cloned() {
             if record.is_tombstone()
                 && self
                     .snapshot
@@ -575,7 +575,7 @@ impl RepositoryReplicaRuntime {
                 cluster_id,
                 identity,
                 signing_key,
-                records,
+                &records,
                 now_unix_seconds,
             )?
             .into_iter()

@@ -96,26 +96,7 @@ pub(in crate::http::history_repository) async fn ready_repository_peers_with_met
 pub(in crate::http::history_repository) async fn ready_repository_peers_for_catch_up(
     state: &AppState,
 ) -> anyhow::Result<(Vec<String>, Vec<MeshPeerTarget>, bool)> {
-    let store = state.store.lock().await;
-    let membership = store
-        .state()
-        .repository_membership
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("history repository membership is not configured"))?;
-    let ready_repository_ids = membership
-        .ready_members()
-        .map(|member| member.node_id().as_str().to_owned())
-        .collect::<Vec<_>>();
-    if ready_repository_ids.is_empty() {
-        anyhow::bail!("no ready history repository is available");
-    }
-    let endpoints = store.list_endpoints();
-    let (peers, missing_metadata) = map_ready_repository_peers_for_catch_up(
-        &ready_repository_ids,
-        &endpoints,
-        |repository_id| store.get_node(repository_id),
-    );
-    Ok((ready_repository_ids, peers, missing_metadata))
+    ready_repository_peers_with_metadata_status(state).await
 }
 
 #[cfg(test)]
