@@ -21,6 +21,7 @@ use crate::{
 
 mod gate;
 mod reverse;
+mod telemetry;
 mod transport;
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
@@ -61,13 +62,6 @@ pub struct PeerCircuitBreakers {
 }
 
 impl PeerCircuitBreakers {
-    pub async fn reset_all(&self) {
-        let mut peers = self.peers.lock().await;
-        for circuit in peers.values_mut() {
-            *circuit = PeerCircuit::default();
-        }
-    }
-
     pub async fn before_attempt(&self, peer_id: &str, enabled: bool) -> MeshAttemptDecision {
         if !enabled {
             return MeshAttemptDecision::Disabled;
@@ -509,7 +503,15 @@ impl MeshAwareHttpClient {
         if matches!(
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
-        ) {
+        ) && !self.mesh_attempt_is_current(mesh_epoch).await
+        {
+            fallback = true;
+        }
+        if matches!(
+            decision,
+            MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
+        ) && !fallback
+        {
             let mesh_url = join_url(
                 peer.mesh_base_url.as_deref().expect("checked enabled"),
                 &request.path_and_query,
@@ -534,8 +536,9 @@ impl MeshAwareHttpClient {
                     if transport.protocol != MeshTransportProtocol::H2 {
                         self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                             .await;
-                        self.record_mesh_protocol_failure(peer).await;
-                        self.record_terminal_failure(peer).await;
+                        self.record_mesh_protocol_failure(peer, mesh_epoch).await;
+                        self.record_terminal_failure_for_epoch(peer, mesh_epoch)
+                            .await;
                         return Err(MeshRequestError::Protocol(
                             "Mesh response did not use HTTP/2".to_string(),
                         ));
@@ -548,8 +551,9 @@ impl MeshAwareHttpClient {
                             Err(_) => {
                                 self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                                     .await;
-                                self.record_mesh_protocol_failure(peer).await;
-                                self.record_terminal_failure(peer).await;
+                                self.record_mesh_protocol_failure(peer, mesh_epoch).await;
+                                self.record_terminal_failure_for_epoch(peer, mesh_epoch)
+                                    .await;
                                 return Err(MeshRequestError::Protocol(
                                     "Mesh response carries a malformed signed acknowledgement"
                                         .to_string(),
@@ -566,8 +570,9 @@ impl MeshAwareHttpClient {
                         ) {
                             self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                                 .await;
-                            self.record_mesh_protocol_failure(peer).await;
-                            self.record_terminal_failure(peer).await;
+                            self.record_mesh_protocol_failure(peer, mesh_epoch).await;
+                            self.record_terminal_failure_for_epoch(peer, mesh_epoch)
+                                .await;
                             return Err(error.into());
                         }
                         self.record_mesh_success(peer, started, &request, transport, mesh_epoch)
@@ -585,8 +590,9 @@ impl MeshAwareHttpClient {
                     }
                     self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
                         .await;
-                    self.record_mesh_protocol_failure(peer).await;
-                    self.record_terminal_failure(peer).await;
+                    self.record_mesh_protocol_failure(peer, mesh_epoch).await;
+                    self.record_terminal_failure_for_epoch(peer, mesh_epoch)
+                        .await;
                     return Err(MeshRequestError::Protocol(
                         "Mesh response did not carry a valid signed acknowledgement".to_string(),
                     ));
@@ -1043,92 +1049,6 @@ impl MeshAwareHttpClient {
         )?;
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }
-    async fn record_mesh_transport_failure(
-        &self,
-        peer: &MeshPeerTarget,
-        mesh_reason: MeshPeerReason,
-        reason: String,
-        epoch: u64,
-    ) {
-        let state = {
-            let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-            if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
-                return;
-            }
-            self.circuits.record_retryable_failure(&peer.node_id).await
-        };
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                false,
-                Duration::ZERO,
-                false,
-                false,
-                None,
-            ),
-        )
-        .await;
-        self.record_mesh_reason(peer, mesh_reason).await;
-        if let Some(telemetry) = &self.telemetry {
-            let message = if state == BreakerState::Open {
-                format!("Mesh breaker opened after retryable transport failure: {reason}")
-            } else {
-                format!("Mesh transport failure: {reason}")
-            };
-            let _ = telemetry
-                .set_breaker(
-                    &peer.node_id,
-                    state,
-                    (state == BreakerState::Open).then_some(message),
-                )
-                .await;
-        }
-    }
-    async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                false,
-                Duration::ZERO,
-                false,
-                false,
-                None,
-            ),
-        )
-        .await;
-        self.record_mesh_reason(peer, MeshPeerReason::ProtocolRejected)
-            .await;
-    }
-
-    async fn record_mesh_reason(&self, peer: &MeshPeerTarget, reason: MeshPeerReason) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_mesh_reason(&peer.node_id, peer.mesh_base_url.as_deref(), reason)
-                .await;
-        }
-    }
-
-    async fn record_sample(&self, peer: &MeshPeerTarget, sample: MeshTelemetrySample) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_sample(&peer.node_id, &peer.node_name, sample)
-                .await;
-        }
-        if sample.success && sample.path == TelemetryPath::Mesh {
-            self.record_mesh_reason(peer, MeshPeerReason::MeshAvailable)
-                .await;
-        }
-    }
-
-    async fn record_terminal_failure(&self, peer: &MeshPeerTarget) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_terminal_failure(&peer.node_id, &peer.node_name)
-                .await;
-        }
-    }
 }
 
 fn telemetry_sample(
@@ -1252,5 +1172,7 @@ fn signed_headers(
 }
 #[cfg(test)]
 mod mesh_gate_tests;
+#[cfg(test)]
+mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;

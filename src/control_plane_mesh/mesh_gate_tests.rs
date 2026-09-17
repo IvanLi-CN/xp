@@ -3,10 +3,9 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use tokio::time::sleep;
 
 #[tokio::test]
-async fn mesh_epoch_reset_serializes_concurrent_observers() {
+async fn mesh_epoch_observation_serializes_concurrent_observers() {
     let gate = Arc::new(AtomicBool::new(true));
     let epoch = Arc::new(AtomicU64::new(0));
     let client =
@@ -16,21 +15,9 @@ async fn mesh_epoch_reset_serializes_concurrent_observers() {
         circuits.record_retryable_failure("peer").await;
     }
     epoch.store(1, Ordering::Release);
-    let peers_guard = circuits.peers.lock().await;
-    let first = tokio::spawn({
-        let client = client.clone();
-        async move { client.observe_mesh_gate().await }
-    });
-    let second = tokio::spawn({
-        let client = client.clone();
-        async move { client.observe_mesh_gate().await }
-    });
-    sleep(Duration::from_millis(10)).await;
-    assert!(!first.is_finished() && !second.is_finished());
-    drop(peers_guard);
-    assert!(first.await.expect("first observer join"));
-    assert!(second.await.expect("second observer join"));
-    assert_eq!(circuits.state("peer", true).await, BreakerState::Closed);
+    let (first, second) = tokio::join!(client.observe_mesh_gate(), client.observe_mesh_gate());
+    assert!(first && second);
+    assert_eq!(circuits.state("peer", true).await, BreakerState::Open);
 }
 
 #[tokio::test]
@@ -60,4 +47,15 @@ async fn stale_mesh_epoch_cannot_reopen_current_breaker() {
             .await;
     }
     assert_eq!(circuits.state("peer", true).await, BreakerState::Closed);
+}
+
+#[tokio::test]
+async fn mesh_attempt_is_rejected_after_gate_closes() {
+    let gate = Arc::new(AtomicBool::new(true));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client =
+        MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate.clone(), epoch);
+    assert!(client.observe_mesh_gate().await);
+    gate.store(false, Ordering::Release);
+    assert!(!client.mesh_attempt_is_current(0).await);
 }

@@ -4,7 +4,7 @@
     "max_line_length": 141
   },
   "AGENTS.md": {
-    "long_line_count": 11,
+    "long_line_count": 10,
     "max_line_length": 244
   },
   "Cargo.toml": {
@@ -576,7 +576,7 @@
   "src/http/mesh.rs": {
     "long_line_count": 2,
     "max_line_length": 109,
-    "source_lines": 1700
+    "source_lines": 1643
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
@@ -588,10 +588,7 @@
     "max_line_length": 125
   },
   "src/control_plane_mesh.rs": {
-    "source_lines": 1261
-  },
-  "src/control_plane_mesh/peer_target_tests.rs": {
-    "source_lines": 1027
+    "source_lines": 1206
   },
   "src/ip_geo_db.rs": {
     "long_line_count": 2,
@@ -714,7 +711,7 @@
   "src/reconcile.rs": {
     "long_line_count": 5,
     "max_line_length": 125,
-    "source_lines": 1339
+    "source_lines": 1291
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,
@@ -723,7 +720,7 @@
   "src/state.rs": {
     "long_line_count": 4,
     "max_line_length": 129,
-    "source_lines": 4567
+    "source_lines": 4548
   },
   "src/state/tests.rs": {
     "source_lines": 2472

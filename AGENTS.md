@@ -41,8 +41,9 @@
   The Raft `PersistedState.mesh_enabled` field is the cluster-level Mesh switch (default `true`);
   when disabled, control-plane requests use only each peer's registered public HTTPS
   `api_base_url` and do not substitute a private or Reverse Mesh route.
-  An internal-auth v2 cluster upgrade requires a one-shot maintenance marker: host-managed nodes bootstrap from a verified
-  target `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the
+  An internal-auth v2 cluster upgrade requires a one-shot maintenance marker: host-managed nodes
+  bootstrap from a verified target `xp-ops` binary using
+  `upgrade --allow-internal-auth-v2-cutover`, while containers use the
   target image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.

@@ -1,22 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::Duration,
-};
-
-use rand::{RngCore, SeedableRng, rngs::StdRng};
-use sha2::{Digest as _, Sha256};
-use tokio::{
-    sync::{Mutex, mpsc},
-    time::{Instant, MissedTickBehavior},
-};
-use tracing::{debug, warn};
-
 use crate::{
     config::Config,
     credentials,
@@ -28,13 +9,28 @@ use crate::{
     xray,
     xray::builder,
 };
-
+use rand::{RngCore, SeedableRng, rngs::StdRng};
+use sha2::{Digest as _, Sha256};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+use tokio::{
+    sync::{Mutex, mpsc},
+    time::{Instant, MissedTickBehavior},
+};
+use tracing::{debug, warn};
+mod mesh_gate;
 mod reverse;
-
 const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
 const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
 const MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10: &str = "migrations/remove_grants_hard_cut_v10";
-
 pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
     let nodes = store.list_nodes();
     if let Some(node) = nodes.iter().find(|n| n.api_base_url == config.api_base_url) {
@@ -45,7 +41,6 @@ pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) 
         .find(|n| n.node_name == config.node_name)
         .map(|n| n.node_id.clone())
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
@@ -54,7 +49,6 @@ pub enum ReconcileRequest {
     RemoveUser { tag: String, email: String },
     RebuildInbound { endpoint_id: String },
 }
-
 #[derive(Debug, Default)]
 struct PendingBatch {
     full: bool,
@@ -63,7 +57,6 @@ struct PendingBatch {
     remove_users: BTreeSet<(String, String)>,
     rebuild_inbounds: BTreeSet<String>,
 }
-
 impl PendingBatch {
     fn has_any(&self) -> bool {
         self.full
@@ -91,7 +84,6 @@ impl PendingBatch {
         }
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct ReconcileHandle {
     tx: Option<mpsc::UnboundedSender<ReconcileRequest>>,
@@ -106,7 +98,6 @@ pub struct ReconcileHandle {
     mesh_enabled_epoch: Arc<AtomicU64>,
     mesh_gate_authoritative: Arc<AtomicBool>,
 }
-
 impl ReconcileHandle {
     pub fn noop() -> Self {
         Self {
@@ -139,7 +130,6 @@ impl ReconcileHandle {
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
         }
     }
-
     pub fn request(&self, req: ReconcileRequest) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(req);
@@ -147,44 +137,6 @@ impl ReconcileHandle {
     }
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
-    }
-
-    pub fn mesh_gate(&self) -> Arc<AtomicBool> {
-        self.mesh_enabled.clone()
-    }
-
-    pub fn mesh_gate_epoch(&self) -> Arc<AtomicU64> {
-        self.mesh_enabled_epoch.clone()
-    }
-
-    pub fn initialize_mesh_gate(&self, enabled: bool) {
-        self.mesh_gate_authoritative.store(true, Ordering::Release);
-        self.set_mesh_enabled(enabled);
-    }
-    pub fn initialize_mesh_gate_if_unset(&self, enabled: bool) {
-        if !self.mesh_gate_authoritative.swap(true, Ordering::AcqRel) {
-            self.set_mesh_enabled(enabled);
-        }
-    }
-    pub fn hold_mesh_gate_until_raft_state(&self) {
-        self.mesh_gate_authoritative.store(false, Ordering::Release);
-        self.mesh_enabled.store(false, Ordering::Release);
-        self.refresh_reverse_gate();
-    }
-    fn set_mesh_enabled(&self, enabled: bool) {
-        if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
-            self.mesh_enabled.store(false, Ordering::Release);
-            self.refresh_reverse_gate();
-            return;
-        }
-        let was_enabled = self.mesh_enabled.swap(enabled, Ordering::AcqRel);
-        if was_enabled != enabled {
-            self.mesh_enabled_epoch.fetch_add(1, Ordering::AcqRel);
-        }
-        if enabled && !was_enabled {
-            self.reverse_runtime_ready.store(false, Ordering::Release);
-        }
-        self.refresh_reverse_gate();
     }
     pub(crate) fn request_reverse_restart_recovery(&self) {
         self.reverse_recovery_required

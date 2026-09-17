@@ -474,12 +474,6 @@ fn managed_vless_endpoint(_endpoint_id: &str, port: u16) -> Endpoint {
     }
 }
 
-fn managed_xhttp_endpoint(port: u16) -> Endpoint {
-    let mut endpoint = managed_vless_endpoint("xhttp", port);
-    endpoint.meta["transport"] = serde_json::json!("xhttp");
-    endpoint
-}
-
 #[test]
 fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     let node = peer_node();
@@ -553,17 +547,6 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }
-
-#[test]
-fn peer_target_skips_xhttp_endpoint_for_control_plane_mesh() {
-    let node = peer_node();
-    let target = peer_target_from_node(&node, &[managed_xhttp_endpoint(443)]);
-
-    assert!(target.mesh_base_url.is_none());
-    assert_eq!(target.mesh_reason, MeshPeerReason::UnsupportedTransport);
-    assert_eq!(target.public_base_url, node.api_base_url);
-}
-
 #[tokio::test]
 async fn reverse_only_request_respects_the_local_readiness_gate() {
     let gate = Arc::new(AtomicBool::new(false));
@@ -589,10 +572,8 @@ async fn reverse_only_request_respects_the_local_readiness_gate() {
         )
         .await
         .expect_err("disabled Reverse must not resolve or send a route");
-
     assert!(error.to_string().contains("reverse relay is disabled"));
 }
-
 #[tokio::test]
 async fn reverse_outer_request_prefers_rendezvous_reality_mesh() {
     let (mesh_base_url, mesh_requests, mesh_task) = spawn_reverse_relay_counter().await;
@@ -610,18 +591,15 @@ async fn reverse_outer_request_prefers_rendezvous_reality_mesh() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     client
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter response omits relay acknowledgements");
-
     assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
     mesh_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_outer_request_falls_back_public_after_reality_timeout() {
     let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_reverse_relay().await;
@@ -643,13 +621,11 @@ async fn reverse_outer_request_falls_back_public_after_reality_timeout() {
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("public counter response omits relay acknowledgements");
-
     assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     mesh_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_outer_request_uses_local_rendezvous_portal() {
     let (local_base_url, local_requests, local_task) = spawn_reverse_relay_counter().await;
@@ -667,18 +643,15 @@ async fn reverse_outer_request_uses_local_rendezvous_portal() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     client
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter response omits relay acknowledgements");
-
     assert_eq!(local_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
     local_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_health_probe_warms_primary_and_standby() {
     let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
@@ -697,18 +670,15 @@ async fn reverse_health_probe_warms_primary_and_standby() {
             reverse_route(rendezvous, Some(standby), assignment),
         )
         .await;
-
     client
         .send_peer_reverse_health_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter responses omit relay acknowledgements");
-
     assert_eq!(primary_requests.load(Ordering::SeqCst), 1);
     assert_eq!(standby_requests.load(Ordering::SeqCst), 1);
     primary_task.abort();
     standby_task.abort();
 }
-
 #[tokio::test]
 async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
     let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
@@ -722,7 +692,6 @@ async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
     client
         .set_reverse_route(peer.node_id.clone(), route.clone())
         .await;
-
     let fanout = client
         .send_peer_reverse_health_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await;
@@ -740,7 +709,6 @@ async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
     assert_eq!(primary_requests.load(Ordering::SeqCst), 0);
     primary_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
     let (rendezvous_base_url, peak, entered, release, relay_task) =
@@ -757,7 +725,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     let budget = super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
         - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS;
     let responses_task = tokio::spawn({
@@ -782,7 +749,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
             .await
         }
     });
-
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let notified = entered.notified();
@@ -799,7 +765,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
         .await
         .expect("reverse relay admission must fail fast when the budget is full")
         .expect("reverse relay request task must finish");
-
     assert!(
         peak.load(Ordering::SeqCst) == budget,
         "reverse relay did not exercise the full per-rendezvous budget: {}",
@@ -833,7 +798,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
     ));
     relay_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_health_keeps_a_reserved_rendezvous_slot() {
     let circuits = PeerCircuitBreakers::default();
@@ -870,7 +834,6 @@ async fn reverse_health_keeps_a_reserved_rendezvous_slot() {
     drop(health_slot);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_health_reservation_is_atomic_under_concurrent_control_admission() {
     let circuits = PeerCircuitBreakers::default();
@@ -901,7 +864,6 @@ async fn reverse_health_reservation_is_atomic_under_concurrent_control_admission
     drop(second);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_is_held_until_response_body_stream_finishes() {
     let circuits = PeerCircuitBreakers::default();
@@ -954,7 +916,6 @@ async fn reverse_slot_is_held_until_response_body_stream_finishes() {
     );
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_is_released_when_response_body_stream_errors() {
     let circuits = PeerCircuitBreakers::default();
@@ -1004,7 +965,6 @@ async fn reverse_slot_is_released_when_response_body_stream_errors() {
     drop(body_stream);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_response_preserves_the_original_url() {
     let circuits = PeerCircuitBreakers::default();

@@ -16,9 +16,6 @@ impl MeshAwareHttpClient {
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let previous = *reset_guard;
         let enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
-        if enabled && epoch != previous {
-            self.circuits.reset_all().await;
-        }
         if epoch != previous {
             *reset_guard = epoch;
         }
@@ -34,6 +31,12 @@ impl MeshAwareHttpClient {
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let decision = self.circuits.before_attempt(peer_id, enabled).await;
         (decision, epoch)
+    }
+
+    pub(super) async fn mesh_attempt_is_current(&self, epoch: u64) -> bool {
+        let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
+        self.cluster_mesh_enabled.load(Ordering::Acquire)
+            && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch
     }
 
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {

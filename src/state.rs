@@ -1,11 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs, io,
-    path::PathBuf,
-};
-
-use serde::{Deserialize, Serialize};
-
 use crate::{
     domain::{
         DomainError, Endpoint, EndpointKind, Node, NodeQuotaReset, QuotaResetSource, RealityDomain,
@@ -35,6 +27,12 @@ use crate::{
     },
     uptime_monitor::{MonitorLifecycle, ServiceMonitor},
 };
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs, io,
+    path::PathBuf,
+};
 mod endpoint_meta;
 use endpoint_meta::build_endpoint_meta;
 mod command_compat;
@@ -59,7 +57,6 @@ pub use probe_state::{
     NodeEgressProbeState, NodeSubscriptionRegion,
 };
 use probe_state::{decode_node_egress_probe_compat_note, prune_endpoint_probe_hour_map};
-
 pub const SCHEMA_VERSION: u32 = 14;
 const SCHEMA_VERSION_V13: u32 = 13;
 const SCHEMA_VERSION_V12: u32 = 12;
@@ -75,7 +72,6 @@ pub const USAGE_SCHEMA_VERSION: u32 = 2;
 const USAGE_SCHEMA_VERSION_V1: u32 = 1;
 const NODE_EGRESS_PROBE_COMPAT_NOOP_PREFIX: &str = "node_egress_probe_state:";
 const ENDPOINT_PROBE_HOUR_BUCKET_LIMIT: usize = 24;
-
 /// Migrate any historical state payload into the latest schema (v14).
 ///
 /// This is used by Raft snapshot installation to support upgrades without requiring operators
@@ -87,7 +83,6 @@ pub(crate) fn migrate_state_value_to_latest(
         .get("schema_version")
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
-
     let mut state = match schema_version {
         SCHEMA_VERSION => serde_json::from_value::<PersistedState>(raw)?,
         SCHEMA_VERSION_V13 => migrate_v13_to_v14(serde_json::from_value::<PersistedState>(raw)?)?,
@@ -106,7 +101,6 @@ pub(crate) fn migrate_state_value_to_latest(
             let mut legacy: PersistedStateV9Compat = serde_json::from_value(raw)?;
             let migrated = legacy.schema_version != schema_version;
             let _ = migrated;
-
             legacy = match schema_version {
                 3 => migrate_v3_to_v4(legacy)?,
                 _ => legacy,
@@ -131,7 +125,6 @@ pub(crate) fn migrate_state_value_to_latest(
             } else {
                 legacy
             };
-
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(legacy)?;
             let v11 = migrate_v10_to_v11(v10)?;
             migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?
@@ -143,7 +136,6 @@ pub(crate) fn migrate_state_value_to_latest(
             let v6 = migrate_v5_to_v6(v5)?;
             let v7 = migrate_v6_to_v7(v6)?;
             let v8 = migrate_v7_to_v8(v7)?;
-
             let (v10, _mapping, _stats) = migrate_v9_compat_to_v10(v8)?;
             let v11 = migrate_v10_to_v11(v10)?;
             migrate_v13_to_v14(migrate_v12_to_v13(migrate_v11_to_v12(v11)?)?)?
@@ -155,14 +147,12 @@ pub(crate) fn migrate_state_value_to_latest(
             });
         }
     };
-
     if state.schema_version != SCHEMA_VERSION {
         return Err(StoreError::SchemaVersionMismatch {
             expected: SCHEMA_VERSION,
             got: state.schema_version,
         });
     }
-
     // Keep the same invariant cleanups as `load_or_init()` so snapshot installs don't
     // resurrect deprecated/invalid indexes.
     for endpoint in state.endpoints.values_mut() {
@@ -176,7 +166,6 @@ pub(crate) fn migrate_state_value_to_latest(
     state
         .node_egress_probes
         .retain(|node_id, _| state.nodes.contains_key(node_id));
-
     state.user_global_weights =
         normalize_user_global_weights(&state, state.user_global_weights.clone());
     state.node_weight_policies =
@@ -190,10 +179,8 @@ pub(crate) fn migrate_state_value_to_latest(
         state.node_user_endpoint_memberships.clone(),
     );
     state.node_user_endpoint_memberships = build_node_user_endpoint_memberships(&state);
-
     Ok(state)
 }
-
 #[derive(Debug, Clone)]
 pub struct StoreInit {
     pub data_dir: PathBuf,
@@ -202,7 +189,6 @@ pub struct StoreInit {
     pub bootstrap_access_host: String,
     pub bootstrap_api_base_url: String,
 }
-
 #[derive(Debug)]
 pub enum StoreError {
     Io(io::Error),
@@ -239,7 +225,6 @@ impl std::fmt::Display for StoreError {
         }
     }
 }
-
 impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -254,19 +239,16 @@ impl std::error::Error for StoreError {
         }
     }
 }
-
 impl From<io::Error> for StoreError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
     }
 }
-
 impl From<serde_json::Error> for StoreError {
     fn from(value: serde_json::Error) -> Self {
         Self::SerdeJson(value)
     }
 }
-
 impl From<DomainError> for StoreError {
     fn from(value: DomainError) -> Self {
         Self::Domain(value)
@@ -338,7 +320,6 @@ fn default_mesh_enabled() -> bool {
 pub struct PersistedState {
     pub schema_version: u32,
     /// Raft-authoritative switch for Reality control-plane Mesh.
-    /// Defaults to enabled for snapshots written before the switch existed.
     #[serde(default = "default_mesh_enabled")]
     pub mesh_enabled: bool,
     #[serde(skip)]
