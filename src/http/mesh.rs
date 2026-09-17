@@ -935,6 +935,16 @@ pub(super) async fn admin_internal_raft_client_write(
     ) {
         crate::http::join_capability::require_reverse_assignment_on_voters(&state).await?;
     }
+    let _membership_operation_guard = if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. })
+    {
+        Some(
+            crate::raft_membership_guard::membership_operation_gate()
+                .lock_owned()
+                .await,
+        )
+    } else {
+        None
+    };
     if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }) {
         crate::http::join_capability::require_mesh_gate_on_voters(&state).await?;
     }
@@ -1335,6 +1345,9 @@ pub(super) async fn admin_update_mesh_config(
     Extension(state): Extension<AppState>,
     ApiJson(request): ApiJson<AdminMeshConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _membership_operation_guard = crate::raft_membership_guard::membership_operation_gate()
+        .lock_owned()
+        .await;
     super::join_capability::require_mesh_gate_on_voters(&state).await?;
     super::raft_write(
         &state,

@@ -576,7 +576,7 @@
   "src/http/mesh.rs": {
     "long_line_count": 2,
     "max_line_length": 109,
-    "source_lines": 1687
+    "source_lines": 1700
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
@@ -588,7 +588,7 @@
     "max_line_length": 125
   },
   "src/control_plane_mesh.rs": {
-    "source_lines": 1206
+    "source_lines": 1217
   },
   "src/control_plane_mesh/peer_target_tests.rs": {
     "source_lines": 1027
@@ -714,7 +714,7 @@
   "src/reconcile.rs": {
     "long_line_count": 5,
     "max_line_length": 125,
-    "source_lines": 1309
+    "source_lines": 1312
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,

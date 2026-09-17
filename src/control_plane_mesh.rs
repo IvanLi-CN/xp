@@ -694,6 +694,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 remaining,
+                allow_unsigned_not_found,
             )
             .await
         {
@@ -714,6 +715,14 @@ impl MeshAwareHttpClient {
                 return Err(error);
             }
         };
+        if allow_unsigned_not_found
+            && response.status() == reqwest::StatusCode::NOT_FOUND
+            && !response
+                .headers()
+                .contains_key(internal_auth::INTERNAL_ACK_HEADER)
+        {
+            return Ok(PeerRequestResponse::PredecessorNotFound);
+        }
         self.record_sample(
             peer,
             telemetry_sample(
@@ -769,6 +778,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         budget: Duration,
+        allow_unsigned_not_found: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let (response, verified) = tokio::time::timeout(
             budget,
@@ -784,14 +794,15 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
-        let acknowledgement = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .ok_or_else(|| {
-                MeshRequestError::Protocol(
-                    "public response has no signed acknowledgement".to_string(),
-                )
-            })?;
+        let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
+        else {
+            if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(response);
+            }
+            return Err(MeshRequestError::Protocol(
+                "public response has no signed acknowledgement".to_string(),
+            ));
+        };
         let ack = acknowledgement.to_str().map_err(|_| {
             MeshRequestError::Protocol(
                 "public response carries a malformed signed acknowledgement".to_string(),

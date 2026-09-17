@@ -156,6 +156,9 @@ impl ReconcileHandle {
     }
 
     fn set_mesh_enabled(&self, enabled: bool) {
+        if enabled {
+            self.reverse_runtime_ready.store(false, Ordering::Release);
+        }
         self.mesh_enabled.store(enabled, Ordering::Release);
         self.refresh_reverse_gate();
     }

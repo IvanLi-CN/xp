@@ -118,6 +118,9 @@ async fn require_capability_on_voters_with_probe(
     let metrics = raft_metrics(state);
     let membership = metrics.membership_config.membership();
     let mut voter_ids = membership.voter_ids().collect::<BTreeSet<_>>();
+    if public_only {
+        voter_ids.extend(membership.nodes().map(|(node_id, _)| *node_id));
+    }
     let local_node_id = crate::raft::types::raft_node_id_from_ulid(&state.cluster.node_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     voter_ids.remove(&local_node_id);
@@ -170,7 +173,7 @@ async fn require_capability_on_voters_with_probe(
                     "coordinated_upgrade_required",
                     StatusCode::CONFLICT,
                     format!(
-                        "voter {} must expose {capability} before this cluster setting can change",
+                        "member {} must expose {capability} before this cluster setting can change",
                         peer.raft_node_id
                     ),
                 ));
