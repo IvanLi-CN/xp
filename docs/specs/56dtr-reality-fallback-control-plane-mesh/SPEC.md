@@ -111,7 +111,10 @@
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
 - `PUT /api/admin/mesh/config` 通过 Raft 写入 `{ "enabled": boolean }`；状态响应的
   `cluster_mesh_enabled` 表示当前集群值。关闭后既有公网请求继续工作，开启后新请求恢复
-  Mesh 尝试。
+  Mesh 尝试。写入前必须确认当前 Raft membership 的 voter 与 learner 都支持该命令；旧
+  learner 不能被跳过，必须先升级或退休。
+- 新加入且尚未应用认证 Raft state/snapshot 的非 bootstrap 节点必须保持本地 Mesh gate 关闭，
+  只走已注册公网路径；首次 state apply 后才采用持久化集群值。
 - status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
   仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
   订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。
