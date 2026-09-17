@@ -672,6 +672,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 let mut inner = self.inner.lock().await;
                 inner.last_applied = Some(log_id);
                 inner.mesh_state_applied |= mesh_state_applied;
+                if normal_entry {
+                    inner.snapshot_install_pending = false;
+                }
             }
             responses.push(resp);
         }

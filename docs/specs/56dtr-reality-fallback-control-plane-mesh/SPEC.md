@@ -92,7 +92,8 @@
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - auth、protocol error 与 headers 后的流中断不得触发公网降级。
-- 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback。
+- 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback；这里的 public
+  transport 指注册的公网 `api_base_url`，不等同于 Bearer 管理 API。
 - 其他 mutation 必须返回 `outcome_unknown`。
 - 跨 Mesh/public 的 mutation 重用同一个 `request_id`。
 - 本地 ledger 保留 10 分钟，最多 16,384 条，满载拒绝新请求。

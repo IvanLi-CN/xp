@@ -654,6 +654,51 @@ async fn pending_snapshot_install_keeps_restart_mesh_gate_closed() {
 }
 
 #[tokio::test]
+async fn normal_apply_clears_pending_snapshot_marker_for_later_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine.persist_meta().await.unwrap();
+    let paths = StorePaths::new(tmp.path());
+    let mut persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    persisted["mesh_state_applied"] = json!(true);
+    persisted["snapshot_install_pending"] = json!(true);
+    std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&persisted).unwrap()).unwrap();
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    restarted
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            1,
+        )])
+        .await
+        .unwrap();
+    drop(restarted);
+
+    let mut reopened = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    reopened.applied_state().await.unwrap();
+    assert!(
+        reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    assert_eq!(persisted["snapshot_install_pending"], false);
+}
+
+#[tokio::test]
 async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
