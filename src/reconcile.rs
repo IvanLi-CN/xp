@@ -72,11 +72,9 @@ impl PendingBatch {
             || !self.remove_users.is_empty()
             || !self.rebuild_inbounds.is_empty()
     }
-
     fn clear(&mut self) {
         *self = Self::default();
     }
-
     fn add(&mut self, req: ReconcileRequest) {
         match req {
             ReconcileRequest::Full => self.full = true,
@@ -125,7 +123,6 @@ impl ReconcileHandle {
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
         }
     }
-
     #[cfg(test)]
     pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
         Self {
@@ -148,7 +145,6 @@ impl ReconcileHandle {
             let _ = tx.send(req);
         }
     }
-
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
     }
@@ -204,7 +200,6 @@ impl ReconcileHandle {
     pub(crate) fn take_xray_restart_request(&self) -> bool {
         self.restart_requested.swap(false, Ordering::AcqRel)
     }
-
     pub fn reverse_gate(&self) -> Arc<AtomicBool> {
         self.reverse_enabled.clone()
     }
@@ -560,8 +555,11 @@ async fn reconcile_once_with_runtime(
         cluster_mesh_enabled,
     ) = {
         let store = store.lock().await;
-        let cluster_mesh_enabled = store.state().mesh_enabled;
-        restart_handle.set_mesh_enabled(cluster_mesh_enabled);
+        restart_handle.set_mesh_enabled(store.state().mesh_enabled);
+        let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
+        let mesh_gate_authoritative = restart_handle
+            .mesh_gate_authoritative
+            .load(Ordering::Acquire);
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,
@@ -582,7 +580,8 @@ async fn reconcile_once_with_runtime(
                     && !operation.phase.is_terminal()
             })
             .and_then(|operation| operation.node_id.clone())
-            .filter(|target| reverse_mesh_assignments.contains_key(target));
+            .filter(|target| reverse_mesh_assignments.contains_key(target))
+            .filter(|_| mesh_gate_authoritative);
         let reverse_mesh_bootstrap = crate::raft::http_rpc::read_bootstrap_sender_marker(
             config
                 .data_dir
@@ -593,7 +592,8 @@ async fn reconcile_once_with_runtime(
         .filter(|marker| {
             reverse_mesh_bootstrap_target.as_deref() == Some(marker.target_node_id.as_str())
                 || reverse_mesh_epoch == 0
-        });
+        })
+        .filter(|_| mesh_gate_authoritative);
         let local_endpoint_ids = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)

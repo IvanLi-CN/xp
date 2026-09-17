@@ -271,18 +271,16 @@ pub struct MeshAwareHttpClient {
     circuits: PeerCircuitBreakers,
     cluster_mesh_enabled: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
-    observed_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
+    mesh_epoch_reset_lock: Arc<Mutex<u64>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
     local_reverse_relay: Option<reverse::LocalReverseRelay>,
 }
-
 impl MeshAwareHttpClient {
     pub fn new(direct: reqwest::Client) -> Self {
         Self::from_transport_clients(direct.clone(), direct)
     }
-
     pub fn from_transport_clients(mesh: reqwest::Client, public_direct: reqwest::Client) -> Self {
         Self {
             mesh,
@@ -290,23 +288,20 @@ impl MeshAwareHttpClient {
             circuits: PeerCircuitBreakers::default(),
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            observed_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
             local_reverse_relay: None,
         }
     }
-
     pub fn direct(&self) -> &reqwest::Client {
         &self.public_direct
     }
-
     pub fn with_mesh_observability(mut self, telemetry: MeshTelemetryHandle) -> Self {
         self.telemetry = Some(telemetry);
         self
     }
-
     pub fn with_circuits(mut self, circuits: PeerCircuitBreakers) -> Self {
         self.circuits = circuits;
         self
@@ -315,6 +310,7 @@ impl MeshAwareHttpClient {
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
     }
+
     pub fn with_reverse_routes(mut self, routes: BTreeMap<String, ReverseRelayRoute>) -> Self {
         self.reverse_routes = Arc::new(RwLock::new(routes));
         self
@@ -337,17 +333,18 @@ impl MeshAwareHttpClient {
     ) -> Self {
         self.cluster_mesh_enabled = gate;
         self.cluster_mesh_epoch = epoch.clone();
-        self.observed_mesh_epoch
-            .store(epoch.load(Ordering::Acquire), Ordering::Release);
         self
     }
-
     async fn observe_mesh_gate(&self) -> bool {
+        let mut reset_guard = self.mesh_epoch_reset_lock.lock().await;
         let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let previous = self.observed_mesh_epoch.swap(epoch, Ordering::AcqRel);
+        let previous = *reset_guard;
         let enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
         if enabled && epoch != previous {
             self.circuits.reset_all().await;
+        }
+        if epoch != previous {
+            *reset_guard = epoch;
         }
         enabled
     }
@@ -1257,5 +1254,7 @@ fn signed_headers(
     .expect("locally signed internal request verifies");
     (headers, verified)
 }
+#[cfg(test)]
+mod mesh_gate_tests;
 #[cfg(test)]
 mod peer_target_tests;

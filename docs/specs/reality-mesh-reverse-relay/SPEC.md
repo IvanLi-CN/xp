@@ -85,11 +85,12 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 - fresh join 在响应前向 leader 与确定性 standby 预注册短期 Reverse；响应中的
   `reverse_mesh_bootstrap` 与现有 0600 `raft_bootstrap_sender` marker 只保存 generation、公开
-  endpoint 参数和 epoch，不保存 secret。启动 Xray 后仅承载 bootstrap/Raft；bootstrap 使用独立
-  `ReverseRole::Bootstrap` 派生域，join operation 进入 terminal phase 后才建立正式
-  Primary/Standby 双链并 drain 临时链，promotion 仍遵循已有 log-index 条件。尚未完成
-  capability barrier 或无
-  可用候选时，marker 缺省且沿用现有 Direct/Public join。
+  endpoint 参数和 epoch，不保存 secret。首次认证 Raft state/snapshot apply 前 marker 仅作为
+  元数据，节点保持 Mesh/Reverse 关闭并沿用 Direct/Public；完成 apply 和 capability barrier 后
+  才可承载 bootstrap/Raft。bootstrap 使用独立 `ReverseRole::Bootstrap` 派生域，join operation
+  进入 terminal phase 后才建立正式 Primary/Standby 双链并 drain 临时链，promotion 仍遵循已有
+  log-index 条件。尚未完成 capability barrier 或无可用候选时，marker 缺省且沿用现有
+  Direct/Public join。
 - public health 优先；signed Reverse health 200 后可标记 `reverse-dependent`。systemd/OpenRC/container 首次启用、滚动升级、restart fallback 和 operator intervention 必须保持 Direct/Public 可用。
 - 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`。
   route 提供当前 Rendezvous、其 `primary|standby|bootstrap` 角色与成员、generation、readiness 和汇总计数；旧客户端可继续解析旧字段。

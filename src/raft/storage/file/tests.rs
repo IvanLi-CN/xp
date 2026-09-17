@@ -124,6 +124,29 @@ async fn apply_mesh_switch_publishes_gate_before_reconcile_runs() {
 }
 
 #[tokio::test]
+async fn ordinary_command_does_not_release_fresh_join_mesh_gate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state();
+    let gate = reconcile.mesh_gate();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile)
+        .await
+        .unwrap();
+
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            1,
+        )])
+        .await
+        .unwrap();
+
+    assert!(!gate.load(std::sync::atomic::Ordering::Acquire));
+}
+
+#[tokio::test]
 async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();

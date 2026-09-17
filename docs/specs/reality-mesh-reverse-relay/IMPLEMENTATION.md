@@ -22,8 +22,10 @@
 - Fresh join now returns an additive `reverse_mesh_bootstrap` marker when the assignment capability
   barrier and a managed Rendezvous candidate are available. The leader pre-registers the learner's
   generation/assignment in Raft; `xp join` stores only the public endpoint parameters, epoch and
-  generation in the existing mode-0600 `raft_bootstrap_sender` marker. Unsupported or candidate-less
-  clusters retain the existing Direct/Public bootstrap path.
+  generation in the existing mode-0600 `raft_bootstrap_sender` marker. The marker is metadata-only
+  until the learner applies authenticated Raft state or a snapshot; Mesh and Reverse remain closed
+  during that interval. Unsupported or candidate-less clusters retain the existing Direct/Public
+  bootstrap path.
 - Assignment reconciliation runs a reverse-only signed `health-v2` probe through every assigned
   primary and standby Rendezvous. Remote outer delivery tries that Rendezvous through Reality Mesh
   before Public/API; when the caller is itself the Rendezvous, it uses the signed local XP loopback

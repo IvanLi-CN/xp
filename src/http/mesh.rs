@@ -1039,7 +1039,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             store.list_nodes(),
             store.list_endpoints(),
             store.state().reverse_mesh_assignments.clone(),
-            store.state().mesh_enabled,
+            store.state().mesh_enabled && state.reconcile.mesh_gate().load(Ordering::Acquire),
         )
     };
     let peers = nodes
@@ -1356,7 +1356,6 @@ pub(super) async fn admin_update_mesh_config(
         },
     )
     .await?;
-    state.reconcile.initialize_mesh_gate(request.enabled);
     state.reconcile.request_full();
     Ok(Json(serde_json::json!({ "enabled": request.enabled })))
 }
