@@ -33,6 +33,9 @@
   retaining a bounded health observation; local Xray/portal readiness remains the admission gate
   and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
   retryable Reality timeout also proceeds to the Rendezvous Public/API path.
+- Mesh and Reverse sends use shared read admission, while cluster gate transitions take an
+  exclusive write barrier so normal reverse concurrency is preserved without crossing a disable
+  boundary.
 - Target-side Reverse lifecycle is local and fail-closed. Each derived Link starts with one
   10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
   The target grants a 120-second lease only when the request's assigned Rendezvous identity and

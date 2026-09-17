@@ -18,6 +18,8 @@
   value immediately, before any deferred reconcile work; disabled clusters use only registered
   public HTTPS peer origins. The write barrier probes every current voter and learner so an older
   learner cannot reject the replicated command; stale learners must be upgraded or retired first.
+  Mesh and Reverse requests share a read-side admission barrier and remain concurrent; gate
+  transitions take the exclusive write side and wait for admitted requests to finish.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated

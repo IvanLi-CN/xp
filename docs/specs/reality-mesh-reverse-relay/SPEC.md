@@ -44,6 +44,7 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - target 动态创建独立 Reverse account 的 VLESS outbound，经 Rendezvous 的现有 Reality/XHTTP 或 Reality/Vision TCP endpoint 主动建链。Rendezvous 的 VLESS inbound 首次握手按 generation 创建 reverse handler。
 - XP 通过 `socks5h` 与 `http2_prior_knowledge()` 请求 `http://rvs-<128-bit-id>.mesh.invalid:443`。target 仅允许精确 origin 路由到固定 XP loopback；未匹配 SOCKS 流量 block。target 不需要 managed VLESS endpoint。
 - XP 进程内共享控制面 client 对每个 Rendezvous 的 Reverse outer request 固定最多 8 个 in-flight slots；该上限由所有 `MeshAwareHttpClient` clones 共享，满载时立即拒绝新请求而不排队或建立新的 underlay stream。普通请求最多占用其中 7 个，始终保留至少 1 个 health slot；slot 绑定到 guarded response body/stream 的完整生命周期，并在成功、错误、超时或 response 丢弃后释放。Direct/Public、assignment 和 Link lease 行为不变。
+- Reverse outer requests retain concurrent read-side gate admission; a cluster Mesh gate transition takes the exclusive write side and waits for admitted requests to finish before disabling Mesh/Reverse traffic.
 - 进程内 Xray reconciler 串行全量重载 XP-owned rule，顺序固定为 API、target bridge、portal exact-match、portal block。旧 handler 进入 120 秒 drain，禁止新请求但允许已开始的 response stream 完成。
 - `Reverse Assignment` 是 durable topology；`Reverse Link` 是按
   `(epoch,target,Rendezvous,role,generation)` 区分的进程内生命周期。target 只为一个

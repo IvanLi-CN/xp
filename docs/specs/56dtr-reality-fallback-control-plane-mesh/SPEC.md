@@ -15,6 +15,7 @@
 
 - 从唯一 managed-default VLESS-REALITY endpoint 派生 HTTPS Mesh 路径。
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
+- Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
