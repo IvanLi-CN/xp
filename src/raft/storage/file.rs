@@ -342,7 +342,7 @@ impl FileStateMachine {
 
         let (last_applied, last_membership, mesh_state_applied) = meta
             .map(|m| {
-                let mesh_state_applied = m.mesh_state_applied.unwrap_or(m.last_applied.is_some());
+                let mesh_state_applied = m.mesh_state_applied.unwrap_or(false);
                 (m.last_applied, m.last_membership, mesh_state_applied)
             })
             .unwrap_or((None, StoredMembership::default(), false));

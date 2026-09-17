@@ -190,6 +190,31 @@ impl InternalIdempotencyLedger {
         *state = next;
         Ok(())
     }
+
+    pub async fn abort(
+        &self,
+        request_id: &str,
+        request: &IdempotencyRequest,
+    ) -> anyhow::Result<()> {
+        validate_request(request)?;
+        let mut state = self.state.lock().await;
+        let mut next = state.clone();
+        prune(&mut next, Utc::now());
+        let Some(entry) = next.entries.get(request_id) else {
+            return Ok(());
+        };
+        if entry.request.as_ref() != Some(request) {
+            anyhow::bail!("request_id is already bound to a different internal request");
+        }
+        if !matches!(entry.state, LedgerState::Pending { .. }) {
+            return Ok(());
+        }
+        next.entries.remove(request_id);
+        next.order.retain(|id| id != request_id);
+        persist(&self.path, &next)?;
+        *state = next;
+        Ok(())
+    }
 }
 
 fn validate_request(request: &IdempotencyRequest) -> anyhow::Result<()> {
@@ -312,6 +337,22 @@ mod tests {
         assert_eq!(
             restored.begin("request-1", &request).await.unwrap(),
             BeginResult::InFlight
+        );
+    }
+
+    #[tokio::test]
+    async fn abort_removes_only_pending_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let ledger = InternalIdempotencyLedger::load(temp.path()).unwrap();
+        let request = request();
+        assert_eq!(
+            ledger.begin("request-1", &request).await.unwrap(),
+            BeginResult::New
+        );
+        ledger.abort("request-1", &request).await.unwrap();
+        assert_eq!(
+            ledger.begin("request-1", &request).await.unwrap(),
+            BeginResult::New
         );
     }
 

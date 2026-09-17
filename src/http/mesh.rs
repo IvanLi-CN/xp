@@ -380,7 +380,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay request was already accepted",
         ));
     }
-
     let password = crate::reverse_mesh::derive_reverse_password(
         ca_key_pem,
         &state.cluster.node_id,
@@ -451,7 +450,6 @@ pub(super) async fn admin_internal_reverse_relay(
     }
     liveness::build_reverse_relay_response(response, status, &inner_ack, _mesh_gate_read)
 }
-
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AdminMeshProbeRequest {
@@ -464,7 +462,6 @@ pub(super) struct AdminMeshProbeResponse {
     accepted_node_ids: Vec<String>,
     revision: u64,
 }
-
 pub(super) fn spawn_mesh_probe_worker(state: AppState) {
     tokio::spawn(async move {
         // Probe evidence is local operational telemetry, not replicated cluster state.
@@ -902,7 +899,6 @@ fn reverse_membership_revision(metrics: &openraft::RaftMetrics<RaftNodeId, RaftN
     )
     .max(1)
 }
-
 pub(super) async fn admin_internal_raft_client_write(
     Extension(state): Extension<AppState>,
     internal: Option<Extension<InternalSignatureAuth>>,
@@ -987,7 +983,21 @@ pub(super) async fn admin_internal_raft_client_write(
         let guard = crate::raft_membership_guard::membership_operation_gate()
             .lock_owned()
             .await;
-        crate::http::join_capability::require_mesh_gate_on_voters(&state).await?;
+        if let Err(error) = crate::http::join_capability::require_mesh_gate_on_voters(&state).await
+        {
+            if let Some((request_id, request)) = idempotency_request.as_ref() {
+                state
+                    .internal_idempotency
+                    .abort(request_id, request)
+                    .await
+                    .map_err(|abort_error| {
+                        ApiError::internal(format!(
+                            "abort internal idempotency request: {abort_error}"
+                        ))
+                    })?;
+            }
+            return Err(error);
+        }
         Some(guard)
     } else {
         None
