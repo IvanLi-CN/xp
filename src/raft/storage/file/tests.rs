@@ -331,6 +331,16 @@ async fn legacy_state_machine_meta_keeps_blank_only_restart_closed() {
             serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
         meta.as_object_mut().unwrap().remove("mesh_state_applied");
         std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&meta).unwrap()).unwrap();
+        std::fs::write(
+            &paths.snapshot_meta_json,
+            serde_json::to_vec(&SnapshotMeta::<NodeId, NodeMeta> {
+                last_log_id: Some(LogId::new(openraft::CommittedLeaderId::new(1, 1), 2)),
+                last_membership: StoredMembership::default(),
+                snapshot_id: "local-build-only".to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
         drop(state_machine);
 
         let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
