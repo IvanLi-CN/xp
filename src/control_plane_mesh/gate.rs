@@ -1,5 +1,20 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) enum PublicFallbackPolicy {
+    Always,
+    WhenMeshDisabled,
+}
+
+impl PublicFallbackPolicy {
+    pub(super) fn allows(self, cluster_mesh_enabled: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::WhenMeshDisabled => !cluster_mesh_enabled,
+        }
+    }
+}
+
 pub(super) enum MeshAttemptResult {
     Fallback { ambiguous: bool },
     Response(PeerRequestResponse),

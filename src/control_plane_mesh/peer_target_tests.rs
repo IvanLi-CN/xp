@@ -11,7 +11,7 @@ use futures_util::{StreamExt, future::join_all};
 use reqwest::ResponseBuilderExt;
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use tokio::{
     sync::{Notify, Semaphore},
@@ -137,7 +137,7 @@ async fn spawn_stalling_mesh() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     (format!("http://{address}"), requests, task)
 }
 
-async fn spawn_signed_public(
+pub(super) async fn spawn_signed_public(
     ca_key_pem: &str,
     ca_cert_pem: &str,
 ) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
@@ -394,7 +394,7 @@ fn reverse_assignment() -> ReverseMeshAssignment {
     }
 }
 
-fn primary_reverse_target(
+pub(super) fn primary_reverse_target(
     mesh_base_url: Option<String>,
     public_base_url: String,
 ) -> MeshPeerTarget {

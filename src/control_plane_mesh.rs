@@ -272,7 +272,10 @@ pub struct MeshAwareHttpClient {
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
     local_reverse_relay: Option<reverse::LocalReverseRelay>,
+    #[cfg(test)]
+    mesh_observation_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
+
 impl MeshAwareHttpClient {
     pub fn new(direct: reqwest::Client) -> Self {
         Self::from_transport_clients(direct.clone(), direct)
@@ -290,6 +293,8 @@ impl MeshAwareHttpClient {
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
             local_reverse_relay: None,
+            #[cfg(test)]
+            mesh_observation_pause: None,
         }
     }
     pub fn direct(&self) -> &reqwest::Client {
@@ -315,6 +320,15 @@ impl MeshAwareHttpClient {
 
     pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
         self.reverse_enabled = gate;
+        self
+    }
+    #[cfg(test)]
+    fn with_mesh_observation_pause(
+        mut self,
+        observed: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        self.mesh_observation_pause = Some((observed, release));
         self
     }
     /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
@@ -474,7 +488,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 false,
-                true,
+                gate::PublicFallbackPolicy::Always,
             )
             .await?
         {
@@ -504,7 +518,6 @@ impl MeshAwareHttpClient {
                     .to_string(),
             ));
         }
-        let allow_public_fallback = !self.cluster_mesh_enabled.load(Ordering::Acquire);
         let response = self
             .send_peer_request_with_legacy_not_found(
                 peer,
@@ -512,7 +525,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 true,
-                allow_public_fallback,
+                gate::PublicFallbackPolicy::WhenMeshDisabled,
             )
             .await?;
         Ok(match response {
@@ -530,7 +543,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         allow_unsigned_not_found: bool,
-        allow_public_fallback: bool,
+        public_fallback_policy: gate::PublicFallbackPolicy,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
         let context = RequestContext::now(
@@ -541,6 +554,12 @@ impl MeshAwareHttpClient {
             request.request_id.clone(),
         );
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
+        #[cfg(test)]
+        if let Some((observed, release)) = &self.mesh_observation_pause {
+            observed.notify_one();
+            release.notified().await;
+        }
+        let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled);
         let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
         let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
@@ -660,6 +679,17 @@ impl MeshAwareHttpClient {
                     }
                 }
             }
+        }
+        if !allow_public_fallback
+            && matches!(
+                public_fallback_policy,
+                gate::PublicFallbackPolicy::WhenMeshDisabled
+            )
+        {
+            // A gate transition may have happened after the initial observation while the
+            // circuit decision or reverse route was waiting. Re-observe before refusing the
+            // public compatibility path so a disabled gate cannot strand the probe.
+            allow_public_fallback = !self.observe_mesh_gate().await;
         }
         if !allow_public_fallback {
             self.record_terminal_failure(peer).await;
@@ -1152,6 +1182,8 @@ fn signed_headers(
     .expect("locally signed internal request verifies");
     (headers, verified)
 }
+#[cfg(test)]
+mod mesh_fallback_tests;
 #[cfg(test)]
 mod mesh_gate_tests;
 #[cfg(test)]
