@@ -115,6 +115,31 @@ impl MeshAwareHttpClient {
         }
     }
 
+    pub(super) async fn record_public_outcome_for_epoch(
+        &self,
+        peer: &MeshPeerTarget,
+        started: Instant,
+        success: bool,
+        fallback: bool,
+        updates_active_path: bool,
+        epoch: u64,
+    ) {
+        self.record_public_sample_for_epoch(
+            peer,
+            telemetry_sample(
+                TelemetryPath::Public,
+                success,
+                started.elapsed(),
+                fallback,
+                updates_active_path,
+                None,
+            ),
+            epoch,
+            fallback,
+        )
+        .await;
+    }
+
     pub(super) async fn record_terminal_failure(&self, peer: &MeshPeerTarget) {
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry

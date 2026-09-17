@@ -358,18 +358,7 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
-        let _mesh_gate_read = (path == PeerDirectPath::RealityMesh)
-            .then(|| self.cluster_mesh_epoch.load(Ordering::Acquire))
-            .map(|epoch| async move { self.mesh_read_guard_for_epoch(epoch).await });
-        let _mesh_gate_read = match _mesh_gate_read {
-            Some(future) => Some(future.await),
-            None => None,
-        };
-        if path == PeerDirectPath::RealityMesh && _mesh_gate_read.is_none() {
-            return Err(MeshRequestError::InvalidTarget(
-                "Mesh is disabled by the cluster gate".into(),
-            ));
-        }
+        let _mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
         let url = join_url(
             base_url,
             &request.path_and_query,
@@ -400,6 +389,10 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        let response = match _mesh_gate_read {
+            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
+            None => response,
+        };
         if path == PeerDirectPath::RealityMesh
             && mesh_transport_observation(&response).protocol != MeshTransportProtocol::H2
         {
@@ -533,7 +526,7 @@ impl MeshAwareHttpClient {
             )?;
             let budget = mesh_attempt_budget(request.total_budget);
             let send_result = self
-                .with_mesh_send(mesh_epoch, || async {
+                .with_mesh_send(mesh_epoch, |gate_guard| async {
                     tokio::time::timeout(
                         budget,
                         signed_send(
@@ -546,6 +539,11 @@ impl MeshAwareHttpClient {
                         ),
                     )
                     .await
+                    .map(|result| {
+                        result.map(|(response, verified)| {
+                            (reverse::attach_mesh_gate(response, gate_guard), verified)
+                        })
+                    })
                 })
                 .await;
             match send_result {
@@ -710,7 +708,6 @@ impl MeshAwareHttpClient {
                 }
             }
         }
-
         if !allow_public_fallback {
             self.record_terminal_failure(peer).await;
             return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
@@ -724,6 +721,7 @@ impl MeshAwareHttpClient {
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let elapsed = started.elapsed();
+        let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let remaining = request.total_budget.saturating_sub(elapsed);
         if remaining.is_zero() {
             self.record_terminal_failure(peer).await;
@@ -744,18 +742,13 @@ impl MeshAwareHttpClient {
         {
             Ok(response) => response,
             Err(error) => {
-                self.record_public_sample_for_epoch(
+                self.record_public_outcome_for_epoch(
                     peer,
-                    telemetry_sample(
-                        TelemetryPath::Public,
-                        false,
-                        started.elapsed(),
-                        fallback,
-                        request.updates_active_path,
-                        None,
-                    ),
-                    mesh_epoch,
+                    started,
+                    false,
                     fallback,
+                    request.updates_active_path,
+                    public_epoch,
                 )
                 .await;
                 return Err(error);
@@ -769,18 +762,13 @@ impl MeshAwareHttpClient {
         {
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
-        self.record_public_sample_for_epoch(
+        self.record_public_outcome_for_epoch(
             peer,
-            telemetry_sample(
-                TelemetryPath::Public,
-                true,
-                started.elapsed(),
-                fallback,
-                request.updates_active_path,
-                None,
-            ),
-            mesh_epoch,
+            started,
+            true,
             fallback,
+            request.updates_active_path,
+            public_epoch,
         )
         .await;
         Ok(PeerRequestResponse::Verified(response))

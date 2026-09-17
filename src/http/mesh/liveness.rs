@@ -1,6 +1,42 @@
 use super::*;
 use super::{bootstrap, mesh_peer_target};
 
+pub(super) fn build_reverse_relay_response(
+    response: reqwest::Response,
+    status: StatusCode,
+    inner_ack: &str,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<Response, ApiError> {
+    let mut builder = Response::builder().status(status);
+    if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
+        builder = builder.header(header::CONTENT_TYPE, content_type);
+    }
+    builder = builder.header(
+        header::HeaderName::from_static(crate::reverse_mesh::RELAY_INNER_ACK_HEADER),
+        inner_ack,
+    );
+    let stream = response.bytes_stream();
+    let guarded_stream = futures_util::stream::unfold(
+        (stream, Some(gate_guard)),
+        |(mut stream, mut gate_guard)| async move {
+            match stream.next().await {
+                Some(Ok(item)) => Some((Ok(item), (stream, gate_guard))),
+                Some(Err(error)) => {
+                    drop(gate_guard.take());
+                    Some((Err(std::io::Error::other(error)), (stream, gate_guard)))
+                }
+                None => {
+                    drop(gate_guard.take());
+                    None
+                }
+            }
+        },
+    );
+    builder
+        .body(Body::from_stream(guarded_stream))
+        .map_err(|_| ApiError::internal("build reverse relay response"))
+}
+
 pub(super) fn insert_reverse_link_headers(
     headers: &mut HeaderMap,
     epoch: u64,

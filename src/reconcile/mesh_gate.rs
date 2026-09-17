@@ -13,6 +13,11 @@ impl ReconcileHandle {
         self.mesh_gate_lock.clone()
     }
 
+    pub async fn mesh_gate_read(&self) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        let guard = self.mesh_gate_lock.clone().read_owned().await;
+        self.mesh_enabled.load(Ordering::Acquire).then_some(guard)
+    }
+
     pub async fn initialize_mesh_gate(&self, enabled: bool) {
         let _gate_lock = self.mesh_gate_lock.write().await;
         self.mesh_gate_authoritative.store(true, Ordering::Release);
@@ -34,9 +39,15 @@ impl ReconcileHandle {
         self.refresh_reverse_gate();
     }
 
-    pub(super) async fn set_mesh_enabled(&self, enabled: bool) {
+    pub(crate) fn note_mesh_state_applied(&self) {
+        self.mesh_state_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(super) async fn set_mesh_enabled_if_current(&self, enabled: bool, generation: u64) {
         let _gate_lock = self.mesh_gate_lock.write().await;
-        self.set_mesh_enabled_locked(enabled);
+        if self.mesh_state_generation.load(Ordering::Acquire) == generation {
+            self.set_mesh_enabled_locked(enabled);
+        }
     }
 
     fn set_mesh_enabled_locked(&self, enabled: bool) {

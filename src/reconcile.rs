@@ -88,6 +88,7 @@ pub struct ReconcileHandle {
     reverse_links: ReverseLinkRuntime,
     mesh_enabled: Arc<AtomicBool>,
     mesh_enabled_epoch: Arc<AtomicU64>,
+    mesh_state_generation: Arc<AtomicU64>,
     mesh_gate_authoritative: Arc<AtomicBool>,
     mesh_gate_lock: Arc<RwLock<()>>,
 }
@@ -104,6 +105,7 @@ impl ReconcileHandle {
             reverse_links: ReverseLinkRuntime::default(),
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_state_generation: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
         }
@@ -121,6 +123,7 @@ impl ReconcileHandle {
             reverse_links: ReverseLinkRuntime::default(),
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_state_generation: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
             mesh_gate_lock: Arc::new(RwLock::new(())),
         }
@@ -293,6 +296,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_links: ReverseLinkRuntime::default(),
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+        mesh_state_generation: Arc::new(AtomicU64::new(0)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
         mesh_gate_lock: Arc::new(RwLock::new(())),
     };
@@ -481,7 +485,6 @@ async fn reconcile_once(
     )
     .await
 }
-
 async fn reconcile_once_with_runtime(
     config: &Arc<Config>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -501,9 +504,13 @@ async fn reconcile_once_with_runtime(
         local_vless_endpoint_ids,
         desired_hash_by_endpoint_id,
         cluster_mesh_enabled,
+        mesh_state_generation,
     ) = {
         let store = store.lock().await;
-        let mesh_enabled_state = store.state().mesh_enabled;
+        let (mesh_enabled_state, mesh_state_generation) = (
+            store.state().mesh_enabled,
+            restart_handle.mesh_state_generation.load(Ordering::Acquire),
+        );
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,
@@ -551,7 +558,6 @@ async fn reconcile_once_with_runtime(
             .filter(|e| e.node_id == local_node_id && e.kind == EndpointKind::VlessRealityVisionTcp)
             .map(|e| e.endpoint_id.clone())
             .collect::<BTreeSet<_>>();
-
         let memberships: Vec<NodeUserEndpointMembership> = store
             .state()
             .node_user_endpoint_memberships
@@ -559,7 +565,6 @@ async fn reconcile_once_with_runtime(
             .filter(|m| m.node_id == local_node_id)
             .cloned()
             .collect();
-
         let mut users_by_id = BTreeMap::<String, User>::new();
         for membership in memberships.iter() {
             let Some(user) = store.get_user(&membership.user_id) else {
@@ -567,7 +572,6 @@ async fn reconcile_once_with_runtime(
             };
             users_by_id.insert(user.user_id.clone(), user);
         }
-
         let mut quota_banned_membership_keys = BTreeSet::<String>::new();
         for membership in memberships.iter() {
             let key = membership_key(&membership.user_id, &membership.endpoint_id);
@@ -578,7 +582,6 @@ async fn reconcile_once_with_runtime(
                 quota_banned_membership_keys.insert(key);
             }
         }
-
         let mut users_needing_credential_refresh = BTreeMap::<String, u32>::new();
         for (user_id, user) in users_by_id.iter() {
             let applied = store.get_user_credential_epoch_applied(user_id);
@@ -586,7 +589,6 @@ async fn reconcile_once_with_runtime(
                 users_needing_credential_refresh.insert(user_id.clone(), user.credential_epoch);
             }
         }
-
         let mut endpoint_users_applied = BTreeMap::<String, BTreeSet<String>>::new();
         for endpoint_id in local_endpoint_ids.iter() {
             let users = store.get_endpoint_users_applied(endpoint_id);
@@ -594,7 +596,6 @@ async fn reconcile_once_with_runtime(
                 endpoint_users_applied.insert(endpoint_id.clone(), users);
             }
         }
-
         let desired_hash_by_endpoint_id = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -619,11 +620,13 @@ async fn reconcile_once_with_runtime(
             local_vless_endpoint_ids,
             desired_hash_by_endpoint_id,
             mesh_enabled_state,
+            mesh_state_generation,
         )
     };
-    restart_handle.set_mesh_enabled(cluster_mesh_enabled).await;
+    restart_handle
+        .set_mesh_enabled_if_current(cluster_mesh_enabled, mesh_state_generation)
+        .await;
     let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
-
     let migration_marker_user_encryption_path = config
         .data_dir
         .join(MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE);

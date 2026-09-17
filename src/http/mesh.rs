@@ -241,13 +241,10 @@ pub(super) async fn admin_internal_reverse_relay(
         ));
     }
 
-    let mesh_gate_lock = state.reconcile.mesh_gate_lock();
-    let _mesh_gate_read = mesh_gate_lock.read().await;
-    if !state.reconcile.mesh_gate().load(Ordering::Acquire) {
-        return Err(ApiError::conflict(
-            "reverse relay is disabled by the cluster Mesh gate",
-        ));
-    }
+    let _mesh_gate_read =
+        state.reconcile.mesh_gate_read().await.ok_or_else(|| {
+            ApiError::conflict("reverse relay is disabled by the cluster Mesh gate")
+        })?;
 
     let mut inner_headers = HeaderMap::new();
     if !envelope.content_type.is_empty() {
@@ -436,13 +433,14 @@ pub(super) async fn admin_internal_reverse_relay(
         .get(internal_auth::INTERNAL_ACK_HEADER)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| ApiError::gateway_timeout("reverse target acknowledgement is missing"))?;
+    let inner_ack = inner_ack.to_owned();
     internal_auth::verify_ack_v2(
         ca_key_pem,
         &state.cluster_ca_pem,
         &verified_inner,
         &assignment.target_node_id,
         status.as_u16(),
-        inner_ack,
+        &inner_ack,
     )
     .map_err(|_| ApiError::gateway_timeout("reverse target acknowledgement is invalid"))?;
     if relay_route == internal_auth::InternalRoute::HealthV2 {
@@ -451,20 +449,7 @@ pub(super) async fn admin_internal_reverse_relay(
             .mark_health_verified(&assignment.target_node_id, assignment.generation)
             .await;
     }
-    let mut builder = Response::builder().status(status);
-    if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
-        builder = builder.header(header::CONTENT_TYPE, content_type);
-    }
-    builder = builder.header(
-        header::HeaderName::from_static(crate::reverse_mesh::RELAY_INNER_ACK_HEADER),
-        inner_ack,
-    );
-    let stream = response
-        .bytes_stream()
-        .map(|chunk| chunk.map_err(std::io::Error::other));
-    builder
-        .body(Body::from_stream(stream))
-        .map_err(|_| ApiError::internal("build reverse relay response"))
+    liveness::build_reverse_relay_response(response, status, &inner_ack, _mesh_gate_read)
 }
 
 #[derive(Debug, Deserialize, Default)]

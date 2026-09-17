@@ -508,6 +508,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
+                            self.reconcile.note_mesh_state_applied();
                             mesh_gate_update = Some((
                                 matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }),
                                 store.state().mesh_enabled,
@@ -746,6 +747,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     std::io::Error::other(e.to_string()),
                 )
             })?;
+            self.reconcile.note_mesh_state_applied();
 
             // Snapshot install replaces the entire state; keep local usage bounded to the
             // current memberships set to avoid stale grant/membership usage lingering.

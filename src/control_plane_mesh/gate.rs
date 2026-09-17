@@ -51,26 +51,47 @@ impl MeshAwareHttpClient {
 
     pub(super) async fn with_mesh_send<T, F, Fut>(&self, epoch: u64, send: F) -> Option<T>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(tokio::sync::OwnedRwLockReadGuard<()>) -> Fut,
         Fut: std::future::Future<Output = T>,
     {
-        let _gate_lock = self.mesh_gate_lock.read().await;
+        let gate_lock = self.mesh_gate_lock.clone();
+        let gate_guard = gate_lock.read_owned().await;
         if !self.cluster_mesh_enabled.load(Ordering::Acquire)
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {
             return None;
         }
-        Some(send().await)
+        Some(send(gate_guard).await)
     }
 
     pub(super) async fn mesh_read_guard_for_epoch(
         &self,
         epoch: u64,
-    ) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
-        let guard = self.mesh_gate_lock.read().await;
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        let guard = self.mesh_gate_lock.clone().read_owned().await;
         (self.cluster_mesh_enabled.load(Ordering::Acquire)
             && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch)
             .then_some(guard)
+    }
+
+    pub(super) async fn mesh_direct_read_guard(
+        &self,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<()>, MeshRequestError> {
+        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
+        self.mesh_read_guard_for_epoch(epoch).await.ok_or_else(|| {
+            MeshRequestError::InvalidTarget("Mesh is disabled by the cluster gate".into())
+        })
+    }
+
+    pub(super) async fn mesh_read_guard_for_path(
+        &self,
+        path: PeerDirectPath,
+    ) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, MeshRequestError> {
+        if path == PeerDirectPath::RealityMesh {
+            self.mesh_direct_read_guard().await.map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {

@@ -76,7 +76,8 @@ async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
 
     let send = tokio::spawn(async move {
         client
-            .with_mesh_send(0, || async move {
+            .with_mesh_send(0, |gate_guard| async move {
+                let _gate_guard = gate_guard;
                 let _ = started_tx.send(());
                 let _ = release_rx.await;
             })
