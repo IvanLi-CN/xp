@@ -466,8 +466,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 let mut inner = self.inner.lock().await;
                 inner.last_membership = StoredMembership::new(Some(log_id), membership.clone());
             }
+            let normal_entry = matches!(&entry.payload, EntryPayload::Normal(_));
             let mut mesh_gate_update = None;
-            let mut mesh_state_applied = false;
+            let mesh_state_applied = normal_entry;
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
@@ -516,8 +517,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
-                            self.reconcile.note_mesh_state_applied();
-                            mesh_state_applied = true;
                             mesh_gate_update = Some((
                                 matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }),
                                 store.state().mesh_enabled,
@@ -653,6 +652,13 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     result: crate::state::DesiredStateApplyResult::Applied,
                 },
             };
+            if normal_entry {
+                self.reconcile.note_mesh_state_applied();
+                if mesh_gate_update.is_none() {
+                    let mesh_enabled = self.store.lock().await.state().mesh_enabled;
+                    mesh_gate_update = Some((false, mesh_enabled));
+                }
+            }
             if let Some((explicit, enabled)) = mesh_gate_update {
                 if explicit {
                     self.reconcile.initialize_mesh_gate(enabled).await;
@@ -667,7 +673,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             }
             responses.push(resp);
         }
-
         self.persist_meta().await?;
         self.reconcile.request_full();
         Ok(responses)
@@ -687,21 +692,18 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
     > {
         Ok(Box::new(std::io::Cursor::new(Vec::new())))
     }
-
     async fn install_snapshot(
         &mut self,
         meta: &SnapshotMeta<NodeId, NodeMeta>,
         mut snapshot: Box<<TypeConfig as openraft::RaftTypeConfig>::SnapshotData>,
     ) -> Result<(), openraft::StorageError<NodeId>> {
         use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
-
         let _ = snapshot.seek(std::io::SeekFrom::Start(0)).await;
         let mut buf = Vec::new();
         snapshot
             .read_to_end(&mut buf)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
-
         let raw_payload: serde_json::Value = serde_json::from_slice(&buf).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
@@ -807,7 +809,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         }))
     }
 }
-
 fn io_err(
     subject: ErrorSubject<NodeId>,
     verb: ErrorVerb,
@@ -815,7 +816,6 @@ fn io_err(
 ) -> openraft::StorageError<NodeId> {
     openraft::StorageError::from_io_error(subject, verb, err)
 }
-
 async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     path: &Path,
 ) -> Result<Option<T>, std::io::Error> {
@@ -831,7 +831,6 @@ async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     .await
     .expect("spawn_blocking read_json")
 }
-
 async fn read_wal_with_compat(
     path: &Path,
     last_applied_index: Option<u64>,
@@ -839,7 +838,6 @@ async fn read_wal_with_compat(
     let Some(raw_wal) = read_json::<serde_json::Value>(path).await? else {
         return Ok((PersistedWal::empty(), false));
     };
-
     let mut rewritten = false;
     let last_purged_log_id: Option<LogId<NodeId>> = raw_wal
         .get("last_purged_log_id")
@@ -870,7 +868,6 @@ async fn read_wal_with_compat(
                     if !is_retired_grant_group_command(&cmd_type) {
                         return Err(std::io::Error::other(parse_err));
                     }
-
                     let entry_index = extract_entry_log_index(raw_entry).ok_or_else(|| {
                         std::io::Error::other(format!(
                             "failed to read wal entry index for retired command: type={cmd_type}"
@@ -887,7 +884,6 @@ async fn read_wal_with_compat(
                             "retired wal command is still in active log range (entry_index={entry_index}, last_purged={last_purged_index}); start old version to snapshot/purge logs first, then upgrade"
                         )));
                     }
-
                     let mut blank_entry = raw_entry.clone();
                     rewrite_entry_payload_to_blank(&mut blank_entry)?;
                     let parsed =

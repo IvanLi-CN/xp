@@ -156,6 +156,49 @@ async fn ordinary_command_releases_fresh_join_mesh_gate_once_authenticated() {
 }
 
 #[tokio::test]
+async fn rejected_normal_command_still_releases_fresh_join_mesh_gate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let gate = reconcile.mesh_gate();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let node_id = store.lock().await.list_nodes()[0].node_id.clone();
+    store
+        .lock()
+        .await
+        .create_endpoint(
+            node_id.clone(),
+            EndpointKind::VlessRealityVisionTcp,
+            443,
+            json!({"reality": xp_test_fixtures::endpoint_reality()}),
+        )
+        .unwrap();
+    let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+
+    let responses = state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::DeleteNode {
+                node_id,
+                delete_endpoints: false,
+                expected_endpoint_ids: Vec::new(),
+                join_session: None,
+            },
+            1,
+        )])
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        responses.as_slice(),
+        [ClientResponse::Err { status: 409, .. }]
+    ));
+    assert!(gate.load(std::sync::atomic::Ordering::Acquire));
+}
+
+#[tokio::test]
 async fn applied_state_releases_mesh_gate_after_a_caught_up_restart() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();

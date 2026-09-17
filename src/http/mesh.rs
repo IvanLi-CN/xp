@@ -515,7 +515,6 @@ pub(super) fn spawn_mesh_probe_worker(state: AppState) {
         }
     });
 }
-
 #[derive(Debug, Deserialize)]
 struct ReverseCapabilityResponse {
     #[serde(default)]
@@ -565,7 +564,6 @@ pub(super) async fn reverse_candidate_readiness(
         .as_ref()
         .is_some_and(|readiness| readiness.reverse_ready))
 }
-
 /// The leader owns Reverse assignment orchestration. Runtime links remain local; only the epoch
 /// and deterministic assignment are replicated through the normal Raft command path.
 pub(super) fn spawn_reverse_assignment_worker(state: AppState) {
@@ -1036,13 +1034,14 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints, assignments, cluster_mesh_enabled) = {
+    let (nodes, endpoints, assignments, cluster_mesh_enabled, local_mesh_gate_enabled) = {
         let store = state.store.lock().await;
         (
             store.list_nodes(),
             store.list_endpoints(),
             store.state().reverse_mesh_assignments.clone(),
-            store.state().mesh_enabled && state.reconcile.mesh_gate().load(Ordering::Acquire),
+            store.state().mesh_enabled,
+            state.reconcile.mesh_gate().load(Ordering::Acquire),
         )
     };
     let peers = nodes
@@ -1051,9 +1050,10 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .map(|node| {
             let target = crate::control_plane_mesh::peer_target_from_node(&node, &endpoints);
             let mesh_url = target.mesh_base_url.clone();
-            let mesh_enabled = mesh_url.is_some() && cluster_mesh_enabled;
+            let local_mesh_enabled = cluster_mesh_enabled && local_mesh_gate_enabled;
+            let mesh_enabled = mesh_url.is_some() && local_mesh_enabled;
             let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
-            let mesh_reason = if !cluster_mesh_enabled {
+            let mesh_reason = if !local_mesh_enabled {
                 Some(crate::mesh_telemetry::MeshPeerReason::FallbackActive)
             } else if mesh_enabled {
                 Some(
@@ -1093,11 +1093,11 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                     if mesh_enabled { "enabled" } else { "disabled" }.to_string(),
                 ),
                 mesh_reason,
-                current_path: cluster_mesh_enabled
+                current_path: local_mesh_enabled
                     .then(|| peer.and_then(|peer| peer.last_path))
                     .flatten()
-                    .or_else(|| (!cluster_mesh_enabled).then_some(TelemetryPath::Public)),
-                active_route: cluster_mesh_enabled
+                    .or_else(|| (!local_mesh_enabled).then_some(TelemetryPath::Public)),
+                active_route: local_mesh_enabled
                     .then(|| {
                         status::with_assignment(
                             peer.and_then(|peer| peer.active_route.clone()),

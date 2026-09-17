@@ -3,6 +3,10 @@
 ## `GET /api/admin/mesh/status`
 
 - Requires administrator Bearer authentication.
+- `cluster_mesh_enabled` is the durable cluster-wide Mesh setting from the
+  replicated state. A fresh non-bootstrap node may report `true` here while its
+  local admission gate is still closed until the first authenticated state or
+  snapshot apply; peer paths remain public during that bootstrap window.
 - Returns local node state, remote peer routes, availability, breaker, RTT,
   stale state, 24h buckets and local events.
 - Peer quality is good, slow, unstable, down or unknown.
@@ -38,3 +42,14 @@
 - New Web clients hide reuse details when the capability or optional object is absent. When
   present but unsampled, the peer row displays `Reuse data unavailable`; otherwise it displays
   `H2 · N req / M starts · gen G` inline with the current path.
+
+## `PUT /api/admin/mesh/config`
+
+- Requires administrator Bearer authentication and a JSON body of
+  `{ "enabled": boolean }`.
+- Writes the cluster-wide Mesh setting through Raft. Before a new mutation is
+  accepted, every current voter and learner must expose the required Mesh
+  capability; an existing idempotency request replays its stored result before
+  that capability check.
+- Disabling Mesh keeps existing public paths available. Enabling only takes
+  effect for new Mesh attempts after the replicated state is applied locally.
