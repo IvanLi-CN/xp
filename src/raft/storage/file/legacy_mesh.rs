@@ -43,6 +43,17 @@ pub(super) fn validate_snapshot_payload(
 ) -> Result<(), std::io::Error> {
     let payload: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|e| std::io::Error::other(format!("invalid snapshot payload: {e}")))?;
+    let mesh_state_applied = payload
+        .get("mesh_state_applied")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if mesh_state_applied
+        && (payload.get("snapshot_id").is_none() || payload.get("last_log_id").is_none())
+    {
+        return Err(std::io::Error::other(
+            "authenticated snapshot payload is missing identity",
+        ));
+    }
     if let Some(snapshot_id) = payload.get("snapshot_id")
         && snapshot_id.as_str() != Some(meta.snapshot_id.as_str())
     {
@@ -59,6 +70,15 @@ pub(super) fn validate_snapshot_payload(
     Ok(())
 }
 
+pub(super) fn snapshot_mesh_state_applied(bytes: &[u8]) -> Result<bool, std::io::Error> {
+    let payload: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| std::io::Error::other(format!("invalid snapshot payload: {e}")))?;
+    Ok(payload
+        .get("mesh_state_applied")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
+}
+
 pub(super) fn normalize_snapshot_payload(
     meta: &SnapshotMeta<NodeId, NodeMeta>,
     mut payload: serde_json::Value,
@@ -66,9 +86,13 @@ pub(super) fn normalize_snapshot_payload(
     let object = payload
         .as_object_mut()
         .ok_or_else(|| std::io::Error::other("invalid snapshot payload: expected object"))?;
+    let mesh_state_applied = object
+        .get("mesh_state_applied")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     object.insert(
         "mesh_state_applied".to_string(),
-        serde_json::Value::Bool(true),
+        serde_json::Value::Bool(mesh_state_applied),
     );
     object.insert(
         "snapshot_id".to_string(),

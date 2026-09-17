@@ -567,6 +567,92 @@ fn snapshot_payload_metadata_mismatch_is_rejected() {
     assert!(super::legacy_mesh::validate_snapshot_payload(&meta, &bytes).is_err());
 }
 
+#[test]
+fn authenticated_snapshot_requires_identity_fields() {
+    let meta = SnapshotMeta::<NodeId, NodeMeta> {
+        last_log_id: None,
+        last_membership: StoredMembership::default(),
+        snapshot_id: "snapshot-authenticated".to_string(),
+    };
+    let bytes = serde_json::to_vec(&json!({
+        "state": {},
+        "mesh_state_applied": true,
+    }))
+    .unwrap();
+    assert!(super::legacy_mesh::validate_snapshot_payload(&meta, &bytes).is_err());
+}
+
+#[tokio::test]
+async fn install_snapshot_with_false_marker_keeps_mesh_gate_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut snapshot_state = store.lock().await.state().clone();
+    snapshot_state.mesh_enabled = true;
+    let meta = SnapshotMeta {
+        last_log_id: None,
+        last_membership: StoredMembership::default(),
+        snapshot_id: "snapshot-false-marker".to_string(),
+    };
+    let bytes = serde_json::to_vec(&json!({
+        "state": snapshot_state,
+        "mesh_state_applied": false,
+        "snapshot_id": meta.snapshot_id,
+        "last_log_id": meta.last_log_id,
+    }))
+    .unwrap();
+    let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+
+    state_machine
+        .install_snapshot(&meta, Box::new(std::io::Cursor::new(bytes)))
+        .await
+        .unwrap();
+
+    assert!(!gate.load(std::sync::atomic::Ordering::Acquire));
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&StorePaths::new(tmp.path()).sm_meta_json).unwrap())
+            .unwrap();
+    assert_eq!(persisted["mesh_state_applied"], false);
+    assert_eq!(persisted["snapshot_install_pending"], false);
+}
+
+#[tokio::test]
+async fn pending_snapshot_install_keeps_restart_mesh_gate_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .persist_meta()
+        .await
+        .expect("write baseline state machine metadata");
+    let paths = StorePaths::new(tmp.path());
+    let mut persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    persisted["mesh_state_applied"] = json!(true);
+    persisted["snapshot_install_pending"] = json!(true);
+    std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&persisted).unwrap()).unwrap();
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    restarted.applied_state().await.unwrap();
+    assert!(
+        !reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
 #[tokio::test]
 async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
     let tmp = tempfile::tempdir().unwrap();

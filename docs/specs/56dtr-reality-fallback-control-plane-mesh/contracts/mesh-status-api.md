@@ -49,7 +49,11 @@
   `{ "enabled": boolean }`.
 - Writes the cluster-wide Mesh setting through Raft. Before a new mutation is
   accepted, every current voter and learner must expose the required Mesh
-  capability; an existing idempotency request replays its stored result before
-  that capability check.
+  capability.
 - Disabling Mesh keeps existing public paths available. Enabling only takes
   effect for new Mesh attempts after the replicated state is applied locally.
+
+The signed internal `POST /api/admin/_internal/raft/client-write` path may carry
+an idempotency request. An existing signed request replays its stored result
+before the Mesh capability check; the public Bearer-authenticated PUT above has
+no idempotency header contract.

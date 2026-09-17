@@ -572,6 +572,10 @@ struct PersistedStateMachineMeta {
     last_applied: Option<openraft::LogId<crate::raft::types::NodeId>>,
     last_membership:
         openraft::StoredMembership<crate::raft::types::NodeId, crate::raft::types::NodeMeta>,
+    #[serde(default)]
+    mesh_state_applied: Option<bool>,
+    #[serde(default)]
+    snapshot_install_pending: bool,
 }
 
 fn recover_single_node_membership(

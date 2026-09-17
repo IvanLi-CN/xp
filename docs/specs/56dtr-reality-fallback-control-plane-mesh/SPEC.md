@@ -118,9 +118,10 @@
   learner 不能被跳过，必须先升级或退休。
 - 新加入且尚未应用认证 Raft state/snapshot 的非 bootstrap 节点必须保持本地 Mesh gate 关闭，
   只走已注册公网路径；首次 state apply 后才采用持久化集群值。
-  Snapshot payload 持久化明确的 `mesh_state_applied` 证据与 snapshot identity；数据先于 metadata
-  写入，读取时拒绝 identity 不匹配的文件对。旧 metadata 缺失该字段时，仅在 snapshot metadata
-  与已应用日志一致且 payload marker 为 `true` 时恢复 gate，否则保持关闭。
+  Snapshot payload 持久化明确的 `mesh_state_applied` 证据与 snapshot identity；安装期间先持久化
+  fail-closed marker，再写数据与 metadata，最后清除 pending marker。读取时拒绝 identity 不匹配的
+  文件对；显式 `false` 或缺失 marker 不得被升级为 `true`。旧 metadata 缺失该字段时，仅在
+  snapshot metadata 与已应用日志一致且 payload marker 为 `true` 时恢复 gate，否则保持关闭。
 - status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
   仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
   订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。

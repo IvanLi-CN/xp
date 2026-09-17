@@ -20,6 +20,7 @@ use openraft::{
 };
 use tokio::sync::Mutex;
 mod legacy_mesh;
+mod snapshot_install;
 #[derive(Debug, Clone)]
 pub struct StorePaths {
     pub wal_json: PathBuf,
@@ -294,12 +295,15 @@ struct PersistedStateMachineMeta {
     last_membership: StoredMembership<NodeId, NodeMeta>,
     #[serde(default)]
     mesh_state_applied: Option<bool>,
+    #[serde(default)]
+    snapshot_install_pending: bool,
 }
 #[derive(Debug)]
 struct StateMachineInner {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeMeta>,
     mesh_state_applied: bool,
+    snapshot_install_pending: bool,
 }
 #[derive(Debug, Clone)]
 pub struct FileStateMachine {
@@ -324,6 +328,7 @@ impl FileStateMachine {
             .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
 
         let mesh_state_applied = match meta.as_ref() {
+            Some(m) if m.snapshot_install_pending => false,
             Some(m) => match m.mesh_state_applied {
                 Some(applied) => applied,
                 None => legacy_mesh::infer_state_applied(&paths, m).await,
@@ -331,7 +336,8 @@ impl FileStateMachine {
             None => false,
         };
         let (last_applied, last_membership) = meta
-            .map(|m| (m.last_applied, m.last_membership))
+            .as_ref()
+            .map(|m| (m.last_applied, m.last_membership.clone()))
             .unwrap_or((None, StoredMembership::default()));
 
         Ok(Self {
@@ -342,6 +348,7 @@ impl FileStateMachine {
                 last_applied,
                 last_membership,
                 mesh_state_applied,
+                snapshot_install_pending: meta.as_ref().is_some_and(|m| m.snapshot_install_pending),
             })),
         })
     }
@@ -352,6 +359,7 @@ impl FileStateMachine {
             last_applied: inner.last_applied,
             last_membership: inner.last_membership.clone(),
             mesh_state_applied: Some(inner.mesh_state_applied),
+            snapshot_install_pending: inner.snapshot_install_pending,
         };
         write_json(&self.paths.sm_meta_json, &meta)
             .await
@@ -689,106 +697,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
     async fn install_snapshot(
         &mut self,
         meta: &SnapshotMeta<NodeId, NodeMeta>,
-        mut snapshot: Box<<TypeConfig as openraft::RaftTypeConfig>::SnapshotData>,
+        snapshot: Box<<TypeConfig as openraft::RaftTypeConfig>::SnapshotData>,
     ) -> Result<(), openraft::StorageError<NodeId>> {
-        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
-        let _ = snapshot.seek(std::io::SeekFrom::Start(0)).await;
-        let mut buf = Vec::new();
-        snapshot
-            .read_to_end(&mut buf)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
-        let raw_payload: serde_json::Value = serde_json::from_slice(&buf).map_err(|e| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(e),
-            )
-        })?;
-        let raw_state = raw_payload.get("state").cloned().ok_or_else(|| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other("invalid snapshot payload: missing `state` field"),
-            )
-        })?;
-        let incoming_schema_version = raw_state
-            .get("schema_version")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default() as u32;
-        let active_reverse_epoch = self.store.lock().await.state().reverse_mesh_epoch;
-        if active_reverse_epoch != 0 && incoming_schema_version < crate::state::SCHEMA_VERSION {
-            return Err(io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(format!(
-                    "snapshot schema rollback is blocked after Reverse Mesh epoch {active_reverse_epoch} was written (incoming schema {incoming_schema_version}, required {})",
-                    crate::state::SCHEMA_VERSION
-                )),
-            ));
-        }
-        legacy_mesh::validate_snapshot_payload(meta, &buf)
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
-        let state = crate::state::migrate_state_value_to_latest(raw_state).map_err(|e| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(e.to_string()),
-            )
-        })?;
-
-        let persisted_buf = legacy_mesh::normalize_snapshot_payload(meta, raw_payload)
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-
-        let mesh_enabled = {
-            let mut store = self.store.lock().await;
-            let resource_revision = store.state().mihomo_resource_revision.wrapping_add(1);
-            *store.state_mut() = state;
-            store.state_mut().mihomo_resource_revision = resource_revision;
-            let mesh_enabled = store.state().mesh_enabled;
-            store.save().map_err(|e| {
-                io_err(
-                    ErrorSubject::StateMachine,
-                    ErrorVerb::Write,
-                    std::io::Error::other(e.to_string()),
-                )
-            })?;
-            self.reconcile.note_mesh_state_applied();
-
-            // Snapshot install replaces the entire state; keep local usage bounded to the
-            // current memberships set to avoid stale grant/membership usage lingering.
-            let allowed_membership_keys = store
-                .state()
-                .node_user_endpoint_memberships
-                .iter()
-                .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
-                .collect::<std::collections::BTreeSet<_>>();
-            let _ = store.update_usage(|usage| {
-                usage
-                    .memberships
-                    .retain(|key, _| allowed_membership_keys.contains(key));
-            });
-            let _ = store.prune_inbound_ip_usage_memberships();
-            mesh_enabled
-        };
-        self.reconcile.initialize_mesh_gate(mesh_enabled).await;
-
-        {
-            let mut inner = self.inner.lock().await;
-            inner.last_applied = meta.last_log_id;
-            inner.last_membership = meta.last_membership.clone();
-            inner.mesh_state_applied = true;
-        }
-
-        self.persist_meta().await?;
-        write_bytes(&self.paths.snapshot_data_json, &persisted_buf)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        write_json(&self.paths.snapshot_meta_json, meta)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        self.reconcile.request_full();
-        Ok(())
+        snapshot_install::install(self, meta, snapshot).await
     }
     async fn get_current_snapshot(
         &mut self,

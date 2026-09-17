@@ -23,7 +23,9 @@
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
   Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
-  Snapshot data is written before its metadata and readers reject mismatched identity pairs.
+  Snapshot installation persists a fail-closed pending marker before replacing state, writes data
+  before metadata, and clears the pending marker only after both files are durable. Readers reject
+  mismatched identity pairs and authenticated markers without identity evidence.
   Legacy startup migration only reopens the gate when that marker is true and its snapshot metadata
   exactly matches the persisted applied log; WAL-only, metadata-only, missing, malformed, or legacy
   snapshots remain fail-closed. This avoids treating a locally-built Blank/Membership snapshot as
