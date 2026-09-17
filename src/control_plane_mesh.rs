@@ -454,6 +454,7 @@ impl MeshAwareHttpClient {
                     .to_string(),
             ));
         }
+        let allow_public_fallback = !self.cluster_mesh_enabled.load(Ordering::Acquire);
         let response = self
             .send_peer_request_with_legacy_not_found(
                 peer,
@@ -461,7 +462,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 true,
-                false,
+                allow_public_fallback,
             )
             .await?;
         Ok(match response {

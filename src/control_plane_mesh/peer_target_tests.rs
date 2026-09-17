@@ -271,6 +271,47 @@ async fn cluster_mesh_gate_disabled_uses_public_without_mesh_or_reverse_attempts
     public_task.abort();
 }
 
+#[tokio::test]
+async fn cluster_mesh_gate_disabled_uses_public_for_capability_probe() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let gate = Arc::new(AtomicBool::new(false));
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate(gate);
+
+    let result = client
+        .send_peer_request_allowing_legacy_not_found(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/capabilities".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: "cluster-mesh-disabled-capability-public".to_string(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::primary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(result.is_ok(), "public capability probe should succeed");
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    mesh_task.abort();
+    public_task.abort();
+}
+
 #[derive(Clone)]
 struct PeakStallState {
     active: Arc<AtomicUsize>,
@@ -666,6 +707,38 @@ async fn reverse_health_probe_warms_primary_and_standby() {
     assert_eq!(standby_requests.load(Ordering::SeqCst), 1);
     primary_task.abort();
     standby_task.abort();
+}
+
+#[tokio::test]
+async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
+    let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let rendezvous = secondary_reverse_target(None, primary_base_url);
+    let peer = primary_reverse_target(None, "http://127.0.0.1:1".to_string());
+    let route = reverse_route(rendezvous, None, reverse_assignment());
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_mesh_gate(Arc::new(AtomicBool::new(false)));
+    client
+        .set_reverse_route(peer.node_id.clone(), route.clone())
+        .await;
+
+    let fanout = client
+        .send_peer_reverse_health_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
+        .await;
+    assert!(fanout.is_err(), "disabled Mesh must block reverse fanout");
+    let via = client
+        .send_peer_reverse_health_request_via(
+            &peer,
+            &route,
+            reverse_request(),
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+    assert!(via.is_err(), "disabled Mesh must block reverse link probes");
+    assert_eq!(primary_requests.load(Ordering::SeqCst), 0);
+    primary_task.abort();
 }
 
 #[tokio::test]

@@ -147,6 +147,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
@@ -213,6 +218,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
@@ -249,6 +259,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
