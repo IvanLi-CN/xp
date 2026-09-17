@@ -124,7 +124,7 @@ async fn apply_mesh_switch_publishes_gate_before_reconcile_runs() {
 }
 
 #[tokio::test]
-async fn ordinary_command_does_not_release_fresh_join_mesh_gate() {
+async fn ordinary_command_releases_fresh_join_mesh_gate_once_authenticated() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
     reconcile.hold_mesh_gate_until_raft_state();
@@ -143,6 +143,15 @@ async fn ordinary_command_does_not_release_fresh_join_mesh_gate() {
         .await
         .unwrap();
 
+    assert!(gate.load(std::sync::atomic::Ordering::Acquire));
+
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetMeshEnabled { enabled: false },
+            2,
+        )])
+        .await
+        .unwrap();
     assert!(!gate.load(std::sync::atomic::Ordering::Acquire));
 }
 

@@ -161,13 +161,16 @@ impl ReconcileHandle {
         self.mesh_gate_authoritative.store(true, Ordering::Release);
         self.set_mesh_enabled(enabled);
     }
-
+    pub fn initialize_mesh_gate_if_unset(&self, enabled: bool) {
+        if !self.mesh_gate_authoritative.swap(true, Ordering::AcqRel) {
+            self.set_mesh_enabled(enabled);
+        }
+    }
     pub fn hold_mesh_gate_until_raft_state(&self) {
         self.mesh_gate_authoritative.store(false, Ordering::Release);
         self.mesh_enabled.store(false, Ordering::Release);
         self.refresh_reverse_gate();
     }
-
     fn set_mesh_enabled(&self, enabled: bool) {
         if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
             self.mesh_enabled.store(false, Ordering::Release);
@@ -203,7 +206,6 @@ impl ReconcileHandle {
     pub fn reverse_gate(&self) -> Arc<AtomicBool> {
         self.reverse_enabled.clone()
     }
-
     pub(crate) fn set_reverse_enabled(&self, enabled: bool) {
         self.reverse_supervisor_enabled
             .store(enabled, Ordering::Release);
@@ -211,11 +213,9 @@ impl ReconcileHandle {
             .fetch_and(enabled, Ordering::AcqRel);
         self.refresh_reverse_gate();
     }
-
     pub fn request_remove_inbound(&self, tag: impl Into<String>) {
         self.request(ReconcileRequest::RemoveInbound { tag: tag.into() });
     }
-
     pub fn request_remove_user(&self, tag: impl Into<String>, email: impl Into<String>) {
         self.request(ReconcileRequest::RemoveUser {
             tag: tag.into(),

@@ -19,6 +19,7 @@ use crate::{
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
+mod gate;
 mod reverse;
 mod transport;
 #[cfg(test)]
@@ -326,28 +327,6 @@ impl MeshAwareHttpClient {
         self.cluster_mesh_enabled = gate;
         self
     }
-    pub fn with_mesh_gate_epoch(
-        mut self,
-        gate: Arc<AtomicBool>,
-        epoch: Arc<std::sync::atomic::AtomicU64>,
-    ) -> Self {
-        self.cluster_mesh_enabled = gate;
-        self.cluster_mesh_epoch = epoch.clone();
-        self
-    }
-    async fn observe_mesh_gate(&self) -> bool {
-        let mut reset_guard = self.mesh_epoch_reset_lock.lock().await;
-        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
-        let previous = *reset_guard;
-        let enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
-        if enabled && epoch != previous {
-            self.circuits.reset_all().await;
-        }
-        if epoch != previous {
-            *reset_guard = epoch;
-        }
-        enabled
-    }
     pub async fn set_reverse_route(
         &self,
         target_node_id: impl Into<String>,
@@ -523,10 +502,7 @@ impl MeshAwareHttpClient {
         );
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
         let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
-        let decision = self
-            .circuits
-            .before_attempt(&peer.node_id, mesh_enabled)
-            .await;
+        let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
 
@@ -556,7 +532,8 @@ impl MeshAwareHttpClient {
                 Ok(Ok((response, verified))) => {
                     let transport = mesh_transport_observation(&response);
                     if transport.protocol != MeshTransportProtocol::H2 {
-                        self.circuits.release_half_open_probe(&peer.node_id).await;
+                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                            .await;
                         self.record_mesh_protocol_failure(peer).await;
                         self.record_terminal_failure(peer).await;
                         return Err(MeshRequestError::Protocol(
@@ -569,7 +546,8 @@ impl MeshAwareHttpClient {
                         let ack = match acknowledgement.to_str() {
                             Ok(ack) => ack,
                             Err(_) => {
-                                self.circuits.release_half_open_probe(&peer.node_id).await;
+                                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                                    .await;
                                 self.record_mesh_protocol_failure(peer).await;
                                 self.record_terminal_failure(peer).await;
                                 return Err(MeshRequestError::Protocol(
@@ -586,12 +564,13 @@ impl MeshAwareHttpClient {
                             response.status().as_u16(),
                             ack,
                         ) {
-                            self.circuits.release_half_open_probe(&peer.node_id).await;
+                            self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                                .await;
                             self.record_mesh_protocol_failure(peer).await;
                             self.record_terminal_failure(peer).await;
                             return Err(error.into());
                         }
-                        self.record_mesh_success(peer, started, &request, transport)
+                        self.record_mesh_success(peer, started, &request, transport, mesh_epoch)
                             .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
@@ -600,11 +579,12 @@ impl MeshAwareHttpClient {
                     if allow_unsigned_not_found
                         && response.status() == reqwest::StatusCode::NOT_FOUND
                     {
-                        self.record_mesh_success(peer, started, &request, transport)
+                        self.record_mesh_success(peer, started, &request, transport, mesh_epoch)
                             .await;
                         return Ok(PeerRequestResponse::PredecessorNotFound);
                     }
-                    self.circuits.release_half_open_probe(&peer.node_id).await;
+                    self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
+                        .await;
                     self.record_mesh_protocol_failure(peer).await;
                     self.record_terminal_failure(peer).await;
                     return Err(MeshRequestError::Protocol(
@@ -616,6 +596,7 @@ impl MeshAwareHttpClient {
                         peer,
                         MeshPeerReason::TransportError,
                         error.to_string(),
+                        mesh_epoch,
                     )
                     .await;
                     fallback = true;
@@ -626,6 +607,7 @@ impl MeshAwareHttpClient {
                         peer,
                         MeshPeerReason::TransportTimeout,
                         "Mesh request timed out".to_string(),
+                        mesh_epoch,
                     )
                     .await;
                     fallback = true;
@@ -781,8 +763,15 @@ impl MeshAwareHttpClient {
         started: Instant,
         request: &MeshRequest,
         transport: MeshTransportObservation,
+        epoch: u64,
     ) {
-        let breaker_state = self.circuits.record_success(&peer.node_id).await;
+        let breaker_state = {
+            let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
+            if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+                return;
+            }
+            self.circuits.record_success(&peer.node_id).await
+        };
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
                 .set_breaker(&peer.node_id, breaker_state, None)
@@ -1059,8 +1048,15 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         mesh_reason: MeshPeerReason,
         reason: String,
+        epoch: u64,
     ) {
-        let state = self.circuits.record_retryable_failure(&peer.node_id).await;
+        let state = {
+            let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
+            if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+                return;
+            }
+            self.circuits.record_retryable_failure(&peer.node_id).await
+        };
         self.record_sample(
             peer,
             telemetry_sample(
