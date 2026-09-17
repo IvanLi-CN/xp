@@ -22,6 +22,11 @@
   transitions take the exclusive write side and wait for admitted requests to finish.
   Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
   snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
+  Snapshots carry an explicit `mesh_state_applied` payload marker. Legacy startup migration only
+  reopens the gate when that marker is true and its snapshot metadata exactly matches the persisted
+  applied log; metadata-only, missing, malformed, or legacy snapshots remain fail-closed. This
+  avoids treating a locally-built Blank/Membership snapshot as authenticated state while allowing
+  purged-WAL nodes to recover from a verified snapshot.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated
   Reverse health and link probes are suppressed until the gate is enabled again.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、

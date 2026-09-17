@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use openraft::RaftSnapshotBuilder;
 use serde_json::json;
 use tokio::sync::{Mutex, mpsc};
 
@@ -450,6 +451,99 @@ async fn legacy_state_machine_meta_reopens_a_caught_up_node_after_restart() {
     restarted.applied_state().await.unwrap();
     assert!(
         reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
+#[tokio::test]
+async fn legacy_state_machine_meta_reopens_from_authenticated_snapshot_after_wal_purge() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            2,
+        )])
+        .await
+        .unwrap();
+
+    let mut builder = state_machine.get_snapshot_builder().await;
+    builder.build_snapshot().await.unwrap();
+    let paths = StorePaths::new(tmp.path());
+    std::fs::write(
+        &paths.wal_json,
+        serde_json::to_vec(&PersistedWal {
+            last_purged_log_id: Some(LogId::new(openraft::CommittedLeaderId::new(1, 1), 2)),
+            entries: Vec::new(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let mut meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    meta.as_object_mut().unwrap().remove("mesh_state_applied");
+    std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&meta).unwrap()).unwrap();
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    restarted.applied_state().await.unwrap();
+    assert!(
+        reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
+#[tokio::test]
+async fn legacy_state_machine_meta_keeps_blank_snapshot_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![openraft::impls::Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 2),
+            payload: EntryPayload::Blank,
+        }])
+        .await
+        .unwrap();
+    let mut builder = state_machine.get_snapshot_builder().await;
+    builder.build_snapshot().await.unwrap();
+    let paths = StorePaths::new(tmp.path());
+    std::fs::write(
+        &paths.wal_json,
+        serde_json::to_vec(&PersistedWal {
+            last_purged_log_id: Some(LogId::new(openraft::CommittedLeaderId::new(1, 1), 2)),
+            entries: Vec::new(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let mut meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    meta.as_object_mut().unwrap().remove("mesh_state_applied");
+    std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&meta).unwrap()).unwrap();
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    restarted.applied_state().await.unwrap();
+    assert!(
+        !reconcile
             .mesh_gate()
             .load(std::sync::atomic::Ordering::Acquire)
     );

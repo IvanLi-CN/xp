@@ -306,10 +306,6 @@ struct PersistedStateMachineMeta {
     #[serde(default)]
     mesh_state_applied: Option<bool>,
 }
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct SnapshotPayload {
-    state: crate::state::PersistedState,
-}
 #[derive(Debug)]
 struct StateMachineInner {
     last_applied: Option<LogId<NodeId>>,
@@ -385,17 +381,20 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
     async fn build_snapshot(
         &mut self,
     ) -> Result<Snapshot<TypeConfig>, openraft::StorageError<NodeId>> {
-        let (last_applied, last_membership) = {
+        let (last_applied, last_membership, mesh_state_applied) = {
             let inner = self.inner.lock().await;
-            (inner.last_applied, inner.last_membership.clone())
+            (
+                inner.last_applied,
+                inner.last_membership.clone(),
+                inner.mesh_state_applied,
+            )
         };
-
         let state = {
             let store = self.store.lock().await;
             store.state().clone()
         };
 
-        let payload = SnapshotPayload { state };
+        let payload = serde_json::json!({"state": state, "mesh_state_applied": mesh_state_applied});
         let bytes = serde_json::to_vec_pretty(&payload).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
