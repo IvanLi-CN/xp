@@ -11,7 +11,7 @@ impl MeshAwareHttpClient {
         self
     }
 
-    pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::Mutex<()>>) -> Self {
+    pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {
         self.mesh_gate_lock = lock;
         self
     }
@@ -54,7 +54,7 @@ impl MeshAwareHttpClient {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = T>,
     {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.cluster_mesh_enabled.load(Ordering::Acquire)
             || self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch
         {

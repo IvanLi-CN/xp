@@ -8,7 +8,7 @@ impl MeshAwareHttpClient {
         reason: String,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         let state = {
             if !self.mesh_gate_matches(epoch) {
                 return;
@@ -45,7 +45,7 @@ impl MeshAwareHttpClient {
     }
 
     pub(super) async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget, epoch: u64) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -90,7 +90,7 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }

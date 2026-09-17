@@ -267,7 +267,7 @@ pub struct MeshAwareHttpClient {
     cluster_mesh_enabled: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
-    mesh_gate_lock: Arc<tokio::sync::Mutex<()>>,
+    mesh_gate_lock: Arc<tokio::sync::RwLock<()>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -285,7 +285,7 @@ impl MeshAwareHttpClient {
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
-            mesh_gate_lock: Arc::new(tokio::sync::Mutex::new(())),
+            mesh_gate_lock: Arc::new(tokio::sync::RwLock::new(())),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
@@ -782,7 +782,7 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         let breaker_state = {
             if !self.mesh_gate_matches(epoch) {
                 return;

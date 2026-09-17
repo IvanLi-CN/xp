@@ -9,18 +9,18 @@ impl ReconcileHandle {
         self.mesh_enabled_epoch.clone()
     }
 
-    pub fn mesh_gate_lock(&self) -> Arc<Mutex<()>> {
+    pub fn mesh_gate_lock(&self) -> Arc<RwLock<()>> {
         self.mesh_gate_lock.clone()
     }
 
     pub async fn initialize_mesh_gate(&self, enabled: bool) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.write().await;
         self.mesh_gate_authoritative.store(true, Ordering::Release);
         self.set_mesh_enabled_locked(enabled);
     }
 
     pub async fn initialize_mesh_gate_if_unset(&self, enabled: bool) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.write().await;
         if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
             self.mesh_gate_authoritative.store(true, Ordering::Release);
             self.set_mesh_enabled_locked(enabled);
@@ -28,14 +28,14 @@ impl ReconcileHandle {
     }
 
     pub async fn hold_mesh_gate_until_raft_state(&self) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.write().await;
         self.mesh_gate_authoritative.store(false, Ordering::Release);
         self.mesh_enabled.store(false, Ordering::Release);
         self.refresh_reverse_gate();
     }
 
     pub(super) async fn set_mesh_enabled(&self, enabled: bool) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.write().await;
         self.set_mesh_enabled_locked(enabled);
     }
 

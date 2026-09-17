@@ -22,7 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, RwLock, mpsc},
     time::{Instant, MissedTickBehavior},
 };
 use tracing::{debug, warn};
@@ -89,7 +89,7 @@ pub struct ReconcileHandle {
     mesh_enabled: Arc<AtomicBool>,
     mesh_enabled_epoch: Arc<AtomicU64>,
     mesh_gate_authoritative: Arc<AtomicBool>,
-    mesh_gate_lock: Arc<Mutex<()>>,
+    mesh_gate_lock: Arc<RwLock<()>>,
 }
 impl ReconcileHandle {
     pub fn noop() -> Self {
@@ -105,7 +105,7 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
-            mesh_gate_lock: Arc::new(Mutex::new(())),
+            mesh_gate_lock: Arc::new(RwLock::new(())),
         }
     }
     #[cfg(test)]
@@ -122,7 +122,7 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
-            mesh_gate_lock: Arc::new(Mutex::new(())),
+            mesh_gate_lock: Arc::new(RwLock::new(())),
         }
     }
     pub fn request(&self, req: ReconcileRequest) {
@@ -294,7 +294,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
-        mesh_gate_lock: Arc::new(Mutex::new(())),
+        mesh_gate_lock: Arc::new(RwLock::new(())),
     };
     let restart_handle = handle.clone();
 

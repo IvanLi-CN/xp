@@ -104,7 +104,7 @@ impl MeshAwareHttpClient {
         route: &ReverseRelayRoute,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.lock().await;
+        let _gate_lock = self.mesh_gate_lock.read().await;
         if !self.mesh_gate_matches(epoch) {
             return;
         }
@@ -332,9 +332,9 @@ pub(super) async fn send_outer_request(
     budget: Duration,
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
-    mesh_gate_lock: &Arc<tokio::sync::Mutex<()>>,
+    mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
 ) -> Result<reqwest::Response, MeshRequestError> {
-    let _gate_lock = mesh_gate_lock.lock().await;
+    let _gate_lock = mesh_gate_lock.read().await;
     if !cluster_mesh_enabled.load(Ordering::Acquire) {
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),
