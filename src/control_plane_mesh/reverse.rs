@@ -239,7 +239,6 @@ impl MeshAwareHttpClient {
                     cluster_ca_cert_pem,
                     budget,
                     ReverseRequestClass::Health,
-                    None,
                 )
                 .await
             {
@@ -284,41 +283,17 @@ impl MeshAwareHttpClient {
                 "reverse health probe must be a bodyless GET".to_string(),
             ));
         }
-        self.send_reverse_health_request_via(
+        self.send_reverse_relay(
             peer,
             route,
             &request,
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             route_budget(request.total_budget),
-            None,
+            ReverseRequestClass::Health,
         )
         .await
         .map(|_| ())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn send_reverse_health_request_via(
-        &self,
-        peer: &MeshPeerTarget,
-        route: &ReverseRelayRoute,
-        request: &MeshRequest,
-        cluster_ca_key_pem: &str,
-        cluster_ca_cert_pem: &str,
-        budget: Duration,
-        gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
-    ) -> Result<reqwest::Response, MeshRequestError> {
-        self.send_reverse_relay(
-            peer,
-            route,
-            request,
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
-            budget,
-            ReverseRequestClass::Health,
-            gate_guard,
-        )
-        .await
     }
 
     /// Sends only through the Raft-assigned Reverse route for control-plane callers that opt in.
@@ -373,7 +348,6 @@ impl MeshAwareHttpClient {
                     cluster_ca_cert_pem,
                     budget,
                     ReverseRequestClass::Control,
-                    None,
                 )
                 .await
             {
@@ -401,20 +375,13 @@ pub(super) async fn send_outer_request(
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
     mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
-    gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
 ) -> Result<reqwest::Response, MeshRequestError> {
-    let gate_guard = match gate_guard {
-        Some(guard) => guard,
-        None => {
-            let guard = mesh_gate_lock.clone().read_owned().await;
-            if !cluster_mesh_enabled.load(Ordering::Acquire) {
-                return Err(MeshRequestError::Reverse(
-                    "cluster Mesh gate is disabled".to_string(),
-                ));
-            }
-            guard
-        }
-    };
+    let gate_guard = mesh_gate_lock.clone().read_owned().await;
+    if !cluster_mesh_enabled.load(Ordering::Acquire) {
+        return Err(MeshRequestError::Reverse(
+            "cluster Mesh gate is disabled".to_string(),
+        ));
+    }
     let mut builder = client
         .request(request.method.clone(), url)
         .body(request.body.clone());

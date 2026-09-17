@@ -632,7 +632,6 @@ impl MeshAwareHttpClient {
                         cluster_ca_cert_pem,
                         reverse_budget,
                         reverse_class,
-                        None,
                     )
                     .await
                 {
@@ -839,7 +838,6 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         budget: Duration,
         class: reverse::ReverseRequestClass,
-        mut gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> Result<reqwest::Response, MeshRequestError> {
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
@@ -948,7 +946,6 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
-                    gate_guard.take(),
                 )
                 .await?,
             );
@@ -964,7 +961,6 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
-                gate_guard.take(),
             )
             .await
             {
@@ -999,7 +995,6 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
-                    None,
                 )
                 .await?
             }
