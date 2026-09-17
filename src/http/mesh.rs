@@ -241,6 +241,14 @@ pub(super) async fn admin_internal_reverse_relay(
         ));
     }
 
+    let mesh_gate_lock = state.reconcile.mesh_gate_lock();
+    let _mesh_gate_read = mesh_gate_lock.read().await;
+    if !state.reconcile.mesh_gate().load(Ordering::Acquire) {
+        return Err(ApiError::conflict(
+            "reverse relay is disabled by the cluster Mesh gate",
+        ));
+    }
+
     let mut inner_headers = HeaderMap::new();
     if !envelope.content_type.is_empty() {
         inner_headers.insert(

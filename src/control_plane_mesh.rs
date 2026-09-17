@@ -358,6 +358,18 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
+        let _mesh_gate_read = (path == PeerDirectPath::RealityMesh)
+            .then(|| self.cluster_mesh_epoch.load(Ordering::Acquire))
+            .map(|epoch| async move { self.mesh_read_guard_for_epoch(epoch).await });
+        let _mesh_gate_read = match _mesh_gate_read {
+            Some(future) => Some(future.await),
+            None => None,
+        };
+        if path == PeerDirectPath::RealityMesh && _mesh_gate_read.is_none() {
+            return Err(MeshRequestError::InvalidTarget(
+                "Mesh is disabled by the cluster gate".into(),
+            ));
+        }
         let url = join_url(
             base_url,
             &request.path_and_query,
@@ -732,7 +744,7 @@ impl MeshAwareHttpClient {
         {
             Ok(response) => response,
             Err(error) => {
-                self.record_sample(
+                self.record_public_sample_for_epoch(
                     peer,
                     telemetry_sample(
                         TelemetryPath::Public,
@@ -742,6 +754,8 @@ impl MeshAwareHttpClient {
                         request.updates_active_path,
                         None,
                     ),
+                    mesh_epoch,
+                    fallback,
                 )
                 .await;
                 return Err(error);
@@ -755,7 +769,7 @@ impl MeshAwareHttpClient {
         {
             return Ok(PeerRequestResponse::PredecessorNotFound);
         }
-        self.record_sample(
+        self.record_public_sample_for_epoch(
             peer,
             telemetry_sample(
                 TelemetryPath::Public,
@@ -765,12 +779,10 @@ impl MeshAwareHttpClient {
                 request.updates_active_path,
                 None,
             ),
+            mesh_epoch,
+            fallback,
         )
         .await;
-        if fallback && peer.mesh_base_url.is_some() {
-            self.record_mesh_reason(peer, MeshPeerReason::FallbackActive)
-                .await;
-        }
         Ok(PeerRequestResponse::Verified(response))
     }
 

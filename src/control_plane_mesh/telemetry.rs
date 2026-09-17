@@ -97,6 +97,24 @@ impl MeshAwareHttpClient {
         self.record_terminal_failure(peer).await;
     }
 
+    pub(super) async fn record_public_sample_for_epoch(
+        &self,
+        peer: &MeshPeerTarget,
+        sample: MeshTelemetrySample,
+        epoch: u64,
+        fallback: bool,
+    ) {
+        let _gate_lock = self.mesh_gate_lock.read().await;
+        if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+            return;
+        }
+        self.record_sample(peer, sample).await;
+        if fallback && peer.mesh_base_url.is_some() {
+            self.record_mesh_reason(peer, MeshPeerReason::FallbackActive)
+                .await;
+        }
+    }
+
     pub(super) async fn record_terminal_failure(&self, peer: &MeshPeerTarget) {
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry

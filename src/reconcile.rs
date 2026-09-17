@@ -504,11 +504,6 @@ async fn reconcile_once_with_runtime(
     ) = {
         let store = store.lock().await;
         let mesh_enabled_state = store.state().mesh_enabled;
-        restart_handle.set_mesh_enabled(mesh_enabled_state).await;
-        let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
-        let mesh_gate_authoritative = restart_handle
-            .mesh_gate_authoritative
-            .load(Ordering::Acquire);
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,
@@ -521,6 +516,9 @@ async fn reconcile_once_with_runtime(
         let endpoints = store.list_endpoints();
         let reverse_mesh_epoch = store.state().reverse_mesh_epoch;
         let reverse_mesh_assignments = store.state().reverse_mesh_assignments.clone();
+        let mesh_gate_authoritative = restart_handle
+            .mesh_gate_authoritative
+            .load(Ordering::Acquire);
         let reverse_mesh_bootstrap_target = store
             .state()
             .active_membership_operation()
@@ -620,9 +618,11 @@ async fn reconcile_once_with_runtime(
             },
             local_vless_endpoint_ids,
             desired_hash_by_endpoint_id,
-            cluster_mesh_enabled,
+            mesh_enabled_state,
         )
     };
+    restart_handle.set_mesh_enabled(cluster_mesh_enabled).await;
+    let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
 
     let migration_marker_user_encryption_path = config
         .data_dir

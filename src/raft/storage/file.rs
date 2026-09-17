@@ -459,6 +459,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 inner.last_membership = StoredMembership::new(Some(log_id), membership.clone());
             }
 
+            let mut mesh_gate_update = None;
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
@@ -507,15 +508,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
-                            if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }) {
-                                self.reconcile
-                                    .initialize_mesh_gate(store.state().mesh_enabled)
-                                    .await;
-                            } else {
-                                self.reconcile
-                                    .initialize_mesh_gate_if_unset(store.state().mesh_enabled)
-                                    .await;
-                            }
+                            mesh_gate_update = Some((
+                                matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }),
+                                store.state().mesh_enabled,
+                            ));
                             if let Some(endpoint_id) = rebuild_inbound {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
                             }
@@ -648,6 +644,14 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 },
             };
 
+            if let Some((explicit, enabled)) = mesh_gate_update {
+                if explicit {
+                    self.reconcile.initialize_mesh_gate(enabled).await;
+                } else {
+                    self.reconcile.initialize_mesh_gate_if_unset(enabled).await;
+                }
+            }
+
             {
                 let mut inner = self.inner.lock().await;
                 inner.last_applied = Some(log_id);
@@ -729,7 +733,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             )
         })?;
 
-        {
+        let mesh_enabled = {
             let mut store = self.store.lock().await;
             let resource_revision = store.state().mihomo_resource_revision.wrapping_add(1);
             *store.state_mut() = state;
@@ -757,8 +761,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     .retain(|key, _| allowed_membership_keys.contains(key));
             });
             let _ = store.prune_inbound_ip_usage_memberships();
-            self.reconcile.initialize_mesh_gate(mesh_enabled).await;
-        }
+            mesh_enabled
+        };
+        self.reconcile.initialize_mesh_gate(mesh_enabled).await;
 
         {
             let mut inner = self.inner.lock().await;

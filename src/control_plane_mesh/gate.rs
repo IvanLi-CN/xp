@@ -63,6 +63,16 @@ impl MeshAwareHttpClient {
         Some(send().await)
     }
 
+    pub(super) async fn mesh_read_guard_for_epoch(
+        &self,
+        epoch: u64,
+    ) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
+        let guard = self.mesh_gate_lock.read().await;
+        (self.cluster_mesh_enabled.load(Ordering::Acquire)
+            && self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch)
+            .then_some(guard)
+    }
+
     pub(super) async fn release_half_open_probe_for_epoch(&self, peer_id: &str, epoch: u64) {
         let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
         if self.cluster_mesh_epoch.load(Ordering::Acquire) == epoch {
