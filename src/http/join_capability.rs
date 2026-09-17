@@ -11,7 +11,10 @@ use super::{
     ApiError, AppState, MeshCapabilityProbeResponse, raft_metrics,
     send_mesh_internal_capability_read,
 };
-use crate::domain::Node;
+use crate::{
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath},
+    domain::Node,
+};
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 pub(super) const STALE_LEARNER_RETIREMENT_CAPABILITY: &str = "cluster.stale-learner-retirement-v1";
@@ -276,23 +279,43 @@ async fn public_capability_supports(
     if api_base_url.is_empty() {
         return false;
     }
-    let response = tokio::time::timeout(
-        remaining,
-        state
-            .mesh_client
-            .direct()
-            .get(format!("{api_base_url}{LEGACY_CAPABILITIES_PATH}"))
-            .send(),
-    )
-    .await
-    .ok()
-    .and_then(Result::ok);
+    let peer = MeshPeerTarget {
+        node_id: node.node_id.clone(),
+        node_name: node.node_name.clone(),
+        mesh_base_url: None,
+        mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
+        public_base_url: api_base_url.to_string(),
+    };
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/capabilities".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: remaining,
+        allow_ambiguous_fallback: false,
+        request_id: crate::id::new_ulid_string(),
+        route: crate::internal_auth::InternalRoute::MeshV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: false,
+    };
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_deref() else {
+        return false;
+    };
+    let response = state
+        .mesh_client
+        .send_peer_direct_request(
+            &peer,
+            PeerDirectPath::ApiBaseUrl,
+            request,
+            ca_key_pem,
+            &state.cluster_ca_pem,
+        )
+        .await
+        .ok();
     let Some(response) = response else {
         return false;
     };
-    if !response.status().is_success() {
-        return false;
-    }
     let Some(remaining) = remaining_probe_budget(started) else {
         return false;
     };

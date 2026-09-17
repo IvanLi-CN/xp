@@ -201,6 +201,11 @@ async fn probe_reverse_link(
     state: &AppState,
     link: &crate::reverse_mesh::ReverseLinkKey,
 ) -> Result<(), ApiError> {
+    if !state.reconcile.mesh_gate().load(Ordering::Acquire) {
+        return Err(ApiError::conflict(
+            "reverse link probing is disabled by the cluster Mesh gate",
+        ));
+    }
     if link.target_node_id != state.cluster.node_id {
         return Err(ApiError::invalid_request(
             "reverse link target is not local",
@@ -266,6 +271,11 @@ pub(in crate::http) async fn admin_internal_mesh_health(
     if link.is_none() && headers.contains_key(crate::reverse_mesh::RELAY_VERSION_HEADER) {
         return Err(ApiError::unauthorized(
             "reverse relay proof requires complete reverse link headers",
+        ));
+    }
+    if link.is_some() && !state.reconcile.mesh_gate().load(Ordering::Acquire) {
+        return Err(ApiError::conflict(
+            "reverse health is disabled by the cluster Mesh gate",
         ));
     }
     if let Some(link) = link {

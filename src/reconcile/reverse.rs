@@ -29,7 +29,8 @@ impl ReconcileHandle {
     }
 
     pub(super) fn refresh_reverse_gate(&self) {
-        let enabled = self.reverse_supervisor_enabled.load(Ordering::Acquire)
+        let enabled = self.mesh_enabled.load(Ordering::Acquire)
+            && self.reverse_supervisor_enabled.load(Ordering::Acquire)
             && self.reverse_runtime_ready.load(Ordering::Acquire)
             && self.reverse_operator_enabled.load(Ordering::Acquire)
             && !self.reverse_recovery_required.load(Ordering::Acquire);

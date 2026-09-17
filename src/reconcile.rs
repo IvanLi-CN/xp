@@ -157,6 +157,7 @@ impl ReconcileHandle {
 
     fn set_mesh_enabled(&self, enabled: bool) {
         self.mesh_enabled.store(enabled, Ordering::Release);
+        self.refresh_reverse_gate();
     }
     pub(crate) fn request_reverse_restart_recovery(&self) {
         self.reverse_recovery_required
@@ -526,9 +527,11 @@ async fn reconcile_once_with_runtime(
         snapshot,
         local_vless_endpoint_ids,
         desired_hash_by_endpoint_id,
+        cluster_mesh_enabled,
     ) = {
         let store = store.lock().await;
-        restart_handle.set_mesh_enabled(store.state().mesh_enabled);
+        let cluster_mesh_enabled = store.state().mesh_enabled;
+        restart_handle.set_mesh_enabled(cluster_mesh_enabled);
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,
@@ -638,6 +641,7 @@ async fn reconcile_once_with_runtime(
             },
             local_vless_endpoint_ids,
             desired_hash_by_endpoint_id,
+            cluster_mesh_enabled,
         )
     };
 
@@ -683,7 +687,7 @@ async fn reconcile_once_with_runtime(
         reverse_reconciler,
         restart_handle,
         config.bind.port(),
-        config.reverse_mesh_enabled,
+        config.reverse_mesh_enabled && cluster_mesh_enabled,
     )
     .await;
 

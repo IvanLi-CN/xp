@@ -1902,7 +1902,8 @@ async fn admin_internal_reverse_readiness(
         })
     };
     let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
-    let reverse_ready = state.reconcile.reverse_gate().load(Ordering::Acquire)
+    let reverse_ready = state.reconcile.mesh_gate().load(Ordering::Acquire)
+        && state.reconcile.reverse_gate().load(Ordering::Acquire)
         && xray_ready
         && managed_vless_endpoint;
     let health_verified = state.reverse_relay.has_any_health_verified().await;
@@ -1938,7 +1939,8 @@ async fn admin_internal_capabilities(
     response.reverse_mesh = Some(capabilities::ReverseMeshReadiness {
         xray_ready,
         managed_vless_endpoint,
-        reverse_ready: state.reconcile.reverse_gate().load(Ordering::Acquire)
+        reverse_ready: state.reconcile.mesh_gate().load(Ordering::Acquire)
+            && state.reconcile.reverse_gate().load(Ordering::Acquire)
             && xray_ready
             && managed_vless_endpoint,
         health_verified,

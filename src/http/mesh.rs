@@ -101,6 +101,11 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay is disabled until local Xray readiness recovers",
         ));
     }
+    if !state.reconcile.mesh_gate().load(Ordering::Acquire) {
+        return Err(ApiError::conflict(
+            "reverse relay is disabled by the cluster Mesh gate",
+        ));
+    }
     let ca_key_pem = state
         .cluster_ca_key_pem
         .as_deref()
@@ -930,6 +935,9 @@ pub(super) async fn admin_internal_raft_client_write(
     ) {
         crate::http::join_capability::require_reverse_assignment_on_voters(&state).await?;
     }
+    if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }) {
+        crate::http::join_capability::require_mesh_gate_on_voters(&state).await?;
+    }
     let idempotency_request = internal
         .verified
         .as_ref()
@@ -1072,11 +1080,18 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                     if mesh_enabled { "enabled" } else { "disabled" }.to_string(),
                 ),
                 mesh_reason,
-                current_path: peer.and_then(|peer| peer.last_path),
-                active_route: status::with_assignment(
-                    peer.and_then(|peer| peer.active_route.clone()),
-                    assignments.get(&node.node_id),
-                ),
+                current_path: cluster_mesh_enabled
+                    .then(|| peer.and_then(|peer| peer.last_path))
+                    .flatten()
+                    .or_else(|| (!cluster_mesh_enabled).then_some(TelemetryPath::Public)),
+                active_route: cluster_mesh_enabled
+                    .then(|| {
+                        status::with_assignment(
+                            peer.and_then(|peer| peer.active_route.clone()),
+                            assignments.get(&node.node_id),
+                        )
+                    })
+                    .flatten(),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: is_mesh_peer_stale(peer, now),
                 breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
