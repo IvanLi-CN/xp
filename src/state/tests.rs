@@ -467,6 +467,30 @@ fn legacy_set_grant_enabled_missing_source_deserializes_as_noop() {
 }
 
 #[test]
+fn mesh_switch_defaults_on_and_is_raft_serializable() {
+    let mut state: PersistedState = serde_json::from_value(json!({
+        "schema_version": SCHEMA_VERSION
+    }))
+    .unwrap();
+    assert!(state.mesh_enabled);
+
+    let command: DesiredStateCommand = serde_json::from_value(json!({
+        "type": "set_mesh_enabled",
+        "enabled": false
+    }))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&command).unwrap(),
+        json!({ "type": "set_mesh_enabled", "enabled": false })
+    );
+    assert_eq!(
+        command.apply(&mut state).unwrap(),
+        DesiredStateApplyResult::Applied
+    );
+    assert!(!state.mesh_enabled);
+}
+
+#[test]
 fn legacy_replace_user_access_items_deserializes_to_endpoint_ids() {
     let cmd: DesiredStateCommand = serde_json::from_value(json!({
         "type": "replace_user_access",

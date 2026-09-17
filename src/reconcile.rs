@@ -104,6 +104,7 @@ pub struct ReconcileHandle {
     reverse_recovery_required: Arc<AtomicBool>,
     reverse_operator_enabled: Arc<AtomicBool>,
     reverse_links: ReverseLinkRuntime,
+    mesh_enabled: Arc<AtomicBool>,
 }
 
 impl ReconcileHandle {
@@ -117,6 +118,7 @@ impl ReconcileHandle {
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
+            mesh_enabled: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -131,6 +133,7 @@ impl ReconcileHandle {
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
+            mesh_enabled: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -142,6 +145,18 @@ impl ReconcileHandle {
 
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
+    }
+
+    pub fn mesh_gate(&self) -> Arc<AtomicBool> {
+        self.mesh_enabled.clone()
+    }
+
+    pub fn initialize_mesh_gate(&self, enabled: bool) {
+        self.set_mesh_enabled(enabled);
+    }
+
+    fn set_mesh_enabled(&self, enabled: bool) {
+        self.mesh_enabled.store(enabled, Ordering::Release);
     }
     pub(crate) fn request_reverse_restart_recovery(&self) {
         self.reverse_recovery_required
@@ -305,6 +320,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_recovery_required: Arc::new(AtomicBool::new(false)),
         reverse_operator_enabled: Arc::new(AtomicBool::new(config.reverse_mesh_enabled)),
         reverse_links: ReverseLinkRuntime::default(),
+        mesh_enabled: Arc::new(AtomicBool::new(true)),
     };
     let restart_handle = handle.clone();
 
@@ -512,6 +528,7 @@ async fn reconcile_once_with_runtime(
         desired_hash_by_endpoint_id,
     ) = {
         let store = store.lock().await;
+        restart_handle.set_mesh_enabled(store.state().mesh_enabled);
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,

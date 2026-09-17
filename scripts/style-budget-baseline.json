@@ -4,7 +4,7 @@
     "max_line_length": 141
   },
   "AGENTS.md": {
-    "long_line_count": 10,
+    "long_line_count": 11,
     "max_line_length": 244
   },
   "Cargo.toml": {
@@ -576,7 +576,7 @@
   "src/http/mesh.rs": {
     "long_line_count": 2,
     "max_line_length": 109,
-    "source_lines": 1643
+    "source_lines": 1671
   },
   "src/http/tests.rs": {
     "long_line_count": 3,
@@ -711,7 +711,7 @@
   "src/reconcile.rs": {
     "long_line_count": 5,
     "max_line_length": 125,
-    "source_lines": 1291
+    "source_lines": 1305
   },
   "src/reconcile/tests.rs": {
     "long_line_count": 8,
@@ -720,7 +720,7 @@
   "src/state.rs": {
     "long_line_count": 4,
     "max_line_length": 129,
-    "source_lines": 4548
+    "source_lines": 4567
   },
   "src/state/tests.rs": {
     "source_lines": 2472

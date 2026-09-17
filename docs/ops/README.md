@@ -282,6 +282,14 @@ Contract:
 
 ## Reality fallback control-plane Mesh
 
+Mesh is enabled for the cluster by default and is controlled by the Raft-persisted
+`PersistedState.mesh_enabled` value. Operators can inspect the current value in
+`GET /api/admin/mesh/status` (`cluster_mesh_enabled`) and change it with the authenticated
+`PUT /api/admin/mesh/config` request body `{ "enabled": true|false }`. When disabled, XP uses
+only each member's registered public HTTPS `api_base_url`; it does not replace Mesh with a
+private origin or a Reverse Mesh relay. Re-enabling is cluster-wide and takes effect after the
+replicated command is applied on each voter.
+
 When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
 `https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints
 are proxy-only and are excluded from this plain HTTPS route, so XP uses the existing Reverse/Public

@@ -9,6 +9,7 @@
 - 内部 HMAC 没有覆盖 body、时间或身份。
 - 失败后的跨路径重试可能让 mutation 重复执行。
 - 管理界面缺少当前节点视角的 peer 链路诊断。
+- 运维需要一个由 Raft 统一复制的集群级 Mesh 开关，以便在公网 HTTPS 仍可用时止损。
 
 ## 目标
 
@@ -16,6 +17,8 @@
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
+- `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
+  公网 `api_base_url`，不改用私网或 Reverse Mesh。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -29,6 +32,7 @@
 - 不保证 50 个以上 peer 的性能。
 - 不修改 Xray inbound、`connIdle`、Reality 端口或用户代理流量。
 - 不为 Mesh pool、idle timeout、flow-control window 或 keepalive 暴露 operator 配置。
+- 不提供节点本地环境变量覆盖集群 Mesh 开关。
 
 ## 范围
 
@@ -104,6 +108,9 @@
 - probe 有 jitter，最多并发四个 peer；三分钟无样本标记 stale。
 - `GET /api/admin/mesh/status` 对完整状态表示计算 ETag。
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
+- `PUT /api/admin/mesh/config` 通过 Raft 写入 `{ "enabled": boolean }`；状态响应的
+  `cluster_mesh_enabled` 表示当前集群值。关闭后既有公网请求继续工作，开启后新请求恢复
+  Mesh 尝试。
 - status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
   仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
   订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。

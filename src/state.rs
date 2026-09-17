@@ -330,9 +330,17 @@ pub enum MihomoDeliveryMode {
     Provider,
 }
 
+fn default_mesh_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistedState {
     pub schema_version: u32,
+    /// Raft-authoritative switch for Reality control-plane Mesh.
+    /// Defaults to enabled for snapshots written before the switch existed.
+    #[serde(default = "default_mesh_enabled")]
+    pub mesh_enabled: bool,
     #[serde(skip)]
     pub mihomo_resource_revision: u64,
     #[serde(default)]
@@ -405,6 +413,7 @@ impl PersistedState {
     pub fn empty() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            mesh_enabled: true,
             mihomo_resource_revision: 0,
             mihomo_resource_allow_private_targets: false,
             nodes: BTreeMap::new(),
@@ -1707,6 +1716,9 @@ fn is_false(value: &bool) -> bool {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesiredStateCommand {
+    SetMeshEnabled {
+        enabled: bool,
+    },
     UpsertNode {
         node: Node,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1898,6 +1910,9 @@ struct UserAccessItemCompat {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum DesiredStateCommandCompat {
+    SetMeshEnabled {
+        enabled: bool,
+    },
     UpsertNode {
         node: Node,
         #[serde(default)]
@@ -2270,6 +2285,10 @@ impl DesiredStateCommand {
             return result;
         }
         match self {
+            Self::SetMeshEnabled { enabled } => {
+                state.mesh_enabled = *enabled;
+                Ok(DesiredStateApplyResult::Applied)
+            }
             Self::BeginMembershipOperation { .. }
             | Self::TransitionMembershipOperation { .. }
             | Self::PruneMembershipOperations { .. } => {

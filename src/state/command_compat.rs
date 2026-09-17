@@ -5,6 +5,9 @@ use super::{DesiredStateCommand, DesiredStateCommandCompat};
 impl From<DesiredStateCommandCompat> for DesiredStateCommand {
     fn from(value: DesiredStateCommandCompat) -> Self {
         match value {
+            DesiredStateCommandCompat::SetMeshEnabled { enabled } => {
+                Self::SetMeshEnabled { enabled }
+            }
             DesiredStateCommandCompat::UpsertNode { node, join_session } => {
                 Self::UpsertNode { node, join_session }
             }

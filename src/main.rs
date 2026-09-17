@@ -375,6 +375,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         store.clone(),
         cluster_ca_key_pem_required.clone(),
     );
+    let mesh_enabled = store.lock().await.state().mesh_enabled;
+    reconcile.initialize_mesh_gate(mesh_enabled);
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
     let (cloudflared_health, _cloudflared_supervisor_task) =
@@ -418,6 +420,7 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         cluster.node_id.clone(),
         format!("http://127.0.0.1:{}", config.bind.port()),
     )
+    .with_mesh_gate(reconcile.mesh_gate())
     .with_reverse_gate(reconcile.reverse_gate());
     let mesh_client = raft_network.mesh_client();
     let raft = xp::raft::runtime::start_raft(

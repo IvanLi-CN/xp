@@ -262,6 +262,7 @@ pub struct MeshAwareHttpClient {
     mesh: reqwest::Client,
     public_direct: reqwest::Client,
     circuits: PeerCircuitBreakers,
+    cluster_mesh_enabled: Arc<AtomicBool>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -278,6 +279,7 @@ impl MeshAwareHttpClient {
             mesh,
             public_direct,
             circuits: PeerCircuitBreakers::default(),
+            cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
@@ -310,6 +312,13 @@ impl MeshAwareHttpClient {
 
     pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
         self.reverse_enabled = gate;
+        self
+    }
+
+    /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
+    /// available when this gate is closed.
+    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.cluster_mesh_enabled = gate;
         self
     }
 
@@ -480,7 +489,8 @@ impl MeshAwareHttpClient {
             peer.node_id.clone(),
             request.request_id.clone(),
         );
-        let mesh_enabled = peer.mesh_base_url.is_some();
+        let cluster_mesh_enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
+        let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
         let decision = self
             .circuits
             .before_attempt(&peer.node_id, mesh_enabled)
@@ -592,7 +602,8 @@ impl MeshAwareHttpClient {
             }
         }
 
-        let should_try_reverse = !request.path_and_query.contains("/mesh/reverse-relay")
+        let should_try_reverse = cluster_mesh_enabled
+            && !request.path_and_query.contains("/mesh/reverse-relay")
             && (mesh_outcome_ambiguous
                 || !mesh_enabled
                 || matches!(decision, MeshAttemptDecision::SkipOpen));

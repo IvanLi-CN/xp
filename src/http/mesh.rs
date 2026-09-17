@@ -16,6 +16,7 @@ pub(super) use liveness::{
 struct AdminMeshStatusResponse {
     generated_at: String,
     revision: u64,
+    cluster_mesh_enabled: bool,
     local: AdminMeshLocalStatus,
     peers: Vec<AdminMeshPeerStatus>,
     events: Vec<crate::mesh_telemetry::MeshTelemetryEvent>,
@@ -1014,12 +1015,13 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints, assignments) = {
+    let (nodes, endpoints, assignments, cluster_mesh_enabled) = {
         let store = state.store.lock().await;
         (
             store.list_nodes(),
             store.list_endpoints(),
             store.state().reverse_mesh_assignments.clone(),
+            store.state().mesh_enabled,
         )
     };
     let peers = nodes
@@ -1028,9 +1030,11 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .map(|node| {
             let target = crate::control_plane_mesh::peer_target_from_node(&node, &endpoints);
             let mesh_url = target.mesh_base_url.clone();
-            let mesh_enabled = mesh_url.is_some();
+            let mesh_enabled = mesh_url.is_some() && cluster_mesh_enabled;
             let peer = telemetry_by_peer.get(node.node_id.as_str()).copied();
-            let mesh_reason = if mesh_enabled {
+            let mesh_reason = if !cluster_mesh_enabled {
+                Some(crate::mesh_telemetry::MeshPeerReason::FallbackActive)
+            } else if mesh_enabled {
                 Some(
                     peer.and_then(|peer| peer.last_mesh_reason)
                         .filter(|_| {
@@ -1094,6 +1098,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
     AdminMeshStatusResponse {
         generated_at: telemetry.generated_at,
         revision: telemetry.revision,
+        cluster_mesh_enabled,
         local: AdminMeshLocalStatus {
             node_id: state.cluster.node_id.clone(),
             node_name: state.cluster.node_name.clone(),
@@ -1198,6 +1203,7 @@ mod tests {
             AdminMeshStatusResponse {
                 generated_at: generated_at.to_string(),
                 revision: 7,
+                cluster_mesh_enabled: true,
                 local: AdminMeshLocalStatus {
                     node_id: "local".to_string(),
                     node_name: "local".to_string(),
@@ -1302,6 +1308,28 @@ pub(super) async fn admin_get_mesh_status(
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
     (StatusCode::OK, [(header::ETAG, etag)], Json(snapshot)).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AdminMeshConfigRequest {
+    pub enabled: bool,
+}
+
+pub(super) async fn admin_update_mesh_config(
+    Extension(state): Extension<AppState>,
+    ApiJson(request): ApiJson<AdminMeshConfigRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::raft_write(
+        &state,
+        crate::state::DesiredStateCommand::SetMeshEnabled {
+            enabled: request.enabled,
+        },
+    )
+    .await?;
+    state.reconcile.request_full();
+    let enabled = state.store.lock().await.state().mesh_enabled;
+    Ok(Json(serde_json::json!({ "enabled": enabled })))
 }
 
 fn mesh_status_etag(snapshot: &AdminMeshStatusResponse) -> String {

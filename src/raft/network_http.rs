@@ -96,6 +96,11 @@ impl HttpNetworkFactory {
         self
     }
 
+    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.client = self.client.with_mesh_gate(gate);
+        self
+    }
+
     pub fn mesh_client(&self) -> MeshAwareHttpClient {
         self.client.clone()
     }

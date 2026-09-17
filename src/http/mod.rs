@@ -38,9 +38,9 @@ mod unreachable_voter_eviction;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
     admin_internal_raft_client_write, admin_internal_reverse_probe, admin_internal_reverse_relay,
-    admin_run_mesh_probes, send_mesh_internal_capability_read, send_mesh_internal_read,
-    send_mesh_internal_request, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
-    spawn_reverse_link_probe_worker,
+    admin_run_mesh_probes, admin_update_mesh_config, send_mesh_internal_capability_read,
+    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
+    spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use resource_alerts::admin_get_alerts_response;
@@ -1198,6 +1198,7 @@ pub fn build_router_with_mesh_telemetry(
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/upgrade/status", get(admin_get_upgrade_status))
         .route("/upgrade/start", post(admin_start_upgrade))
+        .route("/mesh/config", put(admin_update_mesh_config))
         .route("/mesh/status", get(admin_get_mesh_status))
         .route("/mesh/probes", post(admin_run_mesh_probes))
         .route("/status/events", get(admin_stream_status_events))

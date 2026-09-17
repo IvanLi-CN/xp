@@ -217,6 +217,60 @@ async fn short_budget_keeps_public_fallback_after_mesh_and_reverse_timeouts() {
     public_task.abort();
 }
 
+#[tokio::test]
+async fn cluster_mesh_gate_disabled_uses_public_without_mesh_or_reverse_attempts() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let gate = Arc::new(AtomicBool::new(false));
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate(gate);
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(
+                secondary_reverse_target(
+                    Some("http://127.0.0.1:1".to_string()),
+                    "http://127.0.0.1:2".to_string(),
+                ),
+                None,
+                reverse_assignment(),
+            ),
+        )
+        .await;
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "cluster-mesh-disabled-public-only".to_string(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(result.is_ok(), "public request should succeed: {result:?}");
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    mesh_task.abort();
+    public_task.abort();
+}
+
 #[derive(Clone)]
 struct PeakStallState {
     active: Arc<AtomicUsize>,

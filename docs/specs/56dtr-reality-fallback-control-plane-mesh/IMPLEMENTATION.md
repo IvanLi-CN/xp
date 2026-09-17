@@ -12,6 +12,9 @@
 
 - internal-auth v2、purpose-separated ack（完整 canonical request digest）与 strict bodyless
   canary ingress。
+- Raft `PersistedState.mesh_enabled` provides the cluster-level Mesh switch. The authenticated
+  `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
+  observes the same gate; disabled clusters use only registered public HTTPS peer origins.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、
   node history、探针、管理 fan-out 与 SSE 共用进程级传输 bundle。托管 Mesh 使用 HTTP/2-only
   client，每 origin 最多保留一条 idle connection，idle timeout 为 120 秒；公网 direct/relay
