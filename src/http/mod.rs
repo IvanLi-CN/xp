@@ -951,6 +951,7 @@ pub fn build_router(
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     geo_db_update: GeoDbUpdateHandle,
 ) -> Router {
+    let mesh_gate = reconcile.mesh_gate();
     let mesh_telemetry =
         MeshTelemetryHandle::load(&config.data_dir).expect("load local mesh telemetry");
     let node_cert_pem = cluster
@@ -961,6 +962,7 @@ pub fn build_router(
         .expect("read node private key");
     let mesh_client = build_mesh_http_client(&cluster_ca_pem, &node_cert_pem, &node_key_pem)
         .expect("build Mesh transport clients")
+        .with_mesh_gate(mesh_gate)
         .with_mesh_observability(mesh_telemetry.clone());
     build_router_with_mesh_telemetry(
         config,
@@ -1003,6 +1005,7 @@ pub fn build_router_with_mesh_telemetry(
     mesh_telemetry: MeshTelemetryHandle,
     mesh_client: MeshAwareHttpClient,
 ) -> Router {
+    let mesh_client = mesh_client.with_mesh_gate(reconcile.mesh_gate());
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
         .expect("load local internal idempotency ledger");

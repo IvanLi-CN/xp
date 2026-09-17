@@ -304,7 +304,6 @@ impl MeshAwareHttpClient {
     pub fn circuits(&self) -> PeerCircuitBreakers {
         self.circuits.clone()
     }
-
     pub fn with_reverse_routes(mut self, routes: BTreeMap<String, ReverseRelayRoute>) -> Self {
         self.reverse_routes = Arc::new(RwLock::new(routes));
         self
@@ -314,14 +313,12 @@ impl MeshAwareHttpClient {
         self.reverse_enabled = gate;
         self
     }
-
     /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
     /// available when this gate is closed.
     pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
         self.cluster_mesh_enabled = gate;
         self
     }
-
     pub async fn set_reverse_route(
         &self,
         target_node_id: impl Into<String>,
@@ -332,7 +329,6 @@ impl MeshAwareHttpClient {
             .await
             .insert(target_node_id.into(), route);
     }
-
     pub async fn clear_reverse_route(&self, target_node_id: &str) {
         self.reverse_routes.write().await.remove(target_node_id);
     }
@@ -347,6 +343,11 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let base_url = match path {
+            PeerDirectPath::RealityMesh if !self.cluster_mesh_enabled.load(Ordering::Acquire) => {
+                return Err(MeshRequestError::InvalidTarget(
+                    "Mesh is disabled by the cluster gate".into(),
+                ));
+            }
             PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
             })?,

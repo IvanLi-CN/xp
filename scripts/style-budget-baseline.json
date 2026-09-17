@@ -576,7 +576,7 @@
   "src/http/mesh.rs": {
     "long_line_count": 2,
     "max_line_length": 109,
-    "source_lines": 1671
+    "source_lines": 1672
   },
   "src/http/tests.rs": {
     "long_line_count": 3,

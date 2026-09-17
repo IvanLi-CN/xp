@@ -1320,6 +1320,7 @@ pub(super) async fn admin_update_mesh_config(
     Extension(state): Extension<AppState>,
     ApiJson(request): ApiJson<AdminMeshConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    super::join_capability::require_mesh_gate_on_voters(&state).await?;
     super::raft_write(
         &state,
         crate::state::DesiredStateCommand::SetMeshEnabled {
@@ -1327,9 +1328,9 @@ pub(super) async fn admin_update_mesh_config(
         },
     )
     .await?;
+    state.reconcile.initialize_mesh_gate(request.enabled);
     state.reconcile.request_full();
-    let enabled = state.store.lock().await.state().mesh_enabled;
-    Ok(Json(serde_json::json!({ "enabled": enabled })))
+    Ok(Json(serde_json::json!({ "enabled": request.enabled })))
 }
 
 fn mesh_status_etag(snapshot: &AdminMeshStatusResponse) -> String {

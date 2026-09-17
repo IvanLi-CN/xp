@@ -77,6 +77,7 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "cluster.membership-lifecycle-v1",
         "cluster.stale-learner-retirement-v1",
         "cluster.mesh-reverse-assignment-v1",
+        "cluster.mesh-gate-v1",
     ];
     if crate::uptime_runtime::icmp_supported() {
         capabilities.push("admin.service-monitor-icmp-v1");
@@ -130,6 +131,7 @@ mod tests {
                 .capabilities
                 .contains(&"cluster.membership-lifecycle-v1")
         );
+        assert!(response.capabilities.contains(&"cluster.mesh-gate-v1"));
         assert!(
             response
                 .capabilities

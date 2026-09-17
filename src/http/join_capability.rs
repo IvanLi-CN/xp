@@ -16,6 +16,7 @@ use crate::domain::Node;
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 pub(super) const STALE_LEARNER_RETIREMENT_CAPABILITY: &str = "cluster.stale-learner-retirement-v1";
 pub(super) const REVERSE_ASSIGNMENT_CAPABILITY: &str = "cluster.mesh-reverse-assignment-v1";
+pub(super) const MESH_GATE_CAPABILITY: &str = "cluster.mesh-gate-v1";
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
 const MAX_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
@@ -93,10 +94,23 @@ pub(super) async fn require_reverse_assignment_on_voters(state: &AppState) -> Re
     require_capability_on_voters(state, REVERSE_ASSIGNMENT_CAPABILITY, None).await
 }
 
+pub(super) async fn require_mesh_gate_on_voters(state: &AppState) -> Result<(), ApiError> {
+    require_capability_on_voters_with_probe(state, MESH_GATE_CAPABILITY, None, true).await
+}
+
 async fn require_capability_on_voters(
     state: &AppState,
     capability: &str,
     excluded_voter_id: Option<u64>,
+) -> Result<(), ApiError> {
+    require_capability_on_voters_with_probe(state, capability, excluded_voter_id, false).await
+}
+
+async fn require_capability_on_voters_with_probe(
+    state: &AppState,
+    capability: &str,
+    excluded_voter_id: Option<u64>,
+    public_only: bool,
 ) -> Result<(), ApiError> {
     let metrics = raft_metrics(state);
     let membership = metrics.membership_config.membership();
@@ -147,6 +161,19 @@ async fn require_capability_on_voters(
     }
     for peer in peers {
         let started = Instant::now();
+        if public_only {
+            if !public_capability_supports(state, &peer.node, capability, started).await {
+                return Err(ApiError::new(
+                    "coordinated_upgrade_required",
+                    StatusCode::CONFLICT,
+                    format!(
+                        "voter {} must expose {capability} before this cluster setting can change",
+                        peer.raft_node_id
+                    ),
+                ));
+            }
+            continue;
+        }
         let response = send_mesh_internal_capability_read(
             state,
             &state.mesh_client,
@@ -233,6 +260,45 @@ async fn require_capability_on_voters(
         }
     }
     Ok(())
+}
+
+async fn public_capability_supports(
+    state: &AppState,
+    node: &Node,
+    capability: &str,
+    started: Instant,
+) -> bool {
+    let remaining = remaining_probe_budget(started).unwrap_or_default();
+    if remaining.is_zero() {
+        return false;
+    }
+    let api_base_url = node.api_base_url.trim().trim_end_matches('/');
+    if api_base_url.is_empty() {
+        return false;
+    }
+    let response = tokio::time::timeout(
+        remaining,
+        state
+            .mesh_client
+            .direct()
+            .get(format!("{api_base_url}{LEGACY_CAPABILITIES_PATH}"))
+            .send(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok);
+    let Some(response) = response else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Some(remaining) = remaining_probe_budget(started) else {
+        return false;
+    };
+    read_capability_response(response, remaining)
+        .await
+        .is_some_and(|body| body.capabilities.iter().any(|item| item == capability))
 }
 
 #[cfg(test)]
