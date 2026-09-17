@@ -257,6 +257,45 @@ async fn membership_then_state_entry_releases_a_fresh_join_mesh_gate() {
 }
 
 #[tokio::test]
+async fn legacy_state_machine_meta_keeps_membership_only_restart_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![openraft::impls::Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Membership(openraft::Membership::new(
+                vec![std::collections::BTreeSet::from([1])],
+                std::collections::BTreeMap::new(),
+            )),
+        }])
+        .await
+        .unwrap();
+    let paths = StorePaths::new(tmp.path());
+    let mut meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
+    meta.as_object_mut().unwrap().remove("mesh_state_applied");
+    std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&meta).unwrap()).unwrap();
+    drop(state_machine);
+
+    let restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    let mut restarted = restarted;
+    restarted.applied_state().await.unwrap();
+    assert!(
+        !reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
+#[tokio::test]
 async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
