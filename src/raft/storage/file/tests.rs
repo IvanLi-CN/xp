@@ -156,6 +156,68 @@ async fn ordinary_command_releases_fresh_join_mesh_gate_once_authenticated() {
 }
 
 #[tokio::test]
+async fn applied_state_releases_mesh_gate_after_a_caught_up_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            1,
+        )])
+        .await
+        .unwrap();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    restarted.applied_state().await.unwrap();
+    assert!(
+        reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
+#[tokio::test]
+async fn membership_and_blank_entries_release_a_fresh_join_mesh_gate() {
+    for payload in [
+        EntryPayload::Blank,
+        EntryPayload::Membership(openraft::Membership::new(
+            vec![std::collections::BTreeSet::from([1])],
+            std::collections::BTreeMap::new(),
+        )),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let reconcile = ReconcileHandle::noop();
+        reconcile.hold_mesh_gate_until_raft_state().await;
+        let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+            .await
+            .unwrap();
+        state_machine
+            .apply(vec![openraft::impls::Entry {
+                log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+                payload,
+            }])
+            .await
+            .unwrap();
+        assert!(
+            reconcile
+                .mesh_gate()
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+    }
+}
+
+#[tokio::test]
 async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();

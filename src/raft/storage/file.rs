@@ -428,7 +428,6 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
         })
     }
 }
-
 impl RaftStateMachine<TypeConfig> for FileStateMachine {
     type SnapshotBuilder = FileSnapshotBuilder;
 
@@ -438,10 +437,18 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         (Option<LogId<NodeId>>, StoredMembership<NodeId, NodeMeta>),
         openraft::StorageError<NodeId>,
     > {
-        let inner = self.inner.lock().await;
-        Ok((inner.last_applied, inner.last_membership.clone()))
+        let (last_applied, last_membership) = {
+            let inner = self.inner.lock().await;
+            (inner.last_applied, inner.last_membership.clone())
+        };
+        if last_applied.is_some() {
+            let mesh_enabled = self.store.lock().await.state().mesh_enabled;
+            self.reconcile
+                .initialize_mesh_gate_if_unset(mesh_enabled)
+                .await;
+        }
+        Ok((last_applied, last_membership))
     }
-
     async fn apply<I>(
         &mut self,
         entries: I,
@@ -451,14 +458,12 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         I::IntoIter: openraft::OptionalSend,
     {
         let mut responses = Vec::new();
-
         for entry in entries {
             let log_id = entry.log_id;
             if let Some(membership) = entry.get_membership() {
                 let mut inner = self.inner.lock().await;
                 inner.last_membership = StoredMembership::new(Some(log_id), membership.clone());
             }
-
             let mut mesh_gate_update = None;
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
@@ -640,11 +645,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                         }
                     }
                 }
-                EntryPayload::Membership(_) | EntryPayload::Blank => ClientResponse::Ok {
-                    result: crate::state::DesiredStateApplyResult::Applied,
-                },
+                EntryPayload::Membership(_) | EntryPayload::Blank => {
+                    let mesh_enabled = self.store.lock().await.state().mesh_enabled;
+                    self.reconcile.note_mesh_state_applied();
+                    mesh_gate_update = Some((false, mesh_enabled));
+                    ClientResponse::Ok {
+                        result: crate::state::DesiredStateApplyResult::Applied,
+                    }
+                }
             };
-
             if let Some((explicit, enabled)) = mesh_gate_update {
                 if explicit {
                     self.reconcile.initialize_mesh_gate(enabled).await;
@@ -652,12 +661,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     self.reconcile.initialize_mesh_gate_if_unset(enabled).await;
                 }
             }
-
             {
                 let mut inner = self.inner.lock().await;
                 inner.last_applied = Some(log_id);
             }
-
             responses.push(resp);
         }
 
@@ -665,7 +672,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         self.reconcile.request_full();
         Ok(responses)
     }
-
     async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
         FileSnapshotBuilder {
             store: self.store.clone(),
@@ -673,7 +679,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             paths: self.paths.clone(),
         }
     }
-
     async fn begin_receiving_snapshot(
         &mut self,
     ) -> Result<
