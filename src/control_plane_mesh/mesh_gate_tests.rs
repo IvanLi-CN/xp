@@ -76,8 +76,7 @@ async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
 
     let send = tokio::spawn(async move {
         client
-            .with_mesh_send(0, |gate_guard| async move {
-                let _gate_guard = gate_guard;
+            .with_mesh_send(0, || async move {
                 let _ = started_tx.send(());
                 let _ = release_rx.await;
             })
@@ -93,7 +92,13 @@ async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
     assert!(gate.load(Ordering::Acquire));
 
     let _ = release_tx.send(());
-    assert!(send.await.expect("send task should finish").is_some());
+    let (_result, gate_guard) = send
+        .await
+        .expect("send task should finish")
+        .expect("send should enter the gate");
+    tokio::task::yield_now().await;
+    assert!(gate.load(Ordering::Acquire));
+    drop(gate_guard);
     transition.await.expect("transition task should finish");
     assert!(!gate.load(Ordering::Acquire));
 }

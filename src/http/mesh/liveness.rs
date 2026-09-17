@@ -309,11 +309,13 @@ pub(in crate::http) async fn admin_internal_mesh_health(
             "reverse relay proof requires complete reverse link headers",
         ));
     }
-    if link.is_some() && !state.reconcile.mesh_gate().load(Ordering::Acquire) {
-        return Err(ApiError::conflict(
-            "reverse health is disabled by the cluster Mesh gate",
-        ));
-    }
+    let _mesh_gate_read = if link.is_some() {
+        Some(state.reconcile.mesh_gate_read().await.ok_or_else(|| {
+            ApiError::conflict("reverse health is disabled by the cluster Mesh gate")
+        })?)
+    } else {
+        None
+    };
     if let Some(link) = link {
         let verified = internal
             .verified

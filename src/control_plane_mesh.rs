@@ -525,120 +525,26 @@ impl MeshAwareHttpClient {
                 false,
             )?;
             let budget = mesh_attempt_budget(request.total_budget);
-            let send_result = self
-                .with_mesh_send(mesh_epoch, |gate_guard| async {
-                    tokio::time::timeout(
-                        budget,
-                        signed_send(
-                            &self.mesh,
-                            &mesh_url,
-                            &request,
-                            &context,
-                            cluster_ca_key_pem,
-                            cluster_ca_cert_pem,
-                        ),
-                    )
-                    .await
-                    .map(|result| {
-                        result.map(|(response, verified)| {
-                            (reverse::attach_mesh_gate(response, gate_guard), verified)
-                        })
-                    })
-                })
-                .await;
-            match send_result {
-                None => {
+            match self
+                .attempt_mesh_request(
+                    peer,
+                    &request,
+                    &context,
+                    &mesh_url,
+                    budget,
+                    mesh_epoch,
+                    started,
+                    allow_unsigned_not_found,
+                    cluster_ca_key_pem,
+                    cluster_ca_cert_pem,
+                )
+                .await?
+            {
+                gate::MeshAttemptResult::Fallback { ambiguous } => {
                     fallback = true;
-                    mesh_outcome_ambiguous = true;
+                    mesh_outcome_ambiguous |= ambiguous;
                 }
-                Some(Ok(Ok((response, verified)))) => {
-                    let transport = mesh_transport_observation(&response);
-                    if transport.protocol != MeshTransportProtocol::H2 {
-                        self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                            .await;
-                        self.record_mesh_protocol_failure(peer, mesh_epoch).await;
-                        self.record_terminal_failure_for_epoch(peer, mesh_epoch)
-                            .await;
-                        return Err(MeshRequestError::Protocol(
-                            "Mesh response did not use HTTP/2".to_string(),
-                        ));
-                    }
-                    if let Some(acknowledgement) =
-                        response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
-                    {
-                        let ack = match acknowledgement.to_str() {
-                            Ok(ack) => ack,
-                            Err(_) => {
-                                self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                                    .await;
-                                self.record_mesh_protocol_failure(peer, mesh_epoch).await;
-                                self.record_terminal_failure_for_epoch(peer, mesh_epoch)
-                                    .await;
-                                return Err(MeshRequestError::Protocol(
-                                    "Mesh response carries a malformed signed acknowledgement"
-                                        .to_string(),
-                                ));
-                            }
-                        };
-                        if let Err(error) = internal_auth::verify_ack_v2(
-                            cluster_ca_key_pem,
-                            cluster_ca_cert_pem,
-                            &verified,
-                            &peer.node_id,
-                            response.status().as_u16(),
-                            ack,
-                        ) {
-                            self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                                .await;
-                            self.record_mesh_protocol_failure(peer, mesh_epoch).await;
-                            self.record_terminal_failure_for_epoch(peer, mesh_epoch)
-                                .await;
-                            return Err(error.into());
-                        }
-                        self.record_mesh_success(peer, started, &request, transport, mesh_epoch)
-                            .await;
-                        return Ok(PeerRequestResponse::Verified(response));
-                    }
-                    // An unknown nested admin route bypasses `admin_auth`, so a predecessor's
-                    // route miss is intentionally the only accepted acknowledgement-less reply.
-                    if allow_unsigned_not_found
-                        && response.status() == reqwest::StatusCode::NOT_FOUND
-                    {
-                        self.record_mesh_success(peer, started, &request, transport, mesh_epoch)
-                            .await;
-                        return Ok(PeerRequestResponse::PredecessorNotFound);
-                    }
-                    self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
-                        .await;
-                    self.record_mesh_protocol_failure(peer, mesh_epoch).await;
-                    self.record_terminal_failure_for_epoch(peer, mesh_epoch)
-                        .await;
-                    return Err(MeshRequestError::Protocol(
-                        "Mesh response did not carry a valid signed acknowledgement".to_string(),
-                    ));
-                }
-                Some(Ok(Err(error))) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        MeshPeerReason::TransportError,
-                        error.to_string(),
-                        mesh_epoch,
-                    )
-                    .await;
-                    fallback = true;
-                    mesh_outcome_ambiguous = true;
-                }
-                Some(Err(_)) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        MeshPeerReason::TransportTimeout,
-                        "Mesh request timed out".to_string(),
-                        mesh_epoch,
-                    )
-                    .await;
-                    fallback = true;
-                    mesh_outcome_ambiguous = true;
-                }
+                gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
         }
 
@@ -781,14 +687,12 @@ impl MeshAwareHttpClient {
         request: &MeshRequest,
         transport: MeshTransportObservation,
         epoch: u64,
+        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
-        let breaker_state = {
-            if !self.mesh_gate_matches(epoch) {
-                return;
-            }
-            self.circuits.record_success(&peer.node_id).await
-        };
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
+        let breaker_state = self.circuits.record_success(&peer.node_id).await;
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
                 .set_breaker(&peer.node_id, breaker_state, None)
@@ -806,6 +710,23 @@ impl MeshAwareHttpClient {
             ),
         )
         .await;
+    }
+
+    async fn reject_mesh_response(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        response: reqwest::Response,
+        gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+        error: MeshRequestError,
+    ) -> MeshRequestError {
+        drop(response);
+        drop(gate_guard);
+        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
+            .await;
+        self.record_mesh_protocol_failure(peer, epoch).await;
+        self.record_terminal_failure_for_epoch(peer, epoch).await;
+        error
     }
 
     #[allow(clippy::too_many_arguments)]

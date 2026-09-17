@@ -95,6 +95,8 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   log-index 条件。尚未完成 capability barrier 或无可用候选时，marker 缺省且沿用现有
   Direct/Public join。
 - public health 优先；signed Reverse health 200 后可标记 `reverse-dependent`。systemd/OpenRC/container 首次启用、滚动升级、restart fallback 和 operator intervention 必须保持 Direct/Public 可用。
+- 入站 signed Reverse health 在校验 Link 后必须持有 Mesh read admission 直到 lease 确认完成；集群 Mesh
+  关闭一旦取得写屏障，不得再确认 health 或续租 Link。
 - 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`。
   route 提供当前 Rendezvous、其 `primary|standby|bootstrap` 角色与成员、generation、readiness 和汇总计数；旧客户端可继续解析旧字段。
   System Status 由当前 assignments 标明直连 Rendezvous 的 primary/standby 角色。

@@ -21,6 +21,8 @@
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
   公网 `api_base_url`，不改用私网或 Reverse Mesh。能力探测也使用同一签名的公网请求并保留
   predecessor 404 兼容；专用 Reverse health/link probe 在关闭期间必须停用。
+- 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
+  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。

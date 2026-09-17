@@ -144,7 +144,9 @@ impl MeshAwareHttpClient {
         route: &ReverseRelayRoute,
         epoch: u64,
     ) {
-        let _gate_lock = self.mesh_gate_lock.read().await;
+        // Every successful reverse response carries the Mesh read guard in its body stream.
+        // Do not reacquire the write-preferring lock here: a queued gate transition would
+        // otherwise wait for this response while this task waits for another read lock.
         if !self.mesh_gate_matches(epoch) {
             return;
         }

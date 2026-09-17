@@ -36,6 +36,10 @@
 - Mesh and Reverse sends use shared read admission, while cluster gate transitions take an
   exclusive write barrier so normal reverse concurrency is preserved without crossing a disable
   boundary.
+- Successful Mesh telemetry reuses the response's existing read admission instead of reacquiring
+  the write-preferring lock; protocol and transport failures release the response and admission
+  before recording telemetry. Inbound signed Reverse health holds the same admission through lease
+  confirmation, so a queued gate disable cannot cross either lifecycle boundary.
 - Target-side Reverse lifecycle is local and fail-closed. Each derived Link starts with one
   10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
   The target grants a 120-second lease only when the request's assigned Rendezvous identity and
