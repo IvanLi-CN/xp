@@ -230,12 +230,10 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_vote().await?;
         Ok(())
     }
-
     async fn read_vote(&mut self) -> Result<Option<Vote<NodeId>>, openraft::StorageError<NodeId>> {
         let inner = self.inner.lock().await;
         Ok(inner.vote)
     }
-
     async fn save_committed(
         &mut self,
         committed: Option<LogId<NodeId>>,
@@ -247,14 +245,12 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_committed().await?;
         Ok(())
     }
-
     async fn read_committed(
         &mut self,
     ) -> Result<Option<LogId<NodeId>>, openraft::StorageError<NodeId>> {
         let inner = self.inner.lock().await;
         Ok(inner.committed)
     }
-
     async fn append<I>(
         &mut self,
         entries: I,
@@ -279,7 +275,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         );
         res
     }
-
     async fn truncate(
         &mut self,
         log_id: LogId<NodeId>,
@@ -290,7 +285,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         }
         self.persist_wal().await
     }
-
     async fn purge(&mut self, log_id: LogId<NodeId>) -> Result<(), openraft::StorageError<NodeId>> {
         {
             let mut inner = self.inner.lock().await;
@@ -307,24 +301,23 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_wal().await
     }
 }
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PersistedStateMachineMeta {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeMeta>,
+    #[serde(default)]
+    mesh_state_applied: Option<bool>,
 }
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct SnapshotPayload {
     state: crate::state::PersistedState,
 }
-
 #[derive(Debug)]
 struct StateMachineInner {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeMeta>,
+    mesh_state_applied: bool,
 }
-
 #[derive(Debug, Clone)]
 pub struct FileStateMachine {
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -332,7 +325,6 @@ pub struct FileStateMachine {
     paths: StorePaths,
     inner: Arc<Mutex<StateMachineInner>>,
 }
-
 impl FileStateMachine {
     pub async fn open(
         data_dir: &Path,
@@ -348,9 +340,12 @@ impl FileStateMachine {
             .await
             .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
 
-        let (last_applied, last_membership) = meta
-            .map(|m| (m.last_applied, m.last_membership))
-            .unwrap_or((None, StoredMembership::default()));
+        let (last_applied, last_membership, mesh_state_applied) = meta
+            .map(|m| {
+                let mesh_state_applied = m.mesh_state_applied.unwrap_or(m.last_applied.is_some());
+                (m.last_applied, m.last_membership, mesh_state_applied)
+            })
+            .unwrap_or((None, StoredMembership::default(), false));
 
         Ok(Self {
             store,
@@ -359,6 +354,7 @@ impl FileStateMachine {
             inner: Arc::new(Mutex::new(StateMachineInner {
                 last_applied,
                 last_membership,
+                mesh_state_applied,
             })),
         })
     }
@@ -368,6 +364,7 @@ impl FileStateMachine {
         let meta = PersistedStateMachineMeta {
             last_applied: inner.last_applied,
             last_membership: inner.last_membership.clone(),
+            mesh_state_applied: Some(inner.mesh_state_applied),
         };
         write_json(&self.paths.sm_meta_json, &meta)
             .await
@@ -437,11 +434,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         (Option<LogId<NodeId>>, StoredMembership<NodeId, NodeMeta>),
         openraft::StorageError<NodeId>,
     > {
-        let (last_applied, last_membership) = {
+        let (last_applied, last_membership, mesh_state_applied) = {
             let inner = self.inner.lock().await;
-            (inner.last_applied, inner.last_membership.clone())
+            (
+                inner.last_applied,
+                inner.last_membership.clone(),
+                inner.mesh_state_applied,
+            )
         };
-        if last_applied.is_some() {
+        if mesh_state_applied {
             let mesh_enabled = self.store.lock().await.state().mesh_enabled;
             self.reconcile
                 .initialize_mesh_gate_if_unset(mesh_enabled)
@@ -465,6 +466,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 inner.last_membership = StoredMembership::new(Some(log_id), membership.clone());
             }
             let mut mesh_gate_update = None;
+            let mut mesh_state_applied = false;
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
@@ -514,6 +516,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                 )
                             })?;
                             self.reconcile.note_mesh_state_applied();
+                            mesh_state_applied = true;
                             mesh_gate_update = Some((
                                 matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }),
                                 store.state().mesh_enabled,
@@ -645,14 +648,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                         }
                     }
                 }
-                EntryPayload::Membership(_) | EntryPayload::Blank => {
-                    let mesh_enabled = self.store.lock().await.state().mesh_enabled;
-                    self.reconcile.note_mesh_state_applied();
-                    mesh_gate_update = Some((false, mesh_enabled));
-                    ClientResponse::Ok {
-                        result: crate::state::DesiredStateApplyResult::Applied,
-                    }
-                }
+                EntryPayload::Membership(_) | EntryPayload::Blank => ClientResponse::Ok {
+                    result: crate::state::DesiredStateApplyResult::Applied,
+                },
             };
             if let Some((explicit, enabled)) = mesh_gate_update {
                 if explicit {
@@ -664,6 +662,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             {
                 let mut inner = self.inner.lock().await;
                 inner.last_applied = Some(log_id);
+                inner.mesh_state_applied |= mesh_state_applied;
             }
             responses.push(resp);
         }
@@ -776,6 +775,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             let mut inner = self.inner.lock().await;
             inner.last_applied = meta.last_log_id;
             inner.last_membership = meta.last_membership.clone();
+            inner.mesh_state_applied = true;
         }
 
         self.persist_meta().await?;

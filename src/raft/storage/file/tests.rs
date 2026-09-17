@@ -186,7 +186,7 @@ async fn applied_state_releases_mesh_gate_after_a_caught_up_restart() {
 }
 
 #[tokio::test]
-async fn membership_and_blank_entries_release_a_fresh_join_mesh_gate() {
+async fn membership_and_blank_entries_keep_a_fresh_join_mesh_gate_closed() {
     for payload in [
         EntryPayload::Blank,
         EntryPayload::Membership(openraft::Membership::new(
@@ -210,11 +210,50 @@ async fn membership_and_blank_entries_release_a_fresh_join_mesh_gate() {
             .await
             .unwrap();
         assert!(
-            reconcile
+            !reconcile
                 .mesh_gate()
                 .load(std::sync::atomic::Ordering::Acquire)
         );
     }
+}
+
+#[tokio::test]
+async fn membership_then_state_entry_releases_a_fresh_join_mesh_gate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![openraft::impls::Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Membership(openraft::Membership::new(
+                vec![std::collections::BTreeSet::from([1])],
+                std::collections::BTreeMap::new(),
+            )),
+        }])
+        .await
+        .unwrap();
+    assert!(
+        !reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            2,
+        )])
+        .await
+        .unwrap();
+    assert!(
+        reconcile
+            .mesh_gate()
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
 }
 
 #[tokio::test]

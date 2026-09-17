@@ -931,19 +931,6 @@ pub(super) async fn admin_internal_raft_client_write(
     ) {
         crate::http::join_capability::require_reverse_assignment_on_voters(&state).await?;
     }
-    let _membership_operation_guard = if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. })
-    {
-        Some(
-            crate::raft_membership_guard::membership_operation_gate()
-                .lock_owned()
-                .await,
-        )
-    } else {
-        None
-    };
-    if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }) {
-        crate::http::join_capability::require_mesh_gate_on_voters(&state).await?;
-    }
     let idempotency_request = internal
         .verified
         .as_ref()
@@ -995,6 +982,16 @@ pub(super) async fn admin_internal_raft_client_write(
             IdempotencyBegin::New => {}
         }
     }
+    let _membership_operation_guard = if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. })
+    {
+        let guard = crate::raft_membership_guard::membership_operation_gate()
+            .lock_owned()
+            .await;
+        crate::http::join_capability::require_mesh_gate_on_voters(&state).await?;
+        Some(guard)
+    } else {
+        None
+    };
     let resp = state
         .raft
         .client_write(cmd)
