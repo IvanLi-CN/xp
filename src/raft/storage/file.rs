@@ -22,6 +22,8 @@ use openraft::{
     storage::{RaftLogStorage, RaftStateMachine},
 };
 
+mod legacy_mesh;
+
 #[derive(Debug, Clone)]
 pub struct StorePaths {
     pub wal_json: PathBuf,
@@ -202,7 +204,6 @@ impl RaftLogReader<TypeConfig> for FileLogStore {
 }
 impl RaftLogStorage<TypeConfig> for FileLogStore {
     type LogReader = FileLogStore;
-
     async fn get_log_state(
         &mut self,
     ) -> Result<LogState<TypeConfig>, openraft::StorageError<NodeId>> {
@@ -216,7 +217,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
     async fn get_log_reader(&mut self) -> Self::LogReader {
         self.clone()
     }
-
     async fn save_vote(
         &mut self,
         vote: &Vote<NodeId>,
@@ -338,14 +338,16 @@ impl FileStateMachine {
             .await
             .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
 
-        let (last_applied, last_membership, mesh_state_applied) = meta
-            .map(|m| {
-                let mesh_state_applied = m.mesh_state_applied.unwrap_or_else(|| {
-                    m.last_applied.is_some() && m.last_membership.log_id() != &m.last_applied
-                });
-                (m.last_applied, m.last_membership, mesh_state_applied)
-            })
-            .unwrap_or((None, StoredMembership::default(), false));
+        let mesh_state_applied = match meta.as_ref() {
+            Some(m) => match m.mesh_state_applied {
+                Some(applied) => applied,
+                None => legacy_mesh::infer_state_applied(&paths, m).await,
+            },
+            None => false,
+        };
+        let (last_applied, last_membership) = meta
+            .map(|m| (m.last_applied, m.last_membership))
+            .unwrap_or((None, StoredMembership::default()));
 
         Ok(Self {
             store,
@@ -372,7 +374,6 @@ impl FileStateMachine {
         Ok(())
     }
 }
-
 #[derive(Debug)]
 pub struct FileSnapshotBuilder {
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -788,7 +789,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         self.reconcile.request_full();
         Ok(())
     }
-
     async fn get_current_snapshot(
         &mut self,
     ) -> Result<Option<Snapshot<TypeConfig>>, openraft::StorageError<NodeId>> {
