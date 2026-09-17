@@ -347,7 +347,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let cluster_mesh_enabled = self.observe_mesh_gate().await;
-        let base_url = match path {
+        match path {
             PeerDirectPath::RealityMesh if !cluster_mesh_enabled => {
                 return Err(MeshRequestError::InvalidTarget(
                     "Mesh is disabled by the cluster gate".into(),
@@ -358,7 +358,46 @@ impl MeshAwareHttpClient {
             })?,
             PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
         };
-        let _mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
+        let mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
+        self.send_peer_direct_request_with_gate(
+            peer,
+            path,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            mesh_gate_read,
+        )
+        .await
+    }
+
+    /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
+    /// span asynchronous target preparation for dedicated probes and is never reacquired.
+    pub(crate) async fn send_peer_direct_request_with_gate(
+        &self,
+        peer: &MeshPeerTarget,
+        path: PeerDirectPath,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+        mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
+            Some(self.mesh_direct_read_guard().await?)
+        } else {
+            mesh_gate_read
+        };
+        if path == PeerDirectPath::RealityMesh && !self.cluster_mesh_enabled.load(Ordering::Acquire)
+        {
+            return Err(MeshRequestError::InvalidTarget(
+                "Mesh is disabled by the cluster gate".into(),
+            ));
+        }
+        let base_url = match path {
+            PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
+                MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
+            })?,
+            PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
+        };
         let url = join_url(
             base_url,
             &request.path_and_query,
@@ -389,7 +428,7 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
-        let response = match _mesh_gate_read {
+        let response = match mesh_gate_read {
             Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
             None => response,
         };
@@ -593,6 +632,7 @@ impl MeshAwareHttpClient {
                         cluster_ca_cert_pem,
                         reverse_budget,
                         reverse_class,
+                        None,
                     )
                     .await
                 {
@@ -609,7 +649,15 @@ impl MeshAwareHttpClient {
                             ?error,
                             "reverse relay attempt failed"
                         );
-                        mesh_outcome_ambiguous = true;
+                        // A gate rejection happens before dispatch and cannot make the outcome
+                        // unknown. Transport failures remain ambiguous.
+                        if !matches!(
+                            error,
+                            MeshRequestError::Reverse(ref reason)
+                                if reason == "cluster Mesh gate is disabled"
+                        ) {
+                            mesh_outcome_ambiguous = true;
+                        }
                     }
                 }
             }
@@ -791,6 +839,7 @@ impl MeshAwareHttpClient {
         cluster_ca_cert_pem: &str,
         budget: Duration,
         class: reverse::ReverseRequestClass,
+        mut gate_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> Result<reqwest::Response, MeshRequestError> {
         if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
@@ -899,6 +948,7 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
+                    gate_guard.take(),
                 )
                 .await?,
             );
@@ -914,6 +964,7 @@ impl MeshAwareHttpClient {
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
                 &self.mesh_gate_lock,
+                gate_guard.take(),
             )
             .await
             {
@@ -948,6 +999,7 @@ impl MeshAwareHttpClient {
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
                     &self.mesh_gate_lock,
+                    None,
                 )
                 .await?
             }

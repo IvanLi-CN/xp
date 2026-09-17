@@ -237,11 +237,11 @@ async fn probe_reverse_link(
     state: &AppState,
     link: &crate::reverse_mesh::ReverseLinkKey,
 ) -> Result<(), ApiError> {
-    if !state.reconcile.mesh_gate().load(Ordering::Acquire) {
-        return Err(ApiError::conflict(
-            "reverse link probing is disabled by the cluster Mesh gate",
-        ));
-    }
+    // Hold shared Mesh admission through asynchronous target lookup and dispatch. This
+    // dedicated probe must never fall back to the rendezvous public API path.
+    let gate_guard = state.reconcile.mesh_gate_read().await.ok_or_else(|| {
+        ApiError::conflict("reverse link probing is disabled by the cluster Mesh gate")
+    })?;
     if link.target_node_id != state.cluster.node_id {
         return Err(ApiError::invalid_request(
             "reverse link target is not local",
@@ -260,8 +260,9 @@ async fn probe_reverse_link(
     .map_err(|error| ApiError::internal(format!("encode reverse link probe: {error}")))?;
     state
         .mesh_client
-        .send_peer_request(
+        .send_peer_direct_request_with_gate(
             &rendezvous,
+            crate::control_plane_mesh::PeerDirectPath::RealityMesh,
             MeshRequest {
                 method: Method::POST,
                 path_and_query: "/api/admin/_internal/mesh/reverse-probe".to_string(),
@@ -277,6 +278,7 @@ async fn probe_reverse_link(
             },
             ca_key_pem,
             &state.cluster_ca_pem,
+            Some(gate_guard),
         )
         .await
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;

@@ -37,7 +37,8 @@ impl MeshAwareHttpClient {
             })
             .await;
         match send_result {
-            None => Ok(MeshAttemptResult::Fallback { ambiguous: true }),
+            // The gate rejected admission before dispatch, so the request outcome is known.
+            None => Ok(MeshAttemptResult::Fallback { ambiguous: false }),
             Some((Ok(Ok((response, verified))), gate_guard)) => {
                 let transport = mesh_transport_observation(&response);
                 if transport.protocol != MeshTransportProtocol::H2 {
