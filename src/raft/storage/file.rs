@@ -6,24 +6,20 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::Mutex;
-
 use crate::{
     raft::types::ClientResponse,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore},
 };
-
 use openraft::entry::RaftPayload as _;
 use openraft::{
     EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader, Snapshot, SnapshotMeta,
     StoredMembership, Vote,
     storage::{RaftLogStorage, RaftStateMachine},
 };
-
+use tokio::sync::Mutex;
 mod legacy_mesh;
-
 #[derive(Debug, Clone)]
 pub struct StorePaths {
     pub wal_json: PathBuf,
@@ -33,7 +29,6 @@ pub struct StorePaths {
     pub snapshot_meta_json: PathBuf,
     pub snapshot_data_json: PathBuf,
 }
-
 impl StorePaths {
     pub fn new(data_dir: &Path) -> Self {
         let raft_dir = data_dir.join("raft");
@@ -48,7 +43,6 @@ impl StorePaths {
             snapshot_data_json: snapshot_dir.join("current_snapshot.json"),
         }
     }
-
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         if let Some(parent) = self.wal_json.parent() {
             std::fs::create_dir_all(parent)?;
@@ -59,7 +53,6 @@ impl StorePaths {
         Ok(())
     }
 }
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PersistedWal {
     #[serde(default)]
@@ -67,7 +60,6 @@ struct PersistedWal {
     #[serde(default)]
     entries: Vec<openraft::impls::Entry<TypeConfig>>,
 }
-
 impl PersistedWal {
     fn empty() -> Self {
         Self {
@@ -76,7 +68,6 @@ impl PersistedWal {
         }
     }
 }
-
 #[derive(Debug)]
 struct WalInner {
     last_purged_log_id: Option<LogId<NodeId>>,
@@ -84,7 +75,6 @@ struct WalInner {
     vote: Option<Vote<NodeId>>,
     committed: Option<LogId<NodeId>>,
 }
-
 impl WalInner {
     fn last_log_id(&self) -> Option<LogId<NodeId>> {
         self.entries
@@ -94,7 +84,6 @@ impl WalInner {
             .or(self.last_purged_log_id)
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct FileLogStore {
     paths: StorePaths,
@@ -394,7 +383,16 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
             store.state().clone()
         };
 
-        let payload = serde_json::json!({"state": state, "mesh_state_applied": mesh_state_applied});
+        let snapshot_id = format!(
+            "snapshot-{}",
+            last_applied.as_ref().map(|l| l.index).unwrap_or(0)
+        );
+        let payload = serde_json::json!({
+            "state": state,
+            "mesh_state_applied": mesh_state_applied,
+            "snapshot_id": snapshot_id,
+            "last_log_id": last_applied,
+        });
         let bytes = serde_json::to_vec_pretty(&payload).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
@@ -406,16 +404,13 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
         let meta = SnapshotMeta {
             last_log_id: last_applied,
             last_membership,
-            snapshot_id: format!(
-                "snapshot-{}",
-                last_applied.as_ref().map(|l| l.index).unwrap_or(0)
-            ),
+            snapshot_id,
         };
 
-        write_json(&self.paths.snapshot_meta_json, &meta)
+        write_bytes(&self.paths.snapshot_data_json, &bytes)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        write_bytes(&self.paths.snapshot_data_json, &bytes)
+        write_json(&self.paths.snapshot_meta_json, &meta)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
 
@@ -732,6 +727,8 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 )),
             ));
         }
+        legacy_mesh::validate_snapshot_payload(meta, &buf)
+            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
         let state = crate::state::migrate_state_value_to_latest(raw_state).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
@@ -739,6 +736,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                 std::io::Error::other(e.to_string()),
             )
         })?;
+
+        let persisted_buf = legacy_mesh::normalize_snapshot_payload(meta, raw_payload)
+            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
 
         let mesh_enabled = {
             let mut store = self.store.lock().await;
@@ -781,10 +781,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         }
 
         self.persist_meta().await?;
-        write_json(&self.paths.snapshot_meta_json, meta)
+        write_bytes(&self.paths.snapshot_data_json, &persisted_buf)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        write_bytes(&self.paths.snapshot_data_json, &buf)
+        write_json(&self.paths.snapshot_meta_json, meta)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
         self.reconcile.request_full();
@@ -802,6 +802,8 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         let bytes = read_bytes(&self.paths.snapshot_data_json)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
+        legacy_mesh::validate_snapshot_payload(&meta, &bytes)
+            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
         Ok(Some(Snapshot {
             meta,
             snapshot: Box::new(std::io::Cursor::new(bytes)),
@@ -815,6 +817,7 @@ fn io_err(
 ) -> openraft::StorageError<NodeId> {
     openraft::StorageError::from_io_error(subject, verb, err)
 }
+
 async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     path: &Path,
 ) -> Result<Option<T>, std::io::Error> {

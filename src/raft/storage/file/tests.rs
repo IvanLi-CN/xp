@@ -400,7 +400,7 @@ async fn legacy_state_machine_meta_keeps_blank_only_restart_closed() {
 }
 
 #[tokio::test]
-async fn legacy_state_machine_meta_reopens_a_caught_up_node_after_restart() {
+async fn legacy_state_machine_meta_keeps_wal_only_restart_closed() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
     reconcile.hold_mesh_gate_until_raft_state().await;
@@ -443,6 +443,7 @@ async fn legacy_state_machine_meta_reopens_a_caught_up_node_after_restart() {
         serde_json::from_slice(&std::fs::read(&paths.sm_meta_json).unwrap()).unwrap();
     meta.as_object_mut().unwrap().remove("mesh_state_applied");
     std::fs::write(&paths.sm_meta_json, serde_json::to_vec(&meta).unwrap()).unwrap();
+    reconcile.hold_mesh_gate_until_raft_state().await;
     drop(state_machine);
 
     let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
@@ -450,7 +451,7 @@ async fn legacy_state_machine_meta_reopens_a_caught_up_node_after_restart() {
         .unwrap();
     restarted.applied_state().await.unwrap();
     assert!(
-        reconcile
+        !reconcile
             .mesh_gate()
             .load(std::sync::atomic::Ordering::Acquire)
     );
@@ -547,6 +548,23 @@ async fn legacy_state_machine_meta_keeps_blank_snapshot_closed() {
             .mesh_gate()
             .load(std::sync::atomic::Ordering::Acquire)
     );
+}
+
+#[test]
+fn snapshot_payload_metadata_mismatch_is_rejected() {
+    let meta = SnapshotMeta::<NodeId, NodeMeta> {
+        last_log_id: Some(LogId::new(openraft::CommittedLeaderId::new(2, 7), 11)),
+        last_membership: StoredMembership::default(),
+        snapshot_id: "snapshot-11".to_string(),
+    };
+    let payload = serde_json::json!({
+        "state": {},
+        "mesh_state_applied": true,
+        "snapshot_id": "snapshot-10",
+        "last_log_id": meta.last_log_id,
+    });
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    assert!(super::legacy_mesh::validate_snapshot_payload(&meta, &bytes).is_err());
 }
 
 #[tokio::test]
