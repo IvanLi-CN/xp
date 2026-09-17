@@ -507,6 +507,9 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
+                            if let DesiredStateCommand::SetMeshEnabled { enabled } = &cmd {
+                                self.reconcile.initialize_mesh_gate(*enabled);
+                            }
                             if let Some(endpoint_id) = rebuild_inbound {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
                             }
@@ -725,6 +728,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             let resource_revision = store.state().mihomo_resource_revision.wrapping_add(1);
             *store.state_mut() = state;
             store.state_mut().mihomo_resource_revision = resource_revision;
+            let mesh_enabled = store.state().mesh_enabled;
             store.save().map_err(|e| {
                 io_err(
                     ErrorSubject::StateMachine,
@@ -747,6 +751,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     .retain(|key, _| allowed_membership_keys.contains(key));
             });
             let _ = store.prune_inbound_ip_usage_memberships();
+            self.reconcile.initialize_mesh_gate(mesh_enabled);
         }
 
         {

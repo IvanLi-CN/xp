@@ -14,7 +14,9 @@
   canary ingress。
 - Raft `PersistedState.mesh_enabled` provides the cluster-level Mesh switch. The authenticated
   `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
-  observes the same gate; disabled clusters use only registered public HTTPS peer origins.
+  observes the same gate. State-machine apply and snapshot installation publish the persisted
+  value immediately, before any deferred reconcile work; disabled clusters use only registered
+  public HTTPS peer origins.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated
   Reverse health and link probes are suppressed until the gate is enabled again.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、

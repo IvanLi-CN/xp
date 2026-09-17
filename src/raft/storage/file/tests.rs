@@ -100,6 +100,59 @@ async fn upsert_endpoint_change_requests_rebuild_inbound() {
 }
 
 #[tokio::test]
+async fn apply_mesh_switch_publishes_gate_before_reconcile_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+        .await
+        .unwrap();
+
+    assert!(gate.load(std::sync::atomic::Ordering::Acquire));
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetMeshEnabled { enabled: false },
+            1,
+        )])
+        .await
+        .unwrap();
+
+    assert!(!gate.load(std::sync::atomic::Ordering::Acquire));
+    assert!(!store.lock().await.state().mesh_enabled);
+}
+
+#[tokio::test]
+async fn install_snapshot_publishes_mesh_gate_before_reconcile_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    let mut snapshot_state = store.lock().await.state().clone();
+    snapshot_state.mesh_enabled = false;
+    let bytes = serde_json::to_vec(&json!({ "state": snapshot_state })).unwrap();
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile)
+        .await
+        .unwrap();
+    let meta = SnapshotMeta {
+        last_log_id: None,
+        last_membership: StoredMembership::default(),
+        snapshot_id: "snapshot-mesh-gate".to_string(),
+    };
+
+    assert!(gate.load(std::sync::atomic::Ordering::Acquire));
+    state_machine
+        .install_snapshot(&meta, Box::new(std::io::Cursor::new(bytes)))
+        .await
+        .unwrap();
+
+    assert!(!gate.load(std::sync::atomic::Ordering::Acquire));
+    assert!(!store.lock().await.state().mesh_enabled);
+}
+
+#[tokio::test]
 async fn install_snapshot_migrates_legacy_grants_state_to_v10() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
