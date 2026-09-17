@@ -187,7 +187,6 @@ impl FileLogStore {
         Ok(())
     }
 }
-
 impl RaftLogReader<TypeConfig> for FileLogStore {
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + openraft::OptionalSend>(
         &mut self,
@@ -201,7 +200,6 @@ impl RaftLogReader<TypeConfig> for FileLogStore {
         Ok(out)
     }
 }
-
 impl RaftLogStorage<TypeConfig> for FileLogStore {
     type LogReader = FileLogStore;
 
@@ -342,7 +340,9 @@ impl FileStateMachine {
 
         let (last_applied, last_membership, mesh_state_applied) = meta
             .map(|m| {
-                let mesh_state_applied = m.mesh_state_applied.unwrap_or(false);
+                let mesh_state_applied = m.mesh_state_applied.unwrap_or_else(|| {
+                    m.last_applied.is_some() && m.last_membership.log_id() != &m.last_applied
+                });
                 (m.last_applied, m.last_membership, mesh_state_applied)
             })
             .unwrap_or((None, StoredMembership::default(), false));
