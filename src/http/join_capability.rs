@@ -319,6 +319,9 @@ async fn public_capability_supports(
     let Some(response) = response else {
         return false;
     };
+    if !response.status().is_success() {
+        return false;
+    }
     let Some(remaining) = remaining_probe_budget(started) else {
         return false;
     };

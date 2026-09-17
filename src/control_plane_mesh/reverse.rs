@@ -324,7 +324,13 @@ pub(super) async fn send_outer_request(
     headers: &axum::http::HeaderMap,
     budget: Duration,
     allow_ambiguous_fallback: bool,
+    cluster_mesh_enabled: &Arc<AtomicBool>,
 ) -> Result<reqwest::Response, MeshRequestError> {
+    if !cluster_mesh_enabled.load(Ordering::Acquire) {
+        return Err(MeshRequestError::Reverse(
+            "cluster Mesh gate is disabled".to_string(),
+        ));
+    }
     let mut builder = client
         .request(request.method.clone(), url)
         .body(request.body.clone());

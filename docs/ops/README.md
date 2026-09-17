@@ -288,7 +288,11 @@ Mesh is enabled for the cluster by default and is controlled by the Raft-persist
 `PUT /api/admin/mesh/config` request body `{ "enabled": true|false }`. When disabled, XP uses
 only each member's registered public HTTPS `api_base_url`; it does not replace Mesh with a
 private origin or a Reverse Mesh relay. Re-enabling is cluster-wide and takes effect after the
-replicated command is applied on each voter.
+replicated command is applied on every current Raft member, including learners. This all-member
+capability barrier is required because older learners also apply the replicated command; retire or
+upgrade a stale learner before changing the switch.
+Fresh non-bootstrap nodes use public-only control-plane requests until authenticated Raft state is
+applied; this prevents a local default from overriding a disabled cluster switch during join.
 
 When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
 `https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints

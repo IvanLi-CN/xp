@@ -507,9 +507,8 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
-                            if let DesiredStateCommand::SetMeshEnabled { enabled } = &cmd {
-                                self.reconcile.initialize_mesh_gate(*enabled);
-                            }
+                            self.reconcile
+                                .initialize_mesh_gate(store.state().mesh_enabled);
                             if let Some(endpoint_id) = rebuild_inbound {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
                             }

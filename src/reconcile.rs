@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -105,6 +105,8 @@ pub struct ReconcileHandle {
     reverse_operator_enabled: Arc<AtomicBool>,
     reverse_links: ReverseLinkRuntime,
     mesh_enabled: Arc<AtomicBool>,
+    mesh_enabled_epoch: Arc<AtomicU64>,
+    mesh_gate_authoritative: Arc<AtomicBool>,
 }
 
 impl ReconcileHandle {
@@ -119,6 +121,8 @@ impl ReconcileHandle {
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
             mesh_enabled: Arc::new(AtomicBool::new(true)),
+            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -134,6 +138,8 @@ impl ReconcileHandle {
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
             mesh_enabled: Arc::new(AtomicBool::new(true)),
+            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -151,15 +157,34 @@ impl ReconcileHandle {
         self.mesh_enabled.clone()
     }
 
+    pub fn mesh_gate_epoch(&self) -> Arc<AtomicU64> {
+        self.mesh_enabled_epoch.clone()
+    }
+
     pub fn initialize_mesh_gate(&self, enabled: bool) {
+        self.mesh_gate_authoritative.store(true, Ordering::Release);
         self.set_mesh_enabled(enabled);
     }
 
+    pub fn hold_mesh_gate_until_raft_state(&self) {
+        self.mesh_gate_authoritative.store(false, Ordering::Release);
+        self.mesh_enabled.store(false, Ordering::Release);
+        self.refresh_reverse_gate();
+    }
+
     fn set_mesh_enabled(&self, enabled: bool) {
-        if enabled {
+        if !self.mesh_gate_authoritative.load(Ordering::Acquire) {
+            self.mesh_enabled.store(false, Ordering::Release);
+            self.refresh_reverse_gate();
+            return;
+        }
+        let was_enabled = self.mesh_enabled.swap(enabled, Ordering::AcqRel);
+        if was_enabled != enabled {
+            self.mesh_enabled_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        if enabled && !was_enabled {
             self.reverse_runtime_ready.store(false, Ordering::Release);
         }
-        self.mesh_enabled.store(enabled, Ordering::Release);
         self.refresh_reverse_gate();
     }
     pub(crate) fn request_reverse_restart_recovery(&self) {
@@ -325,6 +350,8 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_operator_enabled: Arc::new(AtomicBool::new(config.reverse_mesh_enabled)),
         reverse_links: ReverseLinkRuntime::default(),
         mesh_enabled: Arc::new(AtomicBool::new(true)),
+        mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+        mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
     };
     let restart_handle = handle.clone();
 

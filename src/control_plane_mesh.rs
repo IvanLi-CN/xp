@@ -60,6 +60,13 @@ pub struct PeerCircuitBreakers {
 }
 
 impl PeerCircuitBreakers {
+    pub async fn reset_all(&self) {
+        let mut peers = self.peers.lock().await;
+        for circuit in peers.values_mut() {
+            *circuit = PeerCircuit::default();
+        }
+    }
+
     pub async fn before_attempt(&self, peer_id: &str, enabled: bool) -> MeshAttemptDecision {
         if !enabled {
             return MeshAttemptDecision::Disabled;
@@ -263,6 +270,8 @@ pub struct MeshAwareHttpClient {
     public_direct: reqwest::Client,
     circuits: PeerCircuitBreakers,
     cluster_mesh_enabled: Arc<AtomicBool>,
+    cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
+    observed_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -280,6 +289,8 @@ impl MeshAwareHttpClient {
             public_direct,
             circuits: PeerCircuitBreakers::default(),
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
+            cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            observed_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
@@ -319,6 +330,27 @@ impl MeshAwareHttpClient {
         self.cluster_mesh_enabled = gate;
         self
     }
+    pub fn with_mesh_gate_epoch(
+        mut self,
+        gate: Arc<AtomicBool>,
+        epoch: Arc<std::sync::atomic::AtomicU64>,
+    ) -> Self {
+        self.cluster_mesh_enabled = gate;
+        self.cluster_mesh_epoch = epoch.clone();
+        self.observed_mesh_epoch
+            .store(epoch.load(Ordering::Acquire), Ordering::Release);
+        self
+    }
+
+    async fn observe_mesh_gate(&self) -> bool {
+        let epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
+        let previous = self.observed_mesh_epoch.swap(epoch, Ordering::AcqRel);
+        let enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
+        if enabled && epoch != previous {
+            self.circuits.reset_all().await;
+        }
+        enabled
+    }
     pub async fn set_reverse_route(
         &self,
         target_node_id: impl Into<String>,
@@ -342,8 +374,9 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        let cluster_mesh_enabled = self.observe_mesh_gate().await;
         let base_url = match path {
-            PeerDirectPath::RealityMesh if !self.cluster_mesh_enabled.load(Ordering::Acquire) => {
+            PeerDirectPath::RealityMesh if !cluster_mesh_enabled => {
                 return Err(MeshRequestError::InvalidTarget(
                     "Mesh is disabled by the cluster gate".into(),
                 ));
@@ -491,7 +524,7 @@ impl MeshAwareHttpClient {
             peer.node_id.clone(),
             request.request_id.clone(),
         );
-        let cluster_mesh_enabled = self.cluster_mesh_enabled.load(Ordering::Acquire);
+        let cluster_mesh_enabled = self.observe_mesh_gate().await;
         let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
         let decision = self
             .circuits
@@ -629,6 +662,9 @@ impl MeshAwareHttpClient {
                 reverse::ReverseRequestClass::Control
             };
             for candidate in reverse_route.candidates() {
+                if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+                    break;
+                }
                 let elapsed = started.elapsed();
                 let remaining = request.total_budget.saturating_sub(elapsed);
                 let reverse_budget = route_budget(request.total_budget)
@@ -832,6 +868,11 @@ impl MeshAwareHttpClient {
         budget: Duration,
         class: reverse::ReverseRequestClass,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "cluster Mesh gate is disabled".to_string(),
+            ));
+        }
         if route.assignment.target_node_id != peer.node_id
             || !route
                 .assignment
@@ -932,6 +973,7 @@ impl MeshAwareHttpClient {
                     &outer_headers,
                     budget,
                     request.allow_ambiguous_fallback,
+                    &self.cluster_mesh_enabled,
                 )
                 .await?,
             );
@@ -945,6 +987,7 @@ impl MeshAwareHttpClient {
                 &outer_headers,
                 mesh_budget,
                 request.allow_ambiguous_fallback,
+                &self.cluster_mesh_enabled,
             )
             .await
             {
@@ -977,6 +1020,7 @@ impl MeshAwareHttpClient {
                     &outer_headers,
                     remaining,
                     request.allow_ambiguous_fallback,
+                    &self.cluster_mesh_enabled,
                 )
                 .await?
             }
