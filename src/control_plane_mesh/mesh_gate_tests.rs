@@ -1,9 +1,11 @@
 use super::*;
+use crate::reconcile::ReconcileHandle;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Instant;
+use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn mesh_epoch_observation_serializes_concurrent_observers() {
@@ -59,6 +61,40 @@ async fn mesh_attempt_is_rejected_after_gate_closes() {
     assert!(client.observe_mesh_gate().await);
     gate.store(false, Ordering::Release);
     assert!(!client.mesh_attempt_is_current(0).await);
+}
+
+#[tokio::test]
+async fn mesh_gate_transition_waits_for_an_inflight_send_boundary() {
+    let reconcile = ReconcileHandle::noop();
+    let gate = reconcile.mesh_gate();
+    let epoch = reconcile.mesh_gate_epoch();
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_mesh_gate_epoch(gate.clone(), epoch)
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock());
+    let (started_tx, started_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+
+    let send = tokio::spawn(async move {
+        client
+            .with_mesh_send(0, || async move {
+                let _ = started_tx.send(());
+                let _ = release_rx.await;
+            })
+            .await
+    });
+    started_rx.await.expect("send should enter the gate");
+
+    let transition = tokio::spawn({
+        let reconcile = reconcile.clone();
+        async move { reconcile.initialize_mesh_gate(false).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(gate.load(Ordering::Acquire));
+
+    let _ = release_tx.send(());
+    assert!(send.await.expect("send task should finish").is_some());
+    transition.await.expect("transition task should finish");
+    assert!(!gate.load(Ordering::Acquire));
 }
 
 #[tokio::test]

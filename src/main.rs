@@ -377,9 +377,9 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
     );
     let mesh_enabled = store.lock().await.state().mesh_enabled;
     if cluster.should_bootstrap_raft() {
-        reconcile.initialize_mesh_gate(mesh_enabled);
+        reconcile.initialize_mesh_gate(mesh_enabled).await;
     } else {
-        reconcile.hold_mesh_gate_until_raft_state();
+        reconcile.hold_mesh_gate_until_raft_state().await;
     }
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());

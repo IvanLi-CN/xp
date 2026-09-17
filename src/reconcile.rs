@@ -503,7 +503,8 @@ async fn reconcile_once_with_runtime(
         cluster_mesh_enabled,
     ) = {
         let store = store.lock().await;
-        restart_handle.set_mesh_enabled(store.state().mesh_enabled);
+        let mesh_enabled_state = store.state().mesh_enabled;
+        restart_handle.set_mesh_enabled(mesh_enabled_state).await;
         let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
         let mesh_gate_authoritative = restart_handle
             .mesh_gate_authoritative

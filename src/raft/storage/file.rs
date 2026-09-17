@@ -509,10 +509,12 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                             })?;
                             if matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }) {
                                 self.reconcile
-                                    .initialize_mesh_gate(store.state().mesh_enabled);
+                                    .initialize_mesh_gate(store.state().mesh_enabled)
+                                    .await;
                             } else {
                                 self.reconcile
-                                    .initialize_mesh_gate_if_unset(store.state().mesh_enabled);
+                                    .initialize_mesh_gate_if_unset(store.state().mesh_enabled)
+                                    .await;
                             }
                             if let Some(endpoint_id) = rebuild_inbound {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
@@ -755,7 +757,7 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     .retain(|key, _| allowed_membership_keys.contains(key));
             });
             let _ = store.prune_inbound_ip_usage_memberships();
-            self.reconcile.initialize_mesh_gate(mesh_enabled);
+            self.reconcile.initialize_mesh_gate(mesh_enabled).await;
         }
 
         {
