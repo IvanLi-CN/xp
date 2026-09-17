@@ -8,9 +8,9 @@ impl MeshAwareHttpClient {
         reason: String,
         epoch: u64,
     ) {
+        let _gate_lock = self.mesh_gate_lock.lock().await;
         let state = {
-            let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-            if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+            if !self.mesh_gate_matches(epoch) {
                 return;
             }
             self.circuits.record_retryable_failure(&peer.node_id).await
@@ -45,7 +45,8 @@ impl MeshAwareHttpClient {
     }
 
     pub(super) async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget, epoch: u64) {
-        if !self.mesh_attempt_is_current(epoch).await {
+        let _gate_lock = self.mesh_gate_lock.lock().await;
+        if !self.mesh_gate_matches(epoch) {
             return;
         }
         self.record_sample(
@@ -89,7 +90,8 @@ impl MeshAwareHttpClient {
         peer: &MeshPeerTarget,
         epoch: u64,
     ) {
-        if !self.mesh_attempt_is_current(epoch).await {
+        let _gate_lock = self.mesh_gate_lock.lock().await;
+        if !self.mesh_gate_matches(epoch) {
             return;
         }
         self.record_terminal_failure(peer).await;

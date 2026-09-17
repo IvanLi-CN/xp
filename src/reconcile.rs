@@ -27,20 +27,12 @@ use tokio::{
 };
 use tracing::{debug, warn};
 mod mesh_gate;
+mod node;
 mod reverse;
 const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
 const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
 const MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10: &str = "migrations/remove_grants_hard_cut_v10";
-pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
-    let nodes = store.list_nodes();
-    if let Some(node) = nodes.iter().find(|n| n.api_base_url == config.api_base_url) {
-        return Some(node.node_id.clone());
-    }
-    nodes
-        .iter()
-        .find(|n| n.node_name == config.node_name)
-        .map(|n| n.node_id.clone())
-}
+pub(crate) use node::resolve_local_node_id;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
@@ -97,6 +89,7 @@ pub struct ReconcileHandle {
     mesh_enabled: Arc<AtomicBool>,
     mesh_enabled_epoch: Arc<AtomicU64>,
     mesh_gate_authoritative: Arc<AtomicBool>,
+    mesh_gate_lock: Arc<Mutex<()>>,
 }
 impl ReconcileHandle {
     pub fn noop() -> Self {
@@ -112,6 +105,7 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            mesh_gate_lock: Arc::new(Mutex::new(())),
         }
     }
     #[cfg(test)]
@@ -128,6 +122,7 @@ impl ReconcileHandle {
             mesh_enabled: Arc::new(AtomicBool::new(true)),
             mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
             mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            mesh_gate_lock: Arc::new(Mutex::new(())),
         }
     }
     pub fn request(&self, req: ReconcileRequest) {
@@ -299,6 +294,7 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         mesh_enabled: Arc::new(AtomicBool::new(true)),
         mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
         mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
+        mesh_gate_lock: Arc::new(Mutex::new(())),
     };
     let restart_handle = handle.clone();
 

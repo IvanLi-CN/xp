@@ -102,7 +102,12 @@ impl MeshAwareHttpClient {
         started: Instant,
         request: &MeshRequest,
         route: &ReverseRelayRoute,
+        epoch: u64,
     ) {
+        let _gate_lock = self.mesh_gate_lock.lock().await;
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
                 .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
@@ -291,6 +296,7 @@ impl MeshAwareHttpClient {
             if budget.is_zero() {
                 break;
             }
+            let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
             match self
                 .send_reverse_relay(
                     peer,
@@ -304,7 +310,7 @@ impl MeshAwareHttpClient {
                 .await
             {
                 Ok(response) => {
-                    self.record_reverse_sample(peer, started, &request, &candidate)
+                    self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
                         .await;
                     return Ok(response);
                 }
@@ -317,6 +323,7 @@ impl MeshAwareHttpClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn send_outer_request(
     client: &reqwest::Client,
     request: &MeshRequest,
@@ -325,7 +332,9 @@ pub(super) async fn send_outer_request(
     budget: Duration,
     allow_ambiguous_fallback: bool,
     cluster_mesh_enabled: &Arc<AtomicBool>,
+    mesh_gate_lock: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<reqwest::Response, MeshRequestError> {
+    let _gate_lock = mesh_gate_lock.lock().await;
     if !cluster_mesh_enabled.load(Ordering::Acquire) {
         return Err(MeshRequestError::Reverse(
             "cluster Mesh gate is disabled".to_string(),

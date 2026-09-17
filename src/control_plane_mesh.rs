@@ -267,6 +267,7 @@ pub struct MeshAwareHttpClient {
     cluster_mesh_enabled: Arc<AtomicBool>,
     cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
     mesh_epoch_reset_lock: Arc<Mutex<u64>>,
+    mesh_gate_lock: Arc<tokio::sync::Mutex<()>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
@@ -284,6 +285,7 @@ impl MeshAwareHttpClient {
             cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
             cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
+            mesh_gate_lock: Arc::new(tokio::sync::Mutex::new(())),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
@@ -518,20 +520,28 @@ impl MeshAwareHttpClient {
                 false,
             )?;
             let budget = mesh_attempt_budget(request.total_budget);
-            match tokio::time::timeout(
-                budget,
-                signed_send(
-                    &self.mesh,
-                    &mesh_url,
-                    &request,
-                    &context,
-                    cluster_ca_key_pem,
-                    cluster_ca_cert_pem,
-                ),
-            )
-            .await
-            {
-                Ok(Ok((response, verified))) => {
+            let send_result = self
+                .with_mesh_send(mesh_epoch, || async {
+                    tokio::time::timeout(
+                        budget,
+                        signed_send(
+                            &self.mesh,
+                            &mesh_url,
+                            &request,
+                            &context,
+                            cluster_ca_key_pem,
+                            cluster_ca_cert_pem,
+                        ),
+                    )
+                    .await
+                })
+                .await;
+            match send_result {
+                None => {
+                    fallback = true;
+                    mesh_outcome_ambiguous = true;
+                }
+                Some(Ok(Ok((response, verified)))) => {
                     let transport = mesh_transport_observation(&response);
                     if transport.protocol != MeshTransportProtocol::H2 {
                         self.release_half_open_probe_for_epoch(&peer.node_id, mesh_epoch)
@@ -597,7 +607,7 @@ impl MeshAwareHttpClient {
                         "Mesh response did not carry a valid signed acknowledgement".to_string(),
                     ));
                 }
-                Ok(Err(error)) => {
+                Some(Ok(Err(error))) => {
                     self.record_mesh_transport_failure(
                         peer,
                         MeshPeerReason::TransportError,
@@ -608,7 +618,7 @@ impl MeshAwareHttpClient {
                     fallback = true;
                     mesh_outcome_ambiguous = true;
                 }
-                Err(_) => {
+                Some(Err(_)) => {
                     self.record_mesh_transport_failure(
                         peer,
                         MeshPeerReason::TransportTimeout,
@@ -657,6 +667,7 @@ impl MeshAwareHttpClient {
                 if reverse_budget.is_zero() {
                     break;
                 }
+                let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
                 match self
                     .send_reverse_relay(
                         peer,
@@ -670,7 +681,7 @@ impl MeshAwareHttpClient {
                     .await
                 {
                     Ok(response) => {
-                        self.record_reverse_sample(peer, started, &request, &candidate)
+                        self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
                             .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
@@ -771,9 +782,9 @@ impl MeshAwareHttpClient {
         transport: MeshTransportObservation,
         epoch: u64,
     ) {
+        let _gate_lock = self.mesh_gate_lock.lock().await;
         let breaker_state = {
-            let _reset_guard = self.mesh_epoch_reset_lock.lock().await;
-            if self.cluster_mesh_epoch.load(Ordering::Acquire) != epoch {
+            if !self.mesh_gate_matches(epoch) {
                 return;
             }
             self.circuits.record_success(&peer.node_id).await
@@ -966,6 +977,7 @@ impl MeshAwareHttpClient {
                     budget,
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
+                    &self.mesh_gate_lock,
                 )
                 .await?,
             );
@@ -980,6 +992,7 @@ impl MeshAwareHttpClient {
                 mesh_budget,
                 request.allow_ambiguous_fallback,
                 &self.cluster_mesh_enabled,
+                &self.mesh_gate_lock,
             )
             .await
             {
@@ -1013,6 +1026,7 @@ impl MeshAwareHttpClient {
                     remaining,
                     request.allow_ambiguous_fallback,
                     &self.cluster_mesh_enabled,
+                    &self.mesh_gate_lock,
                 )
                 .await?
             }

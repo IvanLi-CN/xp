@@ -106,6 +106,11 @@ impl HttpNetworkFactory {
         self
     }
 
+    pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::Mutex<()>>) -> Self {
+        self.client = self.client.with_mesh_gate_lock(lock);
+        self
+    }
+
     pub fn mesh_client(&self) -> MeshAwareHttpClient {
         self.client.clone()
     }

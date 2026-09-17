@@ -36,6 +36,8 @@ use std::{
 mod endpoint_meta;
 use endpoint_meta::build_endpoint_meta;
 mod command_compat;
+mod mesh_gate;
+use mesh_gate::{apply_mesh_enabled, default_mesh_enabled};
 mod membership_operation;
 pub use membership_operation::{
     MembershipOperation, MembershipOperationKind, MembershipOperationPhase,
@@ -310,10 +312,6 @@ pub enum MihomoDeliveryMode {
     #[default]
     Legacy,
     Provider,
-}
-
-fn default_mesh_enabled() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2266,10 +2264,7 @@ impl DesiredStateCommand {
             return result;
         }
         match self {
-            Self::SetMeshEnabled { enabled } => {
-                state.mesh_enabled = *enabled;
-                Ok(DesiredStateApplyResult::Applied)
-            }
+            Self::SetMeshEnabled { enabled } => apply_mesh_enabled(state, enabled),
             Self::BeginMembershipOperation { .. }
             | Self::TransitionMembershipOperation { .. }
             | Self::PruneMembershipOperations { .. } => {

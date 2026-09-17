@@ -9,6 +9,10 @@ impl ReconcileHandle {
         self.mesh_enabled_epoch.clone()
     }
 
+    pub fn mesh_gate_lock(&self) -> Arc<Mutex<()>> {
+        self.mesh_gate_lock.clone()
+    }
+
     pub fn initialize_mesh_gate(&self, enabled: bool) {
         self.mesh_gate_authoritative.store(true, Ordering::Release);
         self.set_mesh_enabled(enabled);

@@ -3,6 +3,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::Instant;
 
 #[tokio::test]
 async fn mesh_epoch_observation_serializes_concurrent_observers() {
@@ -58,4 +59,30 @@ async fn mesh_attempt_is_rejected_after_gate_closes() {
     assert!(client.observe_mesh_gate().await);
     gate.store(false, Ordering::Release);
     assert!(!client.mesh_attempt_is_current(0).await);
+}
+
+#[tokio::test]
+async fn mesh_epoch_change_releases_half_open_probe_without_resetting_backoff() {
+    let gate = Arc::new(AtomicBool::new(true));
+    let epoch = Arc::new(AtomicU64::new(0));
+    let client =
+        MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch.clone());
+    let circuits = client.circuits();
+    {
+        let mut peers = circuits.peers.lock().await;
+        let circuit = peers.entry("peer".to_owned()).or_default();
+        circuit.failures = MESH_FAILURES_BEFORE_OPEN;
+        circuit.retry_at = Some(Instant::now() - Duration::from_secs(1));
+    }
+    assert_eq!(
+        circuits.before_attempt("peer", true).await,
+        MeshAttemptDecision::Probe
+    );
+    epoch.store(1, Ordering::Release);
+    assert!(client.observe_mesh_gate().await);
+    assert_eq!(
+        circuits.before_attempt("peer", true).await,
+        MeshAttemptDecision::Probe
+    );
+    assert_eq!(circuits.state("peer", true).await, BreakerState::HalfOpen);
 }
