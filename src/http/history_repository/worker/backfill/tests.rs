@@ -238,6 +238,19 @@ fn peer_backfill_rejects_records_with_a_phase_transition_cursor() {
 }
 
 #[test]
+fn peer_backfill_accepts_the_final_tombstone_page_before_records_phase() {
+    let mut tombstone = tiered_backfill_record(1);
+    tombstone.tombstone = true;
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tombstone],
+        next_page_cursor: Some(tiered_cursor("records", None)),
+    };
+    let previous_cursor = tiered_cursor("tombstones", Some(0));
+
+    assert!(validate_peer_backfill_page(&page, Some(&previous_cursor), "cluster-a").is_ok());
+}
+
+#[test]
 fn peer_backfill_uses_canonical_budget_for_tiered_records() {
     let mut record = backfill_record(URL_SAFE_NO_PAD.encode(vec![b'x'; 145 * 1024]));
     record.source_node_id = Some("node-a".to_owned());

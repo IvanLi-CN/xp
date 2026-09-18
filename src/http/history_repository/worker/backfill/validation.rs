@@ -71,6 +71,18 @@ fn tiered_backfill_cursor_after(
     Ok(Some(position))
 }
 
+fn tiered_backfill_cursor_metadata(encoded: &str) -> anyhow::Result<(TieredBackfillPhase, bool)> {
+    let bytes = URL_SAFE_NO_PAD.decode(encoded)?;
+    let value = serde_json::from_slice::<serde_json::Value>(&bytes)?;
+    let phase = value
+        .get("phase")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
+    Ok((phase, value.get("export_session_id").is_some()))
+}
+
 fn historical_record_sort_key(
     record: &super::RepositoryInitialBackfillRecord,
 ) -> anyhow::Result<super::HistoricalBackfillSortKey> {
@@ -154,8 +166,15 @@ fn validate_peer_backfill_cursor(
     if !is_tiered_page {
         anyhow::bail!("tiered backfill cursor returned for historical page");
     }
+    let (next_phase, next_is_current) = tiered_backfill_cursor_metadata(next_encoded)?;
     let Some(next_after) = tiered_backfill_cursor_after(next_encoded)? else {
         if page.records.is_empty() {
+            return Ok(());
+        }
+        if !next_is_current
+            || (next_phase == TieredBackfillPhase::Records
+                && page.records.iter().all(|record| record.tombstone))
+        {
             return Ok(());
         }
         anyhow::bail!("peer tiered backfill cursor without after has records");
