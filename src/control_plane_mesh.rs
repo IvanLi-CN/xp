@@ -28,7 +28,6 @@ pub(crate) use transport::build_mesh_http_client_with_policy;
 pub(crate) use transport::build_unauthenticated_mesh_http_client;
 use transport::join_url;
 pub use transport::{MESH_POOL_IDLE_TIMEOUT, MeshTransportPolicy, build_mesh_http_client};
-
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
 pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(30),
@@ -38,7 +37,6 @@ pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(300),
 ];
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshAttemptDecision {
     Attempt,
@@ -559,7 +557,9 @@ impl MeshAwareHttpClient {
             observed.notify_one();
             release.notified().await;
         }
-        let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled);
+        let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
+            || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
+                && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
         let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
         let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
