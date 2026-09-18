@@ -67,10 +67,11 @@
   serving batch changes during an interrupted pending page, XP clears only the stale response
   identity and retries the same durable segment set; malformed or non-advancing responses fail
   closed.
-  Initial backfill receivers enforce the 128-record / 192 KiB page bound before decoding and
-  validate both historical-source and Ready-tiered opaque cursor formats for length, forward
-  progress and stable snapshot/export state before checkpointing; tiered pages use the sender's
-  canonical segment-byte budget.
+  Initial backfill receivers cap the JSON response body at four times the semantic page budget,
+  reject record-count overflow before typed decoding, then enforce the 128-record / 192 KiB page
+  bound. They validate both historical-source and Ready-tiered opaque cursor formats for length,
+  forward progress, page-tail binding and stable snapshot/export state before checkpointing;
+  tiered pages use the sender's canonical segment-byte budget.
   The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
   candidate gate before rollout; the runner binds the clean commit and generated Web shell by
   SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.

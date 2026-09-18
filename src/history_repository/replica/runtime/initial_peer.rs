@@ -140,6 +140,7 @@ impl RepositoryReplicaRuntime {
         &mut self,
         peer_node_id: &str,
     ) -> Result<(), RepositoryRuntimeError> {
+        let previous_snapshot = self.snapshot.clone();
         let Some(checkpoint) = self.snapshot.initial_peer_backfills.get_mut(peer_node_id) else {
             return Ok(());
         };
@@ -147,8 +148,10 @@ impl RepositoryReplicaRuntime {
             .retained_anchor_repair_response_id
             .take()
             .is_some()
+            && let Err(error) = self.persist_control_state()
         {
-            self.persist_control_state()?;
+            self.snapshot = previous_snapshot;
+            return Err(error);
         }
         Ok(())
     }

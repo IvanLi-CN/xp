@@ -132,7 +132,27 @@ pub(crate) async fn repository_direct_request<T>(
 where
     T: DeserializeOwned,
 {
-    send_repository_request_on_path(
+    let body = repository_direct_request_body(
+        state,
+        peer,
+        method,
+        path_and_query,
+        body,
+        MAX_REPAIR_RESPONSE_BODY_BYTES,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(|error| RepositoryDirectError::Application(error.into()))
+}
+
+pub(crate) async fn repository_direct_request_body(
+    state: &AppState,
+    peer: &MeshPeerTarget,
+    method: Method,
+    path_and_query: &str,
+    body: Vec<u8>,
+    max_success_body_bytes: usize,
+) -> Result<Vec<u8>, RepositoryDirectError> {
+    send_repository_request_on_path_body(
         state,
         peer,
         repository_direct_path(),
@@ -140,6 +160,7 @@ where
         path_and_query,
         body,
         true,
+        max_success_body_bytes,
     )
     .await
 }
@@ -148,7 +169,8 @@ fn repository_direct_path() -> PeerDirectPath {
     PeerDirectPath::ApiBaseUrl
 }
 
-async fn send_repository_request_on_path<T>(
+#[allow(clippy::too_many_arguments)]
+async fn send_repository_request_on_path_body(
     state: &AppState,
     peer: &MeshPeerTarget,
     path: PeerDirectPath,
@@ -156,10 +178,8 @@ async fn send_repository_request_on_path<T>(
     path_and_query: &str,
     body: Vec<u8>,
     updates_active_path: bool,
-) -> Result<T, RepositoryDirectError>
-where
-    T: DeserializeOwned,
-{
+    max_success_body_bytes: usize,
+) -> Result<Vec<u8>, RepositoryDirectError> {
     let started = Instant::now();
     let request = MeshRequest {
         method,
@@ -223,13 +243,13 @@ where
     let remaining = REPOSITORY_REQUEST_BUDGET.saturating_sub(started.elapsed());
     let body = tokio::time::timeout(
         remaining,
-        read_bounded_body(response, MAX_REPAIR_RESPONSE_BODY_BYTES, false),
+        read_bounded_body(response, max_success_body_bytes, false),
     )
     .await
     .map_err(|_| {
         RepositoryDirectError::Transport(anyhow::anyhow!("repository peer response body timed out"))
     })??;
-    serde_json::from_slice(&body).map_err(|error| RepositoryDirectError::Application(error.into()))
+    Ok(body)
 }
 
 #[cfg(test)]

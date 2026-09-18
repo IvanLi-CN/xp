@@ -77,7 +77,8 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
   覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
   删除、跳过其历史或伪造 ACK。
-- 初始 backfill 接收方必须在解码记录前执行与服务端相同的 128 条 / 192 KiB 页上限；历史源页
+- 初始 backfill 接收方必须先以不超过 4 倍语义页预算的 JSON wire body 上限读取响应，并在 typed
+  record 解码前拒绝超过 128 条记录；随后执行与服务端相同的 128 条 / 192 KiB 页上限。历史源页
   使用 JSON 记录预算，Ready repository tiered 页使用发送方的 canonical segment 字节预算。接收方
   必须分别校验两种 opaque cursor 的长度、格式、单调前进和稳定 snapshot/export 状态；非法、回退
   或循环 cursor 不得写入 durable checkpoint。

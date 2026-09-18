@@ -1,8 +1,9 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
     InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
-    is_initial_history_source_peer, next_historical_backfill_page_cursor,
-    serialized_backfill_record_bytes, validate_peer_backfill_page,
+    deserialize_initial_backfill_page, is_initial_history_source_peer,
+    next_historical_backfill_page_cursor, serialized_backfill_record_bytes,
+    validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
 use crate::state::history_repository::{
@@ -38,6 +39,22 @@ fn peer_backfill_rejects_an_oversized_record_page() {
     };
 
     assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_record_overflow_before_record_decode() {
+    let raw_record = r#"{"payload_base64":"not-base64"}"#;
+    let body = format!(
+        r#"{{"records":[{}]}}"#,
+        std::iter::repeat(raw_record)
+            .take(MAX_INITIAL_BACKFILL_PAGE_RECORDS + 1)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
+    let error = deserialize_initial_backfill_page(body.as_bytes())
+        .expect_err("record count must be checked before typed record decoding");
+    assert!(error.to_string().contains("record limit"));
 }
 
 #[test]
@@ -82,6 +99,25 @@ fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
         validate_peer_backfill_page(&page(Some(cursor)), Some(&previous_cursor), "cluster-a",)
             .is_err()
     );
+}
+
+#[test]
+fn peer_backfill_rejects_a_cursor_beyond_the_historical_page_tail() {
+    let record = backfill_record("a2V5".to_owned());
+    let cursor = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: record.observed_at_unix_seconds + 1,
+            schema_id: record.schema_id.clone(),
+            record_key: b"later".to_vec(),
+        },
+        snapshot_end_unix_seconds: None,
+    };
+    let page = RepositoryInitialBackfillPage {
+        records: vec![record],
+        next_page_cursor: Some(cursor.encode().expect("cursor encoding")),
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
 }
 
 #[test]

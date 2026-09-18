@@ -31,7 +31,9 @@
   existing five-minute stability window only after every page is complete. A local page records
   its pending wire set before delivery and commits all acknowledgements with the page cursor; an
   interrupted tick replays those unchanged wires instead of assigning new source sequences. The
-  receiver applies the same 128-record / 192 KiB bound before decoding a peer page, using JSON bytes
+  receiver first caps the JSON response body at four times the semantic page budget and rejects
+  record-count overflow before typed decoding, then applies the same 128-record / 192 KiB bound,
+  using JSON bytes
   for historical-source pages and the sender's canonical segment bytes for Ready-tiered pages. It
   validates each cursor family for length, format, forward progress and stable snapshot/export state
   before persisting a checkpoint; malformed or regressing pages remain retryable failures. For a

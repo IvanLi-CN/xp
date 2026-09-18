@@ -16,7 +16,12 @@ mod validation;
 use cursor::HistoricalBackfillPageCursor;
 pub(crate) use cursor::HistoricalBackfillSortKey;
 pub(crate) use ready_peer::catch_up_against_ready_repositories;
-use validation::validate_peer_backfill_page;
+use validation::{deserialize_initial_backfill_page, validate_peer_backfill_page};
+
+// Base64 fields and the JSON envelope expand the canonical page on the wire. Keep the
+// pre-decode allocation bounded to four times the semantic page budget; typed validation below
+// still enforces the exact record and canonical-byte limits.
+const MAX_INITIAL_BACKFILL_WIRE_BYTES: usize = MAX_INITIAL_BACKFILL_PAGE_BYTES * 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitialBackfillProgress {
@@ -410,7 +415,7 @@ pub(super) async fn pull_peer_initial_history(
     if checkpoint.completed {
         return Ok(InitialBackfillProgress::Complete);
     }
-    let page: RepositoryInitialBackfillPage = match repository_direct_request(
+    let page_body = match repository_direct_request_body(
         state,
         peer,
         Method::GET,
@@ -429,6 +434,7 @@ pub(super) async fn pull_peer_initial_history(
             },
         ),
         Vec::new(),
+        MAX_INITIAL_BACKFILL_WIRE_BYTES,
     )
     .await
     {
@@ -445,6 +451,17 @@ pub(super) async fn pull_peer_initial_history(
                 peer = %peer.node_id,
                 error = %error,
                 "peer history backfill is incomplete"
+            );
+            return Ok(InitialBackfillProgress::Unavailable);
+        }
+    };
+    let page = match deserialize_initial_backfill_page(&page_body) {
+        Ok(page) => page,
+        Err(error) => {
+            tracing::debug!(
+                peer = %peer.node_id,
+                error = %error,
+                "peer history backfill page failed pre-decode validation"
             );
             return Ok(InitialBackfillProgress::Unavailable);
         }
