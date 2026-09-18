@@ -1,3 +1,4 @@
+use super::peer_target_tests::primary_reverse_target;
 use super::*;
 use crate::reconcile::ReconcileHandle;
 use std::sync::{
@@ -29,13 +30,7 @@ async fn stale_mesh_epoch_cannot_reopen_current_breaker() {
     let epoch = Arc::new(AtomicU64::new(0));
     let client =
         MeshAwareHttpClient::new(reqwest::Client::new()).with_mesh_gate_epoch(gate, epoch.clone());
-    let peer = MeshPeerTarget {
-        node_id: "peer".to_string(),
-        node_name: "peer".to_string(),
-        mesh_base_url: None,
-        mesh_reason: MeshPeerReason::MeshAvailable,
-        public_base_url: "https://peer.example".to_string(),
-    };
+    let peer = primary_reverse_target(None, xp_test_fixtures::primary_api_url().to_string());
     let circuits = client.circuits();
     epoch.store(1, Ordering::Release);
     assert!(client.observe_mesh_gate().await);

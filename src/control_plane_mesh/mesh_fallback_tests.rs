@@ -65,13 +65,16 @@ async fn non_mesh_capability_probe_bypasses_reverse_assignment() {
         .expect("cluster CA");
     let (public_base_url, public_requests, public_task) =
         spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
-    let peer = MeshPeerTarget {
+    let node = Node {
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
-        mesh_base_url: None,
-        mesh_reason: MeshPeerReason::MissingEndpoint,
-        public_base_url,
+        access_host: xp_test_fixtures::primary_host().to_owned(),
+        api_base_url: xp_test_fixtures::primary_api_url().to_owned(),
+        quota_limit_bytes: 0,
+        quota_reset: Default::default(),
     };
+    let mut peer = peer_target_from_node(&node, &[]);
+    peer.public_base_url = public_base_url;
     let rendezvous = secondary_reverse_target(None, reverse_base_url);
     let client =
         MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
