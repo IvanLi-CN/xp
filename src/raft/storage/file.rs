@@ -330,11 +330,31 @@ impl FileStateMachine {
         let mesh_state_applied = match meta.as_ref() {
             Some(m) if m.snapshot_install_pending => false,
             Some(m) => match m.mesh_state_applied {
-                Some(applied) => applied,
+                Some(true) => {
+                    let snapshot_meta_exists = tokio::fs::try_exists(&paths.snapshot_meta_json)
+                        .await
+                        .unwrap_or(false);
+                    let snapshot_data_exists = tokio::fs::try_exists(&paths.snapshot_data_json)
+                        .await
+                        .unwrap_or(false);
+                    if snapshot_meta_exists || snapshot_data_exists {
+                        legacy_mesh::infer_state_applied(&paths, m).await
+                    } else {
+                        // A normal authenticated apply may be persisted before any local
+                        // snapshot exists; its marker is sufficient evidence in that case.
+                        true
+                    }
+                }
+                Some(false) => false,
                 None => legacy_mesh::infer_state_applied(&paths, m).await,
             },
             None => false,
         };
+        if meta.is_some() && !mesh_state_applied {
+            // `main` may initialize a bootstrap node's gate before the state machine opens.
+            // Persisted pending, false, or unverifiable evidence must override that default.
+            reconcile.hold_mesh_gate_until_raft_state().await;
+        }
         let (last_applied, last_membership) = meta
             .as_ref()
             .map(|m| (m.last_applied, m.last_membership.clone()))
@@ -908,5 +928,7 @@ async fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     .expect("spawn_blocking write_bytes")
 }
 
+#[cfg(test)]
+mod snapshot_recovery_tests;
 #[cfg(test)]
 mod tests;

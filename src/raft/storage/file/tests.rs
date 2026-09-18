@@ -624,7 +624,8 @@ async fn install_snapshot_with_false_marker_keeps_mesh_gate_closed() {
 async fn pending_snapshot_install_keeps_restart_mesh_gate_closed() {
     let tmp = tempfile::tempdir().unwrap();
     let reconcile = ReconcileHandle::noop();
-    reconcile.hold_mesh_gate_until_raft_state().await;
+    // Model the bootstrap path: main initializes the gate before opening the state machine.
+    reconcile.initialize_mesh_gate(true).await;
     let store = JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap();
     let store = Arc::new(Mutex::new(store));
     let state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
