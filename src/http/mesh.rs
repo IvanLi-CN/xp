@@ -10,7 +10,6 @@ mod liveness;
 mod status;
 
 pub(super) use config::admin_update_mesh_config;
-
 pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
@@ -98,7 +97,7 @@ pub(super) async fn admin_internal_reverse_relay(
         return Err(ApiError::unauthorized(
             "reverse relay outer route is invalid",
         ));
-    }
+    };
     if !state.reconcile.reverse_gate().load(Ordering::Acquire) {
         return Err(ApiError::conflict(
             "reverse relay is disabled until local Xray readiness recovers",
@@ -1524,10 +1523,11 @@ pub(super) async fn send_mesh_internal_capability_read(
     let response = if matches!(
         peer.mesh_reason,
         crate::mesh_telemetry::MeshPeerReason::MissingEndpoint
+            | crate::mesh_telemetry::MeshPeerReason::InvalidAccessHost
+            | crate::mesh_telemetry::MeshPeerReason::AmbiguousEndpoint
             | crate::mesh_telemetry::MeshPeerReason::UnsupportedTransport
     ) {
-        // A voter without an eligible VLESS/REALITY Mesh endpoint must still prove capability
-        // through its registered control-plane origin using the same Mesh-v2 request signature.
+        // Probe non-eligible Mesh peers through their registered public origin.
         client
             .send_peer_direct_request(
                 &peer,

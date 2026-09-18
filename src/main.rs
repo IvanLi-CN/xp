@@ -458,7 +458,15 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             .any(|node| node.node_id == cluster.node_id);
         raft.initialize_single_node_if_needed(raft_id, raft_node_meta)
             .await?;
-        if !was_initialized || bootstrap_node_missing {
+        let local_membership = raft
+            .raft()
+            .metrics()
+            .borrow()
+            .membership_config
+            .membership()
+            .get_node(&raft_id)
+            .is_some();
+        if !was_initialized || (bootstrap_node_missing && local_membership) {
             // Ensure the bootstrap node exists in the Raft state machine so future joiners can
             // replicate the full node list. Without this, a joiner would only ever see itself
             // unless the leader later emits an explicit UpsertNode for the bootstrap node.
