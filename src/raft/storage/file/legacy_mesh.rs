@@ -37,6 +37,31 @@ pub(super) async fn infer_state_applied(
         .unwrap_or(false)
 }
 
+pub(super) async fn validate_persisted_snapshot(paths: &StorePaths) -> bool {
+    let Some(snapshot_meta) =
+        read_json::<SnapshotMeta<NodeId, NodeMeta>>(&paths.snapshot_meta_json)
+            .await
+            .ok()
+            .flatten()
+    else {
+        return false;
+    };
+    let Ok(snapshot_bytes) = read_bytes(&paths.snapshot_data_json).await else {
+        return false;
+    };
+    if validate_snapshot_payload(&snapshot_meta, &snapshot_bytes).is_err() {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(&snapshot_bytes)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .get("mesh_state_applied")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn validate_snapshot_payload(
     meta: &SnapshotMeta<NodeId, NodeMeta>,
     bytes: &[u8],

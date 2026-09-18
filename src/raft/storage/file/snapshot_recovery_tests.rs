@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use openraft::RaftSnapshotBuilder;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -20,6 +21,13 @@ fn closed(reconcile: &ReconcileHandle) -> bool {
     !reconcile
         .mesh_gate()
         .load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn build_entry(cmd: DesiredStateCommand, index: u64) -> openraft::impls::Entry<TypeConfig> {
+    openraft::impls::Entry {
+        log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+        payload: EntryPayload::Normal(cmd),
+    }
 }
 
 #[tokio::test]
@@ -104,4 +112,40 @@ async fn explicit_false_snapshot_marker_closes_bootstrap_mesh_gate_on_restart() 
         .unwrap();
     restarted.applied_state().await.unwrap();
     assert!(closed(&reconcile));
+}
+
+#[tokio::test]
+async fn modern_marker_survives_progress_after_snapshot_watermark() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reconcile = ReconcileHandle::noop();
+    let store = Arc::new(Mutex::new(
+        JsonSnapshotStore::load_or_init(test_store_init(tmp.path())).unwrap(),
+    ));
+    let mut state_machine = FileStateMachine::open(tmp.path(), store.clone(), reconcile.clone())
+        .await
+        .unwrap();
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 1 },
+            1,
+        )])
+        .await
+        .unwrap();
+    let mut builder = state_machine.get_snapshot_builder().await;
+    builder.build_snapshot().await.unwrap();
+    state_machine
+        .apply(vec![build_entry(
+            DesiredStateCommand::SetReverseMeshEpoch { epoch: 2 },
+            2,
+        )])
+        .await
+        .unwrap();
+    reconcile.hold_mesh_gate_until_raft_state().await;
+    drop(state_machine);
+
+    let mut restarted = FileStateMachine::open(tmp.path(), store, reconcile.clone())
+        .await
+        .unwrap();
+    restarted.applied_state().await.unwrap();
+    assert!(!closed(&reconcile));
 }

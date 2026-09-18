@@ -331,14 +331,17 @@ impl FileStateMachine {
             Some(m) if m.snapshot_install_pending => false,
             Some(m) => match m.mesh_state_applied {
                 Some(true) => {
-                    let snapshot_meta_exists = tokio::fs::try_exists(&paths.snapshot_meta_json)
-                        .await
-                        .unwrap_or(false);
-                    let snapshot_data_exists = tokio::fs::try_exists(&paths.snapshot_data_json)
-                        .await
-                        .unwrap_or(false);
+                    let (snapshot_meta_exists, snapshot_data_exists) = match (
+                        tokio::fs::try_exists(&paths.snapshot_meta_json).await,
+                        tokio::fs::try_exists(&paths.snapshot_data_json).await,
+                    ) {
+                        (Ok(meta_exists), Ok(data_exists)) => (meta_exists, data_exists),
+                        // An existence-check error is unverifiable snapshot state. Force the
+                        // validation path, which fails closed if either file cannot be read.
+                        _ => (true, true),
+                    };
                     if snapshot_meta_exists || snapshot_data_exists {
-                        legacy_mesh::infer_state_applied(&paths, m).await
+                        legacy_mesh::validate_persisted_snapshot(&paths).await
                     } else {
                         // A normal authenticated apply may be persisted before any local
                         // snapshot exists; its marker is sufficient evidence in that case.
