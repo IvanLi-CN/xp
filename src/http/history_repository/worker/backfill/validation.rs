@@ -38,6 +38,16 @@ struct TieredBackfillCursorPosition {
     source_epoch: u64,
     stream: String,
     sequence: u64,
+    #[serde(default)]
+    phase: TieredBackfillPhase,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TieredBackfillPhase {
+    #[default]
+    Tombstones,
+    Records,
 }
 
 fn tiered_backfill_cursor_after(
@@ -45,14 +55,20 @@ fn tiered_backfill_cursor_after(
 ) -> anyhow::Result<Option<TieredBackfillCursorPosition>> {
     let bytes = URL_SAFE_NO_PAD.decode(encoded)?;
     let value = serde_json::from_slice::<serde_json::Value>(&bytes)?;
+    let phase = value
+        .get("phase")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
     let Some(after) = value.get("after").filter(|after| !after.is_null()) else {
         // Legacy compaction cursors are accepted for wire compatibility. The next response is
         // expected to upgrade them to the current export cursor, which carries an `after` key.
         return Ok(None);
     };
-    serde_json::from_value(after.clone())
-        .map(Some)
-        .map_err(anyhow::Error::from)
+    let mut position: TieredBackfillCursorPosition = serde_json::from_value(after.clone())?;
+    position.phase = phase;
+    Ok(Some(position))
 }
 
 fn historical_record_sort_key(
@@ -141,14 +157,32 @@ fn validate_peer_backfill_cursor(
     let Some(next_after) = tiered_backfill_cursor_after(next_encoded)? else {
         return Ok(());
     };
+    if page.records.is_empty() {
+        anyhow::bail!("peer tiered backfill cursor has an after value for an empty page");
+    }
+    let previous_position = previous_encoded
+        .map(tiered_backfill_cursor_after)
+        .transpose()?
+        .flatten();
     let mut previous_record: Option<(u64, &str, u64, &str, u64)> = None;
     for record in &page.records {
         let key = tiered_record_sort_key(record)?;
         if previous_record
             .as_ref()
             .is_some_and(|previous| key <= *previous)
+            || previous_position.as_ref().is_some_and(|previous| {
+                previous.phase == next_after.phase
+                    && (key.0, key.1, key.2, key.3, key.4)
+                        <= (
+                            previous.observed_start_unix_seconds,
+                            previous.source_node_id.as_str(),
+                            previous.source_epoch,
+                            previous.stream.as_str(),
+                            previous.sequence,
+                        )
+            })
         {
-            anyhow::bail!("peer tiered backfill records are not strictly ordered");
+            anyhow::bail!("peer tiered backfill records are not strictly after cursor");
         }
         previous_record = Some(key);
     }

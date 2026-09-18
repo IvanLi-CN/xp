@@ -97,8 +97,18 @@ pub(crate) fn validate_tiered_backfill_cursor(
         RepositoryTieredBackfillCursorState::Current(next),
     ) = (&previous, &next)
     else {
-        // A legacy compaction cursor is intentionally upgraded to the current export cursor on
-        // the next response, so there is no comparable phase/session state to validate here.
+        // A legacy compaction cursor may be upgraded to the current export cursor on the next
+        // response. The reverse transition would discard the current export phase/session and
+        // must fail closed instead of allowing a replay to replace the durable checkpoint.
+        if matches!(
+            (&previous, &next),
+            (
+                RepositoryTieredBackfillCursorState::Current(_),
+                RepositoryTieredBackfillCursorState::Legacy(_)
+            )
+        ) {
+            anyhow::bail!("peer tiered backfill cursor regressed to legacy format");
+        }
         return Ok(());
     };
     if previous.repair_cache_cutoff_unix_seconds != next.repair_cache_cutoff_unix_seconds

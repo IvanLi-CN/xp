@@ -466,7 +466,16 @@ pub(super) async fn pull_peer_initial_history(
             return Ok(InitialBackfillProgress::Unavailable);
         }
     };
-    validate_peer_backfill_page(&page, cursor.as_deref(), &state.cluster.cluster_id)?;
+    if let Err(error) =
+        validate_peer_backfill_page(&page, cursor.as_deref(), &state.cluster.cluster_id)
+    {
+        tracing::debug!(
+            peer = %peer.node_id,
+            error = %error,
+            "peer history backfill page failed semantic validation"
+        );
+        return Ok(InitialBackfillProgress::Unavailable);
+    }
     if !page.records.is_empty() {
         saw_history = true;
         receive_peer_backfill_page(
