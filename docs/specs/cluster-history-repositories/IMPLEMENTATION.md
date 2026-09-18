@@ -87,11 +87,12 @@
   `(source, epoch, stream)` allowance set records the consumed historical allowance, while the
   receiver persists a `source_retention_expired` permanent gap and advances its watermark as the
   completion evidence. The completed handoff range is also retained in the peer checkpoint, so a
-  later gap-ledger rotation cannot reopen the allowance. A stale allowance marker without the
-  legacy response-complete bit, an active handoff, matching gap/watermark, or completed range is
-  recoverable state: the worker recreates the tiered handoff and retries the same response identity
-  instead of rejecting the repair forever. The legacy response-complete bit remains completion
-  evidence and blocks a second handoff for that stream.
+  later gap-ledger rotation cannot reopen the allowance. A stale allowance marker without an active
+  handoff, matching gap/watermark, or completed range is recoverable state: the worker recreates
+  the tiered handoff and retries the same response identity instead of rejecting the repair forever.
+  The legacy response-complete bit is response-scoped historical state, not per-stream completion
+  evidence; current gap/watermark state and the durable completed range decide whether a stream may
+  be scheduled.
   Each completed response clears only its own identity; strict contiguous sequence/hash links apply
   after that stream is anchored and on ordinary source delivery and anti-entropy, so the relaxed
   boundary cannot bypass live fork protection.
