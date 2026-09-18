@@ -30,6 +30,11 @@
   exactly matches the persisted applied log; WAL-only, metadata-only, missing, malformed, or legacy
   snapshots remain fail-closed. This avoids treating a locally-built Blank/Membership snapshot as
   authenticated state while allowing purged-WAL nodes to recover from a verified snapshot.
+  Modern metadata markers remain valid after later log progress: when a snapshot exists, startup
+  validates the data/meta pair and authenticated marker without requiring the older snapshot
+  watermark to equal the current applied log. Bootstrap startup also retries the local node
+  upsert when Raft is initialized but the state machine still lacks that node, closing the
+  initialization crash window.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated
   Reverse health and link probes are suppressed until the gate is enabled again.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、
