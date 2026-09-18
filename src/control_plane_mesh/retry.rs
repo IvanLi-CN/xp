@@ -7,6 +7,17 @@ pub(super) fn is_retryable_public_gateway_status(status: reqwest::StatusCode) ->
     matches!(status.as_u16(), 502 | 503 | 504 | 520 | 522 | 523 | 524)
 }
 
+fn is_retryable_public_transport_error(error: &reqwest::Error) -> bool {
+    // These errors happen before a response acknowledgement exists. Retrying is safe only
+    // for the request classes admitted by `request_allows_public_gateway_retry` below.
+    error.is_connect() || error.is_timeout() || error.is_request()
+}
+
+fn next_retry_delay(started: Instant, budget: Duration, retry: usize) -> Option<Duration> {
+    let delay = PUBLIC_GATEWAY_RETRY_DELAYS.get(retry).copied()?;
+    (delay < budget.saturating_sub(started.elapsed())).then_some(delay)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn signed_send_with_public_gateway_retries(
     client: &reqwest::Client,
@@ -41,12 +52,27 @@ pub(super) async fn signed_send_with_public_gateway_retries(
         let (response, verified) = match sent {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
+                if allow_retry
+                    && is_retryable_public_transport_error(&error)
+                    && let Some(delay) = next_retry_delay(started, budget, retry)
+                {
+                    tokio::time::sleep(delay).await;
+                    retry += 1;
+                    continue;
+                }
                 return Err(public_transport_error(
                     error,
                     request.allow_ambiguous_fallback,
                 ));
             }
-            Err(_) => return Err(MeshRequestError::OutcomeUnknown),
+            Err(_) => {
+                if allow_retry && let Some(delay) = next_retry_delay(started, budget, retry) {
+                    tokio::time::sleep(delay).await;
+                    retry += 1;
+                    continue;
+                }
+                return Err(MeshRequestError::OutcomeUnknown);
+            }
         };
         let missing_ack = !response
             .headers()
@@ -54,16 +80,12 @@ pub(super) async fn signed_send_with_public_gateway_retries(
         if allow_retry
             && missing_ack
             && is_retryable_public_gateway_status(response.status())
-            && retry < PUBLIC_GATEWAY_RETRY_DELAYS.len()
+            && let Some(delay) = next_retry_delay(started, budget, retry)
         {
-            let delay = PUBLIC_GATEWAY_RETRY_DELAYS[retry];
-            let remaining = budget.saturating_sub(started.elapsed());
-            if delay < remaining {
-                drop(response);
-                tokio::time::sleep(delay).await;
-                retry += 1;
-                continue;
-            }
+            drop(response);
+            tokio::time::sleep(delay).await;
+            retry += 1;
+            continue;
         }
         return Ok((response, verified));
     }

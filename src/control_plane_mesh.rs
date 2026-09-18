@@ -433,7 +433,7 @@ impl MeshAwareHttpClient {
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             request.total_budget,
-            request.allow_ambiguous_fallback && path == PeerDirectPath::ApiBaseUrl,
+            path == PeerDirectPath::ApiBaseUrl,
         )
         .await?;
         let response = match mesh_gate_read {
@@ -836,7 +836,7 @@ impl MeshAwareHttpClient {
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
             budget,
-            request.allow_ambiguous_fallback,
+            true,
         )
         .await?;
         let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
