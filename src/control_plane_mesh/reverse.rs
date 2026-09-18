@@ -26,6 +26,45 @@ pub(super) fn reverse_authority(route: &ReverseRelayRoute, peer: &MeshPeerTarget
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn verify_relay_ack(
+    request: &MeshRequest,
+    response: &reqwest::Response,
+    verified: &internal_auth::VerifiedRequest,
+    expected_node_id: &str,
+    cluster_ca_key_pem: &str,
+    cluster_ca_cert_pem: &str,
+    header_name: &str,
+    missing_message: &str,
+) -> Result<(), MeshRequestError> {
+    let ack = response
+        .headers()
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            dispatch_error(request, MeshRequestError::Reverse(missing_message.into()))
+        })?;
+    if let Err(error) = internal_auth::verify_ack_v2(
+        cluster_ca_key_pem,
+        cluster_ca_cert_pem,
+        verified,
+        expected_node_id,
+        response.status().as_u16(),
+        ack,
+    ) {
+        return Err(dispatch_error(request, error.into()));
+    }
+    Ok(())
+}
+
+fn dispatch_error(request: &MeshRequest, error: MeshRequestError) -> MeshRequestError {
+    if request.allow_ambiguous_fallback {
+        error
+    } else {
+        MeshRequestError::OutcomeUnknown
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct LocalReverseRelay {
     pub(super) node_id: String,
@@ -355,6 +394,9 @@ impl MeshAwareHttpClient {
                     self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
                         .await;
                     return Ok(response);
+                }
+                Err(MeshRequestError::OutcomeUnknown) if !request.allow_ambiguous_fallback => {
+                    return Err(MeshRequestError::OutcomeUnknown);
                 }
                 Err(error) => last_error = Some(error),
             }

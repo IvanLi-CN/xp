@@ -665,6 +665,12 @@ impl MeshAwareHttpClient {
                             ?error,
                             "reverse relay attempt failed"
                         );
+                        if !request.allow_ambiguous_fallback
+                            && matches!(error, MeshRequestError::OutcomeUnknown)
+                        {
+                            self.record_terminal_failure(peer).await;
+                            return Err(MeshRequestError::OutcomeUnknown);
+                        }
                         // A gate rejection happens before dispatch and cannot make the outcome
                         // unknown. Transport failures remain ambiguous.
                         if !matches!(
@@ -1024,35 +1030,25 @@ impl MeshAwareHttpClient {
                 .await?
             }
         };
-        let outer_ack = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("outer acknowledgement is missing".to_string())
-            })?;
-        internal_auth::verify_ack_v2(
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
+        reverse::verify_relay_ack(
+            request,
+            &response,
             &outer_verified,
             &route.rendezvous.node_id,
-            response.status().as_u16(),
-            outer_ack,
-        )?;
-        let inner_ack = response
-            .headers()
-            .get(crate::reverse_mesh::RELAY_INNER_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("inner acknowledgement is missing".to_string())
-            })?;
-        internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
+            internal_auth::INTERNAL_ACK_HEADER,
+            "outer acknowledgement is missing",
+        )?;
+        reverse::verify_relay_ack(
+            request,
+            &response,
             &inner_verified,
             &peer.node_id,
-            response.status().as_u16(),
-            inner_ack,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            crate::reverse_mesh::RELAY_INNER_ACK_HEADER,
+            "inner acknowledgement is missing",
         )?;
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }

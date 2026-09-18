@@ -18,7 +18,7 @@ struct GatewayState {
     ca_key_pem: String,
     ca_cert_pem: String,
     remaining_failures: Arc<AtomicUsize>,
-    requests: Arc<AtomicUsize>,
+    request_count: Arc<AtomicUsize>,
 }
 
 async fn gateway(
@@ -28,7 +28,7 @@ async fn gateway(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    state.requests.fetch_add(1, Ordering::SeqCst);
+    state.request_count.fetch_add(1, Ordering::SeqCst);
     if state
         .remaining_failures
         .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -77,7 +77,7 @@ async fn spawn_gateway(
         ca_key_pem: ca_key_pem.to_owned(),
         ca_cert_pem: ca_cert_pem.to_owned(),
         remaining_failures: Arc::new(AtomicUsize::new(failures)),
-        requests: requests.clone(),
+        request_count: requests.clone(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -139,7 +139,7 @@ fn public_gateway_retry_excludes_non_idempotent_mutations() {
         allow_ambiguous_fallback: true,
         request_id: "retry-policy".to_string(),
         route: InternalRoute::MeshV2,
-        cluster_id: "cluster".to_string(),
+        cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
         sender_id: "sender".to_string(),
         updates_active_path: true,
     };
@@ -148,4 +148,37 @@ fn public_gateway_retry_excludes_non_idempotent_mutations() {
     assert!(retry::request_allows_public_gateway_retry(&request));
     request.path_and_query = "/api/admin/_internal/raft/client-write".to_string();
     assert!(retry::request_allows_public_gateway_retry(&request));
+}
+
+#[tokio::test]
+async fn reverse_control_does_not_replay_unknown_result_on_standby() {
+    let (primary_base_url, primary_requests, primary_task) =
+        peer_target_tests::spawn_reverse_relay_counter().await;
+    let (standby_base_url, standby_requests, standby_task) =
+        peer_target_tests::spawn_reverse_relay_counter().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let mut assignment = peer_target_tests::reverse_assignment();
+    assignment.standby_node_id = Some(xp_test_fixtures::tertiary_node_id().to_owned());
+    let rendezvous = peer_target_tests::secondary_reverse_target(None, primary_base_url);
+    let standby = peer_target_tests::tertiary_reverse_target(None, standby_base_url);
+    let peer = peer_target_tests::primary_reverse_target(None, "http://127.0.0.1:1".to_string());
+    let client = MeshAwareHttpClient::new(reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            peer_target_tests::reverse_route(rendezvous, Some(standby), assignment),
+        )
+        .await;
+    let mut request = peer_target_tests::reverse_request();
+    request.allow_ambiguous_fallback = false;
+    let error = client
+        .send_peer_reverse_request(&peer, request, &ca.key_pem, &ca.cert_pem)
+        .await
+        .expect_err("missing relay acknowledgement must be outcome-unknown");
+    assert!(matches!(error, MeshRequestError::OutcomeUnknown));
+    assert_eq!(primary_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(standby_requests.load(Ordering::SeqCst), 0);
+    primary_task.abort();
+    standby_task.abort();
 }

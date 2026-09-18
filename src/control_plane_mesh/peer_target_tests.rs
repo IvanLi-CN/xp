@@ -367,7 +367,7 @@ async fn spawn_peak_stalling_reverse_relay() -> (
     (format!("http://{address}"), peak, entered, release, task)
 }
 
-fn reverse_request() -> MeshRequest {
+pub(super) fn reverse_request() -> MeshRequest {
     MeshRequest {
         method: reqwest::Method::GET,
         path_and_query: "/api/admin/_internal/mesh/health".to_string(),
@@ -420,7 +420,7 @@ pub(super) fn secondary_reverse_target(
     }
 }
 
-fn tertiary_reverse_target(
+pub(super) fn tertiary_reverse_target(
     mesh_base_url: Option<String>,
     public_base_url: String,
 ) -> MeshPeerTarget {
@@ -679,6 +679,7 @@ async fn reverse_health_probe_warms_primary_and_standby() {
     primary_task.abort();
     standby_task.abort();
 }
+
 #[tokio::test]
 async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
     let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
