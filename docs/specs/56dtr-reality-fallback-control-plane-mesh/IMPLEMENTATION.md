@@ -34,8 +34,8 @@
   validates the data/meta pair and authenticated marker without requiring the older snapshot
   watermark to equal the current applied log. Bootstrap startup also retries the local node
   upsert when Raft is initialized but the state machine still lacks that node, closing the
-  initialization crash window; the retry is admitted only while the local node is still present
-  in current Raft membership, so a retired bootstrap identity cannot be resurrected. Capability
+  initialization crash window; the retry is admitted only while the local node is still a current
+  voter, so a learner or retired bootstrap identity cannot be resurrected. Capability
   probes for missing, invalid, ambiguous, or unsupported Mesh targets use the registered public
   origin directly.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated
