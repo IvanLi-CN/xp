@@ -100,7 +100,10 @@ before those completion records, the marker is recoverable history rather than c
 the next retry may recreate the same handoff and response identity. The legacy response-complete
 bit is response-scoped historical state, not per-stream completion evidence, so it must not block
 another stream from recovering its own handoff. A completed handoff range is retained in the peer
-checkpoint so gap ledger rotation cannot reopen it. Ordinary source delivery and anti-entropy
+checkpoint so gap ledger rotation cannot reopen it. If a restart finds the active handoff marker
+after its permanent gap and receiver watermark were already persisted, completion is idempotent:
+XP clears the marker and records the completed range without advancing the watermark twice.
+Ordinary source delivery and anti-entropy
 continue to require exact sequence continuity.
 
 An exact persisted segment replay remains an idempotent ACK after the receiving

@@ -880,7 +880,9 @@ Notes:
   repair response and must not block another stream from recovering its own handoff. If an older
   release left the marker while the tiered handoff, receiver watermark advance, and permanent gap
   are absent, the next public retry recreates the handoff and reuses the response identity; do not
-  edit the checkpoint or clear the backlog manually.
+  edit the checkpoint or clear the backlog manually. If the gap and watermark are already durable
+  but the active handoff marker remains after a restart, XP completes it idempotently and clears
+  the marker without advancing the watermark a second time.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer

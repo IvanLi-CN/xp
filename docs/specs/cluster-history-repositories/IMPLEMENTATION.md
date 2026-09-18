@@ -92,7 +92,9 @@
   the tiered handoff and retries the same response identity instead of rejecting the repair forever.
   The legacy response-complete bit is response-scoped historical state, not per-stream completion
   evidence; current gap/watermark state and the durable completed range decide whether a stream may
-  be scheduled.
+  be scheduled. If a crash leaves the active handoff marker after the permanent gap and receiver
+  watermark are already durable, handoff completion is idempotent and clears the marker without
+  advancing the watermark twice.
   Each completed response clears only its own identity; strict contiguous sequence/hash links apply
   after that stream is anchored and on ordinary source delivery and anti-entropy, so the relaxed
   boundary cannot bypass live fork protection.
