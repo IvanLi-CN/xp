@@ -38,7 +38,7 @@
   voter, so a learner or retired bootstrap identity cannot be resurrected. Capability
   probes for missing, invalid, ambiguous, or unsupported Mesh targets use the registered public
   origin directly, while an unsigned predecessor `404` still enters the existing legacy
-  `/api/capabilities` compatibility path.
+  `/api/capabilities` compatibility path; these probes never use a Reverse relay assignment.
   Capability probes keep predecessor 404 compatibility over that public path, while dedicated
   Reverse health and link probes are suppressed until the gate is enabled again.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、

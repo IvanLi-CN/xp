@@ -37,7 +37,7 @@ async fn stall_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> Status
     StatusCode::SERVICE_UNAVAILABLE
 }
 
-async fn spawn_reverse_relay_counter() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+pub(super) async fn spawn_reverse_relay_counter() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     let requests = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
@@ -383,7 +383,7 @@ fn reverse_request() -> MeshRequest {
     }
 }
 
-fn reverse_assignment() -> ReverseMeshAssignment {
+pub(super) fn reverse_assignment() -> ReverseMeshAssignment {
     ReverseMeshAssignment {
         target_node_id: xp_test_fixtures::primary_node_id().to_owned(),
         generation: 1,
@@ -407,7 +407,7 @@ pub(super) fn primary_reverse_target(
     }
 }
 
-fn secondary_reverse_target(
+pub(super) fn secondary_reverse_target(
     mesh_base_url: Option<String>,
     public_base_url: String,
 ) -> MeshPeerTarget {
@@ -433,7 +433,7 @@ fn tertiary_reverse_target(
     }
 }
 
-fn reverse_route(
+pub(super) fn reverse_route(
     rendezvous: MeshPeerTarget,
     standby_rendezvous: Option<MeshPeerTarget>,
     assignment: ReverseMeshAssignment,

@@ -44,7 +44,6 @@ pub enum MeshAttemptDecision {
     SkipOpen,
     Disabled,
 }
-
 #[derive(Debug, Clone, Default)]
 struct PeerCircuit {
     failures: u8,
@@ -52,7 +51,6 @@ struct PeerCircuit {
     retry_at: Option<Instant>,
     half_open_in_flight: bool,
 }
-
 #[derive(Clone, Default)]
 pub struct PeerCircuitBreakers {
     peers: Arc<Mutex<BTreeMap<String, PeerCircuit>>>,
@@ -608,6 +606,8 @@ impl MeshAwareHttpClient {
 
         let should_try_reverse = cluster_mesh_enabled
             && !request.path_and_query.contains("/mesh/reverse-relay")
+            && (request.path_and_query != LEGACY_CAPABILITIES_PROBE_PATH
+                || matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable))
             && (mesh_outcome_ambiguous
                 || !mesh_enabled
                 || matches!(decision, MeshAttemptDecision::SkipOpen));
