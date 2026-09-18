@@ -65,6 +65,30 @@ pub(crate) struct RepositoryInitialBackfillPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_page_cursor: Option<String>,
 }
+
+fn validate_peer_backfill_page(
+    page: &RepositoryInitialBackfillPage,
+    previous_cursor: Option<&HistoricalBackfillPageCursor>,
+) -> anyhow::Result<()> {
+    if page.records.len() > MAX_INITIAL_BACKFILL_PAGE_RECORDS {
+        anyhow::bail!("peer history backfill page exceeds record limit");
+    }
+    if serde_json::to_vec(&page.records)?.len() > MAX_INITIAL_BACKFILL_PAGE_BYTES {
+        anyhow::bail!("peer history backfill page exceeds byte limit");
+    }
+    let Some(next_page_cursor) = page.next_page_cursor.as_deref() else {
+        return Ok(());
+    };
+    let next_cursor = HistoricalBackfillPageCursor::decode(next_page_cursor)?;
+    if previous_cursor.is_some_and(|previous| {
+        next_cursor.after <= previous.after
+            || (previous.snapshot_end_unix_seconds.is_some()
+                && next_cursor.snapshot_end_unix_seconds != previous.snapshot_end_unix_seconds)
+    }) {
+        anyhow::bail!("peer history backfill page cursor did not advance");
+    }
+    Ok(())
+}
 pub(crate) struct HistoricalBackfillCollector {
     pub(crate) after: Option<HistoricalBackfillSortKey>,
     snapshot_end_unix_seconds: Option<u64>,
@@ -402,6 +426,10 @@ pub(super) async fn pull_peer_initial_history(
         .initial_peer_backfill_checkpoint(&peer.node_id)
         .unwrap_or_default();
     let cursor = checkpoint.page_cursor;
+    let decoded_cursor = cursor
+        .as_deref()
+        .map(HistoricalBackfillPageCursor::decode)
+        .transpose()?;
     let mut stream_state = checkpoint.stream_state;
     let mut saw_history = checkpoint.saw_history;
     if checkpoint.completed {
@@ -446,6 +474,7 @@ pub(super) async fn pull_peer_initial_history(
             return Ok(InitialBackfillProgress::Unavailable);
         }
     };
+    validate_peer_backfill_page(&page, decoded_cursor.as_ref())?;
     if !page.records.is_empty() {
         saw_history = true;
         receive_peer_backfill_page(
@@ -476,9 +505,6 @@ pub(super) async fn pull_peer_initial_history(
             )?;
         return Ok(InitialBackfillProgress::Complete);
     };
-    if cursor.as_deref() == Some(next_page_cursor.as_str()) {
-        anyhow::bail!("peer history backfill page cursor did not advance");
-    }
     state
         .repository_replica
         .lock()

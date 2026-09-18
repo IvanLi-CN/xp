@@ -1,10 +1,80 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
-    InitialBackfillProgress, is_initial_history_source_peer, next_historical_backfill_page_cursor,
-    serialized_backfill_record_bytes,
+    InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
+    is_initial_history_source_peer, next_historical_backfill_page_cursor,
+    serialized_backfill_record_bytes, validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
-use crate::state::history_repository::MAX_INITIAL_BACKFILL_PAGE_BYTES;
+use crate::state::history_repository::{
+    MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+};
+
+fn backfill_record(payload_base64: String) -> RepositoryInitialBackfillRecord {
+    RepositoryInitialBackfillRecord {
+        observed_at_unix_seconds: 1,
+        source_node_id: None,
+        source_epoch: None,
+        stream: None,
+        sequence: None,
+        subject_node_id: "node-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key_base64: "a2V5".to_owned(),
+        payload_base64,
+        tombstone: false,
+    }
+}
+
+#[test]
+fn peer_backfill_rejects_an_oversized_record_page() {
+    let page = RepositoryInitialBackfillPage {
+        records: (0..=MAX_INITIAL_BACKFILL_PAGE_RECORDS)
+            .map(|_| backfill_record(String::new()))
+            .collect(),
+        next_page_cursor: None,
+    };
+
+    assert!(validate_peer_backfill_page(&page, None).is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_a_page_over_the_byte_budget() {
+    let page = RepositoryInitialBackfillPage {
+        records: vec![backfill_record("x".repeat(MAX_INITIAL_BACKFILL_PAGE_BYTES))],
+        next_page_cursor: None,
+    };
+
+    assert!(validate_peer_backfill_page(&page, None).is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
+    let page = |next_page_cursor| RepositoryInitialBackfillPage {
+        records: Vec::new(),
+        next_page_cursor,
+    };
+    assert!(validate_peer_backfill_page(&page(Some("invalid".to_owned())), None).is_err());
+
+    let previous = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: 10,
+            schema_id: "runtime.v1".to_owned(),
+            record_key: b"key-10".to_vec(),
+        },
+        snapshot_end_unix_seconds: Some(100),
+    };
+    let regressing = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: 9,
+            schema_id: "runtime.v1".to_owned(),
+            record_key: b"key-9".to_vec(),
+        },
+        snapshot_end_unix_seconds: Some(100),
+    };
+    let cursor = regressing.encode().expect("cursor encoding");
+    assert!(validate_peer_backfill_page(&page(Some(cursor)), Some(&previous)).is_err());
+}
 
 #[test]
 fn tick_progress_keeps_peer_pages_eligible_while_local_backfill_runs() {
