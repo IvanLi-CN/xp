@@ -5638,7 +5638,7 @@ async fn admin_run_endpoint_probe_run(
                 body,
                 Some("application/json".to_string()),
                 Duration::from_secs(3),
-                true,
+                false,
                 request_id,
             )
             .await

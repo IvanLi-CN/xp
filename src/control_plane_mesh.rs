@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod gate;
+mod retry;
 mod reverse;
 mod telemetry;
 mod transport;
@@ -424,20 +425,17 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => &self.mesh,
             PeerDirectPath::ApiBaseUrl => &self.public_direct,
         };
-        let (response, verified) = tokio::time::timeout(
+        let (response, verified) = retry::signed_send_with_public_gateway_retries(
+            client,
+            &url,
+            &request,
+            &context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
             request.total_budget,
-            signed_send(
-                client,
-                &url,
-                &request,
-                &context,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-            ),
+            request.allow_ambiguous_fallback && path == PeerDirectPath::ApiBaseUrl,
         )
-        .await
-        .map_err(|_| MeshRequestError::OutcomeUnknown)?
-        .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        .await?;
         let response = match mesh_gate_read {
             Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
             None => response,
@@ -667,6 +665,19 @@ impl MeshAwareHttpClient {
                             ?error,
                             "reverse relay attempt failed"
                         );
+                        if !request.allow_ambiguous_fallback
+                            && matches!(error, MeshRequestError::OutcomeUnknown)
+                        {
+                            self.record_terminal_failure(peer).await;
+                            return Err(MeshRequestError::OutcomeUnknown);
+                        }
+                        if matches!(
+                            error,
+                            MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
+                        ) {
+                            self.record_terminal_failure(peer).await;
+                            return Err(error);
+                        }
                         // A gate rejection happens before dispatch and cannot make the outcome
                         // unknown. Transport failures remain ambiguous.
                         if !matches!(
@@ -817,20 +828,17 @@ impl MeshAwareHttpClient {
         budget: Duration,
         allow_unsigned_not_found: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        let (response, verified) = tokio::time::timeout(
+        let (response, verified) = retry::signed_send_with_public_gateway_retries(
+            &self.public_direct,
+            url,
+            request,
+            context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
             budget,
-            signed_send(
-                &self.public_direct,
-                url,
-                request,
-                context,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-            ),
+            request.allow_ambiguous_fallback,
         )
-        .await
-        .map_err(|_| MeshRequestError::OutcomeUnknown)?
-        .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        .await?;
         let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
         else {
             if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -1029,35 +1037,25 @@ impl MeshAwareHttpClient {
                 .await?
             }
         };
-        let outer_ack = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("outer acknowledgement is missing".to_string())
-            })?;
-        internal_auth::verify_ack_v2(
-            cluster_ca_key_pem,
-            cluster_ca_cert_pem,
+        reverse::verify_relay_ack(
+            request,
+            &response,
             &outer_verified,
             &route.rendezvous.node_id,
-            response.status().as_u16(),
-            outer_ack,
-        )?;
-        let inner_ack = response
-            .headers()
-            .get(crate::reverse_mesh::RELAY_INNER_ACK_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                MeshRequestError::Reverse("inner acknowledgement is missing".to_string())
-            })?;
-        internal_auth::verify_ack_v2(
             cluster_ca_key_pem,
             cluster_ca_cert_pem,
+            internal_auth::INTERNAL_ACK_HEADER,
+            "outer acknowledgement is missing",
+        )?;
+        reverse::verify_relay_ack(
+            request,
+            &response,
             &inner_verified,
             &peer.node_id,
-            response.status().as_u16(),
-            inner_ack,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            crate::reverse_mesh::RELAY_INNER_ACK_HEADER,
+            "inner acknowledgement is missing",
         )?;
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
     }
@@ -1190,3 +1188,5 @@ mod mesh_gate_tests;
 mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;
+#[cfg(test)]
+mod retry_tests;
