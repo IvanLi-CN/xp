@@ -464,8 +464,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             .borrow()
             .membership_config
             .membership()
-            .get_node(&raft_id)
-            .is_some();
+            .voter_ids()
+            .any(|voter_id| voter_id == raft_id);
         if !was_initialized || (bootstrap_node_missing && local_membership) {
             // Ensure the bootstrap node exists in the Raft state machine so future joiners can
             // replicate the full node list. Without this, a joiner would only ever see itself
