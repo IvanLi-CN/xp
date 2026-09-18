@@ -875,6 +875,10 @@ Notes:
   anchor may omit its predecessor hash because the local watermark supplies the predecessor
   boundary. XP records that expired prefix as a `source_retention_expired` permanent gap, even when
   wire bounds split the page into multiple responses or an earlier segment is already contiguous.
+  The persisted retained-anchor stream marker is historical allowance evidence, not completion
+  evidence. If a restart or an older release left the marker while the tiered handoff, receiver
+  watermark advance, and permanent gap are absent, the next public retry recreates the handoff and
+  reuses the response identity; do not edit the checkpoint or clear the backlog manually.
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer

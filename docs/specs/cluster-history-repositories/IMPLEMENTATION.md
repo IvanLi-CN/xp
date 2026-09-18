@@ -84,10 +84,13 @@
   response carries `history_truncated=true`, the same path may advance an existing local watermark
   once per affected source stream during initial backfill, even if wire bounds split a page into
   multiple responses or the stream appears after another stream's completed page. The durable
-  `(source, epoch, stream)` allowance set prevents a second handoff for the same stream and the
-  receiver persists a `source_retention_expired` permanent gap. Each completed response clears only
-  its own identity; strict contiguous sequence/hash links apply after that stream is anchored and
-  on ordinary source delivery and anti-entropy, so the relaxed boundary cannot bypass live fork
+  `(source, epoch, stream)` allowance set records the consumed historical allowance, while the
+  receiver persists a `source_retention_expired` permanent gap and advances its watermark as the
+  completion evidence. A stale allowance marker without an active handoff or matching gap/watermark
+  is recoverable state: the worker recreates the tiered handoff and retries the same response
+  identity instead of rejecting the repair forever. Each completed response clears only its own
+  identity; strict contiguous sequence/hash links apply after that stream is anchored and on
+  ordinary source delivery and anti-entropy, so the relaxed boundary cannot bypass live fork
   protection.
   A replayed wire whose exact SHA-256 segment ID is already durable and whose complete cursor range
   is at or below the receiver watermark gets an idempotent acknowledgement even while the retained
