@@ -42,7 +42,7 @@ pub(super) fn verify_relay_ack(
         .get(header_name)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            dispatch_error(request, MeshRequestError::Reverse(missing_message.into()))
+            dispatch_error(request, MeshRequestError::Protocol(missing_message.into()))
         })?;
     if let Err(error) = internal_auth::verify_ack_v2(
         cluster_ca_key_pem,
@@ -397,6 +397,9 @@ impl MeshAwareHttpClient {
                 }
                 Err(MeshRequestError::OutcomeUnknown) if !request.allow_ambiguous_fallback => {
                     return Err(MeshRequestError::OutcomeUnknown);
+                }
+                Err(error @ (MeshRequestError::Auth(_) | MeshRequestError::Protocol(_))) => {
+                    return Err(error);
                 }
                 Err(error) => last_error = Some(error),
             }

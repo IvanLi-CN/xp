@@ -671,6 +671,13 @@ impl MeshAwareHttpClient {
                             self.record_terminal_failure(peer).await;
                             return Err(MeshRequestError::OutcomeUnknown);
                         }
+                        if matches!(
+                            error,
+                            MeshRequestError::Auth(_) | MeshRequestError::Protocol(_)
+                        ) {
+                            self.record_terminal_failure(peer).await;
+                            return Err(error);
+                        }
                         // A gate rejection happens before dispatch and cannot make the outcome
                         // unknown. Transport failures remain ambiguous.
                         if !matches!(

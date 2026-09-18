@@ -112,3 +112,49 @@ async fn non_mesh_capability_probe_bypasses_reverse_assignment() {
     reverse_task.abort();
     public_task.abort();
 }
+
+#[tokio::test]
+async fn reverse_protocol_failure_does_not_fall_back_to_public() {
+    let (reverse_base_url, reverse_requests, reverse_task) = spawn_reverse_relay_counter().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(None, public_base_url);
+    let rendezvous = secondary_reverse_target(None, reverse_base_url);
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(rendezvous, None, reverse_assignment()),
+        )
+        .await;
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: xp_test_fixtures::primary_node_id().to_owned(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_owned(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_owned(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(matches!(result, Err(MeshRequestError::Protocol(_))));
+    assert_eq!(reverse_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 0);
+    reverse_task.abort();
+    public_task.abort();
+}
