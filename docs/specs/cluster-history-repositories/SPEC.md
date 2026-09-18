@@ -106,9 +106,10 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   已消费的 stream allowance 和 `source_retention_expired` permanent gap；同一 stream 第二次
   handoff 仍拒绝。allowance marker 只表示历史消费记录，不代表 receiver watermark 或 permanent
   gap 已经落盘；完成的 handoff 还会持久化其范围，即使有界 gap ledger 后续轮转也不能再次跨越。
-  若旧 marker 已存在但 active tiered handoff、watermark 推进、gap 证据和完成范围均缺失，恢复
-  worker 必须重建该 handoff，并继续使用同一 response identity 做幂等重试。普通 source delivery
-  和普通 anti-entropy 仍必须严格连续，不能用该标记伪造缺失 payload。
+  若旧 marker 已存在但旧 response-complete 证据、active tiered handoff、watermark 推进、gap
+  证据和完成范围均缺失，恢复 worker 必须重建该 handoff，并继续使用同一 response identity
+  做幂等重试；旧 response-complete 证据仍表示该 stream allowance 已消费，不得再次跨越。
+  普通 source delivery 和普通 anti-entropy 仍必须严格连续，不能用该标记伪造缺失 payload。
 - repair 响应可携带由实际返回 segments、unavailable IDs、gaps 和 truncation 标记计算的
   `response_id`。接收方对旧服务端缺失该字段的响应自行计算同一摘要；wire-bounded response
   发生中断时，只有摘要相同的重试可继续使用未消费的 stream allowance，任何不匹配都 fail

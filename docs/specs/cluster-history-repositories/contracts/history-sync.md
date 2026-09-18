@@ -96,10 +96,12 @@ allowance. An earlier contiguous segment or completed response does not consume
 another stream's allowance, while a second handoff for the same stream remains
 rejected once its permanent gap and receiver watermark are durable. If an older
 runtime persisted only the consumed-stream marker and lost the active handoff
-before those completion records, the marker is recoverable history rather than
-completion evidence: the next retry may recreate the same handoff and response
-identity. A completed handoff range is retained in the peer checkpoint so gap
-ledger rotation cannot reopen it. Ordinary source delivery and anti-entropy
+before those completion records, and its legacy response-complete bit is not set,
+the marker is recoverable history rather than completion evidence: the next retry
+may recreate the same handoff and response identity. A legacy response-complete
+bit is completion evidence and blocks a second handoff for that stream. A completed
+handoff range is retained in the peer checkpoint so gap ledger rotation cannot
+reopen it. Ordinary source delivery and anti-entropy
 continue to require exact sequence continuity.
 
 An exact persisted segment replay remains an idempotent ACK after the receiving
