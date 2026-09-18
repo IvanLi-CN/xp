@@ -155,7 +155,10 @@ fn validate_peer_backfill_cursor(
         anyhow::bail!("tiered backfill cursor returned for historical page");
     }
     let Some(next_after) = tiered_backfill_cursor_after(next_encoded)? else {
-        return Ok(());
+        if page.records.is_empty() {
+            return Ok(());
+        }
+        anyhow::bail!("peer tiered backfill cursor without after has records");
     };
     if page.records.is_empty() {
         anyhow::bail!("peer tiered backfill cursor has an after value for an empty page");
