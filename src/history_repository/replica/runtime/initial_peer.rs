@@ -40,6 +40,9 @@ pub(crate) struct InitialPeerBackfillCheckpoint {
     pub(crate) retained_anchor_repair_response_id: Option<String>,
     #[serde(default)]
     pub(crate) retained_anchor_streams: BTreeSet<InitialPeerRetainedAnchorStream>,
+    /// Completed tiered handoffs remain durable even after the bounded gap ledger rotates.
+    #[serde(default)]
+    pub(crate) retained_anchor_handoffs: BTreeSet<InitialPeerTieredHandoff>,
     #[serde(default)]
     pub(crate) summary_tiered_handoff: Option<InitialPeerTieredHandoff>,
 }
@@ -51,7 +54,7 @@ pub(crate) struct InitialPeerRetainedAnchorStream {
     pub(crate) stream: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct InitialPeerTieredHandoff {
     pub(crate) source_node_id: String,
     pub(crate) source_epoch: u64,
@@ -104,6 +107,7 @@ impl RepositoryReplicaRuntime {
                     .retained_anchor_repair_response_seen,
                 retained_anchor_repair_response_id: checkpoint.retained_anchor_repair_response_id,
                 retained_anchor_streams: checkpoint.retained_anchor_streams,
+                retained_anchor_handoffs: checkpoint.retained_anchor_handoffs,
                 summary_tiered_handoff: checkpoint.summary_tiered_handoff,
             },
         );
@@ -243,6 +247,7 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_repair_response_seen: prior.retained_anchor_repair_response_seen,
                 retained_anchor_repair_response_id: prior.retained_anchor_repair_response_id,
                 retained_anchor_streams: prior.retained_anchor_streams,
+                retained_anchor_handoffs: prior.retained_anchor_handoffs,
                 summary_tiered_handoff: Some(handoff),
             },
         );
@@ -304,11 +309,13 @@ impl RepositoryReplicaRuntime {
                 },
             ));
         }
-        self.snapshot
+        let checkpoint = self
+            .snapshot
             .initial_peer_backfills
             .get_mut(peer_node_id)
-            .expect("handoff checkpoint checked above")
-            .summary_tiered_handoff = None;
+            .expect("handoff checkpoint checked above");
+        checkpoint.summary_tiered_handoff = None;
+        checkpoint.retained_anchor_handoffs.insert(handoff.clone());
         if let Err(error) = self.persist_control_state() {
             self.restore(&previous_receiver, previous_snapshot)?;
             return Err(error);
@@ -337,6 +344,7 @@ impl RepositoryReplicaRuntime {
                 retained_anchor_repair_response_seen,
                 retained_anchor_repair_response_id,
                 retained_anchor_streams,
+                retained_anchor_handoffs: prior.retained_anchor_handoffs,
                 summary_tiered_handoff: prior.summary_tiered_handoff,
                 ..InitialPeerBackfillCheckpoint::default()
             },

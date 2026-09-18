@@ -54,8 +54,13 @@ fn can_schedule_tiered_handoff(
     // `retained_anchor_streams` records historical allowance consumption, not completion of the
     // receiver watermark or its permanent gap ledger. An older release could persist that marker
     // before losing the tiered handoff, so it must not suppress recovery of an actually unbridged
-    // candidate. Only an identical active handoff is a duplicate.
+    // candidate. An identical active handoff or a durably completed handoff is a duplicate.
     checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
+        && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
+            completed.source_node_id == handoff.source_node_id
+                && completed.source_epoch == handoff.source_epoch
+                && completed.stream == handoff.stream
+        })
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -862,6 +867,15 @@ mod tests {
             ..InitialPeerBackfillCheckpoint::default()
         };
         assert!(!can_schedule_tiered_handoff(&active_handoff, &same_stream));
+
+        let completed_handoff = InitialPeerBackfillCheckpoint {
+            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(!can_schedule_tiered_handoff(
+            &completed_handoff,
+            &same_stream
+        ));
 
         let later_page = InitialPeerBackfillCheckpoint {
             retained_anchor_repair_response_seen: true,
