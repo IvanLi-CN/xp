@@ -51,11 +51,17 @@ fn can_schedule_tiered_handoff(
     checkpoint: &InitialPeerBackfillCheckpoint,
     handoff: &InitialPeerTieredHandoff,
 ) -> bool {
-    !checkpoint.retained_anchor_streams.iter().any(|stream| {
-        stream.source_node_id == handoff.source_node_id
-            && stream.source_epoch == handoff.source_epoch
-            && stream.stream == handoff.stream
-    })
+    // `retained_anchor_streams` and the legacy response-complete bit are historical response
+    // state, not per-stream completion evidence. An older release could persist either marker
+    // before losing a tiered handoff, and the same response may contain multiple streams. Current
+    // gap/watermark evidence is checked by `tiered_handoff_for_sequence_gap`; only an identical
+    // active handoff or a durably completed handoff is a duplicate here.
+    checkpoint.summary_tiered_handoff.as_ref() != Some(handoff)
+        && !checkpoint.retained_anchor_handoffs.iter().any(|completed| {
+            completed.source_node_id == handoff.source_node_id
+                && completed.source_epoch == handoff.source_epoch
+                && completed.stream == handoff.stream
+        })
 }
 
 pub(crate) async fn catch_up_against_ready_repositories(
@@ -852,7 +858,25 @@ mod tests {
             stream: "connections".to_owned(),
             ..handoff.clone()
         };
-        assert!(!can_schedule_tiered_handoff(&stream_consumed, &same_stream));
+        // A retained-anchor marker alone is historical evidence. If the receiver still exposes
+        // an unbridged gap, the worker must be able to recreate the missing handoff.
+        assert!(can_schedule_tiered_handoff(&stream_consumed, &same_stream));
+
+        let active_handoff = InitialPeerBackfillCheckpoint {
+            summary_tiered_handoff: Some(same_stream.clone()),
+            retained_anchor_streams: stream_consumed.retained_anchor_streams.clone(),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(!can_schedule_tiered_handoff(&active_handoff, &same_stream));
+
+        let completed_handoff = InitialPeerBackfillCheckpoint {
+            retained_anchor_handoffs: BTreeSet::from([same_stream.clone()]),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(!can_schedule_tiered_handoff(
+            &completed_handoff,
+            &same_stream
+        ));
 
         let later_page = InitialPeerBackfillCheckpoint {
             retained_anchor_repair_response_seen: true,
@@ -860,5 +884,19 @@ mod tests {
             ..InitialPeerBackfillCheckpoint::default()
         };
         assert!(can_schedule_tiered_handoff(&later_page, &handoff));
+
+        let legacy_response_completed = InitialPeerBackfillCheckpoint {
+            retained_anchor_repair_response_seen: true,
+            retained_anchor_streams: BTreeSet::from([InitialPeerRetainedAnchorStream {
+                source_node_id: same_stream.source_node_id.clone(),
+                source_epoch: same_stream.source_epoch,
+                stream: same_stream.stream.clone(),
+            }]),
+            ..InitialPeerBackfillCheckpoint::default()
+        };
+        assert!(can_schedule_tiered_handoff(
+            &legacy_response_completed,
+            &same_stream
+        ));
     }
 }

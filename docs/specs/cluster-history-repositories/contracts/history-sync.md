@@ -94,8 +94,14 @@ responses or summary pages. The receiver records each crossed range as
 `source_retention_expired` and persists the consumed `(source, epoch, stream)`
 allowance. An earlier contiguous segment or completed response does not consume
 another stream's allowance, while a second handoff for the same stream remains
-rejected. Ordinary source delivery and anti-entropy continue to require exact
-sequence continuity.
+rejected once its permanent gap and receiver watermark are durable. If an older
+runtime persisted only the consumed-stream marker and lost the active handoff
+before those completion records, the marker is recoverable history rather than completion evidence:
+the next retry may recreate the same handoff and response identity. The legacy response-complete
+bit is response-scoped historical state, not per-stream completion evidence, so it must not block
+another stream from recovering its own handoff. A completed handoff range is retained in the peer
+checkpoint so gap ledger rotation cannot reopen it. Ordinary source delivery and anti-entropy
+continue to require exact sequence continuity.
 
 An exact persisted segment replay remains an idempotent ACK after the receiving
 runtime restarts; the durable segment identity and watermark are the authority,

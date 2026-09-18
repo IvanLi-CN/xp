@@ -84,11 +84,18 @@
   response carries `history_truncated=true`, the same path may advance an existing local watermark
   once per affected source stream during initial backfill, even if wire bounds split a page into
   multiple responses or the stream appears after another stream's completed page. The durable
-  `(source, epoch, stream)` allowance set prevents a second handoff for the same stream and the
-  receiver persists a `source_retention_expired` permanent gap. Each completed response clears only
-  its own identity; strict contiguous sequence/hash links apply after that stream is anchored and
-  on ordinary source delivery and anti-entropy, so the relaxed boundary cannot bypass live fork
-  protection.
+  `(source, epoch, stream)` allowance set records the consumed historical allowance, while the
+  receiver persists a `source_retention_expired` permanent gap and advances its watermark as the
+  completion evidence. The completed handoff range is also retained in the peer checkpoint, so a
+  later gap-ledger rotation cannot reopen the allowance. A stale allowance marker without an active
+  handoff, matching gap/watermark, or completed range is recoverable state: the worker recreates
+  the tiered handoff and retries the same response identity instead of rejecting the repair forever.
+  The legacy response-complete bit is response-scoped historical state, not per-stream completion
+  evidence; current gap/watermark state and the durable completed range decide whether a stream may
+  be scheduled.
+  Each completed response clears only its own identity; strict contiguous sequence/hash links apply
+  after that stream is anchored and on ordinary source delivery and anti-entropy, so the relaxed
+  boundary cannot bypass live fork protection.
   A replayed wire whose exact SHA-256 segment ID is already durable and whose complete cursor range
   is at or below the receiver watermark gets an idempotent acknowledgement even while the retained
   anchor remains unverified; the payload is not applied again, including after runtime restart, and
