@@ -68,7 +68,9 @@
   identity and retries the same durable segment set; malformed or non-advancing responses fail
   closed.
   Initial backfill receivers enforce the 128-record / 192 KiB page bound before decoding and
-  validate opaque cursor length, format, forward progress and snapshot horizon before checkpointing.
+  validate both historical-source and Ready-tiered opaque cursor formats for length, forward
+  progress and stable snapshot/export state before checkpointing; tiered pages use the sender's
+  canonical segment-byte budget.
   The 128 MiB/no-swap actual-XP summary resource run is a required operator-run source/release-
   candidate gate before rollout; the runner binds the clean commit and generated Web shell by
   SHA. GitHub CI and release publication do not provide or replace shared-testbox capacity evidence.

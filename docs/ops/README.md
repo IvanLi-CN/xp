@@ -836,8 +836,9 @@ Notes:
   this historical scan open. `syncing` remains visible while pages are in progress, and only a
   fully completed catch-up starts the five-minute readiness window.
   The receiver enforces the same 128-record / 192 KiB page bound before decoding records and
-  validates every opaque cursor for length, format, forward progress and a stable snapshot horizon;
-  malformed or regressing pages remain retryable failures and are never checkpointed.
+  validates historical-source and Ready-tiered opaque cursors for length, format, forward progress
+  and stable snapshot/export state; tiered pages use the sender's canonical segment-byte budget.
+  Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
   For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or

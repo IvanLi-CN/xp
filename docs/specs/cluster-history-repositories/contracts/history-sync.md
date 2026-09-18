@@ -33,10 +33,12 @@ history synchronization never opens a Mesh relay. Legacy relay payloads remain
 parseable at the receive boundary for wire compatibility, but the repository
 worker never constructs or sends them.
 
-Initial-backfill pages are capped at 128 records and 192 KiB. Receivers enforce
-both limits before decoding records and validate opaque cursor length, format,
-forward progress, and snapshot horizon before persisting the next checkpoint.
-Malformed, regressing, or cycling cursors remain retryable failures.
+Initial-backfill pages are capped at 128 records and 192 KiB. Historical-source
+pages use their JSON record budget; Ready-tiered pages use the sender's
+canonical segment-byte budget. Receivers enforce both limits before decoding
+records and validate the applicable opaque cursor family for length, format,
+forward progress, and stable snapshot/export state before persisting the next
+checkpoint. Malformed, regressing, or cycling cursors remain retryable failures.
 
 ## Acknowledgement and repair
 
