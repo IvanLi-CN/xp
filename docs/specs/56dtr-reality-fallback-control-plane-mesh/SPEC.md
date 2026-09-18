@@ -93,6 +93,7 @@
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - 公网边缘返回无签名 `502`、`503`、`504`、`520`、`522`、`523` 或 `524` 时，
   只读、Raft 幂等和 durable history 请求可在原请求预算内按 `200ms`、`500ms` 退避重试两次；
+  请求在响应头之前遇到连接、DNS、TLS 或超时错误时，对同一组幂等请求使用相同的有界重试；
   认证错误、协议错误和带签名响应不得重试。
 - auth、protocol error 与 headers 后的流中断不得触发公网降级。
 - 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback；这里的 public

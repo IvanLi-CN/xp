@@ -128,6 +128,60 @@ async fn public_gateway_timeout_retries_before_reporting_unknown() {
     public_task.abort();
 }
 
+#[tokio::test]
+async fn public_transport_failure_retries_for_idempotent_request() {
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("public listener");
+    let address = listener.local_addr().expect("public address");
+    let requests = Arc::new(AtomicUsize::new(0));
+    let state = GatewayState {
+        ca_key_pem: ca.key_pem.clone(),
+        ca_cert_pem: ca.cert_pem.clone(),
+        remaining_failures: Arc::new(AtomicUsize::new(0)),
+        request_count: requests.clone(),
+    };
+    let task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("first public connection");
+        drop(socket);
+        let _ = axum::serve(
+            listener,
+            Router::new().fallback(any(gateway)).with_state(state),
+        )
+        .await;
+    });
+    let peer = peer_target_tests::primary_reverse_target(None, format!("http://{address}"));
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(2),
+                allow_ambiguous_fallback: true,
+                request_id: "public-transport-retry".to_string(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(result.is_ok(), "transport retry should recover: {result:?}");
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
 #[test]
 fn public_gateway_retry_excludes_non_idempotent_mutations() {
     let mut request = MeshRequest {
@@ -147,6 +201,24 @@ fn public_gateway_retry_excludes_non_idempotent_mutations() {
     request.path_and_query = "/raft/append".to_string();
     assert!(retry::request_allows_public_gateway_retry(&request));
     request.path_and_query = "/api/admin/_internal/raft/client-write".to_string();
+    assert!(retry::request_allows_public_gateway_retry(&request));
+}
+
+#[test]
+fn read_retry_does_not_require_ambiguous_fallback() {
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/capabilities".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: Duration::from_secs(1),
+        allow_ambiguous_fallback: false,
+        request_id: "read-retry-policy".to_string(),
+        route: InternalRoute::MeshV2,
+        cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+        sender_id: "sender".to_string(),
+        updates_active_path: false,
+    };
     assert!(retry::request_allows_public_gateway_retry(&request));
 }
 
