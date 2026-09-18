@@ -4,6 +4,8 @@ use crate::{
     state::history_repository::identity::{Ed25519PublicKey, RepositoryNodeId, X25519PublicKey},
 };
 use ed25519_dalek::SigningKey;
+#[path = "tiered_handoff_recovery_tests.rs"]
+mod tiered_handoff_recovery_tests;
 #[path = "truncated_tail_tests.rs"]
 mod truncated_tail_tests;
 pub(super) fn signing_key() -> SigningKey {
@@ -20,7 +22,6 @@ pub(super) fn identity_for(key: &SigningKey, node_id: &str) -> RepositoryNodeIde
     )
     .expect("identity")
 }
-
 pub(super) fn record(key: &[u8], tombstone: bool) -> SyncRecord {
     SyncRecord::new(
         "subject-a",
@@ -32,7 +33,6 @@ pub(super) fn record(key: &[u8], tombstone: bool) -> SyncRecord {
         tombstone,
     )
 }
-
 pub(super) fn traffic_record(key: &[u8]) -> SyncRecord {
     SyncRecord::new(
         "subject-a",

@@ -295,19 +295,39 @@ impl RepositoryReplicaRuntime {
             reason: Some("source_retention_expired".to_owned()),
         };
         self.merge_replica_gaps_in_memory(&[gap])?;
-        let advanced = self
+        let handoff_already_bridged = self
             .receiver
-            .as_mut()
+            .as_ref()
             .expect("receiver checked above")
-            .advance_declared_sequence_gap(&next, handoff.first_missing, handoff.last_missing)?;
-        if !advanced {
-            self.restore(&previous_receiver, previous_snapshot)?;
-            return Err(RepositoryRuntimeError::Protocol(
-                crate::history_sync::ProtocolError::SequenceGap {
-                    expected: handoff.first_missing,
-                    actual: handoff.next_sequence,
-                },
-            ));
+            .continuous_watermark(&next)?
+            .is_some_and(|watermark| watermark.sequence() >= handoff.next_sequence)
+            && self.snapshot.gaps.iter().any(|gap| {
+                gap.permanent
+                    && gap.source_node_id == handoff.source_node_id
+                    && gap.source_epoch == handoff.source_epoch
+                    && gap.stream == handoff.stream
+                    && gap.first_sequence <= handoff.first_missing
+                    && gap.last_sequence >= handoff.last_missing
+            });
+        if !handoff_already_bridged {
+            let advanced = self
+                .receiver
+                .as_mut()
+                .expect("receiver checked above")
+                .advance_declared_sequence_gap(
+                    &next,
+                    handoff.first_missing,
+                    handoff.last_missing,
+                )?;
+            if !advanced {
+                self.restore(&previous_receiver, previous_snapshot)?;
+                return Err(RepositoryRuntimeError::Protocol(
+                    crate::history_sync::ProtocolError::SequenceGap {
+                        expected: handoff.first_missing,
+                        actual: handoff.next_sequence,
+                    },
+                ));
+            }
         }
         let checkpoint = self
             .snapshot
