@@ -1,10 +1,272 @@
 use super::{
     HistoricalBackfillCollector, HistoricalBackfillPageCursor, HistoricalBackfillSortKey,
-    InitialBackfillProgress, is_initial_history_source_peer, next_historical_backfill_page_cursor,
-    serialized_backfill_record_bytes,
+    InitialBackfillProgress, RepositoryInitialBackfillPage, RepositoryInitialBackfillRecord,
+    deserialize_initial_backfill_page, is_initial_history_source_peer,
+    next_historical_backfill_page_cursor, serialized_backfill_record_bytes,
+    validate_peer_backfill_page,
 };
 use crate::history_sync::SyncRecord;
-use crate::state::history_repository::MAX_INITIAL_BACKFILL_PAGE_BYTES;
+use crate::state::history_repository::{
+    MAX_INITIAL_BACKFILL_PAGE_BYTES, MAX_INITIAL_BACKFILL_PAGE_RECORDS,
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde_json::json;
+
+fn backfill_record(payload_base64: String) -> RepositoryInitialBackfillRecord {
+    RepositoryInitialBackfillRecord {
+        observed_at_unix_seconds: 1,
+        source_node_id: None,
+        source_epoch: None,
+        stream: None,
+        sequence: None,
+        subject_node_id: "node-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key_base64: "a2V5".to_owned(),
+        payload_base64,
+        tombstone: false,
+    }
+}
+
+fn tiered_backfill_record(sequence: u64) -> RepositoryInitialBackfillRecord {
+    RepositoryInitialBackfillRecord {
+        observed_at_unix_seconds: sequence,
+        source_node_id: Some("source-a".to_owned()),
+        source_epoch: Some(7),
+        stream: Some("runtime".to_owned()),
+        sequence: Some(sequence),
+        subject_node_id: "node-a".to_owned(),
+        observer_node_id: "node-a".to_owned(),
+        schema_id: "runtime.v1".to_owned(),
+        schema_version: 1,
+        record_key_base64: "a2V5".to_owned(),
+        payload_base64: String::new(),
+        tombstone: false,
+    }
+}
+
+fn tiered_cursor(phase: &str, sequence: Option<u64>) -> String {
+    URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&json!({
+            "repair_cache_cutoff_unix_seconds": 10,
+            "received_at_cutoff_unix_seconds": 20,
+            "tombstone_high_watermark": null,
+            "record_high_watermark": null,
+            "phase": phase,
+            "export_session_id": "session-a",
+            "after": sequence.map(|sequence| json!({
+                "observed_start_unix_seconds": sequence,
+                "source_node_id": "source-a",
+                "source_epoch": 7,
+                "stream": "runtime",
+                "sequence": sequence,
+            })),
+        }))
+        .expect("tiered cursor"),
+    )
+}
+
+fn legacy_tiered_cursor(sequence: u64) -> String {
+    URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&json!({
+            "observed_start_unix_seconds": sequence,
+            "source_node_id": "source-a",
+            "source_epoch": 7,
+            "stream": "runtime",
+            "sequence": sequence,
+        }))
+        .expect("legacy tiered cursor"),
+    )
+}
+
+#[test]
+fn peer_backfill_rejects_an_oversized_record_page() {
+    let page = RepositoryInitialBackfillPage {
+        records: (0..=MAX_INITIAL_BACKFILL_PAGE_RECORDS)
+            .map(|_| backfill_record(String::new()))
+            .collect(),
+        next_page_cursor: None,
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_record_overflow_before_record_decode() {
+    let raw_record = r#"{"payload_base64":"not-base64"}"#;
+    let body = format!(
+        r#"{{"records":[{}]}}"#,
+        std::iter::repeat_n(raw_record, MAX_INITIAL_BACKFILL_PAGE_RECORDS + 1)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
+    let error = deserialize_initial_backfill_page(body.as_bytes())
+        .expect_err("record count must be checked before typed record decoding");
+    assert!(error.to_string().contains("record limit"));
+}
+
+#[test]
+fn peer_backfill_rejects_a_page_over_the_byte_budget() {
+    let page = RepositoryInitialBackfillPage {
+        records: vec![backfill_record("x".repeat(MAX_INITIAL_BACKFILL_PAGE_BYTES))],
+        next_page_cursor: None,
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_a_malformed_or_regressing_cursor() {
+    let page = |next_page_cursor| RepositoryInitialBackfillPage {
+        records: Vec::new(),
+        next_page_cursor,
+    };
+    assert!(
+        validate_peer_backfill_page(&page(Some("invalid".to_owned())), None, "cluster-a").is_err()
+    );
+
+    let previous = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: 10,
+            schema_id: "runtime.v1".to_owned(),
+            record_key: b"key-10".to_vec(),
+        },
+        snapshot_end_unix_seconds: Some(100),
+    };
+    let regressing = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: 9,
+            schema_id: "runtime.v1".to_owned(),
+            record_key: b"key-9".to_vec(),
+        },
+        snapshot_end_unix_seconds: Some(100),
+    };
+    let cursor = regressing.encode().expect("cursor encoding");
+    let previous_cursor = previous.encode().expect("cursor encoding");
+    assert!(
+        validate_peer_backfill_page(&page(Some(cursor)), Some(&previous_cursor), "cluster-a",)
+            .is_err()
+    );
+}
+
+#[test]
+fn peer_backfill_rejects_a_cursor_beyond_the_historical_page_tail() {
+    let record = backfill_record("a2V5".to_owned());
+    let cursor = HistoricalBackfillPageCursor {
+        after: HistoricalBackfillSortKey {
+            observed_at_unix_seconds: record.observed_at_unix_seconds + 1,
+            schema_id: record.schema_id.clone(),
+            record_key: b"later".to_vec(),
+        },
+        snapshot_end_unix_seconds: None,
+    };
+    let page = RepositoryInitialBackfillPage {
+        records: vec![record],
+        next_page_cursor: Some(cursor.encode().expect("cursor encoding")),
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_accepts_a_tiered_phase_transition_cursor() {
+    let cursor = |phase| {
+        URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&json!({
+                "repair_cache_cutoff_unix_seconds": 10,
+                "received_at_cutoff_unix_seconds": 20,
+                "tombstone_high_watermark": null,
+                "record_high_watermark": null,
+                "phase": phase,
+                "export_session_id": "session-a",
+                "after": null,
+            }))
+            .expect("tiered cursor"),
+        )
+    };
+    let previous = cursor("tombstones");
+    let next = cursor("records");
+    let page = RepositoryInitialBackfillPage {
+        records: Vec::new(),
+        next_page_cursor: Some(next),
+    };
+    assert!(validate_peer_backfill_page(&page, Some(&previous), "cluster-a").is_ok());
+}
+
+#[test]
+fn peer_backfill_rejects_a_tiered_page_that_replays_before_the_previous_cursor() {
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tiered_backfill_record(1), tiered_backfill_record(3)],
+        next_page_cursor: Some(tiered_cursor("records", Some(3))),
+    };
+    let previous_cursor = tiered_cursor("records", Some(2));
+
+    assert!(validate_peer_backfill_page(&page, Some(&previous_cursor), "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_a_tiered_cursor_regression_to_legacy_format() {
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tiered_backfill_record(2)],
+        next_page_cursor: Some(legacy_tiered_cursor(2)),
+    };
+    let previous_cursor = tiered_cursor("records", Some(1));
+
+    assert!(validate_peer_backfill_page(&page, Some(&previous_cursor), "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_an_empty_tiered_page_with_an_after_cursor() {
+    let page = RepositoryInitialBackfillPage {
+        records: Vec::new(),
+        next_page_cursor: Some(tiered_cursor("records", Some(1))),
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_rejects_records_with_a_phase_transition_cursor() {
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tiered_backfill_record(1)],
+        next_page_cursor: Some(tiered_cursor("records", None)),
+    };
+
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_err());
+}
+
+#[test]
+fn peer_backfill_accepts_the_final_tombstone_page_before_records_phase() {
+    let mut tombstone = tiered_backfill_record(1);
+    tombstone.tombstone = true;
+    let page = RepositoryInitialBackfillPage {
+        records: vec![tombstone],
+        next_page_cursor: Some(tiered_cursor("records", None)),
+    };
+    let previous_cursor = tiered_cursor("tombstones", Some(0));
+
+    assert!(validate_peer_backfill_page(&page, Some(&previous_cursor), "cluster-a").is_ok());
+}
+
+#[test]
+fn peer_backfill_uses_canonical_budget_for_tiered_records() {
+    let mut record = backfill_record(URL_SAFE_NO_PAD.encode(vec![b'x'; 145 * 1024]));
+    record.source_node_id = Some("node-a".to_owned());
+    record.source_epoch = Some(7);
+    record.stream = Some("runtime".to_owned());
+    record.sequence = Some(1);
+    let page = RepositoryInitialBackfillPage {
+        records: vec![record],
+        next_page_cursor: None,
+    };
+    assert!(
+        serde_json::to_vec(&page.records).expect("JSON page").len()
+            > MAX_INITIAL_BACKFILL_PAGE_BYTES
+    );
+    assert!(validate_peer_backfill_page(&page, None, "cluster-a").is_ok());
+}
 
 #[test]
 fn tick_progress_keeps_peer_pages_eligible_while_local_backfill_runs() {

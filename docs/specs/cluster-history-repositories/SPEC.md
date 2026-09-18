@@ -77,6 +77,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   不可达或缺少节点元数据的 Ready peer 都会使本轮聚合结果保持未完成；在所有 Ready peer 都被
   覆盖前不得启动本地 ready 稳定窗口。失效成员仍保留在 Raft 并由状态/运维面报告，不能自动
   删除、跳过其历史或伪造 ACK。
+- 初始 backfill 接收方必须先以不超过 4 倍语义页预算的 JSON wire body 上限读取响应，并在 typed
+  record 解码前拒绝超过 128 条记录；随后执行与服务端相同的 128 条 / 192 KiB 页上限。历史源页
+  使用 JSON 记录预算，Ready repository tiered 页使用发送方的 canonical segment 字节预算。接收方
+  必须分别校验两种 opaque cursor 的长度、格式、单调前进和稳定 snapshot/export 状态；非法、回退
+  或循环 cursor 不得写入 durable checkpoint。
 - ready 表示仓库已完成完整已知并集的追赶并通过稳定窗口；若所有 ready 仓库一致保有真正永久
   gap，新仓库可进入 ready 以提供同一完整已知并集，但必须保持 `replica_converged=false`，相关
   查询必须为 `partial`。
@@ -113,8 +118,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   严格连续，不能用该标记伪造缺失 payload。
 - repair 响应可携带由实际返回 segments、unavailable IDs、gaps 和 truncation 标记计算的
   `response_id`。接收方对旧服务端缺失该字段的响应自行计算同一摘要；wire-bounded response
-  发生中断时，只有摘要相同的重试可继续使用未消费的 stream allowance，任何不匹配都 fail
-  closed。已完整处理的 response 清除其摘要，但不会关闭其他尚未消费的 stream allowance。
+  发生中断时，相同摘要可继续使用未消费的 stream allowance。若服务端明确拒绝旧摘要，或旧
+  服务端直接返回了不同摘要，接收方只清除持久化的 response identity，并用同一 pending
+  segment 集合重新请求；cursor、gap、tombstone 和 handoff 状态保持不变。响应自身的摘要
+  与其内容不一致、含未知段或无法推进时仍 fail closed。已完整处理的 response 清除其摘要，
+  但不会关闭其他尚未消费的 stream allowance。
 - repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
   不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
   状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。

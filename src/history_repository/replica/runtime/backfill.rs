@@ -42,7 +42,7 @@ struct RepositoryTieredBackfillCursor {
     after: Option<RepositoryHistoryCompactionCursor>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum RepositoryTieredBackfillPhase {
     #[default]
@@ -53,6 +53,103 @@ enum RepositoryTieredBackfillPhase {
 enum RepositoryTieredBackfillCursorState {
     Current(RepositoryTieredBackfillCursor),
     Legacy(RepositoryHistoryCompactionCursor),
+}
+
+fn decode_tiered_backfill_cursor(
+    encoded: &str,
+) -> anyhow::Result<RepositoryTieredBackfillCursorState> {
+    if encoded.len() > 1_024 {
+        anyhow::bail!("initial history backfill cursor exceeds limit");
+    }
+    let bytes = URL_SAFE_NO_PAD.decode(encoded)?;
+    serde_json::from_slice::<RepositoryTieredBackfillCursor>(&bytes)
+        .map(RepositoryTieredBackfillCursorState::Current)
+        .or_else(|_| {
+            serde_json::from_slice::<RepositoryHistoryCompactionCursor>(&bytes)
+                .map(RepositoryTieredBackfillCursorState::Legacy)
+        })
+        .map_err(Into::into)
+}
+
+fn compaction_cursor_order(
+    cursor: &RepositoryHistoryCompactionCursor,
+) -> (u64, &str, u64, &str, u64) {
+    (
+        cursor.observed_start_unix_seconds,
+        cursor.source_node_id.as_str(),
+        cursor.source_epoch,
+        cursor.stream.as_str(),
+        cursor.sequence,
+    )
+}
+
+pub(crate) fn validate_tiered_backfill_cursor(
+    encoded: &str,
+    previous_encoded: Option<&str>,
+) -> anyhow::Result<()> {
+    let next = decode_tiered_backfill_cursor(encoded)?;
+    let Some(previous_encoded) = previous_encoded else {
+        return Ok(());
+    };
+    let previous = decode_tiered_backfill_cursor(previous_encoded)?;
+    let (
+        RepositoryTieredBackfillCursorState::Current(previous),
+        RepositoryTieredBackfillCursorState::Current(next),
+    ) = (&previous, &next)
+    else {
+        // A legacy compaction cursor may be upgraded to the current export cursor on the next
+        // response. The reverse transition would discard the current export phase/session and
+        // must fail closed instead of allowing a replay to replace the durable checkpoint.
+        if matches!(
+            (&previous, &next),
+            (
+                RepositoryTieredBackfillCursorState::Current(_),
+                RepositoryTieredBackfillCursorState::Legacy(_)
+            )
+        ) {
+            anyhow::bail!("peer tiered backfill cursor regressed to legacy format");
+        }
+        return Ok(());
+    };
+    if previous.repair_cache_cutoff_unix_seconds != next.repair_cache_cutoff_unix_seconds
+        || previous.received_at_cutoff_unix_seconds != next.received_at_cutoff_unix_seconds
+        || previous
+            .tombstone_high_watermark
+            .as_ref()
+            .map(compaction_cursor_order)
+            != next
+                .tombstone_high_watermark
+                .as_ref()
+                .map(compaction_cursor_order)
+        || previous
+            .record_high_watermark
+            .as_ref()
+            .map(compaction_cursor_order)
+            != next
+                .record_high_watermark
+                .as_ref()
+                .map(compaction_cursor_order)
+        || previous.export_session_id != next.export_session_id
+    {
+        anyhow::bail!("peer tiered backfill cursor snapshot changed");
+    }
+    match (previous.phase, next.phase) {
+        (RepositoryTieredBackfillPhase::Tombstones, RepositoryTieredBackfillPhase::Records) => {
+            if next.after.is_some() {
+                anyhow::bail!("peer tiered backfill phase transition has an after cursor");
+            }
+        }
+        (previous_phase, next_phase) if previous_phase == next_phase => {
+            match (previous.after.as_ref(), next.after.as_ref()) {
+                (Some(previous), Some(next))
+                    if compaction_cursor_order(next) > compaction_cursor_order(previous) => {}
+                (None, Some(_)) => {}
+                _ => anyhow::bail!("peer tiered backfill cursor did not advance"),
+            }
+        }
+        _ => anyhow::bail!("peer tiered backfill phase regressed"),
+    }
+    Ok(())
 }
 
 impl RepositoryReplicaRuntime {
@@ -69,18 +166,7 @@ impl RepositoryReplicaRuntime {
         }
         let cursor = page_cursor
             .map(|cursor| {
-                if cursor.len() > 1_024 {
-                    return Err(RepositoryRuntimeError::StateLimitExceeded);
-                }
-                let bytes = URL_SAFE_NO_PAD
-                    .decode(cursor)
-                    .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)?;
-                serde_json::from_slice::<RepositoryTieredBackfillCursor>(&bytes)
-                    .map(RepositoryTieredBackfillCursorState::Current)
-                    .or_else(|_| {
-                        serde_json::from_slice::<RepositoryHistoryCompactionCursor>(&bytes)
-                            .map(RepositoryTieredBackfillCursorState::Legacy)
-                    })
+                decode_tiered_backfill_cursor(cursor)
                     .map_err(|_| RepositoryRuntimeError::StateLimitExceeded)
             })
             .transpose()?;
@@ -407,7 +493,7 @@ impl TryFrom<StoredRecord> for RepositoryTieredBackfillRecord {
     }
 }
 
-fn tiered_backfill_record_bytes(
+pub(crate) fn tiered_backfill_record_bytes(
     cluster_id: &str,
     record: &RepositoryTieredBackfillRecord,
 ) -> Result<usize, RepositoryRuntimeError> {

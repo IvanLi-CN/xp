@@ -585,6 +585,59 @@ fn tiered_handoff_preserves_the_bounded_repair_request_for_retry() {
 }
 
 #[test]
+fn stale_repair_response_identity_reset_preserves_pending_window() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    let streams = BTreeSet::from([InitialPeerRetainedAnchorStream {
+        source_node_id: "node-a".to_owned(),
+        source_epoch: 7,
+        stream: "runtime".to_owned(),
+    }]);
+    runtime
+        .update_initial_peer_summary_checkpoint_with_retained_anchor_response(
+            "node-b",
+            Some("summary-page".to_owned()),
+            vec!["segment-1".to_owned(), "segment-2".to_owned()],
+            Some("summary-next".to_owned()),
+            false,
+            true,
+            Some("stale-response".to_owned()),
+            false,
+            false,
+            streams.clone(),
+        )
+        .expect("persist pending repair window");
+
+    runtime
+        .clear_initial_peer_retained_anchor_response_id("node-b")
+        .expect("clear stale response identity");
+    let checkpoint = runtime
+        .initial_peer_backfill_checkpoint("node-b")
+        .expect("checkpoint");
+    assert_eq!(checkpoint.summary_cursor.as_deref(), Some("summary-page"));
+    assert_eq!(
+        checkpoint.summary_pending_segment_ids,
+        vec!["segment-1".to_owned(), "segment-2".to_owned()]
+    );
+    assert_eq!(
+        checkpoint.summary_pending_next_cursor.as_deref(),
+        Some("summary-next")
+    );
+    assert!(checkpoint.summary_requires_tiered_backfill);
+    assert_eq!(checkpoint.retained_anchor_streams, streams);
+    assert!(checkpoint.retained_anchor_repair_response_id.is_none());
+
+    let restored = load(temporary.path());
+    assert_eq!(
+        restored
+            .initial_peer_backfill_checkpoint("node-b")
+            .expect("restored checkpoint")
+            .summary_pending_segment_ids,
+        vec!["segment-1".to_owned(), "segment-2".to_owned()]
+    );
+}
+
+#[test]
 fn retained_anchor_response_identity_survives_partial_failure() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let key = signing_key();

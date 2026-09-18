@@ -835,6 +835,12 @@ Notes:
   existing opaque page cursor fixes the first page's snapshot horizon, so new samples cannot keep
   this historical scan open. `syncing` remains visible while pages are in progress, and only a
   fully completed catch-up starts the five-minute readiness window.
+  The receiver caps each JSON response body at four times the semantic page budget, rejects
+  record-count overflow before typed decoding, then enforces the same 128-record / 192 KiB page
+  bound. It validates historical-source and Ready-tiered opaque cursors for length, format,
+  forward progress, page-tail binding and stable snapshot/export state; tiered pages use the
+  sender's canonical segment-byte budget.
+  Malformed or regressing pages remain retryable failures and are never checkpointed.
   A local page persists its pending wire set before delivery and commits every acknowledgement
   with the page cursor; a restart replays the original wires and does not allocate new sequences.
   For ready peers, one 60-second lifecycle tick drains up to eight consecutive summary, repair, or
@@ -886,8 +892,10 @@ Notes:
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
-  that omits the digest remains compatible because XP calculates it locally; a changed retry fails
-  closed instead of advancing or relaxing another stream.
+  that omits the digest remains compatible because XP calculates it locally. If the serving batch
+  changes while the same pending IDs are durable, XP clears only the stale response identity and
+  retries that page; cursors, gaps, tombstones, and handoff state are not edited. A malformed,
+  non-advancing, or otherwise unrequested response still fails closed.
   A retained repair segment may belong to a node that has since been retired from cluster
   membership. Replay validates that identity against the deterministic cluster material and
   accepts the signed historical row; live source delivery remains limited to current pinned

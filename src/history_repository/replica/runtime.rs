@@ -37,7 +37,9 @@ mod status;
 
 use status::SourceDeliveryStatus;
 
-pub(crate) use backfill::RepositoryTieredBackfillRecord;
+pub(crate) use backfill::{
+    RepositoryTieredBackfillRecord, tiered_backfill_record_bytes, validate_tiered_backfill_cursor,
+};
 pub(crate) use error::RepositoryRuntimeError;
 pub(crate) use initial_peer::{
     InitialPeerBackfillCheckpoint, InitialPeerRetainedAnchorStream, InitialPeerTieredHandoff,

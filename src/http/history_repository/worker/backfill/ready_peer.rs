@@ -24,6 +24,27 @@ struct CompletedRepairResponse {
     allowance_complete: bool,
 }
 
+async fn request_repair_page(
+    state: &AppState,
+    peer: &MeshPeerTarget,
+    pending: &BTreeSet<String>,
+    response_id: Option<String>,
+) -> Result<RepositoryRepairBatch, RepositoryDirectError> {
+    let body = serde_json::to_vec(&RepositoryRepairRequest {
+        segment_ids: pending.iter().cloned().collect(),
+        response_id,
+    })
+    .map_err(|error| RepositoryDirectError::Application(error.into()))?;
+    repository_direct_request(
+        state,
+        peer,
+        Method::POST,
+        "/api/admin/_internal/history-repository/repair",
+        body,
+    )
+    .await
+}
+
 fn completed_repair_response(
     checkpoint: &InitialPeerBackfillCheckpoint,
     remaining: BTreeSet<String>,
@@ -413,33 +434,55 @@ async fn repair_ready_peer_catch_up_page(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let body = serde_json::to_vec(&RepositoryRepairRequest {
-        segment_ids: pending.iter().cloned().collect(),
-        response_id: checkpoint.retained_anchor_repair_response_id.clone(),
-    })?;
-    let repair: RepositoryRepairBatch = match repository_direct_request(
-        state,
-        peer,
-        Method::POST,
-        "/api/admin/_internal/history-repository/repair",
-        body,
-    )
-    .await
-    {
-        Ok(repair) => repair,
-        Err(error) if error.is_transport() => {
-            tracing::debug!(
-                peer = %peer.node_id,
-                error = %error,
-                "history repository repair page failed"
-            );
-            return Ok(InitialBackfillProgress::Unavailable);
-        }
-        Err(error) => return Err(error.into()),
-    };
+    let mut expected_response_id = checkpoint.retained_anchor_repair_response_id.clone();
+    let mut repair: RepositoryRepairBatch =
+        match request_repair_page(state, peer, &pending, expected_response_id.clone()).await {
+            Ok(repair) => repair,
+            Err(error)
+                if checkpoint.retained_anchor_repair_response_id.is_some()
+                    && error.is_repair_response_changed() =>
+            {
+                // The serving repository may legitimately change a still-pending bounded response
+                // while this peer is offline. Drop only the stale response identity; the durable
+                // segment set, summary cursor, gaps, and tiered handoff remain the source of truth.
+                state
+                    .repository_replica
+                    .lock()
+                    .await
+                    .clear_initial_peer_retained_anchor_response_id(&peer.node_id)?;
+                expected_response_id = None;
+                tracing::warn!(
+                    peer = %peer.node_id,
+                    "discarded stale repair response identity and retrying the pending page"
+                );
+                match request_repair_page(state, peer, &pending, None).await {
+                    Ok(repair) => repair,
+                    Err(error) if error.is_transport() => {
+                        tracing::debug!(
+                            peer = %peer.node_id,
+                            error = %error,
+                            "history repository repair retry failed"
+                        );
+                        return Ok(InitialBackfillProgress::Unavailable);
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            Err(error) => {
+                if error.is_transport() {
+                    tracing::debug!(
+                        peer = %peer.node_id,
+                        error = %error,
+                        "history repository repair page failed"
+                    );
+                    return Ok(InitialBackfillProgress::Unavailable);
+                }
+                return Err(error.into());
+            }
+        };
     // Old peers omit response_id. Derive it from their actual response rather than the
     // request, so a changed retry cannot consume a first-response allowance.
-    let response_id = repair.response_id_digest()?;
+    let mut response_id = repair.response_id_digest()?;
     if repair
         .response_id
         .as_ref()
@@ -447,12 +490,42 @@ async fn repair_ready_peer_catch_up_page(
     {
         anyhow::bail!("repository repair response identity does not match its content");
     }
-    if checkpoint
-        .retained_anchor_repair_response_id
+    if expected_response_id
         .as_ref()
-        .is_some_and(|existing| existing != &response_id)
+        .is_some_and(|expected| expected != &response_id)
     {
-        anyhow::bail!("retained anchor repair response changed before completion");
+        // Older serving peers may return the changed page instead of rejecting the stale
+        // response identity. Re-request the same durable pending IDs without that identity so
+        // both sides agree on the new bounded response before applying it.
+        state
+            .repository_replica
+            .lock()
+            .await
+            .clear_initial_peer_retained_anchor_response_id(&peer.node_id)?;
+        tracing::warn!(
+            peer = %peer.node_id,
+            "repair response changed; retrying the pending page without the stale identity"
+        );
+        repair = match request_repair_page(state, peer, &pending, None).await {
+            Ok(repair) => repair,
+            Err(error) if error.is_transport() => {
+                tracing::debug!(
+                    peer = %peer.node_id,
+                    error = %error,
+                    "history repository repair retry failed"
+                );
+                return Ok(InitialBackfillProgress::Unavailable);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        response_id = repair.response_id_digest()?;
+        if repair
+            .response_id
+            .as_ref()
+            .is_some_and(|provided| provided != &response_id)
+        {
+            anyhow::bail!("repository repair response identity does not match its content");
+        }
     }
     let mut remaining = pending.clone();
     if repair.segments.is_empty() {

@@ -11,6 +11,7 @@ pub(crate) enum RepositoryRuntimeError {
     Replica(ReplicaError),
     Query(QueryError),
     Storage(String),
+    RepairResponseChanged,
     ClusterBindingMismatch,
     LegacySegmentCursorIndexPending,
     WriteStopped(HistoryWriteAvailability),

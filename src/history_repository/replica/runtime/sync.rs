@@ -502,9 +502,7 @@ impl RepositoryReplicaRuntime {
         };
         let response_id = response.response_id_digest()?;
         if expected_response_id.is_some_and(|expected| expected != response_id) {
-            return Err(RepositoryRuntimeError::Storage(
-                "repository repair response changed before completion".to_owned(),
-            ));
+            return Err(RepositoryRuntimeError::RepairResponseChanged);
         }
         response.response_id = Some(response_id);
         Ok(response)

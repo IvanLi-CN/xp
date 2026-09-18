@@ -11,10 +11,17 @@ mod cursor;
 mod ready_peer;
 #[cfg(test)]
 mod tests;
+mod validation;
 
 use cursor::HistoricalBackfillPageCursor;
 pub(crate) use cursor::HistoricalBackfillSortKey;
 pub(crate) use ready_peer::catch_up_against_ready_repositories;
+use validation::{deserialize_initial_backfill_page, validate_peer_backfill_page};
+
+// Base64 fields and the JSON envelope expand the canonical page on the wire. Keep the
+// pre-decode allocation bounded to four times the semantic page budget; typed validation below
+// still enforces the exact record and canonical-byte limits.
+const MAX_INITIAL_BACKFILL_WIRE_BYTES: usize = MAX_INITIAL_BACKFILL_PAGE_BYTES * 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitialBackfillProgress {
@@ -65,6 +72,7 @@ pub(crate) struct RepositoryInitialBackfillPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_page_cursor: Option<String>,
 }
+
 pub(crate) struct HistoricalBackfillCollector {
     pub(crate) after: Option<HistoricalBackfillSortKey>,
     snapshot_end_unix_seconds: Option<u64>,
@@ -215,7 +223,7 @@ impl RepositoryInitialBackfillRecord {
         ))
     }
 
-    fn into_tiered_backfill_record(
+    pub(crate) fn into_tiered_backfill_record(
         self,
     ) -> anyhow::Result<
         Option<crate::state::history_repository::replica::RepositoryTieredBackfillRecord>,
@@ -407,7 +415,7 @@ pub(super) async fn pull_peer_initial_history(
     if checkpoint.completed {
         return Ok(InitialBackfillProgress::Complete);
     }
-    let page: RepositoryInitialBackfillPage = match repository_direct_request(
+    let page_body = match repository_direct_request_body(
         state,
         peer,
         Method::GET,
@@ -426,6 +434,7 @@ pub(super) async fn pull_peer_initial_history(
             },
         ),
         Vec::new(),
+        MAX_INITIAL_BACKFILL_WIRE_BYTES,
     )
     .await
     {
@@ -446,6 +455,27 @@ pub(super) async fn pull_peer_initial_history(
             return Ok(InitialBackfillProgress::Unavailable);
         }
     };
+    let page = match deserialize_initial_backfill_page(&page_body) {
+        Ok(page) => page,
+        Err(error) => {
+            tracing::debug!(
+                peer = %peer.node_id,
+                error = %error,
+                "peer history backfill page failed pre-decode validation"
+            );
+            return Ok(InitialBackfillProgress::Unavailable);
+        }
+    };
+    if let Err(error) =
+        validate_peer_backfill_page(&page, cursor.as_deref(), &state.cluster.cluster_id)
+    {
+        tracing::debug!(
+            peer = %peer.node_id,
+            error = %error,
+            "peer history backfill page failed semantic validation"
+        );
+        return Ok(InitialBackfillProgress::Unavailable);
+    }
     if !page.records.is_empty() {
         saw_history = true;
         receive_peer_backfill_page(
@@ -476,9 +506,6 @@ pub(super) async fn pull_peer_initial_history(
             )?;
         return Ok(InitialBackfillProgress::Complete);
     };
-    if cursor.as_deref() == Some(next_page_cursor.as_str()) {
-        anyhow::bail!("peer history backfill page cursor did not advance");
-    }
     state
         .repository_replica
         .lock()

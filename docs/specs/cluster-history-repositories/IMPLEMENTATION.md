@@ -30,7 +30,13 @@
   collection and lifecycle checks continue on their normal cadence. A repository enters the
   existing five-minute stability window only after every page is complete. A local page records
   its pending wire set before delivery and commits all acknowledgements with the page cursor; an
-  interrupted tick replays those unchanged wires instead of assigning new source sequences. For a
+  interrupted tick replays those unchanged wires instead of assigning new source sequences. The
+  receiver first caps the JSON response body at four times the semantic page budget and rejects
+  record-count overflow before typed decoding, then applies the same 128-record / 192 KiB bound,
+  using JSON bytes
+  for historical-source pages and the sender's canonical segment bytes for Ready-tiered pages. It
+  validates each cursor family for length, format, forward progress and stable snapshot/export state
+  before persisting a checkpoint; malformed or regressing pages remain retryable failures. For a
   ready peer, each worker tick drains up to eight consecutive summary, repair, or tiered export
   pages per peer within a shared 15-second maintenance budget. The remaining budget is split among
   peers in stable order so a slow peer cannot starve later peers. The summary cursor and pending
@@ -104,8 +110,11 @@
   a different ID at the same cursor remains a fork candidate.
   The checkpoint records a content-derived repair response identity while that response is
   incomplete. New peers return the identity; compatibility with older peers derives it from the
-  received batch. A changed retry is rejected before another stream can consume the allowance; a
-  completed bounded response does not consume another stream's allowance before its page drains.
+  received batch. If the serving response changes while the same pending page is durable, the
+  worker clears only the stale identity and retries that page without it; pending IDs, cursors,
+  gaps, tombstones, and tiered handoff state are preserved. A response/content digest mismatch,
+  unknown segment, or non-advancing response remains rejected. A completed bounded response does
+  not consume another stream's allowance before its page drains.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available
