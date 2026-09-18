@@ -37,9 +37,13 @@
   `health-v2` and `mesh-v2` traffic is routed by the canary only to fixed local XP loopback paths;
   public `/generate_204` and authority-based camouflage remain separate. All outbound Mesh users
   share one process-wide HTTP/2-only client with one idle connection per origin and a 120-second
-  idle bound; public direct and dynamic relay use separate clients. An internal-auth v2 cluster
-  upgrade requires a one-shot maintenance marker: host-managed nodes bootstrap from a verified
-  target `xp-ops` binary using `upgrade --allow-internal-auth-v2-cutover`, while containers use the
+  idle bound; public direct and dynamic relay use separate clients.
+  The Raft `PersistedState.mesh_enabled` field is the cluster-level Mesh switch (default `true`);
+  when disabled, control-plane requests use only each peer's registered public HTTPS
+  `api_base_url` and do not substitute a private or Reverse Mesh route.
+  An internal-auth v2 cluster upgrade requires a one-shot maintenance marker: host-managed nodes
+  bootstrap from a verified target `xp-ops` binary using
+  `upgrade --allow-internal-auth-v2-cutover`, while containers use the
   target image's `container mark-internal-auth-v2-cutover` command. Web upgrade must return
   `coordinated_upgrade_required` until the durable epoch has been established; once consumed, v1
   rollback is unsupported.

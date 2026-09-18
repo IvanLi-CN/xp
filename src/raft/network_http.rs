@@ -20,7 +20,7 @@ use openraft::{
     },
 };
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -93,6 +93,21 @@ impl HttpNetworkFactory {
 
     pub fn with_reverse_gate(mut self, gate: Arc<AtomicBool>) -> Self {
         self.client = self.client.with_reverse_gate(gate);
+        self
+    }
+
+    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.client = self.client.with_mesh_gate(gate);
+        self
+    }
+
+    pub fn with_mesh_gate_epoch(mut self, gate: Arc<AtomicBool>, epoch: Arc<AtomicU64>) -> Self {
+        self.client = self.client.with_mesh_gate_epoch(gate, epoch);
+        self
+    }
+
+    pub fn with_mesh_gate_lock(mut self, lock: Arc<tokio::sync::RwLock<()>>) -> Self {
+        self.client = self.client.with_mesh_gate_lock(lock);
         self
     }
 

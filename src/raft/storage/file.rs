@@ -6,22 +6,21 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::Mutex;
-
 use crate::{
     raft::types::ClientResponse,
     raft::types::{NodeId, NodeMeta, TypeConfig},
     reconcile::ReconcileHandle,
     state::{DesiredStateCommand, JsonSnapshotStore},
 };
-
 use openraft::entry::RaftPayload as _;
 use openraft::{
     EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader, Snapshot, SnapshotMeta,
     StoredMembership, Vote,
     storage::{RaftLogStorage, RaftStateMachine},
 };
-
+use tokio::sync::Mutex;
+mod legacy_mesh;
+mod snapshot_install;
 #[derive(Debug, Clone)]
 pub struct StorePaths {
     pub wal_json: PathBuf,
@@ -31,7 +30,6 @@ pub struct StorePaths {
     pub snapshot_meta_json: PathBuf,
     pub snapshot_data_json: PathBuf,
 }
-
 impl StorePaths {
     pub fn new(data_dir: &Path) -> Self {
         let raft_dir = data_dir.join("raft");
@@ -46,7 +44,6 @@ impl StorePaths {
             snapshot_data_json: snapshot_dir.join("current_snapshot.json"),
         }
     }
-
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         if let Some(parent) = self.wal_json.parent() {
             std::fs::create_dir_all(parent)?;
@@ -57,7 +54,6 @@ impl StorePaths {
         Ok(())
     }
 }
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PersistedWal {
     #[serde(default)]
@@ -65,7 +61,6 @@ struct PersistedWal {
     #[serde(default)]
     entries: Vec<openraft::impls::Entry<TypeConfig>>,
 }
-
 impl PersistedWal {
     fn empty() -> Self {
         Self {
@@ -74,7 +69,6 @@ impl PersistedWal {
         }
     }
 }
-
 #[derive(Debug)]
 struct WalInner {
     last_purged_log_id: Option<LogId<NodeId>>,
@@ -82,7 +76,6 @@ struct WalInner {
     vote: Option<Vote<NodeId>>,
     committed: Option<LogId<NodeId>>,
 }
-
 impl WalInner {
     fn last_log_id(&self) -> Option<LogId<NodeId>> {
         self.entries
@@ -92,7 +85,6 @@ impl WalInner {
             .or(self.last_purged_log_id)
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct FileLogStore {
     paths: StorePaths,
@@ -187,7 +179,6 @@ impl FileLogStore {
         Ok(())
     }
 }
-
 impl RaftLogReader<TypeConfig> for FileLogStore {
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + openraft::OptionalSend>(
         &mut self,
@@ -201,10 +192,8 @@ impl RaftLogReader<TypeConfig> for FileLogStore {
         Ok(out)
     }
 }
-
 impl RaftLogStorage<TypeConfig> for FileLogStore {
     type LogReader = FileLogStore;
-
     async fn get_log_state(
         &mut self,
     ) -> Result<LogState<TypeConfig>, openraft::StorageError<NodeId>> {
@@ -218,7 +207,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
     async fn get_log_reader(&mut self) -> Self::LogReader {
         self.clone()
     }
-
     async fn save_vote(
         &mut self,
         vote: &Vote<NodeId>,
@@ -230,12 +218,10 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_vote().await?;
         Ok(())
     }
-
     async fn read_vote(&mut self) -> Result<Option<Vote<NodeId>>, openraft::StorageError<NodeId>> {
         let inner = self.inner.lock().await;
         Ok(inner.vote)
     }
-
     async fn save_committed(
         &mut self,
         committed: Option<LogId<NodeId>>,
@@ -247,14 +233,12 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_committed().await?;
         Ok(())
     }
-
     async fn read_committed(
         &mut self,
     ) -> Result<Option<LogId<NodeId>>, openraft::StorageError<NodeId>> {
         let inner = self.inner.lock().await;
         Ok(inner.committed)
     }
-
     async fn append<I>(
         &mut self,
         entries: I,
@@ -279,7 +263,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         );
         res
     }
-
     async fn truncate(
         &mut self,
         log_id: LogId<NodeId>,
@@ -290,7 +273,6 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         }
         self.persist_wal().await
     }
-
     async fn purge(&mut self, log_id: LogId<NodeId>) -> Result<(), openraft::StorageError<NodeId>> {
         {
             let mut inner = self.inner.lock().await;
@@ -307,24 +289,22 @@ impl RaftLogStorage<TypeConfig> for FileLogStore {
         self.persist_wal().await
     }
 }
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PersistedStateMachineMeta {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeMeta>,
+    #[serde(default)]
+    mesh_state_applied: Option<bool>,
+    #[serde(default)]
+    snapshot_install_pending: bool,
 }
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct SnapshotPayload {
-    state: crate::state::PersistedState,
-}
-
 #[derive(Debug)]
 struct StateMachineInner {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeMeta>,
+    mesh_state_applied: bool,
+    snapshot_install_pending: bool,
 }
-
 #[derive(Debug, Clone)]
 pub struct FileStateMachine {
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -332,7 +312,6 @@ pub struct FileStateMachine {
     paths: StorePaths,
     inner: Arc<Mutex<StateMachineInner>>,
 }
-
 impl FileStateMachine {
     pub async fn open(
         data_dir: &Path,
@@ -348,8 +327,40 @@ impl FileStateMachine {
             .await
             .map_err(|e| io_err(ErrorSubject::StateMachine, ErrorVerb::Read, e))?;
 
+        let mesh_state_applied = match meta.as_ref() {
+            Some(m) if m.snapshot_install_pending => false,
+            Some(m) => match m.mesh_state_applied {
+                Some(true) => {
+                    let (snapshot_meta_exists, snapshot_data_exists) = match (
+                        tokio::fs::try_exists(&paths.snapshot_meta_json).await,
+                        tokio::fs::try_exists(&paths.snapshot_data_json).await,
+                    ) {
+                        (Ok(meta_exists), Ok(data_exists)) => (meta_exists, data_exists),
+                        // An existence-check error is unverifiable snapshot state. Force the
+                        // validation path, which fails closed if either file cannot be read.
+                        _ => (true, true),
+                    };
+                    if snapshot_meta_exists || snapshot_data_exists {
+                        legacy_mesh::validate_persisted_snapshot(&paths).await
+                    } else {
+                        // A normal authenticated apply may be persisted before any local
+                        // snapshot exists; its marker is sufficient evidence in that case.
+                        true
+                    }
+                }
+                Some(false) => false,
+                None => legacy_mesh::infer_state_applied(&paths, m).await,
+            },
+            None => false,
+        };
+        if meta.is_some() && !mesh_state_applied {
+            // `main` may initialize a bootstrap node's gate before the state machine opens.
+            // Persisted pending, false, or unverifiable evidence must override that default.
+            reconcile.hold_mesh_gate_until_raft_state().await;
+        }
         let (last_applied, last_membership) = meta
-            .map(|m| (m.last_applied, m.last_membership))
+            .as_ref()
+            .map(|m| (m.last_applied, m.last_membership.clone()))
             .unwrap_or((None, StoredMembership::default()));
 
         Ok(Self {
@@ -359,6 +370,8 @@ impl FileStateMachine {
             inner: Arc::new(Mutex::new(StateMachineInner {
                 last_applied,
                 last_membership,
+                mesh_state_applied,
+                snapshot_install_pending: meta.as_ref().is_some_and(|m| m.snapshot_install_pending),
             })),
         })
     }
@@ -368,6 +381,8 @@ impl FileStateMachine {
         let meta = PersistedStateMachineMeta {
             last_applied: inner.last_applied,
             last_membership: inner.last_membership.clone(),
+            mesh_state_applied: Some(inner.mesh_state_applied),
+            snapshot_install_pending: inner.snapshot_install_pending,
         };
         write_json(&self.paths.sm_meta_json, &meta)
             .await
@@ -375,7 +390,6 @@ impl FileStateMachine {
         Ok(())
     }
 }
-
 #[derive(Debug)]
 pub struct FileSnapshotBuilder {
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -387,17 +401,29 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
     async fn build_snapshot(
         &mut self,
     ) -> Result<Snapshot<TypeConfig>, openraft::StorageError<NodeId>> {
-        let (last_applied, last_membership) = {
+        let (last_applied, last_membership, mesh_state_applied) = {
             let inner = self.inner.lock().await;
-            (inner.last_applied, inner.last_membership.clone())
+            (
+                inner.last_applied,
+                inner.last_membership.clone(),
+                inner.mesh_state_applied,
+            )
         };
-
         let state = {
             let store = self.store.lock().await;
             store.state().clone()
         };
 
-        let payload = SnapshotPayload { state };
+        let snapshot_id = format!(
+            "snapshot-{}",
+            last_applied.as_ref().map(|l| l.index).unwrap_or(0)
+        );
+        let payload = serde_json::json!({
+            "state": state,
+            "mesh_state_applied": mesh_state_applied,
+            "snapshot_id": snapshot_id,
+            "last_log_id": last_applied,
+        });
         let bytes = serde_json::to_vec_pretty(&payload).map_err(|e| {
             io_err(
                 ErrorSubject::Snapshot(None),
@@ -409,16 +435,13 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
         let meta = SnapshotMeta {
             last_log_id: last_applied,
             last_membership,
-            snapshot_id: format!(
-                "snapshot-{}",
-                last_applied.as_ref().map(|l| l.index).unwrap_or(0)
-            ),
+            snapshot_id,
         };
 
-        write_json(&self.paths.snapshot_meta_json, &meta)
+        write_bytes(&self.paths.snapshot_data_json, &bytes)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        write_bytes(&self.paths.snapshot_data_json, &bytes)
+        write_json(&self.paths.snapshot_meta_json, &meta)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
 
@@ -428,7 +451,6 @@ impl openraft::RaftSnapshotBuilder<TypeConfig> for FileSnapshotBuilder {
         })
     }
 }
-
 impl RaftStateMachine<TypeConfig> for FileStateMachine {
     type SnapshotBuilder = FileSnapshotBuilder;
 
@@ -438,10 +460,22 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         (Option<LogId<NodeId>>, StoredMembership<NodeId, NodeMeta>),
         openraft::StorageError<NodeId>,
     > {
-        let inner = self.inner.lock().await;
-        Ok((inner.last_applied, inner.last_membership.clone()))
+        let (last_applied, last_membership, mesh_state_applied) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.last_applied,
+                inner.last_membership.clone(),
+                inner.mesh_state_applied,
+            )
+        };
+        if mesh_state_applied {
+            let mesh_enabled = self.store.lock().await.state().mesh_enabled;
+            self.reconcile
+                .initialize_mesh_gate_if_unset(mesh_enabled)
+                .await;
+        }
+        Ok((last_applied, last_membership))
     }
-
     async fn apply<I>(
         &mut self,
         entries: I,
@@ -451,14 +485,15 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         I::IntoIter: openraft::OptionalSend,
     {
         let mut responses = Vec::new();
-
         for entry in entries {
             let log_id = entry.log_id;
             if let Some(membership) = entry.get_membership() {
                 let mut inner = self.inner.lock().await;
                 inner.last_membership = StoredMembership::new(Some(log_id), membership.clone());
             }
-
+            let normal_entry = matches!(&entry.payload, EntryPayload::Normal(_));
+            let mut mesh_gate_update = None;
+            let mesh_state_applied = normal_entry;
             let resp = match entry.payload {
                 EntryPayload::Normal(cmd) => {
                     let mut store = self.store.lock().await;
@@ -507,6 +542,10 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                                     std::io::Error::other(e.to_string()),
                                 )
                             })?;
+                            mesh_gate_update = Some((
+                                matches!(&cmd, DesiredStateCommand::SetMeshEnabled { .. }),
+                                store.state().mesh_enabled,
+                            ));
                             if let Some(endpoint_id) = rebuild_inbound {
                                 self.reconcile.request_rebuild_inbound(endpoint_id);
                             }
@@ -638,20 +677,34 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
                     result: crate::state::DesiredStateApplyResult::Applied,
                 },
             };
-
+            if normal_entry {
+                self.reconcile.note_mesh_state_applied();
+                if mesh_gate_update.is_none() {
+                    let mesh_enabled = self.store.lock().await.state().mesh_enabled;
+                    mesh_gate_update = Some((false, mesh_enabled));
+                }
+            }
+            if let Some((explicit, enabled)) = mesh_gate_update {
+                if explicit {
+                    self.reconcile.initialize_mesh_gate(enabled).await;
+                } else {
+                    self.reconcile.initialize_mesh_gate_if_unset(enabled).await;
+                }
+            }
             {
                 let mut inner = self.inner.lock().await;
                 inner.last_applied = Some(log_id);
+                inner.mesh_state_applied |= mesh_state_applied;
+                if normal_entry {
+                    inner.snapshot_install_pending = false;
+                }
             }
-
             responses.push(resp);
         }
-
         self.persist_meta().await?;
         self.reconcile.request_full();
         Ok(responses)
     }
-
     async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
         FileSnapshotBuilder {
             store: self.store.clone(),
@@ -659,7 +712,6 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
             paths: self.paths.clone(),
         }
     }
-
     async fn begin_receiving_snapshot(
         &mut self,
     ) -> Result<
@@ -668,104 +720,13 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
     > {
         Ok(Box::new(std::io::Cursor::new(Vec::new())))
     }
-
     async fn install_snapshot(
         &mut self,
         meta: &SnapshotMeta<NodeId, NodeMeta>,
-        mut snapshot: Box<<TypeConfig as openraft::RaftTypeConfig>::SnapshotData>,
+        snapshot: Box<<TypeConfig as openraft::RaftTypeConfig>::SnapshotData>,
     ) -> Result<(), openraft::StorageError<NodeId>> {
-        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
-
-        let _ = snapshot.seek(std::io::SeekFrom::Start(0)).await;
-        let mut buf = Vec::new();
-        snapshot
-            .read_to_end(&mut buf)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
-
-        let raw_payload: serde_json::Value = serde_json::from_slice(&buf).map_err(|e| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(e),
-            )
-        })?;
-        let raw_state = raw_payload.get("state").cloned().ok_or_else(|| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other("invalid snapshot payload: missing `state` field"),
-            )
-        })?;
-        let incoming_schema_version = raw_state
-            .get("schema_version")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default() as u32;
-        let active_reverse_epoch = self.store.lock().await.state().reverse_mesh_epoch;
-        if active_reverse_epoch != 0 && incoming_schema_version < crate::state::SCHEMA_VERSION {
-            return Err(io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(format!(
-                    "snapshot schema rollback is blocked after Reverse Mesh epoch {active_reverse_epoch} was written (incoming schema {incoming_schema_version}, required {})",
-                    crate::state::SCHEMA_VERSION
-                )),
-            ));
-        }
-        let state = crate::state::migrate_state_value_to_latest(raw_state).map_err(|e| {
-            io_err(
-                ErrorSubject::Snapshot(None),
-                ErrorVerb::Read,
-                std::io::Error::other(e.to_string()),
-            )
-        })?;
-
-        {
-            let mut store = self.store.lock().await;
-            let resource_revision = store.state().mihomo_resource_revision.wrapping_add(1);
-            *store.state_mut() = state;
-            store.state_mut().mihomo_resource_revision = resource_revision;
-            store.save().map_err(|e| {
-                io_err(
-                    ErrorSubject::StateMachine,
-                    ErrorVerb::Write,
-                    std::io::Error::other(e.to_string()),
-                )
-            })?;
-
-            // Snapshot install replaces the entire state; keep local usage bounded to the
-            // current memberships set to avoid stale grant/membership usage lingering.
-            let allowed_membership_keys = store
-                .state()
-                .node_user_endpoint_memberships
-                .iter()
-                .map(|m| crate::state::membership_key(&m.user_id, &m.endpoint_id))
-                .collect::<std::collections::BTreeSet<_>>();
-            let _ = store.update_usage(|usage| {
-                usage
-                    .memberships
-                    .retain(|key, _| allowed_membership_keys.contains(key));
-            });
-            let _ = store.prune_inbound_ip_usage_memberships();
-        }
-
-        {
-            let mut inner = self.inner.lock().await;
-            inner.last_applied = meta.last_log_id;
-            inner.last_membership = meta.last_membership.clone();
-        }
-
-        self.persist_meta().await?;
-        write_json(&self.paths.snapshot_meta_json, meta)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        write_bytes(&self.paths.snapshot_data_json, &buf)
-            .await
-            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Write, e))?;
-        self.reconcile.request_full();
-        Ok(())
+        snapshot_install::install(self, meta, snapshot).await
     }
-
     async fn get_current_snapshot(
         &mut self,
     ) -> Result<Option<Snapshot<TypeConfig>>, openraft::StorageError<NodeId>> {
@@ -778,13 +739,14 @@ impl RaftStateMachine<TypeConfig> for FileStateMachine {
         let bytes = read_bytes(&self.paths.snapshot_data_json)
             .await
             .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
+        legacy_mesh::validate_snapshot_payload(&meta, &bytes)
+            .map_err(|e| io_err(ErrorSubject::Snapshot(None), ErrorVerb::Read, e))?;
         Ok(Some(Snapshot {
             meta,
             snapshot: Box::new(std::io::Cursor::new(bytes)),
         }))
     }
 }
-
 fn io_err(
     subject: ErrorSubject<NodeId>,
     verb: ErrorVerb,
@@ -808,7 +770,6 @@ async fn read_json<T: serde::de::DeserializeOwned + Send + 'static>(
     .await
     .expect("spawn_blocking read_json")
 }
-
 async fn read_wal_with_compat(
     path: &Path,
     last_applied_index: Option<u64>,
@@ -816,7 +777,6 @@ async fn read_wal_with_compat(
     let Some(raw_wal) = read_json::<serde_json::Value>(path).await? else {
         return Ok((PersistedWal::empty(), false));
     };
-
     let mut rewritten = false;
     let last_purged_log_id: Option<LogId<NodeId>> = raw_wal
         .get("last_purged_log_id")
@@ -847,7 +807,6 @@ async fn read_wal_with_compat(
                     if !is_retired_grant_group_command(&cmd_type) {
                         return Err(std::io::Error::other(parse_err));
                     }
-
                     let entry_index = extract_entry_log_index(raw_entry).ok_or_else(|| {
                         std::io::Error::other(format!(
                             "failed to read wal entry index for retired command: type={cmd_type}"
@@ -864,7 +823,6 @@ async fn read_wal_with_compat(
                             "retired wal command is still in active log range (entry_index={entry_index}, last_purged={last_purged_index}); start old version to snapshot/purge logs first, then upgrade"
                         )));
                     }
-
                     let mut blank_entry = raw_entry.clone();
                     rewrite_entry_payload_to_blank(&mut blank_entry)?;
                     let parsed =
@@ -973,5 +931,7 @@ async fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     .expect("spawn_blocking write_bytes")
 }
 
+#[cfg(test)]
+mod snapshot_recovery_tests;
 #[cfg(test)]
 mod tests;

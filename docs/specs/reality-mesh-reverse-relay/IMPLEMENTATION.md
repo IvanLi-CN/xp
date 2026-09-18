@@ -22,8 +22,10 @@
 - Fresh join now returns an additive `reverse_mesh_bootstrap` marker when the assignment capability
   barrier and a managed Rendezvous candidate are available. The leader pre-registers the learner's
   generation/assignment in Raft; `xp join` stores only the public endpoint parameters, epoch and
-  generation in the existing mode-0600 `raft_bootstrap_sender` marker. Unsupported or candidate-less
-  clusters retain the existing Direct/Public bootstrap path.
+  generation in the existing mode-0600 `raft_bootstrap_sender` marker. The marker is metadata-only
+  until the learner applies authenticated Raft state or a snapshot; Mesh and Reverse remain closed
+  during that interval. Unsupported or candidate-less clusters retain the existing Direct/Public
+  bootstrap path.
 - Assignment reconciliation runs a reverse-only signed `health-v2` probe through every assigned
   primary and standby Rendezvous. Remote outer delivery tries that Rendezvous through Reality Mesh
   before Public/API; when the caller is itself the Rendezvous, it uses the signed local XP loopback
@@ -31,6 +33,13 @@
   retaining a bounded health observation; local Xray/portal readiness remains the admission gate
   and a failed probe never disables Direct/Public. The bodyless health GET is safe to retry, so a
   retryable Reality timeout also proceeds to the Rendezvous Public/API path.
+- Mesh and Reverse sends use shared read admission, while cluster gate transitions take an
+  exclusive write barrier so normal reverse concurrency is preserved without crossing a disable
+  boundary.
+- Successful Mesh telemetry reuses the response's existing read admission instead of reacquiring
+  the write-preferring lock; protocol and transport failures release the response and admission
+  before recording telemetry. Inbound signed Reverse health holds the same admission through lease
+  confirmation, so a queued gate disable cannot cross either lifecycle boundary.
 - Target-side Reverse lifecycle is local and fail-closed. Each derived Link starts with one
   10-second Xray probe underlay and asks its exact Rendezvous for a signed return health request.
   The target grants a 120-second lease only when the request's assigned Rendezvous identity and

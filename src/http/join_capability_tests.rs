@@ -718,7 +718,7 @@ async fn orphan_repair_dry_run_uses_signed_control_plane_origin_for_xhttp_endpoi
 }
 
 #[tokio::test]
-async fn orphan_repair_dry_run_rejects_invalid_mesh_target_without_direct_downgrade() {
+async fn orphan_repair_dry_run_uses_signed_control_plane_origin_for_invalid_mesh_target() {
     let (status, body, _orphan_node_id, capability_requests, legacy_requests) =
         run_orphan_repair_dry_run_with_mesh_transport(
             StatusCode::OK,
@@ -729,9 +729,9 @@ async fn orphan_repair_dry_run_rejects_invalid_mesh_target_without_direct_downgr
         )
         .await;
 
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["error"]["code"], "staged_join_capability_unavailable");
-    assert_eq!(capability_requests, 0);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(capability_requests, 1);
     assert_eq!(legacy_requests, 0);
 }
 

@@ -15,3 +15,31 @@ fn reverse_gate_requires_a_runtime_reconcile_after_xray_availability_is_lost() {
     reconcile.set_reverse_runtime_ready(true);
     assert!(reconcile.reverse_gate().load(Ordering::Acquire));
 }
+
+#[tokio::test]
+async fn mesh_gate_can_be_initialized_from_persisted_cluster_state() {
+    let reconcile = ReconcileHandle::noop();
+    assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+
+    reconcile.initialize_mesh_gate(false).await;
+    assert!(!reconcile.mesh_gate().load(Ordering::Acquire));
+
+    reconcile.initialize_mesh_gate(true).await;
+    assert!(reconcile.mesh_gate().load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn mesh_gate_only_resets_reverse_readiness_on_enable_transition() {
+    let reconcile = ReconcileHandle::noop();
+    reconcile.set_reverse_runtime_ready(false);
+
+    reconcile.initialize_mesh_gate(true).await;
+    assert!(!reconcile.reverse_gate().load(Ordering::Acquire));
+
+    reconcile.set_reverse_runtime_ready(true);
+    assert!(reconcile.reverse_gate().load(Ordering::Acquire));
+
+    reconcile.initialize_mesh_gate(false).await;
+    reconcile.initialize_mesh_gate(true).await;
+    assert!(!reconcile.reverse_gate().load(Ordering::Acquire));
+}

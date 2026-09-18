@@ -1,22 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
-
-use rand::{RngCore, SeedableRng, rngs::StdRng};
-use sha2::{Digest as _, Sha256};
-use tokio::{
-    sync::{Mutex, mpsc},
-    time::{Instant, MissedTickBehavior},
-};
-use tracing::{debug, warn};
-
 use crate::{
     config::Config,
     credentials,
@@ -28,24 +9,30 @@ use crate::{
     xray,
     xray::builder,
 };
-
+use rand::{RngCore, SeedableRng, rngs::StdRng};
+use sha2::{Digest as _, Sha256};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+use tokio::{
+    sync::{Mutex, RwLock, mpsc},
+    time::{Instant, MissedTickBehavior},
+};
+use tracing::{debug, warn};
+mod mesh_gate;
+mod node;
 mod reverse;
-
 const MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE: &str = "migrations/vless_user_encryption_none";
 const MIGRATION_MARKER_VLESS_REALITY_TYPE_TCP: &str = "migrations/vless_reality_type_tcp";
 const MIGRATION_MARKER_REMOVE_GRANTS_HARD_CUT_V10: &str = "migrations/remove_grants_hard_cut_v10";
-
-pub(crate) fn resolve_local_node_id(config: &Config, store: &JsonSnapshotStore) -> Option<String> {
-    let nodes = store.list_nodes();
-    if let Some(node) = nodes.iter().find(|n| n.api_base_url == config.api_base_url) {
-        return Some(node.node_id.clone());
-    }
-    nodes
-        .iter()
-        .find(|n| n.node_name == config.node_name)
-        .map(|n| n.node_id.clone())
-}
-
+pub(crate) use node::resolve_local_node_id;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileRequest {
     Full,
@@ -54,7 +41,6 @@ pub enum ReconcileRequest {
     RemoveUser { tag: String, email: String },
     RebuildInbound { endpoint_id: String },
 }
-
 #[derive(Debug, Default)]
 struct PendingBatch {
     full: bool,
@@ -63,7 +49,6 @@ struct PendingBatch {
     remove_users: BTreeSet<(String, String)>,
     rebuild_inbounds: BTreeSet<String>,
 }
-
 impl PendingBatch {
     fn has_any(&self) -> bool {
         self.full
@@ -72,11 +57,9 @@ impl PendingBatch {
             || !self.remove_users.is_empty()
             || !self.rebuild_inbounds.is_empty()
     }
-
     fn clear(&mut self) {
         *self = Self::default();
     }
-
     fn add(&mut self, req: ReconcileRequest) {
         match req {
             ReconcileRequest::Full => self.full = true,
@@ -93,7 +76,6 @@ impl PendingBatch {
         }
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct ReconcileHandle {
     tx: Option<mpsc::UnboundedSender<ReconcileRequest>>,
@@ -104,8 +86,12 @@ pub struct ReconcileHandle {
     reverse_recovery_required: Arc<AtomicBool>,
     reverse_operator_enabled: Arc<AtomicBool>,
     reverse_links: ReverseLinkRuntime,
+    mesh_enabled: Arc<AtomicBool>,
+    mesh_enabled_epoch: Arc<AtomicU64>,
+    mesh_state_generation: Arc<AtomicU64>,
+    mesh_gate_authoritative: Arc<AtomicBool>,
+    mesh_gate_lock: Arc<RwLock<()>>,
 }
-
 impl ReconcileHandle {
     pub fn noop() -> Self {
         Self {
@@ -117,9 +103,13 @@ impl ReconcileHandle {
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
+            mesh_enabled: Arc::new(AtomicBool::new(true)),
+            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_state_generation: Arc::new(AtomicU64::new(0)),
+            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            mesh_gate_lock: Arc::new(RwLock::new(())),
         }
     }
-
     #[cfg(test)]
     pub(crate) fn from_sender(tx: mpsc::UnboundedSender<ReconcileRequest>) -> Self {
         Self {
@@ -131,15 +121,18 @@ impl ReconcileHandle {
             reverse_recovery_required: Arc::new(AtomicBool::new(false)),
             reverse_operator_enabled: Arc::new(AtomicBool::new(true)),
             reverse_links: ReverseLinkRuntime::default(),
+            mesh_enabled: Arc::new(AtomicBool::new(true)),
+            mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+            mesh_state_generation: Arc::new(AtomicU64::new(0)),
+            mesh_gate_authoritative: Arc::new(AtomicBool::new(true)),
+            mesh_gate_lock: Arc::new(RwLock::new(())),
         }
     }
-
     pub fn request(&self, req: ReconcileRequest) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(req);
         }
     }
-
     pub fn request_full(&self) {
         self.request(ReconcileRequest::Full);
     }
@@ -160,11 +153,9 @@ impl ReconcileHandle {
     pub(crate) fn take_xray_restart_request(&self) -> bool {
         self.restart_requested.swap(false, Ordering::AcqRel)
     }
-
     pub fn reverse_gate(&self) -> Arc<AtomicBool> {
         self.reverse_enabled.clone()
     }
-
     pub(crate) fn set_reverse_enabled(&self, enabled: bool) {
         self.reverse_supervisor_enabled
             .store(enabled, Ordering::Release);
@@ -172,11 +163,9 @@ impl ReconcileHandle {
             .fetch_and(enabled, Ordering::AcqRel);
         self.refresh_reverse_gate();
     }
-
     pub fn request_remove_inbound(&self, tag: impl Into<String>) {
         self.request(ReconcileRequest::RemoveInbound { tag: tag.into() });
     }
-
     pub fn request_remove_user(&self, tag: impl Into<String>, email: impl Into<String>) {
         self.request(ReconcileRequest::RemoveUser {
             tag: tag.into(),
@@ -305,6 +294,11 @@ fn spawn_reconciler_with_options<R: RngCore + Send + 'static>(
         reverse_recovery_required: Arc::new(AtomicBool::new(false)),
         reverse_operator_enabled: Arc::new(AtomicBool::new(config.reverse_mesh_enabled)),
         reverse_links: ReverseLinkRuntime::default(),
+        mesh_enabled: Arc::new(AtomicBool::new(true)),
+        mesh_enabled_epoch: Arc::new(AtomicU64::new(0)),
+        mesh_state_generation: Arc::new(AtomicU64::new(0)),
+        mesh_gate_authoritative: Arc::new(AtomicBool::new(false)),
+        mesh_gate_lock: Arc::new(RwLock::new(())),
     };
     let restart_handle = handle.clone();
 
@@ -491,7 +485,6 @@ async fn reconcile_once(
     )
     .await
 }
-
 async fn reconcile_once_with_runtime(
     config: &Arc<Config>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -510,8 +503,14 @@ async fn reconcile_once_with_runtime(
         snapshot,
         local_vless_endpoint_ids,
         desired_hash_by_endpoint_id,
+        cluster_mesh_enabled,
+        mesh_state_generation,
     ) = {
         let store = store.lock().await;
+        let (mesh_enabled_state, mesh_state_generation) = (
+            store.state().mesh_enabled,
+            restart_handle.mesh_state_generation.load(Ordering::Acquire),
+        );
         let Some(local_node_id) = resolve_local_node_id(config, &store) else {
             warn!(
                 node_name = %config.node_name,
@@ -524,6 +523,9 @@ async fn reconcile_once_with_runtime(
         let endpoints = store.list_endpoints();
         let reverse_mesh_epoch = store.state().reverse_mesh_epoch;
         let reverse_mesh_assignments = store.state().reverse_mesh_assignments.clone();
+        let mesh_gate_authoritative = restart_handle
+            .mesh_gate_authoritative
+            .load(Ordering::Acquire);
         let reverse_mesh_bootstrap_target = store
             .state()
             .active_membership_operation()
@@ -532,7 +534,8 @@ async fn reconcile_once_with_runtime(
                     && !operation.phase.is_terminal()
             })
             .and_then(|operation| operation.node_id.clone())
-            .filter(|target| reverse_mesh_assignments.contains_key(target));
+            .filter(|target| reverse_mesh_assignments.contains_key(target))
+            .filter(|_| mesh_gate_authoritative);
         let reverse_mesh_bootstrap = crate::raft::http_rpc::read_bootstrap_sender_marker(
             config
                 .data_dir
@@ -543,7 +546,8 @@ async fn reconcile_once_with_runtime(
         .filter(|marker| {
             reverse_mesh_bootstrap_target.as_deref() == Some(marker.target_node_id.as_str())
                 || reverse_mesh_epoch == 0
-        });
+        })
+        .filter(|_| mesh_gate_authoritative);
         let local_endpoint_ids = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -554,7 +558,6 @@ async fn reconcile_once_with_runtime(
             .filter(|e| e.node_id == local_node_id && e.kind == EndpointKind::VlessRealityVisionTcp)
             .map(|e| e.endpoint_id.clone())
             .collect::<BTreeSet<_>>();
-
         let memberships: Vec<NodeUserEndpointMembership> = store
             .state()
             .node_user_endpoint_memberships
@@ -562,7 +565,6 @@ async fn reconcile_once_with_runtime(
             .filter(|m| m.node_id == local_node_id)
             .cloned()
             .collect();
-
         let mut users_by_id = BTreeMap::<String, User>::new();
         for membership in memberships.iter() {
             let Some(user) = store.get_user(&membership.user_id) else {
@@ -570,7 +572,6 @@ async fn reconcile_once_with_runtime(
             };
             users_by_id.insert(user.user_id.clone(), user);
         }
-
         let mut quota_banned_membership_keys = BTreeSet::<String>::new();
         for membership in memberships.iter() {
             let key = membership_key(&membership.user_id, &membership.endpoint_id);
@@ -581,7 +582,6 @@ async fn reconcile_once_with_runtime(
                 quota_banned_membership_keys.insert(key);
             }
         }
-
         let mut users_needing_credential_refresh = BTreeMap::<String, u32>::new();
         for (user_id, user) in users_by_id.iter() {
             let applied = store.get_user_credential_epoch_applied(user_id);
@@ -589,7 +589,6 @@ async fn reconcile_once_with_runtime(
                 users_needing_credential_refresh.insert(user_id.clone(), user.credential_epoch);
             }
         }
-
         let mut endpoint_users_applied = BTreeMap::<String, BTreeSet<String>>::new();
         for endpoint_id in local_endpoint_ids.iter() {
             let users = store.get_endpoint_users_applied(endpoint_id);
@@ -597,7 +596,6 @@ async fn reconcile_once_with_runtime(
                 endpoint_users_applied.insert(endpoint_id.clone(), users);
             }
         }
-
         let desired_hash_by_endpoint_id = endpoints
             .iter()
             .filter(|e| e.node_id == local_node_id)
@@ -621,9 +619,14 @@ async fn reconcile_once_with_runtime(
             },
             local_vless_endpoint_ids,
             desired_hash_by_endpoint_id,
+            mesh_enabled_state,
+            mesh_state_generation,
         )
     };
-
+    restart_handle
+        .set_mesh_enabled_if_current(cluster_mesh_enabled, mesh_state_generation)
+        .await;
+    let cluster_mesh_enabled = restart_handle.mesh_gate().load(Ordering::Acquire);
     let migration_marker_user_encryption_path = config
         .data_dir
         .join(MIGRATION_MARKER_VLESS_USER_ENCRYPTION_NONE);
@@ -666,7 +669,7 @@ async fn reconcile_once_with_runtime(
         reverse_reconciler,
         restart_handle,
         config.bind.port(),
-        config.reverse_mesh_enabled,
+        config.reverse_mesh_enabled && cluster_mesh_enabled,
     )
     .await;
 

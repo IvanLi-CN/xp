@@ -11,11 +11,15 @@ use super::{
     ApiError, AppState, MeshCapabilityProbeResponse, raft_metrics,
     send_mesh_internal_capability_read,
 };
-use crate::domain::Node;
+use crate::{
+    control_plane_mesh::{MeshPeerTarget, MeshRequest, PeerDirectPath},
+    domain::Node,
+};
 
 pub(super) const MEMBERSHIP_LIFECYCLE_CAPABILITY: &str = "cluster.membership-lifecycle-v1";
 pub(super) const STALE_LEARNER_RETIREMENT_CAPABILITY: &str = "cluster.stale-learner-retirement-v1";
 pub(super) const REVERSE_ASSIGNMENT_CAPABILITY: &str = "cluster.mesh-reverse-assignment-v1";
+pub(super) const MESH_GATE_CAPABILITY: &str = "cluster.mesh-gate-v1";
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
 const MAX_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 const LEGACY_CAPABILITIES_PATH: &str = "/api/capabilities";
@@ -93,14 +97,30 @@ pub(super) async fn require_reverse_assignment_on_voters(state: &AppState) -> Re
     require_capability_on_voters(state, REVERSE_ASSIGNMENT_CAPABILITY, None).await
 }
 
+pub(super) async fn require_mesh_gate_on_voters(state: &AppState) -> Result<(), ApiError> {
+    require_capability_on_voters_with_probe(state, MESH_GATE_CAPABILITY, None, true).await
+}
+
 async fn require_capability_on_voters(
     state: &AppState,
     capability: &str,
     excluded_voter_id: Option<u64>,
 ) -> Result<(), ApiError> {
+    require_capability_on_voters_with_probe(state, capability, excluded_voter_id, false).await
+}
+
+async fn require_capability_on_voters_with_probe(
+    state: &AppState,
+    capability: &str,
+    excluded_voter_id: Option<u64>,
+    public_only: bool,
+) -> Result<(), ApiError> {
     let metrics = raft_metrics(state);
     let membership = metrics.membership_config.membership();
     let mut voter_ids = membership.voter_ids().collect::<BTreeSet<_>>();
+    if public_only {
+        voter_ids.extend(membership.nodes().map(|(node_id, _)| *node_id));
+    }
     let local_node_id = crate::raft::types::raft_node_id_from_ulid(&state.cluster.node_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     voter_ids.remove(&local_node_id);
@@ -147,6 +167,19 @@ async fn require_capability_on_voters(
     }
     for peer in peers {
         let started = Instant::now();
+        if public_only {
+            if !public_capability_supports(state, &peer.node, capability, started).await {
+                return Err(ApiError::new(
+                    "coordinated_upgrade_required",
+                    StatusCode::CONFLICT,
+                    format!(
+                        "member {} must expose {capability} before this cluster setting can change",
+                        peer.raft_node_id
+                    ),
+                ));
+            }
+            continue;
+        }
         let response = send_mesh_internal_capability_read(
             state,
             &state.mesh_client,
@@ -233,6 +266,68 @@ async fn require_capability_on_voters(
         }
     }
     Ok(())
+}
+
+async fn public_capability_supports(
+    state: &AppState,
+    node: &Node,
+    capability: &str,
+    started: Instant,
+) -> bool {
+    let remaining = remaining_probe_budget(started).unwrap_or_default();
+    if remaining.is_zero() {
+        return false;
+    }
+    let api_base_url = node.api_base_url.trim().trim_end_matches('/');
+    if api_base_url.is_empty() {
+        return false;
+    }
+    let peer = MeshPeerTarget {
+        node_id: node.node_id.clone(),
+        node_name: node.node_name.clone(),
+        mesh_base_url: None,
+        mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
+        public_base_url: api_base_url.to_string(),
+    };
+    let request = MeshRequest {
+        method: reqwest::Method::GET,
+        path_and_query: "/api/admin/_internal/capabilities".to_string(),
+        content_type: None,
+        body: Vec::new(),
+        total_budget: remaining,
+        allow_ambiguous_fallback: false,
+        request_id: crate::id::new_ulid_string(),
+        route: crate::internal_auth::InternalRoute::MeshV2,
+        cluster_id: state.cluster.cluster_id.clone(),
+        sender_id: state.cluster.node_id.clone(),
+        updates_active_path: false,
+    };
+    let Some(ca_key_pem) = state.cluster_ca_key_pem.as_deref() else {
+        return false;
+    };
+    let response = state
+        .mesh_client
+        .send_peer_direct_request(
+            &peer,
+            PeerDirectPath::ApiBaseUrl,
+            request,
+            ca_key_pem,
+            &state.cluster_ca_pem,
+        )
+        .await
+        .ok();
+    let Some(response) = response else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Some(remaining) = remaining_probe_budget(started) else {
+        return false;
+    };
+    read_capability_response(response, remaining)
+        .await
+        .is_some_and(|body| body.capabilities.iter().any(|item| item == capability))
 }
 
 #[cfg(test)]

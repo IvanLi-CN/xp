@@ -9,13 +9,20 @@
 - 内部 HMAC 没有覆盖 body、时间或身份。
 - 失败后的跨路径重试可能让 mutation 重复执行。
 - 管理界面缺少当前节点视角的 peer 链路诊断。
+- 运维需要一个由 Raft 统一复制的集群级 Mesh 开关，以便在公网 HTTPS 仍可用时止损。
 
 ## 目标
 
 - 从唯一 managed-default VLESS-REALITY endpoint 派生 HTTPS Mesh 路径。
 - 先尝试 Mesh；路径不可用时再访问 peer 的公网地址。
+- Mesh 请求在共享读准入边界内并发执行；集群 gate 切换取得独占写屏障，等待已准入请求完成后才改变状态，避免关闭后的新请求越过公网-only 边界。
 - 用 internal-auth v2、稳定 request ID 和 durable dedupe 保护内部调用。
 - 提供本地持久遥测、管理 API 与 `/system-status`。
+- `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
+  公网 `api_base_url`，不改用私网或 Reverse Mesh。能力探测也使用同一签名的公网请求并保留
+  predecessor 404 兼容；专用 Reverse health/link probe 在关闭期间必须停用。
+- 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
+  必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
 - 在不持久化地址或端口的前提下，提供连接复用和异常 churn 的可观测证据。
 - 对 auth epoch 跨界升级实施维护窗口 hard cut。
@@ -29,6 +36,7 @@
 - 不保证 50 个以上 peer 的性能。
 - 不修改 Xray inbound、`connIdle`、Reality 端口或用户代理流量。
 - 不为 Mesh pool、idle timeout、flow-control window 或 keepalive 暴露 operator 配置。
+- 不提供节点本地环境变量覆盖集群 Mesh 开关。
 
 ## 范围
 
@@ -84,7 +92,8 @@
 - Mesh 预算为 `min(5s, max(500ms, total/3))`；公网取得剩余预算。
 - 有效 ack 的任何 HTTP status 都是权威结果，禁止降级。
 - auth、protocol error 与 headers 后的流中断不得触发公网降级。
-- 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback。
+- 只读、Raft RPC 与 durable idempotency mutation 才可模糊超时后 fallback；这里的 public
+  transport 指注册的公网 `api_base_url`，不等同于 Bearer 管理 API。
 - 其他 mutation 必须返回 `outcome_unknown`。
 - 跨 Mesh/public 的 mutation 重用同一个 `request_id`。
 - 本地 ledger 保留 10 分钟，最多 16,384 条，满载拒绝新请求。
@@ -104,6 +113,21 @@
 - probe 有 jitter，最多并发四个 peer；三分钟无样本标记 stale。
 - `GET /api/admin/mesh/status` 对完整状态表示计算 ETag。
 - `POST /api/admin/mesh/probes` 只接受当前成员 node ID。
+- `PUT /api/admin/mesh/config` 通过 Raft 写入 `{ "enabled": boolean }`；状态响应的
+  `cluster_mesh_enabled` 表示当前集群值。关闭后既有公网请求继续工作，开启后新请求恢复
+  Mesh 尝试。写入前必须确认当前 Raft membership 的 voter 与 learner 都支持该命令；旧
+  learner 不能被跳过，必须先升级或退休。
+- 新加入且尚未应用认证 Raft state/snapshot 的非 bootstrap 节点必须保持本地 Mesh gate 关闭，
+  只走已注册公网路径；首次 state apply 后才采用持久化集群值。
+  Snapshot payload 持久化明确的 `mesh_state_applied` 证据与 snapshot identity；安装期间先持久化
+  fail-closed marker，再写数据与 metadata，最后清除 pending marker。读取时拒绝 identity 不匹配的
+  文件对；显式 `false` 或缺失 marker 不得被升级为 `true`。旧 metadata 缺失该字段时，仅在
+  snapshot metadata 与已应用日志一致且 payload marker 为 `true` 时恢复 gate，否则保持关闭。
+  现代 metadata 的 `true` 在没有本地 snapshot 文件时可直接作为已认证日志证据；若存在 snapshot
+  文件，则只要求 data/meta 彼此一致且 payload marker 为 `true`，允许快照水位落后于后续已应用日志。
+  bootstrap 在 Raft 已初始化但本节点尚未出现在 state machine 时，且本节点仍是当前 voter，重启必须
+  再次补写本节点，不得因 `is_initialized` 而跳过恢复；learner 或已退役身份不得触发补写。
+  snapshot existence/read 错误保持 fail-closed。
 - status SSE 保持现有 `hello`、`snapshot`、`snapshot_error` schema 和 5 秒节奏。进程级快照 hub
   仅在存在订阅者时运行一个 producer，执行一次远端 runtime fan-out、序列化和去重后广播给所有
   订阅者；后加入订阅者在 `hello` 后重放当前 producer 的最后一条 `snapshot` 或 `snapshot_error`。

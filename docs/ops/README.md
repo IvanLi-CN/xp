@@ -148,8 +148,9 @@ Host-managed mode assumptions:
 - Fresh joins may receive an additive `reverse_mesh_bootstrap` response and 0600 bootstrap marker
   after the voter capability barrier. The marker contains only public Rendezvous endpoint
   parameters, assignment generation and epoch; it never replaces learner catch-up or log-index
-  promotion. When the barrier or candidate readiness is unavailable, the join remains on
-  Direct/Public bootstrap.
+  promotion. Until the first authenticated Raft state or snapshot apply, the marker is metadata-only
+  and the learner remains on Direct/Public; Reverse bootstrap starts only after that apply. When the
+  barrier or candidate readiness is unavailable, the join remains on Direct/Public bootstrap.
 - Reverse tombstone overflow is fail-closed. systemd/OpenRC nodes use the controlled Xray restart
   path; a single-image container without a successful child-process restart keeps Reverse disabled
   until the operator restarts the container and XP completes reconciliation. Direct/Public and
@@ -281,6 +282,18 @@ Contract:
 - Legacy `XP_RELAY_PROBE_*` variables are removed; startup/sync now fails fast if they are still present.
 
 ## Reality fallback control-plane Mesh
+
+Mesh is enabled for the cluster by default and is controlled by the Raft-persisted
+`PersistedState.mesh_enabled` value. Operators can inspect the current value in
+`GET /api/admin/mesh/status` (`cluster_mesh_enabled`) and change it with the authenticated
+`PUT /api/admin/mesh/config` request body `{ "enabled": true|false }`. When disabled, XP uses
+only each member's registered public HTTPS `api_base_url`; it does not replace Mesh with a
+private origin or a Reverse Mesh relay. Re-enabling is cluster-wide and takes effect after the
+replicated command is applied on every current Raft member, including learners. This all-member
+capability barrier is required because older learners also apply the replicated command; retire or
+upgrade a stale learner before changing the switch.
+Fresh non-bootstrap nodes use public-only control-plane requests until authenticated Raft state is
+applied; this prevents a local default from overriding a disabled cluster switch during join.
 
 When a peer has exactly one managed-default VLESS/REALITY Vision/TCP endpoint, XP derives
 `https://<access_host>:<vless_port>` as a signed control-plane Mesh route. Managed XHTTP endpoints

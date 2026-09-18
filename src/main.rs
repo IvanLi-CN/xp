@@ -375,6 +375,12 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         store.clone(),
         cluster_ca_key_pem_required.clone(),
     );
+    let mesh_enabled = store.lock().await.state().mesh_enabled;
+    if cluster.should_bootstrap_raft() {
+        reconcile.initialize_mesh_gate(mesh_enabled).await;
+    } else {
+        reconcile.hold_mesh_gate_until_raft_state().await;
+    }
     let (xray_health, _xray_supervisor_task) =
         xp::xray_supervisor::spawn_xray_supervisor(config_arc.clone(), reconcile.clone());
     let (cloudflared_health, _cloudflared_supervisor_task) =
@@ -418,6 +424,8 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
         cluster.node_id.clone(),
         format!("http://127.0.0.1:{}", config.bind.port()),
     )
+    .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
+    .with_mesh_gate_lock(reconcile.mesh_gate_lock())
     .with_reverse_gate(reconcile.reverse_gate());
     let mesh_client = raft_network.mesh_client();
     let raft = xp::raft::runtime::start_raft(
@@ -442,9 +450,23 @@ async fn run_server(config: xp::config::Config) -> Result<()> {
             .is_initialized()
             .await
             .map_err(|e| anyhow::anyhow!("raft is_initialized: {e}"))?;
+        let bootstrap_node_missing = !store
+            .lock()
+            .await
+            .list_nodes()
+            .iter()
+            .any(|node| node.node_id == cluster.node_id);
         raft.initialize_single_node_if_needed(raft_id, raft_node_meta)
             .await?;
-        if !was_initialized {
+        let local_membership = raft
+            .raft()
+            .metrics()
+            .borrow()
+            .membership_config
+            .membership()
+            .voter_ids()
+            .any(|voter_id| voter_id == raft_id);
+        if !was_initialized || (bootstrap_node_missing && local_membership) {
             // Ensure the bootstrap node exists in the Raft state machine so future joiners can
             // replicate the full node list. Without this, a joiner would only ever see itself
             // unless the leader later emits an explicit UpsertNode for the bootstrap node.

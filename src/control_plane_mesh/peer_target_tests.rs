@@ -11,7 +11,7 @@ use futures_util::{StreamExt, future::join_all};
 use reqwest::ResponseBuilderExt;
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use tokio::{
     sync::{Notify, Semaphore},
@@ -37,7 +37,7 @@ async fn stall_reverse_relay(State(requests): State<Arc<AtomicUsize>>) -> Status
     StatusCode::SERVICE_UNAVAILABLE
 }
 
-async fn spawn_reverse_relay_counter() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+pub(super) async fn spawn_reverse_relay_counter() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     let requests = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
@@ -137,7 +137,7 @@ async fn spawn_stalling_mesh() -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
     (format!("http://{address}"), requests, task)
 }
 
-async fn spawn_signed_public(
+pub(super) async fn spawn_signed_public(
     ca_key_pem: &str,
     ca_cert_pem: &str,
 ) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
@@ -217,6 +217,101 @@ async fn short_budget_keeps_public_fallback_after_mesh_and_reverse_timeouts() {
     public_task.abort();
 }
 
+#[tokio::test]
+async fn cluster_mesh_gate_disabled_uses_public_without_mesh_or_reverse_attempts() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let gate = Arc::new(AtomicBool::new(false));
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate(gate);
+    client
+        .set_reverse_route(
+            peer.node_id.clone(),
+            reverse_route(
+                secondary_reverse_target(
+                    Some("http://127.0.0.1:1".to_string()),
+                    "http://127.0.0.1:2".to_string(),
+                ),
+                None,
+                reverse_assignment(),
+            ),
+        )
+        .await;
+
+    let result = client
+        .send_peer_request(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: true,
+                request_id: "cluster-mesh-disabled-public-only".to_string(),
+                route: InternalRoute::HealthV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::tertiary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(result.is_ok(), "public request should succeed: {result:?}");
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    mesh_task.abort();
+    public_task.abort();
+}
+
+#[tokio::test]
+async fn cluster_mesh_gate_disabled_uses_public_for_capability_probe() {
+    let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_mesh().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let (public_base_url, public_requests, public_task) =
+        spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
+    let peer = primary_reverse_target(Some(mesh_base_url), public_base_url);
+    let gate = Arc::new(AtomicBool::new(false));
+    let client =
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_mesh_gate(gate);
+
+    let result = client
+        .send_peer_request_allowing_legacy_not_found(
+            &peer,
+            MeshRequest {
+                method: reqwest::Method::GET,
+                path_and_query: "/api/admin/_internal/capabilities".to_string(),
+                content_type: None,
+                body: Vec::new(),
+                total_budget: Duration::from_secs(1),
+                allow_ambiguous_fallback: false,
+                request_id: "cluster-mesh-disabled-capability-public".to_string(),
+                route: InternalRoute::MeshV2,
+                cluster_id: xp_test_fixtures::cluster_fixture53().to_string(),
+                sender_id: xp_test_fixtures::primary_node_id().to_string(),
+                updates_active_path: true,
+            },
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+
+    assert!(result.is_ok(), "public capability probe should succeed");
+    assert_eq!(mesh_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
+    mesh_task.abort();
+    public_task.abort();
+}
+
 #[derive(Clone)]
 struct PeakStallState {
     active: Arc<AtomicUsize>,
@@ -288,7 +383,7 @@ fn reverse_request() -> MeshRequest {
     }
 }
 
-fn reverse_assignment() -> ReverseMeshAssignment {
+pub(super) fn reverse_assignment() -> ReverseMeshAssignment {
     ReverseMeshAssignment {
         target_node_id: xp_test_fixtures::primary_node_id().to_owned(),
         generation: 1,
@@ -299,7 +394,7 @@ fn reverse_assignment() -> ReverseMeshAssignment {
     }
 }
 
-fn primary_reverse_target(
+pub(super) fn primary_reverse_target(
     mesh_base_url: Option<String>,
     public_base_url: String,
 ) -> MeshPeerTarget {
@@ -312,7 +407,7 @@ fn primary_reverse_target(
     }
 }
 
-fn secondary_reverse_target(
+pub(super) fn secondary_reverse_target(
     mesh_base_url: Option<String>,
     public_base_url: String,
 ) -> MeshPeerTarget {
@@ -338,7 +433,7 @@ fn tertiary_reverse_target(
     }
 }
 
-fn reverse_route(
+pub(super) fn reverse_route(
     rendezvous: MeshPeerTarget,
     standby_rendezvous: Option<MeshPeerTarget>,
     assignment: ReverseMeshAssignment,
@@ -377,12 +472,6 @@ fn managed_vless_endpoint(_endpoint_id: &str, port: u16) -> Endpoint {
             "managed_default": true
         }),
     }
-}
-
-fn managed_xhttp_endpoint(port: u16) -> Endpoint {
-    let mut endpoint = managed_vless_endpoint("xhttp", port);
-    endpoint.meta["transport"] = serde_json::json!("xhttp");
-    endpoint
 }
 
 #[test]
@@ -458,17 +547,6 @@ fn peer_target_uses_mesh_only_for_one_managed_default_endpoint() {
     assert!(ambiguous.mesh_base_url.is_none());
     assert_eq!(ambiguous.mesh_reason, MeshPeerReason::AmbiguousEndpoint);
 }
-
-#[test]
-fn peer_target_skips_xhttp_endpoint_for_control_plane_mesh() {
-    let node = peer_node();
-    let target = peer_target_from_node(&node, &[managed_xhttp_endpoint(443)]);
-
-    assert!(target.mesh_base_url.is_none());
-    assert_eq!(target.mesh_reason, MeshPeerReason::UnsupportedTransport);
-    assert_eq!(target.public_base_url, node.api_base_url);
-}
-
 #[tokio::test]
 async fn reverse_only_request_respects_the_local_readiness_gate() {
     let gate = Arc::new(AtomicBool::new(false));
@@ -494,10 +572,8 @@ async fn reverse_only_request_respects_the_local_readiness_gate() {
         )
         .await
         .expect_err("disabled Reverse must not resolve or send a route");
-
     assert!(error.to_string().contains("reverse relay is disabled"));
 }
-
 #[tokio::test]
 async fn reverse_outer_request_prefers_rendezvous_reality_mesh() {
     let (mesh_base_url, mesh_requests, mesh_task) = spawn_reverse_relay_counter().await;
@@ -515,18 +591,15 @@ async fn reverse_outer_request_prefers_rendezvous_reality_mesh() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     client
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter response omits relay acknowledgements");
-
     assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
     mesh_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_outer_request_falls_back_public_after_reality_timeout() {
     let (mesh_base_url, mesh_requests, mesh_task) = spawn_stalling_reverse_relay().await;
@@ -548,13 +621,11 @@ async fn reverse_outer_request_falls_back_public_after_reality_timeout() {
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("public counter response omits relay acknowledgements");
-
     assert_eq!(mesh_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     mesh_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_outer_request_uses_local_rendezvous_portal() {
     let (local_base_url, local_requests, local_task) = spawn_reverse_relay_counter().await;
@@ -572,18 +643,15 @@ async fn reverse_outer_request_uses_local_rendezvous_portal() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     client
         .send_peer_reverse_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter response omits relay acknowledgements");
-
     assert_eq!(local_requests.load(Ordering::SeqCst), 1);
     assert_eq!(public_requests.load(Ordering::SeqCst), 0);
     local_task.abort();
     public_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_health_probe_warms_primary_and_standby() {
     let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
@@ -602,18 +670,45 @@ async fn reverse_health_probe_warms_primary_and_standby() {
             reverse_route(rendezvous, Some(standby), assignment),
         )
         .await;
-
     client
         .send_peer_reverse_health_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
         .await
         .expect_err("counter responses omit relay acknowledgements");
-
     assert_eq!(primary_requests.load(Ordering::SeqCst), 1);
     assert_eq!(standby_requests.load(Ordering::SeqCst), 1);
     primary_task.abort();
     standby_task.abort();
 }
-
+#[tokio::test]
+async fn disabled_cluster_mesh_gate_blocks_dedicated_reverse_health_probes() {
+    let (primary_base_url, primary_requests, primary_task) = spawn_reverse_relay_counter().await;
+    let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
+        .expect("cluster CA");
+    let rendezvous = secondary_reverse_target(None, primary_base_url);
+    let peer = primary_reverse_target(None, "http://127.0.0.1:1".to_string());
+    let route = reverse_route(rendezvous, None, reverse_assignment());
+    let client = MeshAwareHttpClient::new(reqwest::Client::new())
+        .with_mesh_gate(Arc::new(AtomicBool::new(false)));
+    client
+        .set_reverse_route(peer.node_id.clone(), route.clone())
+        .await;
+    let fanout = client
+        .send_peer_reverse_health_request(&peer, reverse_request(), &ca.key_pem, &ca.cert_pem)
+        .await;
+    assert!(fanout.is_err(), "disabled Mesh must block reverse fanout");
+    let via = client
+        .send_peer_reverse_health_request_via(
+            &peer,
+            &route,
+            reverse_request(),
+            &ca.key_pem,
+            &ca.cert_pem,
+        )
+        .await;
+    assert!(via.is_err(), "disabled Mesh must block reverse link probes");
+    assert_eq!(primary_requests.load(Ordering::SeqCst), 0);
+    primary_task.abort();
+}
 #[tokio::test]
 async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
     let (rendezvous_base_url, peak, entered, release, relay_task) =
@@ -630,7 +725,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
             reverse_route(rendezvous, None, assignment),
         )
         .await;
-
     let budget = super::reverse::REVERSE_MAX_IN_FLIGHT_PER_RENDEZVOUS
         - super::reverse::REVERSE_HEALTH_RESERVED_SLOTS;
     let responses_task = tokio::spawn({
@@ -655,7 +749,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
             .await
         }
     });
-
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let notified = entered.notified();
@@ -672,7 +765,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
         .await
         .expect("reverse relay admission must fail fast when the budget is full")
         .expect("reverse relay request task must finish");
-
     assert!(
         peak.load(Ordering::SeqCst) == budget,
         "reverse relay did not exercise the full per-rendezvous budget: {}",
@@ -706,7 +798,6 @@ async fn reverse_relay_concurrency_is_bounded_per_rendezvous() {
     ));
     relay_task.abort();
 }
-
 #[tokio::test]
 async fn reverse_health_keeps_a_reserved_rendezvous_slot() {
     let circuits = PeerCircuitBreakers::default();
@@ -743,7 +834,6 @@ async fn reverse_health_keeps_a_reserved_rendezvous_slot() {
     drop(health_slot);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_health_reservation_is_atomic_under_concurrent_control_admission() {
     let circuits = PeerCircuitBreakers::default();
@@ -774,7 +864,6 @@ async fn reverse_health_reservation_is_atomic_under_concurrent_control_admission
     drop(second);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_is_held_until_response_body_stream_finishes() {
     let circuits = PeerCircuitBreakers::default();
@@ -827,7 +916,6 @@ async fn reverse_slot_is_held_until_response_body_stream_finishes() {
     );
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_is_released_when_response_body_stream_errors() {
     let circuits = PeerCircuitBreakers::default();
@@ -877,7 +965,6 @@ async fn reverse_slot_is_released_when_response_body_stream_errors() {
     drop(body_stream);
     drop(control_slots);
 }
-
 #[tokio::test]
 async fn reverse_slot_response_preserves_the_original_url() {
     let circuits = PeerCircuitBreakers::default();

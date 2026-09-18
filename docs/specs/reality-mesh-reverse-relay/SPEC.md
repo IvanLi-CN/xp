@@ -44,6 +44,9 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - target 动态创建独立 Reverse account 的 VLESS outbound，经 Rendezvous 的现有 Reality/XHTTP 或 Reality/Vision TCP endpoint 主动建链。Rendezvous 的 VLESS inbound 首次握手按 generation 创建 reverse handler。
 - XP 通过 `socks5h` 与 `http2_prior_knowledge()` 请求 `http://rvs-<128-bit-id>.mesh.invalid:443`。target 仅允许精确 origin 路由到固定 XP loopback；未匹配 SOCKS 流量 block。target 不需要 managed VLESS endpoint。
 - XP 进程内共享控制面 client 对每个 Rendezvous 的 Reverse outer request 固定最多 8 个 in-flight slots；该上限由所有 `MeshAwareHttpClient` clones 共享，满载时立即拒绝新请求而不排队或建立新的 underlay stream。普通请求最多占用其中 7 个，始终保留至少 1 个 health slot；slot 绑定到 guarded response body/stream 的完整生命周期，并在成功、错误、超时或 response 丢弃后释放。Direct/Public、assignment 和 Link lease 行为不变。
+- Reverse outer requests retain concurrent read-side gate admission; a cluster Mesh gate transition
+  takes the exclusive write side and waits for admitted requests to finish before disabling
+  Mesh/Reverse traffic.
 - 进程内 Xray reconciler 串行全量重载 XP-owned rule，顺序固定为 API、target bridge、portal exact-match、portal block。旧 handler 进入 120 秒 drain，禁止新请求但允许已开始的 response stream 完成。
 - `Reverse Assignment` 是 durable topology；`Reverse Link` 是按
   `(epoch,target,Rendezvous,role,generation)` 区分的进程内生命周期。target 只为一个
@@ -85,12 +88,15 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 - fresh join 在响应前向 leader 与确定性 standby 预注册短期 Reverse；响应中的
   `reverse_mesh_bootstrap` 与现有 0600 `raft_bootstrap_sender` marker 只保存 generation、公开
-  endpoint 参数和 epoch，不保存 secret。启动 Xray 后仅承载 bootstrap/Raft；bootstrap 使用独立
-  `ReverseRole::Bootstrap` 派生域，join operation 进入 terminal phase 后才建立正式
-  Primary/Standby 双链并 drain 临时链，promotion 仍遵循已有 log-index 条件。尚未完成
-  capability barrier 或无
-  可用候选时，marker 缺省且沿用现有 Direct/Public join。
+  endpoint 参数和 epoch，不保存 secret。首次认证 Raft state/snapshot apply 前 marker 仅作为
+  元数据，节点保持 Mesh/Reverse 关闭并沿用 Direct/Public；完成 apply 和 capability barrier 后
+  才可承载 bootstrap/Raft。bootstrap 使用独立 `ReverseRole::Bootstrap` 派生域，join operation
+  进入 terminal phase 后才建立正式 Primary/Standby 双链并 drain 临时链，promotion 仍遵循已有
+  log-index 条件。尚未完成 capability barrier 或无可用候选时，marker 缺省且沿用现有
+  Direct/Public join。
 - public health 优先；signed Reverse health 200 后可标记 `reverse-dependent`。systemd/OpenRC/container 首次启用、滚动升级、restart fallback 和 operator intervention 必须保持 Direct/Public 可用。
+- 入站 signed Reverse health 在校验 Link 后必须持有 Mesh read admission 直到 lease 确认完成；集群 Mesh
+  关闭一旦取得写屏障，不得再确认 health 或续租 Link。
 - 保留 `current_path=mesh|public`。新增可选 `active_route.kind=reality_direct|reverse_relay|public`。
   route 提供当前 Rendezvous、其 `primary|standby|bootstrap` 角色与成员、generation、readiness 和汇总计数；旧客户端可继续解析旧字段。
   System Status 由当前 assignments 标明直连 Rendezvous 的 primary/standby 角色。

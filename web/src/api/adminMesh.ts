@@ -97,6 +97,7 @@ export const AdminMeshPeerSchema = z.object({
 export const AdminMeshStatusSchema = z.object({
 	generated_at: z.string(),
 	revision: z.number(),
+	cluster_mesh_enabled: z.boolean().optional(),
 	local: z.object({
 		node_id: z.string(),
 		node_name: z.string(),
@@ -160,4 +161,21 @@ export async function runAdminMeshProbes(
 	return z
 		.object({ accepted_node_ids: z.array(z.string()), revision: z.number() })
 		.parse(await response.json());
+}
+
+export async function updateAdminMeshConfig(
+	adminToken: string,
+	enabled: boolean,
+): Promise<{ enabled: boolean }> {
+	const response = await fetch("/api/admin/mesh/config", {
+		method: "PUT",
+		headers: {
+			Accept: "application/json",
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${adminToken}`,
+		},
+		body: JSON.stringify({ enabled }),
+	});
+	await throwIfNotOk(response);
+	return z.object({ enabled: z.boolean() }).parse(await response.json());
 }

@@ -28,6 +28,14 @@ pub(super) fn with_assignment(
     })
 }
 
+pub(super) fn is_mesh_peer_stale(peer: Option<&MeshPeerTelemetry>, now: DateTime<Utc>) -> bool {
+    peer.and_then(|peer| peer.last_sample_at.as_deref())
+        .and_then(|sample| DateTime::parse_from_rfc3339(sample).ok())
+        .is_some_and(|sample| {
+            now.signed_duration_since(sample.with_timezone(&Utc)) > chrono::Duration::minutes(3)
+        })
+}
+
 pub(super) fn mesh_transport_status_for(
     mesh_enabled: bool,
     peer: Option<&MeshPeerTelemetry>,

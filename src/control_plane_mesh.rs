@@ -19,14 +19,15 @@ use crate::{
     reverse_mesh::{ReverseMeshAssignment, ReverseRelayEnvelope, ReverseRole, route_budget},
 };
 
+mod gate;
 mod reverse;
+mod telemetry;
 mod transport;
 #[cfg(test)]
 pub(crate) use transport::build_mesh_http_client_with_policy;
 pub(crate) use transport::build_unauthenticated_mesh_http_client;
 use transport::join_url;
 pub use transport::{MESH_POOL_IDLE_TIMEOUT, MeshTransportPolicy, build_mesh_http_client};
-
 pub const MESH_FAILURES_BEFORE_OPEN: u8 = 3;
 pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(30),
@@ -36,7 +37,6 @@ pub const MESH_BACKOFF: [Duration; 5] = [
     Duration::from_secs(300),
 ];
 const LEGACY_CAPABILITIES_PROBE_PATH: &str = "/api/admin/_internal/capabilities";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshAttemptDecision {
     Attempt,
@@ -44,7 +44,6 @@ pub enum MeshAttemptDecision {
     SkipOpen,
     Disabled,
 }
-
 #[derive(Debug, Clone, Default)]
 struct PeerCircuit {
     failures: u8,
@@ -52,7 +51,6 @@ struct PeerCircuit {
     retry_at: Option<Instant>,
     half_open_in_flight: bool,
 }
-
 #[derive(Clone, Default)]
 pub struct PeerCircuitBreakers {
     peers: Arc<Mutex<BTreeMap<String, PeerCircuit>>>,
@@ -262,38 +260,46 @@ pub struct MeshAwareHttpClient {
     mesh: reqwest::Client,
     public_direct: reqwest::Client,
     circuits: PeerCircuitBreakers,
+    cluster_mesh_enabled: Arc<AtomicBool>,
+    cluster_mesh_epoch: Arc<std::sync::atomic::AtomicU64>,
+    mesh_epoch_reset_lock: Arc<Mutex<u64>>,
+    mesh_gate_lock: Arc<tokio::sync::RwLock<()>>,
     telemetry: Option<MeshTelemetryHandle>,
     reverse_routes: Arc<RwLock<BTreeMap<String, ReverseRelayRoute>>>,
     reverse_enabled: Arc<AtomicBool>,
     local_reverse_relay: Option<reverse::LocalReverseRelay>,
+    #[cfg(test)]
+    mesh_observation_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 impl MeshAwareHttpClient {
     pub fn new(direct: reqwest::Client) -> Self {
         Self::from_transport_clients(direct.clone(), direct)
     }
-
     pub fn from_transport_clients(mesh: reqwest::Client, public_direct: reqwest::Client) -> Self {
         Self {
             mesh,
             public_direct,
             circuits: PeerCircuitBreakers::default(),
+            cluster_mesh_enabled: Arc::new(AtomicBool::new(true)),
+            cluster_mesh_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            mesh_epoch_reset_lock: Arc::new(Mutex::new(0)),
+            mesh_gate_lock: Arc::new(tokio::sync::RwLock::new(())),
             telemetry: None,
             reverse_routes: Arc::new(RwLock::new(BTreeMap::new())),
             reverse_enabled: Arc::new(AtomicBool::new(true)),
             local_reverse_relay: None,
+            #[cfg(test)]
+            mesh_observation_pause: None,
         }
     }
-
     pub fn direct(&self) -> &reqwest::Client {
         &self.public_direct
     }
-
     pub fn with_mesh_observability(mut self, telemetry: MeshTelemetryHandle) -> Self {
         self.telemetry = Some(telemetry);
         self
     }
-
     pub fn with_circuits(mut self, circuits: PeerCircuitBreakers) -> Self {
         self.circuits = circuits;
         self
@@ -312,7 +318,21 @@ impl MeshAwareHttpClient {
         self.reverse_enabled = gate;
         self
     }
-
+    #[cfg(test)]
+    fn with_mesh_observation_pause(
+        mut self,
+        observed: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        self.mesh_observation_pause = Some((observed, release));
+        self
+    }
+    /// Attach the Raft-authoritative cluster Mesh switch. Public direct requests remain
+    /// available when this gate is closed.
+    pub fn with_mesh_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.cluster_mesh_enabled = gate;
+        self
+    }
     pub async fn set_reverse_route(
         &self,
         target_node_id: impl Into<String>,
@@ -323,7 +343,6 @@ impl MeshAwareHttpClient {
             .await
             .insert(target_node_id.into(), route);
     }
-
     pub async fn clear_reverse_route(&self, target_node_id: &str) {
         self.reverse_routes.write().await.remove(target_node_id);
     }
@@ -337,6 +356,52 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        let cluster_mesh_enabled = self.observe_mesh_gate().await;
+        match path {
+            PeerDirectPath::RealityMesh if !cluster_mesh_enabled => {
+                return Err(MeshRequestError::InvalidTarget(
+                    "Mesh is disabled by the cluster gate".into(),
+                ));
+            }
+            PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
+                MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
+            })?,
+            PeerDirectPath::ApiBaseUrl => &peer.public_base_url,
+        };
+        let mesh_gate_read = self.mesh_read_guard_for_path(path).await?;
+        self.send_peer_direct_request_with_gate(
+            peer,
+            path,
+            request,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
+            mesh_gate_read,
+        )
+        .await
+    }
+
+    /// Sends over one direct path with a caller-owned Mesh admission guard. The guard may
+    /// span asynchronous target preparation for dedicated probes and is never reacquired.
+    pub(crate) async fn send_peer_direct_request_with_gate(
+        &self,
+        peer: &MeshPeerTarget,
+        path: PeerDirectPath,
+        request: MeshRequest,
+        cluster_ca_key_pem: &str,
+        cluster_ca_cert_pem: &str,
+        mesh_gate_read: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    ) -> Result<reqwest::Response, MeshRequestError> {
+        let mesh_gate_read = if path == PeerDirectPath::RealityMesh && mesh_gate_read.is_none() {
+            Some(self.mesh_direct_read_guard().await?)
+        } else {
+            mesh_gate_read
+        };
+        if path == PeerDirectPath::RealityMesh && !self.cluster_mesh_enabled.load(Ordering::Acquire)
+        {
+            return Err(MeshRequestError::InvalidTarget(
+                "Mesh is disabled by the cluster gate".into(),
+            ));
+        }
         let base_url = match path {
             PeerDirectPath::RealityMesh => peer.mesh_base_url.as_deref().ok_or_else(|| {
                 MeshRequestError::InvalidTarget("Mesh is unavailable".to_string())
@@ -373,6 +438,10 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        let response = match mesh_gate_read {
+            Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
+            None => response,
+        };
         if path == PeerDirectPath::RealityMesh
             && mesh_transport_observation(&response).protocol != MeshTransportProtocol::H2
         {
@@ -415,7 +484,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 false,
-                true,
+                gate::PublicFallbackPolicy::Always,
             )
             .await?
         {
@@ -452,7 +521,7 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 true,
-                false,
+                gate::PublicFallbackPolicy::WhenMeshDisabled,
             )
             .await?;
         Ok(match response {
@@ -470,7 +539,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         allow_unsigned_not_found: bool,
-        allow_public_fallback: bool,
+        public_fallback_policy: gate::PublicFallbackPolicy,
     ) -> Result<PeerRequestResponse, MeshRequestError> {
         let started = Instant::now();
         let context = RequestContext::now(
@@ -480,119 +549,65 @@ impl MeshAwareHttpClient {
             peer.node_id.clone(),
             request.request_id.clone(),
         );
-        let mesh_enabled = peer.mesh_base_url.is_some();
-        let decision = self
-            .circuits
-            .before_attempt(&peer.node_id, mesh_enabled)
-            .await;
+        let cluster_mesh_enabled = self.observe_mesh_gate().await;
+        #[cfg(test)]
+        if let Some((observed, release)) = &self.mesh_observation_pause {
+            observed.notify_one();
+            release.notified().await;
+        }
+        let mut allow_public_fallback = public_fallback_policy.allows(cluster_mesh_enabled)
+            || (request.path_and_query == LEGACY_CAPABILITIES_PROBE_PATH
+                && !matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable));
+        let mesh_enabled = peer.mesh_base_url.is_some() && cluster_mesh_enabled;
+        let (decision, mesh_epoch) = self.before_mesh_attempt(&peer.node_id, mesh_enabled).await;
         let mut fallback = matches!(decision, MeshAttemptDecision::SkipOpen);
         let mut mesh_outcome_ambiguous = false;
 
         if matches!(
             decision,
             MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
-        ) {
+        ) && !self.mesh_attempt_is_current(mesh_epoch).await
+        {
+            fallback = true;
+        }
+        if matches!(
+            decision,
+            MeshAttemptDecision::Attempt | MeshAttemptDecision::Probe
+        ) && !fallback
+        {
             let mesh_url = join_url(
                 peer.mesh_base_url.as_deref().expect("checked enabled"),
                 &request.path_and_query,
                 false,
             )?;
             let budget = mesh_attempt_budget(request.total_budget);
-            match tokio::time::timeout(
-                budget,
-                signed_send(
-                    &self.mesh,
-                    &mesh_url,
+            match self
+                .attempt_mesh_request(
+                    peer,
                     &request,
                     &context,
+                    &mesh_url,
+                    budget,
+                    mesh_epoch,
+                    started,
+                    allow_unsigned_not_found,
                     cluster_ca_key_pem,
                     cluster_ca_cert_pem,
-                ),
-            )
-            .await
+                )
+                .await?
             {
-                Ok(Ok((response, verified))) => {
-                    let transport = mesh_transport_observation(&response);
-                    if transport.protocol != MeshTransportProtocol::H2 {
-                        self.circuits.release_half_open_probe(&peer.node_id).await;
-                        self.record_mesh_protocol_failure(peer).await;
-                        self.record_terminal_failure(peer).await;
-                        return Err(MeshRequestError::Protocol(
-                            "Mesh response did not use HTTP/2".to_string(),
-                        ));
-                    }
-                    if let Some(acknowledgement) =
-                        response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
-                    {
-                        let ack = match acknowledgement.to_str() {
-                            Ok(ack) => ack,
-                            Err(_) => {
-                                self.circuits.release_half_open_probe(&peer.node_id).await;
-                                self.record_mesh_protocol_failure(peer).await;
-                                self.record_terminal_failure(peer).await;
-                                return Err(MeshRequestError::Protocol(
-                                    "Mesh response carries a malformed signed acknowledgement"
-                                        .to_string(),
-                                ));
-                            }
-                        };
-                        if let Err(error) = internal_auth::verify_ack_v2(
-                            cluster_ca_key_pem,
-                            cluster_ca_cert_pem,
-                            &verified,
-                            &peer.node_id,
-                            response.status().as_u16(),
-                            ack,
-                        ) {
-                            self.circuits.release_half_open_probe(&peer.node_id).await;
-                            self.record_mesh_protocol_failure(peer).await;
-                            self.record_terminal_failure(peer).await;
-                            return Err(error.into());
-                        }
-                        self.record_mesh_success(peer, started, &request, transport)
-                            .await;
-                        return Ok(PeerRequestResponse::Verified(response));
-                    }
-                    // An unknown nested admin route bypasses `admin_auth`, so a predecessor's
-                    // route miss is intentionally the only accepted acknowledgement-less reply.
-                    if allow_unsigned_not_found
-                        && response.status() == reqwest::StatusCode::NOT_FOUND
-                    {
-                        self.record_mesh_success(peer, started, &request, transport)
-                            .await;
-                        return Ok(PeerRequestResponse::PredecessorNotFound);
-                    }
-                    self.circuits.release_half_open_probe(&peer.node_id).await;
-                    self.record_mesh_protocol_failure(peer).await;
-                    self.record_terminal_failure(peer).await;
-                    return Err(MeshRequestError::Protocol(
-                        "Mesh response did not carry a valid signed acknowledgement".to_string(),
-                    ));
-                }
-                Ok(Err(error)) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        MeshPeerReason::TransportError,
-                        error.to_string(),
-                    )
-                    .await;
+                gate::MeshAttemptResult::Fallback { ambiguous } => {
                     fallback = true;
-                    mesh_outcome_ambiguous = true;
+                    mesh_outcome_ambiguous |= ambiguous;
                 }
-                Err(_) => {
-                    self.record_mesh_transport_failure(
-                        peer,
-                        MeshPeerReason::TransportTimeout,
-                        "Mesh request timed out".to_string(),
-                    )
-                    .await;
-                    fallback = true;
-                    mesh_outcome_ambiguous = true;
-                }
+                gate::MeshAttemptResult::Response(response) => return Ok(response),
             }
         }
 
-        let should_try_reverse = !request.path_and_query.contains("/mesh/reverse-relay")
+        let should_try_reverse = cluster_mesh_enabled
+            && !request.path_and_query.contains("/mesh/reverse-relay")
+            && (request.path_and_query != LEGACY_CAPABILITIES_PROBE_PATH
+                || matches!(peer.mesh_reason, MeshPeerReason::MeshAvailable))
             && (mesh_outcome_ambiguous
                 || !mesh_enabled
                 || matches!(decision, MeshAttemptDecision::SkipOpen));
@@ -616,6 +631,9 @@ impl MeshAwareHttpClient {
                 reverse::ReverseRequestClass::Control
             };
             for candidate in reverse_route.candidates() {
+                if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+                    break;
+                }
                 let elapsed = started.elapsed();
                 let remaining = request.total_budget.saturating_sub(elapsed);
                 let reverse_budget = route_budget(request.total_budget)
@@ -623,6 +641,7 @@ impl MeshAwareHttpClient {
                 if reverse_budget.is_zero() {
                     break;
                 }
+                let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
                 match self
                     .send_reverse_relay(
                         peer,
@@ -636,7 +655,7 @@ impl MeshAwareHttpClient {
                     .await
                 {
                     Ok(response) => {
-                        self.record_reverse_sample(peer, started, &request, &candidate)
+                        self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
                             .await;
                         return Ok(PeerRequestResponse::Verified(response));
                     }
@@ -648,12 +667,30 @@ impl MeshAwareHttpClient {
                             ?error,
                             "reverse relay attempt failed"
                         );
-                        mesh_outcome_ambiguous = true;
+                        // A gate rejection happens before dispatch and cannot make the outcome
+                        // unknown. Transport failures remain ambiguous.
+                        if !matches!(
+                            error,
+                            MeshRequestError::Reverse(ref reason)
+                                if reason == "cluster Mesh gate is disabled"
+                        ) {
+                            mesh_outcome_ambiguous = true;
+                        }
                     }
                 }
             }
         }
-
+        if !allow_public_fallback
+            && matches!(
+                public_fallback_policy,
+                gate::PublicFallbackPolicy::WhenMeshDisabled
+            )
+        {
+            // A gate transition may have happened after the initial observation while the
+            // circuit decision or reverse route was waiting. Re-observe before refusing the
+            // public compatibility path so a disabled gate cannot strand the probe.
+            allow_public_fallback = !self.observe_mesh_gate().await;
+        }
         if !allow_public_fallback {
             self.record_terminal_failure(peer).await;
             return Err(if matches!(decision, MeshAttemptDecision::Disabled) {
@@ -667,6 +704,7 @@ impl MeshAwareHttpClient {
             return Err(MeshRequestError::OutcomeUnknown);
         }
         let elapsed = started.elapsed();
+        let public_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
         let remaining = request.total_budget.saturating_sub(elapsed);
         if remaining.is_zero() {
             self.record_terminal_failure(peer).await;
@@ -681,42 +719,41 @@ impl MeshAwareHttpClient {
                 cluster_ca_key_pem,
                 cluster_ca_cert_pem,
                 remaining,
+                allow_unsigned_not_found,
             )
             .await
         {
             Ok(response) => response,
             Err(error) => {
-                self.record_sample(
+                self.record_public_outcome_for_epoch(
                     peer,
-                    telemetry_sample(
-                        TelemetryPath::Public,
-                        false,
-                        started.elapsed(),
-                        fallback,
-                        request.updates_active_path,
-                        None,
-                    ),
+                    started,
+                    false,
+                    fallback,
+                    request.updates_active_path,
+                    public_epoch,
                 )
                 .await;
                 return Err(error);
             }
         };
-        self.record_sample(
+        if allow_unsigned_not_found
+            && response.status() == reqwest::StatusCode::NOT_FOUND
+            && !response
+                .headers()
+                .contains_key(internal_auth::INTERNAL_ACK_HEADER)
+        {
+            return Ok(PeerRequestResponse::PredecessorNotFound);
+        }
+        self.record_public_outcome_for_epoch(
             peer,
-            telemetry_sample(
-                TelemetryPath::Public,
-                true,
-                started.elapsed(),
-                fallback,
-                request.updates_active_path,
-                None,
-            ),
+            started,
+            true,
+            fallback,
+            request.updates_active_path,
+            public_epoch,
         )
         .await;
-        if fallback && peer.mesh_base_url.is_some() {
-            self.record_mesh_reason(peer, MeshPeerReason::FallbackActive)
-                .await;
-        }
         Ok(PeerRequestResponse::Verified(response))
     }
 
@@ -726,7 +763,12 @@ impl MeshAwareHttpClient {
         started: Instant,
         request: &MeshRequest,
         transport: MeshTransportObservation,
+        epoch: u64,
+        _gate_guard: &tokio::sync::OwnedRwLockReadGuard<()>,
     ) {
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
         let breaker_state = self.circuits.record_success(&peer.node_id).await;
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
@@ -747,6 +789,23 @@ impl MeshAwareHttpClient {
         .await;
     }
 
+    async fn reject_mesh_response(
+        &self,
+        peer: &MeshPeerTarget,
+        epoch: u64,
+        response: reqwest::Response,
+        gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+        error: MeshRequestError,
+    ) -> MeshRequestError {
+        drop(response);
+        drop(gate_guard);
+        self.release_half_open_probe_for_epoch(&peer.node_id, epoch)
+            .await;
+        self.record_mesh_protocol_failure(peer, epoch).await;
+        self.record_terminal_failure_for_epoch(peer, epoch).await;
+        error
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn send_public_signed(
         &self,
@@ -756,6 +815,7 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
         budget: Duration,
+        allow_unsigned_not_found: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
         let (response, verified) = tokio::time::timeout(
             budget,
@@ -771,14 +831,15 @@ impl MeshAwareHttpClient {
         .await
         .map_err(|_| MeshRequestError::OutcomeUnknown)?
         .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
-        let acknowledgement = response
-            .headers()
-            .get(internal_auth::INTERNAL_ACK_HEADER)
-            .ok_or_else(|| {
-                MeshRequestError::Protocol(
-                    "public response has no signed acknowledgement".to_string(),
-                )
-            })?;
+        let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
+        else {
+            if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(response);
+            }
+            return Err(MeshRequestError::Protocol(
+                "public response has no signed acknowledgement".to_string(),
+            ));
+        };
         let ack = acknowledgement.to_str().map_err(|_| {
             MeshRequestError::Protocol(
                 "public response carries a malformed signed acknowledgement".to_string(),
@@ -808,6 +869,11 @@ impl MeshAwareHttpClient {
         budget: Duration,
         class: reverse::ReverseRequestClass,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "cluster Mesh gate is disabled".to_string(),
+            ));
+        }
         if route.assignment.target_node_id != peer.node_id
             || !route
                 .assignment
@@ -908,6 +974,8 @@ impl MeshAwareHttpClient {
                     &outer_headers,
                     budget,
                     request.allow_ambiguous_fallback,
+                    &self.cluster_mesh_enabled,
+                    &self.mesh_gate_lock,
                 )
                 .await?,
             );
@@ -921,6 +989,8 @@ impl MeshAwareHttpClient {
                 &outer_headers,
                 mesh_budget,
                 request.allow_ambiguous_fallback,
+                &self.cluster_mesh_enabled,
+                &self.mesh_gate_lock,
             )
             .await
             {
@@ -953,6 +1023,8 @@ impl MeshAwareHttpClient {
                     &outer_headers,
                     remaining,
                     request.allow_ambiguous_fallback,
+                    &self.cluster_mesh_enabled,
+                    &self.mesh_gate_lock,
                 )
                 .await?
             }
@@ -988,85 +1060,6 @@ impl MeshAwareHttpClient {
             inner_ack,
         )?;
         Ok(reverse::attach_reverse_slot(response, reverse_slot))
-    }
-    async fn record_mesh_transport_failure(
-        &self,
-        peer: &MeshPeerTarget,
-        mesh_reason: MeshPeerReason,
-        reason: String,
-    ) {
-        let state = self.circuits.record_retryable_failure(&peer.node_id).await;
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                false,
-                Duration::ZERO,
-                false,
-                false,
-                None,
-            ),
-        )
-        .await;
-        self.record_mesh_reason(peer, mesh_reason).await;
-        if let Some(telemetry) = &self.telemetry {
-            let message = if state == BreakerState::Open {
-                format!("Mesh breaker opened after retryable transport failure: {reason}")
-            } else {
-                format!("Mesh transport failure: {reason}")
-            };
-            let _ = telemetry
-                .set_breaker(
-                    &peer.node_id,
-                    state,
-                    (state == BreakerState::Open).then_some(message),
-                )
-                .await;
-        }
-    }
-    async fn record_mesh_protocol_failure(&self, peer: &MeshPeerTarget) {
-        self.record_sample(
-            peer,
-            telemetry_sample(
-                TelemetryPath::Mesh,
-                false,
-                Duration::ZERO,
-                false,
-                false,
-                None,
-            ),
-        )
-        .await;
-        self.record_mesh_reason(peer, MeshPeerReason::ProtocolRejected)
-            .await;
-    }
-
-    async fn record_mesh_reason(&self, peer: &MeshPeerTarget, reason: MeshPeerReason) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .set_mesh_reason(&peer.node_id, peer.mesh_base_url.as_deref(), reason)
-                .await;
-        }
-    }
-
-    async fn record_sample(&self, peer: &MeshPeerTarget, sample: MeshTelemetrySample) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_sample(&peer.node_id, &peer.node_name, sample)
-                .await;
-        }
-        if sample.success && sample.path == TelemetryPath::Mesh {
-            self.record_mesh_reason(peer, MeshPeerReason::MeshAvailable)
-                .await;
-        }
-    }
-
-    async fn record_terminal_failure(&self, peer: &MeshPeerTarget) {
-        if let Some(telemetry) = &self.telemetry {
-            let _ = telemetry
-                .record_terminal_failure(&peer.node_id, &peer.node_name)
-                .await;
-        }
     }
 }
 
@@ -1189,5 +1182,11 @@ fn signed_headers(
     .expect("locally signed internal request verifies");
     (headers, verified)
 }
+#[cfg(test)]
+mod mesh_fallback_tests;
+#[cfg(test)]
+mod mesh_gate_tests;
+#[cfg(test)]
+mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;

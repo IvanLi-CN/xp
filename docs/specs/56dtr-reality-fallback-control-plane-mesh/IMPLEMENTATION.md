@@ -12,6 +12,35 @@
 
 - internal-auth v2、purpose-separated ack（完整 canonical request digest）与 strict bodyless
   canary ingress。
+- Raft `PersistedState.mesh_enabled` provides the cluster-level Mesh switch. The authenticated
+  `/api/admin/mesh/config` endpoint replicates the setting, and every process-wide Mesh client
+  observes the same gate. State-machine apply and snapshot installation publish the persisted
+  value immediately, before any deferred reconcile work; disabled clusters use only registered
+  public HTTPS peer origins. The write barrier probes every current voter and learner so an older
+  learner cannot reject the replicated command; stale learners must be upgraded or retired first.
+  Mesh and Reverse requests share a read-side admission barrier and remain concurrent; gate
+  transitions take the exclusive write side and wait for admitted requests to finish.
+  Non-bootstrap nodes hold the local gate closed until the first authenticated Raft state or
+  snapshot is applied, so a joining node cannot emit Mesh traffic from the default local state.
+  Snapshots carry an explicit `mesh_state_applied` payload marker plus snapshot identity fields.
+  Snapshot installation persists a fail-closed pending marker before replacing state, writes data
+  before metadata, and clears the pending marker only after both files are durable. Readers reject
+  mismatched identity pairs and authenticated markers without identity evidence.
+  Legacy startup migration only reopens the gate when that marker is true and its snapshot metadata
+  exactly matches the persisted applied log; WAL-only, metadata-only, missing, malformed, or legacy
+  snapshots remain fail-closed. This avoids treating a locally-built Blank/Membership snapshot as
+  authenticated state while allowing purged-WAL nodes to recover from a verified snapshot.
+  Modern metadata markers remain valid after later log progress: when a snapshot exists, startup
+  validates the data/meta pair and authenticated marker without requiring the older snapshot
+  watermark to equal the current applied log. Bootstrap startup also retries the local node
+  upsert when Raft is initialized but the state machine still lacks that node, closing the
+  initialization crash window; the retry is admitted only while the local node is still a current
+  voter, so a learner or retired bootstrap identity cannot be resurrected. Capability
+  probes for missing, invalid, ambiguous, or unsupported Mesh targets use the registered public
+  origin directly, while an unsigned predecessor `404` still enters the existing legacy
+  `/api/capabilities` compatibility path; these probes never use a Reverse relay assignment.
+  Capability probes keep predecessor 404 compatibility over that public path, while dedicated
+  Reverse health and link probes are suppressed until the gate is enabled again.
 - per-peer HTTPS Mesh transport、breaker、fallback 与本地 telemetry；Raft、leader forwarding、
   node history、探针、管理 fan-out 与 SSE 共用进程级传输 bundle。托管 Mesh 使用 HTTP/2-only
   client，每 origin 最多保留一条 idle connection，idle timeout 为 120 秒；公网 direct/relay

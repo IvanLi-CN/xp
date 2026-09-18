@@ -38,9 +38,9 @@ mod unreachable_voter_eviction;
 use mesh::{
     MeshCapabilityProbeResponse, admin_get_mesh_status, admin_internal_mesh_health,
     admin_internal_raft_client_write, admin_internal_reverse_probe, admin_internal_reverse_relay,
-    admin_run_mesh_probes, send_mesh_internal_capability_read, send_mesh_internal_read,
-    send_mesh_internal_request, spawn_mesh_probe_worker, spawn_reverse_assignment_worker,
-    spawn_reverse_link_probe_worker,
+    admin_run_mesh_probes, admin_update_mesh_config, send_mesh_internal_capability_read,
+    send_mesh_internal_read, send_mesh_internal_request, spawn_mesh_probe_worker,
+    spawn_reverse_assignment_worker, spawn_reverse_link_probe_worker,
 };
 use node_delete::AdminNodeDeletePreviewEndpoint;
 use resource_alerts::admin_get_alerts_response;
@@ -951,6 +951,7 @@ pub fn build_router(
     raft_rpc: Option<openraft::Raft<crate::raft::types::TypeConfig>>,
     geo_db_update: GeoDbUpdateHandle,
 ) -> Router {
+    let mesh_gate = reconcile.mesh_gate();
     let mesh_telemetry =
         MeshTelemetryHandle::load(&config.data_dir).expect("load local mesh telemetry");
     let node_cert_pem = cluster
@@ -961,6 +962,7 @@ pub fn build_router(
         .expect("read node private key");
     let mesh_client = build_mesh_http_client(&cluster_ca_pem, &node_cert_pem, &node_key_pem)
         .expect("build Mesh transport clients")
+        .with_mesh_gate(mesh_gate)
         .with_mesh_observability(mesh_telemetry.clone());
     build_router_with_mesh_telemetry(
         config,
@@ -1003,6 +1005,9 @@ pub fn build_router_with_mesh_telemetry(
     mesh_telemetry: MeshTelemetryHandle,
     mesh_client: MeshAwareHttpClient,
 ) -> Router {
+    let mesh_client = mesh_client
+        .with_mesh_gate_epoch(reconcile.mesh_gate(), reconcile.mesh_gate_epoch())
+        .with_mesh_gate_lock(reconcile.mesh_gate_lock());
     let cluster_id = cluster.cluster_id.clone();
     let internal_idempotency = InternalIdempotencyLedger::load(&config.data_dir)
         .expect("load local internal idempotency ledger");
@@ -1198,6 +1203,7 @@ pub fn build_router_with_mesh_telemetry(
         .route("/tools/mihomo/redact", post(admin_redact_mihomo_source))
         .route("/upgrade/status", get(admin_get_upgrade_status))
         .route("/upgrade/start", post(admin_start_upgrade))
+        .route("/mesh/config", put(admin_update_mesh_config))
         .route("/mesh/status", get(admin_get_mesh_status))
         .route("/mesh/probes", post(admin_run_mesh_probes))
         .route("/status/events", get(admin_stream_status_events))
@@ -1898,7 +1904,8 @@ async fn admin_internal_reverse_readiness(
         })
     };
     let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
-    let reverse_ready = state.reconcile.reverse_gate().load(Ordering::Acquire)
+    let reverse_ready = state.reconcile.mesh_gate().load(Ordering::Acquire)
+        && state.reconcile.reverse_gate().load(Ordering::Acquire)
         && xray_ready
         && managed_vless_endpoint;
     let health_verified = state.reverse_relay.has_any_health_verified().await;
@@ -1934,7 +1941,8 @@ async fn admin_internal_capabilities(
     response.reverse_mesh = Some(capabilities::ReverseMeshReadiness {
         xray_ready,
         managed_vless_endpoint,
-        reverse_ready: state.reconcile.reverse_gate().load(Ordering::Acquire)
+        reverse_ready: state.reconcile.mesh_gate().load(Ordering::Acquire)
+            && state.reconcile.reverse_gate().load(Ordering::Acquire)
             && xray_ready
             && managed_vless_endpoint,
         health_verified,

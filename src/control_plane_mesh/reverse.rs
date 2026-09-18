@@ -95,6 +95,46 @@ pub(super) fn attach_reverse_slot(
     reqwest::Response::from(response)
 }
 
+pub(super) fn attach_mesh_gate(
+    response: reqwest::Response,
+    gate_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> reqwest::Response {
+    let response_url = response.url().clone();
+    let response: axum::http::Response<reqwest::Body> = response.into();
+    let (mut parts, body) = response.into_parts();
+    let url_extensions = axum::http::Response::builder()
+        .url(response_url)
+        .body(())
+        .expect("response URL extension builder")
+        .into_parts()
+        .0
+        .extensions;
+    let mut extensions = url_extensions;
+    extensions.extend(std::mem::take(&mut parts.extensions));
+    parts.extensions = extensions;
+    let body = body.into_data_stream();
+    let guarded_body = futures_util::stream::unfold(
+        (body, Some(gate_guard)),
+        |(mut body, mut gate_guard)| async move {
+            match body.next().await {
+                Some(Ok(item)) => Some((Ok(item), (body, gate_guard))),
+                Some(Err(error)) => {
+                    drop(gate_guard.take());
+                    Some((Err(error), (body, gate_guard)))
+                }
+                None => {
+                    drop(gate_guard.take());
+                    None
+                }
+            }
+        },
+    );
+    reqwest::Response::from(axum::http::Response::from_parts(
+        parts,
+        reqwest::Body::wrap_stream(guarded_body),
+    ))
+}
+
 impl MeshAwareHttpClient {
     pub(super) async fn record_reverse_sample(
         &self,
@@ -102,7 +142,14 @@ impl MeshAwareHttpClient {
         started: Instant,
         request: &MeshRequest,
         route: &ReverseRelayRoute,
+        epoch: u64,
     ) {
+        // Every successful reverse response carries the Mesh read guard in its body stream.
+        // Do not reacquire the write-preferring lock here: a queued gate transition would
+        // otherwise wait for this response while this task waits for another read lock.
+        if !self.mesh_gate_matches(epoch) {
+            return;
+        }
         if let Some(telemetry) = &self.telemetry {
             let _ = telemetry
                 .record_reverse_sample(crate::mesh_telemetry::ReverseRelayTelemetrySample {
@@ -147,6 +194,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
@@ -213,6 +265,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<(), MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
@@ -249,6 +306,11 @@ impl MeshAwareHttpClient {
         cluster_ca_key_pem: &str,
         cluster_ca_cert_pem: &str,
     ) -> Result<reqwest::Response, MeshRequestError> {
+        if !self.cluster_mesh_enabled.load(Ordering::Acquire) {
+            return Err(MeshRequestError::Reverse(
+                "reverse relay is disabled by the cluster Mesh gate".to_string(),
+            ));
+        }
         if !self.reverse_enabled.load(Ordering::Acquire) {
             return Err(MeshRequestError::Reverse(
                 "reverse relay is disabled until local Xray readiness recovers".to_string(),
@@ -276,6 +338,7 @@ impl MeshAwareHttpClient {
             if budget.is_zero() {
                 break;
             }
+            let mesh_epoch = self.cluster_mesh_epoch.load(Ordering::Acquire);
             match self
                 .send_reverse_relay(
                     peer,
@@ -289,7 +352,7 @@ impl MeshAwareHttpClient {
                 .await
             {
                 Ok(response) => {
-                    self.record_reverse_sample(peer, started, &request, &candidate)
+                    self.record_reverse_sample(peer, started, &request, &candidate, mesh_epoch)
                         .await;
                     return Ok(response);
                 }
@@ -302,6 +365,7 @@ impl MeshAwareHttpClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn send_outer_request(
     client: &reqwest::Client,
     request: &MeshRequest,
@@ -309,7 +373,15 @@ pub(super) async fn send_outer_request(
     headers: &axum::http::HeaderMap,
     budget: Duration,
     allow_ambiguous_fallback: bool,
+    cluster_mesh_enabled: &Arc<AtomicBool>,
+    mesh_gate_lock: &Arc<tokio::sync::RwLock<()>>,
 ) -> Result<reqwest::Response, MeshRequestError> {
+    let gate_guard = mesh_gate_lock.clone().read_owned().await;
+    if !cluster_mesh_enabled.load(Ordering::Acquire) {
+        return Err(MeshRequestError::Reverse(
+            "cluster Mesh gate is disabled".to_string(),
+        ));
+    }
     let mut builder = client
         .request(request.method.clone(), url)
         .body(request.body.clone());
@@ -317,9 +389,9 @@ pub(super) async fn send_outer_request(
         builder = builder.header(name, value);
     }
     match tokio::time::timeout(budget, builder.send()).await {
-        Ok(result) => {
-            result.map_err(|error| public_transport_error(error, allow_ambiguous_fallback))
-        }
+        Ok(result) => result
+            .map(|response| attach_mesh_gate(response, gate_guard))
+            .map_err(|error| public_transport_error(error, allow_ambiguous_fallback)),
         Err(_) if allow_ambiguous_fallback => Err(MeshRequestError::Reverse(
             "reverse outer request timed out before response headers".to_string(),
         )),
