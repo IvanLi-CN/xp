@@ -113,8 +113,11 @@ Issue #248 要求一个或多个节点保存完整历史，多仓库最终收敛
   严格连续，不能用该标记伪造缺失 payload。
 - repair 响应可携带由实际返回 segments、unavailable IDs、gaps 和 truncation 标记计算的
   `response_id`。接收方对旧服务端缺失该字段的响应自行计算同一摘要；wire-bounded response
-  发生中断时，只有摘要相同的重试可继续使用未消费的 stream allowance，任何不匹配都 fail
-  closed。已完整处理的 response 清除其摘要，但不会关闭其他尚未消费的 stream allowance。
+  发生中断时，相同摘要可继续使用未消费的 stream allowance。若服务端明确拒绝旧摘要，或旧
+  服务端直接返回了不同摘要，接收方只清除持久化的 response identity，并用同一 pending
+  segment 集合重新请求；cursor、gap、tombstone 和 handoff 状态保持不变。响应自身的摘要
+  与其内容不一致、含未知段或无法推进时仍 fail closed。已完整处理的 response 清除其摘要，
+  但不会关闭其他尚未消费的 stream allowance。
 - repair 响应在请求段已按保留策略淘汰时，以 `unavailable_segment_ids` 明确列出该请求中的
   不可恢复 ID；catch-up 只移除服务端明确报告的 ID，未知或重复 ID 必须 fail closed。该
   状态不伪造 segment payload、不推进 source ACK，也不删除本地未确认历史。

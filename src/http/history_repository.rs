@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use axum::{
     Json,
     extract::{Extension, Query},
@@ -980,6 +981,11 @@ fn repository_error(error: RepositoryRuntimeError) -> ApiError {
         RepositoryRuntimeError::StateLimitExceeded => {
             ApiError::conflict("repository history capacity is exhausted")
         }
+        RepositoryRuntimeError::RepairResponseChanged => ApiError::new(
+            "repository_repair_response_changed",
+            StatusCode::CONFLICT,
+            "repository repair response changed before completion",
+        ),
         RepositoryRuntimeError::Storage(error) => ApiError::internal(error),
     }
 }

@@ -886,8 +886,10 @@ Notes:
   Live source delivery, ordinary anti-entropy, and later repair pages still reject sequence gaps;
   do not bypass that boundary by editing the checkpoint.
   XP binds an interrupted repair response to a digest of the actual returned batch. An older peer
-  that omits the digest remains compatible because XP calculates it locally; a changed retry fails
-  closed instead of advancing or relaxing another stream.
+  that omits the digest remains compatible because XP calculates it locally. If the serving batch
+  changes while the same pending IDs are durable, XP clears only the stale response identity and
+  retries that page; cursors, gaps, tombstones, and handoff state are not edited. A malformed,
+  non-advancing, or otherwise unrequested response still fails closed.
   A retained repair segment may belong to a node that has since been retired from cluster
   membership. Replay validates that identity against the deterministic cluster material and
   accepts the signed historical row; live source delivery remains limited to current pinned

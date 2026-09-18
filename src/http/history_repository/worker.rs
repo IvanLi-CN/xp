@@ -829,6 +829,16 @@ async fn replicate_peer(
                             repair_body,
                         )
                         .await?;
+                    let response_id = repair.response_id_digest()?;
+                    if repair
+                        .response_id
+                        .as_ref()
+                        .is_some_and(|provided| provided != &response_id)
+                    {
+                        anyhow::bail!(
+                            "repository repair response identity does not match its content"
+                        );
+                    }
                     if pending_segment_ids.is_empty() {
                         if !repair.segments.is_empty() {
                             anyhow::bail!(
@@ -836,6 +846,14 @@ async fn replicate_peer(
                             )
                         }
                     } else {
+                        let response_advances = !repair.segments.is_empty()
+                            || !repair.unavailable_segment_ids.is_empty();
+                        if !response_advances {
+                            anyhow::bail!(concat!(
+                                "repository repair response did not advance the requested ",
+                                "segment set"
+                            ));
+                        }
                         remove_delivered_repair_segment_ids(
                             &mut pending_segment_ids,
                             repair
@@ -844,6 +862,10 @@ async fn replicate_peer(
                                 .map(|segment| segment.wire.as_slice()),
                         )?;
                     }
+                    remove_unavailable_repair_segment_ids(
+                        &mut pending_segment_ids,
+                        &repair.unavailable_segment_ids,
+                    )?;
                     if repair.segments.is_empty() && !repair.gaps.is_empty() {
                         state
                             .repository_replica

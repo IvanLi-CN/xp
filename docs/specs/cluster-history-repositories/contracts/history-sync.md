@@ -53,8 +53,13 @@ are interpreted as an empty list, preserving wire compatibility.
 
 A repair response may add `response_id`, a digest of its segments, unavailable
 IDs, gaps, and truncation flag. The receiver derives the same digest when an
-older peer omits it, so an interrupted truncated response can be retried only
-with identical content. A supplied mismatch or a changed retry fails closed.
+older peer omits it. An interrupted response with the same digest reuses its
+stream allowance. If the serving repository explicitly rejects a stale digest,
+or an older peer returns changed content, the receiver clears only the persisted
+response identity and retries the same pending segment set; its cursor, gaps,
+tombstones, and handoff state remain durable. A response whose supplied digest
+does not match its content, contains unknown IDs, or does not advance the pending
+set still fails closed.
 
 A temporary transport failure, exhausted retry schedule, or full bounded outbox
 creates Recoverable Backlog, never a permanent gap. A Source or any ready

@@ -104,8 +104,11 @@
   a different ID at the same cursor remains a fork candidate.
   The checkpoint records a content-derived repair response identity while that response is
   incomplete. New peers return the identity; compatibility with older peers derives it from the
-  received batch. A changed retry is rejected before another stream can consume the allowance; a
-  completed bounded response does not consume another stream's allowance before its page drains.
+  received batch. If the serving response changes while the same pending page is durable, the
+  worker clears only the stale identity and retries that page without it; pending IDs, cursors,
+  gaps, tombstones, and tiered handoff state are preserved. A response/content digest mismatch,
+  unknown segment, or non-advancing response remains rejected. A completed bounded response does
+  not consume another stream's allowance before its page drains.
 - Deep-verification partition summaries are persisted in the replica control snapshot and rebuilt
   from SQLite in bounded keyset pages. Until the rebuild reaches the end of the row set, a summary
   returns segment and gap metadata with `partitions_included=false`; this keeps catch-up available

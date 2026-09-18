@@ -136,6 +136,23 @@ impl RepositoryReplicaRuntime {
         self.persist_control_state()
     }
 
+    pub(crate) fn clear_initial_peer_retained_anchor_response_id(
+        &mut self,
+        peer_node_id: &str,
+    ) -> Result<(), RepositoryRuntimeError> {
+        let Some(checkpoint) = self.snapshot.initial_peer_backfills.get_mut(peer_node_id) else {
+            return Ok(());
+        };
+        if checkpoint
+            .retained_anchor_repair_response_id
+            .take()
+            .is_some()
+        {
+            self.persist_control_state()?;
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn update_initial_peer_summary_checkpoint_with_retained_anchors(
         &mut self,
