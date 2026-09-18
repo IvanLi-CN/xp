@@ -61,7 +61,7 @@ xp-ops container run
 - When `XP_ACCESS_HOST` is unset, it is derived from `XP_CLOUDFLARE_HOSTNAME` or `XP_API_BASE_URL`
 - `XP_VLESS_CANARY_BIND` defaults to `127.0.0.1:39043`
 - When `XP_CLOUDFLARE_DDNS_ENABLED=true`, `xp-ops container run` writes the runtime DDNS token file before starting `xp` and injects the resolved `XP_CLOUDFLARE_DDNS_ZONE_ID`
-- Xray defaults to `GOMEMLIMIT=16MiB` and `GOGC=50`; cloudflared defaults to
+- Xray defaults to `GOMEMLIMIT=32MiB` and `GOGC=100`; cloudflared defaults to
   `GOMEMLIMIT=12MiB`, `GOGC=50`, and disabled management diagnostics. The image
   contains the same pinned, checksummed low-memory binaries published with the
   XP Release. Explicit `XP_XRAY_*` and `XP_CLOUDFLARED_*` values override the
