@@ -315,6 +315,12 @@ last 200 global transitions in `${XP_DATA_DIR}/mesh/telemetry.json`; inspect the
 `GET /api/admin/mesh/status` or the Web **System status** page. `POST /api/admin/mesh/probes`
 accepts only current remote member IDs.
 
+When a public edge returns `502`, `503`, `504`, `520`, `522`, `523`, or `524` without the XP
+signed acknowledgement, Raft-idempotent, read-only, and durable-history requests retry twice with
+`200ms` and `500ms` backoff inside their existing request budget. Authentication failures,
+protocol errors, and any response carrying a signed acknowledgement are never retried. A final
+timeout remains outcome-unknown and does not advance a history ACK.
+
 An owner-approved private ingress exception may intentionally have no managed-default
 VLESS/REALITY endpoint. Its registered `api_base_url` is then a private control-plane origin for
 the lifecycle capability barrier only: XP sends the same signed `mesh-v2` request and requires a

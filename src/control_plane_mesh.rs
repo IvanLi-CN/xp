@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod gate;
+mod retry;
 mod reverse;
 mod telemetry;
 mod transport;
@@ -424,20 +425,17 @@ impl MeshAwareHttpClient {
             PeerDirectPath::RealityMesh => &self.mesh,
             PeerDirectPath::ApiBaseUrl => &self.public_direct,
         };
-        let (response, verified) = tokio::time::timeout(
+        let (response, verified) = retry::signed_send_with_public_gateway_retries(
+            client,
+            &url,
+            &request,
+            &context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
             request.total_budget,
-            signed_send(
-                client,
-                &url,
-                &request,
-                &context,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-            ),
+            request.allow_ambiguous_fallback && path == PeerDirectPath::ApiBaseUrl,
         )
-        .await
-        .map_err(|_| MeshRequestError::OutcomeUnknown)?
-        .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        .await?;
         let response = match mesh_gate_read {
             Some(gate_guard) => reverse::attach_mesh_gate(response, gate_guard),
             None => response,
@@ -817,20 +815,17 @@ impl MeshAwareHttpClient {
         budget: Duration,
         allow_unsigned_not_found: bool,
     ) -> Result<reqwest::Response, MeshRequestError> {
-        let (response, verified) = tokio::time::timeout(
+        let (response, verified) = retry::signed_send_with_public_gateway_retries(
+            &self.public_direct,
+            url,
+            request,
+            context,
+            cluster_ca_key_pem,
+            cluster_ca_cert_pem,
             budget,
-            signed_send(
-                &self.public_direct,
-                url,
-                request,
-                context,
-                cluster_ca_key_pem,
-                cluster_ca_cert_pem,
-            ),
+            request.allow_ambiguous_fallback,
         )
-        .await
-        .map_err(|_| MeshRequestError::OutcomeUnknown)?
-        .map_err(|error| public_transport_error(error, request.allow_ambiguous_fallback))?;
+        .await?;
         let Some(acknowledgement) = response.headers().get(internal_auth::INTERNAL_ACK_HEADER)
         else {
             if allow_unsigned_not_found && response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -1190,3 +1185,5 @@ mod mesh_gate_tests;
 mod peer_target_edge_tests;
 #[cfg(test)]
 mod peer_target_tests;
+#[cfg(test)]
+mod retry_tests;
