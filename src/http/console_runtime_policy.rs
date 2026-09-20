@@ -74,7 +74,7 @@ fn local_node_supports_static_console() -> bool {
 }
 
 async fn remote_node_supports_static_console(state: &AppState, node: &crate::domain::Node) -> bool {
-    let response = match send_mesh_internal_capability_read(
+    let (response, deadline) = match send_mesh_internal_capability_read(
         state,
         &state.mesh_client,
         node,
@@ -82,7 +82,7 @@ async fn remote_node_supports_static_console(state: &AppState, node: &crate::dom
     )
     .await
     {
-        Ok(MeshCapabilityProbeResponse::Verified(response)) => response,
+        Ok(MeshCapabilityProbeResponse::Verified { response, deadline }) => (response, deadline),
         Ok(MeshCapabilityProbeResponse::PredecessorNotFound) | Err(_) => return false,
     };
 
@@ -90,7 +90,8 @@ async fn remote_node_supports_static_console(state: &AppState, node: &crate::dom
         return false;
     }
 
-    super::bounded_json::read_bounded_internal_json::<CapabilityResponse>(response)
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    super::bounded_json::read_bounded_internal_json::<CapabilityResponse>(response, remaining)
         .await
         .ok()
         .is_some_and(|body| {

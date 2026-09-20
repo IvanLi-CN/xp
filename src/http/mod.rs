@@ -184,7 +184,6 @@ pub struct ApiError {
     status: StatusCode,
     details: Map<String, Value>,
 }
-
 impl ApiError {
     fn new(code: &'static str, status: StatusCode, message: impl Into<String>) -> Self {
         Self {
@@ -4574,7 +4573,7 @@ async fn require_node_mihomo_resource_policy_capability(
                     format!("node is unreachable: {}", error.message),
                 )
             })?;
-    let MeshCapabilityProbeResponse::Verified(response) = response else {
+    let MeshCapabilityProbeResponse::Verified { response, deadline } = response else {
         return Err(ApiError::new(
             "node_capability_unavailable",
             StatusCode::CONFLICT,
@@ -4588,7 +4587,8 @@ async fn require_node_mihomo_resource_policy_capability(
             "target node capability probe was not accepted; upgrade it first",
         ));
     }
-    let body = bounded_json::read_bounded_internal_json::<Value>(response)
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let body = bounded_json::read_bounded_internal_json::<Value>(response, remaining)
         .await
         .map_err(|_| {
             ApiError::new(

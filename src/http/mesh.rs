@@ -530,7 +530,7 @@ pub(super) async fn reverse_candidate_readiness(
                 && state.reconcile.reverse_gate().load(Ordering::Acquire),
         );
     }
-    let response = match send_mesh_internal_capability_read(
+    let (response, deadline) = match send_mesh_internal_capability_read(
         state,
         &state.mesh_client,
         node,
@@ -538,13 +538,15 @@ pub(super) async fn reverse_candidate_readiness(
     )
     .await?
     {
-        MeshCapabilityProbeResponse::Verified(response) => response,
+        MeshCapabilityProbeResponse::Verified { response, deadline } => (response, deadline),
         MeshCapabilityProbeResponse::PredecessorNotFound => return Ok(false),
     };
-    let body =
-        super::bounded_json::read_bounded_internal_json::<ReverseCapabilityResponse>(response)
-            .await
-            .map_err(ApiError::gateway_timeout)?;
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let body = super::bounded_json::read_bounded_internal_json::<ReverseCapabilityResponse>(
+        response, remaining,
+    )
+    .await
+    .map_err(ApiError::gateway_timeout)?;
     Ok(body
         .reverse_mesh
         .as_ref()
@@ -666,17 +668,20 @@ async fn reconcile_reverse_assignments(
                 }
                 Err(error) => return Err(ApiError::gateway_timeout(error.message)),
             };
-            let response = match response {
-                MeshCapabilityProbeResponse::Verified(response) => response,
+            let (response, deadline) = match response {
+                MeshCapabilityProbeResponse::Verified { response, deadline } => {
+                    (response, deadline)
+                }
                 MeshCapabilityProbeResponse::PredecessorNotFound => {
                     return Err(ApiError::conflict(
                         "reverse assignment requires signed capability support on every voter",
                     ));
                 }
             };
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             let body = match super::bounded_json::read_bounded_internal_json::<
                 ReverseCapabilityResponse,
-            >(response)
+            >(response, remaining)
             .await
             {
                 Ok(body) => body,
@@ -1446,7 +1451,10 @@ pub(super) async fn send_mesh_internal_read(
 }
 /// Reads the one predecessor-compatible capability route.
 pub(super) enum MeshCapabilityProbeResponse {
-    Verified(reqwest::Response),
+    Verified {
+        response: reqwest::Response,
+        deadline: std::time::Instant,
+    },
     PredecessorNotFound,
 }
 pub(super) async fn send_mesh_internal_capability_read(
@@ -1474,6 +1482,7 @@ pub(super) async fn send_mesh_internal_capability_read(
         sender_id: state.cluster.node_id.clone(),
         updates_active_path: true,
     };
+    let deadline = std::time::Instant::now() + budget;
     let response = client
         .send_peer_request_allowing_legacy_not_found(
             &peer,
@@ -1485,7 +1494,7 @@ pub(super) async fn send_mesh_internal_capability_read(
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(match response {
         crate::control_plane_mesh::CapabilityProbeResponse::Verified(response) => {
-            MeshCapabilityProbeResponse::Verified(response)
+            MeshCapabilityProbeResponse::Verified { response, deadline }
         }
         crate::control_plane_mesh::CapabilityProbeResponse::PredecessorNotFound => {
             MeshCapabilityProbeResponse::PredecessorNotFound

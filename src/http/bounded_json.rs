@@ -1,10 +1,12 @@
 use futures_util::StreamExt as _;
 use serde::de::DeserializeOwned;
+use std::time::Duration;
 
 pub(super) const MAX_INTERNAL_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 
 pub(super) async fn read_bounded_internal_json<T: DeserializeOwned>(
     response: reqwest::Response,
+    timeout: Duration,
 ) -> Result<T, String> {
     if response
         .content_length()
@@ -15,7 +17,7 @@ pub(super) async fn read_bounded_internal_json<T: DeserializeOwned>(
             MAX_INTERNAL_CAPABILITY_RESPONSE_BYTES
         ));
     }
-    let body = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let body = tokio::time::timeout(timeout, async {
         let mut body = Vec::with_capacity(
             response
                 .content_length()
