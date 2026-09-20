@@ -521,9 +521,11 @@ fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
             target.to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some(xp_test_fixtures::address_documentation192_0_2_30().to_owned()),
+                public_ipv6: Some(xp_test_fixtures::private_ipv6_address().to_owned()),
                 selected_public_ip: Some(
                     xp_test_fixtures::address_documentation192_0_2_30().to_owned(),
                 ),
+                last_success_ipv6_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 ..Default::default()
             },
@@ -557,6 +559,12 @@ fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
                 .unwrap(),
             remote_port: 50002,
         },
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: xp_test_fixtures::private_ipv6_address().parse().unwrap(),
+            remote_port: 50003,
+        },
     ];
 
     let report = build_mesh_connection_usage(
@@ -573,8 +581,8 @@ fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
 
     let reverse = report.reverse_by_peer.get(target).expect("target peer");
     assert_eq!(reverse.physical_connections, None);
-    assert_eq!(report.local.user_inbound.connections, Some(2));
-    assert_eq!(report.local.user_inbound.unknown, Some(2));
+    assert_eq!(report.local.user_inbound.connections, Some(3));
+    assert_eq!(report.local.user_inbound.unknown, Some(3));
     assert_eq!(report.local.user_inbound.external, Some(0));
 }
 

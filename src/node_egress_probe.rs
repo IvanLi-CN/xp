@@ -298,7 +298,17 @@ fn invalidate_previous_classification_on_selected_ip_change(
     selected_public_ip: &Option<String>,
     next: &mut NodeEgressProbeState,
 ) {
-    if selected_public_ip.is_none() || *selected_public_ip == previous.selected_public_ip {
+    if selected_public_ip.is_none() {
+        if previous.selected_public_ip.is_some() {
+            next.selected_public_ip = None;
+            next.geo = Default::default();
+            next.subscription_region = NodeSubscriptionRegion::Other;
+            next.last_success_at = None;
+            next.classification_invalidated_at = Some(next.checked_at.clone());
+        }
+        return;
+    }
+    if *selected_public_ip == previous.selected_public_ip {
         return;
     }
     next.selected_public_ip = selected_public_ip.clone();
@@ -444,6 +454,30 @@ mod tests {
             Some(xp_test_fixtures::recent_timestamp())
         );
         assert!(next.geo.country.is_empty());
+    }
+
+    #[test]
+    fn missing_public_ip_invalidates_previous_classification() {
+        let previous = NodeEgressProbeState {
+            selected_public_ip: Some(
+                xp_test_fixtures::address_documentation203_0_113_8().to_owned(),
+            ),
+            subscription_region: NodeSubscriptionRegion::Us,
+            last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+            ..NodeEgressProbeState::default()
+        };
+        let mut next = previous.clone();
+        next.checked_at = xp_test_fixtures::recent_timestamp().to_owned();
+
+        invalidate_previous_classification_on_selected_ip_change(&previous, &None, &mut next);
+
+        assert!(next.selected_public_ip.is_none());
+        assert_eq!(next.subscription_region, NodeSubscriptionRegion::Other);
+        assert!(next.last_success_at.is_none());
+        assert_eq!(
+            next.classification_invalidated_at.as_deref(),
+            Some(xp_test_fixtures::recent_timestamp())
+        );
     }
 
     #[tokio::test]

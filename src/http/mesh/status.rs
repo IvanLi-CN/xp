@@ -439,10 +439,16 @@ fn matching_connections_for_link(
             })
             .cloned()
             .collect::<BTreeSet<_>>();
-        if matched.is_empty()
-            && target_ips
-                .iter()
-                .any(|ip| !egress_ip_is_unique_for_node(egress_ips, target_node_id, ip))
+        let ambiguous = connections.iter().any(|connection| {
+            local_ports.contains(&connection.local_port)
+                && target_ips.contains(&connection.remote_ip)
+                && !egress_ip_is_unique_for_node(egress_ips, target_node_id, &connection.remote_ip)
+        });
+        if ambiguous
+            || (matched.is_empty()
+                && target_ips
+                    .iter()
+                    .any(|ip| !egress_ip_is_unique_for_node(egress_ips, target_node_id, ip)))
         {
             None
         } else {
@@ -464,10 +470,20 @@ fn matching_connections_for_link(
             })
             .cloned()
             .collect::<BTreeSet<_>>();
-        if matched.is_empty()
-            && rendezvous_ips
-                .iter()
-                .any(|ip| !egress_ip_is_unique_for_node(egress_ips, rendezvous_node_id, ip))
+        let ambiguous = connections.iter().any(|connection| {
+            rendezvous_ports.contains(&connection.remote_port)
+                && rendezvous_ips.contains(&connection.remote_ip)
+                && !egress_ip_is_unique_for_node(
+                    egress_ips,
+                    rendezvous_node_id,
+                    &connection.remote_ip,
+                )
+        });
+        if ambiguous
+            || (matched.is_empty()
+                && rendezvous_ips
+                    .iter()
+                    .any(|ip| !egress_ip_is_unique_for_node(egress_ips, rendezvous_node_id, ip)))
         {
             None
         } else {
