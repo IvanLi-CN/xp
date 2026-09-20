@@ -22,6 +22,7 @@ use crate::{
     state::NodeEgressProbeState,
     tcp_connection_usage::{EstablishedTcpConnection, collect_established_tcp_connections},
 };
+pub(super) use bootstrap_status::active_bootstrap_marker;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct AdminMeshTransportStatus {
@@ -250,7 +251,12 @@ fn build_mesh_connection_usage_with_bootstrap(
         .collect();
 
     let mut reverse_by_peer = reverse_by_peer;
-    bootstrap_status::add_bootstrap_status(&mut reverse_by_peer, local_node_id, bootstrap);
+    bootstrap_status::add_bootstrap_status(
+        &mut reverse_by_peer,
+        local_node_id,
+        bootstrap,
+        supported,
+    );
 
     MeshConnectionUsageReport {
         local: AdminMeshConnectionUsage {
@@ -287,10 +293,17 @@ fn egress_ips_by_node(
         .filter(|(_, probe)| !is_node_egress_probe_stale(probe, now))
         .filter_map(|(node_id, probe)| {
             let mut ips = BTreeSet::new();
-            if let Some(value) = probe.selected_public_ip.as_deref()
-                && let Ok(ip) = IpAddr::from_str(value)
+            for value in [
+                probe.public_ipv4.as_deref(),
+                probe.public_ipv6.as_deref(),
+                probe.selected_public_ip.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
             {
-                ips.insert(ip);
+                if let Ok(ip) = IpAddr::from_str(value) {
+                    ips.insert(ip);
+                }
             }
             (!ips.is_empty()).then_some((node_id.clone(), ips))
         })

@@ -314,8 +314,8 @@ export const BootstrapReverse: Story = {
 	args: {
 		status: {
 			...demoReverseMeshStatus,
-			peers: demoReverseMeshStatus.peers.map((peer, index) =>
-				index === 0 && peer.reverse_underlay
+			peers: demoReverseMeshStatus.peers.map((peer) =>
+				peer.node_id === "node-osaka-1" && peer.reverse_underlay
 					? {
 							...peer,
 							reverse_underlay: {

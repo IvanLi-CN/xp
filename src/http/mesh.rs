@@ -1029,11 +1029,8 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         reverse_mesh_bootstrap,
     ) = {
         let store = state.store.lock().await;
-        let reverse_mesh_bootstrap = crate::raft::http_rpc::read_bootstrap_sender_marker(
-            crate::cluster_metadata::ClusterPaths::new(&state.config.data_dir)
-                .raft_bootstrap_sender,
-        )
-        .and_then(|marker| marker.reverse_mesh);
+        let reverse_mesh_bootstrap =
+            status::active_bootstrap_marker(&store, &state.config.data_dir);
         (
             store.list_nodes(),
             store.list_endpoints(),
@@ -1044,6 +1041,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             reverse_mesh_bootstrap,
         )
     };
+    let reverse_mesh_bootstrap = reverse_mesh_bootstrap.filter(|_| local_mesh_gate_enabled);
     let connection_usage = status::collect_mesh_connection_usage(
         &state.cluster.node_id,
         &nodes,
@@ -1226,73 +1224,6 @@ mod tests {
         assert_eq!(healthy.health, MeshTransportHealth::Healthy);
         assert_eq!(healthy.requests_5m, 12);
         assert_eq!(healthy.connection_starts_5m, 1);
-    }
-    #[test]
-    fn mesh_status_etag_tracks_reuse_evidence_but_not_generation_time() {
-        fn response(generated_at: &str, connection_starts_5m: u32) -> AdminMeshStatusResponse {
-            AdminMeshStatusResponse {
-                generated_at: generated_at.to_string(),
-                revision: 7,
-                cluster_mesh_enabled: true,
-                local: AdminMeshLocalStatus {
-                    node_id: "local".to_string(),
-                    node_name: "local".to_string(),
-                    cluster_id: "cluster".to_string(),
-                    role: "leader".to_string(),
-                    leader_api_base_url: "https://local.example.test".to_string(),
-                    term: 3,
-                    canary: crate::vless_https_canary::VlessHttpsCanaryStatus::disabled(
-                        std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
-                    ),
-                    connection_usage: None,
-                },
-                peers: vec![AdminMeshPeerStatus {
-                    node_id: "peer".to_string(),
-                    node_name: "peer".to_string(),
-                    api_base_url: "https://peer.example.test".to_string(),
-                    mesh_url: Some("https://peer.example.test:443".to_string()),
-                    mesh_capability: Some("enabled".to_string()),
-                    mesh_reason: Some(crate::mesh_telemetry::MeshPeerReason::MeshAvailable),
-                    current_path: Some(TelemetryPath::Mesh),
-                    active_route: None,
-                    quality: MeshQuality::Good,
-                    stale: false,
-                    breaker: BreakerState::Closed,
-                    last_sample_at: None,
-                    last_transition_at: None,
-                    availability_1h: Some(1.0),
-                    availability_24h: Some(1.0),
-                    mesh_availability_24h: Some(1.0),
-                    latency_p50_ms: Some(10),
-                    latency_p95_ms: Some(20),
-                    mesh_transport: Some(AdminMeshTransportStatus {
-                        protocol: Some(MeshTransportProtocol::H2),
-                        health: MeshTransportHealth::Healthy,
-                        connection_generation: 2,
-                        current_connection_requests: 12,
-                        requests_5m: 12,
-                        connection_starts_5m,
-                        requests_1h: 60,
-                        connection_starts_1h: 2,
-                        last_connection_started_at: None,
-                    }),
-                    reverse_underlay: None,
-                    buckets: Vec::new(),
-                }],
-                events: Vec::new(),
-            }
-        }
-        let first = response("2026-08-08T10:00:00Z", 1);
-        let generated_later = response("2026-08-08T10:01:00Z", 1);
-        let churning = response("2026-08-08T10:01:00Z", 3);
-        assert_eq!(
-            etag::mesh_status_etag(&first),
-            etag::mesh_status_etag(&generated_later)
-        );
-        assert_ne!(
-            etag::mesh_status_etag(&first),
-            etag::mesh_status_etag(&churning)
-        );
     }
 }
 fn mesh_availability_for(

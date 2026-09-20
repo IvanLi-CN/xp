@@ -940,12 +940,14 @@ mod tests {
         writeln!(file, "sl local_address rem_address st").unwrap();
         writeln!(
             file,
-            "0: 00000000000000000000000000000000:01BB 00000000000000000000000000000001:01BC 01"
+            "0: 00000000000000000000000000000000:01BB 00000000000000000000000001000000:01BC 01"
         )
         .unwrap();
         let mut connections = Vec::new();
         collect_established_tcp_connections_from_path(temp.path(), &mut connections).unwrap();
         assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].local_ip, "::".parse::<IpAddr>().unwrap());
+        assert_eq!(connections[0].remote_ip, "::1".parse::<IpAddr>().unwrap());
         assert_eq!(connections[0].local_port, 443);
 
         let malformed = tempfile::NamedTempFile::new().unwrap();
