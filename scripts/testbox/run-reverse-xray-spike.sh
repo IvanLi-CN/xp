@@ -10,13 +10,18 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
 REPO_NAME="$(basename "$REPO_ROOT")"
+if ! git diff --quiet HEAD -- || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+  echo "reverse-xray-spike requires a clean worktree" >&2
+  exit 1
+fi
 PATH_HASH8="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib, os, sys
 print(hashlib.sha256(os.path.realpath(sys.argv[1]).encode()).hexdigest()[:8])
 PY
 )"
-GIT_SHA="$(git rev-parse --short HEAD)"
-RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA}_reverse"
+GIT_SHA="$(git rev-parse HEAD)"
+GIT_SHA_SHORT="$(git rev-parse --short HEAD)"
+RUN_ID="$(date -u +%Y%m%d_%H%M%S)_${GIT_SHA_SHORT}_reverse"
 REMOTE_BASE="/srv/codex/workspaces/$USER"
 REMOTE_WORKSPACE="$REMOTE_BASE/${REPO_NAME}__${PATH_HASH8}"
 REMOTE_RUN="$REMOTE_WORKSPACE/runs/$RUN_ID"
@@ -74,4 +79,4 @@ ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \
   XP_REVERSE_XRAY_SOCKS_ADDR=127.0.0.1:\$REVERSE_SPIKE_PORTAL_PORT \
   XP_REVERSE_XRAY_TARGET_CONTAINER=\$(docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml ps -q target) \
   cargo test --test reverse_xray_spike -- --ignored"
-echo "reverse-xray-spike=pass xray=26.3.27 expected_commit=d2758a023cd7f4174a5a5fa4ff66e487d4342ba0"
+echo "reverse-xray-spike=pass xray=26.3.27 tested_commit=$GIT_SHA"
