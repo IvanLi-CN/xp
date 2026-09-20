@@ -305,13 +305,25 @@ async fn exercise_transport(
 fn target_established_underlays(remote_port: u16) -> usize {
     let container = std::env::var("XP_REVERSE_XRAY_TARGET_CONTAINER")
         .expect("XP_REVERSE_XRAY_TARGET_CONTAINER is set by the testbox runner");
-    let output = Command::new("docker")
+    let pid = Command::new("docker")
+        .args(["inspect", "--format", "{{.State.Pid}}", &container])
+        .output()
+        .expect("inspect target container PID");
+    assert!(
+        pid.status.success(),
+        "target container inspect failed: {}",
+        String::from_utf8_lossy(&pid.stderr)
+    );
+    let pid = String::from_utf8_lossy(&pid.stdout).trim().to_owned();
+    let output = Command::new("nsenter")
         .args([
-            "exec",
-            &container,
-            "sh",
-            "-c",
-            "cat /proc/net/tcp /proc/net/tcp6",
+            "-t",
+            &pid,
+            "-n",
+            "--",
+            "cat",
+            "/proc/net/tcp",
+            "/proc/net/tcp6",
         ])
         .output()
         .expect("read target container TCP table");
