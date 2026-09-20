@@ -113,7 +113,7 @@ mod tests {
             primary_node_id: "rendezvous".to_string(),
             standby_node_id: None,
             primary_endpoint: ReverseMeshBootstrapEndpoint {
-                access_host: "rendezvous.example.test".to_string(),
+                access_host: xp_test_fixtures::primary_host().to_owned(),
                 port: 443,
                 server_name: "rendezvous.example.test".to_string(),
                 public_key: "public-key".to_string(),
@@ -149,7 +149,7 @@ mod tests {
             primary_node_id: "rendezvous".to_string(),
             standby_node_id: None,
             primary_endpoint: ReverseMeshBootstrapEndpoint {
-                access_host: "rendezvous.example.test".to_string(),
+                access_host: xp_test_fixtures::primary_host().to_owned(),
                 port: 443,
                 server_name: "rendezvous.example.test".to_string(),
                 public_key: "public-key".to_string(),

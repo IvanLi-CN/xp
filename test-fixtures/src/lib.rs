@@ -51,6 +51,8 @@ struct Addresses {
     private_cidr: String,
     #[serde(rename = "privateIpv6Cidr")]
     private_ipv6_cidr: String,
+    #[serde(rename = "privateIpv6Address")]
+    private_ipv6_address: String,
     loopback: String,
     #[serde(rename = "loopback39043")]
     loopback_39043: String,
@@ -279,6 +281,10 @@ pub fn secondary_ipv4() -> &'static str {
 
 pub fn tertiary_ipv4() -> &'static str {
     &catalog().addresses.tertiary_ipv4
+}
+
+pub fn private_ipv6_address() -> &'static str {
+    &catalog().addresses.private_ipv6_address
 }
 
 pub fn loopback_address() -> &'static str {

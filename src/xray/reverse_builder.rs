@@ -61,7 +61,7 @@ mod tests {
             "reverse-user",
             "00000000-0000-4000-8000-000000000001",
             &ReverseVlessEndpoint {
-                access_host: "rendezvous.example.test".to_string(),
+                access_host: xp_test_fixtures::primary_host().to_owned(),
                 endpoint,
                 target_port: 443,
                 target_public_key_b64url_nopad: "Pf8FreUQ5qeklEqp0sUrQPztRLmqQacHXfCfhxmmKm4"

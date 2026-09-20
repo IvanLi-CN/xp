@@ -107,7 +107,7 @@ describe("AdminMeshPeerSchema", () => {
 			...peerFixture(),
 			reverse_underlay: {
 				logical_links: 1,
-				physical_connections: 3,
+				physical_connections: fixtureCatalog.number.value3(),
 				limit_per_link: 2,
 				state: "over_limit",
 				links: [
@@ -116,7 +116,7 @@ describe("AdminMeshPeerSchema", () => {
 						rendezvous_node_id: "node-rendezvous",
 						role: "primary",
 						generation: fixtureCatalog.number.value4(),
-						connections: 3,
+						connections: fixtureCatalog.number.value3(),
 						limit: 2,
 						state: "over_limit",
 					},

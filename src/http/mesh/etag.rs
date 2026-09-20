@@ -16,7 +16,7 @@ mod tests {
     use crate::mesh_telemetry::{MeshTransportHealth, MeshTransportProtocol};
 
     #[test]
-    fn mesh_status_etag_tracks_stable_evidence_and_sampling_time() {
+    fn mesh_status_etag_tracks_reuse_evidence_but_not_generation_time() {
         fn response(generated_at: &str, connection_starts_5m: u32) -> AdminMeshStatusResponse {
             AdminMeshStatusResponse {
                 generated_at: generated_at.to_string(),
