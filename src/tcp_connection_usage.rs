@@ -138,7 +138,7 @@ pub struct TcpConnectionEndpointView {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EstablishedTcpConnection {
     pub local_ip: IpAddr,
     pub local_port: u16,

@@ -82,11 +82,12 @@ export const AdminConnectionSourceSchema = z.object({
 	classification: AdminConnectionClassificationSchema,
 });
 export const AdminUserInboundStatusSchema = z.object({
-	connections: z.number().int().nonnegative(),
-	external: z.number().int().nonnegative(),
-	cluster_peer: z.number().int().nonnegative(),
-	unknown: z.number().int().nonnegative(),
+	connections: z.number().int().nonnegative().nullable(),
+	external: z.number().int().nonnegative().nullable(),
+	cluster_peer: z.number().int().nonnegative().nullable(),
+	unknown: z.number().int().nonnegative().nullable(),
 	sources: z.array(AdminConnectionSourceSchema),
+	sources_truncated: z.boolean().default(false),
 });
 export const AdminMeshConnectionUsageSchema = z.object({
 	supported: z.boolean(),
@@ -105,13 +106,13 @@ export const AdminReverseLinkStatusSchema = z.object({
 	rendezvous_node_id: z.string(),
 	role: z.enum(["primary", "standby", "bootstrap"]),
 	generation: z.number().int().nonnegative(),
-	connections: z.number().int().nonnegative(),
+	connections: z.number().int().nonnegative().nullable(),
 	limit: z.number().int().positive(),
 	state: AdminReverseUnderlayStateSchema,
 });
 export const AdminReverseUnderlayStatusSchema = z.object({
 	logical_links: z.number().int().nonnegative(),
-	physical_connections: z.number().int().nonnegative(),
+	physical_connections: z.number().int().nonnegative().nullable(),
 	limit_per_link: z.number().int().positive(),
 	state: AdminReverseUnderlayStateSchema,
 	links: z.array(AdminReverseLinkStatusSchema),

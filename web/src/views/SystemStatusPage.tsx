@@ -225,10 +225,15 @@ function connectionStateVariant(
 function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 	const usage = status.local.connection_usage;
 	const reversePeers = status.peers.filter((peer) => peer.reverse_underlay);
-	const reverseConnections = reversePeers.reduce(
-		(total, peer) => total + (peer.reverse_underlay?.physical_connections ?? 0),
-		0,
-	);
+	const reverseConnections = reversePeers.every(
+		(peer) => peer.reverse_underlay?.physical_connections !== null,
+	)
+		? reversePeers.reduce(
+				(total, peer) =>
+					total + (peer.reverse_underlay?.physical_connections ?? 0),
+				0,
+			)
+		: null;
 	const reverseLinks = reversePeers.reduce(
 		(total, peer) => total + (peer.reverse_underlay?.logical_links ?? 0),
 		0,
@@ -242,9 +247,9 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 	);
 	const userInboundDetail = usage
 		? [
-				`${usage.user_inbound.connections} total`,
-				`${usage.user_inbound.cluster_peer} cluster peer`,
-				`${usage.user_inbound.unknown} unknown`,
+				`${usage.user_inbound.connections ?? "Unavailable"} total`,
+				`${usage.user_inbound.cluster_peer ?? "Unavailable"} cluster peer`,
+				`${usage.user_inbound.unknown ?? "Unavailable"} unknown`,
 			].join(" · ")
 		: "New API capability required";
 
@@ -278,7 +283,9 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 					label="Reverse underlay · internal"
 					value={
 						reverseLinks > 0
-							? `${reverseConnections} / ${reverseLimit}`
+							? reverseConnections === null
+								? "Unavailable"
+								: `${reverseConnections} / ${reverseLimit}`
 							: "None"
 					}
 					detail={`${reverseLinks} logical Link${reverseLinks === 1 ? "" : "s"} · max 2 each`}
@@ -286,7 +293,11 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 				<StatusFact
 					label="User inbound · external"
 					value={
-						usage ? `${usage.user_inbound.external} external` : "Unavailable"
+						usage
+							? usage.user_inbound.external === null
+								? "Unavailable"
+								: `${usage.user_inbound.external} external`
+							: "Unavailable"
 					}
 					detail={userInboundDetail}
 				/>
@@ -313,8 +324,9 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 									</div>
 									<div className="flex items-center gap-2 font-mono text-xs">
 										<span>
-											{reverse.physical_connections} /{" "}
-											{reverse.limit_per_link * reverse.logical_links}
+											{reverse.physical_connections === null
+												? "Unavailable"
+												: `${reverse.physical_connections} / ${reverse.limit_per_link * reverse.logical_links}`}
 										</span>
 										<Badge
 											variant={connectionStateVariant(reverse.state)}
@@ -334,6 +346,11 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 					<summary className="cursor-pointer text-sm font-medium">
 						Inbound source details
 					</summary>
+					{usage.user_inbound.sources_truncated ? (
+						<p className="mt-2 text-xs text-muted-foreground">
+							Some source addresses omitted after the 128-entry display limit.
+						</p>
+					) : null}
 					<div className="mt-2 divide-y divide-border/70 border-t border-border/70">
 						{usage.user_inbound.sources.map((source) => (
 							<div

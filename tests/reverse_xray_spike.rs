@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{process::Command, time::Duration};
 
 use axum::{Router, routing::get};
 use reqwest::Client;
@@ -229,6 +229,32 @@ async fn exercise_transport(
     assert_eq!(response.version(), reqwest::Version::HTTP_2);
     assert_eq!(response.text().await.expect("H2C body"), "ok");
 
+    let requests = (0..8)
+        .map(|_| {
+            let h2c = h2c.clone();
+            let origin = origin.clone();
+            async move {
+                h2c.get(format!("http://{origin}/health"))
+                    .timeout(Duration::from_secs(5))
+                    .send()
+                    .await
+                    .expect("concurrent Reverse request")
+                    .text()
+                    .await
+                    .expect("concurrent H2C body")
+            }
+        })
+        .collect::<Vec<_>>();
+    let bodies = futures_util::future::join_all(requests).await;
+    assert!(bodies.iter().all(|body| body == "ok"));
+    if transport == VlessRealityTransport::Xhttp {
+        let underlays = target_established_underlays(port);
+        assert!(
+            underlays <= 2,
+            "XHTTP Reverse opened {underlays} target underlays for one logical Link"
+        );
+    }
+
     let blocked = h2c
         .get("http://unmatched.mesh.invalid:443/health")
         .timeout(Duration::from_secs(2))
@@ -274,6 +300,39 @@ async fn exercise_transport(
     )
     .await
     .expect("remove dynamic Rendezvous reverse user");
+}
+
+fn target_established_underlays(remote_port: u16) -> usize {
+    let container = std::env::var("XP_REVERSE_XRAY_TARGET_CONTAINER")
+        .expect("XP_REVERSE_XRAY_TARGET_CONTAINER is set by the testbox runner");
+    let output = Command::new("docker")
+        .args([
+            "exec",
+            &container,
+            "sh",
+            "-c",
+            "cat /proc/net/tcp /proc/net/tcp6",
+        ])
+        .output()
+        .expect("read target container TCP table");
+    assert!(
+        output.status.success(),
+        "target TCP table failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let remote_port = format!("{remote_port:04X}");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .filter(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            fields.get(3) == Some(&"01")
+                && fields
+                    .get(2)
+                    .and_then(|remote| remote.split(':').nth(1))
+                    .is_some_and(|port| port.eq_ignore_ascii_case(&remote_port))
+        })
+        .count()
 }
 
 fn vless_meta(transport: VlessRealityTransport) -> serde_json::Value {

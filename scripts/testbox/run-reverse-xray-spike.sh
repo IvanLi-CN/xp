@@ -72,5 +72,6 @@ ssh -o BatchMode=yes "$TESTBOX" "cd '$REMOTE_RUN' && \
   XP_REVERSE_XRAY_RVS_API_ADDR=127.0.0.1:\$REVERSE_SPIKE_RVS_API_PORT \
   XP_REVERSE_XRAY_TARGET_API_ADDR=127.0.0.1:\$REVERSE_SPIKE_TARGET_API_PORT \
   XP_REVERSE_XRAY_SOCKS_ADDR=127.0.0.1:\$REVERSE_SPIKE_PORTAL_PORT \
+  XP_REVERSE_XRAY_TARGET_CONTAINER=\$(docker compose -p '$COMPOSE_PROJECT' -f scripts/testbox/reverse-xray-spike-compose.yml ps -q target) \
   cargo test --test reverse_xray_spike -- --ignored"
 echo "reverse-xray-spike=pass xray=26.3.27 expected_commit=d2758a023cd7f4174a5a5fa4ff66e487d4342ba0"

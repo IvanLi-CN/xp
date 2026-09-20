@@ -69,6 +69,7 @@ export const demoMeshStatus: AdminMeshStatus = {
 				external: 2,
 				cluster_peer: 0,
 				unknown: 0,
+				sources_truncated: false,
 				sources: [
 					{
 						address: "203.0.113.24",

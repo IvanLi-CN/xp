@@ -115,7 +115,10 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   不表示 TCP socket 数量。新增可选 `peers[].reverse_underlay`，分别返回 logical Link、physical
   underlay、每 Link 上限、generation、role 与 `ok|over_limit|unknown|unavailable` 状态；本机
   `local.connection_usage.user_inbound` 单独返回 `external`、`cluster_peer`、`unknown` 计数及
-  管理员可展开的来源地址明细。System Status 以 `Reverse underlay · internal` 和
+  管理员可展开的来源地址明细。来源地址明细最多保留 128 个聚合来源，并以
+  `sources_truncated=true` 明确表示还有未展开来源。`/proc` 不可读时这些计数为 `null`，而不是
+  零值；过期或缺失的 egress probe 只允许 `unknown`，共享 egress 地址也不得冒充唯一集群节点。
+  Reverse underlay 套接字从 user inbound 统计中排除，避免在两个区域重复计算。System Status 以 `Reverse underlay · internal` 和
   `User inbound · external` 两个独立区域展示，不合并为一个入站总数。超过 2 条只产生诊断状态，
   不自动断链或重启 XP。
 

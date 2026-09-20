@@ -1,0 +1,428 @@
+use std::collections::BTreeMap;
+
+use chrono::{Duration, Utc};
+
+use crate::{
+    domain::{Endpoint, EndpointKind, Node, NodeQuotaReset},
+    mesh_telemetry::{ActiveRouteKind, MeshActiveRoute, MeshPeerReason},
+    reverse_mesh::ReverseMeshAssignment,
+    state::NodeEgressProbeState,
+    tcp_connection_usage::EstablishedTcpConnection,
+};
+
+use super::{AdminReverseUnderlayState, build_mesh_connection_usage, with_assignment};
+
+#[test]
+fn unsupported_transport_keeps_the_legacy_status_reason() {
+    let reason = super::status_mesh_reason(MeshPeerReason::UnsupportedTransport);
+    assert_eq!(reason, MeshPeerReason::InvalidAccessHost);
+    assert_eq!(serde_json::to_value(reason).unwrap(), "invalid_access_host");
+}
+
+#[test]
+fn assignment_enriches_a_direct_route_without_changing_its_kind() {
+    let route = with_assignment(
+        Some(MeshActiveRoute {
+            kind: ActiveRouteKind::RealityDirect,
+            rendezvous: None,
+            rendezvous_role: None,
+            primary_rendezvous: None,
+            standby_rendezvous: None,
+            generation: None,
+            readiness: None,
+        }),
+        Some(&ReverseMeshAssignment {
+            target_node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            generation: 7,
+            membership_revision: 1,
+            primary_node_id: xp_test_fixtures::secondary_node_id().to_owned(),
+            standby_node_id: Some(xp_test_fixtures::tertiary_node_id().to_owned()),
+            credential_epoch: 1,
+        }),
+    )
+    .expect("route remains present");
+
+    assert_eq!(route.kind, ActiveRouteKind::RealityDirect);
+    assert_eq!(
+        route.primary_rendezvous.as_deref(),
+        Some(xp_test_fixtures::secondary_node_id())
+    );
+    assert_eq!(
+        route.standby_rendezvous.as_deref(),
+        Some(xp_test_fixtures::tertiary_node_id())
+    );
+    assert_eq!(route.generation, Some(7));
+}
+
+#[test]
+fn connection_usage_separates_reverse_peers_from_external_users() {
+    let local = "node-local";
+    let peer = "node-peer";
+    let nodes = vec![
+        Node {
+            node_id: local.to_string(),
+            node_name: "local".to_string(),
+            access_host: "local.example.test".to_string(),
+            api_base_url: "https://local.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+        Node {
+            node_id: peer.to_string(),
+            node_name: "peer".to_string(),
+            access_host: "peer.example.test".to_string(),
+            api_base_url: "https://peer.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    ];
+    let mut local_meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    local_meta["managed_default"] = serde_json::json!(true);
+    local_meta["transport"] = serde_json::json!("xhttp");
+    let endpoints = vec![Endpoint {
+        endpoint_id: "endpoint-local".to_string(),
+        node_id: local.to_string(),
+        tag: "local-vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 44444,
+        meta: local_meta,
+    }];
+    let assignments = BTreeMap::from([(
+        peer.to_string(),
+        ReverseMeshAssignment {
+            target_node_id: peer.to_string(),
+            generation: 4,
+            membership_revision: 1,
+            primary_node_id: local.to_string(),
+            standby_node_id: None,
+            credential_epoch: 1,
+        },
+    )]);
+    let now = Utc::now();
+    let fresh_probe_at = (now - Duration::minutes(1)).to_rfc3339();
+    let probes = BTreeMap::from([
+        (
+            local.to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.10".to_string()),
+                last_success_at: Some(fresh_probe_at.clone()),
+                ..Default::default()
+            },
+        ),
+        (
+            peer.to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.20".to_string()),
+                last_success_at: Some(fresh_probe_at),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let connections = vec![
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "198.51.100.20".parse().unwrap(),
+            remote_port: 50001,
+        },
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "198.51.100.20".parse().unwrap(),
+            remote_port: 50002,
+        },
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "198.51.100.20".parse().unwrap(),
+            remote_port: 50003,
+        },
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "203.0.113.24".parse().unwrap(),
+            remote_port: 50004,
+        },
+    ];
+    let report = build_mesh_connection_usage(
+        local,
+        &nodes,
+        &endpoints,
+        &assignments,
+        &probes,
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    let reverse = report.reverse_by_peer.get(peer).unwrap();
+    assert_eq!(reverse.logical_links, 1);
+    assert_eq!(reverse.physical_connections, Some(3));
+    assert!(matches!(
+        reverse.state,
+        AdminReverseUnderlayState::OverLimit
+    ));
+    assert_eq!(report.local.user_inbound.connections, Some(1));
+    assert_eq!(report.local.user_inbound.cluster_peer, Some(0));
+    assert_eq!(report.local.user_inbound.external, Some(1));
+    assert_eq!(report.local.user_inbound.unknown, Some(0));
+    assert!(!report.local.user_inbound.sources_truncated);
+}
+
+#[test]
+fn target_side_standby_link_counts_the_rendezvous_socket() {
+    let local = "node-target";
+    let peer = "node-standby";
+    let now = Utc::now();
+    let fresh = (now - Duration::minutes(1)).to_rfc3339();
+    let nodes = vec![
+        Node {
+            node_id: local.to_string(),
+            node_name: "target".to_string(),
+            access_host: "target.example.test".to_string(),
+            api_base_url: "https://target.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+        Node {
+            node_id: peer.to_string(),
+            node_name: "standby".to_string(),
+            access_host: "standby.example.test".to_string(),
+            api_base_url: "https://standby.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    ];
+    let mut peer_meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    peer_meta["managed_default"] = serde_json::json!(true);
+    peer_meta["transport"] = serde_json::json!("xhttp");
+    let endpoints = vec![Endpoint {
+        endpoint_id: "endpoint-standby".to_string(),
+        node_id: peer.to_string(),
+        tag: "standby-vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 44444,
+        meta: peer_meta,
+    }];
+    let assignments = BTreeMap::from([(
+        local.to_string(),
+        ReverseMeshAssignment {
+            target_node_id: local.to_string(),
+            generation: 9,
+            membership_revision: 1,
+            primary_node_id: "node-primary".to_string(),
+            standby_node_id: Some(peer.to_string()),
+            credential_epoch: 1,
+        },
+    )]);
+    let probes = BTreeMap::from([(
+        peer.to_string(),
+        NodeEgressProbeState {
+            public_ipv4: Some("198.51.100.40".to_string()),
+            last_success_at: Some(fresh),
+            ..Default::default()
+        },
+    )]);
+    let connections = vec![EstablishedTcpConnection {
+        local_ip: "0.0.0.0".parse().unwrap(),
+        local_port: 51000,
+        remote_ip: "198.51.100.40".parse().unwrap(),
+        remote_port: 44444,
+    }];
+
+    let report = build_mesh_connection_usage(
+        local,
+        &nodes,
+        &endpoints,
+        &assignments,
+        &probes,
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    let reverse = report.reverse_by_peer.get(peer).expect("standby peer");
+    assert_eq!(reverse.physical_connections, Some(1));
+    assert_eq!(reverse.links[0].connections, Some(1));
+    assert!(matches!(
+        reverse.links[0].role,
+        crate::reverse_mesh::ReverseRole::Standby
+    ));
+}
+
+#[test]
+fn unsupported_socket_collection_is_explicitly_unavailable() {
+    let report = build_mesh_connection_usage(
+        "node-local",
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        Utc::now(),
+        false,
+        Some("socket inspection unavailable".to_string()),
+        &[],
+    );
+
+    assert!(!report.local.supported);
+    assert_eq!(report.local.user_inbound.connections, None);
+    assert_eq!(report.local.user_inbound.external, None);
+    assert_eq!(report.local.user_inbound.cluster_peer, None);
+    assert_eq!(report.local.user_inbound.unknown, None);
+    assert!(report.local.user_inbound.sources.is_empty());
+}
+
+#[test]
+fn stale_egress_addresses_are_not_used_for_peer_classification() {
+    let now = Utc::now();
+    let probes = BTreeMap::from([(
+        "peer".to_string(),
+        NodeEgressProbeState {
+            public_ipv4: Some("198.51.100.20".to_string()),
+            last_success_at: Some((now - Duration::hours(2)).to_rfc3339()),
+            ..Default::default()
+        },
+    )]);
+    let connections = vec![EstablishedTcpConnection {
+        local_ip: "0.0.0.0".parse().unwrap(),
+        local_port: 44444,
+        remote_ip: "198.51.100.20".parse().unwrap(),
+        remote_port: 50001,
+    }];
+    let endpoint = Endpoint {
+        endpoint_id: "endpoint-local".to_string(),
+        node_id: "local".to_string(),
+        tag: "local-vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 44444,
+        meta: {
+            let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+            meta["managed_default"] = serde_json::json!(true);
+            meta["transport"] = serde_json::json!("xhttp");
+            meta
+        },
+    };
+    let report = build_mesh_connection_usage(
+        "local",
+        &[],
+        &[endpoint],
+        &BTreeMap::new(),
+        &probes,
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    assert_eq!(report.local.user_inbound.external, Some(0));
+    assert_eq!(report.local.user_inbound.cluster_peer, Some(0));
+    assert_eq!(report.local.user_inbound.unknown, Some(1));
+}
+
+#[test]
+fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
+    let now = Utc::now();
+    let fresh = (now - Duration::minutes(1)).to_rfc3339();
+    let probes = BTreeMap::from([
+        (
+            "peer-a".to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.30".to_string()),
+                public_ipv6: Some("2001:db8::30".to_string()),
+                last_success_at: Some(fresh.clone()),
+                ..Default::default()
+            },
+        ),
+        (
+            "peer-b".to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.30".to_string()),
+                last_success_at: Some(fresh),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let connections = vec![
+        EstablishedTcpConnection {
+            local_ip: "::".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "198.51.100.30".parse().unwrap(),
+            remote_port: 50001,
+        },
+        EstablishedTcpConnection {
+            local_ip: "::".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "2001:db8::30".parse().unwrap(),
+            remote_port: 50002,
+        },
+    ];
+    let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    meta["managed_default"] = serde_json::json!(true);
+    meta["transport"] = serde_json::json!("xhttp");
+    let report = build_mesh_connection_usage(
+        "local",
+        &[],
+        &[Endpoint {
+            endpoint_id: "endpoint-local".to_string(),
+            node_id: "local".to_string(),
+            tag: "local-vless".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 44444,
+            meta,
+        }],
+        &BTreeMap::new(),
+        &probes,
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    assert_eq!(report.local.user_inbound.unknown, Some(1));
+    assert_eq!(report.local.user_inbound.cluster_peer, Some(1));
+}
+
+#[test]
+fn inbound_sources_are_bounded_without_losing_category_totals() {
+    let now = Utc::now();
+    let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    meta["managed_default"] = serde_json::json!(true);
+    meta["transport"] = serde_json::json!("xhttp");
+    let connections = (0..(super::MAX_CONNECTION_SOURCES + 7))
+        .map(|index| EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: format!("203.0.113.{}", index + 1).parse().unwrap(),
+            remote_port: 50000 + index as u16,
+        })
+        .collect::<Vec<_>>();
+    let report = build_mesh_connection_usage(
+        "local",
+        &[],
+        &[Endpoint {
+            endpoint_id: "endpoint-local".to_string(),
+            node_id: "local".to_string(),
+            tag: "local-vless".to_string(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 44444,
+            meta,
+        }],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    assert_eq!(report.local.user_inbound.connections, Some(135));
+    assert_eq!(report.local.user_inbound.external, Some(0));
+    assert_eq!(report.local.user_inbound.unknown, Some(135));
+    assert_eq!(
+        report.local.user_inbound.sources.len(),
+        super::MAX_CONNECTION_SOURCES
+    );
+    assert!(report.local.user_inbound.sources_truncated);
+}

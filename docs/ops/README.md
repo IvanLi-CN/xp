@@ -486,7 +486,11 @@ Mesh read-only diagnosis:
 - Treat `reverse_underlay.state=over_limit` as an internal Reverse fan-out defect when its
   `physical_connections` exceeds `limit_per_link`; treat `user_inbound.external` and its source
   list as client traffic. `unknown` means the node cannot classify the source and must not be
-  inferred as either cluster or user traffic.
+  inferred as either cluster or user traffic. `user_inbound.*=null` means local `/proc` socket
+  inspection is unavailable and must not be interpreted as zero traffic. `sources_truncated=true`
+  means the bounded 128-entry diagnostic list omitted additional addresses; category totals still
+  include every sampled socket. Stale or missing egress probes and shared provider/NAT addresses
+  remain `unknown`, and Reverse underlay sockets are excluded from user-inbound totals.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
 - `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability
