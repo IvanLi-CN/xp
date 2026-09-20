@@ -41,6 +41,24 @@ pub fn membership_operation_gate() -> Arc<Mutex<()>> {
         .clone()
 }
 
+pub async fn active_join_operation_for_session(
+    store: &Arc<Mutex<crate::state::JsonSnapshotStore>>,
+    node_id: NodeId,
+    session_node_id: &str,
+) -> Option<MembershipOperation> {
+    store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .filter(|operation| {
+            operation.kind == MembershipOperationKind::Join
+                && operation.raft_node_id == node_id
+                && operation.node_id.as_deref() == Some(session_node_id)
+        })
+        .cloned()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipAudit {
     pub orphan_voters: BTreeSet<NodeId>,

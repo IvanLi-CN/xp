@@ -13,7 +13,6 @@ use super::{
 
 const POLICY_TTL: ChronoDuration = ChronoDuration::minutes(10);
 const CAPABILITY_PROBE_BUDGET: Duration = Duration::from_secs(5);
-const MAX_CAPABILITY_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct RuntimePolicyResponse {
@@ -87,19 +86,12 @@ async fn remote_node_supports_static_console(state: &AppState, node: &crate::dom
         Ok(MeshCapabilityProbeResponse::PredecessorNotFound) | Err(_) => return false,
     };
 
-    if !response.status().is_success()
-        || response
-            .content_length()
-            .is_some_and(|length| length > MAX_CAPABILITY_RESPONSE_BYTES as u64)
-    {
+    if !response.status().is_success() {
         return false;
     }
 
-    let bytes = match response.bytes().await {
-        Ok(bytes) if bytes.len() <= MAX_CAPABILITY_RESPONSE_BYTES => bytes,
-        _ => return false,
-    };
-    serde_json::from_slice::<CapabilityResponse>(&bytes)
+    super::bounded_json::read_bounded_internal_json::<CapabilityResponse>(response)
+        .await
         .ok()
         .is_some_and(|body| {
             body.capabilities
