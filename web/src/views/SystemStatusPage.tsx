@@ -14,6 +14,7 @@ import {
 	runAdminMeshProbes,
 } from "@/api/adminMesh";
 import { fetchAdminNodesRuntime } from "@/api/adminNodeRuntime";
+import { isBackendApiError } from "@/api/backendError";
 import { Button, IconButton } from "@/components/Button";
 import { RepositoryStatusSummary } from "@/components/HistoryRepositoryStatus";
 import { Icon } from "@/components/Icon";
@@ -650,9 +651,11 @@ export function SystemStatusSurface({
 								peerNames={peerNames}
 								rendezvousRoles={rendezvousRoles}
 								showMeshTransportReuse={showMeshTransportReuse}
-								probeDisabled={readOnly}
+								probeDisabled={readOnly || isProbing}
 								onProbe={
-									readOnly ? undefined : () => onProbePeer?.(peer.node_id)
+									readOnly || isProbing
+										? undefined
+										: () => onProbePeer?.(peer.node_id)
 								}
 							/>
 						))}
@@ -783,7 +786,22 @@ export function SystemStatusPage() {
 		mutationFn: async () => {
 			const nodeIds = meshData?.peers.map((peer) => peer.node_id) ?? [];
 			for (let index = 0; index < nodeIds.length; index += 50) {
-				await runAdminMeshProbes(adminToken, nodeIds.slice(index, index + 50));
+				const batch = nodeIds.slice(index, index + 50);
+				for (let attempt = 0; ; attempt += 1) {
+					try {
+						await runAdminMeshProbes(adminToken, batch);
+						break;
+					} catch (error) {
+						if (
+							!isBackendApiError(error) ||
+							error.status !== 409 ||
+							attempt >= 240
+						) {
+							throw error;
+						}
+						await new Promise((resolve) => window.setTimeout(resolve, 500));
+					}
+				}
 			}
 		},
 		onSuccess: () => meshQuery.refetch(),
