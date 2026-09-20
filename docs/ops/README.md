@@ -491,6 +491,10 @@ Mesh read-only diagnosis:
   means the bounded 128-entry diagnostic list omitted additional addresses; category totals still
   include every sampled socket. Stale or missing egress probes and shared provider/NAT addresses
   remain `unknown`, and Reverse underlay sockets are excluded from user-inbound totals.
+  If any current member lacks a fresh valid egress identity, all inbound sources stay `unknown`.
+  An aggregate Reverse state is only `over_limit` when every contributing Link has a known
+  physical count; `unknown` or `unavailable` takes precedence. During the 120-second generation
+  drain, physical status is endpoint-level and is not a per-generation accounting guarantee.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
 - `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability

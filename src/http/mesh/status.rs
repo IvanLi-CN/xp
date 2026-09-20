@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::{mesh_transport_counts_for, mesh_transport_health_for};
+#[path = "bootstrap_status.rs"]
+mod bootstrap_status;
 use crate::{
     domain::{Endpoint, EndpointKind, Node},
     managed_default_endpoints::managed_default_vless_endpoint,
@@ -16,7 +18,7 @@ use crate::{
         MeshTransportProtocol,
     },
     node_egress_probe::is_node_egress_probe_stale,
-    reverse_mesh::ReverseMeshAssignment,
+    reverse_mesh::{ReverseMeshAssignment, ReverseMeshBootstrapMarker},
     state::NodeEgressProbeState,
     tcp_connection_usage::{EstablishedTcpConnection, collect_established_tcp_connections},
 };
@@ -112,27 +114,30 @@ pub(super) fn collect_mesh_connection_usage(
     endpoints: &[Endpoint],
     assignments: &BTreeMap<String, ReverseMeshAssignment>,
     egress_probes: &BTreeMap<String, NodeEgressProbeState>,
-    now: DateTime<Utc>,
+    bootstrap: Option<&ReverseMeshBootstrapMarker>,
 ) -> MeshConnectionUsageReport {
     let collected = collect_established_tcp_connections();
+    let sample_now = Utc::now();
     let (supported, warning, connections) = match collected {
         Ok(connections) => (true, None, connections),
         Err(error) => (false, Some(error.to_string()), Vec::new()),
     };
-    build_mesh_connection_usage(
+    build_mesh_connection_usage_with_bootstrap(
         local_node_id,
         nodes,
         endpoints,
         assignments,
         egress_probes,
-        now,
+        sample_now,
         supported,
         warning,
         &connections,
+        bootstrap,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn build_mesh_connection_usage(
     local_node_id: &str,
     nodes: &[Node],
@@ -144,8 +149,38 @@ fn build_mesh_connection_usage(
     warning: Option<String>,
     connections: &[EstablishedTcpConnection],
 ) -> MeshConnectionUsageReport {
+    build_mesh_connection_usage_with_bootstrap(
+        local_node_id,
+        nodes,
+        endpoints,
+        assignments,
+        egress_probes,
+        now,
+        supported,
+        warning,
+        connections,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_mesh_connection_usage_with_bootstrap(
+    local_node_id: &str,
+    nodes: &[Node],
+    endpoints: &[Endpoint],
+    assignments: &BTreeMap<String, ReverseMeshAssignment>,
+    egress_probes: &BTreeMap<String, NodeEgressProbeState>,
+    now: DateTime<Utc>,
+    supported: bool,
+    warning: Option<String>,
+    connections: &[EstablishedTcpConnection],
+    bootstrap: Option<&ReverseMeshBootstrapMarker>,
+) -> MeshConnectionUsageReport {
     let vless_ports = managed_vless_ports(endpoints);
     let egress_ips = egress_ips_by_node(egress_probes, now);
+    let egress_identity_complete = nodes
+        .iter()
+        .all(|node| egress_ips.contains_key(&node.node_id));
     let reverse_connections = reverse_connections_for_local(
         local_node_id,
         nodes,
@@ -158,11 +193,12 @@ fn build_mesh_connection_usage(
     let user_inbound = user_inbound_status(
         &vless_ports.get(local_node_id).cloned().unwrap_or_default(),
         &egress_ips,
+        egress_identity_complete,
         supported,
         connections,
         &reverse_connections,
     );
-    let reverse_by_peer = nodes
+    let reverse_by_peer: BTreeMap<String, AdminReverseUnderlayStatus> = nodes
         .iter()
         .filter(|node| node.node_id != local_node_id)
         .filter_map(|peer| {
@@ -213,6 +249,9 @@ fn build_mesh_connection_usage(
         })
         .collect();
 
+    let mut reverse_by_peer = reverse_by_peer;
+    bootstrap_status::add_bootstrap_status(&mut reverse_by_peer, local_node_id, bootstrap);
+
     MeshConnectionUsageReport {
         local: AdminMeshConnectionUsage {
             supported,
@@ -246,7 +285,7 @@ fn egress_ips_by_node(
     probes
         .iter()
         .filter(|(_, probe)| !is_node_egress_probe_stale(probe, now))
-        .map(|(node_id, probe)| {
+        .filter_map(|(node_id, probe)| {
             let mut ips = BTreeSet::new();
             for value in [
                 probe.public_ipv4.as_deref(),
@@ -260,7 +299,7 @@ fn egress_ips_by_node(
                     ips.insert(ip);
                 }
             }
-            (node_id.clone(), ips)
+            (!ips.is_empty()).then_some((node_id.clone(), ips))
         })
         .collect()
 }
@@ -358,32 +397,68 @@ fn matching_connections_for_link(
     if local_node_id == rendezvous_node_id {
         let target_ips = egress_ips.get(target_node_id)?;
         let local_ports = vless_ports.get(local_node_id)?;
-        Some(
-            connections
+        let matched = connections
+            .iter()
+            .filter(|connection| {
+                local_ports.contains(&connection.local_port)
+                    && target_ips.contains(&connection.remote_ip)
+                    && egress_ip_is_unique_for_node(
+                        egress_ips,
+                        target_node_id,
+                        &connection.remote_ip,
+                    )
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if matched.is_empty()
+            && target_ips
                 .iter()
-                .filter(|connection| {
-                    local_ports.contains(&connection.local_port)
-                        && target_ips.contains(&connection.remote_ip)
-                })
-                .cloned()
-                .collect(),
-        )
+                .any(|ip| !egress_ip_is_unique_for_node(egress_ips, target_node_id, ip))
+        {
+            None
+        } else {
+            Some(matched)
+        }
     } else if local_node_id == target_node_id {
         let rendezvous_ips = egress_ips.get(rendezvous_node_id)?;
         let rendezvous_ports = vless_ports.get(rendezvous_node_id)?;
-        Some(
-            connections
+        let matched = connections
+            .iter()
+            .filter(|connection| {
+                rendezvous_ports.contains(&connection.remote_port)
+                    && rendezvous_ips.contains(&connection.remote_ip)
+                    && egress_ip_is_unique_for_node(
+                        egress_ips,
+                        rendezvous_node_id,
+                        &connection.remote_ip,
+                    )
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if matched.is_empty()
+            && rendezvous_ips
                 .iter()
-                .filter(|connection| {
-                    rendezvous_ports.contains(&connection.remote_port)
-                        && rendezvous_ips.contains(&connection.remote_ip)
-                })
-                .cloned()
-                .collect(),
-        )
+                .any(|ip| !egress_ip_is_unique_for_node(egress_ips, rendezvous_node_id, ip))
+        {
+            None
+        } else {
+            Some(matched)
+        }
     } else {
         None
     }
+}
+
+fn egress_ip_is_unique_for_node(
+    egress_ips: &BTreeMap<String, BTreeSet<IpAddr>>,
+    expected_node_id: &str,
+    ip: &IpAddr,
+) -> bool {
+    let mut owners = egress_ips
+        .iter()
+        .filter(|(_, ips)| ips.contains(ip))
+        .map(|(node_id, _)| node_id.as_str());
+    owners.next() == Some(expected_node_id) && owners.next().is_none()
 }
 
 fn physical_connections_for_link(
@@ -432,11 +507,6 @@ fn aggregate_reverse_underlay_state(
 ) -> AdminReverseUnderlayState {
     if links
         .iter()
-        .any(|link| matches!(link.state, AdminReverseUnderlayState::OverLimit))
-    {
-        AdminReverseUnderlayState::OverLimit
-    } else if links
-        .iter()
         .any(|link| matches!(link.state, AdminReverseUnderlayState::Unavailable))
     {
         AdminReverseUnderlayState::Unavailable
@@ -446,6 +516,11 @@ fn aggregate_reverse_underlay_state(
             .any(|link| matches!(link.state, AdminReverseUnderlayState::Unknown))
     {
         AdminReverseUnderlayState::Unknown
+    } else if links
+        .iter()
+        .any(|link| matches!(link.state, AdminReverseUnderlayState::OverLimit))
+    {
+        AdminReverseUnderlayState::OverLimit
     } else {
         AdminReverseUnderlayState::Ok
     }
@@ -454,6 +529,7 @@ fn aggregate_reverse_underlay_state(
 fn user_inbound_status(
     local_ports: &BTreeSet<u16>,
     egress_ips: &BTreeMap<String, BTreeSet<IpAddr>>,
+    egress_identity_complete: bool,
     supported: bool,
     connections: &[EstablishedTcpConnection],
     reverse_connections: &BTreeSet<EstablishedTcpConnection>,
@@ -482,7 +558,7 @@ fn user_inbound_status(
     for connection in connections.iter().filter(|connection| {
         local_ports.contains(&connection.local_port) && !reverse_connections.contains(*connection)
     }) {
-        let classification = if cluster_ips.is_empty() {
+        let classification = if !egress_identity_complete || cluster_ips.is_empty() {
             unknown += 1;
             AdminConnectionClassification::Unknown
         } else {

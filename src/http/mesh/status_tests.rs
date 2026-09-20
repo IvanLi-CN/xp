@@ -385,6 +385,113 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
 }
 
 #[test]
+fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
+    let local = "node-local";
+    let target = "node-target";
+    let shared = "node-shared";
+    let now = Utc::now();
+    let fresh = (now - Duration::minutes(1)).to_rfc3339();
+    let nodes = vec![
+        Node {
+            node_id: local.to_string(),
+            node_name: "local".to_string(),
+            access_host: "local.example.test".to_string(),
+            api_base_url: "https://local.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+        Node {
+            node_id: target.to_string(),
+            node_name: "target".to_string(),
+            access_host: "target.example.test".to_string(),
+            api_base_url: "https://target.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+        Node {
+            node_id: shared.to_string(),
+            node_name: "shared".to_string(),
+            access_host: "shared.example.test".to_string(),
+            api_base_url: "https://shared.example.test".to_string(),
+            quota_limit_bytes: 0,
+            quota_reset: NodeQuotaReset::default(),
+        },
+    ];
+    let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+    meta["managed_default"] = serde_json::json!(true);
+    meta["transport"] = serde_json::json!("xhttp");
+    let endpoints = vec![Endpoint {
+        endpoint_id: "endpoint-local".to_string(),
+        node_id: local.to_string(),
+        tag: "local-vless".to_string(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: 44444,
+        meta,
+    }];
+    let assignments = BTreeMap::from([(
+        target.to_string(),
+        ReverseMeshAssignment {
+            target_node_id: target.to_string(),
+            generation: 1,
+            membership_revision: 1,
+            primary_node_id: local.to_string(),
+            standby_node_id: None,
+            credential_epoch: 1,
+        },
+    )]);
+    let probes = BTreeMap::from([
+        (
+            target.to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.50".to_string()),
+                last_success_at: Some(fresh.clone()),
+                ..Default::default()
+            },
+        ),
+        (
+            shared.to_string(),
+            NodeEgressProbeState {
+                public_ipv4: Some("198.51.100.50".to_string()),
+                last_success_at: Some(fresh),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let connections = vec![
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "198.51.100.50".parse().unwrap(),
+            remote_port: 50001,
+        },
+        EstablishedTcpConnection {
+            local_ip: "0.0.0.0".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: "203.0.113.50".parse().unwrap(),
+            remote_port: 50002,
+        },
+    ];
+
+    let report = build_mesh_connection_usage(
+        local,
+        &nodes,
+        &endpoints,
+        &assignments,
+        &probes,
+        now,
+        true,
+        None,
+        &connections,
+    );
+
+    let reverse = report.reverse_by_peer.get(target).expect("target peer");
+    assert_eq!(reverse.physical_connections, None);
+    assert_eq!(report.local.user_inbound.connections, Some(2));
+    assert_eq!(report.local.user_inbound.unknown, Some(2));
+    assert_eq!(report.local.user_inbound.external, Some(0));
+}
+
+#[test]
 fn inbound_sources_are_bounded_without_losing_category_totals() {
     let now = Utc::now();
     let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();

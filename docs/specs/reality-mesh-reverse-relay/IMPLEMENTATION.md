@@ -87,6 +87,12 @@
   nullable counters so the UI cannot render unavailable data as zero. The System Status page
   exposes these as separate internal/external sections and keeps source addresses behind an
   administrator disclosure.
+- Socket inspection is line-streamed and fail-closed above the bounded 4096-record inspection
+  limit; quota sampling filters by configured listen ports before counting. If any current node
+  lacks a fresh, valid egress identity, inbound sources remain `unknown` rather than being
+  promoted to `external`. Aggregate Reverse state gives precedence to unavailable/unknown data
+  over an over-limit sub-link. During a 120-second generation drain, the socket view is an
+  endpoint-level diagnostic count and must not be interpreted as a generation-specific counter.
 - Fixed Xray spike: Xray `26.3.27`, image digest
   `sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7`. Two Xray
   instances completed dynamic VLESS Reverse registration over both Vision TCP + Reality and

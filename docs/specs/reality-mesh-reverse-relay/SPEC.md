@@ -120,7 +120,9 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   零值；过期或缺失的 egress probe 只允许 `unknown`，共享 egress 地址也不得冒充唯一集群节点。
   Reverse underlay 套接字从 user inbound 统计中排除，避免在两个区域重复计算。System Status 以 `Reverse underlay · internal` 和
   `User inbound · external` 两个独立区域展示，不合并为一个入站总数。超过 2 条只产生诊断状态，
-  不自动断链或重启 XP。
+  不自动断链或重启 XP。若任一当前节点缺少新鲜且有效的 egress identity，入站来源只能为
+  `unknown`；在 120 秒 generation drain 期间，physical count 是 endpoint 级观测值，不承诺
+  精确归属于单一 generation。`unknown|unavailable` 优先于 `over_limit` 聚合状态。
 
 ## 验收
 

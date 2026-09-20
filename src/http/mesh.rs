@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
 mod bootstrap;
 mod config;
+mod etag;
 #[path = "mesh/liveness.rs"]
 mod liveness;
 #[path = "mesh/status.rs"]
@@ -15,7 +16,6 @@ pub(super) use config::admin_update_mesh_config;
 pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
@@ -1017,7 +1017,6 @@ pub(super) async fn admin_internal_raft_client_write(
     }
     Ok(Json(resp))
 }
-
 async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusResponse {
     let now = Utc::now();
     let telemetry = state.mesh_telemetry.snapshot().await;
@@ -1033,8 +1032,14 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         egress_probes,
         cluster_mesh_enabled,
         local_mesh_gate_enabled,
+        reverse_mesh_bootstrap,
     ) = {
         let store = state.store.lock().await;
+        let reverse_mesh_bootstrap = crate::raft::http_rpc::read_bootstrap_sender_marker(
+            crate::cluster_metadata::ClusterPaths::new(&state.config.data_dir)
+                .raft_bootstrap_sender,
+        )
+        .and_then(|marker| marker.reverse_mesh);
         (
             store.list_nodes(),
             store.list_endpoints(),
@@ -1042,6 +1047,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
             store.list_node_egress_probes(),
             store.state().mesh_enabled,
             state.reconcile.mesh_gate().load(Ordering::Acquire),
+            reverse_mesh_bootstrap,
         )
     };
     let connection_usage = status::collect_mesh_connection_usage(
@@ -1050,7 +1056,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         &endpoints,
         &assignments,
         &egress_probes,
-        now,
+        reverse_mesh_bootstrap.as_ref(),
     );
     let peers = nodes
         .into_iter()
@@ -1285,8 +1291,14 @@ mod tests {
         let first = response("2026-08-08T10:00:00Z", 1);
         let generated_later = response("2026-08-08T10:01:00Z", 1);
         let churning = response("2026-08-08T10:01:00Z", 3);
-        assert_eq!(mesh_status_etag(&first), mesh_status_etag(&generated_later));
-        assert_ne!(mesh_status_etag(&first), mesh_status_etag(&churning));
+        assert_eq!(
+            etag::mesh_status_etag(&first),
+            etag::mesh_status_etag(&generated_later)
+        );
+        assert_ne!(
+            etag::mesh_status_etag(&first),
+            etag::mesh_status_etag(&churning)
+        );
     }
 }
 fn mesh_availability_for(
@@ -1316,7 +1328,7 @@ pub(super) async fn admin_get_mesh_status(
     headers: HeaderMap,
 ) -> Response {
     let snapshot = build_admin_mesh_status_response(&state).await;
-    let etag = mesh_status_etag(&snapshot);
+    let etag = etag::mesh_status_etag(&snapshot);
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
@@ -1325,12 +1337,6 @@ pub(super) async fn admin_get_mesh_status(
         return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
     }
     (StatusCode::OK, [(header::ETAG, etag)], Json(snapshot)).into_response()
-}
-fn mesh_status_etag(snapshot: &AdminMeshStatusResponse) -> String {
-    let mut stable_snapshot = snapshot.clone();
-    stable_snapshot.generated_at.clear();
-    let stable_bytes = serde_json::to_vec(&stable_snapshot).expect("serialize mesh status ETag");
-    format!("\"mesh-{}\"", hex::encode(Sha256::digest(stable_bytes)))
 }
 pub(super) async fn admin_run_mesh_probes(
     Extension(state): Extension<AppState>,

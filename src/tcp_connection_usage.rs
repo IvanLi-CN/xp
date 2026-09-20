@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    fs, io,
+    fs::File,
+    io::{self, BufRead, BufReader},
     net::IpAddr,
     path::Path,
 };
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub const TCP_CONNECTION_USAGE_SCHEMA_VERSION: u32 = 1;
 pub const MINUTES_WINDOW: usize = 7 * 24 * 60;
+const MAX_ESTABLISHED_TCP_CONNECTIONS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TcpConnectionUsageWindow {
@@ -489,14 +491,19 @@ pub fn collect_established_inbound_connections_by_port(
     if listen_ports.is_empty() {
         return Ok(counts);
     }
-    for connection in collect_established_tcp_connections()? {
-        if listen_ports.contains(&connection.local_port) {
-            counts
-                .entry(connection.local_port)
-                .and_modify(|count| *count = count.saturating_add(1))
-                .or_insert(1);
-        }
-    }
+    let mut inspected = 0;
+    collect_established_inbound_connections_by_port_from_path(
+        Path::new("/proc/net/tcp"),
+        listen_ports,
+        &mut counts,
+        &mut inspected,
+    )?;
+    collect_established_inbound_connections_by_port_from_path(
+        Path::new("/proc/net/tcp6"),
+        listen_ports,
+        &mut counts,
+        &mut inspected,
+    )?;
     Ok(counts)
 }
 
@@ -517,8 +524,9 @@ fn collect_established_tcp_connections_from_path(
     path: &Path,
     connections: &mut Vec<EstablishedTcpConnection>,
 ) -> Result<(), TcpConnectionUsageError> {
-    let content = fs::read_to_string(path)?;
-    for (line_index, raw_line) in content.lines().enumerate() {
+    let file = File::open(path)?;
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let raw_line = line?;
         if line_index == 0 {
             continue;
         }
@@ -549,12 +557,71 @@ fn collect_established_tcp_connections_from_path(
         if remote_port == 0 {
             continue;
         }
+        if connections.len() >= MAX_ESTABLISHED_TCP_CONNECTIONS {
+            return Err(TcpConnectionUsageError::Unsupported(
+                "established TCP socket count exceeds the bounded inspection limit".to_string(),
+            ));
+        }
         connections.push(EstablishedTcpConnection {
             local_ip,
             local_port,
             remote_ip,
             remote_port,
         });
+    }
+    Ok(())
+}
+
+fn collect_established_inbound_connections_by_port_from_path(
+    path: &Path,
+    listen_ports: &BTreeSet<u16>,
+    counts: &mut HashMap<u16, u32>,
+    inspected: &mut usize,
+) -> Result<(), TcpConnectionUsageError> {
+    let file = File::open(path)?;
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let raw_line = line?;
+        if line_index == 0 {
+            continue;
+        }
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        if columns.len() < 4 {
+            return Err(TcpConnectionUsageError::Parse(format!(
+                "{}:{} missing columns",
+                path.display(),
+                line_index + 1
+            )));
+        }
+        if columns[3] != "01" {
+            continue;
+        }
+        let (_, local_port) = parse_proc_addr_port(columns[1]).map_err(|err| {
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
+        })?;
+        if !listen_ports.contains(&local_port) {
+            continue;
+        }
+        let (_, remote_port) = parse_proc_addr_port(columns[2]).map_err(|err| {
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
+        })?;
+        if remote_port == 0 {
+            continue;
+        }
+        *inspected = inspected.saturating_add(1);
+        if *inspected > MAX_ESTABLISHED_TCP_CONNECTIONS {
+            return Err(TcpConnectionUsageError::Unsupported(
+                "established inbound TCP socket count exceeds the bounded inspection limit"
+                    .to_string(),
+            ));
+        }
+        counts
+            .entry(local_port)
+            .and_modify(|count| *count = count.saturating_add(1))
+            .or_insert(1);
     }
     Ok(())
 }
