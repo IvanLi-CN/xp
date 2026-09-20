@@ -774,11 +774,20 @@ export function SystemStatusPage() {
 		["adminHistoryRepositories", adminToken],
 		repositoriesQuery,
 	);
+	const meshData = meshCapability.available ? meshState.data : undefined;
 	const probe = useMutation({
 		mutationFn: (nodeIds: string[]) => runAdminMeshProbes(adminToken, nodeIds),
 		onSuccess: () => meshQuery.refetch(),
 	});
-	const meshData = meshCapability.available ? meshState.data : undefined;
+	const probeAll = useMutation({
+		mutationFn: async () => {
+			const nodeIds = meshData?.peers.map((peer) => peer.node_id) ?? [];
+			for (let index = 0; index < nodeIds.length; index += 50) {
+				await runAdminMeshProbes(adminToken, nodeIds.slice(index, index + 50));
+			}
+		},
+		onSuccess: () => meshQuery.refetch(),
+	});
 	const latestAt = latestQueryDataUpdatedAt([
 		meshCapability.available ? meshState : null,
 		runtimeQuery,
@@ -876,12 +885,12 @@ export function SystemStatusPage() {
 				repositoryStatus={repositoriesState.data}
 				components={localComponents}
 				isRefreshing={meshState.isFetching}
-				isProbing={probe.isPending}
+				isProbing={probe.isPending || probeAll.isPending}
 				readOnly={runtime.isReadOnly}
 				showMeshTransportReuse={meshTransportCapability.available}
 				onRefresh={() => meshState.refetch()}
 				onProbeAll={
-					meshCapability.available ? () => probe.mutate([]) : undefined
+					meshCapability.available ? () => probeAll.mutate() : undefined
 				}
 				onProbePeer={
 					meshCapability.available
