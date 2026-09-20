@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { fixtureCatalog } from "../fixture-policy/catalog";
-import { AdminMeshPeerSchema } from "./adminMesh";
+import {
+	AdminMeshConnectionUsageSchema,
+	AdminMeshPeerSchema,
+} from "./adminMesh";
 
 function peerFixture() {
 	return {
@@ -39,6 +42,24 @@ function peerFixture() {
 }
 
 describe("AdminMeshPeerSchema", () => {
+	it("keeps unavailable socket inspection distinct from zero traffic", () => {
+		const parsed = AdminMeshConnectionUsageSchema.parse({
+			supported: false,
+			sampled_at: null,
+			warning: "socket inspection unavailable",
+			user_inbound: {
+				connections: null,
+				external: null,
+				cluster_peer: null,
+				unknown: null,
+				sources: [],
+				sources_truncated: false,
+			},
+		});
+
+		expect(parsed.user_inbound.external).toBeNull();
+	});
+
 	it("accepts legacy peers and defaults additive bucket counters", () => {
 		const parsed = AdminMeshPeerSchema.parse(peerFixture());
 
