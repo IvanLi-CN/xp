@@ -1280,17 +1280,11 @@ pub(super) async fn admin_run_mesh_probes(
         .try_acquire_operator_probe_batch()
         .ok_or_else(|| ApiError::conflict("a mesh probe batch is already running"))?;
     let accepted_node_ids = if request.node_ids.is_empty() {
-        let accepted_node_ids = nodes
+        nodes
             .into_iter()
             .filter(|node| node.node_id != state.cluster.node_id)
             .map(|node| node.node_id)
-            .collect::<Vec<_>>();
-        if accepted_node_ids.len() > 50 {
-            return Err(ApiError::invalid_request(
-                "probe-all exceeds the 50-target limit; submit explicit batches",
-            ));
-        }
-        accepted_node_ids
+            .collect::<Vec<_>>()
     } else {
         if request.node_ids.len() > 50 {
             return Err(ApiError::invalid_request(
