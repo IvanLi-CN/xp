@@ -105,6 +105,7 @@ fn connection_usage_separates_reverse_peers_from_external_users() {
             local.to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.10".to_string()),
+                selected_public_ip: Some("198.51.100.10".to_string()),
                 last_success_at: Some(fresh_probe_at.clone()),
                 ..Default::default()
             },
@@ -113,6 +114,7 @@ fn connection_usage_separates_reverse_peers_from_external_users() {
             peer.to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.20".to_string()),
+                selected_public_ip: Some("198.51.100.20".to_string()),
                 last_success_at: Some(fresh_probe_at),
                 ..Default::default()
             },
@@ -220,6 +222,7 @@ fn target_side_standby_link_counts_the_rendezvous_socket() {
         peer.to_string(),
         NodeEgressProbeState {
             public_ipv4: Some("198.51.100.40".to_string()),
+            selected_public_ip: Some("198.51.100.40".to_string()),
             last_success_at: Some(fresh),
             ..Default::default()
         },
@@ -281,6 +284,7 @@ fn stale_egress_addresses_are_not_used_for_peer_classification() {
         "peer".to_string(),
         NodeEgressProbeState {
             public_ipv4: Some("198.51.100.20".to_string()),
+            selected_public_ip: Some("198.51.100.20".to_string()),
             last_success_at: Some((now - Duration::hours(2)).to_rfc3339()),
             ..Default::default()
         },
@@ -331,6 +335,7 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.30".to_string()),
                 public_ipv6: Some("2001:db8::30".to_string()),
+                selected_public_ip: Some("2001:db8::30".to_string()),
                 last_success_at: Some(fresh.clone()),
                 ..Default::default()
             },
@@ -339,6 +344,7 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
             "peer-b".to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.30".to_string()),
+                selected_public_ip: Some("198.51.100.30".to_string()),
                 last_success_at: Some(fresh),
                 ..Default::default()
             },
@@ -444,6 +450,7 @@ fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
             target.to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.50".to_string()),
+                selected_public_ip: Some("198.51.100.50".to_string()),
                 last_success_at: Some(fresh.clone()),
                 ..Default::default()
             },
@@ -452,6 +459,7 @@ fn shared_egress_address_does_not_hide_reverse_or_external_sockets() {
             shared.to_string(),
             NodeEgressProbeState {
                 public_ipv4: Some("198.51.100.50".to_string()),
+                selected_public_ip: Some("198.51.100.50".to_string()),
                 last_success_at: Some(fresh),
                 ..Default::default()
             },
