@@ -71,6 +71,52 @@ export const AdminMeshTransportSchema = z.object({
 	last_connection_started_at: z.string().nullable(),
 });
 
+export const AdminConnectionClassificationSchema = z.enum([
+	"cluster_peer",
+	"external",
+	"unknown",
+]);
+export const AdminConnectionSourceSchema = z.object({
+	address: z.string(),
+	connections: z.number().int().nonnegative(),
+	classification: AdminConnectionClassificationSchema,
+});
+export const AdminUserInboundStatusSchema = z.object({
+	connections: z.number().int().nonnegative(),
+	external: z.number().int().nonnegative(),
+	cluster_peer: z.number().int().nonnegative(),
+	unknown: z.number().int().nonnegative(),
+	sources: z.array(AdminConnectionSourceSchema),
+});
+export const AdminMeshConnectionUsageSchema = z.object({
+	supported: z.boolean(),
+	sampled_at: z.string().nullable(),
+	warning: z.string().nullable().optional(),
+	user_inbound: AdminUserInboundStatusSchema,
+});
+export const AdminReverseUnderlayStateSchema = z.enum([
+	"ok",
+	"over_limit",
+	"unknown",
+	"unavailable",
+]);
+export const AdminReverseLinkStatusSchema = z.object({
+	target_node_id: z.string(),
+	rendezvous_node_id: z.string(),
+	role: z.enum(["primary", "standby", "bootstrap"]),
+	generation: z.number().int().nonnegative(),
+	connections: z.number().int().nonnegative(),
+	limit: z.number().int().positive(),
+	state: AdminReverseUnderlayStateSchema,
+});
+export const AdminReverseUnderlayStatusSchema = z.object({
+	logical_links: z.number().int().nonnegative(),
+	physical_connections: z.number().int().nonnegative(),
+	limit_per_link: z.number().int().positive(),
+	state: AdminReverseUnderlayStateSchema,
+	links: z.array(AdminReverseLinkStatusSchema),
+});
+
 export const AdminMeshPeerSchema = z.object({
 	node_id: z.string(),
 	node_name: z.string(),
@@ -91,6 +137,7 @@ export const AdminMeshPeerSchema = z.object({
 	latency_p50_ms: z.number().nullable(),
 	latency_p95_ms: z.number().nullable(),
 	mesh_transport: AdminMeshTransportSchema.optional(),
+	reverse_underlay: AdminReverseUnderlayStatusSchema.optional(),
 	buckets: z.array(AdminMeshBucketSchema),
 });
 
@@ -113,6 +160,7 @@ export const AdminMeshStatusSchema = z.object({
 			last_renewed_at: z.string().nullable().optional(),
 			last_error: z.string().nullable().optional(),
 		}),
+		connection_usage: AdminMeshConnectionUsageSchema.optional(),
 	}),
 	peers: z.array(AdminMeshPeerSchema),
 	events: z.array(

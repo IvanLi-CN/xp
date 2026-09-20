@@ -201,6 +201,159 @@ function BreakerBadge({ state }: { state: AdminMeshPeer["breaker"] }) {
 	);
 }
 
+function connectionStateLabel(
+	state: NonNullable<AdminMeshPeer["reverse_underlay"]>["state"],
+) {
+	return {
+		ok: "Within limit",
+		over_limit: "Over limit",
+		unknown: "Classification unavailable",
+		unavailable: "Socket data unavailable",
+	}[state];
+}
+
+function connectionStateVariant(
+	state: NonNullable<AdminMeshPeer["reverse_underlay"]>["state"],
+) {
+	return state === "over_limit"
+		? "destructive"
+		: state === "ok"
+			? "success"
+			: "outline";
+}
+
+function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
+	const usage = status.local.connection_usage;
+	const reversePeers = status.peers.filter((peer) => peer.reverse_underlay);
+	const reverseConnections = reversePeers.reduce(
+		(total, peer) => total + (peer.reverse_underlay?.physical_connections ?? 0),
+		0,
+	);
+	const reverseLinks = reversePeers.reduce(
+		(total, peer) => total + (peer.reverse_underlay?.logical_links ?? 0),
+		0,
+	);
+	const reverseLimit = reversePeers.reduce(
+		(total, peer) =>
+			total +
+			(peer.reverse_underlay?.logical_links ?? 0) *
+				(peer.reverse_underlay?.limit_per_link ?? 0),
+		0,
+	);
+	const userInboundDetail = usage
+		? [
+				`${usage.user_inbound.connections} total`,
+				`${usage.user_inbound.cluster_peer} cluster peer`,
+				`${usage.user_inbound.unknown} unknown`,
+			].join(" · ")
+		: "New API capability required";
+
+	return (
+		<section
+			className="border-y border-border/70 py-4"
+			data-connection-accounting
+		>
+			<div className="flex flex-wrap items-baseline justify-between gap-2">
+				<div>
+					<h2 className="text-lg font-semibold">Connection accounting</h2>
+					<p className="mt-1 text-sm text-muted-foreground">
+						Internal Reverse underlay sockets and external user inbound sessions
+						are tracked separately.
+					</p>
+				</div>
+				{usage?.sampled_at ? (
+					<span className="text-xs text-muted-foreground">
+						Sampled {timestamp(usage.sampled_at)}
+					</span>
+				) : null}
+			</div>
+			{usage && !usage.supported ? (
+				<p className="mt-3 text-sm text-warning">
+					{usage.warning ??
+						"Linux socket inspection is unavailable on this node."}
+				</p>
+			) : null}
+			<div className="mt-4 grid gap-4 sm:grid-cols-2">
+				<StatusFact
+					label="Reverse underlay · internal"
+					value={
+						reverseLinks > 0
+							? `${reverseConnections} / ${reverseLimit}`
+							: "None"
+					}
+					detail={`${reverseLinks} logical Link${reverseLinks === 1 ? "" : "s"} · max 2 each`}
+				/>
+				<StatusFact
+					label="User inbound · external"
+					value={
+						usage ? `${usage.user_inbound.external} external` : "Unavailable"
+					}
+					detail={userInboundDetail}
+				/>
+			</div>
+			{reversePeers.length > 0 ? (
+				<div className="mt-4 border-t border-border/70 pt-3">
+					<h3 className="text-sm font-medium">Reverse links by peer</h3>
+					<div className="mt-2 divide-y divide-border/70 border-t border-border/70">
+						{reversePeers.map((peer) => {
+							const reverse = peer.reverse_underlay;
+							if (!reverse) return null;
+							return (
+								<div
+									className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm"
+									key={peer.node_id}
+								>
+									<div className="min-w-0">
+										<p className="truncate font-medium">{peer.node_name}</p>
+										<p className="mt-1 text-xs text-muted-foreground">
+											{reverse.logical_links} logical Link
+											{reverse.logical_links === 1 ? "" : "s"} · generation{" "}
+											{reverse.links.map((link) => link.generation).join(", ")}
+										</p>
+									</div>
+									<div className="flex items-center gap-2 font-mono text-xs">
+										<span>
+											{reverse.physical_connections} /{" "}
+											{reverse.limit_per_link * reverse.logical_links}
+										</span>
+										<Badge
+											variant={connectionStateVariant(reverse.state)}
+											size="sm"
+										>
+											{connectionStateLabel(reverse.state)}
+										</Badge>
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				</div>
+			) : null}
+			{usage?.user_inbound.sources.length ? (
+				<details className="mt-4 border-t border-border/70 pt-3">
+					<summary className="cursor-pointer text-sm font-medium">
+						Inbound source details
+					</summary>
+					<div className="mt-2 divide-y divide-border/70 border-t border-border/70">
+						{usage.user_inbound.sources.map((source) => (
+							<div
+								className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm"
+								key={`${source.address}-${source.classification}`}
+							>
+								<span className="font-mono text-xs">{source.address}</span>
+								<span className="text-xs text-muted-foreground">
+									{source.connections} ·{" "}
+									{source.classification.replaceAll("_", " ")}
+								</span>
+							</div>
+						))}
+					</div>
+				</details>
+			) : null}
+		</section>
+	);
+}
+
 function PeerRows({
 	peer,
 	onProbe,
@@ -455,6 +608,8 @@ export function SystemStatusSurface({
 					/>
 				</div>
 			</section>
+
+			<ConnectionAccounting status={status} />
 
 			<section>
 				<h2 className="mb-3 text-lg font-semibold">Peer transport</h2>

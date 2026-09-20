@@ -9,6 +9,8 @@ mod liveness;
 #[path = "mesh/status.rs"]
 mod status;
 
+use status::{AdminMeshConnectionUsage, AdminMeshTransportStatus, AdminReverseUnderlayStatus};
+
 pub(super) use config::admin_update_mesh_config;
 pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
@@ -33,6 +35,8 @@ struct AdminMeshLocalStatus {
     leader_api_base_url: String,
     term: u64,
     canary: crate::vless_https_canary::VlessHttpsCanaryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_usage: Option<AdminMeshConnectionUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,21 +64,10 @@ struct AdminMeshPeerStatus {
     latency_p95_ms: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mesh_transport: Option<AdminMeshTransportStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reverse_underlay: Option<AdminReverseUnderlayStatus>,
     buckets: Vec<crate::mesh_telemetry::MeshTelemetryBucket>,
 }
-#[derive(Debug, Clone, Serialize)]
-struct AdminMeshTransportStatus {
-    protocol: Option<MeshTransportProtocol>,
-    health: MeshTransportHealth,
-    connection_generation: u64,
-    current_connection_requests: u64,
-    requests_5m: u32,
-    connection_starts_5m: u32,
-    requests_1h: u32,
-    connection_starts_1h: u32,
-    last_connection_started_at: Option<String>,
-}
-
 pub(super) async fn admin_internal_reverse_relay(
     Extension(state): Extension<AppState>,
     headers: HeaderMap,
@@ -1033,16 +1026,32 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints, assignments, cluster_mesh_enabled, local_mesh_gate_enabled) = {
+    let (
+        nodes,
+        endpoints,
+        assignments,
+        egress_probes,
+        cluster_mesh_enabled,
+        local_mesh_gate_enabled,
+    ) = {
         let store = state.store.lock().await;
         (
             store.list_nodes(),
             store.list_endpoints(),
             store.state().reverse_mesh_assignments.clone(),
+            store.list_node_egress_probes(),
             store.state().mesh_enabled,
             state.reconcile.mesh_gate().load(Ordering::Acquire),
         )
     };
+    let connection_usage = status::collect_mesh_connection_usage(
+        &state.cluster.node_id,
+        &nodes,
+        &endpoints,
+        &assignments,
+        &egress_probes,
+        now,
+    );
     let peers = nodes
         .into_iter()
         .filter(|node| node.node_id != state.cluster.node_id)
@@ -1115,6 +1124,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 latency_p50_ms,
                 latency_p95_ms,
                 mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
+                reverse_underlay: connection_usage.reverse_by_peer.get(&node.node_id).cloned(),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -1141,6 +1151,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 &state.config.data_dir,
                 state.config.vless_canary_bind,
             ),
+            connection_usage: Some(connection_usage.local),
         },
         peers,
         events: telemetry.events,
@@ -1157,6 +1168,7 @@ fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::mesh_telemetry::{MeshTransportHealth, MeshTransportProtocol};
     #[test]
     fn disabled_mesh_target_never_reports_an_active_breaker() {
         assert_eq!(
@@ -1232,6 +1244,7 @@ mod tests {
                     canary: crate::vless_https_canary::VlessHttpsCanaryStatus::disabled(
                         std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
                     ),
+                    connection_usage: None,
                 },
                 peers: vec![AdminMeshPeerStatus {
                     node_id: "peer".to_string(),
@@ -1263,6 +1276,7 @@ mod tests {
                         connection_starts_1h: 2,
                         last_connection_started_at: None,
                     }),
+                    reverse_underlay: None,
                     buckets: Vec::new(),
                 }],
                 events: Vec::new(),

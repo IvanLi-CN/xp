@@ -172,6 +172,12 @@ export const ReverseRelay: Story = {
 		const canvas = within(canvasElement);
 		await expect(await canvas.findByText("Cluster nodes")).toBeInTheDocument();
 		await expect(
+			await canvas.findByRole("heading", { name: "Connection accounting" }),
+		).toBeInTheDocument();
+		await expect(await canvas.findByText("2 external")).toBeInTheDocument();
+		await expect(await canvas.findByText("11 / 2")).toBeInTheDocument();
+		await expect(await canvas.findByText("Over limit")).toBeInTheDocument();
+		await expect(
 			await canvas.findByText("1 local · 4 remote"),
 		).toBeInTheDocument();
 		for (const nodeId of [

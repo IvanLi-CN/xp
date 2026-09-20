@@ -138,6 +138,14 @@ pub struct TcpConnectionEndpointView {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstablishedTcpConnection {
+    pub local_ip: IpAddr,
+    pub local_port: u16,
+    pub remote_ip: IpAddr,
+    pub remote_port: u16,
+}
+
 #[derive(Debug)]
 pub enum TcpConnectionUsageError {
     Io(io::Error),
@@ -481,24 +489,33 @@ pub fn collect_established_inbound_connections_by_port(
     if listen_ports.is_empty() {
         return Ok(counts);
     }
-
-    collect_established_inbound_connections_from_path(
-        Path::new("/proc/net/tcp"),
-        listen_ports,
-        &mut counts,
-    )?;
-    collect_established_inbound_connections_from_path(
-        Path::new("/proc/net/tcp6"),
-        listen_ports,
-        &mut counts,
-    )?;
+    for connection in collect_established_tcp_connections()? {
+        if listen_ports.contains(&connection.local_port) {
+            counts
+                .entry(connection.local_port)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
+        }
+    }
     Ok(counts)
 }
 
-fn collect_established_inbound_connections_from_path(
+pub fn collect_established_tcp_connections()
+-> Result<Vec<EstablishedTcpConnection>, TcpConnectionUsageError> {
+    if !cfg!(target_os = "linux") {
+        return Err(TcpConnectionUsageError::Unsupported(
+            "Linux /proc socket inspection is required".to_string(),
+        ));
+    }
+    let mut connections = Vec::new();
+    collect_established_tcp_connections_from_path(Path::new("/proc/net/tcp"), &mut connections)?;
+    collect_established_tcp_connections_from_path(Path::new("/proc/net/tcp6"), &mut connections)?;
+    Ok(connections)
+}
+
+fn collect_established_tcp_connections_from_path(
     path: &Path,
-    listen_ports: &BTreeSet<u16>,
-    counts: &mut HashMap<u16, u32>,
+    connections: &mut Vec<EstablishedTcpConnection>,
 ) -> Result<(), TcpConnectionUsageError> {
     let content = fs::read_to_string(path)?;
     for (line_index, raw_line) in content.lines().enumerate() {
@@ -526,20 +543,18 @@ fn collect_established_inbound_connections_from_path(
         let (local_ip, local_port) = parse_proc_addr_port(local).map_err(|err| {
             TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
-        let (_remote_ip, remote_port) = parse_proc_addr_port(remote).map_err(|err| {
+        let (remote_ip, remote_port) = parse_proc_addr_port(remote).map_err(|err| {
             TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
         if remote_port == 0 {
             continue;
         }
-        if !listen_ports.contains(&local_port) {
-            continue;
-        }
-        let _ = is_unspecified_ip(&local_ip);
-        counts
-            .entry(local_port)
-            .and_modify(|count| *count = count.saturating_add(1))
-            .or_insert(1);
+        connections.push(EstablishedTcpConnection {
+            local_ip,
+            local_port,
+            remote_ip,
+            remote_port,
+        });
     }
     Ok(())
 }
@@ -617,13 +632,6 @@ fn parse_ipv6_hex(value: &str) -> Result<IpAddr, String> {
         out[index * 4..index * 4 + 4].copy_from_slice(&parsed.to_le_bytes());
     }
     Ok(IpAddr::from(out))
-}
-
-fn is_unspecified_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => ip.is_unspecified(),
-        IpAddr::V6(ip) => ip.is_unspecified(),
-    }
 }
 
 #[cfg(test)]

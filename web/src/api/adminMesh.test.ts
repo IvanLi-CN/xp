@@ -81,6 +81,32 @@ describe("AdminMeshPeerSchema", () => {
 		expect(parsed.mesh_transport?.connection_starts_5m).toBe(1);
 	});
 
+	it("parses separate Reverse underlay and user inbound evidence", () => {
+		const parsed = AdminMeshPeerSchema.parse({
+			...peerFixture(),
+			reverse_underlay: {
+				logical_links: 1,
+				physical_connections: 3,
+				limit_per_link: 2,
+				state: "over_limit",
+				links: [
+					{
+						target_node_id: "node-target",
+						rendezvous_node_id: "node-rendezvous",
+						role: "primary",
+						generation: fixtureCatalog.number.value4(),
+						connections: 3,
+						limit: 2,
+						state: "over_limit",
+					},
+				],
+			},
+		});
+
+		expect(parsed.reverse_underlay?.physical_connections).toBe(3);
+		expect(parsed.reverse_underlay?.links[0]?.state).toBe("over_limit");
+	});
+
 	it.each(["primary", "standby", "bootstrap"] as const)(
 		"accepts the %s reverse rendezvous role",
 		(rendezvous_role) => {

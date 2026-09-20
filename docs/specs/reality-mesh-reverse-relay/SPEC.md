@@ -5,6 +5,7 @@
 ## Related ADRs
 
 - [0005-reverse-link-unverified-cooldown](../../adr/0005-reverse-link-unverified-cooldown.md)
+- [0013-reverse-underlay-connection-budget](../../adr/0013-reverse-underlay-connection-budget.md)
 
 ## 背景
 
@@ -43,7 +44,15 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 - Rendezvous 动态创建 password-auth、TCP-only、UDP-disabled 的 `127.0.0.1:10086` SOCKS5 inbound；端口冲突时 fail closed。
 - target 动态创建独立 Reverse account 的 VLESS outbound，经 Rendezvous 的现有 Reality/XHTTP 或 Reality/Vision TCP endpoint 主动建链。Rendezvous 的 VLESS inbound 首次握手按 generation 创建 reverse handler。
 - XP 通过 `socks5h` 与 `http2_prior_knowledge()` 请求 `http://rvs-<128-bit-id>.mesh.invalid:443`。target 仅允许精确 origin 路由到固定 XP loopback；未匹配 SOCKS 流量 block。target 不需要 managed VLESS endpoint。
-- XP 进程内共享控制面 client 对每个 Rendezvous 的 Reverse outer request 固定最多 8 个 in-flight slots；该上限由所有 `MeshAwareHttpClient` clones 共享，满载时立即拒绝新请求而不排队或建立新的 underlay stream。普通请求最多占用其中 7 个，始终保留至少 1 个 health slot；slot 绑定到 guarded response body/stream 的完整生命周期，并在成功、错误、超时或 response 丢弃后释放。Direct/Public、assignment 和 Link lease 行为不变。
+- XP 进程内共享控制面 client 对每个 Rendezvous 的 Reverse outer request 固定最多 8 个
+  in-flight slots；该上限由所有 `MeshAwareHttpClient` clones 共享，满载时立即拒绝新请求而不排队
+  或建立新的 underlay stream。普通请求最多占用其中 7 个，始终保留至少 1 个 health slot；slot
+  绑定到 guarded response body/stream 的完整生命周期，并在成功、错误、超时或 response 丢弃后释放。
+  Direct/Public、assignment 和 Link lease 行为不变。
+- XP 生成的 Reverse XHTTP outbound 为每个 logical Link 固定 `XMUX max_connections=2`，且不提供
+  环境变量或 Web/API 覆盖。已有 underlay 必须复用，不为后续请求打开第三条连接；请求 admission
+  仍由既有每 Rendezvous 的 8-slot gate 控制，slot 满载时才快速失败并沿用 Direct/Public fallback。
+  Primary、standby、bootstrap Link 各自独立计数。
 - Reverse outer requests retain concurrent read-side gate admission; a cluster Mesh gate transition
   takes the exclusive write side and waits for admitted requests to finish before disabling
   Mesh/Reverse traffic.
@@ -102,6 +111,13 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
   System Status 由当前 assignments 标明直连 Rendezvous 的 primary/standby 角色。
   每个 Reverse target 用两条单行摘要显示 `Reverse relay` 与当前活动 Rendezvous/generation，不重复 standby。
   Cluster nodes 计数包含本机，所有 remote member 各有一行；每个状态单元最多显示两条单行摘要，不新增手动选路控件。
+- `/api/admin/mesh/status` 的 `mesh_transport.current_connection_requests` 继续表示控制面 HTTP 请求数，
+  不表示 TCP socket 数量。新增可选 `peers[].reverse_underlay`，分别返回 logical Link、physical
+  underlay、每 Link 上限、generation、role 与 `ok|over_limit|unknown|unavailable` 状态；本机
+  `local.connection_usage.user_inbound` 单独返回 `external`、`cluster_peer`、`unknown` 计数及
+  管理员可展开的来源地址明细。System Status 以 `Reverse underlay · internal` 和
+  `User inbound · external` 两个独立区域展示，不合并为一个入站总数。超过 2 条只产生诊断状态，
+  不自动断链或重启 XP。
 
 ## 验收
 
@@ -135,3 +151,13 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 下一行显示当前 Rendezvous/generation。
 
 ![移动端反向目标](./assets/system-status-five-node-mobile-targets.png)
+
+Connection accounting in the Web Demo separates internal Reverse underlays from external user
+inbound sessions. The desktop viewport shows the over-limit `11 / 2` Osaka Link and the separate
+`2 external` user count.
+
+![Connection accounting desktop](./assets/system-status-connection-accounting-desktop.png)
+
+The mobile viewport keeps the same two categories visible and preserves the per-peer limit state.
+
+![Connection accounting mobile](./assets/system-status-connection-accounting-mobile.png)

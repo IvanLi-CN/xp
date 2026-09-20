@@ -61,6 +61,23 @@ export const demoMeshStatus: AdminMeshStatus = {
 			last_renewed_at: "2026-08-01T00:00:00Z",
 			last_error: null,
 		},
+		connection_usage: {
+			supported: true,
+			sampled_at: "2026-08-03T09:47:00Z",
+			user_inbound: {
+				connections: 2,
+				external: 2,
+				cluster_peer: 0,
+				unknown: 0,
+				sources: [
+					{
+						address: "203.0.113.24",
+						connections: 2,
+						classification: "external",
+					},
+				],
+			},
+		},
 	},
 	peers: [
 		{
@@ -272,6 +289,23 @@ export const demoReverseMeshStatus: AdminMeshStatus = {
 				generation: 7,
 				readiness: "active",
 			},
+			reverse_underlay: {
+				logical_links: 1,
+				physical_connections: 11,
+				limit_per_link: 2,
+				state: "over_limit",
+				links: [
+					{
+						target_node_id: "node-osaka-1",
+						rendezvous_node_id: "node-sgp-1",
+						role: "primary",
+						generation: 7,
+						connections: 11,
+						limit: 2,
+						state: "over_limit",
+					},
+				],
+			},
 		},
 		{
 			...demoMeshStatus.peers[0],
@@ -296,6 +330,23 @@ export const demoReverseMeshStatus: AdminMeshStatus = {
 				standby_rendezvous: "node-syd-1",
 				generation: 9,
 				readiness: "active",
+			},
+			reverse_underlay: {
+				logical_links: 1,
+				physical_connections: 1,
+				limit_per_link: 2,
+				state: "ok",
+				links: [
+					{
+						target_node_id: "node-seoul-1",
+						rendezvous_node_id: "node-sgp-1",
+						role: "primary",
+						generation: 9,
+						connections: 1,
+						limit: 2,
+						state: "ok",
+					},
+				],
 			},
 		},
 	],

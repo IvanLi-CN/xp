@@ -74,6 +74,14 @@
   direct Rendezvous from current assignments, gives each Reverse target separate `Reverse relay`
   and active Rendezvous/generation lines, counts the local node with all remote members, and
   retains the existing Details entry for the full diagnostic path.
+- Reverse XHTTP outbounds now set an XP-owned XMUX `max_connections=2`. Existing underlays are
+  reused, a third socket is never requested by the generated config, and the existing
+  Direct/Public fallback remains responsible for failed control-plane requests.
+- Mesh status now samples established local TCP sockets and joins them with current node egress
+  probes and Reverse assignments. `peers[].reverse_underlay` reports logical Links separately
+  from physical sockets, while `local.connection_usage.user_inbound` separates external users,
+  known cluster peers, and unknown sources. The System Status page exposes these as separate
+  internal/external sections and keeps source addresses behind an administrator disclosure.
 - Fixed Xray spike: `RUN_ID=20260819_102353_be14b3bf_reverse`, Xray `26.3.27`, image digest
   `sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7`. Two Xray
   instances completed dynamic VLESS Reverse registration over both Vision TCP + Reality and

@@ -84,9 +84,9 @@ use crate::{
         DEFAULT_VLESS_FINGERPRINT, DefaultVlessEndpointSpec, build_managed_default_vless_endpoint,
     },
     mesh_telemetry::{
-        BreakerState, MeshQuality, MeshTelemetryHandle, MeshTransportHealth, MeshTransportProtocol,
-        TelemetryPath, availability_for, latency_percentiles_for, mesh_transport_counts_for,
-        mesh_transport_health_for, quality_for_peer,
+        BreakerState, MeshQuality, MeshTelemetryHandle, TelemetryPath, availability_for,
+        latency_percentiles_for, mesh_transport_counts_for, mesh_transport_health_for,
+        quality_for_peer,
     },
     mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot},
     mihomo_redact, mihomo_resources,

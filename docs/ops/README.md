@@ -121,7 +121,10 @@ Host-managed mode assumptions:
   across all cloned clients; ordinary requests use at most seven so one slot remains for signed
   health probes. Excess requests fail before opening another underlay stream and follow the
   existing fallback/error policy. The slot remains held while the response body/stream is live.
-  This is a fixed safety limit with no node-local override.
+  This is a fixed safety limit with no node-local override. XP-generated Reverse XHTTP outbounds
+  also set XMUX `max_connections=2` per logical Link; existing underlays are reused and a third
+  socket is not opened. Requests continue to reuse those underlays; only a full Reverse request
+  admission slot fails fast and follows the existing Direct/Public fallback policy.
   Repository synchronization is separate from that control-plane fallback: direct requests use the
   peer's public HTTPS `api_base_url` only; they do not select or probe Mesh or Reverse Mesh. Source
   delivery uses the same public HTTPS path. A
@@ -345,10 +348,13 @@ uses H2 and starts at most two connections in five minutes; more starts or a pro
 `churning`, while a peer without evidence is `unknown`. Public fallback retains the last Mesh reuse
 evidence for diagnosis.
 
-The node TCP chart remains an aggregate of business ingress connections and Mesh, and its 24-hour
-peak remains visible until the historical window rolls over. After an upgrade, validate reuse with
-the peer's 5-minute `mesh_connection_starts` and source-specific TCP samples; do not use an old
-24-hour peak alone to judge the rollout.
+The node TCP chart remains a historical aggregate of business ingress connections and Mesh, and
+its 24-hour peak remains visible until the historical window rolls over. The current
+`GET /api/admin/mesh/status` response is the source-specific diagnosis surface: inspect
+`peers[].reverse_underlay` for internal logical/physical Reverse counts and
+`local.connection_usage.user_inbound` for external, cluster-peer and unknown inbound counts.
+After an upgrade, validate reuse with the peer's 5-minute `mesh_connection_starts` and the new
+source-specific status fields; do not use an old 24-hour aggregate peak alone to judge the rollout.
 
 ### Auth epoch cutover
 
@@ -474,7 +480,13 @@ ssh <alias> 'curl -fsS http://127.0.0.1:62416/api/admin/config | jq .vless_https
 Mesh read-only diagnosis:
 
 - Query `GET /api/admin/mesh/status` on each member and record `mesh_capability`,
-  `mesh_reason`, breaker state, current path, and the latest sample timestamp.
+  `mesh_reason`, breaker state, current path, and the latest sample timestamp. Also record
+  `local.connection_usage.user_inbound` and each present `peers[].reverse_underlay`; these are
+  separate from `mesh_transport.current_connection_requests`, which is an HTTP request count.
+- Treat `reverse_underlay.state=over_limit` as an internal Reverse fan-out defect when its
+  `physical_connections` exceeds `limit_per_link`; treat `user_inbound.external` and its source
+  list as client traffic. `unknown` means the node cannot classify the source and must not be
+  inferred as either cluster or user traffic.
 - For every directed peer edge, compare the endpoint inventory with the canary status and Xray
   listener, then verify DNS/port reachability and a signed `health-v2` acknowledgement.
 - `missing_endpoint`, `ambiguous_endpoint`, and `invalid_access_host` are configuration capability
