@@ -1,8 +1,19 @@
-use std::{process::Command, sync::Arc, time::Duration};
+use std::{
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use axum::{Router, routing::get};
 use reqwest::Client;
-use tokio::{net::TcpListener, sync::Notify, time::sleep};
+use tokio::{
+    net::TcpListener,
+    sync::Notify,
+    time::{sleep, timeout},
+};
 
 use xp::{domain, protocol::VlessRealityTransport, reverse_mesh, xray};
 
@@ -31,7 +42,11 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
         .expect("bind H2C server");
     let address = listener.local_addr().expect("H2C address");
     let release_holds = Arc::new(Notify::new());
+    let hold_started_count = Arc::new(AtomicUsize::new(0));
+    let hold_started = Arc::new(Notify::new());
     let release_holds_for_server = release_holds.clone();
+    let hold_started_count_for_server = hold_started_count.clone();
+    let hold_started_for_server = hold_started.clone();
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -41,7 +56,12 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
                     "/hold",
                     get(move || {
                         let release_holds = release_holds_for_server.clone();
+                        let hold_started_count = hold_started_count_for_server.clone();
+                        let hold_started = hold_started_for_server.clone();
                         async move {
+                            if hold_started_count.fetch_add(1, Ordering::AcqRel) + 1 >= 8 {
+                                hold_started.notify_waiters();
+                            }
                             release_holds.notified().await;
                             "ok"
                         }
@@ -93,6 +113,8 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
             label,
             address.port(),
             release_holds.clone(),
+            hold_started_count.clone(),
+            hold_started.clone(),
         )
         .await;
     }
@@ -132,6 +154,8 @@ async fn exercise_transport(
     label: &str,
     h2c_port: u16,
     release_holds: Arc<Notify>,
+    hold_started_count: Arc<AtomicUsize>,
+    hold_started: Arc<Notify>,
 ) {
     let endpoint = if label == "vision" {
         domain::Endpoint {
@@ -244,6 +268,7 @@ async fn exercise_transport(
     assert_eq!(response.version(), reqwest::Version::HTTP_2);
     assert_eq!(response.text().await.expect("H2C body"), "ok");
 
+    hold_started_count.store(0, Ordering::Release);
     let requests = (0..8)
         .map(|_| {
             let h2c = h2c.clone();
@@ -261,7 +286,16 @@ async fn exercise_transport(
         })
         .collect::<Vec<_>>();
     let requests = requests.into_iter().map(tokio::spawn).collect::<Vec<_>>();
-    sleep(Duration::from_millis(500)).await;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hold_started_count.load(Ordering::Acquire) >= 8 {
+                break;
+            }
+            hold_started.notified().await;
+        }
+    })
+    .await
+    .expect("all concurrent hold handlers started");
     if transport == VlessRealityTransport::Xhttp {
         let underlays = target_established_underlays(port);
         assert!(

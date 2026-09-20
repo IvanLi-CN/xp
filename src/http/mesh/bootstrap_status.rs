@@ -17,11 +17,37 @@ pub(crate) fn active_bootstrap_marker(
         })
         .and_then(|operation| operation.node_id.as_deref())
         .filter(|target| assignments.contains_key(*target));
-    crate::raft::http_rpc::read_bootstrap_sender_marker(
+    let target = target?;
+    let assignment = assignments.get(target)?;
+    if let Some(marker) = crate::raft::http_rpc::read_bootstrap_sender_marker(
         crate::cluster_metadata::ClusterPaths::new(data_dir).raft_bootstrap_sender,
     )
     .and_then(|marker| marker.reverse_mesh)
-    .filter(|marker| target == Some(marker.target_node_id.as_str()))
+    .filter(|marker| {
+        marker.target_node_id == target
+            && marker.epoch == assignment.credential_epoch
+            && marker.generation == assignment.generation
+            && marker.primary_node_id == assignment.primary_node_id
+            && marker.standby_node_id == assignment.standby_node_id
+    }) {
+        return Some(marker);
+    }
+    Some(ReverseMeshBootstrapMarker {
+        epoch: assignment.credential_epoch,
+        generation: assignment.generation,
+        target_node_id: assignment.target_node_id.clone(),
+        primary_node_id: assignment.primary_node_id.clone(),
+        standby_node_id: assignment.standby_node_id.clone(),
+        primary_endpoint: crate::reverse_mesh::ReverseMeshBootstrapEndpoint {
+            access_host: String::new(),
+            port: 0,
+            server_name: String::new(),
+            public_key: String::new(),
+            short_id: String::new(),
+            transport: String::new(),
+        },
+        standby_endpoint: None,
+    })
 }
 
 pub(super) fn add_bootstrap_status(
@@ -78,7 +104,7 @@ pub(super) fn add_bootstrap_status(
                     generation: marker.generation,
                     connections: None,
                     limit: 2,
-                    state: AdminReverseUnderlayState::Unknown,
+                    state,
                 });
                 status.logical_links += 1;
             }
@@ -168,5 +194,49 @@ mod tests {
             status["rendezvous"].links[0].state,
             AdminReverseUnderlayState::Unavailable
         ));
+    }
+
+    #[test]
+    fn merged_bootstrap_status_preserves_unavailable_socket_collection() {
+        let marker = ReverseMeshBootstrapMarker {
+            epoch: 4,
+            generation: 9,
+            target_node_id: "target".to_string(),
+            primary_node_id: "rendezvous".to_string(),
+            standby_node_id: None,
+            primary_endpoint: ReverseMeshBootstrapEndpoint {
+                access_host: xp_test_fixtures::primary_host().to_owned(),
+                port: 443,
+                server_name: "rendezvous.example.test".to_string(),
+                public_key: "public-key".to_string(),
+                short_id: "short-id".to_string(),
+                transport: "xhttp".to_string(),
+            },
+            standby_endpoint: None,
+        };
+        let mut status = BTreeMap::from([(
+            "rendezvous".to_string(),
+            AdminReverseUnderlayStatus {
+                logical_links: 1,
+                physical_connections: None,
+                limit_per_link: 2,
+                state: AdminReverseUnderlayState::Unavailable,
+                links: vec![AdminReverseLinkStatus {
+                    target_node_id: "target".to_string(),
+                    rendezvous_node_id: "rendezvous".to_string(),
+                    role: ReverseRole::Primary,
+                    generation: 8,
+                    connections: None,
+                    limit: 2,
+                    state: AdminReverseUnderlayState::Unavailable,
+                }],
+            },
+        )]);
+        add_bootstrap_status(&mut status, "target", Some(&marker), false);
+        assert!(matches!(
+            status["rendezvous"].links[0].state,
+            AdminReverseUnderlayState::Unavailable
+        ));
+        assert_eq!(status["rendezvous"].logical_links, 1);
     }
 }

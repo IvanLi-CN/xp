@@ -198,8 +198,22 @@ async fn probe_and_publish(
 
     let mut next = previous.clone();
     next.checked_at = checked_at.clone();
-    next.public_ipv4 = current_family_ip(&previous.public_ipv4, &ipv4_outcome);
-    next.public_ipv6 = current_family_ip(&previous.public_ipv6, &ipv6_outcome);
+    let (public_ipv4, last_success_ipv4_at) = current_family_state(
+        &previous.public_ipv4,
+        &previous.last_success_ipv4_at,
+        &ipv4_outcome,
+        &checked_at,
+    );
+    let (public_ipv6, last_success_ipv6_at) = current_family_state(
+        &previous.public_ipv6,
+        &previous.last_success_ipv6_at,
+        &ipv6_outcome,
+        &checked_at,
+    );
+    next.public_ipv4 = public_ipv4;
+    next.public_ipv6 = public_ipv6;
+    next.last_success_ipv4_at = last_success_ipv4_at;
+    next.last_success_ipv6_at = last_success_ipv6_at;
 
     let mut errors = collect_probe_errors(&ipv4_outcome, &ipv6_outcome);
     let selected_public_ip = select_public_ip(&ipv4_outcome, &ipv6_outcome);
@@ -246,11 +260,16 @@ async fn probe_and_publish(
     Ok(next)
 }
 
-fn current_family_ip(previous: &Option<String>, outcome: &PublicIpProbeOutcome) -> Option<String> {
+fn current_family_state(
+    previous_ip: &Option<String>,
+    previous_success_at: &Option<String>,
+    outcome: &PublicIpProbeOutcome,
+    checked_at: &str,
+) -> (Option<String>, Option<String>) {
     match outcome {
-        PublicIpProbeOutcome::Available(ip) => Some(ip.to_string()),
-        PublicIpProbeOutcome::MissingCandidate(_) => None,
-        PublicIpProbeOutcome::Unknown(_) => previous.clone(),
+        PublicIpProbeOutcome::Available(ip) => (Some(ip.to_string()), Some(checked_at.to_string())),
+        PublicIpProbeOutcome::MissingCandidate(_) => (None, None),
+        PublicIpProbeOutcome::Unknown(_) => (previous_ip.clone(), previous_success_at.clone()),
     }
 }
 

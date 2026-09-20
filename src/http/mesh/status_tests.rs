@@ -351,6 +351,8 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
                 public_ipv4: Some(xp_test_fixtures::primary_ipv4().to_owned()),
                 public_ipv6: Some(xp_test_fixtures::private_ipv6_address().to_owned()),
                 selected_public_ip: Some(xp_test_fixtures::private_ipv6_address().to_owned()),
+                last_success_ipv4_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+                last_success_ipv6_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 ..Default::default()
             },
@@ -360,6 +362,7 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
             NodeEgressProbeState {
                 public_ipv4: Some(xp_test_fixtures::primary_ipv4().to_owned()),
                 selected_public_ip: Some(xp_test_fixtures::primary_ipv4().to_owned()),
+                last_success_ipv4_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
                 ..Default::default()
             },
@@ -403,6 +406,57 @@ fn shared_egress_address_is_unknown_and_ipv6_is_classified() {
 
     assert_eq!(report.local.user_inbound.unknown, Some(1));
     assert_eq!(report.local.user_inbound.cluster_peer, Some(1));
+}
+
+#[test]
+fn stale_nonselected_egress_family_is_not_classified_as_cluster_traffic() {
+    let now = xp_test_fixtures::baseline_timestamp()
+        .parse::<chrono::DateTime<Utc>>()
+        .unwrap()
+        + Duration::minutes(1);
+    let probes = BTreeMap::from([(
+        "peer".to_string(),
+        NodeEgressProbeState {
+            public_ipv4: Some(xp_test_fixtures::primary_ipv4().to_owned()),
+            public_ipv6: Some(xp_test_fixtures::private_ipv6_address().to_owned()),
+            selected_public_ip: Some(xp_test_fixtures::primary_ipv4().to_owned()),
+            last_success_ipv4_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+            last_success_ipv6_at: Some((now - Duration::hours(2)).to_rfc3339()),
+            last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+            ..Default::default()
+        },
+    )]);
+    let report = build_mesh_connection_usage(
+        xp_test_fixtures::primary_node_id(),
+        &[],
+        &[Endpoint {
+            endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+            node_id: xp_test_fixtures::primary_node_id().to_owned(),
+            tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+            kind: EndpointKind::VlessRealityVisionTcp,
+            port: 44444,
+            meta: {
+                let mut meta = xp_test_fixtures::endpoint_vless_meta().clone();
+                meta["managed_default"] = serde_json::json!(true);
+                meta["transport"] = serde_json::json!("xhttp");
+                meta
+            },
+        }],
+        &BTreeMap::new(),
+        &probes,
+        now,
+        true,
+        None,
+        &[EstablishedTcpConnection {
+            local_ip: "::".parse().unwrap(),
+            local_port: 44444,
+            remote_ip: xp_test_fixtures::private_ipv6_address().parse().unwrap(),
+            remote_port: 50001,
+        }],
+    );
+
+    assert_eq!(report.local.user_inbound.external, Some(1));
+    assert_eq!(report.local.user_inbound.cluster_peer, Some(0));
 }
 
 #[test]

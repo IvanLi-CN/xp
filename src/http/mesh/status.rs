@@ -293,14 +293,37 @@ fn egress_ips_by_node(
         .filter(|(_, probe)| !is_node_egress_probe_stale(probe, now))
         .filter_map(|(node_id, probe)| {
             let mut ips = BTreeSet::new();
-            for value in [
-                probe.public_ipv4.as_deref(),
-                probe.public_ipv6.as_deref(),
-                probe.selected_public_ip.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
+            for (value, family_success_at) in [
+                (
+                    probe.public_ipv4.as_deref(),
+                    probe.last_success_ipv4_at.as_deref(),
+                ),
+                (
+                    probe.public_ipv6.as_deref(),
+                    probe.last_success_ipv6_at.as_deref(),
+                ),
+                (
+                    probe.selected_public_ip.as_deref(),
+                    probe.last_success_at.as_deref(),
+                ),
+            ] {
+                let Some(value) = value else { continue };
+                let success_at = family_success_at.or_else(|| {
+                    (probe.selected_public_ip.as_deref() == Some(value))
+                        .then_some(probe.last_success_at.as_deref())
+                        .flatten()
+                });
+                let Some(success_at) = success_at else {
+                    continue;
+                };
+                let Ok(success_at) = success_at.parse::<DateTime<Utc>>() else {
+                    continue;
+                };
+                if now.signed_duration_since(success_at).num_seconds()
+                    > crate::node_egress_probe::NODE_EGRESS_PROBE_STALE_AFTER_SECS
+                {
+                    continue;
+                }
                 if let Ok(ip) = IpAddr::from_str(value) {
                     ips.insert(ip);
                 }

@@ -541,10 +541,10 @@ pub(super) async fn reverse_candidate_readiness(
         MeshCapabilityProbeResponse::Verified(response) => response,
         MeshCapabilityProbeResponse::PredecessorNotFound => return Ok(false),
     };
-    let body = response
-        .json::<ReverseCapabilityResponse>()
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    let body =
+        super::bounded_json::read_bounded_internal_json::<ReverseCapabilityResponse>(response)
+            .await
+            .map_err(ApiError::gateway_timeout)?;
     Ok(body
         .reverse_mesh
         .as_ref()
@@ -674,7 +674,11 @@ async fn reconcile_reverse_assignments(
                     ));
                 }
             };
-            let body = match response.json::<ReverseCapabilityResponse>().await {
+            let body = match super::bounded_json::read_bounded_internal_json::<
+                ReverseCapabilityResponse,
+            >(response)
+            .await
+            {
                 Ok(body) => body,
                 Err(error) if current_epoch != 0 => {
                     candidates.push(crate::reverse_mesh::ReverseMeshCandidate {
@@ -1276,12 +1280,17 @@ pub(super) async fn admin_run_mesh_probes(
         .try_acquire_operator_probe_batch()
         .ok_or_else(|| ApiError::conflict("a mesh probe batch is already running"))?;
     let accepted_node_ids = if request.node_ids.is_empty() {
-        nodes
+        let accepted_node_ids = nodes
             .into_iter()
             .filter(|node| node.node_id != state.cluster.node_id)
             .map(|node| node.node_id)
-            .take(50)
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        if accepted_node_ids.len() > 50 {
+            return Err(ApiError::invalid_request(
+                "probe-all exceeds the 50-target limit; submit explicit batches",
+            ));
+        }
+        accepted_node_ids
     } else {
         if request.node_ids.len() > 50 {
             return Err(ApiError::invalid_request(

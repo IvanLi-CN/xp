@@ -129,6 +129,7 @@ use crate::{
     },
     xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
+mod bounded_json;
 mod browser_cors;
 mod capabilities;
 mod console_runtime_policy;
@@ -176,7 +177,6 @@ pub struct AppState {
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
 }
-
 #[derive(Debug)]
 pub struct ApiError {
     code: &'static str,
@@ -4588,13 +4588,15 @@ async fn require_node_mihomo_resource_policy_capability(
             "target node capability probe was not accepted; upgrade it first",
         ));
     }
-    let body = response.json::<Value>().await.map_err(|_| {
-        ApiError::new(
-            "node_capability_unavailable",
-            StatusCode::CONFLICT,
-            "target node capability response is invalid; upgrade it first",
-        )
-    })?;
+    let body = bounded_json::read_bounded_internal_json::<Value>(response)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                "node_capability_unavailable",
+                StatusCode::CONFLICT,
+                "target node capability response is invalid; upgrade it first",
+            )
+        })?;
     let supported = body
         .get("capabilities")
         .and_then(Value::as_array)

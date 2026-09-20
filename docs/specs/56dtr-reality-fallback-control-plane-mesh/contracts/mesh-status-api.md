@@ -28,7 +28,8 @@
 ## `POST /api/admin/mesh/probes`
 
 - Requires administrator Bearer authentication.
-- Optional `node_ids` selects remote current members; omission probes all peers.
+- Optional `node_ids` selects remote current members; omission probes all peers when there are at
+  most 50 remote members and is rejected above that limit so operators can submit explicit batches.
 - Rejects local, unknown, duplicate and more than 50 node IDs.
 - All remote targets are derived from replicated member and endpoint state.
 - Returns accepted peer IDs and the telemetry revision.

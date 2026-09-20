@@ -254,6 +254,8 @@ pub(super) fn egress_probe(
         },
         subscription_region: region,
         checked_at: xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned(),
+        last_success_ipv4_at: Some(xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned()),
+        last_success_ipv6_at: None,
         last_success_at: Some(xp_test_fixtures::timestamp_at20990101_t000000_z().to_owned()),
         classification_invalidated_at: None,
         error_summary: None,
