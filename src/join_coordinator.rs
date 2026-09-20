@@ -1,14 +1,11 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
-
-use chrono::{DateTime, Utc};
-use tokio::sync::Mutex;
-
 use crate::{
     join_session::JoinSessionStatus,
     raft::{app::RaftFacade, types::raft_node_id_from_ulid},
     state::{DesiredStateApplyResult, DesiredStateCommand, JsonSnapshotStore},
 };
-
+use chrono::{DateTime, Utc};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use tokio::sync::Mutex;
 async fn write_applied(
     raft: &Arc<dyn RaftFacade>,
     command: DesiredStateCommand,
@@ -20,7 +17,6 @@ async fn write_applied(
         }
     }
 }
-
 async fn transition_join_operation(
     raft: &Arc<dyn RaftFacade>,
     store: &Arc<Mutex<JsonSnapshotStore>>,
@@ -56,7 +52,6 @@ async fn transition_join_operation(
     .await?;
     Ok(())
 }
-
 pub fn spawn_join_coordinator(
     raft: Arc<dyn RaftFacade>,
     store: Arc<Mutex<JsonSnapshotStore>>,
@@ -70,7 +65,6 @@ pub fn spawn_join_coordinator(
         }
     })
 }
-
 /// This runs after the all-voter capability barrier and lifecycle gate. It converts replayable
 /// legacy reservations. Known expired reservations whose non-voter learner remains are terminalized
 /// without changing Raft membership or deleting DesiredState; unrelated fresh joins must not
@@ -248,6 +242,18 @@ async fn reconcile_once(
             .nodes()
             .any(|(member_id, _)| *member_id == node_id);
         if voters.contains(&node_id) {
+            let _guard = crate::raft_membership_guard::membership_operation_gate()
+                .lock_owned()
+                .await;
+            let Some(operation) = crate::raft_membership_guard::active_join_operation_for_session(
+                &store,
+                node_id,
+                &session.node_id,
+            )
+            .await
+            else {
+                continue;
+            };
             match operation.phase {
                 crate::state::MembershipOperationPhase::LearnerRegistered => {
                     transition_join_operation(
@@ -563,15 +569,12 @@ async fn reconcile_once(
     }
     Ok(())
 }
-
 #[cfg(test)]
 #[path = "join_coordinator_promotion_tests.rs"]
 mod promotion_tests;
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-
     use tokio::sync::watch;
 
     use super::*;
@@ -584,7 +587,6 @@ mod tests {
         },
         state::StoreInit,
     };
-
     #[derive(Clone)]
     struct RecoveringRaft {
         inner: LocalRaft,
@@ -619,19 +621,16 @@ mod tests {
             },
         );
     }
-
     impl RaftFacade for RecoveringRaft {
         fn metrics(&self) -> watch::Receiver<openraft::RaftMetrics<u64, RaftNodeMeta>> {
             self.inner.metrics()
         }
-
         fn client_write(
             &self,
             cmd: DesiredStateCommand,
         ) -> BoxFuture<'_, anyhow::Result<ClientResponse>> {
             self.inner.client_write(cmd)
         }
-
         fn add_learner(
             &self,
             _node_id: u64,
@@ -643,7 +642,6 @@ mod tests {
                 Ok(())
             })
         }
-
         fn wait_learner_caught_up(
             &self,
             _node_id: u64,
@@ -656,7 +654,6 @@ mod tests {
                 anyhow::bail!("learner has not started")
             })
         }
-
         fn add_voters(&self, _node_ids: BTreeSet<u64>) -> BoxFuture<'_, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
@@ -669,7 +666,6 @@ mod tests {
             self.inner.change_membership(changes, retain)
         }
     }
-
     #[tokio::test]
     async fn failover_keeps_a_durable_reservation_until_metrics_observe_the_learner() {
         let tmp = tempfile::tempdir().unwrap();

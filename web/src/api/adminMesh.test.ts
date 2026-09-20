@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { fixtureCatalog } from "../fixture-policy/catalog";
-import { AdminMeshPeerSchema } from "./adminMesh";
+import {
+	AdminMeshConnectionUsageSchema,
+	AdminMeshPeerSchema,
+} from "./adminMesh";
 
 function peerFixture() {
 	return {
@@ -39,6 +42,24 @@ function peerFixture() {
 }
 
 describe("AdminMeshPeerSchema", () => {
+	it("keeps unavailable socket inspection distinct from zero traffic", () => {
+		const parsed = AdminMeshConnectionUsageSchema.parse({
+			supported: false,
+			sampled_at: null,
+			warning: "socket inspection unavailable",
+			user_inbound: {
+				connections: null,
+				external: null,
+				cluster_peer: null,
+				unknown: null,
+				sources: [],
+				sources_truncated: false,
+			},
+		});
+
+		expect(parsed.user_inbound.external).toBeNull();
+	});
+
 	it("accepts legacy peers and defaults additive bucket counters", () => {
 		const parsed = AdminMeshPeerSchema.parse(peerFixture());
 
@@ -79,6 +100,32 @@ describe("AdminMeshPeerSchema", () => {
 
 		expect(parsed.mesh_transport?.protocol).toBe("h2");
 		expect(parsed.mesh_transport?.connection_starts_5m).toBe(1);
+	});
+
+	it("parses separate Reverse underlay and user inbound evidence", () => {
+		const parsed = AdminMeshPeerSchema.parse({
+			...peerFixture(),
+			reverse_underlay: {
+				logical_links: 1,
+				physical_connections: fixtureCatalog.number.value3(),
+				limit_per_link: 2,
+				state: "over_limit",
+				links: [
+					{
+						target_node_id: "node-target",
+						rendezvous_node_id: "node-rendezvous",
+						role: "primary",
+						generation: fixtureCatalog.number.value4(),
+						connections: fixtureCatalog.number.value3(),
+						limit: 2,
+						state: "over_limit",
+					},
+				],
+			},
+		});
+
+		expect(parsed.reverse_underlay?.physical_connections).toBe(3);
+		expect(parsed.reverse_underlay?.links[0]?.state).toBe("over_limit");
 	});
 
 	it.each(["primary", "standby", "bootstrap"] as const)(

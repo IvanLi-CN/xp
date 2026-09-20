@@ -132,6 +132,20 @@ async fn reverse_bootstrap_marker_at(
     epoch: u64,
     readiness: &BTreeMap<String, bool>,
 ) -> Option<ReverseMeshBootstrapMarker> {
+    let active_join = state
+        .store
+        .lock()
+        .await
+        .state()
+        .active_membership_operation()
+        .is_some_and(|operation| {
+            operation.kind == crate::state::MembershipOperationKind::Join
+                && !operation.phase.is_terminal()
+                && operation.node_id.as_deref() == Some(target_node_id)
+        });
+    if !active_join {
+        return None;
+    }
     let metrics = raft_metrics(state);
     let voter_ids = metrics
         .membership_config

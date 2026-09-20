@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    fs, io,
+    fs::File,
+    io::{self, BufRead, BufReader},
     net::IpAddr,
     path::Path,
 };
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub const TCP_CONNECTION_USAGE_SCHEMA_VERSION: u32 = 1;
 pub const MINUTES_WINDOW: usize = 7 * 24 * 60;
+const MAX_ESTABLISHED_TCP_CONNECTIONS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TcpConnectionUsageWindow {
@@ -136,6 +138,14 @@ pub struct TcpConnectionEndpointView {
     pub endpoint_id: String,
     pub endpoint_tag: String,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EstablishedTcpConnection {
+    pub local_ip: IpAddr,
+    pub local_port: u16,
+    pub remote_ip: IpAddr,
+    pub remote_port: u16,
 }
 
 #[derive(Debug)]
@@ -481,27 +491,42 @@ pub fn collect_established_inbound_connections_by_port(
     if listen_ports.is_empty() {
         return Ok(counts);
     }
-
-    collect_established_inbound_connections_from_path(
+    let mut inspected = 0;
+    collect_established_inbound_connections_by_port_from_path(
         Path::new("/proc/net/tcp"),
         listen_ports,
         &mut counts,
+        &mut inspected,
     )?;
-    collect_established_inbound_connections_from_path(
+    collect_established_inbound_connections_by_port_from_path(
         Path::new("/proc/net/tcp6"),
         listen_ports,
         &mut counts,
+        &mut inspected,
     )?;
     Ok(counts)
 }
 
-fn collect_established_inbound_connections_from_path(
+pub fn collect_established_tcp_connections()
+-> Result<Vec<EstablishedTcpConnection>, TcpConnectionUsageError> {
+    if !cfg!(target_os = "linux") {
+        return Err(TcpConnectionUsageError::Unsupported(
+            "Linux /proc socket inspection is required".to_string(),
+        ));
+    }
+    let mut connections = Vec::new();
+    collect_established_tcp_connections_from_path(Path::new("/proc/net/tcp"), &mut connections)?;
+    collect_established_tcp_connections_from_path(Path::new("/proc/net/tcp6"), &mut connections)?;
+    Ok(connections)
+}
+
+fn collect_established_tcp_connections_from_path(
     path: &Path,
-    listen_ports: &BTreeSet<u16>,
-    counts: &mut HashMap<u16, u32>,
+    connections: &mut Vec<EstablishedTcpConnection>,
 ) -> Result<(), TcpConnectionUsageError> {
-    let content = fs::read_to_string(path)?;
-    for (line_index, raw_line) in content.lines().enumerate() {
+    let file = File::open(path)?;
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let raw_line = line?;
         if line_index == 0 {
             continue;
         }
@@ -526,16 +551,73 @@ fn collect_established_inbound_connections_from_path(
         let (local_ip, local_port) = parse_proc_addr_port(local).map_err(|err| {
             TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
-        let (_remote_ip, remote_port) = parse_proc_addr_port(remote).map_err(|err| {
+        let (remote_ip, remote_port) = parse_proc_addr_port(remote).map_err(|err| {
             TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
         })?;
         if remote_port == 0 {
             continue;
         }
+        if connections.len() >= MAX_ESTABLISHED_TCP_CONNECTIONS {
+            return Err(TcpConnectionUsageError::Unsupported(
+                "established TCP socket count exceeds the bounded inspection limit".to_string(),
+            ));
+        }
+        connections.push(EstablishedTcpConnection {
+            local_ip,
+            local_port,
+            remote_ip,
+            remote_port,
+        });
+    }
+    Ok(())
+}
+
+fn collect_established_inbound_connections_by_port_from_path(
+    path: &Path,
+    listen_ports: &BTreeSet<u16>,
+    counts: &mut HashMap<u16, u32>,
+    inspected: &mut usize,
+) -> Result<(), TcpConnectionUsageError> {
+    let file = File::open(path)?;
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let raw_line = line?;
+        if line_index == 0 {
+            continue;
+        }
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        if columns.len() < 4 {
+            return Err(TcpConnectionUsageError::Parse(format!(
+                "{}:{} missing columns",
+                path.display(),
+                line_index + 1
+            )));
+        }
+        if columns[3] != "01" {
+            continue;
+        }
+        let (_, local_port) = parse_proc_addr_port(columns[1]).map_err(|err| {
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
+        })?;
         if !listen_ports.contains(&local_port) {
             continue;
         }
-        let _ = is_unspecified_ip(&local_ip);
+        let (_, remote_port) = parse_proc_addr_port(columns[2]).map_err(|err| {
+            TcpConnectionUsageError::Parse(format!("{}:{} {err}", path.display(), line_index + 1))
+        })?;
+        if remote_port == 0 {
+            continue;
+        }
+        *inspected = inspected.saturating_add(1);
+        if *inspected > MAX_ESTABLISHED_TCP_CONNECTIONS {
+            return Err(TcpConnectionUsageError::Unsupported(
+                "established inbound TCP socket count exceeds the bounded inspection limit"
+                    .to_string(),
+            ));
+        }
         counts
             .entry(local_port)
             .and_modify(|count| *count = count.saturating_add(1))
@@ -619,15 +701,10 @@ fn parse_ipv6_hex(value: &str) -> Result<IpAddr, String> {
     Ok(IpAddr::from(out))
 }
 
-fn is_unspecified_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => ip.is_unspecified(),
-        IpAddr::V6(ip) => ip.is_unspecified(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     fn endpoint_view_a() -> TcpConnectionEndpointView {
@@ -854,5 +931,52 @@ mod tests {
         let (ip6, port6) = parse_proc_addr_port("00000000000000000000000000000000:01BB").unwrap();
         assert!(matches!(ip6, IpAddr::V6(v6) if v6.is_unspecified()));
         assert_eq!(port6, 443);
+    }
+
+    #[test]
+    fn streamed_proc_rows_parse_ipv6_and_reject_malformed_rows() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        writeln!(file, "sl local_address rem_address st").unwrap();
+        writeln!(
+            file,
+            "0: 00000000000000000000000000000000:01BB 00000000000000000000000001000000:01BC 01"
+        )
+        .unwrap();
+        let mut connections = Vec::new();
+        collect_established_tcp_connections_from_path(temp.path(), &mut connections).unwrap();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].local_ip, "::".parse::<IpAddr>().unwrap());
+        assert_eq!(connections[0].remote_ip, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(connections[0].local_port, 443);
+
+        let malformed = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            malformed.path(),
+            "sl local_address rem_address st\nmalformed\n",
+        )
+        .unwrap();
+        let error =
+            collect_established_tcp_connections_from_path(malformed.path(), &mut Vec::new())
+                .unwrap_err();
+        assert!(matches!(error, TcpConnectionUsageError::Parse(_)));
+    }
+
+    #[test]
+    fn streamed_proc_rows_fail_closed_at_the_connection_bound() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        writeln!(file, "sl local_address rem_address st").unwrap();
+        for index in 0..=MAX_ESTABLISHED_TCP_CONNECTIONS {
+            writeln!(
+                file,
+                "{index}: 0100007F:01BB 0200007F:{:04X} 01",
+                0x1000 + (index as u16 % 0x7000)
+            )
+            .unwrap();
+        }
+        let error = collect_established_tcp_connections_from_path(temp.path(), &mut Vec::new())
+            .unwrap_err();
+        assert!(matches!(error, TcpConnectionUsageError::Unsupported(_)));
     }
 }

@@ -7,9 +7,21 @@ A Raft-owned mapping from one target to a primary and optional standby Rendezvou
 topology, not proof that either network path is presently usable.
 
 **Reverse Link**:
-One target-initiated Xray underlay identified by `(epoch, target, rendezvous, role, generation)`.
-Primary, standby, and bootstrap are different links even when they serve the same target.
+One logical Xray lifecycle is identified by `(epoch, target, rendezvous, role, generation)`.
+
+A Link may use more than one physical underlay connection, but primary, standby,
+and bootstrap are different links even when they serve the same target.
 _Avoid_: assignment, tunnel, connection pool.
+
+**Reverse Underlay Connection**:
+One physical TCP connection opened by Xray's XMUX for a single Reverse Link. It is a transport
+resource count, not a user session and not another Reverse Link.
+_Avoid_: user inbound session, logical link, node connection.
+
+**User Inbound Session**:
+A client-initiated VLESS session accepted by a managed node endpoint. It is independent of
+Reverse underlay connections and must be counted separately in resource investigations.
+_Avoid_: Reverse session, underlay connection.
 
 **Link Lease**:
 A target-local, 120-second liveness record granted only after signed `health-v2` returns through

@@ -21,6 +21,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+const demoConnectionUsage = demoReverseMeshStatus.local.connection_usage;
+if (!demoConnectionUsage) {
+	throw new Error("reverse relay story requires connection usage fixture");
+}
+
 export const Healthy: Story = {
 	args: {
 		status: demoMeshStatus,
@@ -172,6 +177,12 @@ export const ReverseRelay: Story = {
 		const canvas = within(canvasElement);
 		await expect(await canvas.findByText("Cluster nodes")).toBeInTheDocument();
 		await expect(
+			await canvas.findByRole("heading", { name: "Connection accounting" }),
+		).toBeInTheDocument();
+		await expect(await canvas.findByText("2 external")).toBeInTheDocument();
+		await expect(await canvas.findByText("11 / 2")).toBeInTheDocument();
+		await expect(await canvas.findByText("Over limit")).toBeInTheDocument();
+		await expect(
 			await canvas.findByText("1 local · 4 remote"),
 		).toBeInTheDocument();
 		for (const nodeId of [
@@ -219,6 +230,113 @@ export const ReverseRelay: Story = {
 				await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
 			}
 		}
+	},
+};
+
+export const ConnectionAccountingUnavailable: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			local: {
+				...demoReverseMeshStatus.local,
+				connection_usage: {
+					supported: false,
+					sampled_at: null,
+					warning: "socket inspection unavailable",
+					user_inbound: {
+						connections: null,
+						external: null,
+						cluster_peer: null,
+						unknown: null,
+						sources: [],
+						sources_truncated: false,
+					},
+				},
+			},
+			peers: demoReverseMeshStatus.peers.map((peer) =>
+				peer.reverse_underlay
+					? {
+							...peer,
+							reverse_underlay: {
+								...peer.reverse_underlay,
+								physical_connections: null,
+								state: "unavailable" as const,
+								links: peer.reverse_underlay.links.map((link) => ({
+									...link,
+									connections: null,
+									state: "unavailable" as const,
+								})),
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("socket inspection unavailable"),
+		).toBeInTheDocument();
+		await expect(
+			(await canvas.findAllByText("Unavailable")).length,
+		).toBeGreaterThan(0);
+	},
+};
+
+export const ConnectionSourceDetailsTruncated: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			local: {
+				...demoReverseMeshStatus.local,
+				connection_usage: {
+					...demoConnectionUsage,
+					user_inbound: {
+						...demoConnectionUsage.user_inbound,
+						sources_truncated: true,
+					},
+				},
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(await canvas.findByText("Inbound source details"));
+		await expect(
+			await canvas.findByText(
+				"Some source addresses omitted after the 128-entry display limit.",
+			),
+		).toBeInTheDocument();
+	},
+};
+
+export const BootstrapReverse: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			peers: demoReverseMeshStatus.peers.map((peer) =>
+				peer.node_id === "node-osaka-1" && peer.reverse_underlay
+					? {
+							...peer,
+							reverse_underlay: {
+								...peer.reverse_underlay,
+								state: "unknown" as const,
+								physical_connections: null,
+								links: peer.reverse_underlay.links.map((link) => ({
+									...link,
+									role: "bootstrap" as const,
+									connections: null,
+									state: "unknown" as const,
+								})),
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText(/bootstrap · g/)).toBeInTheDocument();
 	},
 };
 

@@ -84,9 +84,9 @@ use crate::{
         DEFAULT_VLESS_FINGERPRINT, DefaultVlessEndpointSpec, build_managed_default_vless_endpoint,
     },
     mesh_telemetry::{
-        BreakerState, MeshQuality, MeshTelemetryHandle, MeshTransportHealth, MeshTransportProtocol,
-        TelemetryPath, availability_for, latency_percentiles_for, mesh_transport_counts_for,
-        mesh_transport_health_for, quality_for_peer,
+        BreakerState, MeshQuality, MeshTelemetryHandle, TelemetryPath, availability_for,
+        latency_percentiles_for, mesh_transport_counts_for, mesh_transport_health_for,
+        quality_for_peer,
     },
     mihomo_policy::{self, MihomoResourcePolicy, PolicySnapshot},
     mihomo_redact, mihomo_resources,
@@ -129,6 +129,7 @@ use crate::{
     },
     xray_supervisor::{XrayHealthHandle, XrayStatus},
 };
+mod bounded_json;
 mod browser_cors;
 mod capabilities;
 mod console_runtime_policy;
@@ -176,7 +177,6 @@ pub struct AppState {
     pub internal_idempotency: InternalIdempotencyLedger,
     pub admin_token_verifier: AdminTokenVerifier,
 }
-
 #[derive(Debug)]
 pub struct ApiError {
     code: &'static str,
@@ -184,7 +184,6 @@ pub struct ApiError {
     status: StatusCode,
     details: Map<String, Value>,
 }
-
 impl ApiError {
     fn new(code: &'static str, status: StatusCode, message: impl Into<String>) -> Self {
         Self {
@@ -4574,7 +4573,7 @@ async fn require_node_mihomo_resource_policy_capability(
                     format!("node is unreachable: {}", error.message),
                 )
             })?;
-    let MeshCapabilityProbeResponse::Verified(response) = response else {
+    let MeshCapabilityProbeResponse::Verified { response, deadline } = response else {
         return Err(ApiError::new(
             "node_capability_unavailable",
             StatusCode::CONFLICT,
@@ -4588,13 +4587,16 @@ async fn require_node_mihomo_resource_policy_capability(
             "target node capability probe was not accepted; upgrade it first",
         ));
     }
-    let body = response.json::<Value>().await.map_err(|_| {
-        ApiError::new(
-            "node_capability_unavailable",
-            StatusCode::CONFLICT,
-            "target node capability response is invalid; upgrade it first",
-        )
-    })?;
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let body = bounded_json::read_bounded_internal_json::<Value>(response, remaining)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                "node_capability_unavailable",
+                StatusCode::CONFLICT,
+                "target node capability response is invalid; upgrade it first",
+            )
+        })?;
     let supported = body
         .get("capabilities")
         .and_then(Value::as_array)

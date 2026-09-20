@@ -198,8 +198,22 @@ async fn probe_and_publish(
 
     let mut next = previous.clone();
     next.checked_at = checked_at.clone();
-    next.public_ipv4 = current_family_ip(&previous.public_ipv4, &ipv4_outcome);
-    next.public_ipv6 = current_family_ip(&previous.public_ipv6, &ipv6_outcome);
+    let (public_ipv4, last_success_ipv4_at) = current_family_state(
+        &previous.public_ipv4,
+        &previous.last_success_ipv4_at,
+        &ipv4_outcome,
+        &checked_at,
+    );
+    let (public_ipv6, last_success_ipv6_at) = current_family_state(
+        &previous.public_ipv6,
+        &previous.last_success_ipv6_at,
+        &ipv6_outcome,
+        &checked_at,
+    );
+    next.public_ipv4 = public_ipv4;
+    next.public_ipv6 = public_ipv6;
+    next.last_success_ipv4_at = last_success_ipv4_at;
+    next.last_success_ipv6_at = last_success_ipv6_at;
 
     let mut errors = collect_probe_errors(&ipv4_outcome, &ipv6_outcome);
     let selected_public_ip = select_public_ip(&ipv4_outcome, &ipv6_outcome);
@@ -246,11 +260,16 @@ async fn probe_and_publish(
     Ok(next)
 }
 
-fn current_family_ip(previous: &Option<String>, outcome: &PublicIpProbeOutcome) -> Option<String> {
+fn current_family_state(
+    previous_ip: &Option<String>,
+    previous_success_at: &Option<String>,
+    outcome: &PublicIpProbeOutcome,
+    checked_at: &str,
+) -> (Option<String>, Option<String>) {
     match outcome {
-        PublicIpProbeOutcome::Available(ip) => Some(ip.to_string()),
-        PublicIpProbeOutcome::MissingCandidate(_) => None,
-        PublicIpProbeOutcome::Unknown(_) => previous.clone(),
+        PublicIpProbeOutcome::Available(ip) => (Some(ip.to_string()), Some(checked_at.to_string())),
+        PublicIpProbeOutcome::MissingCandidate(_) => (None, None),
+        PublicIpProbeOutcome::Unknown(_) => (previous_ip.clone(), previous_success_at.clone()),
     }
 }
 
@@ -279,7 +298,17 @@ fn invalidate_previous_classification_on_selected_ip_change(
     selected_public_ip: &Option<String>,
     next: &mut NodeEgressProbeState,
 ) {
-    if selected_public_ip.is_none() || *selected_public_ip == previous.selected_public_ip {
+    if selected_public_ip.is_none() {
+        if previous.selected_public_ip.is_some() {
+            next.selected_public_ip = None;
+            next.geo = Default::default();
+            next.subscription_region = NodeSubscriptionRegion::Other;
+            next.last_success_at = None;
+            next.classification_invalidated_at = Some(next.checked_at.clone());
+        }
+        return;
+    }
+    if *selected_public_ip == previous.selected_public_ip {
         return;
     }
     next.selected_public_ip = selected_public_ip.clone();
@@ -425,6 +454,30 @@ mod tests {
             Some(xp_test_fixtures::recent_timestamp())
         );
         assert!(next.geo.country.is_empty());
+    }
+
+    #[test]
+    fn missing_public_ip_invalidates_previous_classification() {
+        let previous = NodeEgressProbeState {
+            selected_public_ip: Some(
+                xp_test_fixtures::address_documentation203_0_113_8().to_owned(),
+            ),
+            subscription_region: NodeSubscriptionRegion::Us,
+            last_success_at: Some(xp_test_fixtures::baseline_timestamp().to_owned()),
+            ..NodeEgressProbeState::default()
+        };
+        let mut next = previous.clone();
+        next.checked_at = xp_test_fixtures::recent_timestamp().to_owned();
+
+        invalidate_previous_classification_on_selected_ip_change(&previous, &None, &mut next);
+
+        assert!(next.selected_public_ip.is_none());
+        assert_eq!(next.subscription_region, NodeSubscriptionRegion::Other);
+        assert!(next.last_success_at.is_none());
+        assert_eq!(
+            next.classification_invalidated_at.as_deref(),
+            Some(xp_test_fixtures::recent_timestamp())
+        );
     }
 
     #[tokio::test]

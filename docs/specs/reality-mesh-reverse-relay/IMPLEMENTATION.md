@@ -74,16 +74,37 @@
   direct Rendezvous from current assignments, gives each Reverse target separate `Reverse relay`
   and active Rendezvous/generation lines, counts the local node with all remote members, and
   retains the existing Details entry for the full diagnostic path.
-- Fixed Xray spike: `RUN_ID=20260819_102353_be14b3bf_reverse`, Xray `26.3.27`, image digest
+- Reverse XHTTP outbounds now set an XP-owned XMUX `max_connections=2`. Existing underlays are
+  reused, a third socket is never requested by the generated config, and the existing
+  Direct/Public fallback remains responsible for failed control-plane requests.
+- Mesh status now samples established local TCP sockets and joins them with current node egress
+  probes and Reverse assignments. `peers[].reverse_underlay` reports logical Links separately
+  from physical sockets, while `local.connection_usage.user_inbound` separates external users,
+  known cluster peers, and unknown sources. Egress addresses are ignored after the one-hour
+  probe freshness window; a shared address is unknown rather than attributed to either node.
+  Reverse sockets are removed from user-inbound totals, and source details are capped at 128
+  aggregate addresses with an explicit truncation flag. Unsupported `/proc` inspection returns
+  nullable counters so the UI cannot render unavailable data as zero. The System Status page
+  exposes these as separate internal/external sections and keeps source addresses behind an
+  administrator disclosure.
+- Socket inspection is line-streamed and fail-closed above the bounded 4096-record inspection
+  limit; quota sampling filters by configured listen ports before counting. If any current node
+  lacks a fresh, valid egress identity, inbound sources remain `unknown` rather than being
+  promoted to `external`. Aggregate Reverse state gives precedence to unavailable/unknown data
+  over an over-limit sub-link. During a 120-second generation drain, the socket view is an
+  endpoint-level diagnostic count and must not be interpreted as a generation-specific counter.
+- Fixed Xray spike: Xray `26.3.27`, image digest
   `sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7`. Two Xray
   instances completed dynamic VLESS Reverse registration over both Vision TCP + Reality and
   XHTTP + Reality. The test then proved password SOCKS5, SOCKS-to-Axum H2C prior-knowledge,
-  exact-origin routing, unmatched block and rule/outbound removal isolation. The test-only SOCKS
-  listener is mapped to a host loopback port because the Rust test runs outside the Xray
-  containers; production remains fixed at `127.0.0.1:10086` with no public listener.
-- The spike is a transport/protocol gate only. It does not yet prove asymmetric firewall behavior,
-  signed end-to-end health, fresh-join bootstrap, deployment restart recovery or the managed-stack
-  memory budget; those remain closed integration gates before writing a production epoch.
+  eight concurrent XHTTP requests, `<=2` established target underlays, exact-origin routing,
+  unmatched block and rule/outbound removal isolation. The test-only SOCKS listener is mapped to
+  a host loopback port because the Rust test runs outside the Xray containers; production remains
+  fixed at `127.0.0.1:10086` with no public listener.
+- The spike is a transport/protocol/resource gate only. It does not yet prove asymmetric firewall
+  behavior, signed end-to-end health, fresh-join bootstrap, or deployment restart recovery.
+  The managed-stack memory budget remains a closed integration gate before writing a
+  production epoch.
 
 ## Validation
 

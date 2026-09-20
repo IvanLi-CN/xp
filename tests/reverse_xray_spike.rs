@@ -1,8 +1,19 @@
-use std::time::Duration;
+use std::{
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use axum::{Router, routing::get};
 use reqwest::Client;
-use tokio::{net::TcpListener, time::sleep};
+use tokio::{
+    net::TcpListener,
+    sync::Notify,
+    time::{sleep, timeout},
+};
 
 use xp::{domain, protocol::VlessRealityTransport, reverse_mesh, xray};
 
@@ -30,10 +41,32 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
         .await
         .expect("bind H2C server");
     let address = listener.local_addr().expect("H2C address");
+    let release_holds = Arc::new(Notify::new());
+    let hold_started_count = Arc::new(AtomicUsize::new(0));
+    let hold_started = Arc::new(Notify::new());
+    let release_holds_for_server = release_holds.clone();
+    let hold_started_count_for_server = hold_started_count.clone();
+    let hold_started_for_server = hold_started.clone();
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            Router::new().route("/health", get(|| async { "ok" })),
+            Router::new()
+                .route("/health", get(|| async { "ok" }))
+                .route(
+                    "/hold",
+                    get(move || {
+                        let release_holds = release_holds_for_server.clone();
+                        let hold_started_count = hold_started_count_for_server.clone();
+                        let hold_started = hold_started_for_server.clone();
+                        async move {
+                            if hold_started_count.fetch_add(1, Ordering::AcqRel) + 1 >= 8 {
+                                hold_started.notify_waiters();
+                            }
+                            release_holds.notified().await;
+                            "ok"
+                        }
+                    }),
+                ),
         )
         .await
         .expect("serve H2C");
@@ -79,6 +112,9 @@ async fn dynamic_reverse_handlers_socks_and_h2c_are_supported() {
             target_reverse_tag,
             label,
             address.port(),
+            release_holds.clone(),
+            hold_started_count.clone(),
+            hold_started.clone(),
         )
         .await;
     }
@@ -117,6 +153,9 @@ async fn exercise_transport(
     target_reverse_tag: &str,
     label: &str,
     h2c_port: u16,
+    release_holds: Arc<Notify>,
+    hold_started_count: Arc<AtomicUsize>,
+    hold_started: Arc<Notify>,
 ) {
     let endpoint = if label == "vision" {
         domain::Endpoint {
@@ -229,6 +268,49 @@ async fn exercise_transport(
     assert_eq!(response.version(), reqwest::Version::HTTP_2);
     assert_eq!(response.text().await.expect("H2C body"), "ok");
 
+    hold_started_count.store(0, Ordering::Release);
+    let requests = (0..8)
+        .map(|_| {
+            let h2c = h2c.clone();
+            let origin = origin.clone();
+            async move {
+                h2c.get(format!("http://{origin}/hold"))
+                    .timeout(Duration::from_secs(5))
+                    .send()
+                    .await
+                    .expect("concurrent Reverse request")
+                    .text()
+                    .await
+                    .expect("concurrent H2C body")
+            }
+        })
+        .collect::<Vec<_>>();
+    let requests = requests.into_iter().map(tokio::spawn).collect::<Vec<_>>();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hold_started_count.load(Ordering::Acquire) >= 8 {
+                break;
+            }
+            hold_started.notified().await;
+        }
+    })
+    .await
+    .expect("all concurrent hold handlers started");
+    if transport == VlessRealityTransport::Xhttp {
+        let underlays = target_established_underlays(port);
+        assert!(
+            (1..=2).contains(&underlays),
+            "XHTTP Reverse opened {underlays} target underlays while requests were in flight"
+        );
+    }
+    release_holds.notify_waiters();
+    let bodies = futures_util::future::join_all(requests)
+        .await
+        .into_iter()
+        .map(|result| result.expect("concurrent Reverse task"))
+        .collect::<Vec<_>>();
+    assert!(bodies.iter().all(|body| body == "ok"));
+
     let blocked = h2c
         .get("http://unmatched.mesh.invalid:443/health")
         .timeout(Duration::from_secs(2))
@@ -274,6 +356,42 @@ async fn exercise_transport(
     )
     .await
     .expect("remove dynamic Rendezvous reverse user");
+}
+
+fn target_established_underlays(remote_port: u16) -> usize {
+    let container = std::env::var("XP_REVERSE_XRAY_TARGET_CONTAINER")
+        .expect("XP_REVERSE_XRAY_TARGET_CONTAINER is set by the testbox runner");
+    let output = Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "--network",
+            &format!("container:{container}"),
+            "alpine:3.20",
+            "cat",
+            "/proc/net/tcp",
+            "/proc/net/tcp6",
+        ])
+        .output()
+        .expect("read target container TCP table");
+    assert!(
+        output.status.success(),
+        "target TCP table failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let remote_port = format!("{remote_port:04X}");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .filter(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            fields.get(3) == Some(&"01")
+                && fields
+                    .get(2)
+                    .and_then(|remote| remote.split(':').nth(1))
+                    .is_some_and(|port| port.eq_ignore_ascii_case(&remote_port))
+        })
+        .count()
 }
 
 fn vless_meta(transport: VlessRealityTransport) -> serde_json::Value {

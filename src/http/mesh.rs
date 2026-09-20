@@ -4,16 +4,18 @@ use sha2::{Digest, Sha256};
 #[path = "mesh/bootstrap.rs"]
 mod bootstrap;
 mod config;
+mod etag;
 #[path = "mesh/liveness.rs"]
 mod liveness;
 #[path = "mesh/status.rs"]
 mod status;
 
+use status::{AdminMeshConnectionUsage, AdminMeshTransportStatus, AdminReverseUnderlayStatus};
+
 pub(super) use config::admin_update_mesh_config;
 pub(super) use liveness::{
     admin_internal_mesh_health, admin_internal_reverse_probe, spawn_reverse_link_probe_worker,
 };
-
 #[derive(Debug, Clone, Serialize)]
 struct AdminMeshStatusResponse {
     generated_at: String,
@@ -33,6 +35,8 @@ struct AdminMeshLocalStatus {
     leader_api_base_url: String,
     term: u64,
     canary: crate::vless_https_canary::VlessHttpsCanaryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_usage: Option<AdminMeshConnectionUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,21 +64,10 @@ struct AdminMeshPeerStatus {
     latency_p95_ms: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mesh_transport: Option<AdminMeshTransportStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reverse_underlay: Option<AdminReverseUnderlayStatus>,
     buckets: Vec<crate::mesh_telemetry::MeshTelemetryBucket>,
 }
-#[derive(Debug, Clone, Serialize)]
-struct AdminMeshTransportStatus {
-    protocol: Option<MeshTransportProtocol>,
-    health: MeshTransportHealth,
-    connection_generation: u64,
-    current_connection_requests: u64,
-    requests_5m: u32,
-    connection_starts_5m: u32,
-    requests_1h: u32,
-    connection_starts_1h: u32,
-    last_connection_started_at: Option<String>,
-}
-
 pub(super) async fn admin_internal_reverse_relay(
     Extension(state): Extension<AppState>,
     headers: HeaderMap,
@@ -159,7 +152,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse health relay must be a bodyless health GET",
         ));
     }
-
     let current_voter_ids = raft_metrics(&state)
         .membership_config
         .membership()
@@ -188,7 +180,6 @@ pub(super) async fn admin_internal_reverse_relay(
     let bootstrap_route =
         relay_route == internal_auth::InternalRoute::HealthV2 || uri.path().starts_with("/raft/");
     let bootstrap_learner_target = is_current_learner(&envelope.target_node_id) && bootstrap_route;
-
     let (assignment, role, reverse_epoch) = {
         let store = state.store.lock().await;
         let Some(assignment) = store
@@ -227,7 +218,6 @@ pub(super) async fn admin_internal_reverse_relay(
         })?;
         (assignment, role, store.state().reverse_mesh_epoch)
     };
-
     if relay_route != internal_auth::InternalRoute::HealthV2
         && !bootstrap_learner_target
         && !state
@@ -239,12 +229,10 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay generation is awaiting signed health verification",
         ));
     }
-
     let _mesh_gate_read =
         state.reconcile.mesh_gate_read().await.ok_or_else(|| {
             ApiError::conflict("reverse relay is disabled by the cluster Mesh gate")
         })?;
-
     let mut inner_headers = HeaderMap::new();
     if !envelope.content_type.is_empty() {
         inner_headers.insert(
@@ -324,7 +312,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay inner identity mismatch",
         ));
     }
-
     // The in-memory replay window is fast-path protection; the existing local idempotency ledger
     // makes the same signed request fail closed across an XP restart without storing request body
     // or response content. A relay response cannot safely be replayed once its stream has started.
@@ -543,7 +530,7 @@ pub(super) async fn reverse_candidate_readiness(
                 && state.reconcile.reverse_gate().load(Ordering::Acquire),
         );
     }
-    let response = match send_mesh_internal_capability_read(
+    let (response, deadline) = match send_mesh_internal_capability_read(
         state,
         &state.mesh_client,
         node,
@@ -551,13 +538,15 @@ pub(super) async fn reverse_candidate_readiness(
     )
     .await?
     {
-        MeshCapabilityProbeResponse::Verified(response) => response,
+        MeshCapabilityProbeResponse::Verified { response, deadline } => (response, deadline),
         MeshCapabilityProbeResponse::PredecessorNotFound => return Ok(false),
     };
-    let body = response
-        .json::<ReverseCapabilityResponse>()
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let body = super::bounded_json::read_bounded_internal_json::<ReverseCapabilityResponse>(
+        response, remaining,
+    )
+    .await
+    .map_err(ApiError::gateway_timeout)?;
     Ok(body
         .reverse_mesh
         .as_ref()
@@ -679,15 +668,22 @@ async fn reconcile_reverse_assignments(
                 }
                 Err(error) => return Err(ApiError::gateway_timeout(error.message)),
             };
-            let response = match response {
-                MeshCapabilityProbeResponse::Verified(response) => response,
+            let (response, deadline) = match response {
+                MeshCapabilityProbeResponse::Verified { response, deadline } => {
+                    (response, deadline)
+                }
                 MeshCapabilityProbeResponse::PredecessorNotFound => {
                     return Err(ApiError::conflict(
                         "reverse assignment requires signed capability support on every voter",
                     ));
                 }
             };
-            let body = match response.json::<ReverseCapabilityResponse>().await {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let body = match super::bounded_json::read_bounded_internal_json::<
+                ReverseCapabilityResponse,
+            >(response, remaining)
+            .await
+            {
                 Ok(body) => body,
                 Err(error) if current_epoch != 0 => {
                     candidates.push(crate::reverse_mesh::ReverseMeshCandidate {
@@ -1024,7 +1020,6 @@ pub(super) async fn admin_internal_raft_client_write(
     }
     Ok(Json(resp))
 }
-
 async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusResponse {
     let now = Utc::now();
     let telemetry = state.mesh_telemetry.snapshot().await;
@@ -1033,16 +1028,37 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
         .iter()
         .map(|peer| (peer.peer_id.as_str(), peer))
         .collect::<BTreeMap<_, _>>();
-    let (nodes, endpoints, assignments, cluster_mesh_enabled, local_mesh_gate_enabled) = {
+    let (
+        nodes,
+        endpoints,
+        assignments,
+        egress_probes,
+        cluster_mesh_enabled,
+        local_mesh_gate_enabled,
+        reverse_mesh_bootstrap,
+    ) = {
         let store = state.store.lock().await;
+        let reverse_mesh_bootstrap =
+            status::active_bootstrap_marker(&store, &state.config.data_dir);
         (
             store.list_nodes(),
             store.list_endpoints(),
             store.state().reverse_mesh_assignments.clone(),
+            store.list_node_egress_probes(),
             store.state().mesh_enabled,
             state.reconcile.mesh_gate().load(Ordering::Acquire),
+            reverse_mesh_bootstrap,
         )
     };
+    let reverse_mesh_bootstrap = reverse_mesh_bootstrap.filter(|_| local_mesh_gate_enabled);
+    let connection_usage = status::collect_mesh_connection_usage(
+        &state.cluster.node_id,
+        &nodes,
+        &endpoints,
+        &assignments,
+        &egress_probes,
+        reverse_mesh_bootstrap.as_ref(),
+    );
     let peers = nodes
         .into_iter()
         .filter(|node| node.node_id != state.cluster.node_id)
@@ -1115,6 +1131,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 latency_p50_ms,
                 latency_p95_ms,
                 mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
+                reverse_underlay: connection_usage.reverse_by_peer.get(&node.node_id).cloned(),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -1141,6 +1158,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 &state.config.data_dir,
                 state.config.vless_canary_bind,
             ),
+            connection_usage: Some(connection_usage.local),
         },
         peers,
         events: telemetry.events,
@@ -1157,6 +1175,7 @@ fn breaker_for_mesh_target(mesh_enabled: bool, recorded: Option<BreakerState>) -
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::mesh_telemetry::{MeshTransportHealth, MeshTransportProtocol};
     #[test]
     fn disabled_mesh_target_never_reports_an_active_breaker() {
         assert_eq!(
@@ -1215,65 +1234,6 @@ mod tests {
         assert_eq!(healthy.requests_5m, 12);
         assert_eq!(healthy.connection_starts_5m, 1);
     }
-    #[test]
-    fn mesh_status_etag_tracks_reuse_evidence_but_not_generation_time() {
-        fn response(generated_at: &str, connection_starts_5m: u32) -> AdminMeshStatusResponse {
-            AdminMeshStatusResponse {
-                generated_at: generated_at.to_string(),
-                revision: 7,
-                cluster_mesh_enabled: true,
-                local: AdminMeshLocalStatus {
-                    node_id: "local".to_string(),
-                    node_name: "local".to_string(),
-                    cluster_id: "cluster".to_string(),
-                    role: "leader".to_string(),
-                    leader_api_base_url: "https://local.example.test".to_string(),
-                    term: 3,
-                    canary: crate::vless_https_canary::VlessHttpsCanaryStatus::disabled(
-                        std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
-                    ),
-                },
-                peers: vec![AdminMeshPeerStatus {
-                    node_id: "peer".to_string(),
-                    node_name: "peer".to_string(),
-                    api_base_url: "https://peer.example.test".to_string(),
-                    mesh_url: Some("https://peer.example.test:443".to_string()),
-                    mesh_capability: Some("enabled".to_string()),
-                    mesh_reason: Some(crate::mesh_telemetry::MeshPeerReason::MeshAvailable),
-                    current_path: Some(TelemetryPath::Mesh),
-                    active_route: None,
-                    quality: MeshQuality::Good,
-                    stale: false,
-                    breaker: BreakerState::Closed,
-                    last_sample_at: None,
-                    last_transition_at: None,
-                    availability_1h: Some(1.0),
-                    availability_24h: Some(1.0),
-                    mesh_availability_24h: Some(1.0),
-                    latency_p50_ms: Some(10),
-                    latency_p95_ms: Some(20),
-                    mesh_transport: Some(AdminMeshTransportStatus {
-                        protocol: Some(MeshTransportProtocol::H2),
-                        health: MeshTransportHealth::Healthy,
-                        connection_generation: 2,
-                        current_connection_requests: 12,
-                        requests_5m: 12,
-                        connection_starts_5m,
-                        requests_1h: 60,
-                        connection_starts_1h: 2,
-                        last_connection_started_at: None,
-                    }),
-                    buckets: Vec::new(),
-                }],
-                events: Vec::new(),
-            }
-        }
-        let first = response("2026-08-08T10:00:00Z", 1);
-        let generated_later = response("2026-08-08T10:01:00Z", 1);
-        let churning = response("2026-08-08T10:01:00Z", 3);
-        assert_eq!(mesh_status_etag(&first), mesh_status_etag(&generated_later));
-        assert_ne!(mesh_status_etag(&first), mesh_status_etag(&churning));
-    }
 }
 fn mesh_availability_for(
     peer: &crate::mesh_telemetry::MeshPeerTelemetry,
@@ -1302,7 +1262,7 @@ pub(super) async fn admin_get_mesh_status(
     headers: HeaderMap,
 ) -> Response {
     let snapshot = build_admin_mesh_status_response(&state).await;
-    let etag = mesh_status_etag(&snapshot);
+    let etag = etag::mesh_status_etag(&snapshot);
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
@@ -1312,12 +1272,6 @@ pub(super) async fn admin_get_mesh_status(
     }
     (StatusCode::OK, [(header::ETAG, etag)], Json(snapshot)).into_response()
 }
-fn mesh_status_etag(snapshot: &AdminMeshStatusResponse) -> String {
-    let mut stable_snapshot = snapshot.clone();
-    stable_snapshot.generated_at.clear();
-    let stable_bytes = serde_json::to_vec(&stable_snapshot).expect("serialize mesh status ETag");
-    format!("\"mesh-{}\"", hex::encode(Sha256::digest(stable_bytes)))
-}
 pub(super) async fn admin_run_mesh_probes(
     Extension(state): Extension<AppState>,
     ApiJson(request): ApiJson<AdminMeshProbeRequest>,
@@ -1326,6 +1280,10 @@ pub(super) async fn admin_run_mesh_probes(
         let store = state.store.lock().await;
         store.list_nodes()
     };
+    let operator_probe_permit = state
+        .mesh_telemetry
+        .try_acquire_operator_probe_batch()
+        .ok_or_else(|| ApiError::conflict("a mesh probe batch is already running"))?;
     let accepted_node_ids = if request.node_ids.is_empty() {
         nodes
             .into_iter()
@@ -1369,6 +1327,7 @@ pub(super) async fn admin_run_mesh_probes(
     let probe_node_ids = accepted_node_ids.clone();
     let probe_gate = state.mesh_telemetry.probe_gate();
     tokio::spawn(async move {
+        let _operator_probe_permit = operator_probe_permit;
         stream::iter(probe_node_ids)
             .map(|node_id| {
                 let state = state_for_probes.clone();
@@ -1492,7 +1451,10 @@ pub(super) async fn send_mesh_internal_read(
 }
 /// Reads the one predecessor-compatible capability route.
 pub(super) enum MeshCapabilityProbeResponse {
-    Verified(reqwest::Response),
+    Verified {
+        response: reqwest::Response,
+        deadline: std::time::Instant,
+    },
     PredecessorNotFound,
 }
 pub(super) async fn send_mesh_internal_capability_read(
@@ -1520,6 +1482,7 @@ pub(super) async fn send_mesh_internal_capability_read(
         sender_id: state.cluster.node_id.clone(),
         updates_active_path: true,
     };
+    let deadline = std::time::Instant::now() + budget;
     let response = client
         .send_peer_request_allowing_legacy_not_found(
             &peer,
@@ -1531,7 +1494,7 @@ pub(super) async fn send_mesh_internal_capability_read(
         .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(match response {
         crate::control_plane_mesh::CapabilityProbeResponse::Verified(response) => {
-            MeshCapabilityProbeResponse::Verified(response)
+            MeshCapabilityProbeResponse::Verified { response, deadline }
         }
         crate::control_plane_mesh::CapabilityProbeResponse::PredecessorNotFound => {
             MeshCapabilityProbeResponse::PredecessorNotFound

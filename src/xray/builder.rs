@@ -148,7 +148,6 @@ fn xhttp_transport_settings() -> xray::transport::internet::TransportConfig {
         settings: Some(to_typed_message(TYPE_SPLITHTTP_TRANSPORT_CONFIG, &xhttp)),
     }
 }
-
 fn business_inbound_socket_settings() -> xray::transport::internet::SocketConfig {
     xray::transport::internet::SocketConfig {
         tcp_keep_alive_interval: 30,
@@ -577,7 +576,6 @@ pub fn build_reverse_socks_inbound_request_on_address(
         }),
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct ReverseVlessEndpoint {
     pub access_host: String,
@@ -636,7 +634,10 @@ pub fn build_reverse_vless_outbound_request(
     };
     let (protocol_name, transport_settings) = match meta.transport {
         VlessRealityTransport::VisionTcp => ("tcp".to_string(), vec![tcp_transport_settings()]),
-        VlessRealityTransport::Xhttp => ("splithttp".to_string(), vec![xhttp_transport_settings()]),
+        VlessRealityTransport::Xhttp => (
+            "splithttp".to_string(),
+            vec![crate::xray::reverse_builder::reverse_xhttp_transport_settings()],
+        ),
     };
     let stream_settings = xray::transport::internet::StreamConfig {
         address: None,
@@ -829,7 +830,6 @@ mod tests {
     fn decode_typed<T: prost::Message + Default>(tm: &xray::common::serial::TypedMessage) -> T {
         T::decode(tm.value.as_slice()).unwrap()
     }
-
     #[test]
     fn typed_message_roundtrip_works() {
         let msg = xray::app::proxyman::command::RemoveUserOperation {

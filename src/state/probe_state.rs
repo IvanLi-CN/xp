@@ -94,6 +94,10 @@ pub struct NodeEgressProbeState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_ipv6: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_ipv4_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_ipv6_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_public_ip: Option<String>,
     #[serde(default)]
     pub geo: PersistedInboundIpGeo,

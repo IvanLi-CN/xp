@@ -108,7 +108,9 @@
   carry a short-lived public-only `reverse_mesh_bootstrap` marker, but learner catch-up and
   log-index promotion remain authoritative. If container-side Xray restart recovery cannot
   complete after tombstone overflow, Reverse stays disabled until an operator restarts the
-  container; Direct/Public and membership remain available.
+  container; Direct/Public and membership remain available. XP-generated Reverse XHTTP outbounds
+  fix XMUX `max_connections=2` per logical Link and reuse existing underlays; status APIs and
+  System Status expose internal Reverse sockets separately from external user inbound sessions.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.
