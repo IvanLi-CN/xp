@@ -212,6 +212,7 @@ pub struct MeshTelemetryHandle {
     state: Arc<Mutex<TelemetryState>>,
     connections: MeshConnectionTrackers,
     probe_gate: Arc<Semaphore>,
+    operator_probe_gate: Arc<Semaphore>,
     history_source_cursor: Arc<AtomicUsize>,
     #[cfg(test)]
     persist_count: Arc<std::sync::atomic::AtomicUsize>,
@@ -233,6 +234,7 @@ impl MeshTelemetryHandle {
             })),
             connections: MeshConnectionTrackers::default(),
             probe_gate: Arc::new(Semaphore::new(4)),
+            operator_probe_gate: Arc::new(Semaphore::new(1)),
             history_source_cursor: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             persist_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -242,6 +244,10 @@ impl MeshTelemetryHandle {
     /// Limits all scheduled and operator-triggered peer probes on this node together.
     pub fn probe_gate(&self) -> Arc<Semaphore> {
         self.probe_gate.clone()
+    }
+
+    pub fn try_acquire_operator_probe_batch(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.operator_probe_gate.clone().try_acquire_owned().ok()
     }
 
     pub async fn snapshot(&self) -> MeshTelemetrySnapshot {

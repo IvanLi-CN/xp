@@ -319,7 +319,9 @@ function ConnectionAccounting({ status }: { status: AdminMeshStatus }) {
 										<p className="mt-1 text-xs text-muted-foreground">
 											{reverse.logical_links} logical Link
 											{reverse.logical_links === 1 ? "" : "s"} · generation{" "}
-											{reverse.links.map((link) => link.generation).join(", ")}
+											{reverse.links
+												.map((link) => `${link.role} · g${link.generation}`)
+												.join(", ")}
 										</p>
 									</div>
 									<div className="flex items-center gap-2 font-mono text-xs">

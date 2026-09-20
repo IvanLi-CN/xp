@@ -152,7 +152,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse health relay must be a bodyless health GET",
         ));
     }
-
     let current_voter_ids = raft_metrics(&state)
         .membership_config
         .membership()
@@ -181,7 +180,6 @@ pub(super) async fn admin_internal_reverse_relay(
     let bootstrap_route =
         relay_route == internal_auth::InternalRoute::HealthV2 || uri.path().starts_with("/raft/");
     let bootstrap_learner_target = is_current_learner(&envelope.target_node_id) && bootstrap_route;
-
     let (assignment, role, reverse_epoch) = {
         let store = state.store.lock().await;
         let Some(assignment) = store
@@ -220,7 +218,6 @@ pub(super) async fn admin_internal_reverse_relay(
         })?;
         (assignment, role, store.state().reverse_mesh_epoch)
     };
-
     if relay_route != internal_auth::InternalRoute::HealthV2
         && !bootstrap_learner_target
         && !state
@@ -232,12 +229,10 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay generation is awaiting signed health verification",
         ));
     }
-
     let _mesh_gate_read =
         state.reconcile.mesh_gate_read().await.ok_or_else(|| {
             ApiError::conflict("reverse relay is disabled by the cluster Mesh gate")
         })?;
-
     let mut inner_headers = HeaderMap::new();
     if !envelope.content_type.is_empty() {
         inner_headers.insert(
@@ -317,7 +312,6 @@ pub(super) async fn admin_internal_reverse_relay(
             "reverse relay inner identity mismatch",
         ));
     }
-
     // The in-memory replay window is fast-path protection; the existing local idempotency ledger
     // makes the same signed request fail closed across an XP restart without storing request body
     // or response content. A relay response cannot safely be replayed once its stream has started.
@@ -1346,11 +1340,16 @@ pub(super) async fn admin_run_mesh_probes(
         let store = state.store.lock().await;
         store.list_nodes()
     };
+    let operator_probe_permit = state
+        .mesh_telemetry
+        .try_acquire_operator_probe_batch()
+        .ok_or_else(|| ApiError::conflict("a mesh probe batch is already running"))?;
     let accepted_node_ids = if request.node_ids.is_empty() {
         nodes
             .into_iter()
             .filter(|node| node.node_id != state.cluster.node_id)
             .map(|node| node.node_id)
+            .take(50)
             .collect::<Vec<_>>()
     } else {
         if request.node_ids.len() > 50 {
@@ -1389,6 +1388,7 @@ pub(super) async fn admin_run_mesh_probes(
     let probe_node_ids = accepted_node_ids.clone();
     let probe_gate = state.mesh_telemetry.probe_gate();
     tokio::spawn(async move {
+        let _operator_probe_permit = operator_probe_permit;
         stream::iter(probe_node_ids)
             .map(|node_id| {
                 let state = state_for_probes.clone();

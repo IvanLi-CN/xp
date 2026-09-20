@@ -703,6 +703,8 @@ fn parse_ipv6_hex(value: &str) -> Result<IpAddr, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     fn endpoint_view_a() -> TcpConnectionEndpointView {
@@ -929,5 +931,50 @@ mod tests {
         let (ip6, port6) = parse_proc_addr_port("00000000000000000000000000000000:01BB").unwrap();
         assert!(matches!(ip6, IpAddr::V6(v6) if v6.is_unspecified()));
         assert_eq!(port6, 443);
+    }
+
+    #[test]
+    fn streamed_proc_rows_parse_ipv6_and_reject_malformed_rows() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        writeln!(file, "sl local_address rem_address st").unwrap();
+        writeln!(
+            file,
+            "0: 00000000000000000000000000000000:01BB 00000000000000000000000000000001:01BC 01"
+        )
+        .unwrap();
+        let mut connections = Vec::new();
+        collect_established_tcp_connections_from_path(temp.path(), &mut connections).unwrap();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].local_port, 443);
+
+        let malformed = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            malformed.path(),
+            "sl local_address rem_address st\nmalformed\n",
+        )
+        .unwrap();
+        let error =
+            collect_established_tcp_connections_from_path(malformed.path(), &mut Vec::new())
+                .unwrap_err();
+        assert!(matches!(error, TcpConnectionUsageError::Parse(_)));
+    }
+
+    #[test]
+    fn streamed_proc_rows_fail_closed_at_the_connection_bound() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        writeln!(file, "sl local_address rem_address st").unwrap();
+        for index in 0..=MAX_ESTABLISHED_TCP_CONNECTIONS {
+            writeln!(
+                file,
+                "{index}: 0100007F:01BB 0200007F:{:04X} 01",
+                0x1000 + (index as u16 % 0x7000)
+            )
+            .unwrap();
+        }
+        let error = collect_established_tcp_connections_from_path(temp.path(), &mut Vec::new())
+            .unwrap_err();
+        assert!(matches!(error, TcpConnectionUsageError::Unsupported(_)));
     }
 }

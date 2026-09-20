@@ -310,6 +310,36 @@ export const ConnectionSourceDetailsTruncated: Story = {
 	},
 };
 
+export const BootstrapReverse: Story = {
+	args: {
+		status: {
+			...demoReverseMeshStatus,
+			peers: demoReverseMeshStatus.peers.map((peer, index) =>
+				index === 0 && peer.reverse_underlay
+					? {
+							...peer,
+							reverse_underlay: {
+								...peer.reverse_underlay,
+								state: "unknown" as const,
+								physical_connections: null,
+								links: peer.reverse_underlay.links.map((link) => ({
+									...link,
+									role: "bootstrap" as const,
+									connections: null,
+									state: "unknown" as const,
+								})),
+							},
+						}
+					: peer,
+			),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(await canvas.findByText(/bootstrap · g/)).toBeInTheDocument();
+	},
+};
+
 export const DirectAssignedTarget: Story = {
 	args: {
 		status: {
