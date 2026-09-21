@@ -549,6 +549,7 @@ fn prepare_summary_storage(data_dir: &Path, cluster: &ClusterMetadata) {
     let replica_snapshot = serde_json::json!({
         "external_history": true,
         "legacy_segment_cursor_index_complete": true,
+        "local_history_backfill_completed": true,
         "partition_summaries": [{
             "source_node_id": "summary-source",
             "source_epoch": 1,
@@ -733,7 +734,6 @@ pub async fn run_repository_summary_resource_workload(binary: &Path) -> u64 {
                 .as_str()
                 .is_some_and(|cursor| { cursor.starts_with("r:") })
         );
-
         let status_context = xp::internal_auth::RequestContext::now(
             xp::internal_auth::InternalRoute::MeshV2,
             &cluster.cluster_id,
