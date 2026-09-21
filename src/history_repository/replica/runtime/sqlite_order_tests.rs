@@ -62,6 +62,40 @@ fn malformed_sqlite_summary_row_does_not_block_replication_preparation() {
 }
 
 #[test]
+fn sqlite_runtime_status_does_not_decode_history_payloads() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let mut runtime = load(temporary.path());
+    runtime.snapshot.external_history = true;
+    runtime.snapshot.legacy_segment_cursor_index_complete = true;
+    runtime
+        .storage
+        .upsert_repository_history_records(&[RepositoryHistoryRecordRow {
+            source_node_id: "node-a".to_owned(),
+            source_epoch: 7,
+            stream: "runtime".to_owned(),
+            sequence: 0,
+            subject_node_id: "subject-a".to_owned(),
+            observer_node_id: "node-a".to_owned(),
+            schema_id: "runtime.v1".to_owned(),
+            schema_version: 1,
+            record_key: b"key".to_vec(),
+            tombstone: false,
+            observed_start_unix_seconds: 10,
+            observed_end_unix_seconds: 10,
+            received_at_unix_seconds: 10,
+            aggregate_complete: Some(true),
+            aggregate_start_unix_seconds: None,
+            aggregate_end_unix_seconds: None,
+            payload: b"not a stored record".to_vec(),
+        }])
+        .expect("seed malformed payload");
+
+    runtime
+        .runtime_status(10 + RepositoryRetentionPolicy::default().minute_retention_seconds() + 2)
+        .expect("status reads metadata without retention decoding");
+}
+
+#[test]
 fn incomplete_sqlite_partition_summary_does_not_trigger_tiered_backfill() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let mut runtime = load(temporary.path());

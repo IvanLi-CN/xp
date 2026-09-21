@@ -633,7 +633,6 @@ impl RepositoryReplicaRuntime {
         now_unix_seconds: u64,
     ) -> Result<RepositoryRuntimeStatus, RepositoryRuntimeError> {
         if !self.storage_degraded {
-            self.prepare_for_replication(now_unix_seconds)?;
             self.refresh_capacity()?;
         }
         let source_delivery = self.source_delivery_status(
