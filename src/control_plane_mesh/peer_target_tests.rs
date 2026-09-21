@@ -402,6 +402,7 @@ pub(super) fn primary_reverse_target(
         node_id: xp_test_fixtures::primary_node_id().to_owned(),
         node_name: xp_test_fixtures::primary_node_name().to_owned(),
         mesh_base_url,
+        endpoint_transport: Some("vision_tcp"),
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }
@@ -415,6 +416,7 @@ pub(super) fn secondary_reverse_target(
         node_id: xp_test_fixtures::secondary_node_id().to_owned(),
         node_name: xp_test_fixtures::secondary_node_name().to_owned(),
         mesh_base_url,
+        endpoint_transport: Some("vision_tcp"),
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }
@@ -428,6 +430,7 @@ pub(super) fn tertiary_reverse_target(
         node_id: xp_test_fixtures::tertiary_node_id().to_owned(),
         node_name: xp_test_fixtures::tertiary_node_name().to_owned(),
         mesh_base_url,
+        endpoint_transport: Some("vision_tcp"),
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url,
     }

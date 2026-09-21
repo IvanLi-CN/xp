@@ -44,6 +44,13 @@ export const MeshPeerReasonSchema = z.enum([
 	"protocol_rejected",
 	"fallback_active",
 ]);
+export const MeshEndpointTransportSchema = z.enum([
+	"vision_tcp",
+	"xhttp_reality_fallback",
+]);
+export const NativeReverseRelayStateSchema = z.enum([
+	"disabled_pending_rework",
+]);
 
 export const AdminMeshBucketSchema = z.object({
 	minute: z.string(),
@@ -123,8 +130,10 @@ export const AdminMeshPeerSchema = z.object({
 	node_name: z.string(),
 	api_base_url: z.string(),
 	mesh_url: z.string().nullable(),
+	endpoint_transport: MeshEndpointTransportSchema.nullable().optional(),
 	mesh_capability: z.enum(["enabled", "disabled"]).optional(),
 	mesh_reason: MeshPeerReasonSchema.optional(),
+	reverse_relay_state: NativeReverseRelayStateSchema.nullable().optional(),
 	current_path: MeshTelemetryPathSchema.nullable(),
 	active_route: AdminMeshActiveRouteSchema.optional(),
 	quality: MeshQualitySchema,

@@ -3,6 +3,10 @@
 > 本文是当前有效规范。
 > 实现状态见 `./IMPLEMENTATION.md`，设计缘由见 `./HISTORY.md`。
 
+## Related ADRs
+
+- [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
+
 ## 背景
 
 - 控制面此前只访问 peer 的公网 `api_base_url`。
@@ -20,7 +24,8 @@
 - 提供本地持久遥测、管理 API 与 `/system-status`。
 - `PersistedState.mesh_enabled` 是集群级开关，默认开启；关闭时控制面只访问 peer 注册的
   公网 `api_base_url`，不改用私网或 Reverse Mesh。能力探测也使用同一签名的公网请求并保留
-  predecessor 404 兼容；专用 Reverse health/link probe 在关闭期间必须停用。
+  predecessor 404 兼容；专用 Reverse health/link probe 在当前发布中固定停用，即使集群
+  Mesh 开关开启也不会重新启用 Native Reverse。
 - 已准入的 Mesh 响应必须把读 guard 绑定到完整 response body 生命周期；准入期间的成功遥测
   必须复用该 guard，不得再次获取同一写优先读写锁而阻塞 gate transition。
 - 所有节点间 Mesh 调用复用进程级 HTTP/2 传输，每个 peer 的稳态外部 TCP 连接为一条。
@@ -55,8 +60,9 @@
 
 ## 必须满足
 
-- Mesh URL 只能由唯一 managed-default Vision/TCP endpoint 推导；XHTTP endpoint 仅用于代理
-  流量，不能被当作普通 HTTPS 控制面入口。
+- Mesh URL 只能由唯一 managed-default VLESS/Reality endpoint 与有效 `access_host` 推导；
+  Vision/TCP 标记为 `vision_tcp`，XHTTP 标记为 `xhttp_reality_fallback`。XHTTP Direct Mesh
+  发送既有签名 HTTP/2 控制面流量，不复用用户 XHTTP session。
 - 无端点、多个 endpoint、不可用的 `access_host` 或不支持控制面 Mesh 的 transport 时，使用
   `Node.api_base_url`；已选择 Mesh 路径后，health ack 的认证或协议无效必须拒绝，不能降级到公网。
 - `health-v2` 与 `mesh-v2` 使用同一个 v2 认证协议。
@@ -82,7 +88,8 @@
   扩张，避免为每个 peer 常驻预留大快照缓冲。每个 origin 最多保留一条 idle connection，pool idle timeout
   固定为 120 秒，不发送 HTTP/2 PING。60 秒 probe 是连接活跃性的唯一周期流量。
 - 公网 direct 使用独立、长期共享的兼容 client；严格 HTTP/2 policy 不得污染公网
-  direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理。
+  direct。Mesh H2 协商或 transport 失败按既有 breaker/fallback 规则处理；Native Reverse
+  不属于通用请求回退路径。
 - 同一 target 的顺序请求、并发 fan-out、Raft burst、8 MiB snapshot 与长驻 SSE 必须复用同一
   HTTP/2 connection。主动断链或 idle timeout 后允许新建一条；重连交叠瞬间最多两条，随后回到一条。
 - 每个 peer 连续三次可重试 Mesh transport 失败后打开 breaker。

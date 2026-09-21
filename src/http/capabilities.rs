@@ -66,7 +66,6 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "admin.upgrade",
         "admin.mesh",
         "admin.mesh-transport-reuse",
-        "admin.mesh-reverse-relay-v1",
         "admin.reality-domains",
         "admin.node-probes",
         "admin.traffic-usage",
@@ -76,9 +75,14 @@ pub(super) async fn api_capabilities() -> Json<ApiCapabilitiesResponse> {
         "cluster.join.staged-v1",
         "cluster.membership-lifecycle-v1",
         "cluster.stale-learner-retirement-v1",
-        "cluster.mesh-reverse-assignment-v1",
         "cluster.mesh-gate-v1",
     ];
+    if crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        capabilities.extend([
+            "admin.mesh-reverse-relay-v1",
+            "cluster.mesh-reverse-assignment-v1",
+        ]);
+    }
     if crate::uptime_runtime::icmp_supported() {
         capabilities.push("admin.service-monitor-icmp-v1");
     }
@@ -143,12 +147,12 @@ mod tests {
                 .contains(&"admin.mesh-transport-reuse")
         );
         assert!(
-            response
+            !response
                 .capabilities
                 .contains(&"admin.mesh-reverse-relay-v1")
         );
         assert!(
-            response
+            !response
                 .capabilities
                 .contains(&"cluster.mesh-reverse-assignment-v1")
         );

@@ -37,7 +37,9 @@
   `health-v2` and `mesh-v2` traffic is routed by the canary only to fixed local XP loopback paths;
   public `/generate_204` and authority-based camouflage remain separate. All outbound Mesh users
   share one process-wide HTTP/2-only client with one idle connection per origin and a 120-second
-  idle bound; public direct and dynamic relay use separate clients.
+  idle bound; public direct uses a separate client. XHTTP endpoints use their Reality
+  fallback for the existing signed HTTP/2 control-plane protocol; Native Reverse is dormant
+  and cannot be selected for generic requests.
   The Raft `PersistedState.mesh_enabled` field is the cluster-level Mesh switch (default `true`);
   when disabled, control-plane requests use only each peer's registered public HTTPS
   `api_base_url` and do not substitute a private or Reverse Mesh route.
@@ -98,19 +100,13 @@
   warning/critical thresholds at 28/32 MiB
   for one minute and never restarts XP. Generated OpenRC XP services use `supervise-daemon`,
   `respawn_delay=2`, and `respawn_max=0`; systemd and container supervision remain unchanged.
-- Reality Mesh Reverse is an additive control-plane path. It uses Raft assignments, an XP-owned
-  `127.0.0.1:10086` TCP-only SOCKS portal, and upstream Xray dynamic APIs; it never adds a public
-  listener. A durable assignment does not itself keep a target Xray initiating outbound installed:
-  each local `(epoch,target,rendezvous,role,generation)` Link must acquire signed health within a
-  10-second probe or maintain a 120-second lease, otherwise its outbound is removed and retry is
-  bounded locally. `XP_REVERSE_MESH_ENABLED=false` is the supported node-local fail-closed
-  rollback and leaves Raft assignments, Direct/Public, and membership intact. Fresh joins may
-  carry a short-lived public-only `reverse_mesh_bootstrap` marker, but learner catch-up and
-  log-index promotion remain authoritative. If container-side Xray restart recovery cannot
-  complete after tombstone overflow, Reverse stays disabled until an operator restarts the
-  container; Direct/Public and membership remain available. XP-generated Reverse XHTTP outbounds
-  fix XMUX `max_connections=2` per logical Link and reuse existing underlays; status APIs and
-  System Status expose internal Reverse sockets separately from external user inbound sessions.
+- Reality Mesh Reverse topology remains persisted for diagnosis, but Native Reverse is
+  `disabled_pending_rework` in this release: no assignment reconcile, health probe, Xray dynamic
+  outbound/rule, public listener, or generic request route is active. Direct/Public and membership
+  remain available. During an owner-authorized upgrade maintenance window, Xray is restarted once
+  to clear legacy Reverse artifacts and matching sockets must be verified at zero. Status APIs and
+  System Status expose the dormant state and keep any internal Reverse socket accounting separate
+  from external user inbound sessions.
 - Managed-default endpoint ports become cluster-owned after creation or auto-adoption.
   `XP_DEFAULT_VLESS_PORT` and `XP_DEFAULT_SS_PORT` are bootstrap inputs only; normal `xp` startup,
   `xp-ops xp sync-node-meta`, container restart, and upgrade must preserve the port stored in Raft.

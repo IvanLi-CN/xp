@@ -1903,19 +1903,19 @@ async fn admin_internal_reverse_readiness(
         })
     };
     let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
-    let reverse_ready = state.reconcile.mesh_gate().load(Ordering::Acquire)
+    let reverse_ready = crate::reverse_mesh::NATIVE_REVERSE_ENABLED
+        && state.reconcile.mesh_gate().load(Ordering::Acquire)
         && state.reconcile.reverse_gate().load(Ordering::Acquire)
         && xray_ready
         && managed_vless_endpoint;
-    let health_verified = state.reverse_relay.has_any_health_verified().await;
     Ok(Json(json!({
         "node_id": state.cluster.node_id,
         "xray_ready": xray_ready,
         "managed_vless_endpoint": managed_vless_endpoint,
         "reverse_ready": reverse_ready,
-        "health_verified": health_verified,
-        "reverse_assignment_capability": true,
-        "reverse_relay_capability": true,
+        "health_verified": state.reverse_relay.has_any_health_verified().await,
+        "reverse_assignment_capability": crate::reverse_mesh::NATIVE_REVERSE_ENABLED,
+        "reverse_relay_capability": crate::reverse_mesh::NATIVE_REVERSE_ENABLED,
     })))
 }
 
@@ -1936,15 +1936,15 @@ async fn admin_internal_capabilities(
         })
     };
     let xray_ready = matches!(state.xray_health.snapshot().await.status, XrayStatus::Up);
-    let health_verified = state.reverse_relay.has_any_health_verified().await;
     response.reverse_mesh = Some(capabilities::ReverseMeshReadiness {
         xray_ready,
         managed_vless_endpoint,
-        reverse_ready: state.reconcile.mesh_gate().load(Ordering::Acquire)
+        reverse_ready: crate::reverse_mesh::NATIVE_REVERSE_ENABLED
+            && state.reconcile.mesh_gate().load(Ordering::Acquire)
             && state.reconcile.reverse_gate().load(Ordering::Acquire)
             && xray_ready
             && managed_vless_endpoint,
-        health_verified,
+        health_verified: state.reverse_relay.has_any_health_verified().await,
     });
     Ok(Json(response))
 }

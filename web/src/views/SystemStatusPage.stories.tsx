@@ -152,18 +152,18 @@ export const PartialAndFallback: Story = {
 	},
 };
 
-export const ReverseRelay: Story = {
+export const DormantReverseTopology: Story = {
 	parameters: {
 		viewport: {
 			defaultViewport: "reverseRelayDesktop",
 			viewports: {
 				reverseRelayDesktop: {
-					name: "Reverse relay desktop (1280x900)",
+					name: "Dormant Reverse topology desktop (1280x900)",
 					styles: { width: "1280px", height: "900px" },
 					type: "desktop",
 				},
 				reverseRelayMobile: {
-					name: "Reverse relay mobile (393x852)",
+					name: "Dormant Reverse topology mobile (393x852)",
 					styles: { width: "393px", height: "852px" },
 					type: "mobile",
 				},
@@ -195,17 +195,16 @@ export const ReverseRelay: Story = {
 				canvasElement.querySelector(`[data-peer-row="${nodeId}"]`),
 			).not.toBeNull();
 		}
+		await expect(canvas.queryAllByText("Rendezvous · primary").length).toBe(0);
+		await expect(canvas.queryAllByText("Rendezvous · standby").length).toBe(0);
+		await expect(canvas.queryAllByText("Reverse relay").length).toBe(0);
+		await expect(canvas.queryAllByText("via singapore-1 · g7").length).toBe(0);
 		await expect(
-			(await canvas.findAllByText("Rendezvous · primary")).length,
-		).toBeGreaterThan(0);
-		await expect(
-			(await canvas.findAllByText("Rendezvous · standby")).length,
-		).toBeGreaterThan(0);
-		await expect(
-			(await canvas.findAllByText("Reverse relay")).length,
-		).toBeGreaterThan(0);
-		await expect(
-			(await canvas.findAllByText("via singapore-1 · g7")).length,
+			(
+				await canvas.findAllByText(
+					"XHTTP · Reality fallback · Native Reverse disabled pending rework",
+				)
+			).length,
 		).toBeGreaterThan(0);
 		await expect(
 			canvas.queryByText("Primary · standby sydney-1"),
@@ -223,9 +222,14 @@ export const ReverseRelay: Story = {
 					`[data-peer-row="${nodeId}"] [data-peer-cell="route"]`,
 				)?.children.length,
 			).toBe(2);
+			await expect(
+				canvasElement.querySelector(
+					`[data-peer-row="${nodeId}"] [data-peer-cell="identity"]`,
+				)?.children.length,
+			).toBe(3);
 		}
 		for (const cell of canvasElement.querySelectorAll("[data-peer-cell]")) {
-			await expect(cell.children.length).toBeLessThanOrEqual(2);
+			await expect(cell.children.length).toBeLessThanOrEqual(3);
 			for (const line of cell.querySelectorAll(":scope > p")) {
 				await expect(getComputedStyle(line).whiteSpace).toBe("nowrap");
 			}

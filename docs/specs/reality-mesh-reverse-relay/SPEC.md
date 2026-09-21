@@ -6,8 +6,17 @@
 
 - [0005-reverse-link-unverified-cooldown](../../adr/0005-reverse-link-unverified-cooldown.md)
 - [0013-reverse-underlay-connection-budget](../../adr/0013-reverse-underlay-connection-budget.md)
+- [0014-xhttp-endpoint-direct-mesh](../../adr/0014-xhttp-endpoint-direct-mesh.md)
 
 ## 背景
+
+## 当前执行边界
+
+Native Reverse 的 assignment、epoch、generation 和 wire/runtime 设计在本 Spec 中保留为
+诊断与未来重做参考，但当前发布不执行它们：状态固定为 `disabled_pending_rework`，不得
+reconcile、probe、创建 Xray dynamic artifact 或承载控制面请求。通用控制面只使用 Direct
+Mesh 后的 Public HTTPS fallback；History Repository 始终使用 Public HTTPS。重新启用必须
+由新 Spec、实际 underlay 关闭证据、资源预算证据和新 release 共同批准。
 
 Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoint。位于单向防火墙、运营商 NAT 或仅允许出站连接的节点，无法作为 Mesh server，导致控制面只能退回 Public/API。反向中继让目标节点主动经一个可访问的 Rendezvous 建立受限的 VLESS Reverse 链路，
 同时保留现有 Reality Direct 与 Public fallback。
@@ -143,23 +152,23 @@ Reality Mesh 目前依赖目标节点可被入站访问的 managed VLESS endpoin
 
 ## Visual Evidence
 
-5 节点桌面状态：本机、两台直连 Rendezvous 与两台 Reverse target 均可见。
-每个 Reverse target 使用两条单行摘要。
+以下证据来自当前 `ui_demo` 的真实浏览器视口，不是 Storybook 或生产页面。
+桌面视口显示 Direct Mesh、XHTTP Reality fallback、连接分类和节点状态。
 
-![五节点 System Status 桌面](./assets/system-status-five-node-desktop.png)
+![Direct Mesh System Status 桌面](./assets/system-status-direct-mesh-desktop.png)
 
-393x852 移动端总览：集群计数包含本机，显示 `1 local · 4 remote`。
+393x852 移动端总览：集群计数包含本机，保留控制面状态和连接分类。
 
-![五节点 System Status 移动端总览](./assets/system-status-five-node-mobile-overview.png)
+![Direct Mesh System Status 移动端总览](./assets/system-status-direct-mesh-mobile-overview.png)
 
-393x852 移动端目标区：每个 Reverse target 分别显示 `Reverse relay`。
-下一行显示当前 Rendezvous/generation。
+393x852 移动端 peer 状态：显示 `XHTTP · Reality fallback` 与
+`Native Reverse disabled pending rework`，并将当前路径显示为 `Reality direct`。
 
-![移动端反向目标](./assets/system-status-five-node-mobile-targets.png)
+![Direct Mesh peer 状态移动视口](./assets/system-status-direct-mesh-mobile-peers.png)
 
-Connection accounting in the Web Demo separates internal Reverse underlays from external user
-inbound sessions. The desktop viewport shows the over-limit `11 / 2` Osaka Link and the separate
-`2 external` user count.
+Connection accounting separates internal Reverse diagnostics from external user inbound sessions.
+The desktop viewport shows the over-limit `11 / 2` Osaka Link and the separate `2 external` user
+count.
 
 ![Connection accounting desktop](./assets/system-status-connection-accounting-desktop.png)
 

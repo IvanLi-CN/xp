@@ -114,20 +114,25 @@ async fn non_mesh_capability_probe_bypasses_reverse_assignment() {
 }
 
 #[tokio::test]
-async fn reverse_protocol_failure_does_not_fall_back_to_public() {
+async fn native_reverse_is_not_attempted_before_public_fallback() {
     let (reverse_base_url, reverse_requests, reverse_task) = spawn_reverse_relay_counter().await;
     let ca = crate::cluster_identity::generate_cluster_ca(xp_test_fixtures::cluster_fixture53())
         .expect("cluster CA");
     let (public_base_url, public_requests, public_task) =
         spawn_signed_public(&ca.key_pem, &ca.cert_pem).await;
     let peer = primary_reverse_target(None, public_base_url);
-    let rendezvous = secondary_reverse_target(None, reverse_base_url);
+    let reverse_gate = Arc::new(AtomicBool::new(false));
     let client =
-        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new());
+        MeshAwareHttpClient::from_transport_clients(reqwest::Client::new(), reqwest::Client::new())
+            .with_reverse_gate(reverse_gate);
     client
         .set_reverse_route(
             peer.node_id.clone(),
-            reverse_route(rendezvous, None, reverse_assignment()),
+            reverse_route(
+                secondary_reverse_target(None, reverse_base_url),
+                None,
+                reverse_assignment(),
+            ),
         )
         .await;
 
@@ -152,9 +157,9 @@ async fn reverse_protocol_failure_does_not_fall_back_to_public() {
         )
         .await;
 
-    assert!(matches!(result, Err(MeshRequestError::Protocol(_))));
-    assert_eq!(reverse_requests.load(Ordering::SeqCst), 1);
-    assert_eq!(public_requests.load(Ordering::SeqCst), 0);
+    assert!(result.is_ok(), "public fallback should be used directly");
+    assert_eq!(reverse_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(public_requests.load(Ordering::SeqCst), 1);
     reverse_task.abort();
     public_task.abort();
 }

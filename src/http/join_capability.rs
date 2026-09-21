@@ -302,6 +302,7 @@ async fn public_capability_supports(
         node_id: node.node_id.clone(),
         node_name: node.node_name.clone(),
         mesh_base_url: None,
+        endpoint_transport: None,
         mesh_reason: crate::mesh_telemetry::MeshPeerReason::MissingEndpoint,
         public_base_url: api_base_url.to_string(),
     };

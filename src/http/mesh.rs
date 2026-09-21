@@ -46,6 +46,8 @@ struct AdminMeshPeerStatus {
     api_base_url: String,
     mesh_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    endpoint_transport: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     mesh_capability: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mesh_reason: Option<crate::mesh_telemetry::MeshPeerReason>,
@@ -66,6 +68,8 @@ struct AdminMeshPeerStatus {
     mesh_transport: Option<AdminMeshTransportStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reverse_underlay: Option<AdminReverseUnderlayStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reverse_relay_state: Option<&'static str>,
     buckets: Vec<crate::mesh_telemetry::MeshTelemetryBucket>,
 }
 pub(super) async fn admin_internal_reverse_relay(
@@ -74,6 +78,11 @@ pub(super) async fn admin_internal_reverse_relay(
     internal: Option<Extension<InternalSignatureAuth>>,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return Err(ApiError::conflict(
+            "Native Reverse is disabled pending rework",
+        ));
+    }
     let Some(Extension(internal)) = internal else {
         return Err(ApiError::unauthorized("internal auth required"));
     };
@@ -513,6 +522,9 @@ pub(super) async fn reverse_candidate_readiness(
     state: &AppState,
     node: &Node,
 ) -> Result<bool, ApiError> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return Ok(false);
+    }
     let managed_vless_endpoint = {
         let store = state.store.lock().await;
         store.list_endpoints().into_iter().any(|endpoint| {
@@ -555,6 +567,9 @@ pub(super) async fn reverse_candidate_readiness(
 /// The leader owns Reverse assignment orchestration. Runtime links remain local; only the epoch
 /// and deterministic assignment are replicated through the normal Raft command path.
 pub(super) fn spawn_reverse_assignment_worker(state: AppState) {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return;
+    }
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -578,6 +593,9 @@ async fn reconcile_reverse_assignments(
     state: &AppState,
     failures: &mut BTreeMap<String, ReverseAssignmentFailure>,
 ) -> Result<(), ApiError> {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return Ok(());
+    }
     let metrics = raft_metrics(state);
     if !is_leader(&metrics) {
         return Ok(());
@@ -822,63 +840,6 @@ async fn reconcile_reverse_assignments(
             (None, None) => {}
         }
     }
-    verify_reverse_assignments(state, &assigned).await;
-    Ok(())
-}
-
-async fn verify_reverse_assignments(
-    state: &AppState,
-    assignments: &BTreeMap<String, crate::reverse_mesh::ReverseMeshAssignment>,
-) {
-    let target_ids = assignments.keys().cloned().collect::<Vec<_>>();
-    let state_for_probes = state.clone();
-    stream::iter(target_ids)
-        .map(|target_id| {
-            let state = state_for_probes.clone();
-            async move {
-                if let Err(error) = verify_reverse_assignment(&state, &target_id).await {
-                    tracing::debug!(
-                        target_id = %target_id,
-                        ?error,
-                        "signed reverse health probe failed"
-                    );
-                }
-            }
-        })
-        .buffer_unordered(4)
-        .collect::<Vec<_>>()
-        .await;
-}
-
-async fn verify_reverse_assignment(state: &AppState, target_id: &str) -> Result<(), ApiError> {
-    let ca_key_pem = state
-        .cluster_ca_key_pem
-        .as_deref()
-        .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
-    let target = mesh_peer_target(state, target_id).await?;
-    configure_reverse_route(state, &state.mesh_client, &target).await;
-    state
-        .mesh_client
-        .send_peer_reverse_health_request(
-            &target,
-            crate::control_plane_mesh::MeshRequest {
-                method: Method::GET,
-                path_and_query: "/api/admin/_internal/mesh/health".to_string(),
-                content_type: None,
-                body: Vec::new(),
-                total_budget: Duration::from_secs(5),
-                allow_ambiguous_fallback: true,
-                request_id: crate::id::new_ulid_string(),
-                route: internal_auth::InternalRoute::HealthV2,
-                cluster_id: state.cluster.cluster_id.clone(),
-                sender_id: state.cluster.node_id.clone(),
-                updates_active_path: false,
-            },
-            ca_key_pem,
-            &state.cluster_ca_pem,
-        )
-        .await
-        .map_err(|error| ApiError::gateway_timeout(error.to_string()))?;
     Ok(())
 }
 
@@ -918,6 +879,11 @@ pub(super) async fn admin_internal_raft_client_write(
             | DesiredStateCommand::UpsertReverseMeshAssignment { .. }
             | DesiredStateCommand::DeleteReverseMeshAssignment { .. }
     ) {
+        if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+            return Err(ApiError::conflict(
+                "Native Reverse is disabled pending rework",
+            ));
+        }
         crate::http::join_capability::require_reverse_assignment_on_voters(&state).await?;
     }
     let idempotency_request = internal
@@ -1104,6 +1070,7 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 node_name: node.node_name,
                 api_base_url: node.api_base_url,
                 mesh_url,
+                endpoint_transport: target.endpoint_transport,
                 mesh_capability: Some(
                     if mesh_enabled { "enabled" } else { "disabled" }.to_string(),
                 ),
@@ -1119,7 +1086,11 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                             assignments.get(&node.node_id),
                         )
                     })
-                    .flatten(),
+                    .flatten()
+                    .filter(|route| {
+                        crate::reverse_mesh::NATIVE_REVERSE_ENABLED
+                            || route.kind != crate::mesh_telemetry::ActiveRouteKind::ReverseRelay
+                    }),
                 quality: peer.map_or(MeshQuality::Unknown, |peer| quality_for_peer(peer, now)),
                 stale: status::is_mesh_peer_stale(peer, now),
                 breaker: breaker_for_mesh_target(mesh_enabled, peer.and_then(|peer| peer.breaker)),
@@ -1132,6 +1103,9 @@ async fn build_admin_mesh_status_response(state: &AppState) -> AdminMeshStatusRe
                 latency_p95_ms,
                 mesh_transport: status::mesh_transport_status_for(mesh_enabled, peer, now),
                 reverse_underlay: connection_usage.reverse_by_peer.get(&node.node_id).cloned(),
+                reverse_relay_state: assignments
+                    .contains_key(&node.node_id)
+                    .then_some("disabled_pending_rework"),
                 buckets: peer.map_or_else(Vec::new, |peer| {
                     crate::mesh_telemetry::buckets_for_last_24_hours(peer, now)
                 }),
@@ -1372,62 +1346,6 @@ async fn mesh_peer_target(state: &AppState, node_id: &str) -> Result<MeshPeerTar
         &node, &endpoints,
     ))
 }
-async fn configure_reverse_route(
-    state: &AppState,
-    client: &MeshAwareHttpClient,
-    target: &MeshPeerTarget,
-) {
-    let route = {
-        let store = state.store.lock().await;
-        (|| {
-            let assignment = store
-                .state()
-                .reverse_mesh_assignments
-                .get(&target.node_id)
-                .cloned()?;
-            let rendezvous_id = assignment.primary_node_id.clone();
-            let rendezvous = store.get_node(&rendezvous_id)?;
-            let standby_rendezvous = assignment
-                .standby_node_id
-                .as_deref()
-                .and_then(|standby_id| store.get_node(standby_id))
-                .map(|standby| {
-                    let endpoints = store
-                        .list_endpoints()
-                        .into_iter()
-                        .filter(|endpoint| endpoint.node_id == standby.node_id)
-                        .collect::<Vec<_>>();
-                    crate::control_plane_mesh::peer_target_from_node(&standby, &endpoints)
-                });
-            let endpoints = store
-                .list_endpoints()
-                .into_iter()
-                .filter(|endpoint| endpoint.node_id == rendezvous_id)
-                .collect::<Vec<_>>();
-            let rendezvous_target =
-                crate::control_plane_mesh::peer_target_from_node(&rendezvous, &endpoints);
-            let role = if rendezvous_id == assignment.primary_node_id {
-                crate::reverse_mesh::ReverseRole::Primary
-            } else {
-                crate::reverse_mesh::ReverseRole::Standby
-            };
-            Some(crate::control_plane_mesh::ReverseRelayRoute {
-                rendezvous: rendezvous_target,
-                standby_rendezvous,
-                assignment,
-                role,
-            })
-        })()
-    };
-    match route {
-        Some(route) => {
-            client
-                .set_reverse_route(target.node_id.clone(), route)
-                .await
-        }
-        None => client.clear_reverse_route(&target.node_id).await,
-    }
-}
 pub(super) async fn send_mesh_internal_read(
     state: &AppState,
     client: &MeshAwareHttpClient,
@@ -1468,7 +1386,6 @@ pub(super) async fn send_mesh_internal_capability_read(
         .as_deref()
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let peer = mesh_peer_target(state, &node.node_id).await?;
-    configure_reverse_route(state, client, &peer).await;
     let request = MeshRequest {
         method: Method::GET,
         path_and_query: "/api/admin/_internal/capabilities".to_string(),
@@ -1519,7 +1436,6 @@ pub(super) async fn send_mesh_internal_request(
         .as_deref()
         .ok_or_else(|| ApiError::internal("cluster CA key is not available"))?;
     let peer = mesh_peer_target(state, &node.node_id).await?;
-    configure_reverse_route(state, client, &peer).await;
     let request = MeshRequest {
         method,
         path_and_query,

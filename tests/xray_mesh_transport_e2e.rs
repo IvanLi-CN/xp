@@ -33,7 +33,7 @@ use xp::{
     mesh_telemetry::MeshPeerReason,
     protocol::{
         MihomoSmuxConfig, RealityConfig, RealityKeys, RealityServerNamesSource,
-        VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
+        VlessRealityTransport, VlessRealityVisionTcpEndpointMeta, generate_reality_keypair,
     },
     xray,
 };
@@ -223,8 +223,44 @@ fn mesh_target(proxy: &CountingProxy) -> MeshPeerTarget {
             xp_test_fixtures::loopback_address(),
             proxy.addr.port()
         )),
+        endpoint_transport: Some("vision_tcp"),
         mesh_reason: MeshPeerReason::MeshAvailable,
         public_base_url: xp_test_fixtures::public_fallback_url().to_owned(),
+    }
+}
+
+fn reality_mesh_endpoint(
+    vless_port: u16,
+    canary: &TestServer,
+    transport: VlessRealityTransport,
+) -> Endpoint {
+    let keypair = generate_reality_keypair(&mut OsRng);
+    Endpoint {
+        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
+        node_id: xp_test_fixtures::primary_node_id().to_owned(),
+        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
+        kind: EndpointKind::VlessRealityVisionTcp,
+        port: vless_port,
+        meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
+            reality: RealityConfig {
+                dest: format!("host.docker.internal:{}", canary.addr.port()),
+                server_names: xp_test_fixtures::loopback_server_names(),
+                server_names_source: RealityServerNamesSource::Manual,
+                fingerprint: "chrome".to_string(),
+            },
+            reality_keys: RealityKeys {
+                private_key: keypair.private_key,
+                public_key: keypair.public_key,
+            },
+            short_ids: xp_test_fixtures::endpoint_short_ids(),
+            active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
+            canary_upstream: xp_test_fixtures::none(),
+            accepted_authorities: xp_test_fixtures::secondary_server_names(),
+            mihomo_smux: MihomoSmuxConfig::default(),
+            transport,
+            managed_default: true,
+        })
+        .expect("serialize Reality endpoint metadata"),
     }
 }
 
@@ -242,9 +278,7 @@ async fn wait_for_inbound(addr: SocketAddr) {
     }
 }
 
-#[tokio::test]
-#[ignore]
-async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect() {
+async fn assert_reality_fallback_reuses_one_h2_connection(transport: VlessRealityTransport) {
     if std::env::var("XP_E2E_XRAY_MODE").ok().as_deref() != Some("external") {
         return;
     }
@@ -270,34 +304,7 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
     )
     .expect("node certificate");
     let canary = spawn_signed_tls_server(&ca.key_pem, &ca.cert_pem).await;
-    let keypair = generate_reality_keypair(&mut OsRng);
-    let endpoint = Endpoint {
-        endpoint_id: xp_test_fixtures::primary_endpoint_id().to_owned(),
-        node_id: xp_test_fixtures::primary_node_id().to_owned(),
-        tag: xp_test_fixtures::primary_endpoint_tag().to_owned(),
-        kind: EndpointKind::VlessRealityVisionTcp,
-        port: vless_port,
-        meta: serde_json::to_value(VlessRealityVisionTcpEndpointMeta {
-            reality: RealityConfig {
-                dest: format!("host.docker.internal:{}", canary.addr.port()),
-                server_names: xp_test_fixtures::loopback_server_names(),
-                server_names_source: RealityServerNamesSource::Manual,
-                fingerprint: "chrome".to_string(),
-            },
-            reality_keys: RealityKeys {
-                private_key: keypair.private_key,
-                public_key: keypair.public_key,
-            },
-            short_ids: xp_test_fixtures::endpoint_short_ids(),
-            active_short_id: xp_test_fixtures::endpoint_active_short_id().to_owned(),
-            canary_upstream: xp_test_fixtures::none(),
-            accepted_authorities: xp_test_fixtures::secondary_server_names(),
-            mihomo_smux: MihomoSmuxConfig::default(),
-            transport: Default::default(),
-            managed_default: true,
-        })
-        .expect("serialize endpoint metadata"),
-    };
+    let endpoint = reality_mesh_endpoint(vless_port, &canary, transport);
     let mut xray = xray::connect(xray_api_addr)
         .await
         .expect("connect Xray API");
@@ -354,4 +361,18 @@ async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect
     )
     .await
     .expect("remove Xray Reality inbound");
+}
+
+#[tokio::test]
+#[ignore]
+async fn reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect() {
+    assert_reality_fallback_reuses_one_h2_connection(VlessRealityTransport::VisionTcp).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn xhttp_endpoint_reality_fallback_reuses_one_h2_connection_and_recovers_after_disconnect() {
+    // Direct Mesh sends signed H2 through Reality fallback; it does not impersonate
+    // user VLESS/XHTTP.
+    assert_reality_fallback_reuses_one_h2_connection(VlessRealityTransport::Xhttp).await;
 }

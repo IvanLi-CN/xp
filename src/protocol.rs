@@ -53,6 +53,14 @@ impl VlessRealityTransport {
     pub(crate) fn is_vision_tcp(&self) -> bool {
         matches!(self, Self::VisionTcp)
     }
+
+    pub(crate) fn mesh_label(&self) -> &'static str {
+        if self.is_vision_tcp() {
+            "vision_tcp"
+        } else {
+            "xhttp_reality_fallback"
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -52,9 +52,8 @@ pub(super) fn xray_reconciliation_required(
         || has_local_rebuilds
         || has_local_remove_inbounds
         || has_local_remove_users
-        || has_reverse_desired
-        || has_reverse_managed_state
-        || !reverse_mesh_enabled
+        || (crate::reverse_mesh::NATIVE_REVERSE_ENABLED
+            && (has_reverse_desired || has_reverse_managed_state || !reverse_mesh_enabled))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -71,6 +70,9 @@ pub(super) fn desired(
     reverse_mesh_bootstrap: Option<&ReverseMeshBootstrapMarker>,
     reverse_mesh_bootstrap_target: Option<&str>,
 ) -> ReverseXrayDesired {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return ReverseXrayDesired::default();
+    }
     let target_links = reverse_mesh_enabled.then(|| {
         target_reverse_link_keys(
             local_node_id,
@@ -112,6 +114,9 @@ pub(super) async fn reconcile(
     reverse_desired: &ReverseXrayDesired,
     reverse_mesh_enabled: bool,
 ) -> bool {
+    if !crate::reverse_mesh::NATIVE_REVERSE_ENABLED {
+        return false;
+    }
     match reverse_reconciler
         .reconcile(client, reverse_desired, !reverse_mesh_enabled)
         .await
@@ -149,8 +154,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn disabled_reverse_mesh_reconciles_persistent_xray_artifacts_after_restart() {
-        assert!(xray_reconciliation_required(
+    fn disabled_reverse_mesh_does_not_touch_persistent_xray_artifacts() {
+        assert!(!xray_reconciliation_required(
             false, false, false, false, false, false, false,
         ));
     }
